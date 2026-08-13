@@ -1,0 +1,348 @@
+/* sidebar.css — sidebar (expanded session list), activity rail; split from panes.css */
+
+aside.sidebar {
+    width: var(--pane-width);
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--pane-list-bg);
+    /* flex column: header stays fixed at top, .sidebar-list fills remaining height and scrolls
+       independently. */
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+aside.sidebar .workspace-item {
+    padding: 0.4rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    margin-bottom: 0.2rem;
+}
+
+aside.sidebar .workspace-item.active {
+    background: var(--accent-bg-active);
+}
+
+/* Session list scroll container. min-height: 0 is required for flex children to shrink
+   below content height and trigger overflow. */
+.sidebar-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* Bottom padding gives breathing room to the last session-item. */
+    padding-bottom: 0.5rem;
+}
+
+/* Session row: status dot | (title + time) | actions (hover).
+   Flat: no shadow. Inactive rows use a subtle panel tint over the list bg. */
+aside.sidebar .session-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    box-sizing: border-box;
+    padding: 0.5rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    margin: 1px 4px 0.3rem;
+    /* Subtle surface tint over the list bg — more transparent than pure --chat-bg.
+       Text uses dim to distinguish from active state. */
+    background: var(--surface-tint);
+    color: var(--fg-dim);
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
+}
+
+aside.sidebar .session-item:hover {
+    background: var(--accent-bg-hover);
+    color: var(--fg);
+}
+
+aside.sidebar .session-item.active {
+    background: var(--accent-bg-active);
+    color: var(--fg);
+    /* Matches the left icon rail's shadow block height (56px). */
+    min-height: 56px;
+}
+
+/* Title row: status dot + title side by side. align-items:center vertically
+   centers the dot with the title baseline. */
+.session-main {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.session-meta {
+    flex: 1;
+    min-width: 0;
+    /* id + time: two-line flex column with gap to separate them (~2.4px). */
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.session-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    /* Single-line ellipsis: long session names truncate with ellipsis.
+       flex:1 + min-width:0 lets it shrink and truncate correctly within the .session-main row. */
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-time {
+    font-size: 0.6rem;
+    color: var(--fg-dim);
+    /* Left indent to align with the title text, accounting for the status dot. */
+    padding-left: calc(6px + 0.45rem);
+    /* Single-line ellipsis: locale time strings don't wrap to two lines. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.session-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    margin-left: auto;
+}
+
+/* Action buttons: circular bg, appear on item hover. Rename uses neutral color, delete uses brand orange. */
+.session-copy,
+.session-rename,
+.session-delete {
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    min-width: auto;
+    background: var(--accent-bg-active);
+    color: var(--fg);
+    border-radius: var(--radius-circle);
+    /* Hidden until hover. */
+    display: none;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
+}
+
+.session-item:hover .session-copy,
+.session-item:hover .session-rename,
+.session-item:hover .session-delete {
+    display: inline-flex;
+}
+
+.session-copy:hover,
+.session-rename:hover {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+/* Delete: idle has light orange bg with orange icon; hover reverses to solid orange bg with light icon. */
+.session-delete {
+    background: var(--rail-bg-active);
+    color: var(--brand-orange);
+}
+
+.session-delete:hover {
+    background: var(--brand-orange);
+    color: var(--bg);
+}
+
+/* "Load more" — sits at the bottom of .sidebar-list, full-width, low-contrast
+   text button. Margin mirrors .session-item's left/right (4px) so it aligns
+   with the items above it. */
+.session-load-more {
+    display: block;
+    width: calc(100% - 8px);
+    margin: 0.4rem 4px 0.6rem;
+    padding: 0.45rem 0.5rem;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-align: center;
+}
+
+.session-load-more:hover {
+    color: var(--fg);
+    border-color: var(--accent);
+    background: var(--accent-bg-hover);
+}
+
+.session-load-more:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.session-load-more-count {
+    color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.layout {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Right column: topbar → content area → input, top-to-bottom filling remaining width and full height. */
+.main-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* lucide-react v1.x sets fill="none" on <svg>, but the attribute does not inherit to
+   children — they fall back to default fill=black, rendering outlined icons as solid black.
+   Explicitly reset child fill to none; stroke is inherited from the svg. */
+button svg > *,
+.session-rename svg > *,
+.session-delete svg > *,
+.session-info-copy svg > * {
+    fill: none;
+}
+
+/* Activity Rail (left icon column, top-to-bottom). */
+.activity-rail {
+    width: 78px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* Top padding: macOS aligns with traffic light center; other platforms use smaller value.
+       See --rail-top-padding in :root. */
+    padding-top: var(--rail-top-padding);
+    padding-bottom: 8px;
+    gap: 4px;
+    background: var(--input-bg);
+    grid-column: 1;
+    grid-row: 1;
+}
+
+/* Top group — items are flush (no gap); the divider between chat and memory/settings
+   is a separate element. */
+.activity-rail-top {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    width: 100%;
+    padding: 0 0.5rem;
+}
+
+.activity-rail-divider {
+    /* Divider below chat button: 56px wide, aligned with hover/active square blocks. */
+    width: 56px;
+    height: 1px;
+    background: var(--border);
+    margin: 6px 0;
+    flex-shrink: 0;
+}
+
+/* Settings pinned to bottom via margin-top:auto. Separator line above via ::before. */
+.activity-rail-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    width: 100%;
+    padding: 0 0.5rem;
+    margin-top: auto;
+    position: relative;
+}
+
+.activity-rail-bottom::before {
+    content: "";
+    /* Divider above settings: 56px wide, centered, 6px below the line. */
+    width: 56px;
+    height: 1px;
+    background: var(--border);
+    margin-bottom: 6px;
+}
+
+/* Each item: min-height 56px for the bg block; content (icon + label) centered. */
+.activity-rail-item {
+    position: relative;
+    width: 100%;
+    min-height: 56px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-dim);
+}
+
+/* Square bg layer — 56x56, flush with item edges, responsible for hover/active orange highlight.
+   Adjacent bg blocks share corner overlap but remain visually square. */
+.activity-rail-bg {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 56px;
+    height: 56px;
+    transform: translateX(-50%);
+    border-radius: var(--radius-md);
+    background: transparent;
+    transition: background 0.12s ease;
+}
+
+.activity-rail-item:hover .activity-rail-bg {
+    background: var(--rail-bg-hover);
+}
+
+.activity-rail-item.active .activity-rail-bg {
+    background: var(--rail-bg-active);
+}
+
+/* Content layer: icon + label centered on top of bg. No overflow clipping. */
+.activity-rail-content {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.activity-rail-item:hover .activity-rail-content {
+    /* Hover text color stays --fg-dim; only the faint orange bg provides affordance. */
+    color: var(--fg-dim);
+}
+
+.activity-rail-item.active .activity-rail-content {
+    color: var(--brand-orange);
+}
+
+/* Label: no-wrap, no truncation. Regular font weight. */
+.activity-rail-label {
+    font-size: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+    line-height: 1.1;
+}
+
+/* lucide SVG fill none inheritance. */
+.activity-rail-item svg > * {
+    fill: none;
+}

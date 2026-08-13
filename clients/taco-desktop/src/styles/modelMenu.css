@@ -1,0 +1,91 @@
+/* modelMenu.css — model selection popup menu; split from chat.css */
+
+.model-trigger-label {
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.model-trigger-provider {
+    color: var(--fg-dim);
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    /* Provider (shorter) shrinks less than label (longer) — label truncates first on long names. */
+    flex-shrink: 0.2;
+}
+
+/* Model custom popup. */
+.model-menu {
+    position: relative;
+    /* Can shrink below min-content; long model names truncate via ellipsis inside the trigger,
+       preventing the trigger from being pushed out and clipped by input-card's overflow:hidden. */
+    min-width: 0;
+    max-width: 100%;
+}
+.model-menu-popup {
+    position: absolute;
+    bottom: calc(100% + 0.4rem);
+    left: 0;
+    min-width: 22rem;
+    max-height: 22rem;
+    overflow-y: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 6px 18px var(--shadow-color);
+    z-index: 200;
+}
+/* settings drawer: trigger is near the top, flip to downward popup to avoid .drawer overflow clipping. */
+.model-menu--down .model-menu-popup {
+    bottom: auto;
+    top: calc(100% + 0.4rem);
+}
+.model-menu-section {
+    display: flex;
+    flex-direction: column;
+}
+.model-menu-header {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.7rem;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.model-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    background: transparent;
+    border: 0;
+    color: var(--fg);
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+}
+.model-menu-item:hover {
+    background: var(--bg-hover);
+}
+.model-menu-item.selected {
+    background: var(--bg-hover);
+}
+.model-menu-item.selected .model-menu-item-name {
+    color: var(--brand-orange);
+    font-weight: 600;
+}
+.model-menu-item-name {
+    flex: 1;
+}
+.model-menu-item-provider {
+    color: var(--fg-dim);
+    font-size: 0.75rem;
+}
+.model-menu-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.3rem 0;
+}

@@ -1,0 +1,66 @@
+/* chatMessages.css — message bubbles (user/assistant/tool) + thinking block; split from chat.css */
+
+.message {
+    padding: 0.6rem;
+    /* Right padding already 0 on main (scrollbar flush to right edge); margin-right gives bubble breathing room. */
+    margin-right: 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    /* No left border — only top/right/bottom edges. Makes consecutive messages feel lighter. */
+    border-left: none;
+    /* Same flex-shrink guard as `main` so wide content in a message
+       can't widen the message bubble beyond the chat pane. */
+    min-width: 0;
+}
+
+.message.user {
+    background: var(--accent);
+    color: var(--bg);
+    margin-top: 0.75rem;
+    /* Consistent font size with .md-assistant (0.85em) for uniform reading rhythm. */
+    font-size: 0.85rem;
+    /* Adaptive width (main already set flex-direction: column), max 90% of chat area.
+       align-self: flex-end + max-width: 90% keeps bubble right-aligned without touching the left edge. */
+    align-self: flex-end;
+    width: fit-content;
+    max-width: 90%;
+}
+
+.message.assistant {
+    background: var(--assistant-msg-bg);
+}
+
+.message.tool {
+    background: var(--tool-bg);
+    color: var(--fg-dim);
+}
+
+/* assistant thinking block + markdown rendering (originally L1455-1722) */
+/* ── thinking collapse block inside the assistant bubble ── */
+.thinking-block {
+    margin: 4px 0;
+}
+.thinking-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    padding: 2px 0;
+    color: var(--fg-dim);
+    font-size: 11px;
+    cursor: pointer;
+    font-style: italic;
+    font-family: inherit;
+}
+.thinking-header:hover {
+    color: var(--fg-dim);
+}
+.thinking-body {
+    margin: 4px 0 4px 14px;
+    padding: 4px 8px;
+    border-left: 2px solid var(--border);
+    color: var(--fg-dim);
+    font-style: italic;
+    font-size: 12px;
+}

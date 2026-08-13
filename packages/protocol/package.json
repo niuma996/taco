@@ -1,0 +1,31 @@
+{
+  "name": "@taco-ai/protocol",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Taco 协议契约 — NDJSON over stdio 的 RPC 帧类型 / method 常量 / 入参 schema,server 与 client 共享。除 typebox(schema 构造)外不依赖任何运行时实现",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": "github:niuma996/taco",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "typebox": "^1.3.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^7.0.2"
+  }
+}

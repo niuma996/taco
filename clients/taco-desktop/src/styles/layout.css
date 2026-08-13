@@ -1,0 +1,574 @@
+/* layout.css — top-level grid, app shell, topbar, workspace picker — split from styles.css on 2026-07-20 */
+
+#root {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    min-height: 100%;
+    overflow: hidden;
+}
+
+.app-shell {
+    display: contents;
+}
+
+.app-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    grid-column: 2;
+    grid-row: 1;
+}
+
+header.topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    /* Topbar occupies only the right column (left column is ActivityRail at 78px).
+       Height = --rail-top-padding (36px on macOS, 8px elsewhere).
+       Fixed height (not min-height) prevents children from stretching the right column
+       and causing misalignment with the left column's first icon baseline. */
+    padding: 0 0.5rem;
+    height: var(--rail-top-padding);
+    border-bottom: 1px solid var(--border);
+    background: var(--pane-list-bg);
+    flex-shrink: 0;
+    /* Positioning ancestor for ContextIndicator popover. */
+    position: relative;
+}
+
+/* Drag region in the topbar (header + drag-spacer via data-tauri-drag-region) enables window
+   dragging + double-click maximize; interactive children omit the attribute so they don't interfere. */
+header.topbar .drag-spacer {
+    flex: 1;
+    height: 100%;
+}
+
+.error-banner {
+    flex-basis: 100%;
+    background: var(--error-bg);
+    border-top: 1px solid var(--error);
+    border-bottom: 1px solid var(--error);
+    color: var(--error-fg);
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+}
+
+header.topbar input,
+header.topbar select {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 0.4rem;
+    border-radius: var(--radius-sm);
+}
+
+/* Left: WorkspacePicker, right: new-session button (space-between),
+   button right edge aligns with sidebar list row inner-right edge. */
+header.topbar .topbar-picker-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex: 0 0 calc(var(--pane-width) - 0.5rem - 4px);
+    min-width: 0;
+}
+
+.topbar-workspace-select {
+    /* Text-button style (not an input): transparent bg, no border, faint hint on hover.
+       Fills remaining space in picker-group; label truncates on overflow.
+       Vertical padding matches .topbar-new-session (0.35rem); horizontal padding is slightly
+       smaller (0.4rem) to give the label more room next to the tighter chevron spacing. */
+    background: transparent;
+    color: var(--fg);
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.4rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.topbar-workspace-select-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.topbar-workspace-select:hover {
+    background: var(--accent-bg-hover);
+}
+
+.topbar-workspace-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.topbar-workspace-select[data-state="open"] {
+    background: var(--accent-bg-hover);
+}
+
+.topbar-workspace-select-chevron {
+    color: var(--fg-dim);
+    flex: 0 0 auto;
+    display: inline-flex;
+    transition: transform 120ms ease;
+}
+
+/* workspace folder icon — same tier as chevron (--fg-dim), hugs label left; flex:0 0 auto
+   does not participate in label compression. */
+.topbar-workspace-select-icon {
+    color: var(--fg-dim);
+    flex: 0 0 auto;
+    display: inline-flex;
+}
+
+.topbar-workspace-select[data-state="open"] .topbar-workspace-select-chevron {
+    transform: rotate(180deg);
+}
+
+/* menu / item rendered by Radix <DropdownMenu.Portal> into body end,
+   not part of the header.topbar tree — scoped only by class names. */
+.topbar-workspace-menu {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 6px 18px var(--shadow-color);
+    z-index: 100;
+    overflow: hidden;
+    /* DropdownMenu has no trigger-width variable like Select; anchors to picker trigger width,
+       long workspace names truncate. */
+    min-width: 180px;
+    padding: 4px 0;
+    max-height: min(60vh, 320px);
+    overflow-y: auto;
+}
+
+.topbar-workspace-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.8rem;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+}
+
+.topbar-workspace-item[data-highlighted] {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.topbar-workspace-item-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar-workspace-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+}
+
+/* .layout (second definition, originally L1083-1097) */
+.layout {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Right column: topbar → content area → input, top-to-bottom filling remaining width and full height. */
+.main-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* ContextIndicator — topbar context usage bar. Single-row component: bar + percentage + optional loading marker.
+   Color tiers via inline modifier class (.topbar-context-indicator--neutral | --warn | --danger | --overflow).
+   Height constrained by topbar height = var(--rail-top-padding); must stay single-line. */
+button.topbar-context-indicator,
+.topbar-context-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0 0.4rem;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    height: 60%;
+    border-radius: var(--radius-xs);
+    border: 1px solid transparent;
+    cursor: pointer;
+    user-select: none;
+    font-family: inherit;
+    text-align: left;
+    white-space: nowrap;
+}
+
+button.topbar-context-indicator {
+    background: transparent;
+    color: inherit;
+}
+
+/* Ring progress (SVG): track is bg color circle, fill is progress arc, center is percentage number.
+   Colors: track uses --fg-dim low opacity, fill uses accent blue (usage), number uses --fg for readability.
+   warn/danger tiers override fill/number with semantic colors. */
+.topbar-context-indicator__ring {
+    display: block;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+}
+
+.topbar-context-indicator__ring-track {
+    stroke: var(--fg-dim);
+    stroke-width: 2.5;
+    opacity: 0.25;
+}
+
+.topbar-context-indicator__ring-fill {
+    stroke: var(--accent);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 120ms ease-out;
+}
+
+.topbar-context-indicator__ring-text {
+    fill: var(--fg);
+    font-size: 7px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Empty state placeholder (no session data). */
+.topbar-context-indicator__pct {
+    font-weight: 500;
+}
+
+.topbar-context-indicator--warn .topbar-context-indicator__ring-fill {
+    stroke: var(--warning, #ebcb8b);
+}
+.topbar-context-indicator--warn .topbar-context-indicator__ring-text {
+    fill: var(--warning, #ebcb8b);
+}
+
+.topbar-context-indicator--danger .topbar-context-indicator__ring-fill,
+.topbar-context-indicator--overflow .topbar-context-indicator__ring-fill {
+    stroke: var(--error, #bf616a);
+}
+.topbar-context-indicator--danger .topbar-context-indicator__ring-text,
+.topbar-context-indicator--overflow .topbar-context-indicator__ring-text {
+    fill: var(--error, #bf616a);
+}
+
+/* ContextIndicator — compacting state. Number frozen, ring pulses to show activity.
+   --warning color avoids false danger/overflow red alerts. */
+.topbar-context-indicator--compacting .topbar-context-indicator__ring-fill {
+    stroke: var(--warning, #ebcb8b);
+}
+.topbar-context-indicator--compacting .topbar-context-indicator__ring-text {
+    fill: var(--warning, #ebcb8b);
+}
+
+.topbar-context-indicator--compacting .topbar-context-indicator__ring-fill {
+    animation: topbar-context-indicator-pulse 1.6s ease-in-out infinite;
+}
+
+.topbar-context-indicator__compacting-label {
+    margin-left: 0.2rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    color: var(--warning, #ebcb8b);
+}
+
+/* ContextIndicator — click to open detail popover.
+   Root establishes positioning context; popover is absolutely positioned below the button. */
+.context-indicator-root {
+    position: relative;
+    display: inline-flex;
+}
+
+.context-indicator-popover {
+    position: absolute;
+    /* Popover flips upward so it stays within the viewport when the input is at screen bottom. */
+    bottom: calc(100% + 6px);
+    right: 0;
+    z-index: 1000;
+    background: var(--tooltip-bg);
+    color: var(--tooltip-fg);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.75rem;
+    min-width: 180px;
+    max-width: 90vw;
+    /* No wrapping — popover widens to fit content (e.g. long cache-hit-rate rows). */
+    white-space: nowrap;
+    width: max-content;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.context-indicator-popover__row + .context-indicator-popover__row {
+    margin-top: 0.2rem;
+}
+
+.context-indicator-popover__row--cache {
+    color: var(--cache-hit, #a3be8c);
+    font-weight: 500;
+}
+
+.context-indicator-popover__row--warn {
+    color: var(--warning, #ebcb8b);
+}
+
+@keyframes topbar-context-indicator-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.45;
+    }
+}
+
+/* PlanModeIndicator — topbar plan mode status badge.
+   Appears next to ContextIndicator on planEnter, disappears after planExit.approved. */
+.plan-mode-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--accent-soft, rgba(120, 180, 255, 0.15));
+    color: var(--accent-fg, #74b9ff);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.plan-mode-indicator .plan-mode-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+/* TaskPanel — task list panel on the right side of the main area.
+   Width aligned with files-drawer (280px), right edge; has a placeholder for empty state. */
+.task-panel {
+    width: 280px;
+    flex-shrink: 0;
+    padding: 12px;
+    overflow-y: auto;
+    border-left: 1px solid var(--border);
+    background: var(--bg-secondary, transparent);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+/* Collapse button: inside the panel header, right side. */
+.task-panel-collapse {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--fg-dim);
+    cursor: pointer;
+}
+
+.task-panel-collapse:hover {
+    background: var(--hover);
+    color: var(--fg-primary, inherit);
+}
+
+/* ── Active list area ── */
+.task-panel-active {
+    margin-bottom: 16px;
+}
+
+/* Top bar: title + collapse button. Shows generic "Tasks" if no active list. */
+.task-panel-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.task-panel-name {
+    font-weight: 600;
+    margin: 0;
+    color: var(--fg-primary, inherit);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.task-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.task-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.task-row-completed .task-row-content,
+.task-row-failed .task-row-content {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.task-row-content {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.task-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.task-icon.spinning {
+    animation: task-icon-spin 1s linear infinite;
+}
+
+.task-icon-done {
+    color: var(--success, #4caf50);
+}
+
+.task-icon-failed {
+    color: var(--error, #bf616a);
+}
+
+/* ── History list area ── */
+/* Visual separator when co-existing with active list; hidden when only history sessions exist. */
+.task-panel-history {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+}
+
+/* Remove separator when there's no .task-panel-active to avoid stray line above history-only sessions. */
+.task-panel:not(:has(.task-panel-active)) > .task-panel-history {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
+}
+
+.task-history-heading {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.task-history-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.task-history-row-wrap {
+    margin-bottom: 4px;
+}
+
+.task-history-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    border-radius: 4px;
+}
+
+.task-history-row:hover {
+    background: var(--hover, rgba(255, 255, 255, 0.04));
+}
+
+.task-history-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* inline status badge: "3/5 done" — same row as task name, no extra line needed. */
+.task-history-badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.task-history-detail {
+    margin-left: 18px;
+    padding: 4px 0 4px 4px;
+}
+
+.task-history-loading,
+.task-history-empty {
+    font-size: 11px;
+    color: var(--fg-dim);
+    padding: 2px 0;
+}
+
+.task-history-error {
+    font-size: 11px;
+    color: var(--error, #bf616a);
+    padding: 2px 0;
+}
+
+@keyframes task-icon-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

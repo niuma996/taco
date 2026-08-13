@@ -1,0 +1,66 @@
+/* chatAttachments.css — attachment thumbnail bar + sent-message image grid; split from chat.css */
+
+/* Attachment thumbnail bar above the textarea. */
+.attachment-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.25rem 0;
+}
+
+.attachment-thumb-wrap {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.attachment-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.attachment-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    line-height: 1;
+    font-size: 14px;
+    border-radius: var(--radius-circle);
+    border: none;
+    background: var(--tooltip-bg);
+    color: var(--tooltip-fg);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.attachment-remove:hover {
+    background: var(--overlay-scrim);
+}
+
+/* Sent user message image grid — max 200px tall, horizontal wrap. */
+.message-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.25rem 0;
+}
+
+.message-image {
+    max-width: 200px;
+    max-height: 200px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg);
+}

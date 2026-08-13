@@ -1,0 +1,602 @@
+/* settings.css — SettingsPane (full-width view, replaces the former 420px
+   SettingsDrawer): left vertical section nav + centered content column, plus
+   the settings-tab-content styles shared by AppearanceTab / ModelTab /
+   CompactionTab / DebugTab / ProviderSection / CustomProviderForm. */
+
+.settings-pane {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.settings-nav {
+    width: var(--pane-width);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-right: 1px solid var(--border);
+    background: var(--pane-list-bg);
+    padding: 0.75rem 0.5rem;
+}
+
+.settings-nav-item {
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.settings-nav-item:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+
+.settings-nav-item.active {
+    color: var(--fg);
+    background: var(--accent-bg-active);
+    font-weight: 600;
+}
+
+.settings-pane-content {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 2rem;
+}
+
+/* Content: centered with max-width so paragraphs/forms don't stretch too wide in full-width view. */
+.settings-pane-content-inner {
+    max-width: 720px;
+    margin: 0 auto;
+}
+
+.settings-tab h3 {
+    margin: 0 0 0.4rem 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+}
+/* Second and subsequent h3 within a settings-tab: extra top spacing for visual separation. */
+.settings-tab h3.settings-tab-h3-secondary {
+    margin-top: 1.5rem;
+}
+.settings-tab-desc {
+    margin: 0 0 0.9rem 0;
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+    line-height: 1.4;
+}
+/* Consistent vertical rhythm for settings rows within each tab. */
+.settings-tab > .settings-row + .settings-row,
+.settings-tab > .settings-row + .settings-row-block,
+.settings-tab > .settings-row-block + .settings-row,
+.settings-tab > .settings-row-block + .settings-row-block {
+    margin-top: 0.6rem;
+}
+.settings-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+/* Inline inputs take remaining width; buttons keep their own width —
+   without this .ui-input's width:100% would push sibling buttons onto the next line. */
+.settings-row > .ui-input {
+    flex: 1;
+    min-width: 0;
+}
+.settings-row > .settings-btn,
+.settings-row > .ui-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+/* Controls that need full row width (e.g. sliders): slider track fills the container. */
+.settings-row-block {
+    display: block;
+}
+.permission-rule-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.6rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.permission-rule-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.permission-rule-text {
+    font-family: var(--mono);
+    font-size: var(--text-sm);
+    color: var(--fg);
+    flex: 1;
+}
+.permission-rule-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    line-height: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+.permission-rule-remove:hover:not(:disabled) {
+    background: var(--hover-overlay);
+    color: var(--error);
+}
+.permission-rule-remove:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.settings-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.3rem 0.7rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+    font-size: var(--text-base);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        border-color 0.12s ease;
+}
+.settings-btn:hover:not(:disabled) {
+    background: var(--hover-overlay);
+    border-color: var(--brand-orange);
+}
+.settings-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.settings-saving {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+
+/* Compaction tab — toggle row layout (left label/description column). The track/thumb is provided by ui.css .ui-switch. */
+.compaction-toggle-row {
+    justify-content: space-between;
+}
+.compaction-toggle-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.compaction-toggle-label {
+    font-weight: 500;
+    color: var(--fg);
+}
+.compaction-toggle-desc {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+/* Threshold slider stays neutral (accent color), distinct from the brand orange toggle above. Off state dims the whole row. */
+.compaction-threshold {
+    margin-top: 0.9rem;
+}
+.compaction-threshold-labels {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+}
+.compaction-threshold-labels .ui-slider {
+    width: 100%;
+}
+.compaction-threshold.off {
+    opacity: 0.55;
+}
+/* Language section spacing from the previous section. */
+.settings-tab-subsection {
+    margin-top: 1.5rem;
+}
+
+/* Debug tab — "Apply and restart" button and its warning hint. */
+.debug-restart-btn {
+    padding: 0.45rem 0.9rem;
+    font-size: var(--text-base);
+}
+.debug-restart-hint {
+    margin-top: 0.6rem;
+    color: var(--warning);
+    font-size: var(--text-sm);
+}
+
+/* Provider section — two-column grid, one provider per cell: name + status + key input. */
+.provider-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+.provider-section-head h3 {
+    margin: 0;
+}
+.provider-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+.provider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+.provider-row-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem 0.6rem;
+    /* Fills card height so the actions area (align-self:flex-end) lands at the card bottom. */
+    flex: 1;
+}
+/* Info area: name + status stacked vertically, fills remaining width; long names truncate without crowding buttons. */
+.provider-row-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex: 1;
+    min-width: 0;
+}
+.provider-row-name {
+    font-weight: 500;
+    color: var(--fg);
+    line-height: 1.25;
+    /* Title: single-line horizontal truncation. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Action area: icon buttons vertically centered relative to the card outer frame, right-aligned; wraps on narrow widths. */
+.provider-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-self: center;
+    flex-shrink: 0;
+}
+.provider-row-badge {
+    font-size: var(--text-xs);
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.provider-row-meta {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+    font-family: var(--mono);
+}
+.provider-row-status {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+.provider-row-status--ok {
+    color: var(--success, var(--fg));
+}
+/* Card action icon buttons — square, transparent bg, faint bg on hover. line-height:0
+   eliminates SVG inline baseline offset; flex center truly centers the icon. */
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    line-height: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+.icon-button:hover:not(:disabled) {
+    background: var(--hover-overlay);
+    border-color: var(--brand-orange);
+    color: var(--fg);
+}
+.icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.icon-button svg {
+    display: block;
+}
+.icon-button svg > * {
+    fill: none;
+}
+/* Key icon — brand orange, signals "configure API key here". */
+.provider-row-key {
+    color: var(--brand-orange);
+}
+.provider-row-key:hover:not(:disabled) {
+    border-color: var(--brand-orange);
+    color: var(--brand-orange-hover);
+}
+.provider-row-icon.provider-row-delete:hover:not(:disabled) {
+    border-color: var(--error);
+    color: var(--error);
+}
+
+/* custom-provider-modal — CustomProviderForm's own Radix Dialog, wider than
+   the base .modal (420px) so its 6 fields and the "fetch models" action aren't
+   cramped, and so the API Select's long option labels (e.g. "OpenAI
+   /chat/completions (chatcomplete)") fit inside the modal. */
+.custom-provider-modal {
+    /* Base .modal sets only max-width, so width is content-driven; without an
+       explicit width the box stays narrow regardless of max-width. */
+    width: 600px;
+    max-width: calc(100vw - 4rem);
+}
+/* Cap the API Select's popper to the trigger width and let long labels
+   wrap instead of clipping past the modal edge. */
+.custom-provider-modal .ui-select-content {
+    max-width: var(--radix-select-trigger-width);
+}
+.custom-provider-modal .ui-select-item {
+    white-space: normal;
+}
+.custom-provider-modal .settings-row-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.9rem;
+}
+/* Field label: gap above the input, slightly smaller size, dim color — clearer hierarchy. */
+.custom-provider-modal .settings-row-block > span {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+}
+
+/* "Fetch models" action for the model id field (right side of the label row, see ui.css .ui-form-label-row). */
+.custom-provider-fetch-btn {
+    padding: 0.15rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+    font-size: var(--text-xs);
+    cursor: pointer;
+}
+.custom-provider-fetch-btn:hover:not(:disabled) {
+    border-color: var(--brand-orange);
+    color: var(--brand-orange);
+}
+.custom-provider-fetch-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+/* Placeholder hint when the protocol doesn't support auto-discovery — replaces the button without stretching the label row. */
+.custom-provider-fetch-hint {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+
+/* Read-only API key mask — monospace font displays sk-ant-...AbCd; dimmed bg signals non-editable. */
+.provider-key-mask {
+    font-family: var(--mono);
+    color: var(--fg-dim);
+    background: var(--input-bg);
+    cursor: default;
+}
+
+/* ── MCP Servers tab ── */
+
+.mcp-section-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-bottom: 0.8rem;
+}
+.mcp-section-head h3 {
+    margin: 0;
+}
+.mcp-section-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+.mcp-section-actions .settings-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.mcp-section-actions .spin {
+    animation: mcp-spin 1s linear infinite;
+}
+@keyframes mcp-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.mcp-restart-hint {
+    /* Slightly dimmer than the description — secondary explanatory line. */
+    font-style: italic;
+    margin-top: -0.4rem;
+}
+.mcp-restart-btn {
+    border-color: var(--brand-orange);
+    color: var(--brand-orange);
+}
+.mcp-restart-btn:hover:not(:disabled) {
+    border-color: var(--brand-orange-hover);
+    color: var(--brand-orange-hover);
+}
+.mcp-info-banner {
+    margin-top: 0.6rem;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--success, var(--border));
+    border-radius: var(--radius-sm);
+    color: var(--success, var(--fg));
+    font-size: var(--text-sm);
+    background: var(--bg);
+}
+
+.mcp-server-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+
+.mcp-server-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+}
+.mcp-server-card--disabled {
+    /* Dim the body so disabled servers read as "configured but inactive", but
+       keep the controls at full opacity so they remain easy to operate. */
+    opacity: 0.6;
+}
+.mcp-server-card--disabled .mcp-server-card-actions {
+    opacity: 1;
+}
+.mcp-server-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.mcp-server-card-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+}
+.mcp-server-name {
+    font-weight: 500;
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: var(--text-sm);
+}
+.mcp-server-badge {
+    font-size: var(--text-xs);
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.mcp-server-disabled-badge {
+    font-size: var(--text-xs);
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--fg-dim);
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.mcp-server-status {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+.mcp-server-status--ok {
+    color: var(--success, var(--fg));
+}
+.mcp-server-status--error {
+    color: var(--error);
+}
+.mcp-server-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+.mcp-server-error {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--error);
+    font-family: var(--mono);
+    word-break: break-word;
+}
+.mcp-server-tools {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    word-break: break-word;
+}
+
+/* MCP server modal — wider than the default .modal so the multi-line env /
+   headers / always-loaded textareas are comfortable. */
+.mcp-server-modal {
+    width: 600px;
+    max-width: calc(100vw - 4rem);
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+/* Project Conventions Tab — file rows and fieldset styles. Reuses .compaction-toggle-* rows;
+   only legend / fieldset / file-row are new elements here. */
+.context-files {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+.context-files.off {
+    opacity: 0.5;
+    pointer-events: none;
+}
+.context-files-fs {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.context-files-legend {
+    padding: 0 0.5rem;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+}
+.context-file-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+}
+.context-file-label {
+    font-family: var(--mono);
+    font-size: var(--text-sm);
+    color: var(--fg);
+}

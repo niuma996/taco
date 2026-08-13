@@ -1,0 +1,294 @@
+/* chatMarkdown.css — assistant markdown rendering (md-assistant, code blocks, shiki, copy button); split from chat.css */
+
+/* ==========================================================================
+   assistant markdown rendering
+   ========================================================================== */
+
+.md-assistant {
+    line-height: 1.55;
+    word-wrap: break-word;
+    font-size: 0.85em;
+}
+
+.md-assistant > *:first-child {
+    margin-top: 0;
+}
+
+.md-assistant > *:last-child {
+    margin-bottom: 0;
+}
+
+.md-assistant p {
+    margin: 0.5em 0;
+}
+
+.md-assistant h1,
+.md-assistant h2,
+.md-assistant h3,
+.md-assistant h4,
+.md-assistant h5,
+.md-assistant h6 {
+    margin: 0.8em 0 0.4em;
+    line-height: 1.25;
+    font-weight: 600;
+}
+
+.md-assistant h1 {
+    font-size: 1.4em;
+}
+.md-assistant h2 {
+    font-size: 1.25em;
+}
+.md-assistant h3 {
+    font-size: 1.1em;
+}
+.md-assistant h4,
+.md-assistant h5,
+.md-assistant h6 {
+    font-size: 1em;
+}
+
+.md-assistant ul,
+.md-assistant ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+
+.md-assistant li {
+    margin: 0.2em 0;
+}
+
+.md-assistant li > p {
+    margin: 0.2em 0;
+}
+
+.md-assistant blockquote {
+    margin: 0.5em 0;
+    padding: 0.2em 0.8em;
+    border-left: 3px solid var(--border);
+    color: var(--fg-dim);
+    font-style: italic;
+}
+
+.md-assistant table {
+    border-collapse: collapse;
+    margin: 0.6em 0;
+    width: auto;
+}
+
+/* Wide tables scroll inside this wrapper instead of widening the message
+   bubble. min-width: 0 lets the flex column shrink; the table keeps its
+   intrinsic width and overflows horizontally here. */
+.md-table-scroll {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fg-dim) transparent;
+}
+.md-table-scroll::-webkit-scrollbar {
+    height: 8px;
+}
+.md-table-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.md-table-scroll::-webkit-scrollbar-thumb {
+    background: var(--fg-dim);
+    border-radius: var(--radius-sm);
+}
+.md-table-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--brand-orange);
+}
+/* The scroll wrapper owns the outer spacing so it doesn't sit inside the
+   scrollable area. */
+.md-table-scroll table {
+    margin: 0.6em 0;
+}
+
+.md-assistant th,
+.md-assistant td {
+    border: 1px solid var(--border);
+    padding: 0.35em 0.7em;
+    text-align: left;
+}
+
+.md-assistant th {
+    background: var(--input-bg);
+    font-weight: 600;
+}
+
+.md-assistant tbody tr:nth-child(even) td {
+    background: var(--surface-tint);
+}
+
+.md-assistant input[type="checkbox"] {
+    margin-right: 0.4em;
+    cursor: default;
+}
+
+.md-assistant a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.md-assistant a:hover {
+    text-decoration: none;
+}
+
+.md-assistant hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 1em 0;
+}
+
+.md-assistant :not(pre) > code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    color: var(--code-fg);
+    border-radius: var(--radius-xs);
+    padding: 0.05em 0.35em;
+    font-size: 0.92em;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Code block container always uses a dark bg, consistent with the shell output area,
+   unchanged across themes. Light theme no longer uses --bg-elevated (#fff), which would
+   visually break from the shell output feel. */
+.md-code-block {
+    position: relative;
+    margin: 0.6em 0;
+    background: var(--terminal-bg, #1f2227);
+    border: 1px solid var(--code-block-border, #d4c9b0);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    color: var(--terminal-fg, #d4d4d4);
+    /* Same flex-shrink guard as .message/.tool-card — long <pre> content
+       must not push the assistant message wider than the chat pane. */
+    min-width: 0;
+}
+
+.md-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3em 0.6em;
+    background: var(--input-bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8em;
+}
+
+.md-code-lang {
+    color: var(--fg-dim);
+    text-transform: lowercase;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.md-code-block pre {
+    margin: 0;
+    padding: 0.7em 0.9em;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: transparent !important;
+    font-size: 0.9em;
+    line-height: 1.45;
+    /* min-width: 0 lets overflow-x: auto actually take effect — without it
+       the <pre> would refuse to shrink below its content's intrinsic width
+       and still push the assistant message bubble wider. */
+    min-width: 0;
+}
+
+/* Always-visible horizontal scrollbar inside code blocks. Without this,
+   macOS hides the scrollbar until scroll, and trackpad horizontal swipes
+   get consumed by the system rather than scrolling the <pre> — so the
+   user has no visible affordance to know the content is wider than the
+   code block. */
+.md-code-block pre {
+    scrollbar-width: thin;
+    scrollbar-color: var(--fg-dim) transparent;
+}
+.md-code-block pre::-webkit-scrollbar {
+    height: 8px;
+}
+.md-code-block pre::-webkit-scrollbar-track {
+    background: transparent;
+}
+.md-code-block pre::-webkit-scrollbar-thumb {
+    background: var(--fg-dim);
+    border-radius: var(--radius-sm);
+}
+.md-code-block pre::-webkit-scrollbar-thumb:hover {
+    background: var(--brand-orange);
+}
+
+/* Shiki dual theme: token colors driven by --shiki-light/--shiki-dark variables.
+   Theme switching works without re-render. The code block container bg is provided by
+   .md-code-block using --terminal-bg, outside shiki's scope. */
+.shiki,
+.shiki span {
+    color: var(--shiki-dark);
+    font-style: var(--shiki-dark-font-style);
+    font-weight: var(--shiki-dark-font-weight);
+    text-decoration: var(--shiki-dark-text-decoration);
+}
+
+:root[data-theme="light"] .shiki,
+:root[data-theme="light"] .shiki span {
+    color: var(--shiki-light);
+    font-style: var(--shiki-light-font-style);
+    font-weight: var(--shiki-light-font-weight);
+    text-decoration: var(--shiki-light-text-decoration);
+}
+
+/* Code blocks always use dark bg, so shiki tokens must always use the dark color palette —
+   even in light theme, code inside the block uses --shiki-dark. Inline styles written by
+   rehype-shiki have higher priority than CSS variables and need !important to override. */
+.md-code-block .shiki,
+.md-code-block .shiki span {
+    color: var(--shiki-dark) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+.md-code-block pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    /* Default text color on dark bg — fallback for no token highlighting or fallback rendering. */
+    color: var(--terminal-fg, #d4d4d4);
+}
+.md-code-block pre {
+    /* Fallback: same fg as .md-code-block container. Prevents a white flash before tokens render. */
+    color: var(--terminal-fg, #d4d4d4);
+}
+
+.md-copy-btn {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--fg-dim);
+    padding: 0.1em 0.55em;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition:
+        color 0.15s,
+        border-color 0.15s;
+}
+
+.md-copy-btn:hover {
+    color: var(--fg);
+    border-color: var(--fg-dim);
+}
+
+.md-copy-btn[data-state="copied"] {
+    color: var(--user);
+    border-color: var(--user);
+}
+
+.md-copy-btn[data-state="failed"] {
+    color: var(--error);
+    border-color: var(--error);
+}

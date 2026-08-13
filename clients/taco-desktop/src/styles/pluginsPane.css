@@ -1,0 +1,75 @@
+/* pluginsPane.css — plugins pane. Shared scaffolding (config-hint, restart
+   banner, card shell, section title, empty/loading) lives in paneShared.css;
+   only plugins-specific shapes stay here. */
+
+.plugins-pane {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+    padding: 16px 20px;
+    gap: 12px;
+}
+.plugins-config-hint-label {
+    padding: 1px 6px;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--input-bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+.plugins-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+/* State modifiers — these classes were referenced in the tsx but never styled,
+   so failed/unauthorized/disabled cards used to look identical to enabled. */
+.plugins-card-failed,
+.plugins-card-unauthorized {
+    border-color: var(--danger);
+}
+.plugins-card-disabled {
+    opacity: 0.6;
+}
+.plugins-card-source {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--surface-tint);
+    color: var(--fg-dim);
+}
+.plugins-card-when,
+.plugins-card-hint,
+.plugins-card-reason {
+    font-size: 13px;
+    margin: 0;
+    color: var(--fg-dim);
+}
+.plugins-perm-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+.plugins-perm-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-bg-hover);
+    color: var(--accent);
+    cursor: help;
+}
+
+/* ── Section grid — 2-column tiles on wide panes, single-column below ~640px ── */
+.plugins-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+@media (max-width: 640px) {
+    .plugins-grid {
+        grid-template-columns: 1fr;
+    }
+}

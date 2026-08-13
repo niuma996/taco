@@ -1,0 +1,210 @@
+/* chatChrome.css — global buttons, topbar open button, main layout, session-info bar; split from chat.css */
+
+.topbar-workspace-item-check {
+    display: inline-flex;
+    align-items: center;
+    width: 12px;
+    flex: 0 0 auto;
+}
+
+button {
+    background: var(--accent);
+    color: var(--bg);
+    border: 0;
+    padding: 0.4rem 0.8rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+/* lucide icons default to stroke, inherit currentColor; aligned with text baseline. */
+button svg {
+    vertical-align: middle;
+}
+
+/* Toggle button for the session list, left of the session id bar.
+   Follows .topbar's height rhythm (--rail-top-padding). No ::after divider —
+   flex gap already separates the toggle from the id area; an extra 1px line is visual noise. */
+.session-info-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    /* Idle state is one level lighter than hover (--accent-bg-hover): visible but not dominant,
+       upgrades to --accent-bg-active on hover. */
+    background: var(--accent-bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    cursor: pointer;
+    padding: 0;
+    flex: 0 0 auto;
+    margin-right: 0.15rem;
+}
+
+.session-info-toggle:hover {
+    color: var(--fg);
+    background: var(--accent-bg-active);
+    border-color: var(--accent);
+}
+
+.topbar-new-session {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    border-radius: var(--radius-sm);
+    -webkit-app-region: no-drag;
+    /* hugs right edge in picker-group (space-between), aligned with list row inner-right. */
+    flex: 0 0 auto;
+    /* Overrides global button { background: --accent } (Nord blue) with brand orange,
+       aligned with the desktop icon left color band. */
+    background: var(--brand-orange);
+}
+
+.topbar-new-session:hover:not(:disabled) {
+    background: var(--brand-orange-hover);
+}
+
+.topbar-new-session:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.topbar-new-session svg {
+    width: 14px;
+    height: 14px;
+}
+
+main {
+    flex: 1;
+    overflow-y: auto;
+    /* Zero right padding so scrollbar hugs the window edge; bottom padding clears
+       the fixed-bottom input. */
+    padding: 1rem 0 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--chat-panel-bg);
+    /* min-width: 0 so wide contents (long <pre>, wide tables) can shrink
+       within this flex column rather than pushing the chat pane wider and
+       producing a horizontal scrollbar on the whole window. */
+    min-width: 0;
+}
+
+.session-info {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    /* Shares --rail-top-padding with .activity-rail top padding and .topbar height,
+       aligning the topbar / session-info bar / ActivityRail item baselines.
+       box-sizing includes padding/border; ellipsis handles overflow. */
+    height: var(--rail-top-padding);
+    box-sizing: border-box;
+    padding: 0 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--input-bg);
+    font-size: 0.78rem;
+    color: var(--fg-dim);
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+}
+.session-info.empty {
+    font-style: italic;
+}
+.session-info-label {
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    color: var(--fg-dim);
+}
+.session-info-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--fg);
+    font-size: 0.78rem;
+    /* Resets inline `code` styling — session ID is functional text, not a code snippet. */
+    background: none;
+    border: none;
+    padding: 0;
+    /* Tight spacing between id and copy; :has(+ .session-info-copy) only matches
+       the immediate sibling, so other gaps still use .session-info gap. */
+}
+.session-info-id:has(+ .session-info-copy) {
+    margin-right: -0.3rem;
+}
+.session-info-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Matches the toggle: 26x26, same tier as the left column + button size. */
+    padding: 0;
+    width: 26px;
+    height: 26px;
+    min-width: auto;
+    background: transparent;
+    color: var(--fg-dim);
+    border-radius: var(--radius-sm);
+}
+.session-info-copy:hover {
+    color: var(--fg);
+    background: var(--accent-bg-active);
+}
+/* log button: 26x26, same tier as copy. Hover bg signals clickability.
+   Path only in title/aria-label — not in the visual layout. */
+.session-info-log {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 26px;
+    height: 26px;
+    min-width: auto;
+    background: transparent;
+    color: var(--fg-dim);
+    border-radius: var(--radius-sm);
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+        color 0.12s ease,
+        background 0.12s ease;
+}
+.session-info-log:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+.session-info-log:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Vertical divider between metadata and action buttons: 1px x 16px. */
+.session-info-divider {
+    flex: 0 0 auto;
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    align-self: center;
+}
+.session-info-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.45rem;
+    border-radius: var(--radius-pill);
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+}
+.session-info-status.idle {
+    color: var(--fg-dim);
+}
+.session-info-status.running {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+.session-info-time {
+    margin-left: auto;
+    font-size: 0.72rem;
+}

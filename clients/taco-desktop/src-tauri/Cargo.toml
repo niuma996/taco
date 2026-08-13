@@ -1,0 +1,27 @@
+[package]
+name = "taco-desktop"
+version = "0.1.0"
+description = "Taco 桌面客户端 — 通过 NDJSON sidecar 调用 taco runtime"
+authors = ["taco team"]
+edition = "2021"
+
+[lib]
+name = "taco_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "TACO"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-store = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-opener = "2.0"
+serde = "1.0"
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["fs", "io-util", "process", "sync", "rt", "time"] }

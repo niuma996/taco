@@ -1,0 +1,27 @@
+/* styles.css — split on 2026-07-20. Each domain lives in its own file below.
+   main.tsx imports this single entry, preserving existing import surface. */
+@import "./styles/theme.css";
+@import "./styles/ui.css";
+@import "./styles/layout.css";
+@import "./styles/chatChrome.css";
+@import "./styles/chatMessages.css";
+@import "./styles/chatToolCard.css";
+@import "./styles/toolCardDiff.css";
+@import "./styles/toolCardShell.css";
+@import "./styles/chatInput.css";
+@import "./styles/modelMenu.css";
+@import "./styles/thinkingSlider.css";
+@import "./styles/chatAttachments.css";
+@import "./styles/chatMarkdown.css";
+@import "./styles/sidebar.css";
+@import "./styles/paneShared.css";
+@import "./styles/toolsPane.css";
+@import "./styles/skillsPane.css";
+@import "./styles/agentsPane.css";
+@import "./styles/toolCards.css";
+@import "./styles/pluginsPane.css";
+@import "./styles/channelsPane.css";
+@import "./styles/memoryPane.css";
+@import "./styles/checkpointsPane.css";
+@import "./styles/overlays.css";
+@import "./styles/settings.css";

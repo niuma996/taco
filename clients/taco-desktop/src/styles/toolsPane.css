@@ -1,0 +1,226 @@
+/* toolsPane.css — tools pane (list + detail); split from panes.css */
+
+/* ── Tools pane ── */
+.tools-pane {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.tools-list {
+    width: var(--pane-width);
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--pane-list-bg);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.5rem 0;
+}
+
+.tools-list-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.25rem 0.75rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.35rem;
+}
+
+.tools-search {
+    width: 100%;
+    font-size: 0.8rem;
+}
+
+.tools-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+}
+
+.tools-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.tools-filter-label {
+    font-size: 0.6rem;
+    color: var(--fg-dim);
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Selects share the cell equally; long option text truncates instead of
+   wrapping to a second line. */
+.tools-filter .ui-select-trigger {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.35rem;
+    height: auto;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.tools-filter .ui-select-trigger > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tools-list-empty {
+    padding: 0.75rem;
+    color: var(--fg-dim);
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+.tools-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.4rem 0.75rem;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-align: left;
+    border-radius: var(--radius-sm);
+    margin: 1px 4px;
+}
+
+.tools-list-item:hover {
+    background: var(--accent-bg-hover);
+}
+
+.tools-list-item.active {
+    background: var(--accent-bg-active);
+    color: var(--accent);
+}
+
+/* Tool name on left, builtin/external tag pill on right — instantly distinguishable even in narrow columns. */
+.tools-list-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tools-list-tag {
+    flex: 0 0 auto;
+    font-size: 0.65rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    line-height: 1.3;
+}
+.tools-list-tag.tag-builtin {
+    color: var(--accent);
+    border-color: var(--accent-border);
+}
+.tools-list-tag.tag-external {
+    color: var(--system);
+    border-color: var(--system);
+}
+.tools-list-tag.tag-subagent-ok {
+    color: var(--success, #4caf50);
+    border-color: var(--success, #4caf50);
+}
+.tools-list-tag.tag-subagent-no {
+    color: var(--warning, #f0a020);
+    border-color: var(--warning, #f0a020);
+}
+.tools-list-tag.tag-session {
+    color: var(--info, #4a90e2);
+    border-color: var(--info, #4a90e2);
+}
+.tools-list-tag.tag-mcp {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-bg-hover);
+}
+.tools-list-tag.tag-loading-always {
+    color: var(--success, #4caf50);
+    border-color: var(--success, #4caf50);
+}
+.tools-list-tag.tag-loading-deferred {
+    color: var(--fg-dim);
+    border-color: var(--border);
+}
+
+.tools-detail {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.2rem;
+}
+
+.tools-detail-name {
+    margin: 0 0 0.4rem 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.tools-detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.8rem 0;
+    font-size: 0.78rem;
+    color: var(--fg-dim);
+}
+
+.tools-detail-description {
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+    color: var(--fg-dim);
+    line-height: 1.5;
+    /* Clamp to 3 lines so long descriptions don't push the schema frame down;
+       the full text stays reachable via the hover tooltip (title attr). */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.tools-detail-schema-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-dim);
+    margin: 0 0 0.4rem 0;
+    font-weight: 600;
+}
+
+/* Fixed-height frame: the schema scrolls inside instead of growing the page,
+   so tools with large parameter schemas keep a consistent layout. */
+.tools-detail-schema {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.tools-detail-schema pre {
+    margin: 0;
+}
+
+.tools-detail-empty {
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+.tools-detail-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+}

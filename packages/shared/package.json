@@ -1,0 +1,33 @@
+{
+  "name": "@taco-ai/shared",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/tacoClient.js",
+  "types": "./dist/tacoClient.d.ts",
+  "exports": {
+    ".": "./dist/tacoClient.js",
+    "./node": "./dist/tacoClientNode.js",
+    "./spawn": "./dist/spawn.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": "github:niuma996/taco",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@taco-ai/protocol": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "tsx --test 'tests/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  }
+}
