@@ -1,0 +1,126 @@
+/* agentsPane.css — agents pane (list + detail, excludes tool cards); split from panes.css */
+
+/* ── Agents pane ─────────────────────────────────────────────── */
+
+.agents-pane {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.agents-list {
+    width: var(--pane-width);
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--pane-list-bg);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.5rem 0;
+}
+
+.agents-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.4rem 0.75rem;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-align: left;
+    border-radius: var(--radius-sm);
+    margin: 1px 4px;
+}
+
+.agents-list-item:hover {
+    background: var(--accent-bg-hover);
+}
+
+.agents-list-item.active {
+    background: var(--accent-bg-active);
+    color: var(--accent);
+}
+
+.agents-list-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    font-weight: 600;
+}
+
+.agents-list-item-source {
+    flex: 0 0 auto;
+    font-size: 0.65rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    line-height: 1.3;
+}
+
+.agents-detail {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.2rem;
+}
+
+.agents-detail-name {
+    margin: 0 0 0.4rem 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.agents-detail-description {
+    margin: 0 0 0.6rem 0;
+    font-size: 0.9rem;
+    color: var(--fg-dim);
+    line-height: 1.5;
+}
+
+.agents-detail-when-to-use {
+    margin: 0 0 1rem 0;
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+    font-style: italic;
+    line-height: 1.5;
+}
+
+.agents-detail-content-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-dim);
+    margin: 0 0 0.4rem 0;
+    font-weight: 600;
+}
+
+.agents-detail-loading {
+    color: var(--fg-dim);
+    font-size: 0.8rem;
+    font-style: italic;
+    margin: 0;
+}
+
+.agents-detail-content-error {
+    color: var(--error);
+    font-size: 0.8rem;
+    margin: 0;
+}
+
+.agents-detail-content {
+    font-size: 0.85rem;
+}
+
+.agents-empty {
+    padding: 0.75rem;
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+    text-align: center;
+}

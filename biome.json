@@ -1,0 +1,92 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 4,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "json": {
+    "formatter": {
+      "indentWidth": 2,
+      "indentStyle": "space",
+      "trailingCommas": "none"
+    }
+  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "noNonNullAssertion": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useTemplate": "off",
+        "useImportType": "error",
+        "noDescendingSpecificity": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noAssignInExpressions": "error",
+        "noTemplateCurlyInString": "off",
+        "noArrayIndexKey": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "error",
+        "noUnsafeOptionalChaining": "off"
+      },
+      "complexity": {
+        "noBannedTypes": "error",
+        "noImportantStyles": "off"
+      },
+      "a11y": {
+        "useKeyWithClickEvents": "off",
+        "useButtonType": "off",
+        "noStaticElementInteractions": "off",
+        "useFocusableInteractive": "off",
+        "useAriaPropsSupportedByRole": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/sidecar/src/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "error"
+          }
+        }
+      }
+    }
+  ],
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.turbo",
+      "!**/target",
+      "!**/build",
+      "!**/coverage",
+      "!**/src-tauri/gen",
+      "!**/src-tauri/binaries",
+      "!**/src-tauri/generated",
+      "!**/packages/sidecar/dist",
+      "!**/packages/sidecar/lib",
+      "!**/clients/**/dist",
+      "!**/.claude/settings.json",
+      "!**/.claude/settings.local.json",
+      "!**/.superpowers"
+    ]
+  }
+}

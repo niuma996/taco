@@ -1,0 +1,110 @@
+/* chatToolCard.css — generic tool card (running/error/ok states, head, result, permission); split from chat.css */
+
+.tool-card {
+    margin-top: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-tint);
+    font-size: 0.85em;
+    /* Same flex-shrink guard as `.message` — without min-width: 0 the wide
+       `<pre>` inside .tool-card-result can push the tool card (and with it,
+       the whole assistant message) wider than the chat pane. */
+    min-width: 0;
+}
+/* running uses brand orange (--brand-orange) rather than --tool yellow: the tool yellow is too gray
+   in both themes and lacks contrast against --fg-dim. Brand orange is more saturated so
+   "in progress" is easier to scan. */
+.tool-card.running {
+    border-left: 3px solid var(--brand-orange);
+}
+.tool-card.error {
+    border-left: 3px solid var(--error);
+}
+.tool-card.ok {
+    border-left: 3px solid var(--user);
+}
+.tool-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 500;
+}
+.tool-card-name {
+    color: var(--fg);
+}
+.tool-card-summary {
+    color: var(--fg-dim);
+    font-family: var(--mono, monospace);
+    word-break: break-all;
+}
+.tool-card-result {
+    margin: 0.3rem 0 0 1.4rem;
+    padding: 0.3rem 0.5rem;
+    background: var(--tool-result-bg, var(--input-bg));
+    border: 1px solid var(--code-block-border, #d4c9b0);
+    border-radius: var(--radius-xs);
+    white-space: pre-wrap;
+    /* pre-wrap only breaks on whitespace; tool output is often a single
+       long shell command with no break opportunities, so allow wrap
+       anywhere to keep the pane from getting a horizontal scrollbar. */
+    overflow-wrap: anywhere;
+    font-size: 0.9em;
+    color: var(--fg-dim);
+}
+/* Light theme: light fallback cards and command blocks share --tool-result-bg. See :root[data-theme="light"] below. */
+.tool-card-result.streaming {
+    color: var(--fg);
+}
+.tool-card-permission {
+    margin: 0.4rem 0 0 1.4rem;
+    color: var(--fg);
+}
+.tool-card-permission-command {
+    font-family: var(--mono, monospace);
+    font-size: 0.85em;
+    margin-top: 0.25rem;
+    padding: 0.25rem 0.35rem;
+    background: var(--input-bg);
+    border-radius: var(--radius-xs);
+    word-break: break-all;
+}
+.tool-card-permission-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+}
+.tool-card-permission-actions button {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--input-bg);
+    color: var(--fg);
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+}
+/* Permission buttons: semantic color border + text — "clickable" and "approve/deny" are instantly distinguishable.
+   Background stays very faint to avoid competing with the dense tool-card stream. */
+.tool-card-permission-actions button.permission-allow {
+    border-color: var(--success);
+    background: var(--success-bg);
+    color: var(--success);
+}
+.tool-card-permission-actions button.permission-deny {
+    border-color: var(--error);
+    background: var(--error-bg);
+    color: var(--error);
+}
+.tool-card-permission-actions button.permission-allow:hover:not(:disabled),
+.tool-card-permission-actions button.permission-deny:hover:not(:disabled) {
+    filter: brightness(1.12);
+}
+.tool-card-permission-actions button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.tool-card-permission-actions .permission-error {
+    color: var(--error);
+    font-size: 0.85em;
+    width: 100%;
+}

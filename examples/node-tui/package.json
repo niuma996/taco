@@ -1,0 +1,20 @@
+{
+  "name": "@taco-ai/node-tui",
+  "version": "0.1.0",
+  "description": "Minimal Node TUI that calls taco-sidecar over NDJSON stdio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "license": "MIT",
+  "repository": "github:niuma996/taco",
+  "dependencies": {
+    "@taco-ai/protocol": "^0.1.0",
+    "@taco-ai/shared": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

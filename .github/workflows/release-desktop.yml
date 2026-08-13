@@ -1,0 +1,253 @@
+name: release-desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+env:
+  NODE_VERSION_FILE: .node-version
+
+jobs:
+  # ── Static gates — mirror ci.yml but desktop-scoped ────────────────────
+  checks:
+    name: type + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      # protocol:build + shared:build emit the dist/.d.ts declarations
+      # that pnpm typecheck needs to resolve cross-workspace imports.
+      # Without them a fresh runner fails with TS2307 on every
+      # `import "@taco-ai/protocol"` (and "@taco-ai/shared").
+      - run: pnpm protocol:build && pnpm shared:build
+      - run: pnpm typecheck
+      - run: pnpm lint
+
+  # ── Build desktop installers ───────────────────────────────────────────
+  # Two Windows installers per release, distinguished only by NSIS
+  # webviewInstallMode:
+  #   - internal: skip (assumes WebView2 already installed; ~15 MB)
+  #   - portable: offlineInstaller (bundles WebView2 Runtime; ~150 MB)
+  # Both run on the same windows-2022 runner so they share the sidecar
+  # build cost. Override passes through Tauri CLI's --config JSON flag,
+  # keeping the canonical conf single-sourced.
+  build:
+    name: desktop (${{ matrix.variant }})
+    needs: checks
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: internal
+            webview_install_mode: '{"type":"skip"}'
+            artifact_name: taco-desktop-internal-setup-x64
+          - variant: portable
+            webview_install_mode: '{"type":"offlineInstaller"}'
+            artifact_name: taco-desktop-portable-setup-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          architecture: x64
+
+      # Tauri 2 on Windows builds via MSVC; Rust toolchain is provided by the
+      # windows-2022 image, but installing the rust toolchain + target is
+      # idempotent and avoids drift if the image changes.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Cache Cargo registry + build artifacts keyed on Cargo.lock + target.
+      # Cuts tauri build cold-start from ~10-15 min to ~3-5 min on cache hit.
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/taco-desktop/src-tauri -> target
+          shared-key: desktop-windows
+
+      - name: Install
+        run: |
+          node scripts/prepareCiInstall.mjs
+          pnpm install --frozen-lockfile
+
+      # Build libs that the desktop bundle imports at runtime (shared,
+      # protocol). Sidecar is staged automatically by `tauri build`'s
+      # beforeBuildCommand (tauri.conf.json runs stageSidecar.mjs, which
+      # owns its own build invocation) — no separate step needed here.
+      - run: pnpm protocol:build && pnpm shared:build
+
+      # Vite frontend bundle — produces ../dist which Tauri loads as
+      # frontendDist.
+      - name: Build frontend
+        run: pnpm --filter @taco-ai/desktop build
+
+      # Build the sidecar runtime up front so stageSidecar.mjs's fallback
+      # `pnpm package:runtime` path (spawned via tauri build's
+      # beforeBuildCommand) is never taken. On Windows runners inside
+      # beforeBuildCommand, that sub-spawn loses stderr to Tauri's stdio
+      # redirection and CI sees only "[stageSidecar] package:runtime
+      # failed (status null)" with no actionable diagnostics. Building it
+      # here keeps the failure surface in this step's logs.
+      - name: Build sidecar runtime
+        shell: bash
+        run: |
+          echo "pnpm: $(which pnpm || echo MISSING)"
+          pnpm --version
+          pnpm --filter @taco-ai/sidecar package:runtime -- --target x86_64-pc-windows-msvc --strict
+
+      # Override webviewInstallMode via --config JSON; leaves every other
+      # field at its committed default. installMode stays at currentUser.
+      - name: Bundle installer
+        shell: bash
+        env:
+          WEBVIEW_MODE: ${{ matrix.webview_install_mode }}
+        run: |
+          pnpm --filter @taco-ai/desktop tauri build \
+            --config "{\"bundle\":{\"windows\":{\"webviewInstallMode\":${WEBVIEW_MODE}}}}"
+
+      - name: Locate installer
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT="${{ matrix.artifact_name }}"
+          # Tauri names the NSIS installer <ProductName>_<version>_<arch>-setup.exe
+          # inside src-tauri/target/release/bundle/nsis/.
+          FOUND=$(find clients/taco-desktop/src-tauri/target/release/bundle/nsis \
+            -maxdepth 2 -name '*-setup.exe' -print -quit)
+          if [ -z "$FOUND" ]; then
+            echo "::error::no NSIS installer found under src-tauri/target/release/bundle/nsis"
+            ls -la clients/taco-desktop/src-tauri/target/release/bundle/nsis/ || true
+            exit 1
+          fi
+          cp "$FOUND" "${ARTIFACT}.exe"
+          echo "staged=${ARTIFACT}.exe" >> "$GITHUB_OUTPUT"
+          # `wc -c` is portable across GNU/BSD/macOS/Windows-Git-bash;
+          # GNU `stat -c%s` is missing on BSD/macOS.
+          SIZE=$(wc -c < "${ARTIFACT}.exe" | tr -d ' ')
+          echo "size=${SIZE}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ steps.locate.outputs.staged }}
+          if-no-files-found: error
+
+  # ── Build macOS installers ────────────────────────────────────────────
+  # Two .dmg artifacts per release: arm64 (Apple Silicon) + x64 (Intel).
+  # Both run on the same macos-13/14 runners so they share no sidecar
+  # rebuild cost across the matrix — each variant compiles from scratch.
+  # Without code signing + notarization, the .dmg will mount but Gatekeeper
+  # will block the first launch with an unidentified-developer warning.
+  # Users can right-click → Open to bypass, but it is poor UX.
+  build-mac:
+    name: desktop (${{ matrix.variant }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: dmg-aarch64
+            os: macos-14
+            arch: arm64
+            artifact_name: taco-desktop-dmg-aarch64
+          # dmg-x64 (Intel Mac) omitted from v0.1.0: macos-13 runners are
+          # capacity-constrained right now (Aug 2026). Re-add when the
+          # runner pool stabilizes or we have a concrete Apple-Intel
+          # consumer needing a .dmg.
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          architecture: ${{ matrix.arch }}
+
+      # macos-13/14 runners ship a default Rust toolchain; pin to stable
+      # for reproducibility and add the matching target.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
+
+      # Cargo cache keyed on Cargo.lock + target/. Same shared-key so the
+      # two macOS jobs and the windows-2022 jobs do not collide.
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/taco-desktop/src-tauri -> target
+          shared-key: desktop-darwin
+
+      - name: Install
+        run: |
+          node scripts/prepareCiInstall.mjs
+          pnpm install --frozen-lockfile
+
+      - run: pnpm protocol:build && pnpm shared:build
+
+      - name: Build frontend
+        run: pnpm --filter @taco-ai/desktop build
+
+      # Build the sidecar runtime up front so stageSidecar.mjs's fallback
+      # `pnpm package:runtime` path (spawned via tauri build's
+      # beforeBuildCommand) is never taken. On Windows runners inside
+      # beforeBuildCommand, that sub-spawn loses stderr to Tauri's stdio
+      # redirection and CI sees only "[stageSidecar] package:runtime
+      # failed (status null)" with no actionable diagnostics. macOS does
+      # not hit the same spawn issue but prebuilding here keeps the two
+      # bundle jobs symmetric and makes the failure surface visible.
+      - name: Build sidecar runtime
+        run: pnpm --filter @taco-ai/sidecar package:runtime -- --target ${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }} --strict
+
+      # `--bundles app,dmg` is the explicit subset of bundle.targets the
+      # Tauri config asks for. We pass a per-arch override so the universal
+      # binary is never produced — each .dmg matches the runner arch.
+      - name: Bundle installer
+        run: pnpm --filter @taco-ai/desktop tauri build --bundles app,dmg
+
+      - name: Locate installer
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT="${{ matrix.artifact_name }}"
+          # Tauri names the dmg <ProductName>_<version>_<arch>.dmg
+          # inside src-tauri/target/release/bundle/dmg/.
+          FOUND=$(find clients/taco-desktop/src-tauri/target/release/bundle/dmg \
+            -maxdepth 2 -name '*.dmg' -print -quit)
+          if [ -z "$FOUND" ]; then
+            echo "::error::no dmg found under src-tauri/target/release/bundle/dmg"
+            ls -la clients/taco-desktop/src-tauri/target/release/bundle/dmg/ || true
+            exit 1
+          fi
+          cp "$FOUND" "${ARTIFACT}.dmg"
+          echo "staged=${ARTIFACT}.dmg" >> "$GITHUB_OUTPUT"
+          # `wc -c` is portable across GNU/BSD/macOS; GNU `stat -c%s`
+          # and BSD `stat -f %z` differ.
+          SIZE=$(wc -c < "${ARTIFACT}.dmg" | tr -d ' ')
+          echo "size=${SIZE}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ steps.locate.outputs.staged }}
+          if-no-files-found: error

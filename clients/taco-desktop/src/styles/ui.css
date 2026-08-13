@@ -1,0 +1,322 @@
+/* ui.css — base UI component styles (src/components/ui). Consumes design
+   tokens from theme.css; no business-specific styling lives here. */
+
+.ui-switch {
+    flex-shrink: 0;
+    width: 38px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--input-bg);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.ui-switch[data-state="checked"] {
+    background: var(--brand-orange);
+}
+.ui-switch:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.ui-switch:focus-visible {
+    outline: 2px solid var(--accent, #4a9eff);
+    outline-offset: 2px;
+}
+.ui-switch-thumb {
+    display: block;
+    width: 16px;
+    height: 16px;
+    margin: 3px;
+    border-radius: 50%;
+    background: var(--bg);
+    transition: transform 0.15s ease;
+}
+.ui-switch[data-state="checked"] .ui-switch-thumb {
+    transform: translateX(16px);
+}
+
+/* ── TextInput / Textarea / FormField ── */
+
+.ui-input {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+    font-family: inherit;
+    font-size: var(--text-base);
+    box-sizing: border-box;
+}
+.ui-input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--focus-ring);
+}
+.ui-input::placeholder {
+    color: var(--fg-dim);
+}
+.ui-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.ui-textarea {
+    font-family: var(--mono);
+    resize: vertical;
+}
+
+.ui-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.9rem;
+}
+.ui-form-field > label {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+}
+/* Label row with a right-aligned action (FormField's `action` slot). */
+.ui-form-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+.ui-form-label-row > label {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+}
+.ui-form-field > .ui-input,
+.ui-form-field > .ui-select-trigger {
+    width: 100%;
+}
+.ui-form-hint {
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+.ui-form-error {
+    font-size: var(--text-xs);
+    color: var(--error);
+}
+
+/* ── Button ── */
+
+/* Shared visual shell — variant/size modifiers below tune color and padding.
+   The base resets native button defaults so callers never fight them. */
+.ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+}
+.ui-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.ui-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* ── Button — sizes ── */
+/* Dense for pane rows and small actions; md for dialogs/drawers. */
+.ui-btn--sm {
+    padding: 4px 12px;
+    font-size: 12px;
+}
+.ui-btn--md {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+}
+
+/* ── Button — variants ── */
+.ui-btn--ghost {
+    background: transparent;
+}
+.ui-btn--ghost:hover:not(:disabled) {
+    background: var(--hover-overlay);
+}
+.ui-btn--default {
+    background: var(--input-bg);
+}
+.ui-btn--default:hover:not(:disabled) {
+    background: var(--hover-overlay);
+}
+.ui-btn--primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--bg);
+}
+.ui-btn--primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+.ui-btn--danger {
+    /* Transparent so a destructive action does not visually scream in a
+       dense list; the color carries the intent, the surrounding modal
+       carries the confirmation. */
+    background: transparent;
+    color: var(--danger);
+}
+.ui-btn--danger:hover:not(:disabled) {
+    background: var(--input-bg);
+    border-color: var(--danger);
+}
+
+/* ── Select (Radix) ── */
+
+.ui-select-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--text-base);
+    cursor: pointer;
+    box-sizing: border-box;
+}
+.ui-select-trigger:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--focus-ring);
+}
+.ui-select-trigger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.ui-select-caret {
+    flex-shrink: 0;
+    color: var(--fg-dim);
+}
+.ui-select-content {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 6px 18px var(--shadow-color);
+    /* Above modal/drawer content (1001) so dropdowns inside dialogs (e.g.
+       CustomProviderForm's API selector) are not painted under the scrim.
+       Below toast/error-fallback (2000). */
+    z-index: 1100;
+    overflow: hidden;
+}
+.ui-select-content [data-radix-select-viewport] {
+    padding: 4px 0;
+    min-width: var(--radix-select-trigger-width);
+    max-height: min(60vh, 320px);
+}
+.ui-select-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.45rem 0.8rem;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+}
+.ui-select-item[data-highlighted] {
+    background: var(--accent);
+    color: var(--bg);
+}
+.ui-select-item[data-state="checked"] {
+    font-weight: 600;
+    color: var(--accent);
+}
+.ui-select-item[data-highlighted][data-state="checked"] {
+    color: var(--bg);
+}
+.ui-select-item-check {
+    display: inline-flex;
+    align-items: center;
+    width: 12px;
+    flex: 0 0 auto;
+}
+
+/* ── Slider (Radix) ── */
+
+.ui-slider {
+    /* Single source of truth for the thumb box — .ui-slider-thumb sizes itself
+       from these and .ui-slider-marks insets by the half width. */
+    --ui-slider-thumb-size: 14px;
+    --ui-slider-thumb-half: 7px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 1.4rem;
+    user-select: none;
+    touch-action: none;
+}
+.ui-slider-track {
+    position: relative;
+    flex-grow: 1;
+    height: 3px;
+    border-radius: var(--radius-line);
+    background: var(--border);
+}
+.ui-slider-range {
+    position: absolute;
+    height: 100%;
+    border-radius: var(--radius-line);
+    background: var(--accent);
+}
+/* Marks overlay — children position themselves at `left: <percent>%` and land
+   exactly on the thumb center for that percent.
+
+   Radix keeps the thumb inside the track by adding a px offset on top of its
+   percent position (getThumbInBoundsOffset):
+       x(pct) = W·pct/100 + h·(1 − pct/50)        h = half thumb width
+              = h + (W − 2h)·pct/100
+   That is just "pct% of a box inset by h on both sides", so insetting this
+   layer by --ui-slider-thumb-half reproduces the thumb's track analytically —
+   no JS measurement, and it stays correct on resize. */
+.ui-slider-marks {
+    position: absolute;
+    left: var(--ui-slider-thumb-half);
+    right: var(--ui-slider-thumb-half);
+    top: 50%;
+    height: 0;
+    pointer-events: none;
+}
+.ui-slider--brand .ui-slider-range {
+    background: var(--brand-orange);
+}
+/* The thumb Radix hands us is the INNER span; its parent wrapper already
+   carries position/left/translateX(-50%). Re-declaring them here would
+   double the -50% shift and collapse the wrapper's height, so the thumb
+   only describes its own box. */
+.ui-slider-thumb {
+    display: block;
+    width: var(--ui-slider-thumb-size);
+    height: var(--ui-slider-thumb-size);
+    border-radius: var(--radius-circle);
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 1px 3px var(--shadow-color);
+    outline: none;
+}
+.ui-slider--brand .ui-slider-thumb {
+    background: var(--brand-orange);
+}
+.ui-slider-thumb:focus-visible {
+    box-shadow: var(--focus-ring);
+}
+.ui-slider:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}

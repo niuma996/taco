@@ -1,0 +1,21 @@
+packages:
+  - "packages/*"
+  - "clients/*"
+allowBuilds:
+  '@biomejs/biome': true
+  '@google/genai': false
+  esbuild: true
+  protobufjs: false
+minimumReleaseAgeExclude:
+  - '@earendil-works/pi-agent-core@0.82.1'
+  - '@earendil-works/pi-ai@0.82.1'
+peerDependencyRules:
+  ignoreMissing:
+    - "@earendil-works/*"
+    # Platform packages under @taco-ai/sidecar-<platform> do not exist on
+    # the npm registry until the matching sidecar-v* release publishes them;
+    # until that point pnpm cannot resolve them and would otherwise fail
+    # the --frozen-lockfile install on CI. ignoreMissing suppresses the
+    # missing-peer warning while leaving the optionalDependency wiring
+    # in packages/sidecar/package.json intact.
+    - "@taco-ai/sidecar-*"

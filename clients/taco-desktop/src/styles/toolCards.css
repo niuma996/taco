@@ -1,0 +1,287 @@
+/* toolCards.css — agent tool card + askUser tool card (rendered in message stream); split from panes.css */
+
+/* Agent tool card — subagent delegate. Collapsed: shows type + description + status.
+   Expanded: shows prompt summary + child session message stream. */
+.agent-card {
+    margin-top: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-tint);
+    font-size: 0.85em;
+    overflow: hidden;
+    min-width: 0;
+}
+.agent-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--fg);
+    text-align: left;
+    font: inherit;
+}
+.agent-card-header:hover {
+    background: var(--hover-overlay);
+}
+.agent-card-chevron {
+    transition: transform 0.1s;
+    flex-shrink: 0;
+    color: var(--fg-dim);
+}
+.agent-card-chevron.expanded {
+    transform: rotate(90deg);
+}
+.agent-card-type {
+    font-weight: 600;
+    color: var(--accent);
+}
+.agent-card-desc {
+    color: var(--fg-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+.agent-card-running {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--tool);
+    font-size: 0.85em;
+}
+.agent-card-error {
+    color: var(--danger);
+    font-size: 0.85em;
+}
+.agent-card-subid {
+    color: var(--fg-dim);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8em;
+}
+.agent-card-body {
+    padding: 0.5rem 0.6rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+.agent-card-prompt {
+    margin-bottom: 0.5rem;
+}
+.agent-card-prompt-label {
+    display: block;
+    font-size: 0.75em;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+}
+.agent-card-prompt pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+}
+.agent-card-stream {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 600px;
+    overflow-y: auto;
+}
+.agent-card-empty {
+    color: var(--fg-dim);
+    font-style: italic;
+    padding: 0.4rem 0;
+}
+
+/* ── askUser tool card ── */
+.askuser-card {
+    padding: 0.5rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.askuser-waiting {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--fg-dim);
+    font-size: 0.85em;
+}
+
+.askuser-no-questions {
+    color: var(--fg-dim);
+    font-style: italic;
+    font-size: 0.9em;
+}
+
+.askuser-question {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.askuser-header {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-bg-hover);
+    border: 1px solid var(--accent-border);
+    border-radius: 3px;
+    padding: 0.1em 0.45em;
+    width: fit-content;
+}
+
+.askuser-text {
+    font-size: 0.92em;
+    color: var(--fg);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.askuser-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.askuser-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    text-align: left;
+    transition:
+        border-color 0.12s,
+        background 0.12s;
+    width: 100%;
+}
+
+.askuser-option:hover {
+    border-color: var(--accent-border);
+    background: var(--accent-bg-hover);
+}
+
+.askuser-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-bg-active);
+}
+
+/* answered state: whole card grayed out, no hover/pointer feedback, disabled cursor.
+   Clearly distinct from the interactive waiting state. Selected option keeps accent border as the sole anchor. */
+.askuser-card.answered {
+    opacity: 0.65;
+}
+
+.askuser-card.answered .askuser-option {
+    cursor: default;
+}
+
+.askuser-card.answered .askuser-option:hover {
+    border-color: var(--border);
+    background: var(--bg-secondary);
+}
+
+.askuser-card.answered .askuser-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-bg-active);
+}
+
+.askuser-card.answered .askuser-option-label,
+.askuser-card.answered .askuser-option-desc {
+    color: var(--fg-dim);
+}
+
+.askuser-card.answered .askuser-check {
+    color: var(--accent);
+    opacity: 0.85;
+}
+
+.askuser-option-label {
+    font-weight: 500;
+    color: var(--fg);
+    white-space: nowrap;
+    font-size: 1.05em;
+}
+
+.askuser-option-desc {
+    color: var(--fg-dim);
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+.askuser-check {
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.askuser-option-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.askuser-option-preview {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78em;
+    color: var(--fg-dim);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.4rem;
+    margin: 0.25rem 0 0;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 8rem;
+    overflow-y: auto;
+}
+
+.askuser-answer-note {
+    font-size: 0.82em;
+    color: var(--accent);
+    font-style: italic;
+    margin: 0.1rem 0 0;
+}
+
+.askuser-submit-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.6rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border-soft, rgba(127, 127, 127, 0.15));
+}
+
+.askuser-submit {
+    padding: 0.4rem 1rem;
+    font-size: 0.9em;
+    border-radius: 4px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-fg, white);
+    cursor: pointer;
+}
+
+.askuser-submit:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    border-color: var(--border-soft, rgba(127, 127, 127, 0.3));
+    background: transparent;
+}

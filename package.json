@@ -1,0 +1,37 @@
+{
+  "name": "taco",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Taco — a desktop-first agent harness built on top of Pi, with a sidecar process and a NDJSON JSON-RPC protocol for embedded agent runtimes",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:sidecar": "tsx watch packages/sidecar/src/index.ts",
+    "dev:console": "pnpm --filter @taco-ai/debug-console dev",
+    "dev:desktop": "pnpm --filter @taco-ai/desktop tauri:dev",
+    "lint": "biome check .",
+    "lint:comments": "node scripts/check-comments.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test 'packages/**/tests/**/*.test.ts' 'clients/**/tests/**/*.test.ts'",
+    "test:e2e": "pnpm --filter @taco-ai/debug-console e2e",
+    "deps:circular": "madge --circular --extensions ts packages/protocol/src packages/sidecar/src clients/debug-console/src packages/shared",
+    "deps:orphans": "madge --orphans --extensions ts packages/protocol/src packages/sidecar/src clients/debug-console/src packages/shared",
+    "deps:summary": "madge --summary --extensions ts packages/protocol/src packages/sidecar/src clients/debug-console/src packages/shared",
+    "protocol:build": "pnpm -F @taco-ai/protocol build",
+    "shared:build": "pnpm -F @taco-ai/shared build",
+    "sidecar:docs": "node scripts/generateProtocolDoc.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.6",
+    "@types/node": "^22.7.0",
+    "jiti": "^2.0.0",
+    "madge": "^8.0.0",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  },
+  "packageManager": "pnpm@11.5.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

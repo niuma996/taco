@@ -1,0 +1,325 @@
+name: release-sidecar
+
+on:
+  workflow_dispatch:
+    inputs:
+      # When false, skips the publish job so this workflow can be used as a
+      # dry-run for checks/build-libs/build/pack-smoke. Tag pushes always
+      # publish regardless of this input — see the publish job's `if:` below.
+      run_publish:
+        description: "Publish npm packages after a successful dry-run"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "sidecar-v*"
+      - "protocol-v*"
+      - "shared-v*"
+
+env:
+  NODE_VERSION_FILE: .node-version
+
+jobs:
+  # ── Type/build checks (gate all platforms) ──────────────────────────
+  checks:
+    name: type + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      # protocol:build + shared:build emit the dist/.d.ts declarations
+      # that pnpm typecheck needs to resolve cross-workspace imports.
+      # Without them a fresh runner fails with TS2307 on every
+      # `import "@taco-ai/protocol"` (and "@taco-ai/shared").
+      - run: pnpm protocol:build && pnpm shared:build
+      - run: pnpm typecheck
+      - run: pnpm lint
+
+  # ── Build @taco-ai/protocol + @taco-ai/shared ─────────────────────────────
+  build-libs:
+    name: build libs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm protocol:build && pnpm shared:build
+      - run: |
+          ls packages/protocol/dist/*.d.ts
+          ls packages/shared/dist/*.d.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taco-libs
+          path: |
+            packages/protocol/dist/
+            packages/shared/dist/
+          if-no-files-found: error
+
+  # ── Build sidecar runtime — 5 hard-gate platforms (gate publish) ────────
+  build:
+    name: sidecar (${{ matrix.target }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            arch: arm64
+          # x86_64-apple-darwin (Intel Mac) omitted from v0.1.0: macos-13
+          # runners are capacity-constrained right now (Aug 2026). Re-add
+          # when we have a concrete Apple-Intel consumer or the runner
+          # pool stabilizes.
+          # linux-* omitted from v0.1.0 — desktop-only release for now.
+          # Re-add when we have a concrete consumer-side test signal
+          # (CI matrix, internal user, etc.) that needs it.
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          architecture: ${{ matrix.arch }}
+      # Defensive: a previous arm64 run on this runner image can leave a
+      # wrong-architecture node in /opt/hostedtoolcache, and setup-node@v4
+      # will pick that up instead of re-fetching. Clear it so it fetches
+      # the binary matching matrix.arch.
+      - name: Clear hostedtoolcache node
+        if: matrix.arch == 'arm64'
+        run: rm -rf /opt/hostedtoolcache/node
+
+      - name: Install
+        run: |
+          node scripts/prepareCiInstall.mjs
+          pnpm install --frozen-lockfile
+
+      # protocol + shared must be built before sidecar bundles, otherwise
+      # the esbuild runtime build cannot resolve @taco-ai/protocol or
+      # @taco-ai/shared (their exports point at ./dist/*.js).
+      - run: pnpm protocol:build && pnpm shared:build
+
+      - name: Build runtime
+        run: pnpm --filter @taco-ai/sidecar package:runtime -- --target ${{ matrix.target }} --strict
+
+      - name: Archive
+        run: pnpm --filter @taco-ai/sidecar package:archive
+
+      # Runtime dir — consumed by the publish job's stage step.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taco-sidecar-${{ matrix.target }}
+          path: packages/sidecar/dist/runtime/${{ matrix.target }}/
+          if-no-files-found: error
+
+      # Distributable tar.gz/zip — retained as build output (not used by publish).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taco-sidecar-archive-${{ matrix.target }}
+          path: packages/sidecar/dist/archives/
+          if-no-files-found: error
+
+  # ── Best-effort win-arm64 — does NOT gate publish ───────────────────────
+  # REMOVED in v0.1.0: an aarch64-pc-windows-msvc build cannot succeed on
+  # windows-2022 (x64) — actions/setup-node would have to spawn the ARM64
+  # node.exe to verify it, which the x64 runner cannot execute, and
+  # buildRuntime.mjs uses `process.execPath` as the runtime source so a
+  # cross-architecture build would silently ship the wrong binary anyway.
+  # If we ever need win-arm64, the right path is `runs-on: windows-11-arm`
+  # (GitHub's public Windows ARM64 runners) so setup-node and the spawned
+  # node are native arm64.
+
+  # ── Consumer pack-smoke — gates publish ────────────────────────────────
+  # Rebuilds libs and exercises the public install surface (pack tarballs,
+  # install into a fresh dir, assert entry points + types compile). Catches
+  # the class of breakage that escapes workspace-relative tests: bad `files`
+  # whitelist, missing build artifact, stale `workspace:*`, broken `exports`.
+  pack-smoke:
+    name: pack-smoke
+    needs: [checks, build-libs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm protocol:build
+      - run: pnpm shared:build
+      - run: pnpm --filter @taco-ai/sidecar build
+      - run: pnpm pack:smoke
+
+  # ── Stage platform packages + publish ─────────────────────────────────
+  # Publishes the artifacts the matrix actually built — does NOT rebuild here.
+  publish:
+    name: publish
+    needs: [checks, build-libs, build, pack-smoke]
+    # Run publish when:
+    #   - the upstream gate jobs all succeeded, AND
+    #   - either triggered by a tagged push (always publish), OR
+    #     invoked manually with inputs.run_publish == true.
+    if: |
+      needs.checks.result == 'success' &&
+      needs.build-libs.result == 'success' &&
+      needs.build.result == 'success' &&
+      needs.pack-smoke.result == 'success' &&
+      (
+        github.event_name == 'push' ||
+        inputs.run_publish
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # reserved for npm provenance if repo ever goes public
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: |
+          node scripts/prepareCiInstall.mjs
+          pnpm install --frozen-lockfile
+
+      # Extract version from tag: sidecar-v0.2.0 / protocol-v0.2.0 → 0.2.0.
+      # All three libraries share one synchronized version.
+      - name: Extract version
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="$(printf '%s' "$TAG" | sed -E 's/^(sidecar|protocol|shared)-v//')"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$TAG" ]; then
+            echo "::error::could not parse version from tag '$TAG' (expected <pkg>-v<semver>)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Apply the release version to every publishable package + sync sidecar's
+      # optionalDependencies to the matching platform-package version. Without
+      # this the manifests stay at 0.1.0 and the main package would resolve
+      # mismatched platform runtimes.
+      - name: Sync package versions
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          npm pkg set version="$V" --prefix packages/protocol
+          npm pkg set version="$V" --prefix packages/shared
+          npm pkg set version="$V" --prefix packages/sidecar
+          for k in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
+            npm pkg set "optionalDependencies[@taco-ai/sidecar-$k]=$V" --prefix packages/sidecar
+          done
+
+      # Refresh the install graph so the just-rewritten optionalDependencies
+      # resolve to the new platform-package version, and the workspace links
+      # (link:../protocol etc.) point at the freshly-built dist/. Without
+      # this the sidecar tarball can ship with the previous version's links.
+      - run: pnpm install --no-frozen-lockfile
+
+      # Build libs (dist/) — cheap, pure TS compile, no cross-platform concern.
+      - run: pnpm protocol:build && pnpm shared:build
+
+      # Bundle lib/sidecar.mjs for the main package tarball.
+      - name: Build sidecar bundle
+        run: pnpm --filter @taco-ai/sidecar build
+
+      # Regenerate the protocol doc tables so the published docs match this
+      # release's actual RPC/push surface (driven by code, not hand-edited).
+      - name: Regenerate protocol doc
+        env:
+          SIDECAR_VERSION: ${{ steps.version.outputs.version }}
+        run: pnpm sidecar:docs
+
+      # Download the platform runtimes the matrix built, restoring the
+      # dist/runtime/<target>/ layout stagePlatformPackages expects.
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # runtime dirs only — exclude the taco-sidecar-archive-* tarball artifacts
+          pattern: taco-sidecar-*
+          path: .artifacts
+
+      - name: Restore dist/runtime layout
+        run: |
+          for d in .artifacts/taco-sidecar-*; do
+            name="$(basename "$d")"
+            # skip distributable archive artifacts; we only stage runtime dirs
+            case "$name" in
+              taco-sidecar-archive-*) echo "skip $name"; continue ;;
+            esac
+            target="${name#taco-sidecar-}"
+            dest="packages/sidecar/dist/runtime/$target"
+            mkdir -p "$dest"
+            cp -R "$d/." "$dest/"
+            echo "restored $target"
+          done
+
+      # Stage per-platform npm packages from the downloaded runtimes.
+      - name: Stage platform packages
+        run: node packages/sidecar/scripts/stagePlatformPackages.mjs --version ${{ steps.version.outputs.version }}
+
+      # Publish platform packages — do NOT swallow failures for hard-gate
+      # platforms; a failed publish must fail the job.
+      # `--provenance` is omitted: npm's registry validates the sigstore
+      # bundle against the source repo's visibility and rejects private
+      # repos with E422 ("Unsupported GitHub Actions source repository
+      # visibility: 'private'. Only public source repositories are
+      # supported when publishing with provenance."). Re-add once the
+      # repo goes public.
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in .release-staging/sidecar-*; do
+            echo "Publishing $(basename "$dir")…"
+            ( cd "$dir" && npm publish --access public )
+          done
+
+      # Publish the three libraries with pnpm so `workspace:*` deps are
+      # rewritten to the real version (npm publish would ship them verbatim).
+      - name: Publish @taco-ai/protocol
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @taco-ai/protocol publish --access public --no-git-checks
+
+      - name: Publish @taco-ai/shared
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @taco-ai/shared publish --access public --no-git-checks
+
+      - name: Publish @taco-ai/sidecar
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @taco-ai/sidecar publish --access public --no-git-checks
+
+      # Restore the version-mutated manifests so a downstream job in the same
+      # checkout (or a re-run) sees the original source-of-truth values.
+      - name: Reset working tree
+        if: always()
+        run: git checkout -- packages/protocol/package.json packages/shared/package.json packages/sidecar/package.json docs/sidecar-protocol.md

@@ -1,0 +1,84 @@
+/* toolCardDiff.css — git-style edit diff block inside tool cards; split from chat.css */
+
+/* Edit diff block — git style: left gutter with line numbers, center mark column (-/+), right content.
+   old=red, new=green; marks and gutter share color variables. Line height locked for alignment. */
+.tool-card-diff {
+    list-style: none;
+    padding: 0;
+    margin: 0.3rem 0 0 0;
+    font-family: var(--mono, monospace);
+    font-size: 0.85em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    overflow: hidden;
+    min-width: 0;
+}
+.tool-card-diff-item + .tool-card-diff-item {
+    border-top: 1px solid var(--border);
+}
+.tool-card-diff-old,
+.tool-card-diff-new {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    align-items: start;
+    gap: 0.5rem;
+    padding: 0;
+    line-height: 1.4;
+}
+.tool-card-diff-old {
+    background: var(--diff-old-bg);
+    color: var(--diff-old-fg);
+}
+.tool-card-diff-new {
+    background: var(--diff-new-bg);
+    color: var(--diff-new-fg);
+}
+.tool-card-diff-ln {
+    user-select: none;
+    text-align: right;
+    padding: 0 0.4rem;
+    color: var(--diff-gutter-fg);
+    background: rgba(0, 0, 0, 0.18);
+    /* Narrow line-number column with stable width — enough for 3 digits + dot. */
+    min-width: 2.5em;
+    font-variant-numeric: tabular-nums;
+}
+.tool-card-diff-mark {
+    user-select: none;
+    width: 1ch;
+    font-weight: 700;
+    text-align: center;
+}
+.tool-card-diff-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--fg);
+    padding-right: 0.5rem;
+}
+.tool-card-diff-summary {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    padding: 0.3rem 0.4rem;
+    color: var(--fg-dim);
+    font-size: 0.85em;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.12);
+}
+.tool-card-diff-summary-stat-old {
+    color: var(--diff-old-fg);
+}
+.tool-card-diff-summary-stat-new {
+    color: var(--diff-new-fg);
+}
+.tool-card-diff-empty {
+    margin: 0.3rem 0 0 1.4rem;
+    color: var(--fg-dim);
+    font-size: 0.85em;
+    font-style: italic;
+}
+.tool-card-diff-summary-absolute {
+    margin-left: auto;
+    color: var(--accent);
+    font-size: 0.8em;
+}

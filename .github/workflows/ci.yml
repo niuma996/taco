@@ -1,0 +1,141 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded PR runs to save minutes. Push-to-main runs are rare and
+# short — keep them.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION_FILE: .node-version
+
+jobs:
+  # ── Static gates ──────────────────────────────────────────────
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      # Strips the @taco-ai/sidecar-<platform> optionalDependencies that only
+      # exist once a sidecar-v* release has published them; without this the
+      # manifest lists six specifiers pnpm-lock.yaml cannot record and
+      # --frozen-lockfile aborts. Every job below does the same.
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm lint:comments
+
+  typecheck:
+    name: typecheck + deps:circular
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      # protocol + shared emit the dist/*.d.ts that cross-workspace imports
+      # resolve against; without them tsc fails with TS2307 on a fresh runner.
+      - run: pnpm protocol:build && pnpm shared:build
+      - run: pnpm typecheck
+      - run: pnpm deps:circular
+
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      # Tests import @taco-ai/protocol / @taco-ai/shared through their package
+      # exports, which point at dist/ — build them before running.
+      - run: pnpm protocol:build && pnpm shared:build
+      - run: pnpm test
+
+  # ── Build gates ──────────────────────────────────────────────
+  build-libs:
+    name: build libs (protocol + shared + sidecar bundle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm protocol:build
+      - run: pnpm shared:build
+      - run: pnpm --filter @taco-ai/sidecar build
+      - name: assert dist/.d.ts emitted
+        run: |
+          ls packages/protocol/dist/*.d.ts
+          ls packages/shared/dist/*.d.ts
+
+  desktop-build:
+    name: desktop build (tsc + vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      # The desktop bundle imports @taco-ai/protocol / @taco-ai/shared, whose
+      # exports resolve to dist/ — build them before tsc + vite run.
+      - run: pnpm protocol:build && pnpm shared:build
+      - run: pnpm --filter @taco-ai/desktop build
+
+  # ── Consumer pack-smoke ──────────────────────────────────────
+  # Heavy: packs three tarballs into a fresh dir, installs them, exercises
+  # the entry points. Gated on push to main so fork PRs don't pay the
+  # supply-chain cost. Mirrored as a publish gate in release-sidecar.yml.
+  pack-smoke:
+    name: pack + consumer install smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.5.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: node scripts/prepareCiInstall.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm protocol:build
+      - run: pnpm shared:build
+      - run: pnpm --filter @taco-ai/sidecar build
+      - run: pnpm pack:smoke

@@ -1,0 +1,42 @@
+/* thinkingSlider.css — discrete thinking-level slider shell; the track/thumb
+   itself lives in ui.css (.ui-slider*). */
+
+.thinking-slider {
+    padding: 0.4rem 0.6rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    user-select: none;
+}
+.thinking-slider-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+/* Tick marks: same brand orange as the filled track. Diameter 6px on a 3px track;
+   current level is scaled up one tier to distinguish it. */
+.thinking-slider-tick {
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 6px;
+    background: var(--brand-orange);
+    border-radius: var(--radius-circle);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: transform 0.12s ease;
+}
+.thinking-slider-tick.active {
+    transform: translate(-50%, -50%) scale(1.35);
+}
+.thinking-slider-current {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--brand-orange);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}

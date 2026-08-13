@@ -1,0 +1,867 @@
+/* overlays.css — error banner, modal, drawer, toast, debug tab, llm dump panel, global scrollbar — split from styles.css on 2026-07-20 */
+
+/* ── confirm modal ── */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay-scrim);
+    z-index: 1000;
+}
+.modal {
+    /* Radix Dialog: Overlay and Content are siblings (not children of a backdrop),
+       so the modal positions itself at the screen center and sits above z-index:1000. */
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1001;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.2rem 1.4rem;
+    min-width: 320px;
+    max-width: 420px;
+    box-shadow: 0 8px 24px var(--shadow-color-strong);
+}
+.modal-title {
+    margin: 0 0 0.6rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.modal-message {
+    margin: 0 0 1.2rem 0;
+    font-size: 0.9rem;
+    color: var(--fg-dim);
+    line-height: 1.4;
+}
+/* Rename modal: spacing between the input and the bottom buttons (formerly .modal-input margin-bottom). */
+.rename-modal-form .ui-input {
+    margin-bottom: 1rem;
+}
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+/* ── settings drawer ── */
+.drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay-scrim);
+    z-index: 1000;
+}
+.drawer {
+    /* Radix Dialog: Overlay and Content are siblings, drawer positions itself at the right edge full-height
+       and sits above z-index:1000. overflow-y:auto lets the drawer scroll internally;
+       the drawer content area (.drawer-content) does not clip, so the model-menu-popup
+       (position:absolute) is not clipped. */
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 1001;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    width: min(420px, 90vw);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -8px 0 24px var(--shadow-color-strong);
+    overflow-y: auto;
+}
+.drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.9rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+}
+.drawer-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.drawer-close {
+    background: transparent;
+    border: 0;
+    color: var(--fg-dim);
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.4rem;
+}
+.drawer-close:hover {
+    color: var(--fg);
+}
+.drawer-close:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.error-banner {
+    margin-top: 0.8rem;
+    padding: 0.5rem 0.7rem;
+    background: var(--error-bg);
+    border: 1px solid var(--error);
+    border-radius: var(--radius-sm);
+    color: var(--error);
+    font-size: 0.8rem;
+}
+
+/* ── Global centered toast (above topbar, large text, 5s auto-dismiss) ── */
+.toast-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 18vh;
+    /* Above modal (1001) and drawer (1001) — ensures toast is always visible.
+       Same z-index as .error-fallback-backdrop (2000), but they never appear together. */
+    z-index: 2000;
+    pointer-events: none;
+}
+.toast-card {
+    pointer-events: auto;
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px var(--shadow-color-strong);
+    padding: 0.9rem 1.4rem;
+    color: var(--fg);
+    font-size: 1rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+/* Toast level visual distinction — via data-level attribute. warn/error use existing tokens for different semantics. */
+.toast-card[data-level="warn"] {
+    border-color: var(--tool);
+    color: var(--tool);
+}
+.toast-card[data-level="error"] {
+    border-color: var(--error);
+    color: var(--error);
+}
+.toast-card button {
+    background: transparent;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    padding: 0 0.2rem;
+}
+.toast-card button:hover {
+    color: var(--fg);
+}
+
+/* ── New session override hint ── */
+.session-override {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--fg-dim);
+}
+
+/* LLM dump chip + panel (originally L1757-1847) */
+/* ── LLM dump chip (inline in topbar) + panel (floating bottom-right, avoids the input area) ── */
+.llm-dump-chip {
+    padding: 0.3rem 0.6rem;
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+}
+.llm-dump-chip:hover {
+    background: var(--input-bg);
+    border-color: var(--accent);
+}
+
+.llm-dump-panel {
+    /* Raised above the input footer to avoid overlap with the send button.
+       footer.input is about 5rem; 1rem margin keeps clear. */
+    position: fixed;
+    right: 1rem;
+    bottom: 6.5rem;
+    z-index: 50;
+    width: min(640px, calc(100vw - 2rem));
+    max-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--border);
+    color: var(--accent-contrast-fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 24px var(--shadow-color);
+    overflow: hidden;
+}
+
+.llm-dump-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.55rem 0.8rem;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+}
+.llm-dump-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.llm-dump-entries {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+.llm-dump-entry {
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.5rem;
+    padding: 0.4rem 0.6rem;
+}
+.llm-dump-entry summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--fg);
+}
+.llm-dump-pre {
+    margin: 0.4rem 0 0;
+    padding: 0.5rem;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border-radius: var(--radius-sm);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Global scrollbar (originally L1849-1883) */
+/* ── Global scrollbar ──
+ * Theme: Nord dark var(--bg), var(--accent) (light blue).
+ * Scrollbar thickened to 12px, thumb uses semi-transparent accent — darker on hover/active.
+ * Firefox uses scrollbar-width / scrollbar-color; Chromium/WebKit uses ::-webkit-scrollbar.
+ * `.md-code-block pre` has a thinner scrollbar (8px) defined earlier that overrides this. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-bg-active) transparent;
+}
+*::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background: var(--accent-bg-active);
+    border-radius: var(--radius-md);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-border);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+}
+*::-webkit-scrollbar-thumb:active {
+    background: var(--accent-border);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+}
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* ── ErrorBoundary fallback ── */
+.error-fallback-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay-scrim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.error-fallback {
+    background: var(--bg);
+    border: 1px solid var(--error);
+    border-radius: var(--radius-lg);
+    padding: 1.4rem 1.6rem;
+    width: min(480px, 90vw);
+    box-shadow: 0 8px 24px var(--shadow-color-strong);
+}
+.error-fallback-title {
+    margin: 0 0 0.6rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--error);
+}
+.error-fallback-message {
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+    color: var(--fg-dim);
+    line-height: 1.5;
+}
+.error-fallback-details {
+    margin: 0 0 1.2rem 0;
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+}
+.error-fallback-details summary {
+    cursor: pointer;
+    user-select: none;
+}
+.error-fallback-pre {
+    margin: 0.6rem 0 0 0;
+    padding: 0.6rem;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    color: var(--fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.error-fallback-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+/* ── first-launch onboarding wizard ── */
+.onboarding-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--overlay-scrim);
+    backdrop-filter: blur(4px);
+    padding: 2rem;
+    overflow-x: hidden;
+}
+
+.onboarding-modal {
+    width: min(600px, 100%);
+    height: min(680px, 92vh);
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: 2.25rem 2.5rem 2rem;
+    border-radius: var(--radius-lg);
+    background: var(--bg-elevated);
+    box-shadow:
+        0 4px 12px var(--shadow-color),
+        0 24px 64px var(--shadow-color-strong);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Scrollable body between header and footer — content that exceeds the fixed
+   modal height scrolls inside this region. */
+.onboarding-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+/* Header — steps indicator + skip link */
+.onboarding-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border);
+    min-width: 0;
+}
+
+.onboarding-steps {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    letter-spacing: 0.01em;
+    min-width: 0;
+}
+
+.onboarding-steps .step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.onboarding-steps .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: var(--radius-pill);
+    background: var(--bg-secondary);
+    color: var(--fg-dim);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+.onboarding-steps .step.is-current {
+    color: var(--fg);
+    font-weight: 600;
+}
+
+.onboarding-steps .step.is-current .step-num {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.onboarding-steps .step-sep {
+    color: var(--fg-dim);
+    opacity: 0.5;
+}
+
+.onboarding-header .ui-btn--ghost {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* Step body — each step fills the scrollable body region. */
+.onboarding-step {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    flex: 1;
+    min-height: 0;
+}
+
+.onboarding-step h2 {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+
+.onboarding-step > p {
+    margin: 0;
+    color: var(--fg-dim);
+    line-height: 1.6;
+    font-size: var(--text-base);
+    max-width: 42rem;
+}
+
+/* Content blocks inside a step — workspace form, model picker, etc. */
+.onboarding-step .settings-row-block,
+.onboarding-step .settings-row {
+    gap: 0.75rem;
+}
+
+/* In onboarding the row-block is a label+field pair: stack them vertically with
+   a small gap, field takes the full row width. */
+.onboarding-step .settings-row-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.onboarding-step .settings-row-block > span {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+    font-weight: 500;
+}
+
+.onboarding-step .settings-row-block input,
+.onboarding-step .settings-row-block select {
+    padding: 0.6rem 0.85rem;
+    font-size: var(--text-base);
+    height: 2.5rem;
+    box-sizing: border-box;
+}
+
+.onboarding-step .settings-row {
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.onboarding-step .settings-row > .onboarding-cta,
+.onboarding-step .settings-row > .ui-btn {
+    height: 2.5rem;
+    padding: 0 1.4rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    box-sizing: border-box;
+}
+
+/* Welcome step: language block sits between body text and CTA */
+.onboarding-welcome-language {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.onboarding-welcome-language-label {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+    font-weight: 500;
+}
+
+/* Language step picker — wider so options don't wrap */
+.onboarding-language-picker {
+    max-width: 18rem;
+}
+
+.onboarding-language-picker .ui-select-trigger {
+    width: 100%;
+    height: 2.5rem;
+    padding: 0 0.85rem;
+    font-size: var(--text-md);
+    box-sizing: border-box;
+}
+
+/* Primary CTA inside a step — brand orange stands out against the panel */
+.onboarding-cta {
+    align-self: flex-start;
+    padding: 0.6rem 1.4rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    min-width: 7rem;
+    background: var(--brand-orange);
+    border: none;
+    color: #fff;
+    border-radius: var(--radius-sm);
+    transition:
+        background 0.15s ease,
+        transform 0.1s ease;
+}
+
+.onboarding-cta:hover:not(:disabled) {
+    background: var(--brand-orange-hover);
+}
+
+.onboarding-cta:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.onboarding-cta:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Inline error/hint inside a step */
+.onboarding-step .error-banner {
+    margin-top: 0.25rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--error);
+    border-left: 3px solid var(--error);
+    background: var(--error-bg);
+    font-size: var(--text-base);
+    line-height: 1.5;
+}
+
+/* Provider step — ProviderSection grows tall; pin it inside the step and scroll
+   the list region so the modal never changes height. */
+.onboarding-step > .settings-tab-subsection {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.onboarding-step > .settings-tab-subsection > .provider-section-head {
+    flex-shrink: 0;
+}
+
+/* ProviderStep's own body copy already covers this; hiding the duplicate inside
+   ProviderSection reclaims the vertical space for the list. */
+.onboarding-step > .settings-tab-subsection > .settings-tab-desc {
+    display: none;
+}
+
+.onboarding-step > .settings-tab-subsection > .provider-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+/* Footer — back/next actions */
+.onboarding-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+}
+
+.onboarding-actions .prompt-button,
+.onboarding-actions .ui-btn,
+.onboarding-actions .onboarding-cta {
+    padding: 0 1.25rem;
+    height: 2.5rem;
+    font-size: var(--text-base);
+    min-width: 6.5rem;
+    box-sizing: border-box;
+}
+
+/* Right-aligned cluster when there's no Back button — keeps Next on the right */
+.onboarding-actions > :only-child {
+    margin-left: auto;
+}
+
+/* Done step summary */
+.onboarding-summary {
+    list-style: none;
+    padding: 0;
+    margin: 0.25rem 0 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-secondary);
+}
+
+.onboarding-summary li {
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    font-size: var(--text-base);
+}
+
+.onboarding-summary li:last-child {
+    border-bottom: none;
+}
+
+.onboarding-summary li > span:first-child {
+    color: var(--fg-dim);
+}
+
+.onboarding-summary li > span:last-child {
+    color: var(--fg);
+    font-weight: 500;
+    text-align: right;
+    word-break: break-all;
+}
+
+.onboarding-done-cta {
+    margin-top: 0.5rem;
+    align-self: flex-start;
+    padding: 0.65rem 1.6rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    background: var(--brand-orange);
+    border: none;
+    color: #fff;
+    border-radius: var(--radius-sm);
+    transition:
+        background 0.15s ease,
+        transform 0.1s ease;
+}
+
+.onboarding-done-cta:hover:not(:disabled) {
+    background: var(--brand-orange-hover);
+}
+
+.onboarding-done-cta:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+/* ── Files drawer (default 280px tree / 840px with preview) ── */
+
+.topbar-files {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    border-radius: var(--radius-sm);
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.topbar-files:hover {
+    color: var(--fg);
+    background: var(--border);
+}
+.topbar-files[aria-pressed="true"] {
+    background: var(--border);
+    color: var(--fg);
+}
+
+.files-drawer {
+    width: min(280px, 90vw);
+    transition: width 180ms ease;
+}
+.files-drawer.files-drawer-with-preview {
+    width: min(840px, 90vw);
+}
+.files-drawer-body {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    height: 100%;
+    min-height: 0;
+}
+.files-tree-pane {
+    overflow-y: auto;
+    padding: 0.4rem 0;
+    /* border-right: 1px solid var(--border);  ← removed; applied conditionally below */
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.files-drawer-with-preview .files-tree-pane {
+    border-right: 1px solid var(--border);
+}
+.files-preview-pane {
+    overflow: auto;
+    padding: 0.6rem 0.8rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--fg);
+    background: var(--bg-elevated);
+    min-height: 0;
+}
+.files-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.18rem 0.6rem 0.18rem calc(0.6rem + var(--depth, 0) * 0.85rem);
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 0.85rem;
+    user-select: none;
+    -webkit-app-region: no-drag;
+    border-left: 3px solid transparent;
+}
+.files-tree-row:hover {
+    background: var(--hover-overlay);
+}
+.files-tree-row[data-active="true"] {
+    background: var(--accent-bg-active);
+    border-left-color: var(--accent);
+    color: var(--accent-contrast-fg);
+}
+.files-tree-row-toggle {
+    display: inline-flex;
+    width: 0.9rem;
+    justify-content: center;
+    color: var(--fg-dim);
+    transition: transform 0.12s ease;
+}
+.files-tree-row-toggle[data-open="true"] {
+    transform: rotate(90deg);
+}
+.files-tree-row-toggle-spacer {
+    display: inline-block;
+    width: 0.9rem;
+}
+.files-tree-row-icon {
+    color: var(--fg-dim);
+}
+.files-tree-row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+.files-preview-path {
+    font-family: inherit;
+    color: var(--fg-dim);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.files-preview-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--fg-dim);
+    font-size: 0.85rem;
+}
+.files-preview-line {
+    display: flex;
+    gap: 0.6rem;
+    min-width: 0;
+}
+.files-preview-gutter {
+    flex: 0 0 auto;
+    color: var(--fg-muted);
+    text-align: right;
+    user-select: none;
+    width: 2.4rem;
+    font-variant-numeric: tabular-nums;
+}
+.files-preview-text {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.files-preview-binary {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--fg-dim);
+    padding: 0.6rem 0.4rem;
+}
+.files-preview-error {
+    color: var(--error);
+    padding: 0.6rem 0.4rem;
+    font-size: 0.85rem;
+}
+.files-preview-truncated {
+    margin-top: 0.6rem;
+    color: var(--fg-muted);
+    font-size: 0.75rem;
+}
+.files-tree-footer {
+    border-top: 1px solid var(--border);
+    padding: 0.4rem 0.8rem;
+    font-size: 0.78rem;
+    color: var(--fg-dim);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: auto;
+}
+.files-tree-footer label {
+    cursor: pointer;
+}

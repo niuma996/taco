@@ -1,0 +1,72 @@
+{
+  "name": "@taco-ai/sidecar",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Taco sidecar — Pi harness-driven JSON-RPC protocol layer. WeChat IM channel support requires the optional @wechatbot/wechatbot dependency (not bundled by default; see README IM Channels).",
+  "type": "module",
+  "bin": {
+    "taco-sidecar": "./bin/taco-sidecar.cjs"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "optionalDependencies": {
+    "@taco-ai/sidecar-darwin-arm64": "0.1.0",
+    "@taco-ai/sidecar-darwin-x64": "0.1.0",
+    "@taco-ai/sidecar-linux-arm64": "0.1.0",
+    "@taco-ai/sidecar-linux-x64": "0.1.0",
+    "@taco-ai/sidecar-win32-arm64": "0.1.0",
+    "@taco-ai/sidecar-win32-x64": "0.1.0",
+    "@wechatbot/wechatbot": "2.2.0"
+  },
+  "license": "MIT",
+  "repository": "github:niuma996/taco",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "node esbuild.config.mjs",
+    "package:runtime": "node scripts/buildRuntime.mjs",
+    "package:archive": "node scripts/archiveRuntime.mjs",
+    "test": "tsx --test 'tests/**/*.test.ts'",
+    "test:prompts": "tsx --test tests/prompts/prompts.test.ts",
+    "test:tags": "tsx --test tests/tags/tags.test.ts",
+    "test:reply": "tsx --test tests/tags/replyLanguage.test.ts",
+    "test:methods": "tsx --test tests/server/methods.sessionCreate.test.ts",
+    "test:methods:snapshot": "tsx --test tests/server/methods.snapshot.test.ts",
+    "test:agents": "tsx --test tests/server/handlers/agents.content.test.ts",
+    "test:extensionsStatus": "tsx --test tests/server/handlers/extensions.status.test.ts",
+    "test:logger": "tsx --test tests/lib/logger.test.ts",
+    "test:tools": "tsx --test tests/tools/edit.test.ts",
+    "test:extensions": "tsx --test tests/extensions/registry.test.ts tests/extensions/extensionApi.test.ts tests/extensions/loader.test.ts tests/extensions/loader.tacoHome.test.ts tests/extensions/loader.extensionRoot.test.ts tests/extensions/integration.test.ts tests/extensions/activation.test.ts tests/extensions/builtin/gitContext.test.ts tests/runtime/workspace.test.ts",
+    "test:config": "tsx --test tests/config/config.extensions.test.ts tests/config/config.roundTrip.test.ts tests/config/config.tacoHome.test.ts tests/config/agentDirs.test.ts",
+    "test:skills": "tsx --test tests/skills/dedupeSkills.test.ts",
+    "test:smoke": "tsx --test tests/packaging/smoke.test.ts",
+    "test:memory": "tsx --test tests/memory/store.test.ts tests/server/handlers/memory.test.ts tests/memory/extractor.test.ts tests/runtime/attachedSession.rememberCoord.test.ts tests/tools/memory.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@taco-ai/protocol": "workspace:*",
+    "@taco-ai/shared": "workspace:*",
+    "fast-glob": "^3.3.3",
+    "gray-matter": "^4.0.3",
+    "ignore": "^7.0.6",
+    "typebox": "^1.3.10",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  }
+}

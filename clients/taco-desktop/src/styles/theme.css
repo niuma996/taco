@@ -1,0 +1,207 @@
+/* theme.css — design tokens + html/body reset — split from styles.css on 2026-07-20 */
+
+:root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    /* Chat area background, slightly lighter than --bg to distinguish from sidebar/pane-bg. */
+    --chat-bg: #13151a;
+    /* Chat panel + input top-half: slightly brighter than --chat-bg, aligns with sidebar bg. */
+    --chat-panel-bg: #171a1f;
+    --fg: #d8dee9;
+    --fg-dim: #7a8390;
+    --accent: #88c0d0;
+    --user: #a3be8c;
+    --assistant: #88c0d0;
+    --system: #b48ead;
+    --tool: #ebcb8b;
+    --border: #2e3440;
+    --input-bg: #1a1d23;
+
+    /* Semantic tokens — consolidates scattered hardcoded colors, overridden per theme. */
+    --error: #bf616a;
+    --error-bg: rgba(191, 97, 106, 0.25);
+    --error-fg: #f4d4d6;
+    --warning: #ebcb8b; /* Same as --tool, used for ContextIndicator warn tier */
+    --code-block-border: #3a3530; /* Terminal/code block border, matches --terminal-bg */
+    --accent-contrast-fg: #eceff4;
+    --accent-bg-hover: rgba(136, 192, 208, 0.1);
+    --accent-bg-active: rgba(136, 192, 208, 0.18);
+    --accent-border: rgba(136, 192, 208, 0.55);
+    /* ActivityRail hover/active orange — same family as the icon-brand orange.
+       Distinguishes "primary nav active" from the global --accent blue.
+       Hover is near-transparent (only a faint warm tint); active is the sole high-saturation orange. */
+    --rail-bg-hover: rgba(251, 117, 30, 0.05);
+    --rail-bg-active: rgba(251, 117, 30, 0.22);
+    --success: #a3be8c; /* Nord 14 green — same as --user, for task done icons etc. */
+    --success-bg: rgba(163, 190, 140, 0.08);
+    --tool-bg: rgba(235, 203, 139, 0.05);
+    --focus-ring: 0 0 0 2px rgba(120, 160, 220, 0.4);
+    /* Brand orange — from the icon.png left color band, desaturated slightly.
+       Bright enough to avoid looking brown. */
+    --brand-orange: #f27c2e;
+    --brand-orange-hover: #f78c42;
+    /* Inline code background — warm orange, distinguishes from the Nord blue accent. */
+    --code-bg: #261a0d;
+    /* Inline code text color — orange, stays legible on dark bg instead of going gray. */
+    --code-fg: #f27c2e;
+    --code-border: var(--code-fg);
+    --overlay-scrim: rgba(0, 0, 0, 0.6);
+    --shadow-color: rgba(0, 0, 0, 0.4);
+    --shadow-color-strong: rgba(0, 0, 0, 0.35);
+    --tooltip-bg: rgba(0, 0, 0, 0.6);
+    --tooltip-fg: #ffffff;
+    --bg-elevated: #1a1d23;
+    --surface-tint: rgba(255, 255, 255, 0.03);
+
+    /* Secondary surface — above --bg-elevated. Used by .skills-detail-content / .agent-card-body. */
+    --bg-secondary: #1f2229;
+    /* List row hover overlay — fainter than --accent-bg-hover, pure transparent white. */
+    --hover-overlay: rgba(255, 255, 255, 0.05);
+    /* Error text color — same as --error but as a distinct token for semantic clarity. */
+    --danger: var(--error);
+
+    /* Sidebar/tools-list/skills-list width — between --bg and --bg-elevated.
+       Clamps: 220px floor, 340px ceiling. */
+    --pane-width: clamp(220px, 20vw, 340px);
+    --pane-bg: #15171c;
+    /* List area bg (topbar + sidebar + tools-list + skills-list): slightly lighter than --pane-bg. */
+    --pane-list-bg: #191b21;
+
+    /* User message background — solid deep-blue, same family as --accent. */
+    --user-msg-bg: #1a2a3a;
+    /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
+    --assistant-msg-bg: #1a1d23;
+
+    /* Diff colors (Nord palette) — track with the theme. fg for left mark/gutter, bg for row fill. */
+    --diff-old-fg: #bf616a; /* Nord 11, red */
+    --diff-old-bg: rgba(191, 97, 106, 0.18);
+    --diff-new-fg: #a3be8c; /* Nord 14, green */
+    --diff-new-bg: rgba(163, 190, 140, 0.16);
+    --diff-gutter-fg: rgba(216, 222, 233, 0.35);
+
+    /* macOS traffic light placeholder: top-padding 8px + buttons 12px*3 + gaps 6px*2 ≈ 56px.
+       Slightly increased for alignment margin with ActivityRail top padding so the
+       first icon aligns with the traffic light center line. Smaller value used on
+       Windows/Linux. Tauri webview's safe-area-inset-top is not injected in
+       overlay titlebar mode, so this is hardcoded. */
+    --rail-top-padding: 8px;
+
+    /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
+       xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */
+    --radius-xs: 3px;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+    --radius-circle: 50%;
+    --radius-line: 1px;
+
+    /* Font size scale — consolidates scattered 0.65rem~1.2rem hardcoded values. Tiers:
+       xs (badge/metadata) < sm (secondary text) < base (body default) < md (subheading)
+       < lg (section heading) < xl (page heading). */
+    --text-xs: 0.72rem;
+    --text-sm: 0.8rem;
+    --text-base: 0.85rem;
+    --text-md: 0.95rem;
+    --text-lg: 1.15rem;
+    --text-xl: 1.4rem;
+
+    /* Mono font stack — consolidates scattered ui-monospace,... hardcoded values. */
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Light theme — warm paper bg + Nord blue accent. Same hue as dark theme (no cross-theme hue shift).
+   Dark uses #88c0d0 (Nord 8), light uses #5e81ac (Nord 10): brightness increases, saturation decreases.
+   --assistant uses deeper blue #4078c0 to distinguish from --accent. Only theme-varying tokens
+   are overridden here; layout tokens inherit from :root. */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #fbf7f2;
+    /* Chat area background — slightly lighter than --bg, warm white. */
+    --chat-bg: #fdfaf4;
+    /* Chat panel + input top-half: warm white between panel bg and model messages. */
+    --chat-panel-bg: #fcf9f4;
+    --fg: #2b2620;
+    --fg-dim: #8a8177;
+    --accent: #5e81ac; /* Nord 10, deep blue — matches dark #88c0d0 family */
+    --user: #5b8a3c;
+    --assistant: #4078c0; /* darker than --accent for role differentiation */
+    --system: #8a5aa8;
+    --tool: #a8760a;
+    --border: #ece3d5;
+    --input-bg: #f3ede4;
+
+    --error: #c0392b;
+    --error-bg: rgba(192, 57, 43, 0.12);
+    --error-fg: #8a241a;
+    --warning: #a8760a; /* Same as --tool, used for ContextIndicator warn tier */
+    --code-block-border: #d4c9b0; /* Warm border for terminal/code block, matches warm paper bg */
+    --accent-contrast-fg: #2b2620;
+    --accent-bg-hover: rgba(94, 129, 172, 0.1);
+    --accent-bg-active: rgba(94, 129, 172, 0.18);
+    --accent-border: rgba(94, 129, 172, 0.5);
+    /* Light theme uses deeper alpha for orange to ensure readability on light bg.
+       Hover is near-transparent (faint warm tint); active is the sole saturated orange. */
+    --rail-bg-hover: rgba(211, 95, 16, 0.05);
+    --rail-bg-active: rgba(211, 95, 16, 0.2);
+    --success: #5b8a3c; /* Same as --user, for task done icons etc. */
+    --success-bg: rgba(91, 138, 60, 0.12);
+    --tool-bg: rgba(168, 118, 10, 0.08);
+    --focus-ring: 0 0 0 2px rgba(94, 129, 172, 0.5);
+    /* Deeper orange on light bg to maintain contrast. */
+    --brand-orange: #d96a1a;
+    --brand-orange-hover: #c25f16;
+    /* Inline code background — warm orange on warm paper bg, readable contrast. */
+    --code-bg: rgba(211, 95, 16, 0.1);
+    /* Inline code text — deeper orange to ensure contrast on light bg. */
+    --code-fg: #b25a14;
+    --code-border: var(--code-fg);
+    --overlay-scrim: rgba(0, 0, 0, 0.6);
+    --shadow-color: rgba(43, 38, 32, 0.18);
+    --shadow-color-strong: rgba(43, 38, 32, 0.22);
+    --tooltip-bg: #2b2620;
+    --tooltip-fg: #fbf7f2;
+    --bg-elevated: #ffffff;
+    --surface-tint: rgba(0, 0, 0, 0.02);
+
+    /* Secondary surface — slightly darker than --bg-elevated (#ffffff). Used by content card bodies. */
+    --bg-secondary: #fdfaf4;
+    /* Hover overlay on light theme — light gray semi-transparent. */
+    --hover-overlay: rgba(0, 0, 0, 0.04);
+    --danger: var(--error);
+
+    /* Second column bg: darker than --bg, lighter than --input-bg. Creates a subtle layer difference. */
+    --pane-bg: #f5f0e8;
+    /* List area bg: slightly lighter than --pane-bg. */
+    --pane-list-bg: #f9f4ee;
+
+    /* User message background — solid light blue, same family as --accent. Mirror of dark theme #1a2a3a. */
+    --user-msg-bg: #dbe5ee;
+    /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
+    --assistant-msg-bg: #faf6f0;
+
+    /* Diff colors — more saturated red/green for light theme readability. */
+    --diff-old-fg: #c0392b;
+    --diff-old-bg: rgba(192, 57, 43, 0.1);
+    --diff-new-fg: #5b8a3c;
+    --diff-new-bg: rgba(91, 138, 60, 0.1);
+    --diff-gutter-fg: rgba(43, 38, 32, 0.45);
+}
+
+:root[data-platform="macos"] {
+    --rail-top-padding: 36px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    margin: 0;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+}
