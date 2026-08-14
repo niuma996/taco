@@ -6,9 +6,20 @@ allowBuilds:
   '@google/genai': false
   esbuild: true
   protobufjs: false
+# Pre-resolve native sidecar packages for every supported platform so that
+# pnpm-lock.yaml stays stable when developers switch between macOS and Windows;
+# without this, installing on one platform rewrites the lockfile to drop the
+# other platform's entries, producing noisy cross-machine diffs.
+supportedArchitectures:
+  - os: darwin
+    cpu: arm64
+  - os: win32
+    cpu: x64
 minimumReleaseAgeExclude:
   - '@earendil-works/pi-agent-core@0.82.1'
   - '@earendil-works/pi-ai@0.82.1'
+  - '@taco-ai/sidecar-darwin-arm64@0.1.0'
+  - '@taco-ai/sidecar-win32-x64@0.1.0'
 peerDependencyRules:
   ignoreMissing:
     - "@earendil-works/*"

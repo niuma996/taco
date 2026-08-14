@@ -221,6 +221,12 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
     optionalDependencies:
+      '@taco-ai/sidecar-darwin-arm64':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@taco-ai/sidecar-win32-x64':
+        specifier: 0.1.0
+        version: 0.1.0
       '@wechatbot/wechatbot':
         specifier: 2.2.0
         version: 2.2.0
@@ -1202,6 +1208,18 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@taco-ai/sidecar-darwin-arm64@0.1.0':
+    resolution: {integrity: sha512-+GWzz7GqsH59nQCTHo761PljRWgR7Awt2zt+StSAMaB/c1/KG4bmchVQlndyfeYu4eAEwXayFGD2NJqfhdgXag==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
+  '@taco-ai/sidecar-win32-x64@0.1.0':
+    resolution: {integrity: sha512-TmT4zt9i3DLbtxfPip3yI2eQw0zySLJ6/QvkApkE+dOSbD8Ic6vA5aNPKdlX9C+mubR9Vm47IAugdkihwuVobg==}
+    cpu: [x64]
+    os: [win32]
+    hasBin: true
 
   '@tauri-apps/api@2.11.1':
     resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==}
@@ -4347,6 +4365,12 @@ snapshots:
       tslib: 2.8.1
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@taco-ai/sidecar-darwin-arm64@0.1.0':
+    optional: true
+
+  '@taco-ai/sidecar-win32-x64@0.1.0':
+    optional: true
 
   '@tauri-apps/api@2.11.1': {}
 
