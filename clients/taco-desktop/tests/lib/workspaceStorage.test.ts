@@ -14,6 +14,7 @@ import {
     applyExistenceFlags,
     isValidWorkspaceCwd,
     lastSegment,
+    reseedDefaultIfEmpty,
 } from "../../src/lib/workspaceStorage.ts";
 
 const DEFAULT = "/Users/me/.taco/workspace";
@@ -75,5 +76,31 @@ describe("lastSegment", () => {
         assert.equal(lastSegment("/Users/me/.taco/workspace"), "workspace");
         assert.equal(lastSegment("plain"), "plain");
         assert.equal(lastSegment(""), "");
+    });
+});
+
+describe("reseedDefaultIfEmpty", () => {
+    it("seeds the default cwd when pruning emptied the list", () => {
+        // Reproduces the production regression: dev-mode cwds persisted a
+        // relative path that resolves to nothing in the NSIS install directory,
+        // so the list comes out empty after pruning and the dropdown renders
+        // blank until the user opens one. initDefaultCwd has run by this point,
+        // so we can fall back to it.
+        assert.deepEqual(reseedDefaultIfEmpty([], DEFAULT), [DEFAULT]);
+    });
+
+    it("passes through non-empty lists untouched", () => {
+        // The default cwd is only a fallback — if any user workspace survives,
+        // we keep their ordering. Auto-injecting the default alongside would
+        // create a phantom workspace the user never opened.
+        const kept = ["/repo/a", "/repo/b"];
+        assert.deepEqual(reseedDefaultIfEmpty(kept, DEFAULT), kept);
+    });
+
+    it("returns the empty list when no default cwd is available yet", () => {
+        // initDefaultCwd failed (e.g. Tauri IPC error). Seeding with "" would
+        // create an invalid cwd the resolver would strip anyway; better to
+        // surface the failure than mask it.
+        assert.deepEqual(reseedDefaultIfEmpty([], ""), []);
     });
 });

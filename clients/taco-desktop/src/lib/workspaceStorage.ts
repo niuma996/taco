@@ -72,16 +72,37 @@ export function applyExistenceFlags(
 }
 
 /**
+ * Pure helper extracted from `pruneMissingCwds`: after pruning, if no workspace
+ * survived, reseed the list with the default cwd so resolveActiveCwd /
+ * switchWorkspace still have a target. Returns the input unchanged when
+ * `defaultCwd` is empty (initDefaultCwd never resolved) — in that case there's
+ * nothing safe to seed with.
+ */
+export function reseedDefaultIfEmpty(kept: string[], defaultCwd: string): string[] {
+    if (kept.length > 0) return kept;
+    return defaultCwd ? [defaultCwd] : kept;
+}
+
+/**
  * Prunes directories that no longer exist. Directories can be moved/deleted; OS also cleans
  * `/tmp`. Invalid workspaces cause the sidecar to emit errors on every startup.
  * The default cwd is always retained — `initDefaultCwd` guarantees it exists, and it's the
  * fallback when the list would otherwise be empty.
  */
 export async function pruneMissingCwds(cwds: string[]): Promise<string[]> {
-    if (cwds.length === 0) return cwds;
+    if (cwds.length === 0) {
+        // No stored workspaces — seed with the default cwd so a fresh install
+        // (or a wiped webview storage) doesn't render an empty dropdown.
+        return defaultCwd ? [defaultCwd] : cwds;
+    }
     try {
         const flags = await invoke<boolean[]>("paths_are_dirs", { paths: cwds });
-        return applyExistenceFlags(cwds, flags, defaultCwd);
+        const kept = applyExistenceFlags(cwds, flags, defaultCwd);
+        // After pruning the list can empty out (typical case: a previous install
+        // persisted only stale relative paths that no longer resolve). Reseed with
+        // the default cwd so resolveActiveCwd / switchWorkspace still have a
+        // valid target — the default was just created by initDefaultCwd.
+        return reseedDefaultIfEmpty(kept, defaultCwd);
     } catch (e) {
         // Never let a failed check strip the user's workspace list.
         console.warn("[taco] workspace existence check failed; keeping list as-is", e);
