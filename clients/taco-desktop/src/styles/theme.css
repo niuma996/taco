@@ -79,12 +79,14 @@
     --diff-new-bg: rgba(163, 190, 140, 0.16);
     --diff-gutter-fg: rgba(216, 222, 233, 0.35);
 
-    /* macOS traffic light placeholder: top-padding 8px + buttons 12px*3 + gaps 6px*2 ≈ 56px.
-       Slightly increased for alignment margin with ActivityRail top padding so the
-       first icon aligns with the traffic light center line. Smaller value used on
-       Windows/Linux. Tauri webview's safe-area-inset-top is not injected in
-       overlay titlebar mode, so this is hardcoded. */
-    --rail-top-padding: 8px;
+    /* Topbar / session-info / activity-rail-top share this height to keep their
+       first-row baselines aligned. The window is frameless (decorations:false),
+       so the topbar IS the title bar and hosts our custom window controls
+       (WindowControls) plus the drag region. macOS uses 36px to give the
+       traffic-light dots native vertical breathing room; Windows/Linux use
+       32px, matching the typical Windows 11 title-bar height and leaving room
+       for the square min/max/close buttons. */
+    --rail-top-padding: 32px;
 
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */

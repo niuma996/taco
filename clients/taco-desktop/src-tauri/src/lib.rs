@@ -24,8 +24,30 @@ use tokio::sync::{mpsc, Mutex};
 pub mod log_file;
 pub use log_file::LogFiles;
 
-const DEFAULT_SIDECAR_CMD: &str = "tsx";
 const DEFAULT_SIDECAR_ARGS: &str = "packages/sidecar/src/index.ts";
+
+#[cfg(windows)]
+const SIDECAR_PROGRAM_FILENAME: &str = "tsx.cmd";
+#[cfg(not(windows))]
+const SIDECAR_PROGRAM_FILENAME: &str = "tsx";
+
+/// Resolve the sidecar launcher in repo-source (debug) mode.
+///
+/// On Windows `Command::new("tsx")` does not consult PATHEXT, so a bare
+/// `tsx` lookup fails with "program not found" even when `tsx.cmd` sits
+/// right next to it in `node_modules/.bin`. Prefer the workspace-local
+/// copy pnpm installs; fall back to the bare name so a globally-installed
+/// tsx still works.
+fn resolve_repo_source_program(repo_root: &Path) -> String {
+    let local = repo_root
+ .join("node_modules")
+ .join(".bin")
+ .join(SIDECAR_PROGRAM_FILENAME);
+    if local.exists() {
+        return local.to_string_lossy().into_owned();
+    }
+    SIDECAR_PROGRAM_FILENAME.to_string()
+}
 
 /// Env vars forwarded from the desktop process into the sidecar subprocess
 /// after `env_clear()`. Whitelist-only so parent-process credentials never
@@ -198,7 +220,7 @@ fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
         // ② debug 走源码,沿用原本 repo+tsx 形态
         let repo_root = find_repo_root();
         return Ok(SidecarResolution {
-            program: DEFAULT_SIDECAR_CMD.to_string(),
+            program: resolve_repo_source_program(&repo_root),
             args: DEFAULT_SIDECAR_ARGS
                 .split_whitespace()
                 .map(String::from)

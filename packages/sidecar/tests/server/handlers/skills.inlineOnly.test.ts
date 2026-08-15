@@ -66,9 +66,11 @@ describe("skills.list surfaces inlineOnly", () => {
     });
 
     it("inlineOnly skills are flagged in the list response", async () => {
-        const { NodeExecutionEnv } = await import("@earendil-works/pi-agent-core/node");
         const { loadSourcedSkills } = await import("@earendil-works/pi-agent-core");
         const { defaultSkillDirs } = await import("../../../src/config/config.ts");
+        const { SlashNormalizedExecutionEnv } = await import(
+            "../../../src/runtime/slashNormalizedEnv.ts"
+        );
         const { dedupeSkillsByName } = await import("../../../src/skills/dedupeSkills.ts");
         const { preloadSkillFrontmatter, readSkillFrontmatter } = await import(
             "../../../src/skills/skillFrontmatter.ts"
@@ -76,7 +78,9 @@ describe("skills.list surfaces inlineOnly", () => {
 
         // Replay the server.ts stamping step so the test exercises the real
         // wiring: load → dedupe → preload → stamp inlineOnly → RPC handler.
-        const skillEnv = new NodeExecutionEnv({ cwd: tmpCwd });
+        // Uses the same SlashNormalizedExecutionEnv as server.ts so the Windows
+        // path-separator fix is on the path under test.
+        const skillEnv = new SlashNormalizedExecutionEnv({ cwd: tmpCwd });
         const loaded = await loadSourcedSkills(
             skillEnv,
             defaultSkillDirs(tmpCwd),

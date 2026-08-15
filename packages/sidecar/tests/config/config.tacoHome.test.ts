@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { defaultSessionsRoot, defaultSkillDirs, tacoHome } from "../../src/config/config.ts";
 
@@ -61,7 +61,9 @@ describe("tacoHome", () => {
         process.env.TACO_HOME = "state";
         const got = tacoHome();
         assert.equal(got, resolve(process.cwd(), "state"));
-        assert.ok(got.startsWith("/"), "must be absolute");
+        // Platform-correct absolute check: Windows absolutes are drive-lettered
+        // (`D:\...`), not `/`-prefixed, so `startsWith("/")` would misfire there.
+        assert.ok(isAbsolute(got), "must be absolute");
     });
 
     it("trims surrounding whitespace from an absolute TACO_HOME", () => {
@@ -111,21 +113,25 @@ describe("defaultSkillDirs / defaultSessionsRoot", () => {
         try {
             const cwd = mkdtempSync(join(tmpdir(), "taco-skills-cwd-"));
             try {
+                // defaultSkillDirs normalizes to forward slashes even on Windows
+                // (pi-agent-core's relativeEnvPath compares with "/" separators), so
+                // compare against the forward-slash form of the expected native path.
+                const fwd = (p: string) => p.replace(/\\/g, "/");
                 const dirs = defaultSkillDirs(cwd);
                 assert.equal(dirs.length, 5, "should have exactly 5 entries");
                 // Project .taco/skills must be first (highest priority, first-wins dedup)
-                assert.equal(dirs[0].path, resolve(cwd, ".taco", "skills"));
+                assert.equal(dirs[0].path, fwd(resolve(cwd, ".taco", "skills")));
                 assert.equal(dirs[0].source, "user");
                 // Global TACO_HOME second
-                assert.equal(dirs[1].path, resolve(tmpTacoHome, "skills"));
+                assert.equal(dirs[1].path, fwd(resolve(tmpTacoHome, "skills")));
                 assert.equal(dirs[1].source, "user");
-                assert.equal(dirs[2].path, resolve(homedir(), ".claude", "skills"));
+                assert.equal(dirs[2].path, fwd(resolve(homedir(), ".claude", "skills")));
                 assert.equal(dirs[2].source, "user");
-                assert.equal(dirs[3].path, resolve(homedir(), ".pi", "skills"));
+                assert.equal(dirs[3].path, fwd(resolve(homedir(), ".pi", "skills")));
                 assert.equal(dirs[3].source, "user");
                 // Builtin directory last (lowest priority; overridable by all four above)
                 assert.equal(dirs[4].source, "builtin");
-                assert.ok(dirs[4].path.endsWith(join("skills", "builtin")));
+                assert.ok(dirs[4].path.endsWith(fwd(join("skills", "builtin"))));
             } finally {
                 rmSync(cwd, { recursive: true, force: true });
             }

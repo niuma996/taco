@@ -75,6 +75,28 @@ function ensureDir(path: string): void {
     if (!existsSync(path)) mkdirSync(path, { recursive: true });
 }
 
+/**
+ * Stable per-workspace directory name derived from the workspace path.
+ *
+ * `workspaceId` is the absolute cwd (e.g. `D:\github\nium-wiki` on Windows
+ * or `/home/me/proj` on POSIX). It contains characters that are illegal in
+ * directory names on Windows (`:` after the drive letter, `\` separators)
+ * and on every platform for the shell-injection surface it would create if
+ * interpolated into a path. Hash to a 16-char hex prefix so every input —
+ * regardless of separator or case — maps to a portable directory name.
+ *
+ * Forward-slash-normalise the input first so the same logical cwd on
+ * different platforms hashes to the same key. (e.g. `D:\a\b` and the
+ * drive-letter-cased `d:/A/B` would otherwise hash to different buckets.)
+ *
+ * Exported so tests (and any future migration tooling) can compute the on-disk
+ * directory for a given workspace id instead of hardcoding the raw path.
+ */
+export function workspaceKey(workspaceId: string): string {
+    const normalised = workspaceId.replace(/\\/g, "/");
+    return createHash("sha256").update(normalised).digest("hex").slice(0, 16);
+}
+
 // ─── LocalMemoryStore ─────────────────────────────────────────────────────────
 
 export class LocalMemoryStore implements MemoryStore {
@@ -93,7 +115,7 @@ export class LocalMemoryStore implements MemoryStore {
 
     private get workspaceDir(): string {
         if (!this._workspaceId) throw new Error("LocalMemoryStore not initialized");
-        return join(this.projectsDir, this._workspaceId);
+        return join(this.projectsDir, workspaceKey(this._workspaceId));
     }
 
     constructor() {
@@ -112,7 +134,7 @@ export class LocalMemoryStore implements MemoryStore {
         if (!existsSync(this.memoryIndex)) {
             atomicWrite(this.memoryIndex, `${MEMORY_INDEX_HEADER}\n`);
         }
-        ensureDir(join(this.projectsDir, workspaceId));
+        ensureDir(join(this.projectsDir, workspaceKey(workspaceId)));
         this.initialized = true;
     }
 
@@ -124,6 +146,13 @@ export class LocalMemoryStore implements MemoryStore {
         // chain; work runs in submission order even if callers don't await.
         const next = this.writeChain.then(() => {
             this.writeTopicFile(entry);
+            // Invalidate the topics cache after every write — same pattern as
+            // updateTopic / deleteTopic. readTopicsCached's mtime check is
+            // unreliable on Windows (NTFS mtime granularity can keep two
+            // rapid same-tick writes at the same value), so the cache can
+            // otherwise return a stale list that pre-dates this append and
+            // miss the newly-written topic.
+            this.topicsCache = undefined;
         });
         // Swallow rejections so one failure doesn't poison subsequent writers.
         this.writeChain = next.catch(() => undefined);
@@ -329,7 +358,7 @@ export function parseTopicFrontmatter(raw: string): {
 
 /** Read all topic files from a project directory. */
 export function readProjectTopics(workspaceId: string): MemoryEntry[] {
-    const root = join(resolveTacoHome(tacoHome()), "memory", "projects", workspaceId);
+    const root = join(resolveTacoHome(tacoHome()), "memory", "projects", workspaceKey(workspaceId));
     if (!existsSync(root)) return [];
 
     let files: string[];

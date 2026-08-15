@@ -93,6 +93,29 @@ function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined)
 
 export type ShellToolInput = Static<typeof shellSchema>;
 
+/**
+ * Prefix a PowerShell command with statements that force UTF-8 output.
+ *
+ * Windows consoles default to the OEM code page (cp936/GBK on zh-CN, cp437 on
+ * en-US). Without this, PowerShell writes non-UTF-8 bytes — including
+ * localised error text like "无法将 'x' 项识别为..." — which the sidecar then
+ * decodes as UTF-8, producing mojibake. Setting `[Console]::OutputEncoding`
+ * makes PowerShell and the native commands it launches emit UTF-8, so the
+ * sidecar's UTF-8 decode (see shell.ts) is correct.
+ *
+ * `chcp` is intentionally omitted: it changes the console code page, which has
+ * no effect when stdout is a pipe (as it is here). Setting the .NET encoding
+ * objects is the mechanism that actually works for piped output.
+ *
+ * Windows-only. Unix commands run unchanged through the other runShell branch.
+ */
+function withUtf8Output(command: string): string {
+    const preamble =
+        "$OutputEncoding = [System.Text.Encoding]::UTF8; " +
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ";
+    return preamble + command;
+}
+
 function getShellDescription(): string {
     if (process.platform === "win32") {
         return "Execute a PowerShell command on Windows. Output is truncated at 1MB, timeout defaults to 120s. Prefer read/write/edit/grep/glob when one fits; use shell for builds, tests, git, package managers, and other shell-only operations.";
@@ -136,11 +159,15 @@ export function createShellTool(opts?: {
             }
             const result =
                 process.platform === "win32"
-                    ? await runShell("powershell.exe", ["-NoProfile", "-Command", params.command], {
-                          cwd: env.cwd,
-                          timeoutMs: params.timeout,
-                          signal,
-                      })
+                    ? await runShell(
+                          "powershell.exe",
+                          ["-NoProfile", "-Command", withUtf8Output(params.command)],
+                          {
+                              cwd: env.cwd,
+                              timeoutMs: params.timeout,
+                              signal,
+                          },
+                      )
                     : await runShell(params.command, null, {
                           cwd: env.cwd,
                           timeoutMs: params.timeout,

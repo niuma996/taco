@@ -75,8 +75,14 @@ export function restrictOwnerSync(path: string, mode = 0o600): void {
 function warnWindowsIfNeeded(): void {
     if (process.platform === "win32" && !warnedWindows) {
         warnedWindows = true;
-        log.warn(
-            "Windows: chmod 0o600 is a no-op; credential files rely on the per-user " +
+        // Console-only on purpose: the sidecar's structured logger routes to
+        // taco.log, where this would land in front of every operator on
+        // every first credential write. The security advisory is real but
+        // not actionable for a per-user %LOCALAPPDATA% install, so we keep
+        // it discoverable in the devtools console without polluting the
+        // normal log stream.
+        console.warn(
+            "[fsPermissions] Windows: chmod 0o600 is a no-op; credential files rely on the per-user " +
                 "profile ACL. Do not put $TACO_HOME on a shared host or network share.",
         );
     }

@@ -15,8 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { loadSourcedSkills } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { defaultSkillDirs } from "../../src/config/config.ts";
+import { SlashNormalizedExecutionEnv } from "../../src/runtime/slashNormalizedEnv.ts";
 import { dedupeSkillsByName } from "../../src/skills/dedupeSkills.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 
@@ -30,7 +30,11 @@ function writeSkill(dir: string, name: string, description: string): void {
 }
 
 async function loadDeduped(cwd: string): Promise<TacoSkill[]> {
-    const skillEnv = new NodeExecutionEnv({ cwd });
+    // Mirror server.ts: it loads skills through SlashNormalizedExecutionEnv so
+    // pi-agent-core's relativeEnvPath sees forward-slash paths on Windows. Using
+    // the same env keeps this test on the production path (a raw NodeExecutionEnv
+    // reproduces the "path.relative()'d string" throw that the wrapper fixes).
+    const skillEnv = new SlashNormalizedExecutionEnv({ cwd });
     const loaded = await loadSourcedSkills(skillEnv, defaultSkillDirs(cwd), (skill, source) => ({
         ...skill,
         source,

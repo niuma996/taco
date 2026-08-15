@@ -26,7 +26,7 @@ header.topbar {
     align-items: center;
     gap: 0.5rem;
     /* Topbar occupies only the right column (left column is ActivityRail at 78px).
-       Height = --rail-top-padding (36px on macOS, 8px elsewhere).
+       Height = --rail-top-padding (36px on macOS, 32px elsewhere).
        Fixed height (not min-height) prevents children from stretching the right column
        and causing misalignment with the left column's first icon baseline. */
     padding: 0 0.5rem;
@@ -43,6 +43,89 @@ header.topbar {
 header.topbar .drag-spacer {
     flex: 1;
     height: 100%;
+}
+
+/* ── Custom window controls (decorations:false; the OS draws none) ──────────
+   Windows/Linux: square buttons hugging the top-right, full topbar height so
+   the hover highlight fills the corner like native. macOS: traffic-light dots
+   pulled to the far left via order:-1, sitting where the OS lights used to be. */
+.window-controls {
+    display: flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    /* Buttons must stay clickable even though the header is a drag region. */
+    -webkit-app-region: no-drag;
+    height: 100%;
+}
+
+/* Windows/Linux square buttons. Negative right margin cancels the topbar's
+   0.5rem padding so the close button reaches the true window corner. */
+.window-controls--win {
+    margin-right: -0.5rem;
+}
+
+.window-control-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
+}
+
+.window-control-btn:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+.window-control-btn--close:hover {
+    background: #e81123; /* Windows close-button red, same in both themes. */
+    color: #ffffff;
+}
+
+/* macOS traffic-light cluster, pinned far-left. */
+.window-controls--mac {
+    order: -1;
+    gap: 8px;
+    align-items: center;
+    padding: 0 4px;
+    /* Sits left of the picker group; small left inset mirrors native margin. */
+    margin-left: 4px;
+}
+
+.window-control-dot {
+    width: 12px;
+    height: 12px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.window-control-dot--close {
+    background: #ff5f57;
+}
+.window-control-dot--minimize {
+    background: #febc2e;
+}
+.window-control-dot--maximize {
+    background: #28c840;
+}
+
+/* Dim the dots only when the window is inactive, mirroring native macOS —
+   an active window keeps its colors regardless of where the mouse is. The
+   `.window-controls--inactive` class is toggled from focus state in
+   WindowControls (isFocused + onFocusChanged). */
+.window-controls--mac.window-controls--inactive .window-control-dot {
+    background: var(--fg-dim);
 }
 
 .error-banner {

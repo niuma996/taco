@@ -12,8 +12,8 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { loadSourcedSkills, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import { SlashNormalizedExecutionEnv } from "../runtime/slashNormalizedEnv.ts";
 import {
     type ChannelStatusEntry,
     type ChannelsBindResult,
@@ -736,7 +736,17 @@ export class SidecarServer implements ServerRpcSurface {
         // entry with its source, and mapSkill stamps the source onto TacoSkill
         // so skills.list RPC and the SkillsPane UI can distinguish builtin vs
         // user skills.
-        const skillEnv = new NodeExecutionEnv({ cwd: fsCwd });
+        //
+        // SlashNormalizedExecutionEnv wraps NodeExecutionEnv so listDir /
+        // fileInfo / canonicalPath return forward-slash paths even on
+        // Windows. pi-agent-core's `relativeEnvPath` compares paths with
+        // `path.startsWith(root + "/")` and falls back to returning the
+        // absolute path unchanged when separators don't match — on Windows
+        // that makes the `ignore` package throw "path should be a
+        // path.relative()'d string". Combined with `defaultSkillDirs`
+        // (also forward-slash normalized) both sides of the comparison are
+        // in `/` form and the scan succeeds.
+        const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
         const loaded = await loadSourcedSkills(
             skillEnv,
             defaultSkillDirs(fsCwd),
@@ -1155,6 +1165,25 @@ export class SidecarServer implements ServerRpcSurface {
         this.customProviders = next;
         for (const ws of this.workspaceMap.values()) {
             ws.setCustomProviders(next);
+        }
+    }
+
+    /**
+     * Update the default model/provider at runtime (pushed by the settings.write
+     * handler after the user picks a provider+model in Settings/onboarding).
+     *
+     * Updates the server's held options so workspaces built LATER read the new
+     * value, and pushes into every EXISTING workspace so the next session.create
+     * resolves the configured default instead of the construction-time fallback
+     * (first catalog model, typically anthropic/*). This is the fix for a fresh
+     * session failing with "Provider is not configured: anthropic" after the
+     * user configured a different provider post-startup.
+     */
+    setDefaultModel(defaultModel?: string, defaultProvider?: string): void {
+        this.options.defaultModel = defaultModel;
+        this.options.defaultProvider = defaultProvider;
+        for (const ws of this.workspaceMap.values()) {
+            ws.setDefaultModel(defaultModel, defaultProvider);
         }
     }
 

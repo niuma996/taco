@@ -22,6 +22,7 @@ import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { TaskPanel } from "./components/panels/TaskPanel";
 import { RenameModal } from "./components/RenameModal";
 import { McpSection } from "./components/settings/McpSection.tsx";
+import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useAgentsPane } from "./hooks/useAgentsPane";
 import { AskUserProvider } from "./hooks/useAskUser";
@@ -529,6 +530,9 @@ export default function App() {
                     >
                         <FolderTree size={15} aria-hidden="true" />
                     </button>
+                    {/* Custom window controls — the OS draws none (decorations:false).
+                        CSS order pulls the macOS traffic-light variant to the far left. */}
+                    <WindowControls />
                 </header>
                 <div className="layout">
                     {mainView === "chat" ? (

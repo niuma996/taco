@@ -11,7 +11,7 @@ import type { ModelOption, ModelSelection } from "../settings/ModelPicker.js";
 export interface ModelStepProps {
     client: TacoClient;
     workspace: WorkspaceId;
-    onSelect: (selection: ModelSelection) => void;
+    onSelect: (selection: ModelSelection | undefined) => void;
 }
 
 export function ModelStep(props: ModelStepProps) {
@@ -52,6 +52,17 @@ export function ModelStep(props: ModelStepProps) {
     }, [selected, filteredOptions]);
 
     const handleChange = (next: ModelSelection) => {
+        // The dropdown is already filtered to configured providers, but the
+        // selection can still drift if the user picks the moment before
+        // providers load, or after they removed a key upstream. Refuse the
+        // pick at the source — saving defaultProvider to a keyless provider
+        // turns into "Provider is not configured" on the first chat attempt
+        // and is invisible until then.
+        if (!configuredProviderIds.has(next.provider)) {
+            setSelected(undefined);
+            props.onSelect(undefined);
+            return;
+        }
         setSelected(next);
         void save({
             kind: "global",

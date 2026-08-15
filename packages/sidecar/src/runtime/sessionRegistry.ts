@@ -148,7 +148,11 @@ export class SessionRegistry extends EventEmitter {
     readonly sessionsRoot: string;
     readonly env: NodeExecutionEnv;
     readonly models: Models;
-    readonly defaultModel?: Model<Api>;
+    // Mutable: settings.write can change the default model at runtime (e.g. the
+    // user configures a provider after the sidecar started). New attaches read
+    // the current value; already-attached sessions keep their own model until
+    // switched. See WorkspaceRuntime.setDefaultModel.
+    defaultModel?: Model<Api>;
     readonly systemPrompt: string;
     readonly tools: TacoTool[];
     readonly resources: AgentHarnessResources<TacoSkill, PromptTemplate>;

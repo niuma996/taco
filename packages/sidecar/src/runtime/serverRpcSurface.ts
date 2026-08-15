@@ -92,6 +92,14 @@ export interface ServerRpcSurface {
      */
     setCustomProviders?(next: readonly CustomProviderConfig[]): void;
     /**
+     * Update the default model/provider at runtime (called by handler after
+     * settings.write changes defaultModel/defaultProvider). Updates held
+     * options for future workspaces and pushes into existing ones so the next
+     * session.create resolves the configured default instead of the
+     * construction-time fallback.
+     */
+    setDefaultModel?(defaultModel?: string, defaultProvider?: string): void;
+    /**
      * Invalidate compaction caches for all workspaces' attached sessions.
      * Called by `settings.write` after writing the compaction field, ensuring a threshold change
      * takes effect immediately in the current session's next `effectiveCompaction()` call

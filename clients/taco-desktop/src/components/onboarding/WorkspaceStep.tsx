@@ -6,7 +6,12 @@ import { Button } from "../ui/Button.tsx";
 
 export interface WorkspaceStepProps {
     defaultCwd: string;
-    onConfirm: (cwd: string) => void;
+    /**
+     * Sync the picked/confirmed cwd up to the parent so footer Next and the
+     * wizard's `workspaceCwd` both point at the right path. Does NOT
+     * advance — the user clicks Next in the wizard footer to commit.
+     */
+    onChange: (cwd: string) => void;
 }
 
 export function WorkspaceStep(props: WorkspaceStepProps) {
@@ -19,6 +24,9 @@ export function WorkspaceStep(props: WorkspaceStepProps) {
         if (selected && !Array.isArray(selected)) {
             setCwd(selected);
             setError(null);
+            // Sync the picked path up so footer Next opens the right cwd.
+            // No auto-advance — the user clicks Next to commit.
+            props.onChange(selected);
         }
     };
 
@@ -27,7 +35,8 @@ export function WorkspaceStep(props: WorkspaceStepProps) {
             setError(t("onboarding.workspaceInvalid"));
             return;
         }
-        props.onConfirm(cwd);
+        // Same as Choose other: sync only, footer Next advances.
+        props.onChange(cwd);
     };
 
     return (

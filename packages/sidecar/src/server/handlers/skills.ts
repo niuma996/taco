@@ -58,8 +58,15 @@ export function registerSkillsHandlers(): void {
             // the loaded root if filePath ever became relative. The whitelist
             // still makes this safe today; using the right base documents the
             // intent.
+            //
+            // Both sides are compared in forward-slash form so the whitelist
+            // holds on Windows regardless of whether the loader stored
+            // backslash (native) or forward-slash (normalized via
+            // SlashNormalizedExecutionEnv / defaultSkillDirs) separators.
             const absPath = nodePath.resolve(workspace.executionCwd, params.filePath);
-            if (!allowed.has(absPath)) {
+            const fwd = (p: string) => p.replace(/\\/g, "/");
+            const normalizedAllowed = new Set([...allowed].map(fwd));
+            if (!normalizedAllowed.has(fwd(absPath))) {
                 throw new Error(`skill content not available: ${params.filePath}`);
             }
             const content = await nodeFs.readFile(absPath, "utf-8");

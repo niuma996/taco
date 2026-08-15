@@ -20,7 +20,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import type { AgentMessage, ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
 import fg from "fast-glob";
 import ignore from "ignore";
@@ -122,6 +122,11 @@ function gitignoreMatcher(cwd: string): ReturnType<typeof ignore> {
  * because both are useful).
  */
 async function detectManifests(cwd: string): Promise<ReadonlyArray<string>> {
+    // fast-glob can return paths the `ignore` package rejects as non-relative
+    // (Windows mixed-separator cwd, trailing slashes, etc.). Coerce any
+    // absolute result back to cwd-relative, and skip the filter entirely if
+    // the matcher still throws — the manifests tag is non-essential, so a
+    // single bad match must not fail workspace construction.
     const matches = await fg(MANIFEST_PATTERNS as string[], {
         cwd,
         dot: false,
@@ -130,8 +135,19 @@ async function detectManifests(cwd: string): Promise<ReadonlyArray<string>> {
         suppressErrors: true,
         ignore: SAFE_DEFAULT_IGNORES,
     });
+    const rel = matches.map((m) => (isAbsolute(m) ? relative(cwd, m) : m));
     const matcher = gitignoreMatcher(cwd);
-    return [...new Set(matches.filter((rel) => !matcher.ignores(rel)))].sort();
+    const kept: string[] = [];
+    for (const m of rel) {
+        try {
+            if (!matcher.ignores(m)) kept.push(m);
+        } catch {
+            // Ignore package rejected this path (e.g. cross-drive on Windows);
+            // surface it as kept rather than failing the whole probe.
+            kept.push(m);
+        }
+    }
+    return [...new Set(kept)].sort();
 }
 
 /** Build the tag body from detected manifests. */

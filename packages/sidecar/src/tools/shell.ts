@@ -4,6 +4,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import type { TextContent } from "@earendil-works/pi-ai";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
@@ -50,13 +51,22 @@ export async function runShell(
     let stderr = "";
     let interrupted = false;
 
+    // Decode as UTF-8 across chunk boundaries. `Buffer.toString()` decodes each
+    // chunk in isolation, so a multibyte character split across two `data`
+    // events yields U+FFFD; StringDecoder buffers the trailing partial bytes.
+    // On Windows the caller injects a UTF-8 output preamble into the PowerShell
+    // command (see shellTool.ts) so the child's bytes really are UTF-8; on
+    // Unix bash/sh already emit UTF-8. Either way this decoder is correct.
+    const outDecoder = new StringDecoder("utf8");
+    const errDecoder = new StringDecoder("utf8");
+
     const cap = MAX_OUTPUT_BYTES * 2;
     child.stdout?.on("data", (data: Buffer) => {
-        stdout += data.toString();
+        stdout += outDecoder.write(data);
         if (stdout.length > cap) stdout = stdout.slice(-cap);
     });
     child.stderr?.on("data", (data: Buffer) => {
-        stderr += data.toString();
+        stderr += errDecoder.write(data);
         if (stderr.length > cap) stderr = stderr.slice(-cap);
     });
 
@@ -94,6 +104,11 @@ export async function runShell(
     clearTimeout(timer);
     if (sigkillTimer) clearTimeout(sigkillTimer);
     opts.signal?.removeEventListener("abort", onAbort);
+
+    // Flush any bytes the decoder buffered waiting for the rest of a multibyte
+    // sequence. On a clean UTF-8 stream this returns "".
+    stdout += outDecoder.end();
+    stderr += errDecoder.end();
 
     const outStr = truncate(stdout, MAX_OUTPUT_BYTES);
     const errStr = truncate(stderr, MAX_OUTPUT_BYTES);

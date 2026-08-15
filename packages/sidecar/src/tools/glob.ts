@@ -10,6 +10,7 @@ import { getOrThrow } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import fg from "fast-glob";
 import ignore from "ignore";
+import { isAbsolute, relative } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";
@@ -69,7 +70,16 @@ export function createGlobTool(): GlobTool {
             const gitignoreResult = await env.readTextFile(`${root}/.gitignore`, signal);
             if (gitignoreResult.ok) {
                 const ig = ignore().add(gitignoreResult.value);
-                matches = matches.filter((rel) => !ig.ignores(rel));
+                matches = matches.filter((m) => {
+                    const rel = isAbsolute(m) ? relative(root, m) : m;
+                    try {
+                        return !ig.ignores(rel);
+                    } catch {
+                        // `ignore` rejects non-relative paths; default to keeping
+                        // the match rather than failing the whole tool call.
+                        return true;
+                    }
+                });
             }
 
             if (signal?.aborted) throw new Error("Operation aborted");

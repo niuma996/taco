@@ -296,15 +296,26 @@ export interface SkillDirInput {
  *   1. <cwd>/.taco/skills       2. $TACO_HOME/skills       3. ~/.claude/skills
  *   4. ~/.pi/skills             5. <sidecar>/skills/builtin (fallback)
  * ⚠ Opposite semantics to agentDirs: skills dedupe by name (first-wins).
+ *
+ * Paths are returned in forward-slash form even on Windows. pi-agent-core's
+ * `loadSourcedSkills` → `relativeEnvPath` compares paths with
+ * `path.startsWith(root + "/")` and falls back to returning the absolute
+ * path unchanged when the separator doesn't match — on Windows, Node's
+ * `resolve()` produces `\`-separated paths that never match the `/`-checked
+ * root, which then makes the `ignore` package throw "path should be a
+ * path.relative()'d string". SlashNormalizing here (and in
+ * `SlashNormalizedExecutionEnv` for `listDir`/`fileInfo` output) keeps both
+ * sides of the comparison in `/` form.
  */
 export function defaultSkillDirs(cwd: string): SkillDirInput[] {
+    const fwd = (p: string) => p.replace(/\\/g, "/");
     return [
-        { path: resolvePath(cwd, ".taco", "skills"), source: "user" },
-        { path: resolvePath(tacoHome(), "skills"), source: "user" },
-        { path: resolvePath(homedir(), ".claude", "skills"), source: "user" },
-        { path: resolvePath(homedir(), ".pi", "skills"), source: "user" },
+        { path: fwd(resolvePath(cwd, ".taco", "skills")), source: "user" },
+        { path: fwd(resolvePath(tacoHome(), "skills")), source: "user" },
+        { path: fwd(resolvePath(homedir(), ".claude", "skills")), source: "user" },
+        { path: fwd(resolvePath(homedir(), ".pi", "skills")), source: "user" },
         {
-            path: resolvePath(resourceRoot(), "skills", "builtin"),
+            path: fwd(resolvePath(resourceRoot(), "skills", "builtin")),
             source: "builtin",
         },
     ];

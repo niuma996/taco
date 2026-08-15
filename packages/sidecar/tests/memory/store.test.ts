@@ -19,6 +19,7 @@ import {
     NoOpMemoryStore,
     parseTopicFrontmatter,
     readProjectTopics,
+    workspaceKey,
 } from "../../src/memory/index.ts";
 import type { MemoryEntry } from "../../src/memory/types.ts";
 
@@ -58,7 +59,7 @@ describe("LocalMemoryStore.initialize", () => {
     it("creates MEMORY.md with header and project dir", () => {
         const _s = mkStore();
         const memPath = join(tmpRoot, "memory", "MEMORY.md");
-        const projDir = join(tmpRoot, "memory", "projects", "ws-test");
+        const projDir = join(tmpRoot, "memory", "projects", workspaceKey("ws-test"));
         assert.ok(existsSync(memPath), "MEMORY.md should exist");
         assert.ok(existsSync(projDir), "project dir should exist");
         const header = readFileSync(memPath, "utf8");
@@ -80,7 +81,7 @@ describe("LocalMemoryStore.appendEntry", () => {
     it("writes a topic file; MEMORY.md stays untouched", async () => {
         const s = mkStore();
         await s.appendEntry(entry());
-        const topicPath = join(tmpRoot, "memory", "projects", "ws-test", "user_role.md");
+        const topicPath = join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md");
         const topic = readFileSync(topicPath, "utf8");
         assert.match(topic, /^---\nname: User uses pnpm/);
         assert.match(topic, /type: user/);
@@ -153,7 +154,7 @@ describe("LocalMemoryStore.readMemory / buildMemoryBlock", () => {
         assert.match(block, /\[user\] User uses pnpm/);
         assert.match(block, /\[feedback\] Use real DB/);
         assert.ok(
-            block.includes(join(tmpRoot, "memory", "projects", "ws-test", "user_role.md")),
+            block.includes(join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md")),
             "block must include the topic file path",
         );
     });
@@ -266,7 +267,7 @@ describe("getTopic / updateTopic", () => {
 
         // createdAt is preserved in file content (getTopic reads mtime, not frontmatter)
         const fileRaw2 = readFileSync(
-            join(tmpRoot, "memory", "projects", "ws-test", "user_role.md"),
+            join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md"),
             "utf8",
         );
         assert.match(fileRaw2, new RegExp(`createdAt: ${originalCreatedAt}`));
@@ -277,7 +278,7 @@ describe("getTopic / updateTopic", () => {
     it("updateTopic frontmatter omits updatedAt line when entry.updatedAt undefined (backward compat)", () => {
         // Write a legacy-format file (no updatedAt line) and verify
         // readProjectTopics parses it correctly with updatedAt: undefined.
-        const projDir = join(tmpRoot, "memory", "projects", "ws-test");
+        const projDir = join(tmpRoot, "memory", "projects", workspaceKey("ws-test"));
         mkdirSync(projDir, { recursive: true });
         writeFileSync(
             join(projDir, "old_style.md"),

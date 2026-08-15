@@ -200,7 +200,12 @@ export class WorkspaceRuntime extends EventEmitter {
     readonly sessionEnv: NodeExecutionEnv;
     readonly repo: JsonlSessionRepo;
     readonly models: MutableModels;
-    readonly defaultModel?: Model<Api>;
+    // Mutable: settings.write hot-reloads the default model when the user
+    // picks a provider/model after the sidecar is already running. See
+    // setDefaultModel — without live update, session.create would keep using
+    // the construction-time fallback (first catalog model) and fail with
+    // "Provider is not configured" for the unconfigured fallback provider.
+    defaultModel?: Model<Api>;
     readonly systemPrompt: string;
     readonly tools: TacoTool[];
     readonly resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
@@ -739,6 +744,41 @@ export class WorkspaceRuntime extends EventEmitter {
     /** Replace the custom provider set at runtime (pushed by server after settings.write). */
     setCustomProviders(next: readonly CustomProviderConfig[]): void {
         this.modelRegistry.setCustomProviders(next);
+    }
+
+    /**
+     * Hot-reload the workspace default model after settings.write changes
+     * `defaultModel` / `defaultProvider`. Resolves against the live catalog
+     * (same rules as the constructor) and updates both this runtime and its
+     * SessionRegistry so the NEXT session.create / attach uses it. Already
+     * attached sessions keep their current model until switched explicitly.
+     *
+     * Without this, the workspace built before the user configured a provider
+     * keeps its construction-time fallback (first catalog model, typically
+     * anthropic/claude-*), and every fresh session fails with "Provider is
+     * not configured" even though the user set a valid default in Settings.
+     */
+    setDefaultModel(defaultModel?: string, defaultProvider?: string): void {
+        let resolved: Model<Api> | undefined;
+        if (defaultModel) {
+            resolved = defaultProvider
+                ? this.models.getModel(defaultProvider, defaultModel)
+                : findModelById(this.models, defaultModel);
+            if (!resolved) {
+                const label = defaultProvider
+                    ? `${defaultProvider}/${defaultModel}`
+                    : defaultModel;
+                log.error(
+                    `default model "${label}" not found in catalog — leaving previous default unchanged.`,
+                );
+                return;
+            }
+        } else {
+            const all = this.models.getModels();
+            resolved = all.length > 0 ? all[0] : undefined;
+        }
+        this.defaultModel = resolved;
+        this.sessionRegistry.defaultModel = resolved;
     }
 
     /** Hot-reload the instructions config. */

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProviders } from "../../hooks/useProviders.js";
 import type { UseWorkspacesApi } from "../../hooks/useWorkspaces.js";
 import { useT } from "../../i18n/useI18n.js";
@@ -36,15 +36,34 @@ export function OnboardingModal(props: OnboardingModalProps) {
     const [selectedModel, setSelectedModel] = useState<ModelSelection | undefined>(undefined);
     // Disables footer Next + workspace step's "Use default" while openWorkspace is in flight.
     const [goingNext, setGoingNext] = useState(false);
+    // Mirrors `useWorkspaces.errorBanner` so workspace-open failures (e.g.
+    // sidecar RPC errors) render inside the modal. `openWorkspace` shows a
+    // toast on the catch path, but the toast sits at z-index 2000 and the
+    // onboarding scrim visually competes with it — the only feedback the
+    // user can rely on while this overlay is up is an in-modal banner.
+    const openError = props.wsApi.errorBanner;
     // Live provider list — drives both the Next gate (≥1 configured) and the Done
     // summary's real count. Fetched against `workspaceCwd`; only enabled from the
     // provider step onward so welcome/workspace don't trigger a fetch against the
     // default-cwd placeholder that the sidecar hasn't ensured yet.
-    const { providers } = useProviders(
+    const { providers, refresh: refreshProviders } = useProviders(
         props.client,
         workspaceCwd,
         step === "provider" || step === "model" || step === "done",
     );
+    // The parent's useProviders fetched once when entering provider step,
+    // before any key was saved. ProviderStep / ModelStep each own their own
+    // useProviders instances and refresh themselves on key changes, but
+    // this parent snapshot stays stale until something kicks it. Refresh
+    // on every step transition so the DoneStep summary reflects what the
+    // child steps actually saw — without this, saving a key in provider
+    // step then advancing to done showed "已配置供应商: 0" even though
+    // ModelStep's own dropdown correctly listed the provider's models.
+    useEffect(() => {
+        if (step === "provider" || step === "model" || step === "done") {
+            refreshProviders();
+        }
+    }, [step, refreshProviders]);
     const configuredProviderCount = useMemo(
         () => providers.filter((p) => p.configured).length,
         [providers],
@@ -70,11 +89,25 @@ export function OnboardingModal(props: OnboardingModalProps) {
     // Opens the given cwd and only advances to the provider step on success. The cwd is
     // passed explicitly so the workspace step's onConfirm (which calls setWorkspaceCwd in
     // the same handler) doesn't suffer from a stale closure of `workspaceCwd`.
+    // `openWorkspace` already calls `setErrorBanner(msg)` on its catch path with
+    // the real failure reason ("Failed to open C:\…: <rpc error>"). That update
+    // bubbles back through `useWorkspaces` → App.tsx → this modal as a new
+    // `wsApi` prop, so the modal's `openError` (read from `props.wsApi.errorBanner`)
+    // will render the real message on the next render. We intentionally do NOT
+    // add a fallback here — the previous "无法打开工作目录: …" string was
+    // computed from a stale-closure read and overwrote the real error, leaving
+    // the wizard with a misleading empty banner.
+    //
+    // `openWorkspace` never rejects — every path resolves to a boolean (false on
+    // invalid/failed, true on success) — so a `.catch` here would be dead code.
+    // The `.then` handles both outcomes: `false` leaves us on the step with the
+    // banner openWorkspace set; `true` advances.
     const openWorkspaceAndAdvance = useCallback(
         (cwd: string) => {
             if (goingNext) return;
             setGoingNext(true);
-            props.wsApi.openWorkspace(cwd).then((ok) => {
+            props.wsApi.setErrorBanner(null);
+            void props.wsApi.openWorkspace(cwd).then((ok) => {
                 setGoingNext(false);
                 if (ok) setStep("provider");
             });
@@ -94,6 +127,15 @@ export function OnboardingModal(props: OnboardingModalProps) {
                 if (providerConfigured) setStep("model");
                 break;
             case "model":
+                // Trust ModelStep's configured-provider filter. A defensive
+                // re-check from the parent's stale `providers` snapshot
+                // mis-fires while the parent's `useProviders` fetch is
+                // still in flight (race against the user clicking fast),
+                // which surfaced a spurious "selected model from
+                // unconfigured provider" banner even on correctly-picked
+                // models. ModelStep owns the authoritative provider
+                // list for selection; the sidecar re-validates the
+                // key at session-create time anyway.
                 if (selectedModel) setStep("done");
                 break;
             case "done":
@@ -154,12 +196,22 @@ export function OnboardingModal(props: OnboardingModalProps) {
                     {step === "welcome" && <WelcomeStep onStart={() => setStep("workspace")} />}
                     {step === "workspace" && (
                         <WorkspaceStep
-                            defaultCwd={props.defaultCwd}
-                            onConfirm={(cwd) => {
+                            // Parent-owned cwd so leaving and returning to
+                            // the step shows whatever the user last picked
+                            // (or the system default if they haven't picked
+                            // anything). Without this, WorkspaceStep's
+                            // local `cwd` re-initialises from
+                            // `props.defaultCwd` on remount and the input
+                            // jumps back to the system default.
+                            defaultCwd={workspaceCwd || props.defaultCwd}
+                            onChange={(cwd) => {
+                                // Sync only — footer Next is the commit point.
                                 setWorkspaceCwd(cwd);
-                                openWorkspaceAndAdvance(cwd);
                             }}
                         />
+                    )}
+                    {openError && step === "workspace" && (
+                        <div className="error-banner" role="alert">{openError}</div>
                     )}
                     {step === "provider" && (
                         <ProviderStep

@@ -157,6 +157,17 @@ export function registerSettingsHandlers(): void {
                 if ("instructions" in globalPatch) {
                     server.refreshInstructions(next.instructions);
                 }
+                // Hot-reload the default model across all workspaces. Without
+                // this, a workspace built before the user picked a provider
+                // keeps its construction-time fallback (first catalog model,
+                // typically anthropic/*), so the next session.create fails
+                // with "Provider is not configured" even though the user set
+                // a valid default. Fire when either field is in the patch —
+                // defaultProvider scopes the defaultModel lookup, so a change
+                // to either must re-resolve.
+                if ("defaultModel" in globalPatch || "defaultProvider" in globalPatch) {
+                    server.setDefaultModel?.(next.defaultModel, next.defaultProvider);
+                }
                 return { global: toView(next) };
             } catch (e) {
                 throw new RpcHandlerError(

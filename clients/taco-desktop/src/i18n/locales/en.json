@@ -78,6 +78,13 @@
     "next": "Next",
     "back": "Back"
   },
+  "window": {
+    "controls": "Window controls",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
+  },
   "activity": {
     "chat": "Chat",
     "memory": "Memory",

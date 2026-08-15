@@ -8,7 +8,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import { getOrThrow } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
@@ -66,7 +66,18 @@ async function loadIgnoreFilter(
     const result = await env.readTextFile(`${root}/.gitignore`, signal);
     if (!result.ok) return null;
     const ig = ignore().add(result.value);
-    return (rel) => ig.ignores(rel);
+    // Coerce any absolute fast-glob result back to root-relative before
+    // handing to `ignore`, and swallow the validation throw that the
+    // `ignore` package raises for non-relative paths — better to surface
+    // the match than fail the whole grep.
+    return (m) => {
+        const rel = isAbsolute(m) ? relative(root, m) : m;
+        try {
+            return ig.ignores(rel);
+        } catch {
+            return false;
+        }
+    };
 }
 
 /**
