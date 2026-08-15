@@ -456,6 +456,12 @@ export default function App() {
 
     return (
         <div className="app-shell">
+            {/* Custom window controls — only used when the OS draws none. On
+               macOS we use the native overlay title bar (rounded corners +
+               native traffic lights), so the custom component must not
+               render there; on Windows/Linux the window is frameless
+               (decorations:false) and this provides min/max/close. */}
+            {document.documentElement.dataset.platform !== "macos" && <WindowControls />}
             <ActivityRail activeView={mainView} onSelect={setMainView} />
             <div className="app-main">
                 <header className="topbar" data-tauri-drag-region>
@@ -530,9 +536,6 @@ export default function App() {
                     >
                         <FolderTree size={15} aria-hidden="true" />
                     </button>
-                    {/* Custom window controls — the OS draws none (decorations:false).
-                        CSS order pulls the macOS traffic-light variant to the far left. */}
-                    <WindowControls />
                 </header>
                 <div className="layout">
                     {mainView === "chat" ? (
