@@ -88,7 +88,8 @@ const PASSTHROUGH_ENV: &[&str] = &[
 const LLM_DUMP_PREFIX: &str = "[taco:llm]";
 
 /// externalBin 的 basename — Tauri 把 `externalBin` 放在 main binary 同目录,
-/// 用 `path().resolve(.., BaseDirectory::Executable)` 定位。
+/// 用 `current_exe()` 的父目录定位(`BaseDirectory::Executable` 在 Windows/macOS
+/// 不受支持,不可用)。Windows 上文件名带 `.exe`,其余平台不带。
 /// (resources 根不走这里,由 `resource_dir()` 直接取。)
 const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
 
@@ -201,6 +202,21 @@ async fn desktop_config_write(app: AppHandle, contents: String) -> Result<(), St
     Ok(())
 }
 
+/// 剥掉 Windows verbatim 前缀(`\\?\`)。
+///
+/// `current_exe()` / `resource_dir()` 在 Windows 上可能返回 `\\?\D:\...` 这种
+/// verbatim 路径。Rust 自己的 `std::fs` 能正确处理它,但把它作为 argv 传给
+/// 子进程会出问题:Node 的 `realpath` 见到 `\\?\D:` 会把盘符解析成目录,直接
+/// 崩 `EISDIR: illegal operation on a directory, lstat 'D:'`(整个 sidecar 因此
+/// 起不来)。在传给 `Command` 之前统一剥掉,非 Windows / 无前缀时原样返回。
+fn strip_win_verbatim(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p.to_path_buf(),
+    }
+}
+
 fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
     // ① 显式覆盖
     if let (Ok(program), Ok(args_str)) = (
@@ -234,10 +250,13 @@ fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
     }
 
     // ③ release
-    let resources_root = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("resource_dir unavailable: {e}"))?;
+    // 剥掉 `\\?\` verbatim 前缀 —— 这条链(resource_dir → lib_path、current_exe →
+    // node_path)上的路径都会作为 argv 传给 Node,带前缀会崩(见 strip_win_verbatim)。
+    let resources_root = strip_win_verbatim(
+        &app.path()
+            .resource_dir()
+            .map_err(|e| format!("resource_dir unavailable: {e}"))?,
+    );
 
     // 资源子目录 sidecar/,sidecar/lib/index.mjs 是 staged bundle
     let lib_path = resources_root.join("sidecar").join("lib").join("index.mjs");
@@ -249,19 +268,26 @@ fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
         ));
     }
 
-    // externalBin 在 release 里被 Tauri 放在 app binary 同目录(macOS .app/MacOS/)。
-    // path().resolve(.., BaseDirectory::Executable) 定位该文件,自动按当前
-    // 平台 triple 选择 arch 命名("taco-sidecar-node-<arch>" staging 文件名
-    // 与 externalBin basename 一致)。
-    let node_path = app
-        .path()
-        .resolve(SIDECAR_NODE_RESOURCE, tauri::path::BaseDirectory::Executable)
-        .map_err(|e| {
-            format!(
-                "sidecar node binary not resolved: {e}; \
-                 check tauri.conf.json externalBin + binaries staging for the current target triple"
-            )
-        })?;
+    // externalBin 在 release 里被 Tauri 放在主程序同目录(Windows NSIS 安装目录、
+    // macOS .app/Contents/MacOS)。定位它**不能**用
+    // `path().resolve(.., BaseDirectory::Executable)` —— 该 base 的
+    // `executable_dir()` 在 Windows/macOS 上不受支持,直接返回 `Error::UnknownPath`
+    // (报 "unknown path"),导致 Windows 安装版永远解析不到侧车。改用
+    // `current_exe()` 的父目录,跨平台都指向主程序所在目录。
+    let exe_dir = strip_win_verbatim(
+        std::env::current_exe()
+            .map_err(|e| format!("current_exe unavailable: {e}"))?
+            .parent()
+            .ok_or_else(|| "current exe has no parent directory".to_string())?,
+    );
+    // Tauri 打包 externalBin 时,会把 staging 的 `taco-sidecar-node-<triple>[.exe]`
+    // 重命名回 basename(Windows 上带 .exe,其余平台不带)。按平台拼同样的名字。
+    let node_bin_name = if cfg!(windows) {
+        format!("{SIDECAR_NODE_RESOURCE}.exe")
+    } else {
+        SIDECAR_NODE_RESOURCE.to_string()
+    };
+    let node_path = exe_dir.join(&node_bin_name);
 
     if !node_path.exists() {
         return Err(format!(
@@ -396,6 +422,15 @@ async fn workspace_ensure(
         cmd.current_dir(&repo_root);
     }
     // release 下不指定 cwd — 让 Node 用其所在父目录即可,资源全部走 TACO_SIDECAR_RESOURCES
+
+    // Windows: 禁止 sidecar Node 进程弹出黑色控制台窗口(原进程 TACO.exe 是
+    // GUI subsystem,默认子进程会继承一个 conhost.exe 窗口 —— 显式置
+    // CREATE_NO_WINDOW = 0x08000000 才不显示)。DETACHED_PROCESS 会切断 stdio
+    // 管道,不能用。
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(0x08000000);
+    }
 
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
