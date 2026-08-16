@@ -259,7 +259,10 @@ export function summarizeToolArgs(_name: string, args: unknown): string {
  *   toolResult: locate the matching tool in the most recent assistant and
  *               set status / resultText.
  */
-export function historyToUiMessages(entries: HistoryEntryLike[] | undefined): UiMessage[] {
+export function historyToUiMessages(
+    entries: HistoryEntryLike[] | undefined,
+    opts?: HistoryToUiMessagesOpts,
+): UiMessage[] {
     const out: UiMessage[] = [];
     const seenEntryIds = new Set<string>();
 
@@ -337,8 +340,21 @@ export function historyToUiMessages(entries: HistoryEntryLike[] | undefined): Ui
             }
         }
     }
-    expireUnresolvedToolCalls(out);
+    expireUnresolvedToolCalls(out, opts?.inFlightAgentToolCallIds);
     return out;
+}
+
+export interface HistoryToUiMessagesOpts {
+    /**
+     * parentToolCallIds whose subagent the sidecar reports as running right now
+     * (from `session.attach`). Long-running tool cards not listed here are
+     * orphans and get expired; listed ones stay "running".
+     *
+     * Omit when liveness is unknown (older sidecar, or a read not paired with an
+     * attach) — long-running cards are then all left "running", the pre-existing
+     * conservative behaviour.
+     */
+    inFlightAgentToolCallIds?: readonly string[];
 }
 
 /**
@@ -355,12 +371,20 @@ const LONG_RUNNING_TOOLS = new Set(["agent", "agentContinue", "skill"]);
  * workspace disposed) — that turn went with the process, so no result will
  * ever arrive. Leaving it "running" shows a spinner that never resolves.
  *
- * The inference only holds for tools whose result lands on disk in the same
+ * That inference is immediate for tools whose result lands on disk in the same
  * breath as the assistant message. `agent` / `skill` spawn a child session and
- * report minutes later, so a history read taken mid-turn legitimately lacks
- * their toolResult — see LONG_RUNNING_TOOLS.
+ * report minutes later, so absence of their toolResult carries no information on
+ * its own — a mid-turn read of a live subagent looks identical to one whose
+ * process is gone. `inFlightAgentToolCallIds` is what separates the two: the
+ * sidecar reports it from process memory, so a card missing from it has no run
+ * behind it any more. Without that list the long-running cards are left
+ * "running", since guessing would flip live subagents to error.
  */
-function expireUnresolvedToolCalls(messages: UiMessage[]): void {
+function expireUnresolvedToolCalls(
+    messages: UiMessage[],
+    inFlightAgentToolCallIds: readonly string[] | undefined,
+): void {
+    const inFlight = inFlightAgentToolCallIds ? new Set(inFlightAgentToolCallIds) : undefined;
     for (const m of messages) {
         if (m.kind !== "assistant") continue;
         for (const tool of m.tools) {
@@ -374,12 +398,27 @@ function expireUnresolvedToolCalls(messages: UiMessage[]): void {
                 const waiting = (tool.details as { waiting?: unknown } | undefined)?.waiting;
                 if (waiting === true) continue;
             }
-            // A missing toolResult here is the expected mid-turn state, not a
-            // crash: expiring it would flip a live subagent card to error and
-            // strip `details.subSessionId`, which the agent view surfaces as
-            // "no sub-session id (tool failed)". Leaving it "running" is the
-            // truthful reading — a real restart is handled by SIDECAR_RESTARTED.
-            if (LONG_RUNNING_TOOLS.has(tool.name)) continue;
+            if (LONG_RUNNING_TOOLS.has(tool.name)) {
+                // Liveness unknown, or the run is still listed → keep the spinner.
+                // Guessing here would flip a live subagent card to error.
+                if (!inFlight || inFlight.has(tool.id)) continue;
+                // Not listed → whatever run owned this card is gone. Kept distinct
+                // from the crash case below: an ordinary app restart lands here too,
+                // and there is no process of its own to report an exit code for.
+                // Spread rather than replace for consistency with that branch, but on
+                // this path `details` is undefined in practice: it is only ever assigned
+                // from a matching toolResult, and an orphan by definition has none. (The
+                // `SUBAGENT_SPAWNED` backfill that writes `details.subSessionId` acts on
+                // the reducer's live message objects — these are built fresh from the
+                // JSONL and expired before they ever reach the reducer.)
+                tool.status = "error";
+                tool.details = {
+                    ...((tool.details ?? {}) as object),
+                    reason: "subagent_orphaned",
+                    interrupted: true,
+                };
+                continue;
+            }
             tool.status = "error";
             tool.details = {
                 ...((tool.details ?? {}) as object),

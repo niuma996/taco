@@ -769,6 +769,42 @@ fn find_repo_root() -> PathBuf {
     }
 }
 
+/// Build the main window with platform-appropriate chrome.
+///
+/// tauri.conf.json can't branch by platform, so `windows` is empty there and
+/// we create the window here. Per platform:
+///
+/// - **macOS**: `TitleBarStyle::Overlay` + `hidden_title` — the OS draws
+///   native rounded corners and native traffic lights (which sit at the
+///   top-left, in the ActivityRail's reserved padding). This matches the
+///   pre-`decorations:false` look; the custom WindowControls React component
+///   is hidden on macOS (see App.tsx).
+/// - **Windows / Linux**: `decorations:false` frameless, sharp corners, and
+///   the React WindowControls supplies min/max/close buttons at the top-right.
+fn build_main_window(app: &tauri::App) -> Result<(), tauri::Error> {
+    let builder = tauri::WebviewWindowBuilder::new(
+        app,
+        "main",
+        tauri::WebviewUrl::default(),
+    )
+    .title("Taco")
+    .theme(Some(tauri::Theme::Dark))
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .resizable(true);
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false);
+
+    builder.build()?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -776,6 +812,10 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
+        .setup(|app| {
+            build_main_window(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             workspace_ensure,
             workspace_send,

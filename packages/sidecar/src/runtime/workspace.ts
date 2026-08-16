@@ -765,9 +765,7 @@ export class WorkspaceRuntime extends EventEmitter {
                 ? this.models.getModel(defaultProvider, defaultModel)
                 : findModelById(this.models, defaultModel);
             if (!resolved) {
-                const label = defaultProvider
-                    ? `${defaultProvider}/${defaultModel}`
-                    : defaultModel;
+                const label = defaultProvider ? `${defaultProvider}/${defaultModel}` : defaultModel;
                 log.error(
                     `default model "${label}" not found in catalog — leaving previous default unchanged.`,
                 );
@@ -826,6 +824,17 @@ export class WorkspaceRuntime extends EventEmitter {
         signal?: AbortSignal;
     }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }> {
         return await this.agentSpawner.spawnSubagent(args);
+    }
+
+    /**
+     * parentToolCallIds under `parentSessionId` whose subagent is running right now.
+     *
+     * Process-memory state, so a fresh process reports none — which is exactly what
+     * lets a client tell an orphaned agent tool card (its run died with a previous
+     * process) from one that is legitimately still awaiting its subagent.
+     */
+    inFlightAgentToolCallIds(parentSessionId: SessionId): string[] {
+        return this.agentSpawner.inFlightAgentToolCallIds(parentSessionId);
     }
 
     /**

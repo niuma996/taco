@@ -474,8 +474,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
 
     const attachSessionInternal = useCallback(
         async (cwd: string, sessionId: string): Promise<void> => {
+            let inFlightAgentToolCallIds: string[] | undefined;
             try {
-                await client.sessionAttach(cwd, sessionId);
+                const attachResult = await client.sessionAttach(cwd, sessionId);
+                inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
             } catch (err) {
                 const msg = `Cannot open session: ${(err as Error).message}`;
                 console.error("[taco] sessionAttach failed", cwd, sessionId, err);
@@ -491,6 +493,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             const hist = await client.sessionHistory(cwd, sessionId);
             const msgs = historyToUiMessages(
                 hist.entries as Parameters<typeof historyToUiMessages>[0],
+                { inFlightAgentToolCallIds },
             );
             dispatchWs({
                 type: "ATTACH",

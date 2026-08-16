@@ -794,4 +794,46 @@ describe("historyToUiMessages — 长耗时工具不被 expire", () => {
         assert.equal(tool?.status, "ok");
         assert.equal((tool?.details as { runAs?: string } | undefined)?.runAs, "inline");
     });
+
+    /**
+     * `inFlightAgentToolCallIds` comes from `session.attach` and reflects sidecar
+     * process memory. It is the only signal that separates "subagent still
+     * working" from "subagent died with a previous process" — absence of a
+     * toolResult looks identical in both cases.
+     */
+    describe("已知在飞集合时按集合判定", () => {
+        const toolWithInFlight = (toolName: string, ids: string[]) => {
+            const ui = historyToUiMessages(inFlight(toolName), {
+                inFlightAgentToolCallIds: ids,
+            });
+            const assistant = ui.find((m) => m.kind === "assistant");
+            if (assistant?.kind !== "assistant") return assert.fail("no assistant");
+            return assistant.tools.find((t) => t.id === "call-long-1");
+        };
+
+        for (const name of ["agent", "agentContinue", "skill"]) {
+            it(`${name} 在集合内 → 保持 running`, () => {
+                const tool = toolWithInFlight(name, ["call-long-1"]);
+                assert.equal(tool?.status, "running");
+                assert.equal((tool?.details as { reason?: string } | undefined)?.reason, undefined);
+            });
+
+            it(`${name} 不在集合内 → 判为 error(进程已退出的孤儿卡片)`, () => {
+                const tool = toolWithInFlight(name, []);
+                assert.equal(tool?.status, "error");
+                const details = tool?.details as
+                    | { reason?: string; interrupted?: boolean }
+                    | undefined;
+                assert.equal(details?.reason, "subagent_orphaned");
+                assert.equal(details?.interrupted, true);
+            });
+        }
+
+        it("空集合不影响短耗时工具的既有过期行为", () => {
+            const ui = historyToUiMessages(inFlight("shell"), { inFlightAgentToolCallIds: [] });
+            const assistant = ui.find((m) => m.kind === "assistant");
+            if (assistant?.kind !== "assistant") return assert.fail("no assistant");
+            assert.equal(assistant.tools.find((t) => t.id === "call-long-1")?.status, "error");
+        });
+    });
 });

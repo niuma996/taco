@@ -147,7 +147,17 @@ export interface TypedRpc {
         workspace: WorkspaceId,
         sessionId: SessionId,
         opts?: { thinkingLevel?: ThinkingLevel },
-    ): Promise<{ attached: true; sessionId: SessionId }>;
+    ): Promise<{
+        attached: true;
+        sessionId: SessionId;
+        /**
+         * parentToolCallIds whose subagent is running in the sidecar right now.
+         * Absent on older sidecars. Process-memory state, so a fresh process
+         * reports none — which is what lets a client expire agent tool cards
+         * orphaned by a previous process exit without touching live ones.
+         */
+        inFlightAgentToolCallIds?: string[];
+    }>;
     sessionDetach(workspace: WorkspaceId, sessionId: SessionId): Promise<{ detached: true }>;
     sessionDelete(workspace: WorkspaceId, sessionId: SessionId): Promise<unknown>;
     sessionRename(workspace: WorkspaceId, sessionId: SessionId, name: string): Promise<unknown>;
