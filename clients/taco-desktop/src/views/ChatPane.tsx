@@ -66,6 +66,12 @@ export interface ChatPaneProps {
         approved: boolean,
         scope: CommandPermissionScope,
     ) => void;
+    /** Show / hide the file-tree drawer — surfaced as a button on the
+     *  session-info bar. Suppressed for IM conversations by the caller. */
+    onToggleFiles?: () => void;
+    filesOpen?: boolean;
+    /** When true, suppress the file-tree button (no filesystem to browse). */
+    isIm?: boolean;
 }
 
 export function ChatPane(props: ChatPaneProps) {
@@ -93,6 +99,9 @@ export function ChatPane(props: ChatPaneProps) {
         onCopySessionId,
         copiedSessionId,
         onCommandPermission,
+        onToggleFiles,
+        filesOpen,
+        isIm,
     } = props;
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const { addFiles, handlePaste, removeAttachment } = useImageAttachments(
@@ -188,6 +197,9 @@ export function ChatPane(props: ChatPaneProps) {
                 copiedSessionId={copiedSessionId}
                 sidebarCollapsed={sidebarCollapsed}
                 onToggleSidebar={onToggleSidebar}
+                onToggleFiles={onToggleFiles}
+                filesOpen={filesOpen}
+                isIm={isIm}
             />
             <main ref={mainRef}>
                 {(ws?.messages ?? []).map((m) => (

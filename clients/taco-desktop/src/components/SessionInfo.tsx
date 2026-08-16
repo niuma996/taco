@@ -1,10 +1,22 @@
 /**
  * SessionInfo — top-of-ChatPane session info bar: sidebar toggle on the left,
- * then id (short) / copy / log / status / creation time.
+ * then id (short) / copy / log / file-tree / status / creation time.
+ *
+ * "Open log" and "toggle file tree" live on this row on purpose. They used
+ * to be in two different topbar locations, and the file-tree button
+ * overlapped the custom window chrome on the frameless Windows build.
+ * Grouping them keeps every session-level action one click away from the
+ * active session without crowding the topbar.
+ *
+ * "Open folder…" (the workspace picker entry that switches the active
+ * workspace to a directory the user chooses) deliberately stays inside the
+ * WorkspacePicker dropdown menu rather than on this row — it is a
+ * workspace-level action, not a session-level one, and the dropdown is its
+ * natural home.
  */
 
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Check, ChevronsLeft, ChevronsRight, Copy, FileText } from "lucide-react";
+import { Check, ChevronsLeft, ChevronsRight, Copy, FileText, FolderTree } from "lucide-react";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 
@@ -14,12 +26,20 @@ export function SessionInfo({
     copiedSessionId,
     sidebarCollapsed,
     onToggleSidebar,
+    onToggleFiles,
+    filesOpen,
+    isIm,
 }: {
     ws: WorkspaceState | undefined;
     onCopy: (sid: string) => void;
     copiedSessionId: string | null;
     sidebarCollapsed: boolean;
     onToggleSidebar: () => void;
+    /** Show / hide the file-tree drawer. */
+    onToggleFiles?: () => void;
+    filesOpen?: boolean;
+    /** IM conversations have no filesystem; suppress the file-tree button only. */
+    isIm?: boolean;
 }) {
     const { t } = useT();
     const activeId = ws?.activeSession;
@@ -100,6 +120,21 @@ export function SessionInfo({
                     }}
                 >
                     <FileText size={14} aria-hidden="true" />
+                </button>
+            )}
+            {onToggleFiles && !isIm && (
+                // File-tree drawer toggle. The topbar's FolderTree button moved
+                // here to clear the overlap with the frameless window controls.
+                // Suppressed for IM conversations (no filesystem to browse).
+                <button
+                    type="button"
+                    className="session-info-files"
+                    title={t("files.buttonLabel")}
+                    aria-label={t("files.buttonLabel")}
+                    aria-pressed={filesOpen ?? false}
+                    onClick={() => onToggleFiles()}
+                >
+                    <FolderTree size={14} aria-hidden="true" />
                 </button>
             )}
         </div>

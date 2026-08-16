@@ -9,7 +9,7 @@
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { FolderTree, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { useEffect, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
@@ -523,19 +523,6 @@ export default function App() {
                             {errorBanner}
                         </div>
                     )}
-                    <button
-                        type="button"
-                        className="topbar-files"
-                        onClick={() => filesDrawer.show()}
-                        aria-label={t("files.buttonLabel")}
-                        title={t("files.buttonLabel")}
-                        aria-pressed={filesDrawer.open}
-                        // IM conversations have no filesystem — the picker
-                        // would render an empty tree.
-                        hidden={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
-                    >
-                        <FolderTree size={15} aria-hidden="true" />
-                    </button>
                 </header>
                 <div className="layout">
                     {mainView === "chat" ? (
@@ -644,6 +631,9 @@ export default function App() {
                                         }}
                                         onCopySessionId={(sid) => void copySessionId(sid)}
                                         copiedSessionId={copiedSessionId}
+                                        onToggleFiles={() => filesDrawer.show()}
+                                        filesOpen={filesDrawer.open}
+                                        isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
                                         onCommandPermission={async (
                                             requestId,
                                             approved,

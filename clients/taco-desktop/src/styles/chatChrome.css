@@ -53,7 +53,11 @@ button svg {
     align-items: center;
     justify-content: center;
     gap: 0.25rem;
-    padding: 0.35rem 0.55rem;
+    /* Vertical padding trimmed (0.35rem -> 0.25rem) so the button doesn't fill
+       the fixed 32px topbar edge-to-edge; the resulting ~2-3px gap top/bottom
+       keeps the orange chip from hugging the header border. line-height stays
+       at the browser default so icon and text keep their natural proportions. */
+    padding: 0.25rem 0.55rem;
     font-size: 0.85rem;
     white-space: nowrap;
     border-radius: var(--radius-sm);
@@ -177,6 +181,39 @@ main {
     background: var(--accent-bg-hover);
 }
 .session-info-log:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* File-tree drawer toggle — moved here from the topbar to clear the overlap
+   with the custom window controls on the frameless Windows build. Sits
+   right of the open-log button. Same visual treatment as its siblings. */
+.session-info-files {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 26px;
+    height: 26px;
+    min-width: auto;
+    background: transparent;
+    color: var(--fg-dim);
+    border-radius: var(--radius-sm);
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+        color 0.12s ease,
+        background 0.12s ease;
+}
+.session-info-files:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+.session-info-files[aria-pressed="true"] {
+    color: var(--accent);
+}
+.session-info-files:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
 }

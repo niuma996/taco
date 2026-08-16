@@ -700,26 +700,6 @@
     transform: translateY(1px);
 }
 
-/* ── Files drawer (default 280px tree / 840px with preview) ── */
-
-.topbar-files {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--fg-dim);
-    border-radius: var(--radius-sm);
-    padding: 0.25rem 0.5rem;
-    cursor: pointer;
-    font-size: 0.9rem;
-}
-.topbar-files:hover {
-    color: var(--fg);
-    background: var(--border);
-}
-.topbar-files[aria-pressed="true"] {
-    background: var(--border);
-    color: var(--fg);
-}
-
 .files-drawer {
     width: min(280px, 90vw);
     transition: width 180ms ease;
