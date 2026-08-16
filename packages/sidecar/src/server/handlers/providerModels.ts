@@ -14,6 +14,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ErrorCodes, providerListModelsSchema } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
+import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 const HTTP_TIMEOUT_MS = 5_000;
@@ -103,7 +104,10 @@ export async function performModelsRequest(
     try {
         return await fetch(url, {
             method: "GET",
-            headers: { Authorization: `Bearer ${apiKey}` },
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                ...tacoRequestHeaders(),
+            },
             signal,
         });
     } catch (e) {

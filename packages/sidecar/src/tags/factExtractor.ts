@@ -9,6 +9,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model, Models } from "@earendil-works/pi-ai";
 import { extractJsonSpan } from "../lib/jsonExtract.ts";
+import { tacoRequestHeaders } from "../runtime/runtimeResources.ts";
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -169,6 +170,9 @@ export async function extractFacts(
         const serialized = serializeMessagesForFacts(messages);
         if (serialized.trim().length === 0) return EMPTY_FACTS;
         const m = options.model ?? model;
+        // Bypasses the harness streamOptions (the harness path tags via
+        // `withTacoUserAgent`); attach the same headers here so this call
+        // is identifiable at the provider.
         const res = await models.completeSimple(
             m,
             {
@@ -177,7 +181,11 @@ export async function extractFacts(
                     { role: "user", content: buildUserPrompt(serialized), timestamp: Date.now() },
                 ],
             },
-            { maxTokens: 800, signal: options.signal },
+            {
+                maxTokens: 800,
+                signal: options.signal,
+                headers: tacoRequestHeaders(),
+            },
         );
         if (!res || typeof res !== "object") return EMPTY_FACTS;
         const text = (res as { content?: unknown }).content;

@@ -13,13 +13,16 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, Model, Models } from "@earendil-works/pi-ai";
 
 import {
     EMPTY_FACTS,
+    extractFacts,
     type FactSet,
     mergeFacts,
     serializeMessagesForFacts,
 } from "../../src/tags/factExtractor.ts";
+import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 
 // Tests intentionally cast through `unknown` so we can hand-craft minimal
 // AgentMessage-like shapes. The real serializer is tolerant on shape.
@@ -130,5 +133,61 @@ describe("mergeFacts", () => {
         assert.equal(merged.decisions.length, 1);
         assert.equal(merged.constraints.length, 1);
         assert.equal(merged.entities.length, 1);
+    });
+});
+
+/**
+ * `extractFacts` — pin-aware compaction's LLM call. Like memory extraction,
+ * this sits outside the harness streamOptions, so the tag must be passed
+ * explicitly. Regression: an earlier refactor that dropped `headers:`
+ * would have surfaced at the provider as `Nr/JS <ver>` instead of
+ * `taco/<ver>` for every compaction.
+ *
+ * `Model<any>` is what pi-agent-core exposes for `completeSimple`; we
+ * cast the minimal stub the same way the real extractor.ts does.
+ */
+describe("extractFacts — taco headers on the fact-extraction LLM call", () => {
+    it("forwards tacoRequestHeaders to models.completeSimple", async () => {
+        const version = sidecarVersion();
+        let capturedOptions: { headers?: Record<string, string> } | undefined;
+
+        const fakeModel = {} as Model<any>;
+        const fakeModels = {
+            completeSimple: async (
+                _model: Model<Api>,
+                _context: unknown,
+                options?: { headers?: Record<string, string> },
+            ) => {
+                capturedOptions = options;
+                return {
+                    role: "assistant",
+                    content: [{ type: "text", text: "{}" }],
+                };
+            },
+        } as unknown as Models;
+
+        const messages: AgentMessage[] = [
+            mk({ role: "user", content: "remember the project name is taco" }),
+            mk({ role: "assistant", content: "got it" }),
+        ];
+
+        await extractFacts(messages, fakeModels, fakeModel);
+
+        assert.ok(capturedOptions, "completeSimple should have been called");
+        assert.equal(capturedOptions.headers?.["user-agent"], `taco/${version}`);
+        assert.equal(capturedOptions.headers?.["x-taco-sidecar-version"], version);
+    });
+
+    it("returns EMPTY_FACTS (does not throw) on LLM failure", async () => {
+        const fakeModel = {} as Model<any>;
+        const fakeModels = {
+            completeSimple: async () => {
+                throw new Error("network down");
+            },
+        } as unknown as Models;
+
+        const messages: AgentMessage[] = [mk({ role: "user", content: "hi" })];
+        const out = await extractFacts(messages, fakeModels, fakeModel);
+        assert.deepEqual(out, EMPTY_FACTS);
     });
 });

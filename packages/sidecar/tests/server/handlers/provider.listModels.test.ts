@@ -5,19 +5,26 @@
  * Network is stubbed by re-registering the handler with a fake
  * `performModelsRequest` injected through deps; fetch is never called.
  *
+ * `performModelsRequest` itself (the outbound HTTP builder) is exercised
+ * separately in the lower "performModelsRequest" suite via node:test mock
+ * on globalThis.fetch — that one cannot go through deps without altering
+ * the production signature just to make it observable.
+ *
  * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/provider.listModels.test.ts
  */
 
 import { strict as assert } from "node:assert";
-import { before, beforeEach, describe, it } from "node:test";
+import { mock, before, beforeEach, describe, it } from "node:test";
 import {
     extractModelIds,
     type performModelsRequest as RealPerform,
+    performModelsRequest,
     registerProviderModelsHandlers,
     TimeoutError,
 } from "../../../src/server/handlers/providerModels.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { sidecarVersion } from "../../../src/runtime/runtimeResources.ts";
 
 type Stub = (url: string, apiKey: string, signal: AbortSignal) => Promise<FakeResponse>;
 
@@ -256,5 +263,30 @@ describe("extractModelIds (schema tolerance)", () => {
         assert.equal(extractModelIds("hello"), null);
         assert.equal(extractModelIds(42), null);
         assert.equal(extractModelIds(null), null);
+    });
+});
+
+describe("performModelsRequest (outbound HTTP builder)", () => {
+    // The outbound builder used to ship no User-Agent at all, leaving the
+    // request identifiable only by Node's default (`User-Agent: node`).
+    // These tests pin the taco identification on every /v1/models probe.
+    it("sends user-agent and x-taco-sidecar-version matching the sidecar version", async () => {
+        const version = sidecarVersion();
+        let captured: RequestInit | undefined;
+        const restore = mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+            captured = init;
+            return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        });
+
+        try {
+            await performModelsRequest("https://example.com/v1/models", "sk-test", AbortSignal.timeout(1000));
+            assert.ok(captured, "fetch should have been called");
+            const headers = captured.headers as Record<string, string>;
+            assert.equal(headers["user-agent"], `taco/${version}`);
+            assert.equal(headers["x-taco-sidecar-version"], version);
+            assert.equal(headers["Authorization"], "Bearer sk-test");
+        } finally {
+            restore.mock.restore();
+        }
     });
 });

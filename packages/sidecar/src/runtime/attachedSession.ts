@@ -67,33 +67,62 @@ export interface AbortResult {
 }
 
 /**
- * Tag provider requests with the sidecar version. Skipped for OAuth providers,
- * whose `user-agent` must stay `claude-cli/<version>` — pi-ai hardcodes that
- * identity to keep Claude Code's OAuth beta features enabled, and these headers
- * merge last and would override it. `checkAuth` is used over `getAuth` because
- * it never triggers a token refresh; when it cannot classify the provider the
- * tag is dropped rather than risking an override of that OAuth identity.
+ * Tag provider requests with the sidecar version.
+ *
+ * `user-agent: taco/<version>` — set on every NON-OAuth provider. OAuth
+ * providers (Anthropic OAuth in particular) need their
+ * `claude-cli/<version>` identity preserved, and pi-ai's openai / anthropic
+ * SDKs read `this.constructor.name` for the default UA — overriding that
+ * with `taco/<version>` would lose Claude Code's OAuth beta features. The
+ * OAuth check uses `checkAuth` rather than `getAuth` because the former
+ * never triggers a token refresh.
+ *
+ * `x-taco-sidecar-version: <version>` — set on EVERY provider, OAuth or
+ * not. It's metadata (which taco build made the call), not identity, so
+ * it never conflicts with the OAuth UA. On an OAuth call it is the only
+ * taco tag that survives, which is enough to attribute the request to a
+ * taco version in the provider's access logs.
+ *
+ * If `checkAuth` cannot classify the provider (returns undefined or
+ * throws), we skip the `user-agent` override but still attach the
+ * version header — the version is safe; the UA is the identity-bearing
+ * field.
  */
 export async function withTacoUserAgent(
     streamOptions: AgentHarnessStreamOptions,
     models: Models,
     provider: string,
 ): Promise<AgentHarnessStreamOptions> {
+    let skipUserAgent = false;
     try {
         const authCheck = await models.checkAuth(provider);
-        if (authCheck?.type === "oauth") return streamOptions;
+        skipUserAgent = authCheck?.type === "oauth";
     } catch {
-        // Credential-store failures must not block attach; skip the tag instead.
-        return streamOptions;
+        // Credential-store failures must not block attach; safe to drop
+        // the UA override (we don't know if it would override an OAuth
+        // identity) but keep the version header — it's metadata only.
+        skipUserAgent = true;
     }
 
     const version = sidecarVersion();
+    // Strip any caller-supplied `user-agent` on the OAuth path. pi-ai
+    // hardcodes `claude-cli/<version>` for Anthropic OAuth to keep Claude
+    // Code's OAuth beta features enabled, and a caller's UA in
+    // `streamOptions.headers` would otherwise survive the spread and
+    // override it (we are the last merge layer before pi-ai's defaults).
+    const callerHeaders = { ...streamOptions.headers };
+    if (skipUserAgent) delete callerHeaders["user-agent"];
+
+    const tags: Record<string, string> = {
+        "x-taco-sidecar-version": version,
+        ...(skipUserAgent ? {} : { "user-agent": `taco/${version}` }),
+    };
+
     return {
         ...streamOptions,
         headers: {
-            ...streamOptions.headers,
-            "user-agent": `taco/${version}`,
-            "x-taco-sidecar-version": version,
+            ...callerHeaders,
+            ...tags,
         },
     };
 }

@@ -55,6 +55,33 @@ function readPackageVersion(): string {
 const UNKNOWN_VERSION = "0.0.0-unknown";
 
 /**
+ * Headers that identify every taco-originated outbound HTTP request
+ * (LLM chat, LLM extract, /v1/models probe). The same pair is used in:
+ *
+ *   - `withTacoUserAgent` (attachedSession) — main conversation turns
+ *     routed through the harness streamOptions, which pi-ai forwards
+ *     as `defaultHeaders` to the OpenAI SDK (overriding its built-in
+ *     User-Agent, which the sidecar bundle mangles to `Nr/JS <ver>`
+ *     after minification).
+ *   - `performModelsRequest` (providerModels) — `/v1/models` probes.
+ *   - `MemoryExtractorImpl.extract` — fire-and-forget extraction call
+ *     at turn_end; bypasses harness streamOptions entirely.
+ *   - `extractFacts` (factExtractor) — fact extraction in pin-aware
+ *     compaction; also bypasses harness streamOptions.
+ *
+ * OAuth paths deliberately skip the tag (see `withTacoUserAgent`) so
+ * Anthropic's `claude-cli/<version>` identity survives and keeps
+ * Claude Code's OAuth beta features enabled.
+ */
+export function tacoRequestHeaders(): Record<string, string> {
+    const version = sidecarVersion();
+    return {
+        "user-agent": `taco/${version}`,
+        "x-taco-sidecar-version": version,
+    };
+}
+
+/**
  * require resolution root for npm extensions. Bundled release ships no
  * node_modules, so the default points to `$TACO_HOME/extensions`;
  * TACO_EXTENSION_ROOT can override for tests/deploy.

@@ -8,7 +8,10 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
-import { parseExtractionResult } from "../../src/memory/local/extractor.ts";
+import type { Api, Model, Models, TextContent } from "@earendil-works/pi-ai";
+
+import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
+import { MemoryExtractorImpl, parseExtractionResult } from "../../src/memory/local/extractor.ts";
 
 describe("parseExtractionResult", () => {
     const createdAt = "2026-07-26T00:00:00.000Z";
@@ -115,5 +118,75 @@ describe("parseExtractionResult", () => {
             assert.equal(e.createdAt, createdAt);
             assert.equal(e.workspaceId, ws);
         }
+    });
+});
+
+/**
+ * `MemoryExtractorImpl.extract` — fire-and-forget LLM call at turn_end.
+ * This call sits OUTSIDE the harness streamOptions (which is where
+ * `withTacoUserAgent` attaches the taco tag for main conversation
+ * turns), so a regression here used to surface at the provider as
+ * `Nr/JS <ver>` — the bundled sidecar's mangled default. Pin it.
+ */
+describe("MemoryExtractorImpl — taco headers on the extraction LLM call", () => {
+    it("forwards tacoRequestHeaders to models.completeSimple", async () => {
+        const version = sidecarVersion();
+        let capturedOptions: { headers?: Record<string, string> } | undefined;
+
+        const fakeModel = { provider: "test", id: "m" } as unknown as Model<Api>;
+        const fakeModels = {
+            completeSimple: async (
+                _model: Model<Api>,
+                _context: unknown,
+                options?: { headers?: Record<string, string> },
+            ) => {
+                capturedOptions = options;
+                // Return an assistant message with valid JSON so the extractor
+                // proceeds past the early return.
+                return {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify([{ name: "n", type: "user", content: "c" }]),
+                        } satisfies TextContent,
+                    ],
+                };
+            },
+        } as unknown as Models;
+
+        const store = { appendEntry: async () => undefined };
+        const extractor = new MemoryExtractorImpl(fakeModels, fakeModel, store, "ws-1");
+
+        // Need enough text to clear the 50-token threshold.
+        const longConversation =
+            "user: " + "this is a memory-worthy conversation ".repeat(20) + "\nassistant: ok";
+        await extractor.onTurnEnd([
+            { role: "user", content: longConversation } as unknown as Parameters<
+                MemoryExtractorImpl["onTurnEnd"]
+            >[0][number],
+        ]);
+
+        assert.ok(capturedOptions, "completeSimple should have been called");
+        assert.equal(capturedOptions.headers?.["user-agent"], `taco/${version}`);
+        assert.equal(capturedOptions.headers?.["x-taco-sidecar-version"], version);
+    });
+
+    it("does not invoke the LLM when the conversation is below the token gate", async () => {
+        let called = false;
+        const fakeModels = {
+            completeSimple: async () => {
+                called = true;
+                return undefined;
+            },
+        } as unknown as Models;
+        const fakeModel = {} as Model<Api>;
+        const extractor = new MemoryExtractorImpl(fakeModels, fakeModel, { appendEntry: async () => undefined }, "ws-1");
+
+        await extractor.onTurnEnd([{ role: "user", content: "hi" } as unknown as Parameters<
+            MemoryExtractorImpl["onTurnEnd"]
+        >[0][number]]);
+
+        assert.equal(called, false);
     });
 });

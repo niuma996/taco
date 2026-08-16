@@ -12,6 +12,7 @@ import type { Api, Model, Models, TextContent } from "@earendil-works/pi-ai";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { extractJsonSpan } from "../../lib/jsonExtract.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
 import {
     MEMORY_ENTRY_TYPES,
@@ -195,7 +196,11 @@ export class MemoryExtractorImpl implements MemoryExtractor {
         // Truncate to last ~8000 chars
         const truncated = serialized.length > MAX_CHARS ? serialized.slice(-MAX_CHARS) : serialized;
 
-        // LLM call
+        // LLM call — bypasses the harness streamOptions (which carries the
+        // `withTacoUserAgent` tag for main turns), so we attach the same
+        // taco identification here. Without it, this call shows up at the
+        // provider as the OpenAI SDK default `Nr/JS <ver>` (the bundled
+        // sidecar mangles the class name).
         const { system, user } = buildExtractionPrompt(truncated);
         const res = await this.models.completeSimple(
             this.model,
@@ -203,7 +208,7 @@ export class MemoryExtractorImpl implements MemoryExtractor {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            { maxTokens: MAX_TOKENS, temperature: LLM_TEMPERATURE },
+            { maxTokens: MAX_TOKENS, temperature: LLM_TEMPERATURE, headers: tacoRequestHeaders() },
         );
 
         if (!res) return;
