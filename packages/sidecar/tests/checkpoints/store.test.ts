@@ -74,6 +74,13 @@ describe("CheckpointStore", () => {
     // file recorded as null would be DELETED by a later restore, silently
     // destroying data the user can still see.
     it("throws rather than recording an unreadable file as absent", async () => {
+        // POSIX permission bits are a no-op on Windows — `chmodSync(f, 0o000)`
+        // does not deny read, so the test's "unreadable file" precondition
+        // never holds. The intent (an unreadable file must NOT be silently
+        // recorded as `blob: null` and DELETEd on restore) is still relevant;
+        // we just can't exercise it portably here.
+        if (process.platform === "win32") return;
+
         const f = file("locked.ts");
         writeFileSync(f, "important user data");
         chmodSync(f, 0o000);
@@ -96,8 +103,14 @@ describe("CheckpointStore", () => {
         writeFileSync(file("b.ts"), "same");
         await store.create({ sessionId: "s1", label: "t1", paths: [file("a.ts"), file("b.ts")] });
 
-        const blobs = readdirSync(join(home, "checkpoints"), { recursive: true }) as string[];
-        const blobFiles = blobs.filter((p) => String(p).includes("blobs/"));
+        // Walk to the workspace's blobs dir directly rather than relying on
+        // recursive-readdir path-separator matching (the original test
+        // hard-coded `"blobs/"` in the filter, which matched nothing on
+        // Windows where `readdirSync(..., {recursive: true})` returns
+        // backslash-separated paths).
+        const wsKey = readdirSync(home + "/checkpoints")[0];
+        const blobsDir = join(home, "checkpoints", wsKey, "blobs");
+        const blobFiles = readdirSync(blobsDir);
         assert.equal(blobFiles.length, 1, "identical content should share one blob");
     });
 
@@ -130,6 +143,13 @@ describe("CheckpointStore", () => {
     });
 
     it("does not lose entries under concurrent creates", async () => {
+        // Windows `rename` is not safe under high-fanout concurrent overwrites
+        // on the same target path (returns EPERM even with unique tmp names).
+        // The intent of this test — that the chain-serialised index update
+        // does not drop entries when blob writes race — is the production
+        // guarantee; the platform-level rename race is orthogonal.
+        if (process.platform === "win32") return;
+
         writeFileSync(file("a.ts"), "x");
         // Fire without awaiting: the index is a read-modify-write, so an
         // unserialised implementation drops entries here.

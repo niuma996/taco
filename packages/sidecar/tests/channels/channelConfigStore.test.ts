@@ -30,6 +30,13 @@ describe("FileChannelConfigStore", () => {
     });
 
     it("writes the state file with 0o600", async () => {
+        // POSIX mode bits are a no-op on Windows (see fsPermissions.ts),
+        // so the assertion is meaningless there. The production code
+        // emits a one-shot warning to make this discoverable, but the
+        // ACL a per-user %LOCALAPPDATA% install gives the file is
+        // enough to keep sibling accounts off it.
+        if (process.platform === "win32") return;
+
         const store = new FileChannelConfigStore("wechat", {}, home);
         await store.set("token", "t-123");
 

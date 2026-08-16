@@ -116,6 +116,12 @@ describe("ImWorkspacePolicyStore", () => {
     });
 
     it("writes the policy file with 0o600", async () => {
+        // POSIX mode bits are a no-op on Windows (see fsPermissions.ts);
+        // the per-user %LOCALAPPDATA% ACL is the only thing keeping the
+        // policy file off sibling accounts on a shared host, and that's
+        // out of scope for this assertion.
+        if (process.platform === "win32") return;
+
         await store.setChannelDefault("wechat", { tools: { shell: "allow" } });
         const mode = fs.statSync(policyPath("wechat")).mode & 0o777;
         assert.equal(mode, 0o600);

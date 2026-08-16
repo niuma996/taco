@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { IM_CWD_PREFIX, makeImCwd, parseImCwd } from "@taco-ai/protocol";
 import {
@@ -62,7 +63,10 @@ describe("virtualWorkspace", () => {
     });
 
     it("makeImSessionsRoot joins under tacoHome", () => {
-        assert.equal(makeImSessionsRoot("/home/x/.taco", "ch1"), "/home/x/.taco/sessions/im/ch1");
+        // Path is joined with `path.join` (POSIX "/" on Linux/macOS, "\"
+        // on Windows). The original assertion hard-coded "/" and broke
+        // on Windows.
+        assert.equal(makeImSessionsRoot("/home/x/.taco", "ch1"), join("/home/x/.taco", "sessions", "im", "ch1"));
     });
 
     it("IM_CWD_PREFIX is im://", () => {

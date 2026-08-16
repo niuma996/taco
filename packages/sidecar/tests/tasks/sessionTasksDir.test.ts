@@ -11,7 +11,9 @@ import { createTaskStore } from "../../src/tasks/taskStore.ts";
 describe("sessionTasksDir", () => {
     it("is scoped under the caller-supplied sessionsRoot", () => {
         const dir = sessionTasksDir("abc-123", "/var/taco/sessions");
-        assert.match(dir, /\/var\/taco\/sessions\/abc-123\/tasks$/);
+        // Path is joined with `path.join`, so use `join` here too — the
+        // original assertion hard-coded POSIX "/" and broke on Windows.
+        assert.equal(dir, join("/var/taco", "sessions", "abc-123", "tasks"));
     });
 
     it("follows the same root JsonlSessionRepo uses (TACO_HOME-aware)", () => {
@@ -19,7 +21,7 @@ describe("sessionTasksDir", () => {
         // data and task state onto different roots — attach would hydrate an
         // empty task list.
         const dir = sessionTasksDir("abc-123", "/srv/taco/sessions");
-        assert.equal(dir, "/srv/taco/sessions/abc-123/tasks");
+        assert.equal(dir, join("/srv/taco", "sessions", "abc-123", "tasks"));
     });
 });
 
