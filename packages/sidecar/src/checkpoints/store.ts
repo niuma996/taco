@@ -98,11 +98,24 @@ async function atomicWrite(
     try {
         await rename(tmp, path);
         if (opts.syncParent) {
-            const parentFh = await open(dirname(path), "r");
+            // Parent fsync is best-effort. The data is already on disk via
+            // the rename; the fsync only adds a guarantee against power
+            // loss between the rename and the directory entry update.
+            // Windows commonly returns EPERM (and sandboxed FS layers
+            // ENOTSUP) on directory fsync — those are platform limits,
+            // not data-loss bugs. A warning keeps a real issue (EACCES,
+            // etc.) visible without failing the checkpoint write.
             try {
-                await parentFh.sync();
-            } finally {
-                await parentFh.close();
+                const parentFh = await open(dirname(path), "r");
+                try {
+                    await parentFh.sync();
+                } finally {
+                    await parentFh.close();
+                }
+            } catch (e) {
+                console.warn(
+                    `atomicWrite: parent fsync failed for ${dirname(path)} (${(e as NodeJS.ErrnoException).code ?? e}), continuing`,
+                );
             }
         }
     } catch (e) {
