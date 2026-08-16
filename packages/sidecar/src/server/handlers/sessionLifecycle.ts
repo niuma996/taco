@@ -153,7 +153,14 @@ export function registerSessionLifecycleHandlers(): void {
         true,
         async ({ workspace, params }: MethodCtx<AttachParams>) => {
             await workspace.attach(params.sessionId, { thinkingLevel: params.thinkingLevel });
-            return { attached: true, sessionId: params.sessionId };
+            // Read after attach so the client can tell a live agent tool call from
+            // one orphaned by a previous process exit. A history read alone cannot:
+            // both look like a toolCall with no toolResult on disk.
+            return {
+                attached: true,
+                sessionId: params.sessionId,
+                inFlightAgentToolCallIds: workspace.inFlightAgentToolCallIds(params.sessionId),
+            };
         },
         { command: true, schema: sessionAttachSchema },
     );
