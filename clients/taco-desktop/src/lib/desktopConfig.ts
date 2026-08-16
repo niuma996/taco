@@ -11,8 +11,28 @@ export interface OnboardingStatus {
     skippedAt?: string;
 }
 
+/**
+ * Persisted workspace-list state, stored under `desktop.json.workspaces`.
+ *
+ * `opened` mirrors what used to live in `localStorage["taco.workspaces"]` —
+ * the cwd list shown in the workspace dropdown. `active` mirrors
+ * `localStorage["taco.activeCwd"]` and is one of `opened` (or, on first
+ * boot before anything is opened, the default cwd).
+ *
+ * Kept out of localStorage: localStorage is per-WebView2 origin, so dev
+ * (localhost:1420) and the packaged build (tauri.localhost) would each
+ * remember a different list. desktop.json lives under $TACO_HOME and is
+ * shared across both, which is what "I switched to nium-wiki yesterday in
+ * dev and want it back in the packaged build" wants.
+ */
+export interface WorkspaceListState {
+    opened: string[];
+    active: string;
+}
+
 export interface DesktopConfig {
     onboarding?: OnboardingStatus;
+    workspaces?: WorkspaceListState;
 }
 
 async function readRaw(): Promise<string> {

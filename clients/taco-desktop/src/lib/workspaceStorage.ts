@@ -1,28 +1,47 @@
 /**
- * Workspace localStorage persistence — centralizes `LS_WORKSPACES` / `LS_ACTIVE` constants and
- * read/write/validation logic. Previously scattered across App.tsx + init() + openWorkspace()
- * in 3 places; any cwd validation rule change required updating all 3. Now hooks/views call
- * a single API.
+ * Workspace persistence — centralizes the cwd list (`opened`) and the active
+ * selection (`active`). Previously this lived in `localStorage` under
+ * `taco.workspaces` / `taco.activeCwd`; it now lives in `~/.taco/desktop.json`
+ * under `workspaces` so the value is shared across WebView2 origins
+ * (dev `localhost:1420` vs packaged `tauri.localhost`) and follows the user
+ * between machines.
+ *
+ * Migration: on first call, if desktop.json has no `workspaces` field but
+ * localStorage still carries the old keys, copy them over and clear the
+ * localStorage entries. After migration runs once the LS keys are gone and
+ * the read path takes the desktop.json branch on every subsequent load.
+ *
+ * Hooks/views call a single API: `loadOpenedCwds`, `loadActiveCwd`,
+ * `resolveActiveCwd` (pure), `persistCwds`, `persistActiveCwd`,
+ * `pruneMissingCwds`.
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { readDesktopConfig, writeDesktopConfig } from "./desktopConfig.ts";
 
-export const LS_WORKSPACES = "taco.workspaces";
-export const LS_ACTIVE = "taco.activeCwd";
+// Old localStorage keys — kept ONLY so the one-shot migration can read them
+// once and clear them. No new code should write to these.
+const LS_WORKSPACES_LEGACY = "taco.workspaces";
+const LS_ACTIVE_LEGACY = "taco.activeCwd";
+
+/** Flag so we don't attempt the LS→desktop.json migration more than once per process. */
+let migrationChecked = false;
+
+/**
+ * Test-only: re-arms the one-shot migration. Production code should never
+ * call this — `loadWorkspaces` is enough.
+ */
+export function __resetMigrationStateForTests(): void {
+    migrationChecked = false;
+}
 
 /**
  * Synchronous fallback default workspace cwd.
  *
  * The real value is `$TACO_HOME/workspace`, but that requires a runtime query to Rust, while
- * `loadOpenedCwds` / `resolveActiveCwd` are synchronous pure functions. We default to the empty
- * string — `isValidWorkspaceCwd("")` returns false, so no read before `initDefaultCwd()` succeeds
- * will surface a wrong hard-coded path. `resolveActiveCwd` takes the `opened[0]` branch
- * (already-persisted cwds from localStorage) rather than the fallback string.
- *
- * Historical baggage: we once hard-coded `/tmp/taco-demo` — macOS periodically cleans `/tmp`,
- * the code never created it, so first launch pointed to a non-existent path; the sidecar used
- * it as the stdio MCP server default cwd, and spawns failed with "command ENOENT" without
- * pointing to the real cause. The empty-string fallback removes the footgun.
+ * pure helpers (`resolveActiveCwd`) need to run synchronously. We default to the empty
+ * string — `isValidWorkspaceCwd("")` returns false, so no read before `initDefaultCwd()`
+ * succeeds will surface a wrong hard-coded path.
  */
 let defaultCwd = "";
 
@@ -33,7 +52,7 @@ export function getDefaultCwd(): string {
 
 /**
  * Resolves `$TACO_HOME/workspace` from Rust (also creates it), then caches it. Called once
- * at startup, before reading localStorage. On failure keeps the fallback value; does not block.
+ * at startup, before reading workspace state. On failure keeps the fallback value; does not block.
  */
 export async function initDefaultCwd(): Promise<string> {
     try {
@@ -130,66 +149,172 @@ export function lastSegment(p: string): string {
     return m ? m[0] : p;
 }
 
-/** Reads the list of opened workspaces from localStorage (cwd array). */
-export function loadOpenedCwds(): string[] {
+/**
+ * One-shot migration: if desktop.json has no `workspaces` field but localStorage
+ * still carries the legacy `taco.workspaces` / `taco.activeCwd` keys (left over
+ * from a previous install that stored them there), copy them across and clear
+ * the localStorage entries. Idempotent — guarded by `migrationChecked`.
+ *
+ * Returns the migrated state when migration fired, or `null` when there was
+ * nothing to migrate. Callers should fall back to the empty default in that
+ * case.
+ *
+ * Exported with a `__` prefix for unit tests; production code goes through
+ * `loadWorkspaces` which calls this internally.
+ */
+export function __migrateFromLocalStorage(): { opened: string[]; active: string } | null {
+    if (migrationChecked) return null;
+    migrationChecked = true;
+    if (typeof localStorage === "undefined") return null;
+    let opened: string[] | null = null;
+    let active: string | null = null;
     try {
-        const raw = localStorage.getItem(LS_WORKSPACES);
-        const arr = raw ? (JSON.parse(raw) as unknown) : null;
-        if (Array.isArray(arr)) {
-            const all = arr.filter((x): x is string => typeof x === "string");
-            const valid = all.filter(isValidWorkspaceCwd);
-            const dropped = all.length - valid.length;
-            if (dropped > 0) {
-                console.warn(
-                    `[taco] dropped ${dropped} invalid cwd(s) from localStorage (likely glob / shell patterns); clearing stored list.`,
+        const raw = localStorage.getItem(LS_WORKSPACES_LEGACY);
+        if (raw) {
+            const parsed = JSON.parse(raw) as unknown;
+            if (Array.isArray(parsed)) {
+                opened = parsed.filter(
+                    (x): x is string => typeof x === "string" && isValidWorkspaceCwd(x),
                 );
-                try {
-                    localStorage.setItem(LS_WORKSPACES, JSON.stringify(valid));
-                } catch {
-                    // ignore quota
-                }
             }
-            if (valid.length > 0) return valid;
         }
     } catch {
-        // ignore corrupt storage
+        // ignore corrupt LS — treat as no migration source
     }
-    // Empty defaultCwd means `initDefaultCwd()` hasn't run yet — return []
-    // instead of [""] so callers don't surface an invalid cwd before Rust
-    // resolves the real path.
-    return defaultCwd ? [defaultCwd] : [];
+    try {
+        const rawActive = localStorage.getItem(LS_ACTIVE_LEGACY);
+        if (rawActive && isValidWorkspaceCwd(rawActive)) {
+            active = rawActive;
+        }
+    } catch {
+        // ignore
+    }
+    if (!opened && !active) return null;
+    // Clear the legacy keys so a subsequent fallback (e.g. desktop.json write
+    // failed) doesn't read them again and confuse the next read path.
+    try {
+        if (opened !== null) localStorage.removeItem(LS_WORKSPACES_LEGACY);
+        if (active !== null) localStorage.removeItem(LS_ACTIVE_LEGACY);
+    } catch {
+        // ignore quota / disabled storage
+    }
+    return {
+        opened: opened ?? [],
+        active: active ?? "",
+    };
 }
 
-/** Validates and returns the current active cwd: stored > opened[0] > default cwd. */
+/**
+ * Reads the persisted `workspaces` block from `desktop.json`. On first call
+ * also performs a one-shot migration from the legacy `localStorage` keys.
+ * Returns `{ opened: [], active: "" }` when nothing is stored anywhere.
+ *
+ * Async because the read crosses an IPC boundary into the Rust host
+ * (`desktop_config_read`). The previous synchronous `loadOpenedCwds` is
+ * kept as a thin async wrapper so call sites that already `await` it keep
+ * working.
+ */
+export async function loadWorkspaces(): Promise<{ opened: string[]; active: string }> {
+    const config = await readDesktopConfig();
+    if (config.workspaces && Array.isArray(config.workspaces.opened)) {
+        // Existing desktop.json state — no migration needed.
+        const opened = config.workspaces.opened.filter(isValidWorkspaceCwd);
+        const active = isValidWorkspaceCwd(config.workspaces.active) ? config.workspaces.active : "";
+        return { opened, active };
+    }
+    // No workspaces in desktop.json yet — try the one-shot LS migration.
+    const migrated = __migrateFromLocalStorage();
+    if (migrated) {
+        // Persist immediately so a crash before the next `persistCwds` doesn't
+        // leave the user re-doing the migration. Failure here is non-fatal —
+        // the next read will still try, and the in-memory state is correct.
+        try {
+            await writeDesktopConfig({ workspaces: migrated });
+        } catch (e) {
+            console.warn("[taco] failed to persist migrated workspaces; will retry on next read", e);
+        }
+        return migrated;
+    }
+    return { opened: [], active: "" };
+}
+
+/**
+ * Async wrapper that returns just the opened list. Drop-in replacement for
+ * the old synchronous `loadOpenedCwds()` — every existing call site already
+ * `await`s it (it was already async-shaped in `pruneMissingCwds`'s caller).
+ */
+export async function loadOpenedCwds(): Promise<string[]> {
+    const { opened } = await loadWorkspaces();
+    return opened;
+}
+
+/**
+ * Async wrapper that returns just the active cwd (empty string when unset).
+ * The previous `localStorage.getItem(LS_ACTIVE)` callers now use this.
+ */
+export async function loadActiveCwd(): Promise<string> {
+    const { active } = await loadWorkspaces();
+    return active;
+}
+
+/**
+ * Validates and returns the current active cwd: stored > opened[0] > default cwd.
+ *
+ * Pure function — does not read storage. Callers fetch the stored value via
+ * `loadActiveCwd()` and the opened list via `loadOpenedCwds()` and pass them
+ * in. Kept as a pure function so the resolution rules (which cwd wins) stay
+ * unit-testable without stubbing IPC.
+ */
 export function resolveActiveCwd(stored: string | null, opened: string[]): string {
     if (stored && isValidWorkspaceCwd(stored)) return stored;
     if (stored && !isValidWorkspaceCwd(stored)) {
         console.warn(
-            `[taco] LS_ACTIVE contains invalid cwd ${JSON.stringify(stored)}; falling back`,
+            `[taco] stored active cwd ${JSON.stringify(stored)} is invalid; falling back`,
         );
-        try {
-            localStorage.removeItem(LS_ACTIVE);
-        } catch {
-            // ignore
-        }
     }
     return opened[0] ?? defaultCwd;
 }
 
-/** Writes the active cwd to localStorage; silently fails on quota / disabled storage. */
-export function persistActiveCwd(cwd: string): void {
+/**
+ * Persists the opened-workspace list. Async because the write crosses an IPC
+ * boundary; the caller can `await` if it needs to know the result, or fire
+ * and forget (the function logs but does not throw on failure).
+ */
+export async function persistCwds(cwds: string[]): Promise<void> {
+    // Read the current active so we don't accidentally clear it when only
+    // updating the opened list.
+    const current = await readDesktopConfig();
+    const active = current.workspaces?.active ?? "";
     try {
-        localStorage.setItem(LS_ACTIVE, cwd);
-    } catch {
-        // ignore
+        await writeDesktopConfig({
+            workspaces: {
+                opened: cwds.filter(isValidWorkspaceCwd),
+                active,
+            },
+        });
+    } catch (e) {
+        console.warn("[taco] failed to persist workspaces", e);
     }
 }
 
-/** Writes the workspace list to localStorage. */
-export function persistCwds(cwds: string[]): void {
+/**
+ * Persists the active cwd. Same fire-and-forget contract as `persistCwds`:
+ * returns a Promise the caller can `await`, but never throws. If the write
+ * fails, the next read still returns the previous value (the in-memory
+ * `active` state used by the running session is independent).
+ */
+export async function persistActiveCwd(cwd: string): Promise<void> {
+    if (!isValidWorkspaceCwd(cwd)) {
+        console.warn(`[taco] refusing to persist invalid active cwd ${JSON.stringify(cwd)}`);
+        return;
+    }
+    const current = await readDesktopConfig();
+    const opened = current.workspaces?.opened ?? [];
     try {
-        localStorage.setItem(LS_WORKSPACES, JSON.stringify(cwds));
-    } catch {
-        // ignore
+        await writeDesktopConfig({
+            workspaces: { opened, active: cwd },
+        });
+    } catch (e) {
+        console.warn("[taco] failed to persist active cwd", e);
     }
 }

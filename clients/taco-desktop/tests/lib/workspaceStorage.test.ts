@@ -9,13 +9,43 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
     applyExistenceFlags,
+    __migrateFromLocalStorage,
+    __resetMigrationStateForTests,
     isValidWorkspaceCwd,
     lastSegment,
     reseedDefaultIfEmpty,
 } from "../../src/lib/workspaceStorage.ts";
+
+class MemoryStorage {
+    private readonly map = new Map<string, string>();
+    getItem(key: string): string | null {
+        return this.map.has(key) ? (this.map.get(key) as string) : null;
+    }
+    setItem(key: string, value: string): void {
+        this.map.set(key, String(value));
+    }
+    removeItem(key: string): void {
+        this.map.delete(key);
+    }
+    clear(): void {
+        this.map.clear();
+    }
+}
+
+const memoryStorage = new MemoryStorage();
+
+beforeEach(() => {
+    memoryStorage.clear();
+    (globalThis as unknown as { localStorage: MemoryStorage }).localStorage = memoryStorage;
+    __resetMigrationStateForTests();
+});
+
+afterEach(() => {
+    memoryStorage.clear();
+});
 
 const DEFAULT = "/Users/me/.taco/workspace";
 
@@ -102,5 +132,87 @@ describe("reseedDefaultIfEmpty", () => {
         // create an invalid cwd the resolver would strip anyway; better to
         // surface the failure than mask it.
         assert.deepEqual(reseedDefaultIfEmpty([], ""), []);
+    });
+});
+
+describe("__migrateFromLocalStorage", () => {
+    it("migrates opened + active from LS and clears the legacy keys", () => {
+        // The one-shot path that fires on the first call after the workspace
+        // storage moved to desktop.json. The legacy keys are removed in the
+        // same step so a subsequent read (e.g. a crashed write's recovery
+        // path) cannot resurrect them.
+        memoryStorage.setItem(
+            "taco.workspaces",
+            JSON.stringify(["/Users/me/repo-a", "/Users/me/repo-b"]),
+        );
+        memoryStorage.setItem("taco.activeCwd", "/Users/me/repo-b");
+
+        const migrated = __migrateFromLocalStorage();
+
+        assert.deepEqual(migrated, {
+            opened: ["/Users/me/repo-a", "/Users/me/repo-b"],
+            active: "/Users/me/repo-b",
+        });
+        assert.equal(memoryStorage.getItem("taco.workspaces"), null);
+        assert.equal(memoryStorage.getItem("taco.activeCwd"), null);
+    });
+
+    it("filters out glob / shell-metacharacter cwds during migration", () => {
+        // Same validation rules as the live read path. A stale LS value
+        // pointing at e.g. `/repo/*` would otherwise sneak into the persisted
+        // list and break the workspace selector's path join.
+        memoryStorage.setItem(
+            "taco.workspaces",
+            JSON.stringify(["/good/repo", "/bad/*", "/bad/$HOME"]),
+        );
+        memoryStorage.setItem("taco.activeCwd", "/bad/$HOME");
+
+        const migrated = __migrateFromLocalStorage();
+
+        // opened keeps only the valid cwd; active falls back to "" because the
+        // stored value was invalid (the resolveActiveCwd resolver downstream
+        // then re-derives it from opened[0] or the default cwd).
+        assert.deepEqual(migrated, { opened: ["/good/repo"], active: "" });
+    });
+
+    it("returns null when LS has neither legacy key", () => {
+        // Fresh install after the cutover — no legacy data, nothing to do.
+        assert.equal(__migrateFromLocalStorage(), null);
+    });
+
+    it("is idempotent across calls within a process", () => {
+        // The guard prevents repeat runs. Without it, a hot-reload or a
+        // second loadWorkspaces would re-copy (and re-clear) the same LS
+        // keys, which is fine functionally but noisy in logs and wastes
+        // IPC roundtrips.
+        memoryStorage.setItem("taco.workspaces", JSON.stringify(["/a", "/b"]));
+
+        const first = __migrateFromLocalStorage();
+        // Re-seed LS after the first call wiped it, to confirm the second
+        // call short-circuits rather than re-migrating.
+        memoryStorage.setItem("taco.workspaces", JSON.stringify(["/x"]));
+        const second = __migrateFromLocalStorage();
+
+        assert.deepEqual(first, { opened: ["/a", "/b"], active: "" });
+        assert.equal(second, null);
+        // The /x we re-seeded stays in LS — the guard won, so the legacy
+        // path was not taken again. Real production behavior: this branch
+        // is only hit in unit tests; in production loadWorkspaces is the
+        // sole caller and the guard prevents repeat reads.
+        assert.equal(memoryStorage.getItem("taco.workspaces"), JSON.stringify(["/x"]));
+    });
+
+    it("survives corrupt JSON in the legacy opened key", () => {
+        // A malformed localStorage value would otherwise throw and abort the
+        // whole init path. We swallow the parse error and treat it as "no
+        // migration source" so the read path falls back to the empty default.
+        memoryStorage.setItem("taco.workspaces", "{not valid json");
+        memoryStorage.setItem("taco.activeCwd", "/Users/me/repo");
+
+        const migrated = __migrateFromLocalStorage();
+
+        // opened is unreadable so we get no opened migration, but the active
+        // cwd is a plain string and is honored.
+        assert.deepEqual(migrated, { opened: [], active: "/Users/me/repo" });
     });
 });

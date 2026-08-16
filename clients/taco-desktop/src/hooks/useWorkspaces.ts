@@ -45,8 +45,8 @@ import {
 import {
     initDefaultCwd,
     isValidWorkspaceCwd,
-    LS_ACTIVE,
     loadOpenedCwds,
+    loadActiveCwd,
     persistActiveCwd,
     persistCwds,
     pruneMissingCwds,
@@ -212,10 +212,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const [workspaces, dispatchWs] = useReducer(workspacesReducer, {});
     const [sessionLevels, setSessionLevels] = useState<Record<string, ThinkingLevel>>({});
     const [sessionModels, setSessionModels] = useState<Record<string, ModelSelection>>({});
-    const [activeCwd, setActiveCwd] = useState<string>(() => {
-        const opened = loadOpenedCwds();
-        return resolveActiveCwd(localStorage.getItem(LS_ACTIVE), opened);
-    });
+    // Active cwd is read from desktop.json (via the IPC) inside initFromStorage;
+    // the lazy initializer can only return a synchronous value, so we seed with
+    // the empty string and let initFromStorage set the real value once the
+    // read resolves. The first paint uses the empty placeholder; initFromStorage
+    // runs in a mount effect so React commits the real value before the user
+    // can interact with the workspace selector.
+    const [activeCwd, setActiveCwd] = useState<string>("");
     const [errorBanner, setErrorBanner] = useState<string | null>(null);
     // showToast is used for non-blocking errors on paths like openWorkspace, replacing window.alert.
     // ToastProvider wraps the whole App in main.tsx, so useWorkspaces always runs inside the provider.
@@ -560,16 +563,26 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         // before reading storage — loadOpenedCwds / resolveActiveCwd fall back to
         // it, and the sync placeholder value points at a path that may not exist.
         await initDefaultCwd();
-        // Drop workspaces whose directory is gone (moved, deleted, or pruned by
-        // the OS under /tmp). Keeping them makes every sidecar start fail for any
-        // stdio MCP server that defaults its cwd to the workspace dir.
-        const opened = await pruneMissingCwds(loadOpenedCwds());
-        persistCwds(opened);
-        const storedActive = localStorage.getItem(LS_ACTIVE);
+        // Read opened + active from desktop.json (via the Rust host). The read
+        // also runs the one-shot migration from the legacy localStorage keys,
+        // so an upgrade-in-place user lands in the same workspaces as before.
+        const opened = await pruneMissingCwds(await loadOpenedCwds());
+        // loadActiveCwd reads the same desktop.json block (separate IPC call so
+        // callers that only need active don't pay for the full opened list).
+        const storedActive = await loadActiveCwd();
+        // resolveActiveCwd is a pure function: prefers the stored active, then
+        // opened[0], then the default cwd. We still validate storedActive
+        // against opened because the desktop.json active can outlive a workspace
+        // that was dropped during pruning.
         const activeTarget = resolveActiveCwd(
             storedActive && opened.includes(storedActive) ? storedActive : null,
             opened,
         );
+        setActiveCwd(activeTarget);
+        // Persist the post-prune list back so a workspace that disappeared
+        // between sessions does not get carried forward. Failure is logged but
+        // non-fatal — the in-memory `opened` already excludes the dropped ones.
+        await persistCwds(opened);
         const placeholder: Record<string, WorkspaceState> = {};
         for (const cwd of opened) {
             placeholder[cwd] = createEmptyWorkspace(cwd, cwd === activeTarget);
@@ -579,8 +592,15 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         // so Promise.all gives us the real sessions[0] for default attach.
         // workspacesRef depends on a useEffect sync, so reading after await may still see stale.
         //
-        // debugMode reads localStorage synchronously (readClientSettings), not the cache, because
-        // client.start hasn't run yet and settings.get RPC can't fire.
+        // debugMode / llmDumpToFile / theme / uiLanguage are read synchronously
+        // from localStorage here on purpose. They are passed into the
+        // client.start() options below, which the Rust host forwards to the
+        // sidecar's spawn env (TACO_DEBUG_LLM_PAYLOAD) — so the values must
+        // be known before sidecar.ensureWorkspace fires. settings.get is a
+        // sidecar RPC and cannot run before the sidecar is up; LS is the only
+        // pre-spawn read available. (Workspaces, by contrast, have no
+        // pre-spawn constraint and moved to desktop.json — see
+        // workspaceStorage.ts.)
         const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
         const settings = readClientSettings();
         // Retry the whole start+sessionList chain when the sidecar isn't ready
@@ -631,7 +651,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
      * first, syncing client state with the new sidecar. */
     const reloadAllWorkspaces = useCallback(async (): Promise<void> => {
         const openedCwds = Object.keys(workspacesRef.current);
-        const storedActive = localStorage.getItem(LS_ACTIVE);
+        // Active cwd lives in desktop.json now (it survives the sidecar restart
+        // that triggered this reload — localStorage would also have survived, but
+        // we go through the new path to keep both sources in sync).
+        const storedActive = await loadActiveCwd();
         const activeTarget = resolveActiveCwd(storedActive, openedCwds);
         const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
         await Promise.all(
@@ -731,8 +754,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 // helper auto-attaches sessions[0] when the workspace has no
                 // active session, which would attach the wrong conversation (or
                 // flash it) before our own attach lands. It also persists
-                // activeCwd, and an im:// key must not reach LS_ACTIVE — the next
-                // launch would resolve an activeCwd with no WorkspaceState.
+                // activeCwd, and an im:// key must not reach the desktop.json
+                // `workspaces.active` field — the next launch would resolve an
+                // activeCwd with no WorkspaceState.
                 setActiveCwd(cwd);
                 dispatchWs({ type: "SET_ACTIVE", cwd });
                 await attachSessionInternal(cwd, sid);
