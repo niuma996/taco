@@ -88,10 +88,29 @@ export function applyGlobalConfig(next: TacoGlobalConfigView): void {
     emit();
 }
 
-/** Fetch sidecar view + read client local settings, merge into cache; emits to subscribers. */
+/**
+ * Synchronously populate `cache.client` from localStorage and emit.
+ *
+ * Sidecar global config (`cache.global`) is unchanged. This must run before
+ * the first React render so the `useTheme` effect resolves against an
+ * already-populated client cache; otherwise the first paint flickers to the
+ * OS dark/light default before settling on the persisted preference.
+ *
+ * Emits to subscribers — same contract as `loadGlobalConfig`. Idempotent:
+ * safe to call from `main.tsx` before mount, then again from `loadGlobalConfig`
+ * when the sidecar RPC resolves (the second call rewrites the same values).
+ */
+export function loadClientConfig(): void {
+    cache = { ...cache, client: readClientSettings() };
+    emit();
+}
+
+/** Fetch sidecar view and merge into cache; emits to subscribers. */
 export async function loadGlobalConfig(client: TacoClient): Promise<void> {
     // Sidecar is unaware of client fields (theme / debugMode); SettingsGetResult
-    // only contains `global`. Client view is read from localStorage synchronously.
+    // only contains `global`. Client view is read from localStorage
+    // synchronously via loadClientConfig() so the cache is populated before
+    // this Promise resolves — see main.tsx for the pre-mount call.
     const sidecarResult = await client.settingsGet();
     cache = {
         global: sidecarResult.global,

@@ -5,7 +5,7 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ToastProvider";
 import { bootstrapI18n, default as i18n } from "./i18n/index.ts";
-import { readPersistedThemePreference } from "./lib/clientSettings";
+import { getGlobalConfig, loadClientConfig } from "./lib/globalConfig.ts";
 import { resolveTheme } from "./lib/theme";
 import "./components/toolViews"; // side-effect: register tool views before App renders
 import "./styles.css";
@@ -24,13 +24,20 @@ if (navigator.userAgent.includes("Macintosh")) {
     document.documentElement.dataset.platform = "macos";
 }
 
-// Anti-FOUC: resolve and write data-theme synchronously before React mounts.
-// Order: localStorage (last user choice) → OS preference fallback.
-// useTheme reconciles once settings are loaded (same value, no jump).
-const initialTheme = resolveTheme(
-    readPersistedThemePreference(),
-    window.matchMedia("(prefers-color-scheme: dark)").matches,
-);
+// Populate the global config cache synchronously BEFORE React mounts so that
+// the `useTheme` effect inside App can resolve the persisted theme on its
+// very first apply() — without this, the effect would read an empty client
+// cache, fall back to the OS scheme, and overwrite the theme that paint
+// just rendered with (the source of the brief dark→light / light→dark
+// flicker reported on first launch).
+loadClientConfig();
+
+// Anti-FOUC: now that the cache holds the persisted theme preference,
+// resolve the concrete theme and write data-theme synchronously before
+// React mounts. Order: localStorage (last user choice) → OS preference
+// fallback. useTheme reconciles on the next emit (same value, no jump).
+const osDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+const initialTheme = resolveTheme(getGlobalConfig().client.theme, osDark);
 document.documentElement.dataset.theme = initialTheme;
 
 ReactDOM.createRoot(rootEl).render(
