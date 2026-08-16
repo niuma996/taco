@@ -70,6 +70,47 @@ export interface AgentSpawnerOptions {
     readonly parentInstructionsBlock?: string;
 }
 
+/** Arguments for one subagent run. Shared by `executeSubagentSession` and its body. */
+export interface SubagentSessionArgs {
+    parentSessionId: SessionId;
+    parentToolCallId: string;
+    /** Metadata agentType + event agentType (must be consistent). */
+    agentType: string;
+    /** Prompt text sent to the child harness. */
+    prompt: string;
+    /** Pre-filtered toolset (caller handles whitelist + Skill removal). */
+    tools: TacoTool[];
+    model?: Model<Api>;
+    signal?: AbortSignal;
+    /**
+     * Profile body from the agent definition's markdown, appended to the
+     * child's system prompt so the role, stop condition and reporting
+     * contract actually reach the model. Skill subagents pass nothing —
+     * their instructions are the prompt itself.
+     */
+    rolePrompt?: string;
+    /**
+     * Optional in-context examples to inject ahead of `rolePrompt`. The
+     * examples establish the contract the profile expects (e.g. citation
+     * shape, stop condition) before the role body takes over. Kept
+     * outside `SystemPromptContributor` because they are profile-specific
+     * rather than workspace-wide.
+     */
+    fewShots?: ReadonlyArray<AgentFewShot>;
+    /**
+     * Turn cap from the agent definition. `AgentHarnessOptions` exposes no
+     * turn limit, so this is enforced by counting `turn_end` on the child
+     * and aborting it — without that the frontmatter value stays inert.
+     */
+    maxTurns?: number;
+    /**
+     * Pre-computed child depth. Callers that already needed it (e.g. for tool
+     * filtering) pass it here to avoid a second openSession() round-trip.
+     * If omitted, we compute it from the parent session's metadata.
+     */
+    childDepth?: number;
+}
+
 export class AgentSpawner extends EventEmitter {
     readonly sessionCwd: WorkspaceId;
     readonly repo: JsonlSessionRepo;
@@ -105,6 +146,7 @@ export class AgentSpawner extends EventEmitter {
         // AttachedSession, but each call would queue its own `prompt()` on it
         // and interleave user messages onto the same branch.
         this.resumeInFlight = new Map();
+        this.inFlight = new Map();
     }
 
     /** Returns the parent default-model identity, used when `args.model` is omitted. */
@@ -127,9 +169,56 @@ export class AgentSpawner extends EventEmitter {
         Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>
     >;
 
+    /**
+     * parentSessionId → set of parentToolCallIds whose subagent is still running.
+     *
+     * This is the authoritative liveness signal for an agent tool card. A history
+     * read cannot distinguish "subagent died with the process" from "subagent is
+     * still working" — both look like a toolCall with no toolResult on disk. This
+     * set answers that question: it lives in process memory, so it is necessarily
+     * empty for sessions whose run ended when a previous process exited, and
+     * necessarily populated for subagents actually in flight right now.
+     *
+     * Surfaced through `session.attach` so the desktop can expire orphaned cards
+     * without misfiring on live ones. See `inFlightAgentToolCallIds`.
+     */
+    private readonly inFlight: Map<SessionId, Set<string>>;
+
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
         return this.agents.find((a) => a.agentType === type);
+    }
+
+    /** parentToolCallIds with a live subagent under `parentSessionId`. */
+    inFlightAgentToolCallIds(parentSessionId: SessionId): string[] {
+        return [...(this.inFlight.get(parentSessionId) ?? [])];
+    }
+
+    /**
+     * Mark a parent tool call as having a live subagent for the duration of `run`.
+     * Registered before the child session exists so the attach window is covered,
+     * and released on settle whichever way `run` ends.
+     */
+    private async trackInFlight<T>(
+        parentSessionId: SessionId,
+        parentToolCallId: string,
+        run: () => Promise<T>,
+    ): Promise<T> {
+        let ids = this.inFlight.get(parentSessionId);
+        if (!ids) {
+            ids = new Set();
+            this.inFlight.set(parentSessionId, ids);
+        }
+        ids.add(parentToolCallId);
+        try {
+            return await run();
+        } finally {
+            const current = this.inFlight.get(parentSessionId);
+            if (current) {
+                current.delete(parentToolCallId);
+                if (current.size === 0) this.inFlight.delete(parentSessionId);
+            }
+        }
     }
 
     /**
@@ -139,45 +228,18 @@ export class AgentSpawner extends EventEmitter {
      *
      * Never throws — errors are wrapped in { isError: true }.
      */
-    async executeSubagentSession(args: {
-        parentSessionId: SessionId;
-        parentToolCallId: string;
-        /** Metadata agentType + event agentType (must be consistent). */
-        agentType: string;
-        /** Prompt text sent to the child harness. */
-        prompt: string;
-        /** Pre-filtered toolset (caller handles whitelist + Skill removal). */
-        tools: TacoTool[];
-        model?: Model<Api>;
-        signal?: AbortSignal;
-        /**
-         * Profile body from the agent definition's markdown, appended to the
-         * child's system prompt so the role, stop condition and reporting
-         * contract actually reach the model. Skill subagents pass nothing —
-         * their instructions are the prompt itself.
-         */
-        rolePrompt?: string;
-        /**
-         * Optional in-context examples to inject ahead of `rolePrompt`. The
-         * examples establish the contract the profile expects (e.g. citation
-         * shape, stop condition) before the role body takes over. Kept
-         * outside `SystemPromptContributor` because they are profile-specific
-         * rather than workspace-wide.
-         */
-        fewShots?: ReadonlyArray<AgentFewShot>;
-        /**
-         * Turn cap from the agent definition. `AgentHarnessOptions` exposes no
-         * turn limit, so this is enforced by counting `turn_end` on the child
-         * and aborting it — without that the frontmatter value stays inert.
-         */
-        maxTurns?: number;
-        /**
-         * Pre-computed child depth. Callers that already needed it (e.g. for tool
-         * filtering) pass it here to avoid a second openSession() round-trip.
-         * If omitted, we compute it from the parent session's metadata.
-         */
-        childDepth?: number;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    async executeSubagentSession(
+        args: SubagentSessionArgs,
+    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+        return this.trackInFlight(args.parentSessionId, args.parentToolCallId, () =>
+            this.runSubagentSession(args),
+        );
+    }
+
+    /** `executeSubagentSession` body, wrapped by it for in-flight tracking. */
+    private async runSubagentSession(
+        args: SubagentSessionArgs,
+    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
         // Caller must supply `childDepth` — used by tool filtering to gate Skill/agent
         // recursion, and computing it here would require a second openSession() call.
         const childDepth =
@@ -497,9 +559,16 @@ export class AgentSpawner extends EventEmitter {
         // removed on settle so a later resume gets a fresh run.
         const existing = this.resumeInFlight.get(args.subSessionId);
         if (existing) return existing;
-        const promise = this.runResume(args).finally(() => {
-            this.resumeInFlight.delete(args.subSessionId);
-        });
+        // The single-flight entry is dropped *inside* the in-flight tracking, not
+        // around it: releasing the tracking first would leave a window where the
+        // cache still hands this promise to a concurrent caller while `inFlight`
+        // already reports the run as finished — an attach in that window would see
+        // a live subagent as an orphan.
+        const promise = this.trackInFlight(args.parentSessionId, args.parentToolCallId, () =>
+            this.runResume(args).finally(() => {
+                this.resumeInFlight.delete(args.subSessionId);
+            }),
+        );
         this.resumeInFlight.set(args.subSessionId, promise);
         return promise;
     }
