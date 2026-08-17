@@ -1,0 +1,39 @@
+{
+  "name": "@taco-ai/cli",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Taco CLI — launcher + daemon supervisor for the sidecar. Wraps @taco-ai/sidecar with user-facing subcommands (start, status, install, upgrade).",
+  "type": "module",
+  "bin": {
+    "taco": "./bin/taco.cjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "dist"
+  ],
+  "license": "MIT",
+  "repository": "github:niuma996/taco",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx lib/index.ts start",
+    "build": "node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test 'tests/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@taco-ai/sidecar": "workspace:*",
+    "tar": "^7.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  }
+}
