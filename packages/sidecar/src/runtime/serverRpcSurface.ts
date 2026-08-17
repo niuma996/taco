@@ -26,6 +26,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
+import type { Job, JobHistoryEntry } from "../scheduler/types.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
 import type { WorkspaceRuntime } from "./workspace.ts";
 
@@ -62,6 +63,22 @@ export interface ImPolicyControl {
         input: { route: ImRoute } | { chatKey: string },
         channelId: string,
     ): Promise<void>;
+}
+
+/**
+ * Scheduler-facing operations exposed to the `jobs.*` RPC handlers. The
+ * store + scheduler live behind this interface so handlers don't reach
+ * into scheduler internals; SidecarServer implements the contract using
+ * the JobStore + Scheduler that runDaemon constructed at startup.
+ */
+export interface JobsControl {
+    list(): Promise<Job[]>;
+    get(id: string): Promise<Job | null>;
+    create(job: Job): Promise<Job>;
+    update(job: Job): Promise<Job>;
+    delete(id: string): Promise<void>;
+    runNow(id: string): Promise<boolean>;
+    history(id: string): Promise<JobHistoryEntry[] | null>;
 }
 
 export interface ServerRpcSurface {
@@ -130,6 +147,11 @@ export interface ServerRpcSurface {
      * handlers reject with `invalid_state` when absent.
      */
     readonly channels?: ChannelControl;
+    /**
+     * Scheduler API exposed to the `jobs.*` RPC handlers. Same optionality
+     * as `channels` — tests / non-daemon hosts can omit it.
+     */
+    readonly jobs?: JobsControl;
     /**
      * IM workspace policy control surface, consumed by the `imPolicy.*`
      * handlers. Same optionality as `channels` — non-SidecarServer hooks

@@ -14,7 +14,7 @@ import { describe, it } from "node:test";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-
+import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 import {
     EMPTY_FACTS,
     extractFacts,
@@ -22,7 +22,6 @@ import {
     mergeFacts,
     serializeMessagesForFacts,
 } from "../../src/tags/factExtractor.ts";
-import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 
 // Tests intentionally cast through `unknown` so we can hand-craft minimal
 // AgentMessage-like shapes. The real serializer is tolerant on shape.
@@ -151,6 +150,7 @@ describe("extractFacts — taco headers on the fact-extraction LLM call", () => 
         const version = sidecarVersion();
         let capturedOptions: { headers?: Record<string, string> } | undefined;
 
+        // biome-ignore lint/suspicious/noExplicitAny: mirrors factExtractor.ts, which re-exposes `Model<any>` from pi-agent-core's `completeSimple`.
         const fakeModel = {} as Model<any>;
         const fakeModels = {
             completeSimple: async (
@@ -179,6 +179,7 @@ describe("extractFacts — taco headers on the fact-extraction LLM call", () => 
     });
 
     it("returns EMPTY_FACTS (does not throw) on LLM failure", async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: mirrors factExtractor.ts, which re-exposes `Model<any>` from pi-agent-core's `completeSimple`.
         const fakeModel = {} as Model<any>;
         const fakeModels = {
             completeSimple: async () => {

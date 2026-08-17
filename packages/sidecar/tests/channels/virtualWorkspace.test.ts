@@ -66,7 +66,10 @@ describe("virtualWorkspace", () => {
         // Path is joined with `path.join` (POSIX "/" on Linux/macOS, "\"
         // on Windows). The original assertion hard-coded "/" and broke
         // on Windows.
-        assert.equal(makeImSessionsRoot("/home/x/.taco", "ch1"), join("/home/x/.taco", "sessions", "im", "ch1"));
+        assert.equal(
+            makeImSessionsRoot("/home/x/.taco", "ch1"),
+            join("/home/x/.taco", "sessions", "im", "ch1"),
+        );
     });
 
     it("IM_CWD_PREFIX is im://", () => {

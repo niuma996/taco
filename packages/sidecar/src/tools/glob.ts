@@ -5,12 +5,12 @@
  * truncated to MAX_RESULTS to avoid flooding context.
  */
 
+import { isAbsolute, relative } from "node:path";
 import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import { getOrThrow } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import fg from "fast-glob";
 import ignore from "ignore";
-import { isAbsolute, relative } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";

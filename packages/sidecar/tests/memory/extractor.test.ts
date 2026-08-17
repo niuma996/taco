@@ -6,12 +6,10 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-
-import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import type { Api, Model, Models, TextContent } from "@earendil-works/pi-ai";
-
-import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
+import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { MemoryExtractorImpl, parseExtractionResult } from "../../src/memory/local/extractor.ts";
+import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 
 describe("parseExtractionResult", () => {
     const createdAt = "2026-07-26T00:00:00.000Z";
@@ -181,11 +179,18 @@ describe("MemoryExtractorImpl — taco headers on the extraction LLM call", () =
             },
         } as unknown as Models;
         const fakeModel = {} as Model<Api>;
-        const extractor = new MemoryExtractorImpl(fakeModels, fakeModel, { appendEntry: async () => undefined }, "ws-1");
+        const extractor = new MemoryExtractorImpl(
+            fakeModels,
+            fakeModel,
+            { appendEntry: async () => undefined },
+            "ws-1",
+        );
 
-        await extractor.onTurnEnd([{ role: "user", content: "hi" } as unknown as Parameters<
-            MemoryExtractorImpl["onTurnEnd"]
-        >[0][number]]);
+        await extractor.onTurnEnd([
+            { role: "user", content: "hi" } as unknown as Parameters<
+                MemoryExtractorImpl["onTurnEnd"]
+            >[0][number],
+        ]);
 
         assert.equal(called, false);
     });

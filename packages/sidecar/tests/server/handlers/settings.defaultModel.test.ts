@@ -60,9 +60,7 @@ function makeCtx(server: unknown, global: Record<string, unknown>) {
         cwd: undefined as never,
         server,
         params: { global },
-    } as unknown as Parameters<
-        NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-    >[0];
+    } as unknown as Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0];
 }
 
 describe("settings.write — defaultModel push", () => {

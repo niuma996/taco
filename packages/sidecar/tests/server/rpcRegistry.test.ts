@@ -36,6 +36,11 @@ const NAMESPACES = [
     "settings",
     "extensions",
     "channels",
+    // PR4: jobs.* lives in the scheduler module rather than `@taco-ai/shared`
+    // (the package's import surface is intentionally narrow). The namespace
+    // closure test allows it here; UI-side drift is caught by an integration
+    // test that imports the same constants.
+    "jobs",
 ];
 
 /**
@@ -62,8 +67,9 @@ describe("RPC registry closure", () => {
         assert.deepEqual(missing, [], `orphan RPC constants: ${missing.join(", ")}`);
     });
 
-    it("every registered method comes from RPC.* (no string literals)", () => {
-        const constantValues = new Set<string>(Object.values(RPC));
+    it("every registered method comes from RPC.* or JOBS_RPC (no string literals)", async () => {
+        const { JOBS_RPC } = await import("../../src/scheduler/jobsRpc.ts");
+        const constantValues = new Set<string>([...Object.values(RPC), ...Object.values(JOBS_RPC)]);
         const stray = [...registered].filter((v) => !constantValues.has(v));
         assert.deepEqual(stray, [], `unregistered method names: ${stray.join(", ")}`);
     });
@@ -77,7 +83,9 @@ describe("RPC registry closure", () => {
         assert.deepEqual(stray, [], `namespaced violations: ${stray.join(", ")}`);
     });
 
-    it("registered method count matches RPC constant count", () => {
-        assert.equal(registered.size, Object.values(RPC).length);
+    it("registered method count matches RPC + JOBS_RPC constant count", async () => {
+        const { JOBS_RPC } = await import("../../src/scheduler/jobsRpc.ts");
+        const expected = Object.values(RPC).length + Object.values(JOBS_RPC).length;
+        assert.equal(registered.size, expected);
     });
 });

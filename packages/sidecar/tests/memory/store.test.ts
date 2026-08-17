@@ -81,7 +81,13 @@ describe("LocalMemoryStore.appendEntry", () => {
     it("writes a topic file; MEMORY.md stays untouched", async () => {
         const s = mkStore();
         await s.appendEntry(entry());
-        const topicPath = join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md");
+        const topicPath = join(
+            tmpRoot,
+            "memory",
+            "projects",
+            workspaceKey("ws-test"),
+            "user_role.md",
+        );
         const topic = readFileSync(topicPath, "utf8");
         assert.match(topic, /^---\nname: User uses pnpm/);
         assert.match(topic, /type: user/);
@@ -154,7 +160,9 @@ describe("LocalMemoryStore.readMemory / buildMemoryBlock", () => {
         assert.match(block, /\[user\] User uses pnpm/);
         assert.match(block, /\[feedback\] Use real DB/);
         assert.ok(
-            block.includes(join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md")),
+            block.includes(
+                join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md"),
+            ),
             "block must include the topic file path",
         );
     });

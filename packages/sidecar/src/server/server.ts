@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { loadSourcedSkills, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import { SlashNormalizedExecutionEnv } from "../runtime/slashNormalizedEnv.ts";
 import {
     type ChannelStatusEntry,
     type ChannelsBindResult,
@@ -79,8 +78,10 @@ import { resourceRoot, sidecarVersion } from "../runtime/runtimeResources.ts";
 import type {
     ChannelControl,
     ImPolicyControl,
+    JobsControl,
     ServerRpcSurface,
 } from "../runtime/serverRpcSurface.ts";
+import { SlashNormalizedExecutionEnv } from "../runtime/slashNormalizedEnv.ts";
 import { WorkspaceRuntime } from "../runtime/workspace.ts";
 import { dedupeSkillsByName } from "../skills/dedupeSkills.ts";
 import { preloadSkillFrontmatter, readSkillFrontmatter } from "../skills/skillFrontmatter.ts";
@@ -164,6 +165,13 @@ export interface SidecarServerOptions {
     transport?: Transport;
     /** Channel configs for IM channels; Channel instances are resolved from manifest.name via ChannelFactory. */
     channels?: readonly ChannelConfig[];
+    /**
+     * Scheduler-facing API exposed to the `jobs.*` handlers. The daemon
+     * entry point (src/index.ts) constructs one JobsController from the
+     * JobStore + Scheduler it boots, and shares it across every NDJSON
+     * connection's SidecarServer.
+     */
+    jobs?: JobsControl;
 }
 
 type CommandOutcome =
@@ -261,6 +269,8 @@ export class SidecarServer implements ServerRpcSurface {
     /** Currently active MCP server set — see customProviders for lifecycle notes. */
     private mcpServers: readonly McpServerConfig[] = [];
     readonly providerKeyStore: ProviderKeyStore;
+    /** Scheduler controller — exposed to `jobs.*` handlers via ServerRpcSurface. */
+    readonly jobs: JobsControl | undefined;
     readonly channelRegistry = new ChannelRegistry();
     readonly channelBindBroker = new ChannelBindBroker();
     private readonly channelFactory = new ChannelFactory({
@@ -359,6 +369,7 @@ export class SidecarServer implements ServerRpcSurface {
         this.now = options.now ?? (() => performance.now());
         this.extensionRegistry = options.extensionRegistry;
         this.providerKeyStore = options.providerKeyStore;
+        this.jobs = options.jobs;
         this.customProviders = options.customProviders ?? [];
         this.mcpServers = options.mcpServers ?? [];
         this.imPolicyStore = new ImWorkspacePolicyStore();
@@ -1519,4 +1530,79 @@ export function redactUpstreamMessage(raw: string): string {
     // Truncate to 200 chars
     if (s.length > 200) s = `${s.slice(0, 197)}…`;
     return `[upstream] ${s}`;
+}
+
+/**
+ * Shared dependencies for spawning one SidecarServer per NDJSON socket
+ * connection. The bundle's daemon mode (see `src/index.ts`) loads
+ * config + extensions once, then calls `startServer(sharedDeps, transport)`
+ * for each accepted connection. Per-connection servers are intentional —
+ * channels (WeChat etc.) and workspace state are connection-scoped, and
+ * a UI that disconnects then reconnects gets a fresh handshake rather than
+ * inheriting a dead socket.
+ */
+export interface SharedSidecarDeps {
+    sessionsRoot: string;
+    defaultModel?: string;
+    defaultProvider?: string;
+    systemPrompt?: string;
+    defaultThinkingLevel?: ThinkingLevel;
+    compaction?: ResolvedCompaction;
+    memoryEnabled?: boolean;
+    extensionRegistry?: ExtensionRegistry;
+    providerKeyStore: ProviderKeyStore;
+    customProviders?: readonly CustomProviderConfig[];
+    mcpServers?: readonly McpServerConfig[];
+    channels?: readonly ChannelConfig[];
+    /**
+     * Scheduler control surface — same instance is shared across every
+     * per-connection SidecarServer so jobs.create/update/delete mutate
+     * the single process-wide scheduler.
+     */
+    jobs?: JobsControl;
+}
+
+/**
+ * Create a fresh SidecarServer over the given transport and start it.
+ *
+ * Returns both the server handle (so callers can stop it on socket close)
+ * and a Promise that resolves once the transport has been opened and the
+ * hello frame has been sent. The returned disposer stops the server.
+ *
+ * This is the bridge between `src/index.ts` daemon-mode entry (which
+ * accepts NDJSON socket connections) and `SidecarServer.start` (which
+ * owns the actual NDJSON read/write over one transport). Adding a thin
+ * factory keeps the daemon wiring in one place and lets the per-connection
+ * server be garbage-collected when its socket closes.
+ */
+export interface StartedSidecar {
+    server: SidecarServer;
+    ready: Promise<void>;
+    stop: () => Promise<void>;
+}
+
+export function startServer(deps: SharedSidecarDeps, transport: Transport): StartedSidecar {
+    const server = new SidecarServer({
+        sessionsRoot: deps.sessionsRoot,
+        defaultModel: deps.defaultModel,
+        defaultProvider: deps.defaultProvider,
+        systemPrompt: deps.systemPrompt,
+        defaultThinkingLevel: deps.defaultThinkingLevel,
+        compaction: deps.compaction,
+        memoryEnabled: deps.memoryEnabled,
+        extensionRegistry: deps.extensionRegistry,
+        providerKeyStore: deps.providerKeyStore,
+        customProviders: deps.customProviders,
+        mcpServers: deps.mcpServers,
+        channels: deps.channels,
+        jobs: deps.jobs,
+    });
+    const ready = server.start(transport);
+    return {
+        server,
+        ready,
+        stop: async () => {
+            await server.stop();
+        },
+    };
 }

@@ -81,6 +81,7 @@ function warnWindowsIfNeeded(): void {
         // not actionable for a per-user %LOCALAPPDATA% install, so we keep
         // it discoverable in the devtools console without polluting the
         // normal log stream.
+        // biome-ignore lint/suspicious/noConsole: dev-only advisory, see comment above.
         console.warn(
             "[fsPermissions] Windows: chmod 0o600 is a no-op; credential files rely on the per-user " +
                 "profile ACL. Do not put $TACO_HOME on a shared host or network share.",

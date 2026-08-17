@@ -113,6 +113,12 @@ async function atomicWrite(
                     await parentFh.close();
                 }
             } catch (e) {
+                // Console-only on purpose: this warning fires whenever parent
+                // fsync returns EPERM on Windows / SMB shares. Routing it into
+                // the structured logger would surface in front of operators
+                // on every checkpoint write, but the EPERM is non-actionable
+                // (parent dir isn't ours to fsync) — we just keep going.
+                // biome-ignore lint/suspicious/noConsole: see comment above.
                 console.warn(
                     `atomicWrite: parent fsync failed for ${dirname(path)} (${(e as NodeJS.ErrnoException).code ?? e}), continuing`,
                 );

@@ -17,8 +17,8 @@
  * inside loadSkillsFromDirInternal.
  */
 
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { FileError, FileInfo, Result } from "@earendil-works/pi-agent-core/node";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
 /** Normalize one FileInfo's `path` + `name` to forward slashes. */
 function normalizeFileInfo(info: FileInfo): FileInfo {

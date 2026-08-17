@@ -14,17 +14,17 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mock, before, beforeEach, describe, it } from "node:test";
+import { before, beforeEach, describe, it, mock } from "node:test";
+import { sidecarVersion } from "../../../src/runtime/runtimeResources.ts";
 import {
     extractModelIds,
-    type performModelsRequest as RealPerform,
     performModelsRequest,
+    type performModelsRequest as RealPerform,
     registerProviderModelsHandlers,
     TimeoutError,
 } from "../../../src/server/handlers/providerModels.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
-import { sidecarVersion } from "../../../src/runtime/runtimeResources.ts";
 
 type Stub = (url: string, apiKey: string, signal: AbortSignal) => Promise<FakeResponse>;
 
@@ -273,18 +273,26 @@ describe("performModelsRequest (outbound HTTP builder)", () => {
     it("sends user-agent and x-taco-sidecar-version matching the sidecar version", async () => {
         const version = sidecarVersion();
         let captured: RequestInit | undefined;
-        const restore = mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
-            captured = init;
-            return new Response(JSON.stringify({ data: [] }), { status: 200 });
-        });
+        const restore = mock.method(
+            globalThis,
+            "fetch",
+            async (_url: unknown, init?: RequestInit) => {
+                captured = init;
+                return new Response(JSON.stringify({ data: [] }), { status: 200 });
+            },
+        );
 
         try {
-            await performModelsRequest("https://example.com/v1/models", "sk-test", AbortSignal.timeout(1000));
+            await performModelsRequest(
+                "https://example.com/v1/models",
+                "sk-test",
+                AbortSignal.timeout(1000),
+            );
             assert.ok(captured, "fetch should have been called");
             const headers = captured.headers as Record<string, string>;
             assert.equal(headers["user-agent"], `taco/${version}`);
             assert.equal(headers["x-taco-sidecar-version"], version);
-            assert.equal(headers["Authorization"], "Bearer sk-test");
+            assert.equal(headers.Authorization, "Bearer sk-test");
         } finally {
             restore.mock.restore();
         }

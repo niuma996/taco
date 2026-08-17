@@ -43,8 +43,14 @@ describe("RPC schema coverage", () => {
         assert.deepEqual(missing, [], `methods missing schema: ${missing.join(", ")}`);
     });
 
-    it("RPC constants map 1:1 to registered methods", () => {
-        assert.deepEqual(builtinMethods(), Object.values(RPC).sort());
+    it("RPC + JOBS_RPC constants map 1:1 to registered methods", async () => {
+        // PR4: jobs.* lives in the scheduler module, not `@taco-ai/shared`.
+        // Import the local constants here so the closure test enforces the
+        // same invariant for jobs.* as for shared.* — adding a method name
+        // to either side without wiring the other surfaces immediately.
+        const { JOBS_RPC } = await import("../../src/scheduler/jobsRpc.ts");
+        const expected = [...Object.values(RPC), ...Object.values(JOBS_RPC)].sort();
+        assert.deepEqual(builtinMethods(), expected);
     });
 });
 

@@ -14,6 +14,7 @@ import { registerCommandPermissionHandlers } from "./handlers/commandPermission.
 import { registerExtensionsHandlers } from "./handlers/extensions.ts";
 import { registerImPolicyHandlers } from "./handlers/imPolicy.ts";
 import { registerInitializeHandler } from "./handlers/initialize.ts";
+import { registerJobsHandlers } from "./handlers/jobs.ts";
 import { registerMcpHandlers } from "./handlers/mcp.ts";
 import { registerMemoryHandlers } from "./handlers/memory.ts";
 import { registerProviderModelsHandlers } from "./handlers/providerModels.ts";
@@ -51,5 +52,9 @@ export function registerBuiltinMethods(): void {
     registerMemoryHandlers();
     registerCheckpointsHandlers();
     registerProviderModelsHandlers();
+    // PR4: jobs.* lives last so any other handler can reference the
+    // scheduler's JobsControl via ServerRpcSurface.jobs without worrying
+    // about init order (jobs is process-scoped, never workspace-scoped).
+    registerJobsHandlers();
     registerMcpHandlers();
 }
