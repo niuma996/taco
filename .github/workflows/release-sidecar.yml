@@ -236,6 +236,13 @@ jobs:
             npm pkg set "optionalDependencies[@taco-ai/sidecar-$k]=$V" --prefix packages/sidecar
           done
 
+          # Also bump the Tauri desktop bundle so the updater manifest matches
+          # the next desktop-v* tag (PR5 version-drift fix). GNU sed syntax
+          # because the runner is ubuntu-latest; the BSD -i '' form is a no-op
+          # on Linux. | delimiter avoids escaping inner quotes.
+          sed -i "s|^version = \".*\"|version = \"$V\"|" clients/taco-desktop/src-tauri/Cargo.toml
+          sed -i "s|\"version\": \"[^\"]*\"|\"version\": \"$V\"|" clients/taco-desktop/src-tauri/tauri.conf.json
+
       # Refresh the install graph so the just-rewritten optionalDependencies
       # resolve to the new platform-package version, and the workspace links
       # (link:../protocol etc.) point at the freshly-built dist/. Without
@@ -322,4 +329,4 @@ jobs:
       # checkout (or a re-run) sees the original source-of-truth values.
       - name: Reset working tree
         if: always()
-        run: git checkout -- packages/protocol/package.json packages/shared/package.json packages/sidecar/package.json docs/sidecar-protocol.md
+        run: git checkout -- packages/protocol/package.json packages/shared/package.json packages/sidecar/package.json clients/taco-desktop/src-tauri/Cargo.toml clients/taco-desktop/src-tauri/tauri.conf.json docs/sidecar-protocol.md

@@ -252,15 +252,143 @@ jobs:
           path: ${{ steps.locate.outputs.staged }}
           if-no-files-found: error
 
+  # ── Sign release artifacts + build updater manifest ──────────────────
+  # Gated on tagged pushes (same condition as the release job) so
+  # workflow_dispatch dry-runs don't burn the minisign secret. Pulls
+  # every dmg/exe artifact from build + build-mac, signs each one with
+  # the operator-supplied minisign keypair (see docs/signing.md),
+  # generates update.json listing every signed platform, and uploads
+  # the whole tree as one composite artifact for `release` to attach.
+  sign:
+    name: sign + manifest
+    needs: [build, build-mac]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Install minisign
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="0.11"
+          ASSET="minisign-${VERSION}-linux.tar.gz"
+          # Verify the tarball's sha256 against GitHub's release asset
+          # digest. The digest is computed by GitHub at upload time and is
+          # the same value every fetch returns; the curl below can't be
+          # trusted until it matches.
+          EXPECTED_SHA=$(gh api \
+            "/repos/jedisct1/minisign/releases/tags/v${VERSION}" \
+            --jq ".assets[] | select(.name == \"${ASSET}\") | .digest" \
+            | sed 's/^sha256://')
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "::error::could not look up sha256 for ${ASSET} (release tag v${VERSION} missing?)"
+            exit 1
+          fi
+          curl -fsSL -o /tmp/minisign.tar.gz \
+            "https://github.com/jedisct1/minisign/releases/download/v${VERSION}/${ASSET}"
+          ACTUAL_SHA=$(sha256sum /tmp/minisign.tar.gz | awk '{print $1}')
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "::error::minisign tarball sha256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
+            exit 1
+          fi
+          tar -xzf /tmp/minisign.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/minisign-${VERSION}/linux/x86_64/minisign /usr/local/bin/minisign
+          minisign -v
+
+      - name: Stage private key
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # Write the operator-supplied key to a temp file with strict
+          # permissions; minisign -s only takes a path. The passphrase
+          # never touches disk.
+          install -m 0600 /dev/null /tmp/taco-update.key
+          printf '%s\n' "$MINISIGN_PRIVATE_KEY" > /tmp/taco-update.key
+
+      - name: Sign release artifacts
+        env:
+          MINISIGN_PRIVATE_KEY_PASSPHRASE: ${{ secrets.MINISIGN_PRIVATE_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # -S writes the signature to a separate .minisig file instead of
+          # appending to the artifact; -W reads the passphrase from stdin
+          # so no PTY is required.
+          while IFS= read -r -d '\0' f; do
+            echo "$MINISIGN_PRIVATE_KEY_PASSPHRASE" | minisign -S -s /tmp/taco-update.key -m "$f" -W
+            echo "signed $f -> $f.minisig"
+          done < <(find dist -type f \( -name '*.dmg' -o -name '*.exe' \) -print0)
+          # Wipe the key file before any later step can read /tmp.
+          shred -u /tmp/taco-update.key 2>/dev/null || rm -f /tmp/taco-update.key
+
+      - name: Generate update.json
+        env:
+          TAG: ${{ github.ref_name }}
+          RELEASE_PUBLISH_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import base64, json, os, pathlib, time
+          tag = os.environ['TAG']
+          base = os.environ['RELEASE_PUBLISH_URL']
+          version = tag.removeprefix('desktop-v')
+          platforms = {}
+          for path in sorted(pathlib.Path('dist').rglob('*')):
+              if not path.is_file() or path.suffix not in ('.dmg', '.exe'):
+                  continue
+              sig = path.with_suffix(path.suffix + '.minisig')
+              if not sig.exists():
+                  raise SystemExit(f'missing signature for {path}')
+              name = path.name
+              # tauri-plugin-updater expects darwin-aarch64, darwin-x86_64,
+              # windows-x86_64, windows-aarch64 — derive from the file name.
+              is_arm = 'aarch64' in name or 'arm64' in name
+              if name.endswith('.dmg'):
+                  platform = 'darwin-aarch64' if is_arm else 'darwin-x86_64'
+              else:
+                  platform = 'windows-aarch64' if is_arm else 'windows-x86_64'
+              if platform in platforms:
+                  raise SystemExit(f'duplicate platform {platform} from {name}')
+              platforms[platform] = {
+                  'signature': base64.b64encode(sig.read_bytes()).decode('ascii'),
+                  'url': f'{base}/{name}',
+              }
+          if not platforms:
+              raise SystemExit('no signed artifacts found')
+          manifest = {
+              'version': version,
+              'pub_date': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+              'platforms': platforms,
+          }
+          pathlib.Path('dist/update.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          print(json.dumps(manifest, indent=2))
+          PYEOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-desktop-bundle
+          path: |
+            dist/taco-desktop-dmg-aarch64/**
+            dist/taco-desktop-internal-setup-x64/**
+            dist/taco-desktop-portable-setup-x64/**
+            dist/update.json
+          if-no-files-found: error
+
   # ── Publish GitHub Release ───────────────────────────────────────────────
-  # Downloads the build artifacts and attaches them to a GitHub Release
-  # named after the tag (e.g. tag `desktop-v0.1.0` → release
-  # `desktop-v0.1.0`). Only fires on tagged pushes; dry-runs via
+  # Attaches the signed bundle (artifacts + .minisig sidecars + update.json)
+  # to a GitHub Release named after the tag (e.g. tag `desktop-v0.1.0` →
+  # release `desktop-v0.1.0`). Only fires on tagged pushes; dry-runs via
   # workflow_dispatch on main upload artifacts only and skip the release
   # so we don't publish a release during testing.
   release:
     name: release
-    needs: [build, build-mac]
+    needs: [sign]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-')
     runs-on: ubuntu-latest
     permissions:
@@ -268,6 +396,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: signed-desktop-bundle
           path: dist
 
       - name: Create release
@@ -278,5 +407,10 @@ jobs:
           generate_release_notes: true
           files: |
             dist/taco-desktop-dmg-aarch64/taco-desktop-dmg-aarch64.dmg
+            dist/taco-desktop-dmg-aarch64/taco-desktop-dmg-aarch64.dmg.minisig
             dist/taco-desktop-internal-setup-x64/taco-desktop-internal-setup-x64.exe
+            dist/taco-desktop-internal-setup-x64/taco-desktop-internal-setup-x64.exe.minisig
+            dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe
+            dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe.minisig
+            dist/update.json
             dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe
