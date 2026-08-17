@@ -44,6 +44,25 @@
     gap: 0.5rem;
 }
 
+/* ── update dialog progress bar (PR5) ── */
+.update-dialog {
+    /* Widen slightly to fit the progress bar + percentage. */
+    min-width: 380px;
+}
+.update-progress {
+    height: 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin: 0 0 1rem 0;
+}
+.update-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.15s linear;
+}
+
 /* ── settings drawer ── */
 .drawer-backdrop {
     position: fixed;

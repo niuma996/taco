@@ -346,3 +346,21 @@ button svg > *,
 .activity-rail-item svg > * {
     fill: none;
 }
+
+/* Status dot in the top-right corner of a rail item. Used by the
+   Settings entry to flag an available update without auto-opening
+   the dialog — the dot sits inside the 56x56 bg block, slightly
+   outside its rounded corner so it reads as a notification marker
+   rather than part of the icon. Brand-orange so it pops against
+   the rail's muted colour palette. */
+.activity-rail-badge {
+    position: absolute;
+    top: 6px;
+    right: calc(50% - 36px);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--brand-orange);
+    box-shadow: 0 0 0 2px var(--pane-list-bg);
+    pointer-events: none;
+}

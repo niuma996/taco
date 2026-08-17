@@ -3,8 +3,9 @@
  * System mode tracks matchMedia changes; explicit light/dark modes ignore them.
  * Parsing remains in lib/theme.ts; this hook only coordinates side effects.
  */
-import { useEffect } from "react";
+
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect } from "react";
 
 import { getGlobalConfig, subscribeGlobalConfig } from "../lib/globalConfig.ts";
 import { resolveTheme } from "../lib/theme.ts";

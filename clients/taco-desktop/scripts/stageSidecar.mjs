@@ -22,6 +22,7 @@ const generatedDir = join(srcTauri, "generated", "sidecar");
 // Repo layout: clients/ and packages/ are siblings, not clients/packages/
 const repoRoot = join(desktopDir, "..", "..");
 const sidecarPkgDir = join(repoRoot, "packages", "sidecar");
+const cliPkgDir = join(repoRoot, "packages", "cli");
 const runtimeDir = join(sidecarPkgDir, "dist", "runtime");
 
 function main() {
@@ -81,6 +82,24 @@ function main() {
         if (existsSync(dst)) rmSync(dst, { recursive: true, force: true });
         cpSync(src, dst, { recursive: true });
     }
+
+    // CLI bundle → generated/cli/taco.mjs. Release-mode desktop startup uses
+    // the already-bundled sidecar Node executable to run this entry, so it
+    // never depends on a globally-installed `taco` command or `tsx`.
+    const cliDist = join(cliPkgDir, "dist", "taco.mjs");
+    if (!existsSync(cliDist)) {
+        const r = spawnSync("pnpm", ["--filter", "@taco-ai/cli", "build"], {
+            cwd: repoRoot,
+            stdio: "inherit",
+        });
+        if (r.status !== 0 || !existsSync(cliDist)) {
+            console.error(`[stageSidecar] CLI bundle missing after build: ${cliDist}`);
+            process.exit(r.status ?? 1);
+        }
+    }
+    const cliGeneratedDir = join(srcTauri, "generated", "cli");
+    mkdirSync(cliGeneratedDir, { recursive: true });
+    cpSync(cliDist, join(cliGeneratedDir, "taco.mjs"));
 
     // Node binary → binaries/taco-sidecar-node-<triple>
     // Tauri 2's externalBin expects naming "<basename>-<triple>"; we only consume

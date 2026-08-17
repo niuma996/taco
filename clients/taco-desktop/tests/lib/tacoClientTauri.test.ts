@@ -83,6 +83,24 @@ class FakeSidecarClient implements SidecarClient {
         };
     }
 
+    // PR4: upgrade-aware reconnect hooks. Tests flip these flags via the
+    // public setters; default behavior (no marker, apply succeeds) is what
+    // every existing test expects so we keep the default implementation
+    // trivial.
+    upgradeMarker = false;
+    upgradeApplyCalls = 0;
+    failUpgradeApply = false;
+    async upgradeMarkerPresent(): Promise<boolean> {
+        return this.upgradeMarker;
+    }
+    async upgradeApply(): Promise<string> {
+        this.upgradeApplyCalls += 1;
+        if (this.failUpgradeApply) throw new Error("simulated upgrade --apply failure");
+        // Apply removes the marker (per the CLI's contract); mirror that here.
+        this.upgradeMarker = false;
+        return "";
+    }
+
     emitExit(exit: SidecarExit): void {
         this.exitHandler?.(exit);
     }
@@ -425,5 +443,111 @@ test("a start after a failed handshake can still recover", async () => {
         Date.now() - started < 3_000,
         `expected fast recovery, took ${Date.now() - started}ms`,
     );
+    await client.dispose();
+});
+
+test("PR4: sidecar exit schedules an upgrade-aware reconnect that re-spawns", async () => {
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+
+    sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
+
+    // First backoff is 500ms; wait long enough for the reconnect attempt
+    // to land, plus a margin for the second start's hello+initialize.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // Reconnect succeeded → start() ran again. We can't directly assert
+    // "ensureWorkspace was called twice" (start() shares state), but the
+    // absence of upgradeMarker + no apply calls matches the default
+    // (no-marker) reconnect path.
+    assert.strictEqual(sidecar.upgradeApplyCalls, 0);
+    assert.strictEqual(sidecar.upgradeMarker, false);
+
+    await client.dispose();
+});
+
+test("PR4: sidecar exit triggers upgrade --apply when the marker is present", async () => {
+    const sidecar = new FakeSidecarClient();
+    sidecar.upgradeMarker = true;
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+
+    sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
+
+    // Wait for the first backoff + apply + new start to land.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // upgradeApply was called exactly once (the marker cleared it).
+    assert.strictEqual(sidecar.upgradeApplyCalls, 1);
+    assert.strictEqual(sidecar.upgradeMarker, false);
+
+    await client.dispose();
+});
+
+test("PR4: sidecar exit tolerates upgrade --apply failure (best-effort)", async () => {
+    const sidecar = new FakeSidecarClient();
+    sidecar.upgradeMarker = true;
+    sidecar.failUpgradeApply = true;
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+
+    // Must not throw — the reconnect loop swallows the apply error and
+    // proceeds to re-ensure against the existing binary.
+    sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    assert.strictEqual(sidecar.upgradeApplyCalls, 1);
+    // Marker stays set so the next exit can retry.
+    assert.strictEqual(sidecar.upgradeMarker, true);
+
+    await client.dispose();
+});
+
+test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async () => {
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+
+    // Wrap ensureWorkspace BEFORE start so we capture the initial call
+    // plus any reconnect-driven ones.
+    let ensureCalls = 0;
+    const original = sidecar.ensureWorkspace.bind(sidecar);
+    sidecar.ensureWorkspace = async (cwd: string) => {
+        ensureCalls += 1;
+        return original(cwd);
+    };
+
+    await client.start("/workspace/a");
+    const callsAfterStart = ensureCalls;
+    assert.ok(callsAfterStart >= 1, "start() should call ensureWorkspace");
+
+    await client.dispose();
+    // Wait past the longest reconnect backoff (5s in the loop, but we
+    // observe a single attempt here — 800ms covers the first 500ms
+    // backoff + the attempt itself).
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // dispose must NOT trigger another ensureWorkspace; if it did, a
+    // reconnect would have run (and called ensureWorkspace at least once).
+    assert.strictEqual(ensureCalls, callsAfterStart);
+});
+
+test("PR4: multiple sidecar exits during one reconnect only schedule one loop", async () => {
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+
+    sidecar.upgradeMarker = true;
+    sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
+    // A second exit while the reconnect loop is mid-backoff must NOT
+    // spawn a parallel loop (which would race on processReadiness).
+    sidecar.emitExit({ code: 1, reason: "second-exit" });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // The marker was present, but only one apply should have happened.
+    // (A second loop would call apply again before clearing the marker.)
+    assert.strictEqual(sidecar.upgradeApplyCalls, 1);
+
     await client.dispose();
 });

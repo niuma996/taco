@@ -97,8 +97,8 @@ export function WindowControls() {
                     type="button"
                     className="window-control-dot window-control-dot--close"
                     onClick={onClose}
-                    aria-label={t("window.close")}
-                    title={t("window.close")}
+                    aria-label={t("window.hide")}
+                    title={t("window.hide")}
                 />
                 <button
                     type="button"
@@ -143,8 +143,8 @@ export function WindowControls() {
                 type="button"
                 className="window-control-btn window-control-btn--close"
                 onClick={onClose}
-                aria-label={t("window.close")}
-                title={t("window.close")}
+                aria-label={t("window.hide")}
+                title={t("window.hide")}
             >
                 <X size={16} aria-hidden="true" />
             </button>

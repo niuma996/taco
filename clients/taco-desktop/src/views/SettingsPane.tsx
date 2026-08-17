@@ -7,6 +7,8 @@
  * width-capped content column instead of a 420px-wide drawer.
  *
  * MCP is not here — it lives on the activity rail as its own top-level view.
+ *
+ * PR4 adds the `schedules` section (daemon-side scheduler UI).
  */
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { useState } from "react";
@@ -17,7 +19,9 @@ import { DebugTab } from "../components/settings/DebugTab.tsx";
 import type { ModelOption } from "../components/settings/ModelPicker.tsx";
 import { ModelTab } from "../components/settings/ModelTab.tsx";
 import { PermissionsTab } from "../components/settings/PermissionsTab.tsx";
-import { useT } from "../i18n/useI18n";
+import { SchedulesTab } from "../components/settings/SchedulesTab.tsx";
+import { UpdatesTab } from "../components/settings/UpdatesTab.tsx";
+import { useT } from "../i18n/useI18n.ts";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
 
 export type SettingsSection =
@@ -26,7 +30,9 @@ export type SettingsSection =
     | "compaction"
     | "context"
     | "permissions"
-    | "debug";
+    | "schedules"
+    | "debug"
+    | "updates";
 
 type SectionLabelKey =
     | "settings.tabAppearance"
@@ -34,7 +40,9 @@ type SectionLabelKey =
     | "settings.tabCompaction"
     | "settings.tabContext"
     | "settings.tabPermissions"
-    | "settings.tabDebug";
+    | "settings.tabSchedules"
+    | "settings.tabDebug"
+    | "settings.tabUpdates";
 
 const SECTIONS: ReadonlyArray<{ key: SettingsSection; labelKey: SectionLabelKey }> = [
     { key: "appearance", labelKey: "settings.tabAppearance" },
@@ -42,7 +50,9 @@ const SECTIONS: ReadonlyArray<{ key: SettingsSection; labelKey: SectionLabelKey 
     { key: "compaction", labelKey: "settings.tabCompaction" },
     { key: "context", labelKey: "settings.tabContext" },
     { key: "permissions", labelKey: "settings.tabPermissions" },
+    { key: "schedules", labelKey: "settings.tabSchedules" },
     { key: "debug", labelKey: "settings.tabDebug" },
+    { key: "updates", labelKey: "settings.tabUpdates" },
 ];
 
 export interface SettingsPaneProps {
@@ -54,6 +64,14 @@ export interface SettingsPaneProps {
     workspace: WorkspaceId | null;
     /** Called when the Model tab's picker opens its dropdown, triggering a model-list refresh. */
     onRefreshModels?: () => void;
+    /** Last known available update from the mount-time check, or null. */
+    updateAvailable: { version: string } | null;
+    /** True while a check is in flight — disables the Check now button. */
+    updateChecking: boolean;
+    /** Last check error message (null = no error). */
+    updateError: string | null;
+    /** Triggers a fresh checkForUpdate() — App.tsx owns the result. */
+    onCheckUpdate: () => void;
 }
 
 export function SettingsPane(props: SettingsPaneProps) {
@@ -88,7 +106,16 @@ export function SettingsPane(props: SettingsPaneProps) {
                     {section === "compaction" && <CompactionTab client={props.client} />}
                     {section === "context" && <ContextTab client={props.client} />}
                     {section === "permissions" && <PermissionsTab client={props.client} />}
+                    {section === "schedules" && <SchedulesTab client={props.client} />}
                     {section === "debug" && <DebugTab onRestart={props.onRestartSidecar} />}
+                    {section === "updates" && (
+                        <UpdatesTab
+                            updateAvailable={props.updateAvailable}
+                            checking={props.updateChecking}
+                            lastError={props.updateError}
+                            onCheck={props.onCheckUpdate}
+                        />
+                    )}
                 </div>
             </div>
         </div>

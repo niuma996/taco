@@ -40,6 +40,15 @@ export interface SidecarClient {
     disposeAll(): Promise<void>;
     onPush(handler: (frame: SidecarFrame) => void): Promise<UnlistenFn>;
     onExit(handler: (exit: SidecarExit) => void): Promise<UnlistenFn>;
+    /** PR4: check whether `taco upgrade` staged a new bundle + wrote the
+     *  marker. Used by the reconnect loop so a daemon shutdown triggered by
+     * the orchestrator's "upgrade-pending" signal results in `taco upgrade
+     * --apply` running before the new daemon is spawned. */
+    upgradeMarkerPresent(): Promise<boolean>;
+    /** PR4: run `taco upgrade --apply` (atomic swap of staged bundle into
+     *  live install dir). Best-effort: the reconnect loop tolerates a
+     * non-zero exit so a transient launcher failure doesn't wedge the UI. */
+    upgradeApply(): Promise<string>;
 }
 
 export function createSidecarClient(deps: {
@@ -72,6 +81,14 @@ export function createSidecarClient(deps: {
             deps.listen<SidecarExit>("sidecar-exited", (event) => {
                 handler(event.payload);
             }),
+        upgradeMarkerPresent: async () => {
+            const present = await deps.invoke("upgrade_marker_present", {});
+            return present === true;
+        },
+        upgradeApply: async () => {
+            const result = await deps.invoke("upgrade_apply", {});
+            return typeof result === "string" ? result : "";
+        },
     };
 }
 

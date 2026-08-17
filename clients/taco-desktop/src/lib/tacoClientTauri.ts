@@ -79,6 +79,15 @@ export class TacoClient extends TacoClientBase {
      * ensured) without changing the public Tauri contract.
      */
     private pendingProcessCwd: WorkspaceId | undefined;
+    /** PR4: cwd the last `start(cwd)` call used. Persists across `sidecar-exited`
+     *  events so the reconnect loop knows which workspace to re-ensure.
+     *  Distinct from `pendingProcessCwd` (cleared on exit) and from
+     *  `ensuredCwds` (cleared on exit so a fresh handshake can run). */
+    private reconnectCwd: WorkspaceId | undefined;
+    /** PR4: set while a reconnect is in flight so a second `sidecar-exited`
+     *  event during the same disconnect storm doesn't schedule a parallel
+     *  reconnect (which would race on `processReadiness`). */
+    private reconnectInFlight = false;
     private readonly epochs = new SidecarEpochs();
     private readonly epochChangeHandlers = new Set<(workspace: WorkspaceId) => void>();
 
@@ -114,6 +123,8 @@ export class TacoClient extends TacoClientBase {
         // returns, and the post-hello `runInitialize` calls callProcess before
         // we ever reach the `pendingProcessCwd = cwd` line below otherwise.
         this.pendingProcessCwd = cwd;
+        // PR4: remember the cwd so a sidecar-exited event can reconnect.
+        this.reconnectCwd = cwd;
         const readiness = this.createProcessReadiness();
         const initialization = this.createProcessInitialization();
         try {
@@ -508,5 +519,59 @@ export class TacoClient extends TacoClientBase {
         this.rejectAllPending(reason);
         this.ensuredCwds.clear();
         this.epochs.clearAll();
+        // PR4: schedule an upgrade-aware reconnect. We don't reconnect from
+        // `dispose()` because that's a deliberate shutdown — the caller
+        // owns the lifecycle. `reconnectCwd` stays set so the loop knows
+        // which workspace to re-ensure against.
+        if (this.reconnectCwd !== undefined && !this.reconnectInFlight) {
+            void this.runReconnect(this.reconnectCwd);
+        }
+    }
+
+    /** PR4: reconnect with backoff + upgrade-marker detection.
+     *
+     *  Flow per the plan's `ensureDaemon` pseudocode:
+     *    1. Wait `backoffMs` (500 → 1s → 2s → 5s).
+     *    2. Probe `upgradeMarkerPresent`. If true, run `upgradeApply`
+     *       (which atomically swaps staging → live and clears the marker).
+     *    3. Re-call `start(cwd)` — same path the user-facing mount flow
+     *       uses, so a successful reconnect goes through the same hello +
+     *       initialize handshake and emits the same epoch transitions as a
+     *       normal mount.
+     *    4. On failure, repeat with the next backoff. After the last entry
+     *       the loop gives up; the user can retry via the UI's reconnect
+     *       control (or a hard refresh) at that point.
+     *
+     *  Why we don't restart ourselves in Rust: the swap needs to happen
+     *  BEFORE the new spawn so the new binary is the one the launcher picks
+     *  up. Rust would have to do `upgrade_apply` + `wait_for_daemon_socket`
+     *  anyway, so the JS side keeping the loop is a simpler integration
+     *  with the existing `start()` flow.
+     */
+    private async runReconnect(cwd: WorkspaceId): Promise<void> {
+        this.reconnectInFlight = true;
+        const backoffs = [500, 1000, 2000, 5000] as const;
+        try {
+            for (const backoffMs of backoffs) {
+                await new Promise((resolve) => setTimeout(resolve, backoffMs));
+                try {
+                    const pending = await this.sidecar.upgradeMarkerPresent();
+                    if (pending) {
+                        try {
+                            await this.sidecar.upgradeApply();
+                        } catch {
+                            // Best-effort — fall through to re-ensure; the
+                            // daemon will start against the old binary.
+                        }
+                    }
+                    await this.start(cwd);
+                    return;
+                } catch {
+                    // Try the next backoff.
+                }
+            }
+        } finally {
+            this.reconnectInFlight = false;
+        }
     }
 }

@@ -22,6 +22,7 @@ clients/*/src-tauri/gen/
 # Tooling caches
 .claude/
 .superpowers/
+docs/superpowers/
 .worktrees/
 .release-staging/
 
@@ -53,3 +54,12 @@ __pycache__/
 AGENTS.md
 CLAUDE.md
 DESIGN.md
+docs/plans/
+
+# Tauri updater signing keys (PR5 / docs/signing.md). The .pub file
+# *is* committed to the repo as the embedded pubkey goes into
+# tauri.conf.json; these patterns only ignore the operator-local
+# copies of the keypair sitting next to `docs/signing.md`.
+*.minisign
+taco-update.key
+taco-update.pub

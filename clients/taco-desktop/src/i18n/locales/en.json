@@ -83,7 +83,7 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "restore": "Restore",
-    "close": "Close"
+    "hide": "Hide to background"
   },
   "activity": {
     "chat": "Chat",
@@ -111,7 +111,8 @@
     "skillsEmptyState": "No skills found.",
     "skillsEmptyHint": "Add a SKILL.md file in ~/.taco/skills/ or <cwd>/.taco/skills/ (also scans ~/.pi/skills/, <cwd>/.pi/skills/).",
     "systemPromptLabel": "System Prompt",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "badgeUpdateAvailable": "Update available"
   },
   "settings": {
     "appearanceTitle": "Theme",
@@ -272,7 +273,21 @@
     "mcpServerDelete": "Delete server",
     "mcpServerEditBtn": "Edit",
     "mcpServerDisabled": "disabled",
-    "mcpServerDisabledHint": "Takes effect after sidecar restart"
+    "mcpServerDisabledHint": "Takes effect after sidecar restart",
+    "tabSchedules": "Schedules",
+    "sectionNavAria": "Settings sections",
+    "tabUpdates": "Updates",
+    "updates": {
+      "title": "Updates",
+      "desc": "Check for desktop updates. New versions ship fixes and features; the app restarts after install.",
+      "currentVersion": "Current version",
+      "status": "Status",
+      "checkNow": "Check now",
+      "statusChecking": "Checking…",
+      "statusUpToDate": "Up to date",
+      "statusAvailable": "Update available: v{{version}}",
+      "statusError": "Last check failed: {{error}}"
+    }
   },
   "context": {
     "indicatorLabel": "Context usage",
@@ -527,5 +542,32 @@
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."
+  },
+  "schedules": {
+    "empty": "No schedules yet.",
+    "newTitle": "New schedule",
+    "editTitle": "Edit schedule",
+    "fieldName": "Name",
+    "fieldSchedule": "Schedule",
+    "fieldScheduleKind": "Kind",
+    "fieldIntervalMs": "Interval (ms)",
+    "fieldCronExpr": "Cron expression",
+    "fieldCronTz": "Timezone (optional)",
+    "fieldCommand": "Command",
+    "fieldArgs": "Args (JSON object)",
+    "fieldEnabled": "Enabled",
+    "fieldRunOnStartup": "Run on startup",
+    "actionSave": "Save",
+    "actionCreate": "Create",
+    "actionCancel": "Cancel",
+    "actionRunNow": "Run now",
+    "actionEdit": "Edit",
+    "actionDelete": "Delete",
+    "toggleAria": "Toggle schedule enabled",
+    "columnName": "Name",
+    "columnSchedule": "Schedule",
+    "columnCommand": "Command",
+    "columnEnabled": "Enabled",
+    "columnActions": "Actions"
   }
 }

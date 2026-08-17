@@ -211,7 +211,9 @@ export function OnboardingModal(props: OnboardingModalProps) {
                         />
                     )}
                     {openError && step === "workspace" && (
-                        <div className="error-banner" role="alert">{openError}</div>
+                        <div className="error-banner" role="alert">
+                            {openError}
+                        </div>
                     )}
                     {step === "provider" && (
                         <ProviderStep

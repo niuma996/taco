@@ -11,7 +11,7 @@ import { IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Plus } from "lucide-react";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ConfirmModal } from "./components/ConfirmModal";
@@ -22,6 +22,7 @@ import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { TaskPanel } from "./components/panels/TaskPanel";
 import { RenameModal } from "./components/RenameModal";
 import { McpSection } from "./components/settings/McpSection.tsx";
+import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useAgentsPane } from "./hooks/useAgentsPane";
@@ -60,6 +61,7 @@ import {
 } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { TacoClient } from "./lib/tacoClientTauri.ts";
+import { checkForUpdate } from "./lib/updater.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
@@ -285,6 +287,53 @@ export default function App() {
                 setDesktopConfig({});
             });
     }, []);
+
+    // Silent auto-check on mount. Populates updateStatus so the
+    // Settings activity-rail entry can show a badge and the Updates
+    // tab can render status text — but does NOT auto-open the dialog.
+    // The user clicks the Settings rail (or the Check now button) to
+    // act. Skipped in dev because the manifest endpoint 404s and
+    // hot-reload would otherwise spam GitHub's API.
+    const [updateStatus, setUpdateStatus] = useState<{
+        checking: boolean;
+        available: { version: string } | null;
+        error: string | null;
+    }>({ checking: false, available: null, error: null });
+    const [updateDialog, setUpdateDialog] = useState<{ open: boolean; version?: string }>({
+        open: false,
+    });
+    // Manual check: always runs. The Check now button needs to work in
+    // dev too so the Updates tab is actually demoable — without it the
+    // button would be a no-op whenever import.meta.env.DEV is true.
+    const runUpdateCheck = useCallback(() => {
+        setUpdateStatus((s) => ({ ...s, checking: true, error: null }));
+        void (async () => {
+            const status = await checkForUpdate();
+            if (status.state === "available" && status.version) {
+                setUpdateStatus({
+                    checking: false,
+                    available: { version: status.version },
+                    error: null,
+                });
+                setUpdateDialog({ open: true, version: status.version });
+            } else if (status.state === "error") {
+                setUpdateStatus({
+                    checking: false,
+                    available: null,
+                    error: status.error ?? "unknown error",
+                });
+            } else {
+                setUpdateStatus({ checking: false, available: null, error: null });
+            }
+        })();
+    }, []);
+
+    // Silent mount-time auto-check. Guarded by import.meta.env.DEV so
+    // hot-reload doesn't spam GitHub's API on every code edit.
+    useEffect(() => {
+        if (import.meta.env.DEV) return;
+        runUpdateCheck();
+    }, [runUpdateCheck]);
     // Accumulate FS scope entries for each newly activated workspace.
     // Scope grows per activeCwd; tauri-plugin-fs 2.x never revokes paths.
     useEffect(() => {
@@ -462,7 +511,11 @@ export default function App() {
                render there; on Windows/Linux the window is frameless
                (decorations:false) and this provides min/max/close. */}
             {document.documentElement.dataset.platform !== "macos" && <WindowControls />}
-            <ActivityRail activeView={mainView} onSelect={setMainView} />
+            <ActivityRail
+                activeView={mainView}
+                onSelect={setMainView}
+                hasUpdateBadge={updateStatus.available !== null}
+            />
             <div className="app-main">
                 <header className="topbar" data-tauri-drag-region>
                     <div className="topbar-picker-group">
@@ -748,6 +801,10 @@ export default function App() {
                             modelOptions={filteredOptions}
                             workspace={activeCwd || null}
                             onRefreshModels={refreshAfterKeyChange}
+                            updateAvailable={updateStatus.available}
+                            updateChecking={updateStatus.checking}
+                            updateError={updateStatus.error}
+                            onCheckUpdate={runUpdateCheck}
                         />
                     ) : mainView === "mcp" ? (
                         <div className="settings-pane">
@@ -846,6 +903,11 @@ export default function App() {
                     }}
                 />
             )}
+            <UpdateDialog
+                open={updateDialog.open}
+                initialVersion={updateDialog.version}
+                onDismiss={() => setUpdateDialog({ open: false })}
+            />
         </div>
     );
 }

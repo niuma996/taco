@@ -219,7 +219,9 @@ export async function loadWorkspaces(): Promise<{ opened: string[]; active: stri
     if (config.workspaces && Array.isArray(config.workspaces.opened)) {
         // Existing desktop.json state — no migration needed.
         const opened = config.workspaces.opened.filter(isValidWorkspaceCwd);
-        const active = isValidWorkspaceCwd(config.workspaces.active) ? config.workspaces.active : "";
+        const active = isValidWorkspaceCwd(config.workspaces.active)
+            ? config.workspaces.active
+            : "";
         return { opened, active };
     }
     // No workspaces in desktop.json yet — try the one-shot LS migration.
@@ -231,7 +233,10 @@ export async function loadWorkspaces(): Promise<{ opened: string[]; active: stri
         try {
             await writeDesktopConfig({ workspaces: migrated });
         } catch (e) {
-            console.warn("[taco] failed to persist migrated workspaces; will retry on next read", e);
+            console.warn(
+                "[taco] failed to persist migrated workspaces; will retry on next read",
+                e,
+            );
         }
         return migrated;
     }
@@ -268,9 +273,7 @@ export async function loadActiveCwd(): Promise<string> {
 export function resolveActiveCwd(stored: string | null, opened: string[]): string {
     if (stored && isValidWorkspaceCwd(stored)) return stored;
     if (stored && !isValidWorkspaceCwd(stored)) {
-        console.warn(
-            `[taco] stored active cwd ${JSON.stringify(stored)} is invalid; falling back`,
-        );
+        console.warn(`[taco] stored active cwd ${JSON.stringify(stored)} is invalid; falling back`);
     }
     return opened[0] ?? defaultCwd;
 }

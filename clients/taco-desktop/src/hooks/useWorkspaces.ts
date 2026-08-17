@@ -45,8 +45,8 @@ import {
 import {
     initDefaultCwd,
     isValidWorkspaceCwd,
-    loadOpenedCwds,
     loadActiveCwd,
+    loadOpenedCwds,
     persistActiveCwd,
     persistCwds,
     pruneMissingCwds,

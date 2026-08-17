@@ -67,6 +67,10 @@ const SETTINGS_ITEM: ItemDef = { type: "settings", icon: Settings, labelKey: "ac
 export interface ActivityRailProps {
     activeView: ActivityView;
     onSelect: (view: ActivityView) => void;
+    /** When true, the Settings item shows a small status dot. Wired to
+     *  the updater's "available" state by App.tsx so the user can see
+     *  at a glance that an update is pending without an auto-popup. */
+    hasUpdateBadge?: boolean;
 }
 
 function RailButton({
@@ -76,10 +80,15 @@ function RailButton({
     activeView,
     onSelect,
     t,
+    badge,
 }: ItemDef & {
     activeView: ActivityView;
     onSelect: (view: ActivityView) => void;
     t: (k: string) => string;
+    /** When set, render a small status dot in the button's top-right
+     *  corner. The Settings item uses this for the "update available"
+     *  badge — App.tsx passes `hasUpdateBadge` through conditionally. */
+    badge?: boolean;
 }) {
     const label = t(labelKey);
     return (
@@ -97,11 +106,17 @@ function RailButton({
                 <Icon size={22} aria-hidden="true" />
                 <span className="activity-rail-label">{label}</span>
             </span>
+            {badge ? (
+                <span
+                    className="activity-rail-badge"
+                    aria-label={t("activity.badgeUpdateAvailable")}
+                />
+            ) : null}
         </button>
     );
 }
 
-export function ActivityRail({ activeView, onSelect }: ActivityRailProps) {
+export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityRailProps) {
     const { t } = useT();
     // Render chat separately so the divider between it and the rest of the top
     // group can live as a sibling element — no Fragment, which trips up Vite
@@ -127,7 +142,13 @@ export function ActivityRail({ activeView, onSelect }: ActivityRailProps) {
                 ))}
             </div>
             <div className="activity-rail-bottom">
-                <RailButton {...SETTINGS_ITEM} activeView={activeView} onSelect={onSelect} t={t} />
+                <RailButton
+                    {...SETTINGS_ITEM}
+                    activeView={activeView}
+                    onSelect={onSelect}
+                    t={t}
+                    badge={hasUpdateBadge}
+                />
             </div>
         </nav>
     );

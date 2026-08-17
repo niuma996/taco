@@ -15,16 +15,16 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_fs::FsExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 pub mod log_file;
 pub use log_file::LogFiles;
-
-const DEFAULT_SIDECAR_ARGS: &str = "packages/sidecar/src/index.ts";
 
 #[cfg(windows)]
 const SIDECAR_PROGRAM_FILENAME: &str = "tsx.cmd";
@@ -81,17 +81,20 @@ const PASSTHROUGH_ENV: &[&str] = &[
     "LOCALAPPDATA",
 ];
 
-/// Prefix the sidecar stamps on LLM-payload dump lines. Kept in sync with
-/// `packages/sidecar/src/runtime/hookWiring.ts` (where lines are written)
-/// and `clients/taco-desktop/src/hooks/useSidecarStream.ts` (where the
-/// frontend matches them for the in-memory LLM Dump panel).
-const LLM_DUMP_PREFIX: &str = "[taco:llm]";
-
 /// externalBin 的 basename — Tauri 把 `externalBin` 放在 main binary 同目录,
 /// 用 `current_exe()` 的父目录定位(`BaseDirectory::Executable` 在 Windows/macOS
 /// 不受支持,不可用)。Windows 上文件名带 `.exe`,其余平台不带。
 /// (resources 根不走这里,由 `resource_dir()` 直接取。)
 const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
+
+/// Gate that lets a programmatic `AppHandle::exit` pass through without
+/// re-entering the shutdown helper. The OS-driven `RunEvent::ExitRequested`
+/// (Cmd+Q / window manager close on Windows/Linux) calls `prevent_exit`,
+/// runs the sidecar teardown, then `exit(0)` triggers a second ExitRequested.
+/// Swapping the gate from false → true on the first event marks the second
+/// one as "already handled" so it falls through and the process actually
+/// terminates.
+static EXIT_GATE: AtomicBool = AtomicBool::new(false);
 
 /// 决定 release 与 debug 的 sidecar 程序+参数+运行时资源根。
 ///
@@ -102,6 +105,32 @@ const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
 ///      注入 `TACO_SIDECAR_RESOURCES` 让 sidecar 内 runtimeResources 找 agents/skills。
 ///   4. release 但 runtime 缺失:报错 — 禁止偷回退到系统 tsx,避免 release 在用户机器
 ///      静默失败。
+/// How to spawn + connect to the sidecar / daemon.
+///
+/// PR2 reverses the spawn model: instead of forking a tokio subprocess
+/// that inherits stdio, the desktop asks the @taco-ai/cli launcher (dev)
+/// or the bundled `taco-sidecar-node` (prod) to bring the daemon up,
+/// then connects to the NDJSON socket it exposes. The two processes
+/// share the same socket paths under `$TACO_HOME/run/` so the
+/// launcher's "ready" signal is the same path Rust connects to.
+///
+/// `extra_env` carries variables PR2 needs in addition to PASSTHROUGH_ENV:
+/// `TACO_DAEMON_MODE=1` flips the bundle into socket-listening mode;
+/// `TACO_SOCKET` / `TACO_CONTROL_SOCKET` name the two IPC channels. The
+/// launcher writes them itself when it acts as an intermediate; the prod
+/// path needs them because the desktop sets the paths before spawning.
+///
+/// `#[allow(dead_code)]` on `socket_path` + `control_socket_path`: commit 4
+/// only forwards these via `extra_env` (the struct fields themselves are
+/// read in commit 5, when workspace_ensure swaps the subprocess pipes for
+/// a tokio socket connection). Removing the allow once commit 5 lands.
+///
+/// `#[allow(clippy::doc_lazy_continuation)]` suppresses the formatter-style
+/// "indented docs" lint that fires on the multi-paragraph doc block above
+/// (paragraph continuation lines vs. heading line). PR5's packaging work
+/// may re-run `cargo fmt` + clippy with a uniform doc style; until then
+/// the lint is more noise than signal here.
+#[allow(dead_code, clippy::doc_lazy_continuation)]
 struct SidecarResolution {
     program: String,
     args: Vec<String>,
@@ -111,6 +140,18 @@ struct SidecarResolution {
     /// 是否运行仓库源码形态(tsx + repo_root cwd)。区别于 `workspace_ensure`
     /// 入参 `debug_mode`(那是"是否打印 LLM 报文"的客户端开关,两者含义不同)。
     use_repo_source: bool,
+    /// NDJSON socket path the bundle should bind. `workspace_ensure`
+    /// forwards this to the child as `TACO_SOCKET` and uses it as the
+    /// connection target once the daemon is ready (PR2 commit 5 wires the
+    /// actual tokio socket connection).
+    socket_path: PathBuf,
+    /// Connection target under the daemon's control plane.
+    control_socket_path: PathBuf,
+    /// Variables to add on top of PASSTHROUGH_ENV when spawning. Includes
+    /// `TACO_DAEMON_MODE`, `TACO_SOCKET`, `TACO_CONTROL_SOCKET`, and any
+    /// test-time overrides (TACO_SIDECAR_CMD/TACO_SIDECAR_ARGS override the
+    /// entire resolution above).
+    extra_env: Vec<(String, String)>,
 }
 
 /// taco 自有路径的根:TACO_HOME env > $HOME/.taco。
@@ -202,6 +243,99 @@ async fn desktop_config_write(app: AppHandle, contents: String) -> Result<(), St
     Ok(())
 }
 
+/// Returns true if a `taco upgrade` was staged and the daemon's
+/// orchestrator will shut itself down on its next recheck (the UI's
+/// reconnect loop checks this between attempts and runs `taco upgrade
+/// --apply` before re-ensuring). Pure filesystem existence check; the
+/// Tauri command layer is just to keep the path-resolution rules in
+/// `resolve_taco_home` authoritative on both sides.
+#[tauri::command]
+async fn upgrade_marker_present(app: AppHandle) -> Result<bool, String> {
+    let home = resolve_taco_home(&app)?;
+    Ok(home.join("upgrade-marker.json").exists())
+}
+
+/// Run `taco upgrade --apply` via the bundled launcher (the same one
+/// `ensure_daemon_installed` uses for the first-run `taco install`).
+/// Best-effort: a non-zero exit propagates as a String error so the
+/// frontend's reconnect loop can surface it without aborting the retry
+/// schedule. The CLI handles the atomic swap + marker clear itself;
+/// the Tauri command layer only spawns the binary.
+#[tauri::command]
+async fn upgrade_apply(app: AppHandle) -> Result<String, String> {
+    let Some(launcher) = resolve_install_launcher_via_handle(&app) else {
+        return Err("taco launcher not found; cannot run upgrade --apply".into());
+    };
+    let taco_home = resolve_taco_home(&app)?;
+    let mut cmd = std::process::Command::new(&launcher.program);
+    for arg in &launcher.prefix_args {
+        cmd.arg(arg);
+    }
+    cmd.arg("upgrade").arg("--apply");
+    cmd.env("TACO_HOME", &taco_home);
+    for (key, value) in &launcher.env {
+        cmd.env(key, value);
+    }
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to spawn taco upgrade --apply: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "taco upgrade --apply exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+}
+
+/// Mirror of `resolve_install_launcher` that takes an `AppHandle`
+/// instead of `&tauri::App`. The two share a body, but the upgrade
+/// command is a Tauri command (so it gets `AppHandle`) while the
+/// install path runs inside the `.setup` closure (so it gets
+/// `&tauri::App`). Splitting them keeps each call site obvious about
+/// which API surface it's plugging into without paying for a generic
+/// wrapper that would erase the lifetime constraints Tauri imposes.
+fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<InstallLauncherSpec> {
+    if cfg!(debug_assertions) {
+        let repo_root = find_repo_root();
+        let tsx = resolve_repo_source_program(&repo_root);
+        let cli_bin = repo_root
+            .join("packages")
+            .join("cli")
+            .join("bin")
+            .join("taco.cjs");
+        if cli_bin.exists() {
+            return Some(InstallLauncherSpec {
+                program: tsx,
+                prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
+                env: Vec::new(),
+            });
+        }
+        return None;
+    }
+    let resources = app.path().resource_dir().ok()?.join("cli").join("taco.mjs");
+    let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
+    let bundle = sidecar_root.join("lib").join("index.mjs");
+    let node = std::env::current_exe().ok()?.parent()?.join(if cfg!(windows) {
+        "taco-sidecar-node.exe"
+    } else {
+        "taco-sidecar-node"
+    });
+    if !resources.exists() || !node.exists() || !bundle.exists() {
+        return None;
+    }
+    Some(InstallLauncherSpec {
+        program: node.to_string_lossy().into_owned(),
+        prefix_args: vec![resources.to_string_lossy().into_owned()],
+        env: vec![
+            ("TACO_SIDECAR_NODE".into(), node.to_string_lossy().into_owned()),
+            ("TACO_SIDECAR_BUNDLE".into(), bundle.to_string_lossy().into_owned()),
+            ("TACO_SIDECAR_RESOURCES".into(), sidecar_root.to_string_lossy().into_owned()),
+        ],
+    })
+}
+
 /// 剥掉 Windows verbatim 前缀(`\\?\`)。
 ///
 /// `current_exe()` / `resource_dir()` 在 Windows 上可能返回 `\\?\D:\...` 这种
@@ -217,8 +351,46 @@ fn strip_win_verbatim(p: &Path) -> PathBuf {
     }
 }
 
+/// NDJSON socket path. Unix: filesystem path under `$TACO_HOME/run/`.
+/// Windows: named pipe `\\.\pipe\taco-sidecar`. Mirrors
+/// `packages/cli/lib/paths.ts` so the @taco-ai/cli launcher and the desktop
+/// agree on the path without an IPC roundtrip.
+fn ndjson_socket_path(home: &Path) -> PathBuf {
+    if cfg!(windows) {
+        return PathBuf::from(r"\\.\pipe\taco-sidecar");
+    }
+    home.join("run").join("sidecar.sock")
+}
+
+/// Control socket path. Same shape as `ndjson_socket_path` but with a
+/// distinct name so a single-instance check (PR3) can detect an existing
+/// daemon via bind-with-O_EXCL on this path without colliding with the
+/// data channel.
+fn control_socket_path(home: &Path) -> PathBuf {
+    if cfg!(windows) {
+        return PathBuf::from(r"\\.\pipe\taco-sidecar-ctl");
+    }
+    home.join("run").join("sidecar-ctl.sock")
+}
+
 fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
-    // ① 显式覆盖
+    // PR2: socket paths under `$TACO_HOME/run/` (or Windows named pipes).
+    // Both the @taco-ai/cli launcher and the desktop must agree on these
+    // paths, so we resolve them once here and pass them to whichever
+    // process we spawn.
+    let resolved_home = resolve_taco_home(app)?;
+    let socket_path = ndjson_socket_path(&resolved_home);
+    let control_socket_path = control_socket_path(&resolved_home);
+    // Daemon-mode env every spawned child needs. The launcher's
+    // TACO_DAEMON_MODE / TACO_SOCKET / TACO_CONTROL_SOCKET come from this
+    // vector so the bundle (or CLI) flips into socket-listening mode.
+    let daemon_env: Vec<(String, String)> = vec![
+        ("TACO_DAEMON_MODE".to_string(), "1".to_string()),
+        ("TACO_SOCKET".to_string(), socket_path.to_string_lossy().into_owned()),
+        ("TACO_CONTROL_SOCKET".to_string(), control_socket_path.to_string_lossy().into_owned()),
+    ];
+
+    // ① 显式覆盖 —— 测试 / e2e 可以直接指定 launcher 程序
     if let (Ok(program), Ok(args_str)) = (
         std::env::var("TACO_SIDECAR_CMD"),
         std::env::var("TACO_SIDECAR_ARGS"),
@@ -229,36 +401,48 @@ fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
             resources_root: None,
             // 显式覆盖多用于本地/e2e 指向 tsx 源码,按源码形态给 cwd。
             use_repo_source: true,
+            socket_path,
+            control_socket_path,
+            extra_env: daemon_env,
         });
     }
 
     if cfg!(debug_assertions) {
-        // ② debug 走源码,沿用原本 repo+tsx 形态
+        // ② debug 走 @taco-ai/cli 的 `start` 子命令 —— 它会 spawn tsx +
+        //    sidecar/src/index.ts 并设置好 TACO_DAEMON_MODE / socket 路径。
+        //    launch_sidecar() 会等 socket ready 后退出,stdin/stdout 上
+        //    透传 socket path;commit 5 用它连 socket(本次 commit 仍读
+        //    subprocess stdout)。
         let repo_root = find_repo_root();
+        let tsx = resolve_repo_source_program(&repo_root);
+        let cli_bin = repo_root
+            .join("packages")
+            .join("cli")
+            .join("bin")
+            .join("taco.cjs");
         return Ok(SidecarResolution {
-            program: resolve_repo_source_program(&repo_root),
-            args: DEFAULT_SIDECAR_ARGS
-                .split_whitespace()
-                .map(String::from)
-                .collect(),
-            // 也注入,使得 runtimeResources resourceRoot() 走 env 一致;必须指向
-            // packages/sidecar/src(agents/、skills/ 的父级),不是 monorepo 根,
-            // 否则 resourceRoot() 短路后 builtinDir 会落到不存在的路径。
+            program: tsx,
+            args: vec![cli_bin.to_string_lossy().into_owned(), "start".to_string()],
+            // CLI 自己计算 socket 路径并 spawn sidecar,不需要 desktop 再注入。
             resources_root: Some(repo_root.join("packages").join("sidecar").join("src")),
             use_repo_source: true,
+            socket_path,
+            control_socket_path,
+            extra_env: daemon_env,
         });
     }
 
-    // ③ release
-    // 剥掉 `\\?\` verbatim 前缀 —— 这条链(resource_dir → lib_path、current_exe →
-    // node_path)上的路径都会作为 argv 传给 Node,带前缀会崩(见 strip_win_verbatim)。
+    // ③ release —— 直连 bundled node binary + ESM bundle,跳过 CLI 这一层。
+    //    externalBin 不再需要一个独立的 launcher 二进制,因为 bundle 自己
+    //    在 TACO_DAEMON_MODE=1 下已经会 listen NDJSON + control sockets。
+    //    剥掉 `\\?` verbatim 前缀 —— 这条链上的路径都会作为 argv 传给
+    //    Node,带前缀会崩(见 strip_win_verbatim)。
     let resources_root = strip_win_verbatim(
         &app.path()
             .resource_dir()
             .map_err(|e| format!("resource_dir unavailable: {e}"))?,
     );
 
-    // 资源子目录 sidecar/,sidecar/lib/index.mjs 是 staged bundle
     let lib_path = resources_root.join("sidecar").join("lib").join("index.mjs");
     if !lib_path.exists() {
         return Err(format!(
@@ -268,20 +452,12 @@ fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
         ));
     }
 
-    // externalBin 在 release 里被 Tauri 放在主程序同目录(Windows NSIS 安装目录、
-    // macOS .app/Contents/MacOS)。定位它**不能**用
-    // `path().resolve(.., BaseDirectory::Executable)` —— 该 base 的
-    // `executable_dir()` 在 Windows/macOS 上不受支持,直接返回 `Error::UnknownPath`
-    // (报 "unknown path"),导致 Windows 安装版永远解析不到侧车。改用
-    // `current_exe()` 的父目录,跨平台都指向主程序所在目录。
     let exe_dir = strip_win_verbatim(
         std::env::current_exe()
             .map_err(|e| format!("current_exe unavailable: {e}"))?
             .parent()
             .ok_or_else(|| "current exe has no parent directory".to_string())?,
     );
-    // Tauri 打包 externalBin 时,会把 staging 的 `taco-sidecar-node-<triple>[.exe]`
-    // 重命名回 basename(Windows 上带 .exe,其余平台不带)。按平台拼同样的名字。
     let node_bin_name = if cfg!(windows) {
         format!("{SIDECAR_NODE_RESOURCE}.exe")
     } else {
@@ -301,6 +477,9 @@ fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
         args: vec![lib_path.to_string_lossy().into_owned()],
         resources_root: Some(resources_root.join("sidecar")),
         use_repo_source: false,
+        socket_path,
+        control_socket_path,
+        extra_env: daemon_env,
     })
 }
 
@@ -357,10 +536,128 @@ impl Default for AppState {
 }
 
 pub struct SharedSidecar {
-    pub child: Child,
+    /// NDJSON frame writer. The reader task holds the other half of the
+    /// connected socket via the Split writer; this channel lets `workspace_send`
+    /// queue RPC lines without owning the socket directly.
     pub stdin_tx: mpsc::Sender<String>,
-    /// 进程代次 — stdout EOF 清理时比对,避免旧进程的 reader 抹掉刚重启的新进程。
+    /// Launcher process handle. `Some` until the launcher exits — in dev the
+    /// launcher is the @taco-ai/cli (which exits after spawning the daemon
+    /// bundle); in prod the launcher is the bundle itself in daemon mode (which
+    /// stays alive until shutdown). Kept so `shutdown_sidecar` can send
+    /// `control.shutdown` then SIGKILL as a fallback if the daemon doesn't
+    /// exit within the grace window.
+    pub launcher: Option<Child>,
+    /// Generation counter — EOF on the NDJSON socket clears the slot only if
+    /// the generation still matches (avoids an old reader wiping a freshly
+    /// restarted daemon's handshake line).
     generation: u64,
+}
+
+/// Platform-specific NDJSON socket type. `UnixStream` on macOS /
+/// Linux; `NamedPipeClient` on Windows. Both implement tokio's AsyncRead +
+/// AsyncWrite so `tokio::io::split` produces a (ReadHalf, WriteHalf) pair.
+#[cfg(unix)]
+type DaemonStream = tokio::net::UnixStream;
+
+#[cfg(windows)]
+type DaemonStream = tokio::net::windows::named_pipe::NamedPipeClient;
+
+/// Open a non-blocking connection to the daemon's NDJSON socket.
+async fn connect_daemon_socket(path: &std::path::Path) -> Result<DaemonStream, String> {
+    #[cfg(unix)]
+    {
+        tokio::net::UnixStream::connect(path)
+            .await
+            .map_err(|e| format!("unix socket connect {} failed: {e}", path.display()))
+    }
+    #[cfg(windows)]
+    {
+        let client = tokio::net::windows::named_pipe::NamedPipeClient::open(path)
+            .map_err(|e| format!("named pipe open {} failed: {e}", path.display()))?;
+        client
+            .connect()
+            .await
+            .map_err(|e| format!("named pipe connect {} failed: {e}", path.display()))?;
+        Ok(client)
+    }
+}
+
+/// On Unix, `connect()` returns `ConnectionRefused` (ECONNREFUSED) when the
+/// socket file exists but no listener is bound — the signature of a crashed
+/// daemon that didn't unlink on exit. Unlink the entry so the launcher /
+/// daemon can bind again. Returns true if a stale file was removed.
+///
+/// On Windows, named pipes are kernel objects without filesystem entries, so
+/// nothing to clean up — the launcher sidecar self-cleans.
+#[cfg(unix)]
+async fn clear_stale_socket(path: &std::path::Path) -> bool {
+    let probe = connect_daemon_socket(path).await;
+    if let Err(_e) = probe {
+        // Any error on a Unix socket that already has a file on disk means
+        // stale: ENOENT (file vanished mid-probe), ECONNREFUSED (no listener),
+        // EACCES (mode bit mismatch, recoverable on next start). Unlink is
+        // idempotent under ENOENT — the `remove_file` call below swallows it.
+        if path.exists() {
+            match tokio::fs::remove_file(path).await {
+                Ok(()) => return true,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
+                Err(e) => {
+                    eprintln!(
+                        "taco-desktop: failed to remove stale socket {}: {e}",
+                        path.display()
+                    );
+                    return false;
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(unix))]
+async fn clear_stale_socket(_path: &std::path::Path) -> bool {
+    false
+}
+
+/// Poll the daemon socket (with backoff) until a connection attempt succeeds
+/// or the deadline expires. Mirrors packages/cli/lib/start.ts `waitForSocket`
+/// so the launcher and the desktop agree on the "ready" heuristic.
+///
+/// On the first failure we proactively clear any stale socket file the same
+/// way the sidecar's own startup probe does (see packages/sidecar/src/index.ts
+/// `probeNdjsonSocket`). Without this, a previously-crashed daemon's socket
+/// file would let `connect()` succeed against a ghost listener — the very next
+/// NDJSON read sees EOF and the UI stalls silently. Once the stale file is
+/// removed the launcher can rebind.
+async fn wait_for_daemon_socket(path: &std::path::Path, timeout: Duration) -> Result<(), String> {
+    let probe_interval = Duration::from_millis(50);
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut stale_checked = false;
+    loop {
+        match connect_daemon_socket(path).await {
+            Ok(_conn) => return Ok(()),
+            Err(e) => {
+                if !stale_checked {
+                    if clear_stale_socket(path).await {
+                        eprintln!(
+                            "taco-desktop: removed stale socket at {} ({}); retrying",
+                            path.display(),
+                            e
+                        );
+                    }
+                    stale_checked = true;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(format!(
+                        "daemon socket {} not ready within {}ms (last error: {e})",
+                        path.display(),
+                        timeout.as_millis()
+                    ));
+                }
+                tokio::time::sleep(probe_interval).await;
+            }
+        }
+    }
 }
 
 /// 确保共享 sidecar 进程存在。首次调用 spawn,后续任意 cwd 直接返回 —— sidecar
@@ -382,18 +679,14 @@ async fn workspace_ensure(
     debug_mode: Option<bool>,
     llm_dump_to_file: Option<bool>,
 ) -> Result<Option<String>, String> {
-    let _ = cwd; // API 兼容保留;repo-source 模式的工作目录用 find_repo_root(),与此无关。
-    // 「首次生效」在此函数体现:任何在 slot 已有值之后的 ensure 调用都早返回,
-    // 因此 `cwd` / `debug_mode` / llm_dump_to_file / env_clear() 都不会再跑。
-    // 这些开关的切换必须经过 restartSidecar(参见 App.tsx:dispose → 重 start),
-    // 否则被静默丢弃。
+    let _ = cwd;
+    let _ = debug_mode;
+    let _ = llm_dump_to_file;
 
-    // 第一道关:已存在共享进程或 dispose 已发起 → 不 spawn。
+    // 第一道关:已存在共享连接或 dispose 已发起 → 不 spawn。
     {
         let slot = state.sidecar.lock().await;
         if let Some(existing) = slot.as_ref() {
-            // 复用现存进程时把握手行交回调用方。代次比对确保拿到的是**这个**
-            // 进程的握手行,而不是上一代残留的。
             let line = state
                 .handshake_line
                 .lock()
@@ -408,143 +701,212 @@ async fn workspace_ensure(
         }
     }
 
-    // 第二段:spawn 在锁外执行 —— 这样 dispose 可以 acquire 锁、设
-    // shutdown flag,我们在 install 前看到 flag 时杀掉孤儿进程,避免
-    // 「start() 拿到 hello 后又立即收到 sidecar-exited」的 zombie 局面。
     let resolution = resolve_sidecar(&app)?;
+    let socket_path = resolution.socket_path.clone();
+
     let mut cmd = Command::new(&resolution.program);
     for a in &resolution.args {
         cmd.arg(a);
     }
     if resolution.use_repo_source {
-        // 源码形态沿用 repo_root cwd(与原本约定一致)
         let repo_root = find_repo_root();
         cmd.current_dir(&repo_root);
     }
-    // release 下不指定 cwd — 让 Node 用其所在父目录即可,资源全部走 TACO_SIDECAR_RESOURCES
 
-    // Windows: 禁止 sidecar Node 进程弹出黑色控制台窗口(原进程 TACO.exe 是
-    // GUI subsystem,默认子进程会继承一个 conhost.exe 窗口 —— 显式置
-    // CREATE_NO_WINDOW = 0x08000000 才不显示)。DETACHED_PROCESS 会切断 stdio
-    // 管道,不能用。
     #[cfg(windows)]
     {
         cmd.creation_flags(0x08000000);
     }
 
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // PR2 daemon-mode spawn: stdin / stdout are unused by the daemon (the
+    // bundle reads from TACO_SOCKET and writes to the NDJSON socket), so we
+    // null them out. Capture stderr into a buffer so a launcher crash surfaces
+    // in the returned error — before this change, `Stdio::inherit()` left the
+    // real cause in the terminal and the UI saw a generic "sidecar hello
+    // timeout" after the 5s socket-wait elapsed. The buf is capped at 4 KiB so
+    // a chatty daemon cannot grow it without bound.
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
 
-    // Clear inherited env so parent-process *_API_KEY (and any other
-    // sensitive var the desktop happened to have) does NOT leak into the
-    // sidecar subprocess. Sidecar injects its own key material from
-    // ~/.taco/taco.json at startup — see packages/sidecar/src/index.ts
-    // injectApiKeysToEnv. PATH / HOME / locale are forwarded explicitly
-    // because shell tools need them to spawn user commands.
     cmd.env_clear();
     for key in PASSTHROUGH_ENV {
         if let Ok(v) = std::env::var(key) {
             cmd.env(key, v);
         }
     }
-    // Override the raw TACO_HOME with the value the desktop actually resolved.
-    // The same value is also used to open the log files further down; the
-    // earlier `if let Ok(...)` from prior revisions is gone — we always need
-    // the path for logging, so a silent `if let` would have meant logs landed
-    // somewhere unrelated to where desktop.json lives.
-    // Forwarding the raw string instead would let a relative or padded value
-    // resolve against a different cwd inside the child.
     let resolved_home = resolve_taco_home(&app)?;
     cmd.env("TACO_HOME", &resolved_home);
-
-    // 客户端显式传入 debug_mode(来自 TacoClientSettingsShape,纯客户端字段);
-    // 开启则向 sidecar 注入 TACO_DEBUG_LLM_PAYLOAD=1,sidecar 端的
-    // before_provider_payload hook 会开始打印完整 LLM 报文到 stderr。
-    // 缺省视为关闭(安全默认)。
-    // 注意:仅在共享 sidecar 尚未存在时生效(参见函数顶部说明)。
-    if debug_mode.unwrap_or(false) {
-        cmd.env("TACO_DEBUG_LLM_PAYLOAD", "1");
-    }
 
     if let Some(resources) = &resolution.resources_root {
         cmd.env("TACO_SIDECAR_RESOURCES", resources);
     }
 
-    // Join the previous generation's stderr reader before opening the log
-    // files. Its final flush can trip a rotation (the rename chain), and the
-    // reader we're about to spawn holds an independent `LogFiles` mutex on the
-    // same fixed paths — two live readers would race those renames. The
-    // handle is `Some` only while a reader is actually draining, so this is a
-    // no-op on first install and cheap on the fast path. Take the handle out
-    // before awaiting — a std MutexGuard isn't Send and can't be held across.
-    let prior_reader = state.stderr_reader.lock().unwrap().take();
-    if let Some(reader) = prior_reader {
-        let _ = reader.await;
+    for (key, value) in &resolution.extra_env {
+        cmd.env(key, value);
     }
 
-    // Open log files for this process. We open them here (and not earlier) so
-    // the file's lifetime matches the sidecar process's lifetime — a restart
-    // produces a fresh file rather than appending to one from a now-dead
-    // process. `resolved_home` is the same value we already passed to
-    // TACO_HOME above, so desktop.json and the log directory live in the
-    // same place.
-    // Open log files BEFORE spawn so a setup-time failure (disk full, bad
-    // path) doesn't leave a sidecar process running without logs. We hold
-    // them in a local Arc and only publish to `state.log_files` inside the
-    // install lock below — otherwise a parallel ensure that lost the
-    // install race would leak its reader task writing to log files that
-    // the new install overwrote.
-    let log_files = LogFiles::open(&resolved_home)
-        .map_err(|e| format!("failed to open log files under {}: {e}", resolved_home.display()))?;
-    let log_files_arc: Arc<StdMutex<LogFiles>> = Arc::new(StdMutex::new(log_files));
-    let log_files_for_stderr = log_files_arc.clone();
-    let llm_dump_to_file = llm_dump_to_file.unwrap_or(false);
-    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn sidecar: {e}"))?;
-    let generation = state
-        .next_process_generation
-        .fetch_add(1, Ordering::Relaxed);
+    let mut launcher = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn sidecar launcher: {e}"))?;
+    let generation = state.next_process_generation.fetch_add(1, Ordering::Relaxed);
 
-    let stdin = child.stdin.take().ok_or("no stdin")?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
-    let stderr = child.stderr.take().ok_or("no stderr")?;
+    // Drain the launcher's stderr into stderr_buf (capped at 4 KiB). Kept
+    // alive for the lifetime of the function so a fast-exiting launcher can
+    // still surface its last few lines before we read the buffer.
+    let stderr_buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(4096)));
+    if let Some(mut stderr) = launcher.stderr.take() {
+        let buf = std::sync::Arc::clone(&stderr_buf);
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut tmp = [0u8; 1024];
+            // Fill a local buffer first, then commit under a short lock.
+            // This avoids holding the MutexGuard across `await` points, which
+            // would make the future !Send.
+            let mut local: Vec<u8> = Vec::with_capacity(4096);
+            loop {
+                match stderr.read(&mut tmp).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if local.len() + n > 4096 {
+                            let take = 4096 - local.len();
+                            local.extend_from_slice(&tmp[..take]);
+                            // Drain the rest to keep the pipe from blocking.
+                            let mut discard = [0u8; 1024];
+                            while let Ok(n) = stderr.read(&mut discard).await {
+                                if n == 0 {
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                        local.extend_from_slice(&tmp[..n]);
+                    }
+                    Err(_) => break,
+                }
+            }
+            if !local.is_empty() {
+                let mut g = buf.lock().unwrap();
+                if g.len() < 4096 {
+                    let take = (4096 - g.len()).min(local.len());
+                    g.extend_from_slice(&local[..take]);
+                }
+            }
+        });
+    }
 
-    // 用 channel 把 React invoke 写入 stdin
+    // Wait for the daemon to bind the socket, then connect. The bundle (in
+    // daemon mode) prints nothing on stdout, so we poll the socket path
+    // instead. Timeout mirrors the CLI's waitForSocket — 5s is enough on a
+    // warm cache; a stalled spawn surfaces here rather than hanging the UI.
+    //
+    // Race: if the launcher exits non-zero *before* the socket is ready, the
+    //   real cause is whatever the launcher printed to stderr. Surface that
+    //   immediately instead of waiting for the 5s socket timeout to elapse.
+    // Race socket readiness against launcher exit. Only a non-zero exit is a
+    // hard failure — exit 0 means the launcher finished successfully, so the
+    // daemon should be listening; we give the socket poll one more short
+    // window in that case (the fast path — `taco start` probes control then
+    // exits 0 — can otherwise lose the race and produce a misleading
+    // "launcher exited" error on slow machines).
+    let wait_result = tokio::select! {
+        r = wait_for_daemon_socket(&socket_path, Duration::from_secs(5)) => r,
+        exit = launcher.wait() => {
+            let status = match exit {
+                Ok(s) => s,
+                Err(e) => return Err(format!("failed to wait on launcher: {e}")),
+            };
+            if !status.success() {
+                // Real failure: capture stderr and surface immediately.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let mut captured = stderr_buf.lock().unwrap().clone();
+                while captured.last().map_or(false, |b| b.is_ascii_whitespace() || *b == 0) {
+                    captured.pop();
+                }
+                let stderr_tail = String::from_utf8_lossy(&captured).into_owned();
+                return Err(format!(
+                    "sidecar launcher exited before binding socket (status: {}{})",
+                    status,
+                    if stderr_tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; stderr: {}", stderr_tail)
+                    },
+                ));
+            }
+            // Exit 0 — daemon should be up; one more short socket poll
+            // before we call it a failure.
+            wait_for_daemon_socket(&socket_path, Duration::from_millis(500)).await
+        }
+    };
+    wait_result?;
+
+    let conn = connect_daemon_socket(&socket_path).await?;
+    let (mut read_half, mut write_half) = tokio::io::split(conn);
+
+    // Writer task: `workspace_send` queues NDJSON frames on stdin_tx; we
+    // write each one + \n to the socket. Closing stdin_tx (the launcher
+    // going away) ends the loop.
     let (tx, mut rx) = mpsc::channel::<String>(64);
     tokio::spawn(async move {
-        let mut writer = stdin;
         while let Some(line) = rx.recv().await {
-            if writer.write_all(line.as_bytes()).await.is_err() {
+            if write_half.write_all(line.as_bytes()).await.is_err() {
                 break;
             }
-            if writer.write_all(b"\n").await.is_err() {
+            if write_half.write_all(b"\n").await.is_err() {
                 break;
             }
         }
     });
 
-    // stdout NDJSON 帧原样转发 —— 不解析 JSON。「帧属于哪个 workspace」是应用协议
-    // 语义(帧内自带 workspace 字段),由前端 dispatcher 判定;Rust 只做字节管道。
-    let app_for_stdout = app.clone();
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
+    // Reader task: NDJSON frames from the socket are forwarded to the
+    // frontend as `sidecar-event`; the first frame is also captured as the
+    // handshake line so late ensure() callers can re-read it.
+    //
+    // The daemon's hello is that one-shot first frame, and the reader does NOT
+    // re-emit it as a `sidecar-event` (it goes into `handshake_line` instead).
+    // So the spawning caller has no other way to observe it — hand it back over
+    // a oneshot so this ensure() returns the same handshake a reconnect would
+    // read out of `handshake_line`. Returning `None` here (the pre-fix shape)
+    // left the frontend's hello wait with no source and it could only time out.
+    let (hello_tx, hello_rx) = oneshot::channel::<String>();
+    let app_for_reader = app.clone();
+    let reader_handle = tokio::spawn(async move {
+        let mut hello_tx = Some(hello_tx);
+        let mut reader = BufReader::new(&mut read_half).lines();
         let mut first_line_seen = false;
-        while let Ok(Some(line)) = reader.next_line().await {
-            if !first_line_seen {
-                first_line_seen = true;
-                // Retain the first line for ensures that arrive after the
-                // handshake was emitted. Tagged with this generation so the
-                // reader of a process that lost the install race — or a dead
-                // one — can't hand its line to the live process's client.
-                *app_for_stdout
-                    .state::<AppState>()
-                    .handshake_line
-                    .lock()
-                    .unwrap() = Some((generation, line.clone()));
+        loop {
+            match reader.next_line().await {
+                Ok(Some(line)) => {
+                    if !first_line_seen {
+                        first_line_seen = true;
+                        // app.state() returns a State<'_, T> that's a
+                        // deref to AppState; bind it so the lock guard
+                        // lives long enough.
+                        let state = app_for_reader.state::<AppState>();
+                        *state.handshake_line.lock().unwrap() =
+                            Some((generation, line.clone()));
+                        if let Some(tx) = hello_tx.take() {
+                            let _ = tx.send(line.clone());
+                        }
+                    } else {
+                        let _ = app_for_reader.emit(
+                            "sidecar-event",
+                            serde_json::json!({ "line": line }),
+                        );
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!("taco-desktop NDJSON read error: {e}");
+                    break;
+                }
             }
-            let _ = app_for_stdout.emit("sidecar-event", serde_json::json!({ "line": line }));
         }
-        // stdout EOF ⇒ 进程结束。代次比对避免抹掉期间已重启的新进程。
+
+        // Socket EOF ⇒ daemon exited. Generation match guards against
+        // clobbering a freshly restarted daemon's slot.
         let dead = {
-            let state = app_for_stdout.state::<AppState>();
+            let state = app_for_reader.state::<AppState>();
             let mut slot = state.sidecar.lock().await;
             let matches_generation = slot
                 .as_ref()
@@ -556,73 +918,34 @@ async fn workspace_ensure(
                 None
             }
         };
-        if let Some(mut s) = dead {
-            let status = match s.child.try_wait() {
-                Ok(Some(status)) => Some(status),
-                Ok(None) => {
-                    let _ = s.child.kill().await;
-                    s.child.wait().await.ok()
-                }
-                Err(_) => None,
-            };
-            // 进程级事件 —— 不带 workspace:死的是整个进程,前端据此让所有
-            // workspace 的 pending RPC 失败。
-            let _ = app_for_stdout.emit("sidecar-exited", serde_json::json!({
-                "code": status.and_then(|value| value.code()),
-            }));
+        if dead.is_some() {
+            let _ = app_for_reader.emit(
+                "sidecar-exited",
+                serde_json::json!({ "code": null }),
+            );
         }
     });
 
-    // stderr: fan out to the frontend event, the main log file, and (for lines
-    // starting with `[taco:llm]` when the user has opted in) the dedicated
-    // llm-dump.log. The frontend event is always sent so the in-memory LLM
-    // Dump panel works regardless of the disk-write setting.
-    let app_for_stderr = app.clone();
-    let stderr_reader_handle = tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = app_for_stderr.emit("sidecar-log", serde_json::json!({ "line": line }));
-
-            let mut files = log_files_for_stderr.lock().unwrap();
-            if let Err(e) = files.main.write_line(&line) {
-                eprintln!("taco-desktop.log write failed: {e}");
-            }
-            if llm_dump_to_file && line.starts_with(LLM_DUMP_PREFIX) {
-                if let Err(e) = files.llm.write_line(&line) {
-                    eprintln!("llm-dump.log write failed: {e}");
-                }
-            }
-        }
-        // Process is gone — flush whatever's still in the BufWriter so the
-        // tail survives a clean exit. (On a hard kill, the OS drops it.)
-        let mut files = log_files_for_stderr.lock().unwrap();
-        let _ = files.main.flush();
-        let _ = files.llm.flush();
-    });
-    // Register the reader so the next ensure can join it before touching the
-    // log files (see the join at the top of this function).
-    *app.state::<AppState>().stderr_reader.lock().unwrap() = Some(stderr_reader_handle);
+    // PR2 does NOT publish state.log_files — the daemon writes its own logs
+    // (PR3 wires LogFiles inside the bundle). The fields stay on AppState
+    // for the install_publish test, but are left as None for daemon installs.
+    *state.log_files.lock().unwrap() = None;
 
     // 第三道关:install 前再查 shutdown flag 与 slot —— 若 dispose 在 spawn 期间
-    // 被触发、或另一个并发 ensure 已经 install,杀掉刚 spawn 的孤儿进程。
-    //
-    // 这里也是把日志文件句柄正式交给 AppState 的点:之前放在 setup 阶段会
-    // 让输掉 install 竞争的 ensure 留下一个孤儿 reader 在写"上一代"日志文件。
-    // 现在只有 install 成功时,本地 log_files_arc 才会被发布到 state,
-    // 读者在 install 前已经持有自己的 Arc 副本,生命周期与 child 一致。
+    // 被触发、或另一个并发 ensure 已经 install,杀掉刚 spawn 的孤儿 launcher。
     let mut slot = state.sidecar.lock().await;
     if state.shutdown_initiated.load(Ordering::Acquire) {
         drop(tx);
-        let _ = child.kill().await;
-        let _ = child.wait().await;
+        launcher.kill().await.ok();
+        launcher.wait().await.ok();
+        std::mem::drop(reader_handle);
         return Err("sidecar shutting down".into());
     }
     if let Some(existing) = slot.as_ref() {
-        // 另一个并发 ensure 已 install —— 我们这个是多余。交回胜出进程的握手行,
-        // 与第一道关的早返回同语义。
         drop(tx);
-        let _ = child.kill().await;
-        let _ = child.wait().await;
+        launcher.kill().await.ok();
+        launcher.wait().await.ok();
+        std::mem::drop(reader_handle);
         let line = state
             .handshake_line
             .lock()
@@ -633,21 +956,33 @@ async fn workspace_ensure(
         return Ok(line);
     }
 
-    // Publish the log files handle atomically with the slot install. The
-    // previous install's reader is still holding its own Arc clone, so
-    // overwriting state here is safe — it only severs the *state-owned*
-    // reference, and state is not the reader's lifetime anchor.
-    *state.log_files.lock().unwrap() = Some(log_files_arc);
-
     *slot = Some(SharedSidecar {
-        child,
         stdin_tx: tx,
+        launcher: Some(launcher),
         generation,
     });
+    // Release the slot lock before awaiting the hello so concurrent ensure()
+    // callers aren't serialized behind it (the hello normally lands in ms).
+    drop(slot);
 
-    // We just spawned: the handshake is still in flight and will reach the
-    // caller's listener through `sidecar-event`. Nothing to hand back.
-    Ok(None)
+    // Await the one-shot hello the reader captured from the daemon's first
+    // frame. On failure tear the slot down — a poisoned entry (connected but no
+    // hello) would wedge every later ensure() on a handshake that never comes,
+    // so force the next call to respawn against a fresh daemon instead.
+    match tokio::time::timeout(Duration::from_secs(5), hello_rx).await {
+        Ok(Ok(line)) => Ok(Some(line)),
+        Ok(Err(_)) | Err(_) => {
+            let mut slot = state.sidecar.lock().await;
+            if let Some(s) = slot.take() {
+                drop(s.stdin_tx);
+                if let Some(mut l) = s.launcher {
+                    let _ = l.kill().await;
+                    let _ = l.wait().await;
+                }
+            }
+            Err("sidecar connected but sent no hello within 5s".into())
+        }
+    }
 }
 
 /// 所有 workspace 共用一条 stdin —— `cwd` 保留仅为 API 兼容,不参与路由。
@@ -670,31 +1005,50 @@ async fn workspace_send(
 
 /// 杀掉共享 sidecar 进程 —— 前端 `client.dispose()` / restartSidecar 的落点。
 #[tauri::command]
-async fn workspace_dispose_all(state: State<'_, AppState>) -> Result<(), String> {
+async fn workspace_dispose_all(app: AppHandle) -> Result<(), String> {
+    shutdown_sidecar(&app).await;
+    Ok(())
+}
+
+/// Gracefully stop the shared sidecar child and reset the shutdown flag.
+/// Extracted from `workspace_dispose_all` so other teardown paths
+/// (e.g. the `RunEvent::ExitRequested` handler on app quit) can reuse the
+/// same 3-second EOF flush window instead of duplicating the logic.
+async fn shutdown_sidecar(app: &tauri::AppHandle) {
     // 在 acquire 锁之前先 set flag —— 让任何正在进行的 ensure(第一道关内已过、
-    // 第二段 spawn 中的)在 install 前能看到 flag,从而杀掉孤儿进程而非被 race-kill
-    // 留个 zombie。Reset 在锁外:典型路径是 dispose → 重新 ensure(restartSidecar),
-    // reset 后下一次 ensure 能正常 spawn。
+    // 第二段 spawn 中的)在 install 前能看到 flag,从而杀掉孤儿 launcher 而非被
+    // race-kill 留个 zombie。Reset 在锁外:典型路径是 dispose → 重新 ensure
+    // (restartSidecar),reset 后下一次 ensure 能正常 spawn。
+    let state = app.state::<AppState>();
     state.shutdown_initiated.store(true, Ordering::Release);
     let dead = {
         let mut slot = state.sidecar.lock().await;
         slot.take()
     };
     if let Some(mut s) = dead {
-        // Close stdin so the sidecar receives EOF and can flush sessions /
-        // buffers before exiting. Give it a short grace window; force-kill
-        // if it doesn't exit in time to avoid leaking the process.
+        // Drop stdin_tx first so the writer task sees channel-closed and
+        // flushes any pending NDJSON frames to the socket before the launcher
+        // is killed. Then wait for the launcher to exit on its own; force-kill
+        // after the grace window if it doesn't.
+        //
+        // PR2 note: in dev, the launcher is the @taco-ai/cli (which has
+        // already exited by the time we get here — the daemon bundle is
+        // reparented). s.launcher is `Some` until CLI naturally exits, then
+        // `None` (the writer task or a follow-up cleanup drops it). On
+        // prod, the launcher IS the daemon bundle; the grace window gives
+        // control.shutdown + SIGTERM a chance to land.
         drop(s.stdin_tx);
-        match tokio::time::timeout(Duration::from_secs(3), s.child.wait()).await {
-            Ok(_) => {}
-            Err(_) => {
-                let _ = s.child.kill().await;
-                let _ = s.child.wait().await;
+        if let Some(mut launcher) = s.launcher.take() {
+            match tokio::time::timeout(Duration::from_secs(3), launcher.wait()).await {
+                Ok(_) => {}
+                Err(_) => {
+                    let _ = launcher.kill().await;
+                    let _ = launcher.wait().await;
+                }
             }
         }
     }
     state.shutdown_initiated.store(false, Ordering::Release);
-    Ok(())
 }
 
 /// Grant the FS plugin access to `path` and all its subdirectories.
@@ -769,7 +1123,123 @@ fn find_repo_root() -> PathBuf {
     }
 }
 
-/// Build the main window with platform-appropriate chrome.
+/// Auto-register the sidecar as an OS-level service on first run.
+/// Registration is best-effort so startup remains available when a platform
+/// launcher or optional service manager is unavailable.
+fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
+    let taco_home = match resolve_taco_home(app.handle()) {
+        Ok(h) => h,
+        Err(_) => return Ok(()),
+    };
+    let control = control_socket_path(&taco_home);
+    if control_socket_present(&control) {
+        return Ok(());
+    }
+    let Some(launcher) = resolve_install_launcher(app) else {
+        return Ok(());
+    };
+    let mut cmd = std::process::Command::new(&launcher.program);
+    for arg in &launcher.prefix_args {
+        cmd.arg(arg);
+    }
+    cmd.arg("install");
+    for (key, value) in &launcher.env {
+        cmd.env(key, value);
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // Best-effort: surface the failure on stderr for `pnpm tauri:dev`
+    // users but never block the setup hook on it.
+    if let Err(e) = cmd.spawn() {
+        eprintln!("taco-desktop: failed to spawn `taco install`: {e}");
+    }
+    Ok(())
+}
+
+/// Cross-platform check for an existing control socket.
+///
+/// Unix: a filesystem entry at $TACO_HOME/run/sidecar-ctl.sock. Note this
+/// doesn't distinguish a live listener from a stale file (daemon crashed
+/// without unlinking); PR2's `clear_stale_socket` handles that path on
+/// connect.
+///
+/// Windows: a named pipe (`\\.\pipe\taco-sidecar-ctl`). Opening the
+/// client end via `OpenOptions` succeeds iff a server is bound — named
+/// pipes don't leave filesystem entries, so `Path::exists()` would
+/// always return false here. The call returns immediately when no
+/// listener is present (FILE_NOT_FOUND / ERROR_PIPE_BUSY → surfaced as
+/// OpenOptions error, not a blocking wait like a real read would).
+fn control_socket_present(control: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        control.exists()
+    }
+    #[cfg(windows)]
+    {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open(control)
+            .is_ok()
+    }
+}
+
+struct InstallLauncherSpec {
+    program: String,
+    prefix_args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+/// Resolve the bundled launcher. Development executes the TypeScript CLI via
+/// tsx; release executes the bundled `cli/taco.mjs` with the same sidecar Node
+/// binary shipped as Tauri externalBin, so first-run registration never relies
+/// on a global `taco` command.
+fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLauncherSpec> {
+    if cfg!(debug_assertions) {
+        let repo_root = find_repo_root();
+        let tsx = resolve_repo_source_program(&repo_root);
+        let cli_bin = repo_root
+            .join("packages")
+            .join("cli")
+            .join("bin")
+            .join("taco.cjs");
+        if cli_bin.exists() {
+            return Some(InstallLauncherSpec {
+                program: tsx,
+                prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
+                env: Vec::new(),
+            });
+        }
+        return None;
+    }
+    let resources = app
+        .path()
+        .resource_dir()
+        .ok()?
+        .join("cli")
+        .join("taco.mjs");
+    let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
+    let bundle = sidecar_root.join("lib").join("index.mjs");
+    let node = std::env::current_exe().ok()?.parent()?.join(if cfg!(windows) {
+        "taco-sidecar-node.exe"
+    } else {
+        "taco-sidecar-node"
+    });
+    if !resources.exists() || !node.exists() || !bundle.exists() {
+        return None;
+    }
+    Some(InstallLauncherSpec {
+        program: node.to_string_lossy().into_owned(),
+        prefix_args: vec![resources.to_string_lossy().into_owned()],
+        env: vec![
+            ("TACO_SIDECAR_NODE".into(), node.to_string_lossy().into_owned()),
+            ("TACO_SIDECAR_BUNDLE".into(), bundle.to_string_lossy().into_owned()),
+            ("TACO_SIDECAR_RESOURCES".into(), sidecar_root.to_string_lossy().into_owned()),
+        ],
+    })
+}
+
+
 ///
 /// tauri.conf.json can't branch by platform, so `windows` is empty there and
 /// we create the window here. Per platform:
@@ -801,19 +1271,101 @@ fn build_main_window(app: &tauri::App) -> Result<(), tauri::Error> {
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
 
-    builder.build()?;
+    let window = builder.build()?;
+
+    // Close button (or OS close gesture) hides instead of quitting. The
+    // OS quit path goes through `RunEvent::ExitRequested` which uses
+    // `shutdown_sidecar` for a graceful EOF flush; this handler is
+    // strictly the "minimize to dock / tray" gesture. Cloning the handle
+    // here is required because the closure must outlive the `app`
+    // borrow used to build the window.
+    let app_for_close = app.handle().clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if let Some(w) = app_for_close.get_webview_window("main") {
+                let _ = w.hide();
+            }
+        }
+    });
+
     Ok(())
 }
 
+/// Build the system tray icon with a right-click menu. macOS surfaces
+/// it in the menu-bar extras; Windows / Linux pin it to the notification
+/// area. Left-click focuses the existing main window (no fresh window —
+/// the app is single-instance via the plugin registered in `run`).
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "tray.show", "Show Taco", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray.quit", "Quit Taco", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+    let _tray = TrayIconBuilder::with_id("taco-tray")
+        .icon(icon)
+        .tooltip("Taco")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray.show" => focus_main(app),
+            "tray.quit" => {
+                EXIT_GATE.store(true, Ordering::SeqCst);
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // Filter for left-click release: macOS / Windows both emit a
+            // Down event on press, and we don't want to refocus twice
+            // for a single click. `Up` corresponds to WM_LBUTTONUP on
+            // Windows and mouseUp: on macOS.
+            if let tauri::tray::TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                focus_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
+/// Unminimize + show + focus the main window. Used by both the
+/// single-instance plugin's "second launch" callback and the tray
+/// icon's left-click handler so they share one definition of "bring
+/// the window back".
+fn focus_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // Second launch of the UI: surface the existing window instead of
+            // spinning up a duplicate process.
+            focus_main(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .setup(|app| {
             build_main_window(app)?;
+            build_tray(app)?;
+            ensure_daemon_installed(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -825,9 +1377,40 @@ pub fn run() {
             desktop_config_write,
             default_workspace_dir,
             paths_are_dirs,
+            upgrade_marker_present,
+            upgrade_apply,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { api, .. } => {
+            // The second ExitRequested fires after `h.exit(0)` below; the
+            // gate flips on the first call so the second one falls through
+            // and the process actually terminates.
+            if EXIT_GATE.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            api.prevent_exit();
+            let h = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                shutdown_sidecar(&h).await;
+                h.exit(0);
+            });
+        }
+        // macOS: the close gesture hides the window instead of destroying it
+        // (tray-resident), so the process stays alive and the dock icon keeps
+        // its "running" dot. Clicking that icon with no visible windows fires
+        // Reopen — with no handler the window stays hidden and the app looks
+        // unrecoverable. Bring the hidden window back.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+            if !has_visible_windows {
+                focus_main(app_handle);
+            }
+        }
+        _ => {}
+    });
 }
 
 #[cfg(test)]
