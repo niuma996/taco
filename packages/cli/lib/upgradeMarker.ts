@@ -15,13 +15,28 @@
  */
 
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createLogger } from "./upgradeLogger.ts";
 import type { UpgradeMarker } from "./upgradeTypes.ts";
 
 const log = createLogger("taco.cli.upgrade.marker");
 
 const JSON_INDENT = 2;
+
+/** True when the marker's live_dir is this CLI's own install root. Several
+ *  installations can share one $TACO_HOME (npm sidecar + desktop-bundled
+ *  sidecar) but only one marker exists, so ownership must be checked before
+ *  applying. resolve() normalizes separators/trailing slashes; Windows
+ *  compares case-insensitively (NTFS). */
+export function markerTargetsInstall(
+    marker: UpgradeMarker,
+    ownRoot: string | null | undefined,
+): boolean {
+    if (!ownRoot) return false;
+    const na = resolve(marker.live_dir);
+    const nb = resolve(ownRoot);
+    return process.platform === "win32" ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
 
 export async function readUpgradeMarker(filePath: string): Promise<UpgradeMarker | null> {
     let raw: string;

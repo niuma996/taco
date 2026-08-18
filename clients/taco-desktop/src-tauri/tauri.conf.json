@@ -18,7 +18,7 @@
   "plugins": {
     "updater": {
       "endpoints": ["https://github.com/niuma996/taco/releases/latest/download/update.json"],
-      "pubkey": "PLACEHOLDER_REPLACE_WITH_MINISIGN_PUBKEY_BASE64_SEE_DOCS_SIGNING_MD",
+      "pubkey": "RWR51OP0ywcYbPZFnhGv6JAyVdpPHDk0x9q0xtt/5Bx7+ZNM4YFA4u0D",
       "windows": {
         "installMode": "passive"
       }

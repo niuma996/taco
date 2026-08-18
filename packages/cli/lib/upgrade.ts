@@ -9,8 +9,7 @@
  *   on npm; GitHub Releases aren't part of the v0.1.0 pipeline. The npm
  *   registry is the source of truth, supports anonymous GETs, and ships
  *   an `integrity` (sha512-base64) field we verify against the
- *   downloaded bytes. PR5 may add minisign signatures over the same
- *   tarball as a second layer; the integrity check stays as a floor.
+ *   downloaded bytes.
  *
  * Layout on disk after a successful run:
  *   $TACO_HOME/cache/sidecar/<platform>-<version>.tgz     downloaded tarball
@@ -28,7 +27,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { extract } from "tar";
-import { STAGING_DIR, TACO_HOME } from "./paths.ts";
+import { TACO_HOME } from "./paths.ts";
 import { createLogger } from "./upgradeLogger.ts";
 import { writeUpgradeMarker } from "./upgradeMarker.ts";
 import { currentPlatformPkg } from "./upgradePlatform.ts";
@@ -252,7 +251,4 @@ async function resolveLiveDir(platformKey: string): Promise<string | null> {
     }
 }
 
-// Re-export so tests can poke at the staging/live dir constants without
-// re-importing from paths.ts (which is shared with unrelated modules).
-export const _INTERNAL_STAGING_DIR = STAGING_DIR;
-export const _INTERNAL_TACO_HOME = TACO_HOME;
+// (no exports below — every constant this module needs is already imported)

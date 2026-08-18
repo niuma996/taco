@@ -47,6 +47,13 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
     const [draft, setDraft] = useState<DraftJob>(EMPTY_DRAFT);
     const [formError, setFormError] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
+    /** Job id whose Run Now click is currently in flight. The button text
+     *  flips to "running…" while this is set so the click registers visibly
+     *  — without this the only feedback is a history entry that lands
+     *  minutes later (the agent session itself runs for a while), and the
+     *  user assumes the click was a no-op. Cleared in the same finally
+     *  block whether the fire was accepted or skipped. */
+    const [runningId, setRunningId] = useState<string | null>(null);
 
     const submit = useCallback(() => {
         setFormError(null);
@@ -149,6 +156,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                         <ScheduleRow
                             key={job.id}
                             job={job}
+                            isRunning={runningId === job.id}
                             onToggle={(enabled) => {
                                 void jobs
                                     .update({ ...job, enabled })
@@ -159,14 +167,36 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                         ),
                                     );
                             }}
-                            onRunNow={() => {
-                                void jobs
-                                    .runNow(job.id)
-                                    .catch((err: unknown) =>
+                            onRunNow={async () => {
+                                // Reflect the click instantly in the UI —
+                                // runNow returns immediately even when the
+                                // underlying fire will take minutes, so
+                                // without flipping the button text the
+                                // click looks like nothing happened. Set
+                                // runningId first so the disabled / label
+                                // change commits before the awaited RPC,
+                                // and clear it in the same finally so we
+                                // never get stuck showing "运行中…" if the
+                                // call rejects.
+                                setRunningId(job.id);
+                                try {
+                                    const accepted = await jobs.runNow(job.id);
+                                    if (!accepted) {
+                                        // The daemon skipped the fire —
+                                        // the previous run is still
+                                        // holding the lock. Surface that
+                                        // distinctly so the user knows
+                                        // it's not a transient failure.
                                         jobs.setError(
-                                            err instanceof Error ? err.message : String(err),
-                                        ),
-                                    );
+                                            t("schedules.busy", "上次运行还没结束,请稍候再触发"),
+                                        );
+                                    }
+                                } catch (err) {
+                                    jobs.setError(err instanceof Error ? err.message : String(err));
+                                } finally {
+                                    await jobs.refresh();
+                                    setRunningId((prev) => (prev === job.id ? null : prev));
+                                }
                             }}
                             onDelete={() => {
                                 void jobs
@@ -352,13 +382,17 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
 
 interface ScheduleRowProps {
     job: Job;
+    /** True while a Run Now click for this row is awaiting the daemon's
+     *  fire-accepted response. Disables the button + changes its label so
+     *  the click registers visibly. */
+    isRunning: boolean;
     onToggle: (enabled: boolean) => void;
     onRunNow: () => void;
     onDelete: () => void;
     onEdit: () => void;
 }
 
-function ScheduleRow({ job, onToggle, onRunNow, onDelete, onEdit }: ScheduleRowProps) {
+function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: ScheduleRowProps) {
     const { t } = useT();
     const scheduleLabel =
         job.schedule.kind === "cron"
@@ -382,8 +416,10 @@ function ScheduleRow({ job, onToggle, onRunNow, onDelete, onEdit }: ScheduleRowP
                 />
             </td>
             <td className="schedules-row-actions">
-                <button type="button" onClick={onRunNow}>
-                    {t("schedules.actionRunNow", "Run now")}
+                <button type="button" onClick={onRunNow} disabled={isRunning}>
+                    {isRunning
+                        ? t("schedules.runningNow", "运行中…")
+                        : t("schedules.actionRunNow", "Run now")}
                 </button>
                 <button type="button" onClick={onEdit}>
                     {t("schedules.actionEdit", "Edit")}

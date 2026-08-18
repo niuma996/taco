@@ -67,6 +67,34 @@ function main() {
         }
     }
 
+    // Sync the runtime into the installed @taco-ai/sidecar-<platform>/
+    // package so a launchd-managed daemon picks up the new bundle. Without
+    // this the daemon keeps running whatever was current at `taco install`
+    // time and `beforeDevCommand` looks like it has no effect on the
+    // running sidecar — exactly the regression that produced the 5s hello
+    // timeout. Cross-target builds (rare; --target windows on a mac host)
+    // skip this step because the daemon is a host-platform concept only.
+    //
+    // `--rebuild` makes sync re-run package:runtime whenever the sidecar
+    // src is newer than the staged bundle, so developers editing sidecar
+    // code don't have to remember to rebuild before `tauri dev`.
+    if (!explicitTarget || explicitTarget === currentTriple()) {
+        const sync = spawnSync(
+            "pnpm",
+            ["--filter", "@taco-ai/sidecar", "sync:staging", "--", "--rebuild"],
+            {
+                cwd: repoRoot,
+                stdio: "inherit",
+            },
+        );
+        if (sync.status !== 0) {
+            // Sync failure is a hard error: continuing here would let
+            // `tauri dev` come up against a stale daemon and the developer
+            // would only find out via a 5s hello timeout in the client.
+            process.exit(sync.status ?? 1);
+        }
+    }
+
     mkdirSync(binariesDir, { recursive: true });
     mkdirSync(generatedDir, { recursive: true });
 

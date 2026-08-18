@@ -65,7 +65,7 @@
 }
 .tool-card-shell-result.streaming {
     /* Streaming output is slightly brighter than completed (#d4d4d4). */
-    color: #e8e8e8;
+    color: var(--fg-streaming);
 }
 .tool-card-shell-empty {
     margin: 0.3rem 0 0 1.4rem;

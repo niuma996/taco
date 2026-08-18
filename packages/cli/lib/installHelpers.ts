@@ -16,18 +16,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-
-/** Keep in sync with the six platform keys published by release-sidecar.yml
- *  (see scripts/stagePlatformPackages.mjs). Adding a new platform requires
- *  adding a key here AND building a matching bundle in CI. */
-const PLATFORM_KEYS = [
-    "darwin-arm64",
-    "darwin-x64",
-    "linux-x64",
-    "linux-arm64",
-    "win32-x64",
-    "win32-arm64",
-] as const;
+import { PLATFORM_KEYS } from "./upgradePlatform.ts";
 
 export interface PlatformPkgPaths {
     /** Absolute path to the @taco-ai/sidecar-<platform>/ package directory. */
@@ -39,6 +28,11 @@ export interface PlatformPkgPaths {
     /** Absolute path that should be exported as TACO_SIDECAR_RESOURCES — the
      *  directory containing `agents/` and `skills/`. Currently equals pkgDir. */
     resources: string;
+    /** True when the bundle was built with daemon-mode support (manifest
+     *  advertises `daemonMode: true`). A missing/false value means the
+     *  bundle is stale (pre-daemon) — `taco install` must refuse to
+     *  register a daemon that will silently boot into stdio mode. */
+    daemonMode: boolean;
 }
 
 /** Locate the @taco-ai/sidecar-<platform>/lib/index.mjs + bundled node binary.
@@ -53,7 +47,15 @@ export function findPlatformPkg(): PlatformPkgPaths | null {
     if (configured.every((value) => value !== undefined)) {
         const [nodeBin, bundle, resources] = configured as [string, string, string];
         if (existsSync(nodeBin) && existsSync(bundle)) {
-            return { pkgDir: resources, nodeBin, bundle, resources };
+            // Env override: no manifest to consult, so grep the bundle
+            // directly. Slow (~4MB read) but install is not hot-path.
+            return {
+                pkgDir: resources,
+                nodeBin,
+                bundle,
+                resources,
+                daemonMode: bundleHasDaemonMode(bundle),
+            };
         }
     }
 
@@ -66,6 +68,7 @@ export function findPlatformPkg(): PlatformPkgPaths | null {
             if (!existsSync(manifestPath)) continue;
             const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
                 target?: string;
+                daemonMode?: boolean;
             };
             const nodeBin = join(
                 pkgDir,
@@ -77,12 +80,29 @@ export function findPlatformPkg(): PlatformPkgPaths | null {
             if (!existsSync(nodeBin)) continue;
             const bundle = join(pkgDir, "lib", "index.mjs");
             if (!existsSync(bundle)) continue;
-            return { pkgDir, nodeBin, bundle, resources: pkgDir };
+            // Trust the manifest's flag when present; fall back to a bundle
+            // grep for older packages that predate the field.
+            const daemonMode = manifest.daemonMode === true ? true : bundleHasDaemonMode(bundle);
+            return { pkgDir, nodeBin, bundle, resources: pkgDir, daemonMode };
         } catch {
             // not installed / wrong platform — try next
         }
     }
     return null;
+}
+
+/** Cheap daemon-mode probe: read the bundle and look for the env var the
+ *  runtime gates on. Older manifests lack the `daemonMode` field, so
+ *  install must fall back to this rather than reject. Bundle read is
+ *  ~4MB — fine for `taco install`, not something to do per-RPC. Exported
+ *  for unit tests; production callers should reach for `findPlatformPkg`
+ *  which consults the manifest first. */
+export function bundleHasDaemonMode(bundlePath: string): boolean {
+    try {
+        return readFileSync(bundlePath, "utf8").includes("TACO_DAEMON_MODE");
+    } catch {
+        return false;
+    }
 }
 
 export interface ExecResult {

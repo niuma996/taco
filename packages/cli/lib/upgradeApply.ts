@@ -170,6 +170,3 @@ async function copyDir(src: string, dest: string): Promise<void> {
         // and copying them blindly is a security smell.
     }
 }
-
-// Re-export for tests that want to override the marker path.
-export const _INTERNAL_MARKER_PATH = UPGRADE_MARKER;

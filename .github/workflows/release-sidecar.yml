@@ -222,19 +222,16 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # Apply the release version to every publishable package + sync sidecar's
-      # optionalDependencies to the matching platform-package version. Without
-      # this the manifests stay at 0.1.0 and the main package would resolve
-      # mismatched platform runtimes.
+      # Apply the release version to every publishable package. The
+      # platform optionalDependencies are synced later (after staging) so
+      # they reflect the set of platforms the matrix actually built.
       - name: Sync package versions
         run: |
           V="${{ steps.version.outputs.version }}"
           npm pkg set version="$V" --prefix packages/protocol
           npm pkg set version="$V" --prefix packages/shared
           npm pkg set version="$V" --prefix packages/sidecar
-          for k in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
-            npm pkg set "optionalDependencies[@taco-ai/sidecar-$k]=$V" --prefix packages/sidecar
-          done
+          npm pkg set version="$V" --prefix packages/cli
 
           # Also bump the Tauri desktop bundle so the updater manifest matches
           # the next desktop-v* tag (PR5 version-drift fix). GNU sed syntax
@@ -243,10 +240,9 @@ jobs:
           sed -i "s|^version = \".*\"|version = \"$V\"|" clients/taco-desktop/src-tauri/Cargo.toml
           sed -i "s|\"version\": \"[^\"]*\"|\"version\": \"$V\"|" clients/taco-desktop/src-tauri/tauri.conf.json
 
-      # Refresh the install graph so the just-rewritten optionalDependencies
-      # resolve to the new platform-package version, and the workspace links
-      # (link:../protocol etc.) point at the freshly-built dist/. Without
-      # this the sidecar tarball can ship with the previous version's links.
+      # Refresh the install graph so the workspace links (link:../protocol
+      # etc.) point at the freshly-built dist/. Without this the sidecar
+      # tarball can ship with the previous version's links.
       - run: pnpm install --no-frozen-lockfile
 
       # Build libs (dist/) — cheap, pure TS compile, no cross-platform concern.
@@ -255,6 +251,12 @@ jobs:
       # Bundle lib/sidecar.mjs for the main package tarball.
       - name: Build sidecar bundle
         run: pnpm --filter @taco-ai/sidecar build
+
+      # Bundle dist/taco.mjs for the CLI package tarball — the bin shim
+      # (bin/taco.cjs) prefers this over the TypeScript source so the
+      # published CLI runs under plain Node without tsx.
+      - name: Build CLI bundle
+        run: pnpm --filter @taco-ai/cli build
 
       # Regenerate the protocol doc tables so the published docs match this
       # release's actual RPC/push surface (driven by code, not hand-edited).
@@ -291,6 +293,23 @@ jobs:
       - name: Stage platform packages
         run: node packages/sidecar/scripts/stagePlatformPackages.mjs --version ${{ steps.version.outputs.version }}
 
+      # The repo manifest carries optionalDependencies for all six platform
+      # keys, but the build matrix produces only a subset (see the build
+      # job's comments). Publish exactly what was staged — otherwise the
+      # manifest references platform packages that don't exist at this
+      # version and consumers on those platforms get a silent skip instead
+      # of an explicit "unsupported platform".
+      - name: Align optionalDependencies with staged platforms
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          for k in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
+            npm pkg delete "optionalDependencies[@taco-ai/sidecar-$k]" --prefix packages/sidecar
+          done
+          for dir in .release-staging/sidecar-*; do
+            key="$(basename "$dir")"
+            npm pkg set "optionalDependencies[@taco-ai/$key]=$V" --prefix packages/sidecar
+          done
+
       # Publish platform packages — do NOT swallow failures for hard-gate
       # platforms; a failed publish must fail the job.
       # `--provenance` is omitted: npm's registry validates the sigstore
@@ -325,8 +344,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm --filter @taco-ai/sidecar publish --access public --no-git-checks
 
+      - name: Publish @taco-ai/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @taco-ai/cli publish --access public --no-git-checks
+
       # Restore the version-mutated manifests so a downstream job in the same
       # checkout (or a re-run) sees the original source-of-truth values.
       - name: Reset working tree
         if: always()
-        run: git checkout -- packages/protocol/package.json packages/shared/package.json packages/sidecar/package.json clients/taco-desktop/src-tauri/Cargo.toml clients/taco-desktop/src-tauri/tauri.conf.json docs/sidecar-protocol.md
+        run: git checkout -- packages/protocol/package.json packages/shared/package.json packages/sidecar/package.json packages/cli/package.json clients/taco-desktop/src-tauri/Cargo.toml clients/taco-desktop/src-tauri/tauri.conf.json docs/sidecar-protocol.md

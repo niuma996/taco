@@ -5,6 +5,16 @@ unless the manifest's per-platform `signature` field verifies against
 the embedded `pubkey`. This document explains how to set up that
 trust chain end to end.
 
+## Current state
+
+A keypair has been generated and the public key is embedded in
+`tauri.conf.json` (`plugins.updater.pubkey`). The operator-local
+private key and passphrase live in `~/.taco/signing/` (mode 0600,
+gitignored by name). **Before the first signed release can succeed,
+the private key and passphrase must be added to GitHub Secrets** —
+see "Add the secrets to GitHub" below. Until then the `sign` job will
+fail for lack of `MINISIGN_PRIVATE_KEY`.
+
 ## Trust model
 
 - One **minisign** Ed25519 keypair per repo. The private key signs
@@ -48,9 +58,9 @@ Replace the `pubkey` placeholder in `clients/taco-desktop/src-tauri/tauri.conf.j
 binary carries the matching key.
 
 The `taco-update.pub` and `taco-update.key` files themselves are
-**never committed**. `.gitignore` covers `*.key`, `*.pub`, and
-`taco-update.*` patterns; verify with `git check-ignore -v taco-update.key`
-before adding anything else.
+**never committed**. `.gitignore` covers `taco-update.key`,
+`taco-update.pub`, and `*.minisign`; verify with
+`git check-ignore -v taco-update.key` before adding anything else.
 
 ## Add the secrets to GitHub
 

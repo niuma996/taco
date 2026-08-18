@@ -167,6 +167,12 @@ function main() {
         target: triple,
         bundleSha256: bundleSha,
         runtimeSha256: nodeSha,
+        // Daemon-mode detection: grep the bundle for the literal the runtime
+        // gates on. We can't trust `sidecarVersion` to signal "has daemon
+        // mode" because version bumps are manual; an older manifest without
+        // this field is exactly the stale-bundle case `taco install` must
+        // reject, so the flag's absence has to read as false.
+        daemonMode: readFileSync(outfile, "utf8").includes("TACO_DAEMON_MODE"),
         builtAt: new Date().toISOString(),
     };
     writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));

@@ -22,15 +22,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const PLATFORM_KEYS = [
-    "darwin-arm64",
-    "darwin-x64",
-    "linux-x64",
-    "linux-arm64",
-    "win32-x64",
-    "win32-arm64",
-] as const;
+import { PLATFORM_KEYS } from "./upgradePlatform.ts";
 
 interface LaunchedBundle {
     program: string;
@@ -125,9 +117,11 @@ export interface LaunchResult {
 }
 
 /** Spawn the sidecar bundle in daemon mode. Returns the child handle so the caller can
- *  forward signals / wait for exit. The child is NOT auto-spawned-detached — on POSIX
- *  systems it will be reparented to init once the launcher exits; on Windows the
- *  child lives as long as the launcher (PR3 wraps the daemon in a service). */
+ *  forward signals / wait for exit. The child is spawned detached: on POSIX it gets
+ *  its own process group (terminal signals aimed at the launcher don't reach the
+ *  daemon) and is reparented to init once the launcher exits; on Windows detaching
+ *  releases it from the launcher's job object so it outlives the launcher (PR3 wraps
+ *  the daemon in a service anyway). */
 export function launchSidecar(opts: LaunchOptions): LaunchResult {
     const repoRoot = findRepoRoot();
     const useDev =
@@ -165,6 +159,11 @@ export function launchSidecar(opts: LaunchOptions): LaunchResult {
     const child = spawn(bundle.program, bundle.args, {
         cwd: bundle.cwd,
         env,
+        // Detached daemon: own process group on POSIX, released from the
+        // launcher's job object on Windows. Paired with child.unref() in
+        // start.ts so the daemon's lifetime is fully decoupled from whoever
+        // ran `taco start`.
+        detached: true,
         // Daemon mode: NDJSON goes via the socket, stderr goes to the daemon's
         // own log file (sidecar opens LogFiles at $TACO_HOME/logs/), stdin is
         // ignored (control socket is the inbound path).

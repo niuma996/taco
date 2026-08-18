@@ -22,9 +22,13 @@
 
 import { mkdirSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { join } from "node:path";
+import { findPlatformPkg } from "./installHelpers.ts";
 import { controlSocketPath, ndjsonSocketPath, RUN_DIR, TACO_HOME } from "./paths.ts";
 import { launchSidecar } from "./sidecarLauncher.ts";
 import { acquireStartLock, readStartLock } from "./startLock.ts";
+import { upgradeApplyCommand } from "./upgradeApply.ts";
+import { markerTargetsInstall, readUpgradeMarker } from "./upgradeMarker.ts";
 
 const READY_TIMEOUT_MS = 5_000;
 const PROBE_INTERVAL_MS = 50;
@@ -76,6 +80,24 @@ export interface StartOptions {
     tacoHome?: string;
 }
 
+/** If an upgrade marker targets this CLI's own install root, apply it.
+ *  Best-effort: a failed apply (e.g. staging dir wiped) must not block the
+ *  daemon from starting on the old bundle — the marker-clearing policy
+ *  lives in upgradeApplyCommand. */
+async function applyOwnedPendingUpgrade(tacoHome: string): Promise<void> {
+    const marker = await readUpgradeMarker(join(tacoHome, "upgrade-marker.json"));
+    if (!marker) return;
+    if (!markerTargetsInstall(marker, findPlatformPkg()?.resources)) return;
+    try {
+        const { version } = await upgradeApplyCommand({ tacoHome });
+        process.stderr.write(`[taco] applied pending upgrade → ${version}\n`);
+    } catch (err) {
+        process.stderr.write(
+            `[taco] pending upgrade could not be applied (${String(err)}); starting existing version\n`,
+        );
+    }
+}
+
 export async function startCommand(opts: StartOptions = {}): Promise<void> {
     const tacoHome = opts.tacoHome ?? TACO_HOME;
     const runDir = RUN_DIR.startsWith(tacoHome) ? RUN_DIR : `${tacoHome}/run`;
@@ -111,6 +133,15 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
     }
 
     try {
+        // Apply a pending upgrade that targets THIS installation before
+        // spawning, so the fresh daemon boots the swapped-in bundle. The
+        // daemon exits itself when its orchestrator sees the marker; this is
+        // the apply step that completes the loop for standalone (npm)
+        // installs — the desktop only applies markers for its own bundled
+        // sidecar. Markers owned by other installations sharing $TACO_HOME
+        // are left untouched.
+        await applyOwnedPendingUpgrade(tacoHome);
+
         const { child, dev } = launchSidecar({
             socketPath: socket,
             controlSocketPath: control,
@@ -135,9 +166,9 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
             throw err;
         }
 
-        // Detach from the child: stop forwarding signals / exit codes. POSIX
-        // reparents the bundle to init once we exit; Windows keeps it alive
-        // until our process tree dies.
+        // Detach from the child: stop forwarding signals / exit codes. The
+        // spawn is already detached (own process group / job object), so
+        // after unref the daemon fully outlives this launcher on every OS.
         child.unref();
 
         // Last line of stdout = NDJSON socket path. The Rust side parses this

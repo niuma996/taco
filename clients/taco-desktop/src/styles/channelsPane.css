@@ -206,7 +206,7 @@
     /* White plate: the QR needs light background contrast to scan reliably
        even when the app is in dark mode. */
     padding: 16px;
-    background: #fff;
+    background: var(--qr-bg);
     border-radius: var(--radius-md, 8px);
 }
 .channel-bind-form {
@@ -221,7 +221,7 @@
     text-align: center;
 }
 .channel-bind-qr .channel-bind-hint {
-    color: #57606a;
+    color: var(--qr-hint-fg);
 }
 .channel-bind-error {
     margin: 0;

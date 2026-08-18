@@ -1,20 +1,22 @@
 /**
  * Typed wrapper around the daemon's `jobs.*` RPC surface. The desktop
- * already has a generic `TacoClient.call` that sends raw NDJSON frames;
- * this module adds the type-level wrapper so the Schedules UI can call
- * `client.jobs.list()` without re-declaring the params/result shape at
- * every call site.
+ * already has a generic `TacoClient.callProcess` that sends raw NDJSON
+ * frames; this module adds the type-level wrapper so the Schedules UI
+ * can call `client.jobs.list()` without re-declaring the params/result
+ * shape at every call site.
  *
- * Each method passes through `call()` with the method name from
- * `jobsRpc.ts`; a runtime check (`throw on missing workspace`) ensures
- * the desktop has a live sidecar before trying. Jobs are process-
- * scoped, not workspace-scoped, but `call()` takes a workspace as the
- * first arg because that's how the existing dispatcher is shaped —
- * the workspace just routes the frame to whichever NDJSON socket is
- * attached to that cwd (the daemon spawns one server per connection).
+ * Jobs are process-scoped (the scheduler lives in the daemon process),
+ * so every call goes through `callProcess`. `call()` would require the
+ * sidecar to validate `params.workspace`, which the schedule UI never
+ * sends.
+ *
+ * Every method takes an `Actor` so the daemon can enforce IM-scope vs
+ * IDE-scope. The desktop constructs the actor from the active workspace
+ * key (an `im://` workspace → IM triple; a real fs cwd → IDE workspace)
+ * and closes over it at the call site. Tests / admin tooling can pass
+ * `undefined` for legacy un-scoped access.
  */
 
-import type { WorkspaceId } from "@taco-ai/protocol";
 import { JOBS_RPC } from "./jobsRpc.ts";
 import type { TacoClient } from "./tacoClientTauri.ts";
 
@@ -31,7 +33,18 @@ export interface Job {
     last_run_at?: string;
     next_run_at?: string;
     history: JobHistoryEntry[];
+    /** IM scope, server-derived. Desktop callers should not set these —
+     *  the daemon derives them from `args.workspace` on create/update and
+     *  ignores caller-supplied values (sandbox escape prevention). */
+    channelId?: string;
+    peerId?: string;
+    /** Default `new`. `reuse` is only valid when `args.workspace` is `im://`. */
+    sessionStrategy?: SessionStrategy;
+    /** Set after the first fire of a `pin` job. */
+    pinnedSessionId?: string;
 }
+
+export type SessionStrategy = "new" | "reuse" | "pin";
 
 export type JobScheduleSpec =
     | { kind: "cron"; expr: string; tz?: string }
@@ -44,14 +57,20 @@ export interface JobHistoryEntry {
     error?: string;
 }
 
+/** Mirrors the sidecar's `Actor` — kept here so the desktop doesn't import
+ *  the scheduler module directly (different module graph). */
+export type Actor =
+    | { kind: "im"; channelId: string; peerId: string; chatId: string }
+    | { kind: "ide"; workspace: string };
+
 export interface JobsClient {
-    list(): Promise<Job[]>;
-    get(id: string): Promise<Job | null>;
-    create(job: Job): Promise<Job>;
-    update(job: Job): Promise<Job>;
-    delete(id: string): Promise<boolean>;
-    runNow(id: string): Promise<boolean>;
-    history(id: string): Promise<JobHistoryEntry[] | null>;
+    list(actor?: Actor): Promise<Job[]>;
+    get(id: string, actor?: Actor): Promise<Job | null>;
+    create(job: Job, actor?: Actor): Promise<Job>;
+    update(job: Job, actor?: Actor): Promise<Job>;
+    delete(id: string, actor?: Actor): Promise<boolean>;
+    runNow(id: string, actor?: Actor): Promise<boolean>;
+    history(id: string, actor?: Actor): Promise<JobHistoryEntry[] | null>;
 }
 
 interface ListResult {
@@ -78,30 +97,32 @@ interface HistoryResult {
 
 export function createJobsClient(client: TacoClient): JobsClient {
     return {
-        list: () => call<ListResult>(client, JOBS_RPC.list, {}).then((r) => r.jobs ?? []),
-        get: (id) => call<GetResult>(client, JOBS_RPC.get, { id }).then((r) => r.job),
-        create: (job) => call<CreateResult>(client, JOBS_RPC.create, { job }).then((r) => r.job),
-        update: (job) => call<UpdateResult>(client, JOBS_RPC.update, { job }).then((r) => r.job),
-        delete: (id) => call<DeleteResult>(client, JOBS_RPC.delete, { id }).then((r) => r.deleted),
-        runNow: (id) => call<RunNowResult>(client, JOBS_RPC.runNow, { id }).then((r) => r.ran),
-        history: (id) =>
-            call<HistoryResult>(client, JOBS_RPC.history, { id }).then((r) => r.history),
+        list: (actor) =>
+            call<ListResult>(client, JOBS_RPC.list, {}, actor).then((r) => r.jobs ?? []),
+        get: (id, actor) => call<GetResult>(client, JOBS_RPC.get, { id }, actor).then((r) => r.job),
+        create: (job, actor) =>
+            call<CreateResult>(client, JOBS_RPC.create, { job }, actor).then((r) => r.job),
+        update: (job, actor) =>
+            call<UpdateResult>(client, JOBS_RPC.update, { job }, actor).then((r) => r.job),
+        delete: (id, actor) =>
+            call<DeleteResult>(client, JOBS_RPC.delete, { id }, actor).then((r) => r.deleted),
+        runNow: (id, actor) =>
+            call<RunNowResult>(client, JOBS_RPC.runNow, { id }, actor).then((r) => r.ran),
+        history: (id, actor) =>
+            call<HistoryResult>(client, JOBS_RPC.history, { id }, actor).then((r) => r.history),
     };
 }
 
-/** Workspace-routed RPC for jobs.* — pass the desktop's current workspace
- *  (any connected cwd works; jobs are process-scoped). Falls back to
- *  "." when the desktop hasn't selected a workspace yet, matching how
- *  `desktop_config_read/write` are routed. */
+/** Process-level RPC for jobs.* — the scheduler lives in the daemon process,
+ *  not in any workspace. `callProcess` routes the frame through whichever
+ *  workspace is currently started (the daemon's stdin is shared, so any
+ *  started cwd works); `call()` would require `params.workspace` to be set
+ *  on the sidecar side, which the jobs UI never provides. */
 async function call<TResult>(
     client: TacoClient,
     method: string,
     params: Record<string, unknown>,
+    actor: Actor | undefined,
 ): Promise<TResult> {
-    // The dispatcher requires *some* workspace. Empty / missing workspace
-    // is a transient UI state (no chat opened yet) — let the existing
-    // dispatcher reject with its usual error rather than masking it here.
-    return client.call(EMPTY_WORKSPACE, method, params);
+    return client.callProcess(method, actor === undefined ? params : { ...params, actor });
 }
-
-const EMPTY_WORKSPACE: WorkspaceId = "" as WorkspaceId;

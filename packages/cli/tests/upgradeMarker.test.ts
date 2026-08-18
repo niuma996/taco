@@ -11,7 +11,12 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { clearUpgradeMarker, readUpgradeMarker, writeUpgradeMarker } from "../lib/upgradeMarker.ts";
+import {
+    clearUpgradeMarker,
+    markerTargetsInstall,
+    readUpgradeMarker,
+    writeUpgradeMarker,
+} from "../lib/upgradeMarker.ts";
 import type { UpgradeMarker } from "../lib/upgradeTypes.ts";
 
 async function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -85,4 +90,19 @@ test("writeUpgradeMarker persists valid JSON (no leftover .tmp)", async () => {
         const tmpPath = `${path}.tmp`;
         await rejects(stat(tmpPath), /ENOENT/);
     });
+});
+
+test("markerTargetsInstall matches only the marker's own live_dir", () => {
+    const marker = sampleMarker();
+    strictEqual(markerTargetsInstall(marker, "/tmp/live/sidecar-darwin-arm64"), true);
+    // Same root via non-normalized spelling (trailing slash, `.` segment).
+    strictEqual(markerTargetsInstall(marker, "/tmp/live/./sidecar-darwin-arm64/"), true);
+    // A different installation sharing $TACO_HOME (e.g. desktop bundle).
+    strictEqual(
+        markerTargetsInstall(marker, "/Applications/Taco.app/Contents/Resources/sidecar"),
+        false,
+    );
+    // Unknown own root → never claim the marker.
+    strictEqual(markerTargetsInstall(marker, null), false);
+    strictEqual(markerTargetsInstall(marker, undefined), false);
 });

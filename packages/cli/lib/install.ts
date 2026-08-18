@@ -46,6 +46,18 @@ export async function installCommand(opts: InstallOptions = {}): Promise<Install
                 "optional dep, then retry `taco install`.",
         );
     }
+    // Stale-bundle guard: a pre-daemon bundle will boot into stdio mode,
+    // launchd will keep "running" it (exit 0 keeps KeepAlive happy), and
+    // the desktop's hello wait times out 5s later with no useful breadcrumb.
+    // Fail fast here so the fix (rebuild + reinstall) is obvious instead of
+    // buried in a silent daemon that never opens its socket.
+    if (!pkg.daemonMode) {
+        throw new Error(
+            `stale sidecar bundle at ${pkg.bundle}: missing daemon-mode support. ` +
+                "Rebuild the runtime (`pnpm --filter @taco-ai/sidecar package:runtime`) " +
+                "and re-run `taco install`.",
+        );
+    }
 
     const paths: PlatformPaths = {
         tacoHome,

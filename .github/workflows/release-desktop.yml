@@ -85,6 +85,23 @@ jobs:
           node scripts/prepareCiInstall.mjs
           pnpm install --frozen-lockfile
 
+      # Sync the bundle version from the tag so the installed app reports
+      # the same version update.json advertises — without this the updater
+      # would offer the same release forever (app 0.1.0 < manifest 0.2.0).
+      # Dry-runs (workflow_dispatch) keep the committed version.
+      - name: Sync version from tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#desktop-v}"
+          if [ -z "$V" ] || [ "$V" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::could not parse version from tag '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          sed -i "s|^version = \".*\"|version = \"$V\"|" clients/taco-desktop/src-tauri/Cargo.toml
+          sed -i "s|\"version\": \"[^\"]*\"|\"version\": \"$V\"|" clients/taco-desktop/src-tauri/tauri.conf.json
+
       # Build libs that the desktop bundle imports at runtime (shared,
       # protocol). Sidecar is staged automatically by `tauri build`'s
       # beforeBuildCommand (tauri.conf.json runs stageSidecar.mjs, which
@@ -201,6 +218,20 @@ jobs:
         run: |
           node scripts/prepareCiInstall.mjs
           pnpm install --frozen-lockfile
+
+      # Same tag→version sync as the Windows build job; the dmg name and
+      # the app's self-reported version both come from these two files.
+      - name: Sync version from tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-')
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#desktop-v}"
+          if [ -z "$V" ] || [ "$V" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::could not parse version from tag '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          sed -i '' "s|^version = \".*\"|version = \"$V\"|" clients/taco-desktop/src-tauri/Cargo.toml
+          sed -i '' "s|\"version\": \"[^\"]*\"|\"version\": \"$V\"|" clients/taco-desktop/src-tauri/tauri.conf.json
 
       - run: pnpm protocol:build && pnpm shared:build
 
@@ -320,7 +351,7 @@ jobs:
           # -S writes the signature to a separate .minisig file instead of
           # appending to the artifact; -W reads the passphrase from stdin
           # so no PTY is required.
-          while IFS= read -r -d '\0' f; do
+          while IFS= read -r -d '' f; do
             echo "$MINISIGN_PRIVATE_KEY_PASSPHRASE" | minisign -S -s /tmp/taco-update.key -m "$f" -W
             echo "signed $f -> $f.minisig"
           done < <(find dist -type f \( -name '*.dmg' -o -name '*.exe' \) -print0)
@@ -348,6 +379,13 @@ jobs:
               name = path.name
               # tauri-plugin-updater expects darwin-aarch64, darwin-x86_64,
               # windows-x86_64, windows-aarch64 — derive from the file name.
+              # Two Windows x64 installers ship per release (internal /
+              # portable) and both map to windows-x86_64; the manifest can
+              # only carry one. Prefer the leaner 'internal' installer and
+              # skip 'portable' (it stays on the release for manual download).
+              if name.endswith('.exe') and 'portable' in name:
+                  print(f'skipping {name} from manifest (internal preferred for windows-x86_64)')
+                  continue
               is_arm = 'aarch64' in name or 'arm64' in name
               if name.endswith('.dmg'):
                   platform = 'darwin-aarch64' if is_arm else 'darwin-x86_64'
@@ -413,4 +451,3 @@ jobs:
             dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe
             dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe.minisig
             dist/update.json
-            dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe

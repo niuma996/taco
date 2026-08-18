@@ -10,7 +10,6 @@
  *  - 客户端 (React) 调 invoke('workspace_send', { cwd, line: JSON.stringify(req) })
  */
 
-use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -26,66 +25,12 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 pub mod log_file;
 pub use log_file::LogFiles;
 
-#[cfg(windows)]
-const SIDECAR_PROGRAM_FILENAME: &str = "tsx.cmd";
-#[cfg(not(windows))]
-const SIDECAR_PROGRAM_FILENAME: &str = "tsx";
+mod paths;
+mod sidecar_launcher;
+pub mod upgrade_commands;
 
-/// Resolve the sidecar launcher in repo-source (debug) mode.
-///
-/// On Windows `Command::new("tsx")` does not consult PATHEXT, so a bare
-/// `tsx` lookup fails with "program not found" even when `tsx.cmd` sits
-/// right next to it in `node_modules/.bin`. Prefer the workspace-local
-/// copy pnpm installs; fall back to the bare name so a globally-installed
-/// tsx still works.
-fn resolve_repo_source_program(repo_root: &Path) -> String {
-    let local = repo_root
- .join("node_modules")
- .join(".bin")
- .join(SIDECAR_PROGRAM_FILENAME);
-    if local.exists() {
-        return local.to_string_lossy().into_owned();
-    }
-    SIDECAR_PROGRAM_FILENAME.to_string()
-}
-
-/// Env vars forwarded from the desktop process into the sidecar subprocess
-/// after `env_clear()`. Whitelist-only so parent-process credentials never
-/// leak. PATH / HOME / locale are needed to spawn user commands; the Windows
-/// entries let PowerShell (`~` expansion) and Node's `os.homedir()` resolve
-/// correctly. A `#[cfg(test)]` assertion at the bottom guards against anyone
-/// adding a credential-bearing var (KEY / SECRET / PASSWORD / TOKEN).
-const PASSTHROUGH_ENV: &[&str] = &[
-    "PATH",
-    "HOME",
-    "LANG",
-    "LC_ALL",
-    "TZ",
-    "NODE_ENV",
-    "TACO_HOME",
-    "TACO_SESSIONS_ROOT",
-    "TACO_EXTENSIONS_DIR",
-    "TACO_EXTENSION_ROOT",
-    "TACO_LOG_LEVEL",
-    "TACO_DEBUG_LLM_PAYLOAD",
-    // Windows: the PowerShell shell tool and Node path/skill resolution
-    // (os.homedir, `~` expansion) depend on these. Forwarded explicitly —
-    // none of them carry credentials or platform secrets.
-    "USERPROFILE",
-    "TEMP",
-    "TMP",
-    "SYSTEMROOT",
-    "COMSPEC",
-    "PATHEXT",
-    "APPDATA",
-    "LOCALAPPDATA",
-];
-
-/// externalBin 的 basename — Tauri 把 `externalBin` 放在 main binary 同目录,
-/// 用 `current_exe()` 的父目录定位(`BaseDirectory::Executable` 在 Windows/macOS
-/// 不受支持,不可用)。Windows 上文件名带 `.exe`,其余平台不带。
-/// (resources 根不走这里,由 `resource_dir()` 直接取。)
-const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
+use crate::paths::{control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home};
+use crate::sidecar_launcher::{resolve_install_launcher, resolve_sidecar, PASSTHROUGH_ENV};
 
 /// Gate that lets a programmatic `AppHandle::exit` pass through without
 /// re-entering the shutdown helper. The OS-driven `RunEvent::ExitRequested`
@@ -96,99 +41,6 @@ const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
 /// terminates.
 static EXIT_GATE: AtomicBool = AtomicBool::new(false);
 
-/// 决定 release 与 debug 的 sidecar 程序+参数+运行时资源根。
-///
-/// 优先级:
-///   1. 显式覆盖 `TACO_SIDECAR_CMD` / `TACO_SIDECAR_ARGS` — e2e / 集成测试 / 调试
-///   2. debug 构建 (cfg!(debug_assertions)):仓库根 + tsx + 源码
-///   3. release:调用 `app.path().resolve_resource()` 定位 bundled node + JS bundle,
-///      注入 `TACO_SIDECAR_RESOURCES` 让 sidecar 内 runtimeResources 找 agents/skills。
-///   4. release 但 runtime 缺失:报错 — 禁止偷回退到系统 tsx,避免 release 在用户机器
-///      静默失败。
-/// How to spawn + connect to the sidecar / daemon.
-///
-/// PR2 reverses the spawn model: instead of forking a tokio subprocess
-/// that inherits stdio, the desktop asks the @taco-ai/cli launcher (dev)
-/// or the bundled `taco-sidecar-node` (prod) to bring the daemon up,
-/// then connects to the NDJSON socket it exposes. The two processes
-/// share the same socket paths under `$TACO_HOME/run/` so the
-/// launcher's "ready" signal is the same path Rust connects to.
-///
-/// `extra_env` carries variables PR2 needs in addition to PASSTHROUGH_ENV:
-/// `TACO_DAEMON_MODE=1` flips the bundle into socket-listening mode;
-/// `TACO_SOCKET` / `TACO_CONTROL_SOCKET` name the two IPC channels. The
-/// launcher writes them itself when it acts as an intermediate; the prod
-/// path needs them because the desktop sets the paths before spawning.
-///
-/// `#[allow(dead_code)]` on `socket_path` + `control_socket_path`: commit 4
-/// only forwards these via `extra_env` (the struct fields themselves are
-/// read in commit 5, when workspace_ensure swaps the subprocess pipes for
-/// a tokio socket connection). Removing the allow once commit 5 lands.
-///
-/// `#[allow(clippy::doc_lazy_continuation)]` suppresses the formatter-style
-/// "indented docs" lint that fires on the multi-paragraph doc block above
-/// (paragraph continuation lines vs. heading line). PR5's packaging work
-/// may re-run `cargo fmt` + clippy with a uniform doc style; until then
-/// the lint is more noise than signal here.
-#[allow(dead_code, clippy::doc_lazy_continuation)]
-struct SidecarResolution {
-    program: String,
-    args: Vec<String>,
-    /// 注入到 child 的 `TACO_SIDECAR_RESOURCES` env,None 表示不覆盖(由 sidecar
-    /// 当前进程的 import.meta.dirname 兜底)。
-    resources_root: Option<PathBuf>,
-    /// 是否运行仓库源码形态(tsx + repo_root cwd)。区别于 `workspace_ensure`
-    /// 入参 `debug_mode`(那是"是否打印 LLM 报文"的客户端开关,两者含义不同)。
-    use_repo_source: bool,
-    /// NDJSON socket path the bundle should bind. `workspace_ensure`
-    /// forwards this to the child as `TACO_SOCKET` and uses it as the
-    /// connection target once the daemon is ready (PR2 commit 5 wires the
-    /// actual tokio socket connection).
-    socket_path: PathBuf,
-    /// Connection target under the daemon's control plane.
-    control_socket_path: PathBuf,
-    /// Variables to add on top of PASSTHROUGH_ENV when spawning. Includes
-    /// `TACO_DAEMON_MODE`, `TACO_SOCKET`, `TACO_CONTROL_SOCKET`, and any
-    /// test-time overrides (TACO_SIDECAR_CMD/TACO_SIDECAR_ARGS override the
-    /// entire resolution above).
-    extra_env: Vec<(String, String)>,
-}
-
-/// taco 自有路径的根:TACO_HOME env > $HOME/.taco。
-///
-/// 返回值恒为**绝对路径**,并且是唯一的真相来源 —— desktop.json 和传给
-/// sidecar 子进程的 TACO_HOME 都用它,两侧不可能再分叉。
-///
-/// 为什么必须绝对化:相对值(如 `TACO_HOME=state`)在两个进程里基准不同 ——
-/// 桌面端按 Tauri 主进程 cwd 解析,而 repo-source 形态下 sidecar 的 cwd 被
-/// 显式设为 repo_root。结果 desktop.json 落在一处、sessions 落在另一处,
-/// 表面上"都用了 TACO_HOME"却指向不同目录。
-///
-/// 空白值(`""` / `"   "`)视同未设:它解析不出有意义的路径,回退比让两侧
-/// 各自猜更安全。sidecar 侧 `config/tacoHome.ts` 同步了同一套规则。
-fn resolve_taco_home(app: &AppHandle) -> Result<PathBuf, String> {
-    let raw = match std::env::var("TACO_HOME") {
-        Ok(v) if !v.trim().is_empty() => Some(PathBuf::from(v.trim())),
-        _ => None,
-    };
-    let taco_home = match raw {
-        Some(p) if p.is_absolute() => p,
-        // 相对路径按主进程 cwd 绝对化,随后同一个绝对值透传给 sidecar。
-        Some(p) => std::env::current_dir()
-            .map_err(|e| format!("cwd unavailable while resolving TACO_HOME: {e}"))?
-            .join(p),
-        None => app
-            .path()
-            .home_dir()
-            .map_err(|e| format!("home_dir unavailable: {e}"))?
-            .join(".taco"),
-    };
-    if !taco_home.exists() {
-        std::fs::create_dir_all(&taco_home)
-            .map_err(|e| format!("failed to create .taco: {e}"))?;
-    }
-    Ok(taco_home)
-}
 
 /// 默认 workspace 的绝对路径,并保证目录存在。
 ///
@@ -243,245 +95,9 @@ async fn desktop_config_write(app: AppHandle, contents: String) -> Result<(), St
     Ok(())
 }
 
-/// Returns true if a `taco upgrade` was staged and the daemon's
-/// orchestrator will shut itself down on its next recheck (the UI's
-/// reconnect loop checks this between attempts and runs `taco upgrade
-/// --apply` before re-ensuring). Pure filesystem existence check; the
-/// Tauri command layer is just to keep the path-resolution rules in
-/// `resolve_taco_home` authoritative on both sides.
-#[tauri::command]
-async fn upgrade_marker_present(app: AppHandle) -> Result<bool, String> {
-    let home = resolve_taco_home(&app)?;
-    Ok(home.join("upgrade-marker.json").exists())
-}
+/// (Implementation lives in `upgrade_commands.rs` so this Tauri-command
+///  layer stays focused on the workspace_* handlers.)
 
-/// Run `taco upgrade --apply` via the bundled launcher (the same one
-/// `ensure_daemon_installed` uses for the first-run `taco install`).
-/// Best-effort: a non-zero exit propagates as a String error so the
-/// frontend's reconnect loop can surface it without aborting the retry
-/// schedule. The CLI handles the atomic swap + marker clear itself;
-/// the Tauri command layer only spawns the binary.
-#[tauri::command]
-async fn upgrade_apply(app: AppHandle) -> Result<String, String> {
-    let Some(launcher) = resolve_install_launcher_via_handle(&app) else {
-        return Err("taco launcher not found; cannot run upgrade --apply".into());
-    };
-    let taco_home = resolve_taco_home(&app)?;
-    let mut cmd = std::process::Command::new(&launcher.program);
-    for arg in &launcher.prefix_args {
-        cmd.arg(arg);
-    }
-    cmd.arg("upgrade").arg("--apply");
-    cmd.env("TACO_HOME", &taco_home);
-    for (key, value) in &launcher.env {
-        cmd.env(key, value);
-    }
-    let output = cmd
-        .output()
-        .map_err(|e| format!("failed to spawn taco upgrade --apply: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "taco upgrade --apply exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
-}
-
-/// Mirror of `resolve_install_launcher` that takes an `AppHandle`
-/// instead of `&tauri::App`. The two share a body, but the upgrade
-/// command is a Tauri command (so it gets `AppHandle`) while the
-/// install path runs inside the `.setup` closure (so it gets
-/// `&tauri::App`). Splitting them keeps each call site obvious about
-/// which API surface it's plugging into without paying for a generic
-/// wrapper that would erase the lifetime constraints Tauri imposes.
-fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<InstallLauncherSpec> {
-    if cfg!(debug_assertions) {
-        let repo_root = find_repo_root();
-        let tsx = resolve_repo_source_program(&repo_root);
-        let cli_bin = repo_root
-            .join("packages")
-            .join("cli")
-            .join("bin")
-            .join("taco.cjs");
-        if cli_bin.exists() {
-            return Some(InstallLauncherSpec {
-                program: tsx,
-                prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
-                env: Vec::new(),
-            });
-        }
-        return None;
-    }
-    let resources = app.path().resource_dir().ok()?.join("cli").join("taco.mjs");
-    let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
-    let bundle = sidecar_root.join("lib").join("index.mjs");
-    let node = std::env::current_exe().ok()?.parent()?.join(if cfg!(windows) {
-        "taco-sidecar-node.exe"
-    } else {
-        "taco-sidecar-node"
-    });
-    if !resources.exists() || !node.exists() || !bundle.exists() {
-        return None;
-    }
-    Some(InstallLauncherSpec {
-        program: node.to_string_lossy().into_owned(),
-        prefix_args: vec![resources.to_string_lossy().into_owned()],
-        env: vec![
-            ("TACO_SIDECAR_NODE".into(), node.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_BUNDLE".into(), bundle.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_RESOURCES".into(), sidecar_root.to_string_lossy().into_owned()),
-        ],
-    })
-}
-
-/// 剥掉 Windows verbatim 前缀(`\\?\`)。
-///
-/// `current_exe()` / `resource_dir()` 在 Windows 上可能返回 `\\?\D:\...` 这种
-/// verbatim 路径。Rust 自己的 `std::fs` 能正确处理它,但把它作为 argv 传给
-/// 子进程会出问题:Node 的 `realpath` 见到 `\\?\D:` 会把盘符解析成目录,直接
-/// 崩 `EISDIR: illegal operation on a directory, lstat 'D:'`(整个 sidecar 因此
-/// 起不来)。在传给 `Command` 之前统一剥掉,非 Windows / 无前缀时原样返回。
-fn strip_win_verbatim(p: &Path) -> PathBuf {
-    let s = p.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) => PathBuf::from(rest),
-        None => p.to_path_buf(),
-    }
-}
-
-/// NDJSON socket path. Unix: filesystem path under `$TACO_HOME/run/`.
-/// Windows: named pipe `\\.\pipe\taco-sidecar`. Mirrors
-/// `packages/cli/lib/paths.ts` so the @taco-ai/cli launcher and the desktop
-/// agree on the path without an IPC roundtrip.
-fn ndjson_socket_path(home: &Path) -> PathBuf {
-    if cfg!(windows) {
-        return PathBuf::from(r"\\.\pipe\taco-sidecar");
-    }
-    home.join("run").join("sidecar.sock")
-}
-
-/// Control socket path. Same shape as `ndjson_socket_path` but with a
-/// distinct name so a single-instance check (PR3) can detect an existing
-/// daemon via bind-with-O_EXCL on this path without colliding with the
-/// data channel.
-fn control_socket_path(home: &Path) -> PathBuf {
-    if cfg!(windows) {
-        return PathBuf::from(r"\\.\pipe\taco-sidecar-ctl");
-    }
-    home.join("run").join("sidecar-ctl.sock")
-}
-
-fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
-    // PR2: socket paths under `$TACO_HOME/run/` (or Windows named pipes).
-    // Both the @taco-ai/cli launcher and the desktop must agree on these
-    // paths, so we resolve them once here and pass them to whichever
-    // process we spawn.
-    let resolved_home = resolve_taco_home(app)?;
-    let socket_path = ndjson_socket_path(&resolved_home);
-    let control_socket_path = control_socket_path(&resolved_home);
-    // Daemon-mode env every spawned child needs. The launcher's
-    // TACO_DAEMON_MODE / TACO_SOCKET / TACO_CONTROL_SOCKET come from this
-    // vector so the bundle (or CLI) flips into socket-listening mode.
-    let daemon_env: Vec<(String, String)> = vec![
-        ("TACO_DAEMON_MODE".to_string(), "1".to_string()),
-        ("TACO_SOCKET".to_string(), socket_path.to_string_lossy().into_owned()),
-        ("TACO_CONTROL_SOCKET".to_string(), control_socket_path.to_string_lossy().into_owned()),
-    ];
-
-    // ① 显式覆盖 —— 测试 / e2e 可以直接指定 launcher 程序
-    if let (Ok(program), Ok(args_str)) = (
-        std::env::var("TACO_SIDECAR_CMD"),
-        std::env::var("TACO_SIDECAR_ARGS"),
-    ) {
-        return Ok(SidecarResolution {
-            program,
-            args: args_str.split_whitespace().map(String::from).collect(),
-            resources_root: None,
-            // 显式覆盖多用于本地/e2e 指向 tsx 源码,按源码形态给 cwd。
-            use_repo_source: true,
-            socket_path,
-            control_socket_path,
-            extra_env: daemon_env,
-        });
-    }
-
-    if cfg!(debug_assertions) {
-        // ② debug 走 @taco-ai/cli 的 `start` 子命令 —— 它会 spawn tsx +
-        //    sidecar/src/index.ts 并设置好 TACO_DAEMON_MODE / socket 路径。
-        //    launch_sidecar() 会等 socket ready 后退出,stdin/stdout 上
-        //    透传 socket path;commit 5 用它连 socket(本次 commit 仍读
-        //    subprocess stdout)。
-        let repo_root = find_repo_root();
-        let tsx = resolve_repo_source_program(&repo_root);
-        let cli_bin = repo_root
-            .join("packages")
-            .join("cli")
-            .join("bin")
-            .join("taco.cjs");
-        return Ok(SidecarResolution {
-            program: tsx,
-            args: vec![cli_bin.to_string_lossy().into_owned(), "start".to_string()],
-            // CLI 自己计算 socket 路径并 spawn sidecar,不需要 desktop 再注入。
-            resources_root: Some(repo_root.join("packages").join("sidecar").join("src")),
-            use_repo_source: true,
-            socket_path,
-            control_socket_path,
-            extra_env: daemon_env,
-        });
-    }
-
-    // ③ release —— 直连 bundled node binary + ESM bundle,跳过 CLI 这一层。
-    //    externalBin 不再需要一个独立的 launcher 二进制,因为 bundle 自己
-    //    在 TACO_DAEMON_MODE=1 下已经会 listen NDJSON + control sockets。
-    //    剥掉 `\\?` verbatim 前缀 —— 这条链上的路径都会作为 argv 传给
-    //    Node,带前缀会崩(见 strip_win_verbatim)。
-    let resources_root = strip_win_verbatim(
-        &app.path()
-            .resource_dir()
-            .map_err(|e| format!("resource_dir unavailable: {e}"))?,
-    );
-
-    let lib_path = resources_root.join("sidecar").join("lib").join("index.mjs");
-    if !lib_path.exists() {
-        return Err(format!(
-            "sidecar bundle missing at {}; \
-             run scripts/stageSidecar.mjs (and re-run `pnpm tauri build`)",
-            lib_path.display(),
-        ));
-    }
-
-    let exe_dir = strip_win_verbatim(
-        std::env::current_exe()
-            .map_err(|e| format!("current_exe unavailable: {e}"))?
-            .parent()
-            .ok_or_else(|| "current exe has no parent directory".to_string())?,
-    );
-    let node_bin_name = if cfg!(windows) {
-        format!("{SIDECAR_NODE_RESOURCE}.exe")
-    } else {
-        SIDECAR_NODE_RESOURCE.to_string()
-    };
-    let node_path = exe_dir.join(&node_bin_name);
-
-    if !node_path.exists() {
-        return Err(format!(
-            "sidecar node binary not present at {}",
-            node_path.display()
-        ));
-    }
-
-    Ok(SidecarResolution {
-        program: node_path.to_string_lossy().into_owned(),
-        args: vec![lib_path.to_string_lossy().into_owned()],
-        resources_root: Some(resources_root.join("sidecar")),
-        use_repo_source: false,
-        socket_path,
-        control_socket_path,
-        extra_env: daemon_env,
-    })
-}
 
 pub struct AppState {
     /// 唯一共享 sidecar 进程。锁仅在 install / dispose 路径持;spawn 在锁外执行
@@ -1063,66 +679,6 @@ async fn set_fs_scope(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_cwd(cwd: &str) -> String {
-    // 与 sidecar 端 WorkspaceRuntime 行为对齐:
-    //   1. trim 尾部 /
-    //   2. 相对路径以 current_dir 兜底拼成绝对路径
-    //   3. 解析 . / .. 段(无需路径存在,允许预先注册尚未创建的 workspace)
-    let trimmed = cwd.trim_end_matches('/');
-    let p = Path::new(trimmed);
-    let absolute: PathBuf = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(p),
-            Err(_) => p.to_path_buf(),
-        }
-    };
-    cleanpath(&absolute).to_string_lossy().into_owned()
-}
-
-/// Lexically normalize: 解析 `.` / `..` 但不要求路径存在(无 fs 访问)。
-/// 与 Node 端 `path.resolve` 行为一致,这是 WorkspaceRuntime 用于 routing key 的语义。
-fn cleanpath(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {} // skip .
-            Component::ParentDir => {
-                // pop only if there's a real prefix / normal component to pop
-                if matches!(out.components().next_back(), Some(Component::Normal(_)) | Some(Component::Prefix(_))) {
-                    out.pop();
-                }
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    if out.as_os_str().is_empty() {
-        PathBuf::from(".")
-    } else {
-        out
-    }
-}
-
-/// 从当前可执行文件向上扫描,找到含 `pnpm-workspace.yaml` 的目录作为 repo root。
-/// 跨 `cargo run` / `pnpm tauri:dev` / release `.app` bundle 都稳。
-fn find_repo_root() -> PathBuf {
-    let start = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_default();
-    let mut current = start;
-    loop {
-        if current.join("pnpm-workspace.yaml").exists() {
-            return current;
-        }
-        match current.parent() {
-            Some(p) => current = p.to_path_buf(),
-            None => return current,
-        }
-    }
-}
-
 /// Auto-register the sidecar as an OS-level service on first run.
 /// Registration is best-effort so startup remains available when a platform
 /// launcher or optional service manager is unavailable.
@@ -1183,62 +739,6 @@ fn control_socket_present(control: &std::path::Path) -> bool {
             .is_ok()
     }
 }
-
-struct InstallLauncherSpec {
-    program: String,
-    prefix_args: Vec<String>,
-    env: Vec<(String, String)>,
-}
-
-/// Resolve the bundled launcher. Development executes the TypeScript CLI via
-/// tsx; release executes the bundled `cli/taco.mjs` with the same sidecar Node
-/// binary shipped as Tauri externalBin, so first-run registration never relies
-/// on a global `taco` command.
-fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLauncherSpec> {
-    if cfg!(debug_assertions) {
-        let repo_root = find_repo_root();
-        let tsx = resolve_repo_source_program(&repo_root);
-        let cli_bin = repo_root
-            .join("packages")
-            .join("cli")
-            .join("bin")
-            .join("taco.cjs");
-        if cli_bin.exists() {
-            return Some(InstallLauncherSpec {
-                program: tsx,
-                prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
-                env: Vec::new(),
-            });
-        }
-        return None;
-    }
-    let resources = app
-        .path()
-        .resource_dir()
-        .ok()?
-        .join("cli")
-        .join("taco.mjs");
-    let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
-    let bundle = sidecar_root.join("lib").join("index.mjs");
-    let node = std::env::current_exe().ok()?.parent()?.join(if cfg!(windows) {
-        "taco-sidecar-node.exe"
-    } else {
-        "taco-sidecar-node"
-    });
-    if !resources.exists() || !node.exists() || !bundle.exists() {
-        return None;
-    }
-    Some(InstallLauncherSpec {
-        program: node.to_string_lossy().into_owned(),
-        prefix_args: vec![resources.to_string_lossy().into_owned()],
-        env: vec![
-            ("TACO_SIDECAR_NODE".into(), node.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_BUNDLE".into(), bundle.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_RESOURCES".into(), sidecar_root.to_string_lossy().into_owned()),
-        ],
-    })
-}
-
 
 ///
 /// tauri.conf.json can't branch by platform, so `windows` is empty there and
@@ -1377,8 +877,8 @@ pub fn run() {
             desktop_config_write,
             default_workspace_dir,
             paths_are_dirs,
-            upgrade_marker_present,
-            upgrade_apply,
+            crate::upgrade_commands::upgrade_marker_present,
+            crate::upgrade_commands::upgrade_apply,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

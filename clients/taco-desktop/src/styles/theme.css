@@ -188,6 +188,20 @@
     --diff-new-fg: #5b8a3c;
     --diff-new-bg: rgba(91, 138, 60, 0.1);
     --diff-gutter-fg: rgba(43, 38, 32, 0.45);
+
+    /* QR plates stay light across themes — scanners need reliable contrast
+       regardless of the app's appearance. */
+    --qr-bg: #ffffff;
+    /* Hint text rendered on the QR plate. Needs to be darker than the
+       ambient --fg-dim (which is tuned for dark surfaces) so it stays
+       legible on white. */
+    --qr-hint-fg: #57606a;
+    /* Foreground color for content rendered on --brand-orange surfaces
+       (the toolbar buttons in overlays.css). */
+    --brand-orange-fg: #ffffff;
+    /* Streaming tool output uses a slightly brighter shade than the
+       completed-output gray so live edits are visually distinct. */
+    --fg-streaming: #e8e8e8;
 }
 
 :root[data-platform="macos"] {

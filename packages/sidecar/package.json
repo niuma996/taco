@@ -35,6 +35,7 @@
     "build": "node esbuild.config.mjs",
     "package:runtime": "node scripts/buildRuntime.mjs",
     "package:archive": "node scripts/archiveRuntime.mjs",
+    "sync:staging": "node scripts/syncPnpmStaging.mjs",
     "test": "tsx --test 'tests/**/*.test.ts'",
     "test:prompts": "tsx --test tests/prompts/prompts.test.ts",
     "test:tags": "tsx --test tests/tags/tags.test.ts",

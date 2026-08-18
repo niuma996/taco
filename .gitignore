@@ -56,10 +56,10 @@ CLAUDE.md
 DESIGN.md
 docs/plans/
 
-# Tauri updater signing keys (PR5 / docs/signing.md). The .pub file
-# *is* committed to the repo as the embedded pubkey goes into
-# tauri.conf.json; these patterns only ignore the operator-local
-# copies of the keypair sitting next to `docs/signing.md`.
+# Tauri updater signing keys (PR5 / docs/signing.md). The keypair is
+# generated locally by the operator and never committed — only the
+# base64 public key string is embedded into tauri.conf.json by hand.
+# These patterns ignore the operator-local keypair files.
 *.minisign
 taco-update.key
 taco-update.pub

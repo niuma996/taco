@@ -1,6 +1,8 @@
 /**
- * ESM dispatcher entry. The bin/taco.cjs shim spawns `tsx <this file>` with the
- * user's argv and lets this module parse + dispatch.
+ * ESM dispatcher entry. The bin/taco.cjs shim spawns Node on this module
+ * (the esbuild bundle dist/taco.mjs in the published package, or this
+ * TypeScript source via tsx in a repo checkout) and lets it parse +
+ * dispatch argv.
  *
  * Subcommands:
  *   start                — spawn sidecar daemon, print NDJSON socket path.
@@ -77,7 +79,7 @@ export async function run(argv: readonly string[]): Promise<number> {
     }
 }
 
-// Auto-run when invoked as the entry (tsx <this file>).
+// Auto-run when invoked as the entry (node dist/taco.mjs, or tsx on the source).
 const isEntry = (() => {
     try {
         const entry = process.argv[1];
