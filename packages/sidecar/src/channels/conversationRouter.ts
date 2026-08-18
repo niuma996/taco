@@ -22,6 +22,11 @@ interface RouteEntry {
  *  any user history. */
 export class ConversationRouter extends EventEmitter {
     private readonly routes = new Map<string, RouteEntry>(); // key = imCwd
+    /** Reverse-only index for sessions created outside `route()` (scheduler
+     *  pin jobs). key = sessionId, value = imCwd. Kept separate from
+     *  `routes` because that map is 1:1 per workspace and is owned by the
+     *  peer's live conversation — see `registerExternalSession`. */
+    private readonly externalRoutes = new Map<string, string>();
     private readonly inflight = new Map<
         string,
         Promise<{ workspace: string; sessionId: string }>
@@ -147,7 +152,11 @@ export class ConversationRouter extends EventEmitter {
         for (const [workspace, entry] of this.routes) {
             if (entry.sessionId === sessionId) return parseImCwd(workspace);
         }
-        return undefined;
+        // Fall back to sessions registered out-of-band (scheduler pin jobs).
+        // Checked second so a live conversation always wins on the (rare)
+        // chance both indexes name the same id.
+        const external = this.externalRoutes.get(sessionId);
+        return external ? parseImCwd(external) : undefined;
     }
 
     lookup(
@@ -273,6 +282,30 @@ export class ConversationRouter extends EventEmitter {
             lastUsedAt,
         });
         return { workspace, sessionId: sid };
+    }
+
+    /** Register a session that was created outside of `route()` (e.g. by the
+     *  scheduler's pin strategy, which dispatches `session.create` directly
+     *  with a stable id and skips the conversation-router create path).
+     *
+     *  Without this, `findRouteBySessionId(pinnedId)` returns nothing — the
+     *  channel's reverse-lookup (`resolvePeer`) misses, and any reply the
+     *  agent emits gets logged as "no peer for session, reply dropped".
+     *
+     *  This deliberately does NOT touch `routes`. That map is the forward
+     *  index (`workspace -> the one session inbound messages go to`), and a
+     *  peer's live conversation owns the same key. Writing the scheduler's
+     *  session there would evict the human's session, so the peer's next
+     *  message would land in the scheduler's session instead — hijacking
+     *  the conversation. Outbound reply addressing only ever needs the
+     *  reverse direction, so it gets its own many-to-one index and the
+     *  forward map is left alone. Not persisted: it is rebuilt by whoever
+     *  re-creates or re-attaches the session after a restart.
+     *
+     *  No-op on fs workspaces (no IM triple to bind). */
+    registerExternalSession(workspace: string, sessionId: string): void {
+        if (!parseImCwd(workspace)) return;
+        this.externalRoutes.set(sessionId, workspace);
     }
 
     /** Uses session.history (not session.list, which filters subagents).

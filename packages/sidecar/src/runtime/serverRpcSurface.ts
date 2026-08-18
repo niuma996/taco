@@ -26,7 +26,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
-import type { Job, JobHistoryEntry } from "../scheduler/types.ts";
+import type { Actor, Job, JobHistoryEntry } from "../scheduler/types.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
 import type { WorkspaceRuntime } from "./workspace.ts";
 
@@ -70,15 +70,20 @@ export interface ImPolicyControl {
  * store + scheduler live behind this interface so handlers don't reach
  * into scheduler internals; SidecarServer implements the contract using
  * the JobStore + Scheduler that runDaemon constructed at startup.
+ *
+ * Every method takes an optional `actor` so the server can enforce
+ * IM-scope (caller's channelId + peerId must match the job) vs IDE-scope
+ * (caller's workspace must match the job's args.workspace). `undefined`
+ * means legacy / admin caller — all jobs are visible and modifiable.
  */
 export interface JobsControl {
-    list(): Promise<Job[]>;
-    get(id: string): Promise<Job | null>;
-    create(job: Job): Promise<Job>;
-    update(job: Job): Promise<Job>;
-    delete(id: string): Promise<void>;
-    runNow(id: string): Promise<boolean>;
-    history(id: string): Promise<JobHistoryEntry[] | null>;
+    list(actor?: Actor): Promise<Job[]>;
+    get(id: string, actor?: Actor): Promise<Job | null>;
+    create(job: Job, actor?: Actor): Promise<Job>;
+    update(job: Job, actor?: Actor): Promise<Job>;
+    delete(id: string, actor?: Actor): Promise<void>;
+    runNow(id: string, actor?: Actor): Promise<boolean>;
+    history(id: string, actor?: Actor): Promise<JobHistoryEntry[] | null>;
 }
 
 export interface ServerRpcSurface {
@@ -152,6 +157,14 @@ export interface ServerRpcSurface {
      * as `channels` — tests / non-daemon hosts can omit it.
      */
     readonly jobs?: JobsControl;
+    /**
+     * Mount/replace the scheduler API after the server is up. The daemon
+     * constructs the controller after the resident SidecarServer has started
+     * (the controller's Scheduler needs the resident's RPC surface); this
+     * setter is the post-start hook for closing that loop. No-op when absent
+     * (e.g. test stubs that own their own jobs field).
+     */
+    setJobsControl?(next: JobsControl | undefined): void;
     /**
      * IM workspace policy control surface, consumed by the `imPolicy.*`
      * handlers. Same optionality as `channels` — non-SidecarServer hooks

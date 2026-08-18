@@ -73,6 +73,9 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
         }),
         availableAgentTypes: [],
         skills: [],
+        // Test stubs return a self-RPC-less context: tools that need call/actor
+        // are tested separately (see tools/memory.test.ts, tools/jobs.test.ts).
+        getToolContext: () => ({ env, workspace: cwd as WorkspaceId }),
         ...overrides,
     });
 }

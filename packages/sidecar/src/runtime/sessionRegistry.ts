@@ -39,6 +39,7 @@ import type { TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";
 import { createAgentTool } from "../tools/agent.ts";
 import { createAgentContinueTool } from "../tools/agentContinue.ts";
+import type { TacoToolContext } from "../tools/context.ts";
 import type { TacoTool } from "../tools/index.ts";
 import { AttachedSession } from "./attachedSession.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
@@ -140,6 +141,14 @@ export interface SessionRegistryOptions {
      * each LLM call.
      */
     readonly getImChannelContext?: () => ImChannelContext | undefined;
+    /**
+     * Per-turn tool context provider. Threaded straight through to every
+     * AttachedSession's harness — the harness calls it once per turn to
+     * resolve the `TacoToolContext` snapshot for that turn's tool calls.
+     * WorkspaceRuntime wires this from `sessionCwd` + `dispatchRpc` +
+     * `imRouting`; tests can pass an inline closure.
+     */
+    readonly getToolContext: () => TacoToolContext;
 }
 
 export class SessionRegistry extends EventEmitter {
@@ -172,6 +181,8 @@ export class SessionRegistry extends EventEmitter {
     readonly getInstructionsConfig?: () => InstructionsConfig | undefined;
     /** Lazy accessor for the current IM channel identity (see options below). */
     readonly getImChannelContext?: () => ImChannelContext | undefined;
+    /** Per-turn tool context provider (see options below). */
+    readonly getToolContext: () => TacoToolContext;
 
     /** cwd → workspace metadata cache, based on list for this cwd */
     private _metadataCache: JsonlSessionMetadata[] | null = null;
@@ -233,6 +244,7 @@ export class SessionRegistry extends EventEmitter {
         this.toolRegistry = options.toolRegistry;
         this.getInstructionsConfig = options.getInstructionsConfig;
         this.getImChannelContext = options.getImChannelContext;
+        this.getToolContext = options.getToolContext;
         this.spawnSubagent = options.spawnSubagent;
         this.resumeSubagent = options.resumeSubagent;
         this.spawnSkillSubagent = options.spawnSkillSubagent;
@@ -506,6 +518,8 @@ export class SessionRegistry extends EventEmitter {
             toolRegistry: this.toolRegistry,
             getInstructionsConfig: this.getInstructionsConfig,
             getImChannelContext: this.getImChannelContext,
+            getToolContext: this.getToolContext,
+            sessionCwd: this.sessionCwd,
         });
 
         this.attached.set(sessionId, attached);

@@ -7,7 +7,7 @@
  */
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -51,6 +51,53 @@ test("marker + staging present → requestShutdown fires with upgrade-pending", 
 
         await orch.tick();
         deepStrictEqual(shutdowns, ["upgrade-pending"]);
+        orch.stop();
+    });
+});
+
+test("liveDir matches marker.live_dir → shutdown fires (own upgrade)", async () => {
+    await withTmp(async (root) => {
+        const stagingDir = join(root, "staging", "sidecar-0.2.0");
+        await mkdir(stagingDir, { recursive: true });
+        const markerPath = join(root, "marker.json");
+        await writeUpgradeMarker(markerPath, sampleMarker("0.2.0", stagingDir));
+
+        const shutdowns: string[] = [];
+        const orch = new UpgradeOrchestrator({
+            markerPath,
+            liveDir: "/tmp/live/sidecar",
+            requestShutdown: (reason) => {
+                shutdowns.push(reason);
+            },
+            intervalMs: 1_000_000,
+        });
+
+        await orch.tick();
+        deepStrictEqual(shutdowns, ["upgrade-pending"]);
+        orch.stop();
+    });
+});
+
+test("liveDir mismatch → foreign marker ignored: no shutdown, marker kept", async () => {
+    await withTmp(async (root) => {
+        // Deliberately NO staging dir: a foreign marker with missing staging
+        // must still be left untouched — its owner decides whether to clear.
+        const markerPath = join(root, "marker.json");
+        await writeUpgradeMarker(markerPath, sampleMarker("0.2.0", join(root, "no-staging")));
+
+        let calls = 0;
+        const orch = new UpgradeOrchestrator({
+            markerPath,
+            liveDir: join(root, "bundled-sidecar"),
+            requestShutdown: () => {
+                calls += 1;
+            },
+            intervalMs: 1_000_000,
+        });
+
+        await orch.tick();
+        strictEqual(calls, 0);
+        ok((await readFile(markerPath, "utf8")).length > 0, "foreign marker must not be cleared");
         orch.stop();
     });
 });

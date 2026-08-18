@@ -17,9 +17,10 @@
  */
 
 import { Type } from "typebox";
+import { JobsScopeError } from "../../lib/jobsErrors.ts";
 import { safeJobId } from "../../scheduler/jobId.ts";
 import { JOBS_RPC } from "../../scheduler/jobsRpc.ts";
-import type { Job } from "../../scheduler/types.ts";
+import type { Actor, Job, SessionStrategy } from "../../scheduler/types.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 // Reserved for future use; today the list endpoint takes no params.
@@ -31,6 +32,7 @@ interface JobsListResult {
 
 interface JobsGetParams {
     id: string;
+    actor?: Actor;
 }
 interface JobsGetResult {
     job: Job | null;
@@ -38,6 +40,7 @@ interface JobsGetResult {
 
 interface JobsCreateParams {
     job: Job;
+    actor?: Actor;
 }
 interface JobsCreateResult {
     job: Job;
@@ -45,6 +48,7 @@ interface JobsCreateResult {
 
 interface JobsUpdateParams {
     job: Job;
+    actor?: Actor;
 }
 interface JobsUpdateResult {
     job: Job;
@@ -52,6 +56,7 @@ interface JobsUpdateResult {
 
 interface JobsDeleteParams {
     id: string;
+    actor?: Actor;
 }
 interface JobsDeleteResult {
     deleted: boolean;
@@ -59,6 +64,7 @@ interface JobsDeleteResult {
 
 interface JobsRunNowParams {
     id: string;
+    actor?: Actor;
 }
 interface JobsRunNowResult {
     ran: boolean;
@@ -66,17 +72,43 @@ interface JobsRunNowResult {
 
 interface JobsHistoryParams {
     id: string;
+    actor?: Actor;
 }
 interface JobsHistoryResult {
     history: Job["history"] | null;
+}
+
+/** Extract an optional `Actor` from params; returns undefined when absent
+ *  or malformed (legacy callers / admin tooling). The presence of a
+ *  well-formed actor is what gates scope enforcement in JobsController. */
+function extractActor(params: unknown): Actor | undefined {
+    if (typeof params !== "object" || params === null) return undefined;
+    const raw = (params as Record<string, unknown>).actor;
+    if (typeof raw !== "object" || raw === null) return undefined;
+    const obj = raw as Record<string, unknown>;
+    if (obj.kind === "im") {
+        if (
+            typeof obj.channelId === "string" &&
+            typeof obj.peerId === "string" &&
+            typeof obj.chatId === "string"
+        ) {
+            return { kind: "im", channelId: obj.channelId, peerId: obj.peerId, chatId: obj.chatId };
+        }
+        return undefined;
+    }
+    if (obj.kind === "ide" && typeof obj.workspace === "string") {
+        return { kind: "ide", workspace: obj.workspace };
+    }
+    return undefined;
 }
 
 export function registerJobsHandlers(): void {
     registerMethod(
         JOBS_RPC.list,
         false,
-        async ({ server }: MethodCtx<EmptyParams>): Promise<JobsListResult> => {
-            const jobs = server.jobs ? await server.jobs.list() : [];
+        async ({ server, params }: MethodCtx<EmptyParams>): Promise<JobsListResult> => {
+            const actor = extractActor(params);
+            const jobs = server.jobs ? await server.jobs.list(actor) : [];
             return { jobs };
         },
         { schema: Type.Any() },
@@ -88,7 +120,8 @@ export function registerJobsHandlers(): void {
         async ({ server, params }: MethodCtx<JobsGetParams>): Promise<JobsGetResult> => {
             const id = expectString(params, "id");
             safeJobId(id);
-            const job = server.jobs ? await server.jobs.get(id) : null;
+            const actor = extractActor(params);
+            const job = server.jobs ? await server.jobs.get(id, actor) : null;
             return { job };
         },
         { schema: Type.Any() },
@@ -96,56 +129,74 @@ export function registerJobsHandlers(): void {
 
     registerMethod(
         JOBS_RPC.create,
-        true,
+        false,
         async ({ server, params }: MethodCtx<JobsCreateParams>): Promise<JobsCreateResult> => {
             if (!server.jobs) throw new RpcHandlerError("not_ready", "scheduler not running");
             const job = assertJob(params, "job");
             safeJobId(job.id);
-            const saved = await server.jobs.create(job);
-            return { job: saved };
+            const actor = extractActor(params);
+            try {
+                const saved = await server.jobs.create(job, actor);
+                return { job: saved };
+            } catch (err) {
+                throw scopeErrorToRpc(err);
+            }
         },
         { schema: Type.Any() },
     );
 
     registerMethod(
         JOBS_RPC.update,
-        true,
+        false,
         async ({ server, params }: MethodCtx<JobsUpdateParams>): Promise<JobsUpdateResult> => {
             if (!server.jobs) throw new RpcHandlerError("not_ready", "scheduler not running");
             const job = assertJob(params, "job");
             safeJobId(job.id);
-            const existing = await server.jobs.get(job.id);
-            if (!existing) {
-                throw new RpcHandlerError("not_found", `no such job: ${job.id}`);
+            const actor = extractActor(params);
+            try {
+                const saved = await server.jobs.update(job, actor);
+                return { job: saved };
+            } catch (err) {
+                throw scopeErrorToRpc(err);
             }
-            const saved = await server.jobs.update(job);
-            return { job: saved };
         },
         { schema: Type.Any() },
     );
 
     registerMethod(
         JOBS_RPC.delete,
-        true,
+        false,
         async ({ server, params }: MethodCtx<JobsDeleteParams>): Promise<JobsDeleteResult> => {
             if (!server.jobs) throw new RpcHandlerError("not_ready", "scheduler not running");
             const id = expectString(params, "id");
             safeJobId(id);
-            const existing = await server.jobs.get(id);
-            await server.jobs.delete(id);
-            return { deleted: existing !== null };
+            const actor = extractActor(params);
+            let existed = false;
+            try {
+                existed = (await server.jobs.get(id, actor)) !== null;
+                await server.jobs.delete(id, actor);
+            } catch (err) {
+                throw scopeErrorToRpc(err);
+            }
+            return { deleted: existed };
         },
         { schema: Type.Any() },
     );
 
     registerMethod(
         JOBS_RPC.runNow,
-        true,
+        false,
         async ({ server, params }: MethodCtx<JobsRunNowParams>): Promise<JobsRunNowResult> => {
             if (!server.jobs) throw new RpcHandlerError("not_ready", "scheduler not running");
             const id = expectString(params, "id");
             safeJobId(id);
-            const ran = await server.jobs.runNow(id);
+            const actor = extractActor(params);
+            let ran = false;
+            try {
+                ran = await server.jobs.runNow(id, actor);
+            } catch (err) {
+                throw scopeErrorToRpc(err);
+            }
             return { ran };
         },
         { schema: Type.Any() },
@@ -157,7 +208,8 @@ export function registerJobsHandlers(): void {
         async ({ server, params }: MethodCtx<JobsHistoryParams>): Promise<JobsHistoryResult> => {
             const id = expectString(params, "id");
             safeJobId(id);
-            const history = server.jobs ? await server.jobs.history(id) : null;
+            const actor = extractActor(params);
+            const history = server.jobs ? await server.jobs.history(id, actor) : null;
             return { history };
         },
         { schema: Type.Any() },
@@ -207,14 +259,51 @@ function assertJob(params: unknown, field: string): Job {
     if (typeof obj.command !== "string") {
         throw new RpcHandlerError("invalid_params", `${field}.command must be a string`);
     }
+    // The scheduler dispatcher only knows `agent.invoke` today — every other
+    // command would land in `dispatcher.createJobDispatcher` and throw
+    // `unsupported scheduled command`. Refuse here so the failure is
+    // actionable (a clear invalid_params) instead of a recurring err entry
+    // in the job's history. When a real second command shows up, add it to
+    // the set AND wire the dispatcher to handle it.
+    if (obj.command !== "agent.invoke") {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.command must be "agent.invoke" ` +
+                "(scheduler dispatches to a fresh agent session; " +
+                "place shell-style commands in args.prompt and let the agent " +
+                `route them through tools). Got: ${JSON.stringify(obj.command)}`,
+        );
+    }
     if (typeof obj.args !== "object" || obj.args === null) {
         throw new RpcHandlerError("invalid_params", `${field}.args must be an object`);
+    }
+    const argsObj = obj.args as Record<string, unknown>;
+    if (typeof argsObj.workspace !== "string" || argsObj.workspace.length === 0) {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.args.workspace is required and must be a non-empty string`,
+        );
+    }
+    // `agent.invoke` requires a prompt. Same allowlist argument: every other
+    // shape falls through to a no-context agent session that has nothing to
+    // do, and the operator only notices via silent history entries.
+    if (typeof argsObj.prompt !== "string" || argsObj.prompt.length === 0) {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.args.prompt is required and must be a non-empty string`,
+        );
     }
     if (typeof obj.enabled !== "boolean") {
         throw new RpcHandlerError("invalid_params", `${field}.enabled must be a boolean`);
     }
     if (typeof obj.run_on_startup !== "boolean") {
         throw new RpcHandlerError("invalid_params", `${field}.run_on_startup must be a boolean`);
+    }
+    if (obj.sessionStrategy !== undefined && !isSessionStrategy(obj.sessionStrategy)) {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.sessionStrategy must be "new" | "reuse" | "pin"`,
+        );
     }
     return obj as unknown as Job;
 }
@@ -233,4 +322,20 @@ function isScheduleSpec(value: unknown): boolean {
         return typeof s.ms === "number" && Number.isInteger(s.ms) && s.ms > 0;
     }
     return false;
+}
+
+function isSessionStrategy(value: unknown): value is SessionStrategy {
+    return value === "new" || value === "reuse" || value === "pin";
+}
+
+/** Map JobsController's scope errors to wire codes. Out-of-scope reads
+ *  are mapped to `not_found` (never leak existence); writes are
+ *  `forbidden` so the caller can distinguish "missing" from "denied". */
+function scopeErrorToRpc(err: unknown): RpcHandlerError {
+    if (err instanceof JobsScopeError) {
+        return new RpcHandlerError(err.code, err.message);
+    }
+    // Re-throw unknown errors so the existing try/catch chain (or the
+    // handler wrapper) maps them to internal_error.
+    throw err;
 }

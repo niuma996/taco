@@ -7,7 +7,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { normalizeError, redactUpstreamMessage } from "../../src/server/server.ts";
+import { normalizeError, redactUpstreamMessage } from "../../src/server/rpcResponse.ts";
 
 describe("redactUpstreamMessage", () => {
     it("returns placeholder for empty input", () => {

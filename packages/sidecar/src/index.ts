@@ -9,19 +9,31 @@
  */
 
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { createServer as createNetServer, connect as netConnect, type Socket } from "node:net";
+import {
+    createServer as createNetServer,
+    connect as netConnect,
+    type Server,
+    type Socket,
+} from "node:net";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { IM_CWD_PREFIX } from "@taco-ai/protocol";
+import { ChannelBindBroker } from "./channels/channelBindBroker.ts";
+import { ConversationRouter } from "./channels/conversationRouter.ts";
+import { ChannelRegistry } from "./channels/registry.ts";
 import { defaultSessionsRoot, resolveConfig, THINKING_LEVELS, tacoHome } from "./config/config.ts";
 import { loadExtensions } from "./extensions/index.ts";
 import type { ExtensionRegistry } from "./extensions/registry.ts";
 import { createLogger } from "./lib/logger.ts";
+import { augmentProcessPath } from "./lib/loginShellPath.ts";
 import { ProviderKeyStore } from "./runtime/providerKeyStore.ts";
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";
 import { JobsController } from "./scheduler/jobsController.ts";
 import { Scheduler } from "./scheduler/runner.ts";
 import { JobStore } from "./scheduler/store.ts";
+import { ClientSinkRegistry } from "./server/clientSinkRegistry.ts";
 import { handleControlChannel } from "./server/controlChannel.ts";
+import { NullTransport } from "./server/nullTransport.ts";
 import { type SharedSidecarDeps, SidecarServer, startServer } from "./server/server.ts";
 import { StdioTransport } from "./server/stdioTransport.ts";
 import { DEFAULT_MARKER_PATH, UpgradeOrchestrator } from "./upgrader/orchestrator.ts";
@@ -157,6 +169,24 @@ function unlinkSocketSync(path: string): void {
     }
 }
 
+/** Tear down a listening server and any sockets it already accepted.
+ *
+ *  `server.close()` only stops accepting new connections; long-lived NDJSON
+ *  sessions keep the event loop alive so the `close` callback never fires
+ *  and the shutdown path hangs forever on its `await`. `closeAllConnections()`
+ *  (Node ≥ 18.2; we're on 22) destroys accepted sockets in userspace so
+ *  `close` resolves immediately. The control socket is included even
+ *  though its sessions are short-lived — a client stuck mid-shutdown can
+ *  wedge the callback too. The cast is needed because @types/node@22
+ *  doesn't expose the method on `net.Server` (it's runtime-only). */
+function closeServer(server: Server): Promise<void> {
+    type Closable = Server & { closeAllConnections?: () => void };
+    return new Promise<void>((resolve) => {
+        (server as Closable).closeAllConnections?.();
+        server.close(() => resolve());
+    });
+}
+
 /** Connect-probe the NDJSON socket path. Returns true if a listener is alive.
  *  Used at startup to distinguish "no daemon yet" (file missing or connection
  *  refused) from "stale socket file from a crashed daemon" (file exists,
@@ -189,35 +219,99 @@ async function runDaemon(
     // delete mutate the single process-wide scheduler.
     const jobsDir = join(tacoHome(), "jobs");
     const jobStore = new JobStore(jobsDir);
+
+    // Process-level IM channel stack. Constructed once and shared with every
+    // NDJSON connection's SidecarServer so a desktop disconnect cannot kill
+    // inbound IM bots and only one routing.json writer exists. `imHost` is
+    // the resident host that owns the channel stack — connection servers
+    // forward im:// RPCs to it via dispatchRpc.
+    //
+    // The resident is constructed BEFORE the single-instance probe so a
+    // hostile / stale probe can't race channel startup. Channel startup
+    // failures are isolated: a bot failing to bind must not block the
+    // socket bind or fs-workspace RPCs.
+    const conversationRouter = await ConversationRouter.load(tacoHome());
+    const sharedChannelStack = {
+        channelRegistry: new ChannelRegistry(),
+        channelBindBroker: new ChannelBindBroker(),
+        conversationRouter,
+    };
+    // Phase 2: process-level fan-out registry. The resident uses it to push
+    // IM frames to every connected desktop's NDJSON transport so an open
+    // IM session view stays live (new peer messages, mid-turn updates).
+    // Without this the host's emitPush would only hit NullTransport and
+    // Phase 1's regression — already-open IM views going stale — would
+    // remain. Each SidecarServer adds its own transport on start().
+    const clientSinkRegistry = new ClientSinkRegistry();
+
+    // Two runtimes, one process:
+    //  - `imHost` owns IM workspaces + the channel stack; im:// cwd sessions
+    //    run here so a desktop disconnect never kills the inbound IM bot.
+    //  - `schedulerSidecar` owns fs workspaces; fs cwd sessions invoked by
+    //    scheduled jobs run here so the scheduler doesn't depend on any
+    //    desktop connection being up. It does NOT share the channel stack
+    //    (no IM traffic) and does NOT register with clientSinkRegistry
+    //    (desktop sessions don't track scheduler-generated sched-* ids).
+    //
+    // Both must be constructed AND started before Scheduler.start(), which
+    // may fire boot-replay jobs as fire-and-forget invokes; the resolver
+    // closes over both references.
+    const imHost = new SidecarServer({
+        ...toSharedSidecarDeps(deps),
+        ...sharedChannelStack,
+        clientSinkRegistry,
+    });
     const schedulerSidecar = new SidecarServer({ ...toSharedSidecarDeps(deps) });
+    await imHost.start(new NullTransport(), deps.cfg.channels ?? []).catch((err: unknown) => {
+        log.error(`IM host failed to start: ${String(err)}`);
+    });
+    // `NullTransport` is no-op for open/close/send, so the scheduler
+    // runtime has no remote client and no channel bots. start() still
+    // wires broker/router subscriptions + command-record sweeper + the
+    // transport field that getTransport() falls back to — without
+    // setting it, emitPush inside job invokes would create a fresh
+    // StdioTransport and write to actual stdout.
+    await schedulerSidecar.start(new NullTransport(), []).catch((err: unknown) => {
+        log.error(`scheduler runtime failed to start: ${String(err)}`);
+    });
+
     const scheduler = new Scheduler({
         store: jobStore,
         lockDir: jobsDir,
-        invoke: createJobDispatcher(schedulerSidecar),
+        invoke: createJobDispatcher(
+            (workspace) => (workspace.startsWith(IM_CWD_PREFIX) ? imHost : schedulerSidecar),
+            // Pin strategy writes the created sessionId back to the job so
+            // subsequent fires can attach the same session. The store stays
+            // authoritative for job state; the dispatcher never mutates it.
+            {
+                onPinnedSessionCreated: async (jobId, sessionId) => {
+                    const job = await jobStore.get(jobId);
+                    if (!job) return;
+                    await jobStore.save({ ...job, pinnedSessionId: sessionId });
+                },
+            },
+        ),
     });
     await scheduler.start().catch((err: unknown) => {
         log.error(`scheduler failed to start: ${String(err)}`);
     });
     const jobsController = new JobsController(jobStore, scheduler, jobsDir);
-    const sharedDeps = { ...toSharedSidecarDeps(deps), jobs: jobsController };
 
-    // PR4 upgrade orchestrator: read the marker on boot + every 6h; when
-    // a pending upgrade is staged, ask the host to shut down so the UI's
-    // reconnect loop can run `taco upgrade --apply`. The shutdown helper
-    // here captures `ndjsonServer`/`controlServer`/`socketPath`/
-    // `controlSocketPath` from the enclosing scope.
-    const upgradeOrchestrator = new UpgradeOrchestrator({
-        markerPath: DEFAULT_MARKER_PATH,
-        requestShutdown: async (reason) => {
-            log.info(`upgrade orchestrator: ${reason}; shutting down daemon`);
-            await new Promise<void>((resolve) => ndjsonServer.close(() => resolve()));
-            await new Promise<void>((resolve) => controlServer.close(() => resolve()));
-            unlinkSocketSync(socketPath);
-            unlinkSocketSync(controlSocketPath);
-            process.exit(0);
-        },
-    });
-    upgradeOrchestrator.start();
+    // Mount the controller on every SidecarServer instance that exposes
+    // jobs.* RPCs. Connection servers pick it up via `sharedDeps.jobs`;
+    // the two residents (imHost + schedulerSidecar) need an explicit setter
+    // because their `start()` already ran before the controller existed
+    // (the controller's Scheduler depends on them — see dispatch resolver).
+    imHost.setJobsControl?.(jobsController);
+    schedulerSidecar.setJobsControl?.(jobsController);
+
+    const sharedDeps = {
+        ...toSharedSidecarDeps(deps),
+        ...sharedChannelStack,
+        jobs: jobsController,
+        imHost,
+        clientSinkRegistry,
+    };
 
     // The control socket doubles as the single-instance marker. A healthy
     // listener means another daemon already owns this $TACO_HOME, which is a
@@ -266,8 +360,8 @@ async function runDaemon(
         // own graceful shutdown via the callback below.
         handleControlChannel(socket, async () => {
             log.info("control.shutdown received, stopping daemon...");
-            await new Promise<void>((resolve) => ndjsonServer.close(() => resolve()));
-            await new Promise<void>((resolve) => controlServer.close(() => resolve()));
+            await closeServer(ndjsonServer);
+            await closeServer(controlServer);
             unlinkSocketSync(socketPath);
             unlinkSocketSync(controlSocketPath);
             process.exit(0);
@@ -315,12 +409,45 @@ async function runDaemon(
         `daemon listening ndjson=${socketPath} control=${controlSocketPath} sessionsRoot=${deps.sessionsRoot}`,
     );
 
+    // PR4 upgrade orchestrator: read the marker on boot + every 6h; when a
+    // pending upgrade targeting THIS install (marker.live_dir === our own
+    // TACO_SIDECAR_RESOURCES root) is staged, shut down so the owner can run
+    // `taco upgrade --apply`. Constructed AFTER the servers are bound: the
+    // shutdown closure captures them, and a marker present at boot used to
+    // fire the closure before the `const` declarations were reached (TDZ).
+    const upgradeOrchestrator = new UpgradeOrchestrator({
+        markerPath: DEFAULT_MARKER_PATH,
+        liveDir: process.env.TACO_SIDECAR_RESOURCES,
+        requestShutdown: async (reason) => {
+            log.info(`upgrade orchestrator: ${reason}; shutting down daemon`);
+            await closeServer(ndjsonServer);
+            await closeServer(controlServer);
+            unlinkSocketSync(socketPath);
+            unlinkSocketSync(controlSocketPath);
+            process.exit(0);
+        },
+    });
+    upgradeOrchestrator.start();
+
     const shutdown = async (sig: string) => {
         log.info(`caught ${sig}, shutting down daemon...`);
         scheduler.stop();
         upgradeOrchestrator.stop();
-        await new Promise<void>((resolve) => ndjsonServer.close(() => resolve()));
-        await new Promise<void>((resolve) => controlServer.close(() => resolve()));
+        // Stop the resident first so its channels cancel before we tear down
+        // the socket listeners — long-poll / webhook handlers otherwise keep
+        // the event loop alive across process.exit.
+        await imHost.stop().catch((err: unknown) => {
+            log.error(`IM host stop failed: ${String(err)}`);
+        });
+        // Scheduler runtime last: any in-flight job invokes have already
+        // been cancelled by scheduler.stop() above, so tearing this down
+        // only reclaims the fs workspaces the scheduler built. NullTransport
+        // close is a no-op; the value of stop() is the workspaceMap dispose.
+        await schedulerSidecar.stop().catch((err: unknown) => {
+            log.error(`scheduler runtime stop failed: ${String(err)}`);
+        });
+        await closeServer(ndjsonServer);
+        await closeServer(controlServer);
         unlinkSocketSync(socketPath);
         unlinkSocketSync(controlSocketPath);
         process.exit(0);
@@ -336,6 +463,16 @@ async function runDaemon(
     process.on("exit", () => {
         unlinkSocketSync(socketPath);
         unlinkSocketSync(controlSocketPath);
+    });
+    // Uncaught error while a job is mid-fire: flip its `running` history
+    // entry to `err` so a hung scheduler doesn't leave a permanent "still
+    // running" record. We deliberately don't rethrow — Node prints the
+    // stack trace and exits with code 1; the marks are best-effort and
+    // the OS reaps any leftover `<id>.lock` on next start via stale
+    // cleanup in Scheduler.start().
+    process.on("uncaughtException", (err) => {
+        log.error(`uncaught exception: ${err?.stack ?? err}`);
+        void jobsController.markRunningAsErr(err?.message ?? "uncaughtException");
     });
 }
 
@@ -374,6 +511,15 @@ async function runStdio(deps: ResolvedDeps): Promise<void> {
  * loading order (env vars / $TACO_HOME/taco.json / CLI args) identical across modes.
  */
 async function main(): Promise<void> {
+    // Recover the user's real PATH before anything spawns a subprocess.
+    // Under launchd / GUI launch the inherited PATH is the minimal
+    // `/usr/bin:/bin:...`; agent shell commands (mmx, etc.) installed in
+    // nvm/Homebrew dirs would be invisible. Agents inherit process.env, so
+    // fixing it here covers both daemon and stdio modes.
+    if (augmentProcessPath()) {
+        log.info("augmented PATH from login shell");
+    }
+
     const deps = await resolveDeps();
 
     if (process.env.TACO_DAEMON_MODE === "1") {

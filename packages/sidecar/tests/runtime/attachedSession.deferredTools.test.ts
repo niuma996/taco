@@ -23,6 +23,7 @@ import {
     type ToolCandidate,
 } from "../../src/runtime/deferredToolRegistry.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
+import type { TacoToolContext } from "../../src/tools/context.ts";
 import { createPlanModeState } from "../../src/tools/planModeState.ts";
 
 const fakeTool = (name: string): AgentTool =>
@@ -88,6 +89,10 @@ async function makeAttachedSession(
         planState: createPlanModeState(),
         tasksDir: tmpDir,
         toolRegistry,
+        sessionCwd: tmpDir as never,
+        // Dynamic-tool tests don't exercise the tool context path; tools that
+        // need `call`/`actor` are tested in their own files.
+        getToolContext: () => ({ env, workspace: tmpDir as never }) as TacoToolContext,
     };
     return AttachedSession.create(opts);
 }
@@ -234,6 +239,11 @@ describe("AttachedSession — dynamic tools", () => {
             planState: createPlanModeState(),
             tasksDir: tmpDir,
             toolRegistry: registry,
+            sessionCwd: tmpDir as never,
+            getToolContext: (): TacoToolContext => ({
+                env,
+                workspace: tmpDir as never,
+            }),
         };
 
         // First attach: load runs once for the always candidate. Then trigger

@@ -36,36 +36,49 @@ type Ctx = Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handl
  *  controller method runs. The wire `server` object nests `jobs` so
  *  `server.jobs.list` resolves as the handler expects. */
 function makeStubServer(controllerCalls: string[]) {
+    const store = new Map<string, unknown>();
     const jobs = {
-        list: async () => {
-            controllerCalls.push("list");
+        list: async (actor?: unknown) => {
+            controllerCalls.push(`list:${formatActor(actor)}`);
             return [];
         },
-        get: async (id: string) => {
-            controllerCalls.push(`get:${id}`);
-            return null;
+        get: async (id: string, actor?: unknown) => {
+            controllerCalls.push(`get:${id}:${formatActor(actor)}`);
+            return store.get(id) ?? null;
         },
-        create: async (job: unknown) => {
-            controllerCalls.push(`create:${(job as { id?: string }).id ?? "?"}`);
+        create: async (job: unknown, actor?: unknown) => {
+            const j = job as { id?: string };
+            controllerCalls.push(`create:${j.id ?? "?"}:${formatActor(actor)}`);
+            store.set(j.id as string, j);
             return job;
         },
-        update: async (job: unknown) => {
-            controllerCalls.push(`update:${(job as { id?: string }).id ?? "?"}`);
+        update: async (job: unknown, actor?: unknown) => {
+            const j = job as { id?: string };
+            controllerCalls.push(`update:${j.id ?? "?"}:${formatActor(actor)}`);
+            store.set(j.id as string, j);
             return job;
         },
-        delete: async (id: string) => {
-            controllerCalls.push(`delete:${id}`);
+        delete: async (id: string, actor?: unknown) => {
+            controllerCalls.push(`delete:${id}:${formatActor(actor)}`);
         },
-        runNow: async (id: string) => {
-            controllerCalls.push(`runNow:${id}`);
+        runNow: async (id: string, actor?: unknown) => {
+            controllerCalls.push(`runNow:${id}:${formatActor(actor)}`);
             return true;
         },
-        history: async () => {
-            controllerCalls.push("history");
+        history: async (id: string, actor?: unknown) => {
+            controllerCalls.push(`history:${id}:${formatActor(actor)}`);
             return null;
         },
     };
     return { jobs } as unknown as AnyServer;
+}
+
+function formatActor(actor: unknown): string {
+    if (!actor || typeof actor !== "object") return "none";
+    const a = actor as { kind?: string };
+    if (a.kind === "im") return "im";
+    if (a.kind === "ide") return "ide";
+    return "?";
 }
 
 function makeCtx(server: AnyServer, params: unknown): Ctx {
@@ -97,7 +110,7 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                             name: "x",
                             schedule: { kind: "interval", ms: 1000 },
                             command: "agent.invoke",
-                            args: {},
+                            args: { workspace: "/tmp/test", prompt: "x" },
                             enabled: true,
                             run_on_startup: false,
                             history: [],
@@ -126,14 +139,14 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                     name: "x",
                     schedule: { kind: "interval", ms: 1000 },
                     command: "agent.invoke",
-                    args: {},
+                    args: { workspace: "/tmp/test", prompt: "x" },
                     enabled: true,
                     run_on_startup: false,
                     history: [],
                 },
             }),
         );
-        assert.deepEqual(controllerCalls, ["create:nightly-cleanup"]);
+        assert.deepEqual(controllerCalls, ["create:nightly-cleanup:none"]);
     });
 
     it("jobs.update rejects traversal id before persistence", async () => {
@@ -153,7 +166,7 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                             name: "x",
                             schedule: { kind: "interval", ms: 1000 },
                             command: "agent.invoke",
-                            args: {},
+                            args: { workspace: "/tmp/test", prompt: "x" },
                             enabled: true,
                             run_on_startup: false,
                             history: [],
@@ -212,5 +225,173 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                 e instanceof RpcHandlerError && (e as { code: string }).code === "invalid_params",
         );
         assert.deepEqual(controllerCalls, []);
+    });
+});
+
+/**
+ * Regression: jobs.* handlers are process-level scheduler RPCs and must NOT
+ * require `params.workspace`. Before the fix, `jobs.create/update/delete/runNow`
+ * were registered with `ensureWorkspace: true`, so any wire payload that
+ * omitted `workspace` was rejected with `missing required field: workspace`
+ * by `SidecarServer.executeRpcRequest` — even though the handlers themselves
+ * never read the workspace. The Schedules UI never sends `workspace`, so
+ * saving a job failed at the wire layer.
+ *
+ * These tests go through `handleRpcRequest` (the same path real NDJSON
+ * traffic hits) and assert the call lands on the controller with the
+ * `workspace` parameter absent.
+ */
+
+import type { RpcResponse } from "@taco-ai/protocol";
+
+async function dispatchThroughServer(
+    method: string,
+    params: unknown,
+    controllerCalls: string[],
+): Promise<RpcResponse> {
+    const { SidecarServer } = await import("../../../src/server/server.ts");
+    const server = new SidecarServer({ providerKeyStore: {} as never });
+    const stubServer = makeStubServer(controllerCalls);
+    // SidecarServer stores its own `jobs` reference on construction; replace
+    // it with the stub so the handler sees our recording controller. The
+    // server never calls any workspace-resolution path here because
+    // jobs.* no longer requests one (ensureWorkspace: false).
+    server.setJobsControl?.(stubServer.jobs);
+    return server.handleRpcRequest({ id: "test-1", method, params } as never);
+}
+
+describe("jobs RPC — workspace routing (regression)", () => {
+    it("jobs.create dispatches without params.workspace", async () => {
+        registerBuiltinMethods();
+        const controllerCalls: string[] = [];
+        const resp = await dispatchThroughServer(
+            "jobs.create",
+            {
+                job: {
+                    id: "nightly-cleanup",
+                    name: "x",
+                    schedule: { kind: "interval", ms: 1000 },
+                    command: "agent.invoke",
+                    args: { workspace: "/tmp/test", prompt: "x" },
+                    enabled: true,
+                    run_on_startup: false,
+                    history: [],
+                },
+            },
+            controllerCalls,
+        );
+        assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+        assert.deepEqual(controllerCalls, ["create:nightly-cleanup:none"]);
+    });
+
+    it("jobs.update dispatches without params.workspace", async () => {
+        registerBuiltinMethods();
+        const controllerCalls: string[] = [];
+        const stub = makeStubServer(controllerCalls);
+        // Pre-seed via the same stub the server will use so jobs.update's
+        // pre-update `get` finds the row. makeStubServer attaches `jobs`
+        // unconditionally; the optional chain is just to satisfy the
+        // ServerRpcSurface type where `jobs` is optional.
+        const jobs = stub.jobs;
+        if (!jobs) throw new Error("stub missing jobs");
+        await jobs.create({
+            id: "nightly-cleanup",
+            name: "x",
+            schedule: { kind: "interval", ms: 1000 },
+            command: "agent.invoke",
+            args: { workspace: "/tmp/test", prompt: "x" },
+            enabled: true,
+            run_on_startup: false,
+            history: [],
+        });
+
+        const { SidecarServer } = await import("../../../src/server/server.ts");
+        const server = new SidecarServer({ providerKeyStore: {} as never });
+        server.setJobsControl?.(jobs);
+        const resp = await server.handleRpcRequest({
+            id: "test-2",
+            method: "jobs.update",
+            params: {
+                job: {
+                    id: "nightly-cleanup",
+                    name: "x",
+                    schedule: { kind: "interval", ms: 1000 },
+                    command: "agent.invoke",
+                    args: { workspace: "/tmp/test", prompt: "x" },
+                    enabled: true,
+                    run_on_startup: false,
+                    history: [],
+                },
+            },
+        } as never);
+        assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+    });
+
+    it("jobs.delete dispatches without params.workspace", async () => {
+        registerBuiltinMethods();
+        const controllerCalls: string[] = [];
+        const resp = await dispatchThroughServer("jobs.delete", { id: "abc" }, controllerCalls);
+        assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+    });
+
+    it("jobs.run_now dispatches without params.workspace", async () => {
+        registerBuiltinMethods();
+        const controllerCalls: string[] = [];
+        const resp = await dispatchThroughServer("jobs.run_now", { id: "abc" }, controllerCalls);
+        assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+    });
+});
+
+describe("jobs RPC — actor extraction", () => {
+    it("passes IM actor through to the controller", async () => {
+        registerBuiltinMethods();
+        const reg = getRegisteredMethod("jobs.list");
+        assert.ok(reg);
+        const controllerCalls: string[] = [];
+        const server = makeStubServer(controllerCalls);
+        await reg.handler(
+            makeCtx(server, {
+                actor: { kind: "im", channelId: "ch1", peerId: "u1", chatId: "c1" },
+            }),
+        );
+        assert.deepEqual(controllerCalls, ["list:im"]);
+    });
+
+    it("passes IDE actor through to the controller", async () => {
+        registerBuiltinMethods();
+        const reg = getRegisteredMethod("jobs.list");
+        assert.ok(reg);
+        const controllerCalls: string[] = [];
+        const server = makeStubServer(controllerCalls);
+        await reg.handler(
+            makeCtx(server, {
+                actor: { kind: "ide", workspace: "/tmp/proj" },
+            }),
+        );
+        assert.deepEqual(controllerCalls, ["list:ide"]);
+    });
+
+    it("passes undefined when actor is omitted (legacy / admin callers)", async () => {
+        registerBuiltinMethods();
+        const reg = getRegisteredMethod("jobs.list");
+        assert.ok(reg);
+        const controllerCalls: string[] = [];
+        const server = makeStubServer(controllerCalls);
+        await reg.handler(makeCtx(server, {}));
+        assert.deepEqual(controllerCalls, ["list:none"]);
+    });
+
+    it("treats malformed actor as undefined (admin path)", async () => {
+        registerBuiltinMethods();
+        const reg = getRegisteredMethod("jobs.list");
+        assert.ok(reg);
+        const controllerCalls: string[] = [];
+        const server = makeStubServer(controllerCalls);
+        await reg.handler(
+            makeCtx(server, {
+                actor: { kind: "im", channelId: "ch1" }, // missing peerId/chatId
+            }),
+        );
+        assert.deepEqual(controllerCalls, ["list:none"]);
     });
 });

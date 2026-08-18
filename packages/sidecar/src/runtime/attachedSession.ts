@@ -13,7 +13,6 @@ import {
     type AgentHarnessResources,
     type AgentHarnessStreamOptions,
     type AgentMessage,
-    type ExecutionToolContext,
     type PromptTemplate,
     type Session,
     type ThinkingLevel,
@@ -26,6 +25,7 @@ import type {
     SessionCompactResult,
     SessionContextInfoResult,
     SupportedLocale,
+    WorkspaceId,
 } from "@taco-ai/protocol";
 import { CheckpointManager } from "../checkpoints/manager.ts";
 import type { CheckpointStore } from "../checkpoints/store.ts";
@@ -42,6 +42,7 @@ import type { TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";
 import type { TaskStore } from "../tasks/taskTypes.ts";
 import { createAddToolsTool } from "../tools/addTools.ts";
+import type { TacoToolContext } from "../tools/context.ts";
 import type { TacoTool } from "../tools/index.ts";
 import type { PlanModeState } from "../tools/planModeState.ts";
 import {
@@ -208,11 +209,20 @@ export interface AttachedSessionOptions {
      * Absent = no dynamic-tool capability.
      */
     toolRegistry?: DeferredToolRegistry;
+    /**
+     * Per-turn `TacoToolContext` provider. The harness invokes it once per
+     * turn snapshot and threads the result into every tool's `execute`.
+     * Workspace-supplied; lazy so future hot-reload flows (imRouting /
+     * dispatchRpc swaps) take effect on the next turn without reattaching.
+     */
+    getToolContext: () => TacoToolContext;
+    /** Workspace cwd the tool context should be anchored to. */
+    sessionCwd: WorkspaceId;
 }
 
 export class AttachedSession extends EventEmitter {
     readonly session: Session;
-    private readonly harness: AgentHarness<ExecutionToolContext>;
+    private readonly harness: AgentHarness<TacoToolContext>;
     private uiLocale: SupportedLocale | undefined;
     private readonly defaultUiLocale: SupportedLocale | undefined;
     private unsubscribe?: () => void;
@@ -248,7 +258,7 @@ export class AttachedSession extends EventEmitter {
 
     private constructor(
         session: Session,
-        harness: AgentHarness<ExecutionToolContext>,
+        harness: AgentHarness<TacoToolContext>,
         defaultUiLocale: SupportedLocale | undefined,
         compactionController: CompactionController,
         contextInfo: ContextInfoService,
@@ -314,7 +324,7 @@ export class AttachedSession extends EventEmitter {
             toolController = controller;
         }
 
-        const harness = new AgentHarness({
+        const harness = new AgentHarness<TacoToolContext>({
             session: args.session,
             models: args.models,
             model: args.model,
@@ -327,7 +337,7 @@ export class AttachedSession extends EventEmitter {
                 args.models,
                 args.model.provider,
             ),
-            toolContext: { env: args.env },
+            toolContext: args.getToolContext,
         });
 
         // Bind harness reference — controller constructed first, bound after: breaks the cycle.

@@ -70,7 +70,8 @@ import {
     type TaskPushAdapter,
     type TaskSnapshotPublisher,
 } from "../tasks/taskPushAdapter.ts";
-import { defaultToolsWithTasks, type MemoryToolDeps, type TacoTool } from "../tools/index.ts";
+import type { SelfRpcCall, TacoToolContext } from "../tools/context.ts";
+import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { AgentSpawner, findModelById } from "./agentSpawner.ts";
 import type { AttachedSession } from "./attachedSession.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
@@ -172,9 +173,10 @@ export interface WorkspaceRuntimeOptions {
     /** Where tools run (shell, fs tools, plan files). Defaults to the session cwd. */
     executionCwd?: string;
     /**
-     * In-process self-RPC entry (injected by SidecarServer) so
-     * `defaultToolsWithTasks` can build `MemoryToolDeps.call`.
-     * Omitted means the memory tool is not wired.
+     * In-process self-RPC entry (injected by SidecarServer) so the memory
+     * and jobs tools can route through the sidecar's own `dispatchRpc`.
+     * Omitted means those tools are wired but their `ctx.call` is undefined
+     * (they throw on execute — see `tools/context.ts`).
      */
     dispatchRpc?: (req: RpcRequest) => Promise<RpcResponse>;
     /**
@@ -382,7 +384,52 @@ export class WorkspaceRuntime extends EventEmitter {
             planState: { active: false, currentSlug: null },
             tasksDir: "",
         };
-        const memoryDeps = makeMemoryDeps(options.dispatchRpc, this.sessionCwd);
+        // Per-workspace self-RPC thunk. Both memory.upsert and jobs.* close
+        // over this in their constructor-free factory; tools read it from
+        // the harness's `toolContext` instead of taking deps. id uses
+        // `self-${random}` so log lines can spot in-process tool calls; the
+        // handler ignores it except to echo back into `RpcResponse.id`.
+        const dispatchRpc = options.dispatchRpc;
+        const selfRpc: SelfRpcCall | undefined = dispatchRpc
+            ? async <P, R>(method: string, _ws: WorkspaceId, params: P): Promise<R> => {
+                  const req: RpcRequest = {
+                      id: `self-${crypto.randomUUID().toLowerCase()}`,
+                      method,
+                      params,
+                  };
+                  const resp = await dispatchRpc(req);
+                  if (resp.ok) return resp.result as R;
+                  throw new Error(`${resp.error.code}: ${resp.error.message}`);
+              }
+            : undefined;
+        const imRouting = this.imRouting;
+        const actor = imRouting
+            ? ({
+                  kind: "im",
+                  channelId: imRouting.channelId,
+                  peerId: imRouting.peerId,
+                  chatId: imRouting.chatId,
+              } as const)
+            : options.dispatchRpc
+              ? ({ kind: "ide", workspace: this.sessionCwd } as const)
+              : undefined;
+        // The thunk lets the harness re-resolve the tool context per turn
+        // snapshot. We capture `selfRpc` / `actor` / `this.env` / `this.workspaceKey`
+        // — none of them change after construction, so a thunk returning
+        // the same object each call is cheap and lets future wiring (e.g.
+        // a re-keyed actor after `setImChannel`) hot-update without
+        // reattaching sessions.
+        //
+        // `ctx.workspace` is the routing key (im:// URL for IM sessions, fs
+        // cwd for IDE), not `sessionCwd` (which is the IM scratch root fs
+        // path). jobs.* RPC needs the routing key on `job.args.workspace` so
+        // server-side scope derivation matches the actor.
+        const toolContext = (): TacoToolContext => ({
+            env: this.env,
+            workspace: this.workspaceKey,
+            ...(selfRpc ? { call: selfRpc } : {}),
+            ...(actor ? { actor } : {}),
+        });
         this.toolRegistry =
             options.toolRegistry ?? new DefaultDeferredToolRegistry({ candidates: [] });
         const imPolicy =
@@ -404,8 +451,8 @@ export class WorkspaceRuntime extends EventEmitter {
                 taskAdapter,
                 planAdapter,
                 "",
-                memoryDeps,
                 this.permissionBroker,
+                undefined,
             );
         const extTools = this.extensions?.toolsWithSource() ?? [];
         const merged = extTools.length > 0 ? dedupOverride(baseTools, extTools) : baseTools;
@@ -425,8 +472,8 @@ export class WorkspaceRuntime extends EventEmitter {
                     taskAdapter,
                     planAdapter,
                     sessionId,
-                    memoryDeps,
                     this.permissionBroker,
+                    undefined,
                 );
             const perSessionMerged =
                 extTools.length > 0 ? dedupOverride(perSession, extTools) : perSession;
@@ -560,6 +607,10 @@ export class WorkspaceRuntime extends EventEmitter {
             // hot-reload without re-constructing the registry. `undefined`
             // here means "use defaults" (resolveInstructions handles it).
             getInstructionsConfig: () => this.instructionsConfig,
+            // Per-turn tool context (workspace, call, actor). The harness
+            // invokes this once per turn; returning a fresh snapshot lets
+            // future hot-reload flows (e.g. imRouting change) take effect.
+            getToolContext: toolContext,
             // For IM workspaces only: resolve the route's channelId to its safe
             // channel identity. Filesystem workspaces yield undefined — the
             // im_channel hook injects nothing there.
@@ -919,34 +970,4 @@ function forwardEvents(
     for (const evt of events) {
         source.on(evt, (...args: unknown[]) => target.emit(evt, ...args));
     }
-}
-
-/**
- * Builds memory-tool deps. When `dispatchRpc` is undefined, returns undefined
- * (memory tool is not wired). Otherwise wraps `dispatchRpc` directly rather
- * than going through `createTypedRpc` — the sidecar does not depend on
- * `@taco-ai/shared`, and the `memory.upsert` handler already validates via
- * typebox, so an extra typed wrapper would add no value.
- *
- * id uses `self-${random}` so log lines can spot in-process tool calls;
- * the handler ignores it except to echo back into `RpcResponse.id`.
- */
-function makeMemoryDeps(
-    dispatchRpc: ((req: RpcRequest) => Promise<RpcResponse>) | undefined,
-    workspace: WorkspaceId,
-): MemoryToolDeps | undefined {
-    if (!dispatchRpc) return undefined;
-    return {
-        workspace,
-        call: async <P, R>(method: string, _ws: WorkspaceId, params: P): Promise<R> => {
-            const req: RpcRequest = {
-                id: `self-${crypto.randomUUID().toLowerCase()}`,
-                method,
-                params,
-            };
-            const resp = await dispatchRpc(req);
-            if (resp.ok) return resp.result as R;
-            throw new Error(`${resp.error.code}: ${resp.error.message}`);
-        },
-    };
 }

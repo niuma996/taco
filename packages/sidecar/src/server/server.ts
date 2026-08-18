@@ -92,14 +92,10 @@ import {
     isContentEmptyAfterVisibility,
 } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
+import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
-import {
-    getRegisteredMethod,
-    listRegisteredMethods,
-    type MethodCtx,
-    RpcHandlerError,
-} from "./methodRegistry.ts";
+import { getRegisteredMethod, listRegisteredMethods, type MethodCtx } from "./methodRegistry.ts";
 import { registerBuiltinMethods } from "./methods.ts";
 import {
     makeHelloFrame,
@@ -107,6 +103,15 @@ import {
     redactCommandPermissionRequest,
     toToolCallPush,
 } from "./push.ts";
+import {
+    type CommandOutcome,
+    err,
+    getTurnKey,
+    normalizeError,
+    ok,
+    toCommandOutcome,
+    withRequestId,
+} from "./rpcResponse.ts";
 import { SessionEventLog } from "./sessionEventLog.ts";
 import { StdioTransport } from "./stdioTransport.ts";
 import type { Transport } from "./transport.ts";
@@ -172,11 +177,35 @@ export interface SidecarServerOptions {
      * connection's SidecarServer.
      */
     jobs?: JobsControl;
+    /**
+     * Process-level IM channel stack (daemon mode). When set, this server
+     * is a non-owner connection server: it does NOT re-start channels,
+     * does NOT own IM workspaces, and forwards `im://` session RPCs to
+     * `imHost` via `dispatchRpc`. Omit on stdio single-process sidecars
+     * and in tests — those keep the existing self-construct behaviour.
+     */
+    channelRegistry?: ChannelRegistry;
+    channelBindBroker?: ChannelBindBroker;
+    conversationRouter?: ConversationRouter;
+    /**
+     * The daemon-resident IM host. Set together with the three channel-stack
+     * fields above; connection servers receive all four as a unit so a
+     * missing `imHost` is treated as "this is the owner" rather than a
+     * half-configured non-owner. The resident itself is constructed without
+     * `imHost` (and therefore owns).
+     */
+    imHost?: ServerRpcSurface;
+    /**
+     * Process-level fan-out registry for desktop transports (Phase 2). The
+     * resident uses it to deliver IM push frames to every connected
+     * desktop's NDJSON transport so an already-open IM session view stays
+     * live (new peer messages, mid-turn updates). Constructed once by
+     * `runDaemon` and shared via SharedSidecarDeps. Omit on stdio /
+     * tests — those have a single SidecarServer whose own transport is
+     * the only sink, so fanout is unnecessary.
+     */
+    clientSinkRegistry?: ClientSinkRegistry;
 }
-
-type CommandOutcome =
-    | { ok: true; result: unknown }
-    | { ok: false; error: { code: string; message: string; data?: unknown } };
 
 interface CommandRecord {
     fingerprint: string;
@@ -269,22 +298,46 @@ export class SidecarServer implements ServerRpcSurface {
     /** Currently active MCP server set — see customProviders for lifecycle notes. */
     private mcpServers: readonly McpServerConfig[] = [];
     readonly providerKeyStore: ProviderKeyStore;
-    /** Scheduler controller — exposed to `jobs.*` handlers via ServerRpcSurface. */
-    readonly jobs: JobsControl | undefined;
-    readonly channelRegistry = new ChannelRegistry();
-    readonly channelBindBroker = new ChannelBindBroker();
-    private readonly channelFactory = new ChannelFactory({
-        broker: this.channelBindBroker,
-        // Resolved at push time: the router only knows a route once the peer's
-        // first message has created the session.
-        resolvePeer: (sessionId) =>
-            this.conversationRouter?.findRouteBySessionId(sessionId)?.peerId,
-        // Broadcast a workspace-dimensioned notice (e.g. the policy
-        // interrupt notice) to every peer routed through a channel.
-        listPeers: (channelId) =>
-            this.conversationRouter?.listAll(channelId).map((e) => e.peerId) ?? [],
-    });
+    /** Scheduler controller — exposed to `jobs.*` handlers via ServerRpcSurface.
+     *  Mutable via `setJobsControl()` so the daemon can mount the controller
+     *  after the resident's `start()` finishes (the controller's
+     *  Scheduler/JobStore depend on the resident, so it's a chicken/egg). */
+    private _jobs: JobsControl | undefined;
+    get jobs(): JobsControl | undefined {
+        return this._jobs;
+    }
+    setJobsControl(next: JobsControl | undefined): void {
+        this._jobs = next;
+    }
+    /**
+     * Shared channel stack. On a non-owner (daemon connection server),
+     * these point at the daemon-resident instances injected via options.
+     * On an owner (stdio sidecar, the resident itself, tests), they are
+     * freshly constructed in the ctor — current self-construct behaviour.
+     */
+    readonly channelRegistry: ChannelRegistry;
+    readonly channelBindBroker: ChannelBindBroker;
+    /** Resolved by the ctor after the broker + router exist. */
+    private readonly channelFactory: ChannelFactory;
     private conversationRouter?: ConversationRouter;
+    /**
+     * Read-only view of the conversation router. Exposed for tests that
+     * need to assert state sharing across owners / non-owners; production
+     * callers go through the channel stack (`channels.listConversations`).
+     */
+    get conversationRouterView(): ConversationRouter | undefined {
+        return this.conversationRouter;
+    }
+    /** Single ownership bit for the channel stack. `imHost` unset means
+     *  this server is the owner; set means it forwards im:// work to the
+     *  resident host. */
+    private readonly ownsChannels: boolean;
+    /** Daemon-resident host for im:// dispatch. Undefined on the resident
+     *  itself and on stdio / test owners. */
+    private readonly imHost?: ServerRpcSurface;
+    /** Process-level fan-out registry. The owner uses it to deliver im://
+     *  push frames to every connected desktop's NDJSON transport. */
+    private readonly clientSinkRegistry?: ClientSinkRegistry;
     /** taco.json channel instances, kept so channels.list can report the
      *  configured set independently of which ones actually started. */
     private channelConfigs: readonly ChannelConfig[] = [];
@@ -338,6 +391,17 @@ export class SidecarServer implements ServerRpcSurface {
         return this.handleRpcRequest(req);
     }
 
+    /** Register a session as the destination for an IM workspace so
+     *  channel replies can address the right peer. Used by the scheduler
+     *  dispatcher after a pin-strategy session.create — that path doesn't
+     *  go through conversationRouter.route(), so the route map needs an
+     *  explicit binding or the agent's replies hit
+     *  "no peer for session, reply dropped". No-op when conversationRouter
+     *  isn't initialized or the workspace isn't an `im://` URL. */
+    async registerRoute(workspace: string, sessionId: string): Promise<void> {
+        this.conversationRouter?.registerExternalSession(workspace, sessionId);
+    }
+
     /**
      * `ServerRpcSurface.markInitialized` — flip the `not_initialized` guard after the
      * `initialize` handler accepts the client's protocol version. Idempotent.
@@ -369,10 +433,37 @@ export class SidecarServer implements ServerRpcSurface {
         this.now = options.now ?? (() => performance.now());
         this.extensionRegistry = options.extensionRegistry;
         this.providerKeyStore = options.providerKeyStore;
-        this.jobs = options.jobs;
+        this._jobs = options.jobs;
         this.customProviders = options.customProviders ?? [];
         this.mcpServers = options.mcpServers ?? [];
         this.imPolicyStore = new ImWorkspacePolicyStore();
+        // Daemon-resident ownership: when `imHost` is injected, this server
+        // is a non-owner connection instance — skip loadAndStart, forward
+        // im:// RPCs, delegate imPolicy writes. Otherwise (stdio / tests /
+        // the resident itself) self-construct and own, preserving the
+        // current behaviour byte-for-byte.
+        this.ownsChannels = options.imHost === undefined;
+        this.imHost = options.imHost;
+        this.clientSinkRegistry = options.clientSinkRegistry;
+        this.channelRegistry = options.channelRegistry ?? new ChannelRegistry();
+        this.channelBindBroker = options.channelBindBroker ?? new ChannelBindBroker();
+        // `conversationRouter` is normally loaded in start() from disk, but
+        // may be injected for owners too (the daemon-resident starts first
+        // and shares the same router). Accept either.
+        this.conversationRouter = options.conversationRouter;
+        this.channelFactory = new ChannelFactory({
+            broker: this.channelBindBroker,
+            // Resolved at push time: the router only knows a route once the
+            // peer's first message has created the session. On both owner
+            // and non-owner, `this.conversationRouter` is the (injected or
+            // loaded) shared router, so route lookups stay consistent.
+            resolvePeer: (sessionId) =>
+                this.conversationRouter?.findRouteBySessionId(sessionId)?.peerId,
+            // Broadcast a workspace-dimensioned notice (e.g. the policy
+            // interrupt notice) to every peer routed through a channel.
+            listPeers: (channelId) =>
+                this.conversationRouter?.listAll(channelId).map((e) => e.peerId) ?? [],
+        });
         // Explicitly register all builtin method handlers instead of relying on module-level side-effect imports.
         registerBuiltinMethods();
     }
@@ -406,19 +497,26 @@ export class SidecarServer implements ServerRpcSurface {
         this.transport = transport;
         transport.onRequest((line) => void this.handleLine(line));
         await transport.open();
+        // Phase 2: register this transport so the host can push im:// frames
+        // to every connected desktop. The host itself registers its
+        // NullTransport here (no-op fanout), so the registry can be a single
+        // uniform Set<Transport> rather than special-casing the host.
+        this.clientSinkRegistry?.add(transport);
 
-        this.conversationRouter = await ConversationRouter.load(tacoHome());
-        this.conversationRouter.on("conversation", () => this.broadcastConversationsChanged());
+        // Router is normally loaded per-instance from disk. Daemon mode
+        // injects a shared router so all instances see the same routes and
+        // only one writer hits routing.json — accept the injection as-is.
+        this.conversationRouter ??= await ConversationRouter.load(tacoHome());
+        // Subscribe-and-rebroadcast: every server (owner + non-owner) subscribes
+        // to the shared emitter so each connection's desktop receives
+        // status_changed (bind QR codes), conversations_changed, and the
+        // broadcasts can fan out to that server's own fs workspaces. Handlers
+        // are stored as named refs so stop() can off() them.
+        this.conversationRouter.on("conversation", this.onRouterConversation);
         this.channelConfigs = channelConfigs;
-        this.channelBindBroker.on("status", (s) => {
-            // Broker frames are the raw transition; the wire entry adds the
-            // config-derived name and the on-disk configured flag. Building it
-            // here keeps the push payload identical to `channels.list` output —
-            // the client replaces the entry wholesale on applyChannelStatus.
-            this.broadcastChannelStatus(this.toStatusEntry(s));
-        });
+        this.channelBindBroker.on("status", this.onBrokerStatus);
         const startedChannelIds: string[] = [];
-        if (channelConfigs.length > 0) {
+        if (this.ownsChannels && channelConfigs.length > 0) {
             const result = await this.channelRegistry.loadAndStart(
                 channelConfigs,
                 async (name) => this.channelFactory.create(name),
@@ -431,6 +529,11 @@ export class SidecarServer implements ServerRpcSurface {
             for (const id of result.started) {
                 startedChannelIds.push(id);
             }
+        } else if (!this.ownsChannels) {
+            // Non-owner: channels are already running on the resident host;
+            // advertise the daemon-level set so initialize capabilities stay
+            // accurate in multi-connection setups.
+            startedChannelIds.push(...this.channelRegistry.startedIds());
         }
         this.startedChannelIds = startedChannelIds;
 
@@ -453,6 +556,16 @@ export class SidecarServer implements ServerRpcSurface {
         this.commandSweeper.unref();
     }
 
+    /** Named refs for stop() to off() — see start() for why this matters. */
+    private readonly onRouterConversation = () => this.broadcastConversationsChanged();
+    private readonly onBrokerStatus = (s: ChannelBindStatus) => {
+        // Broker frames are the raw transition; the wire entry adds the
+        // config-derived name and the on-disk configured flag. Building it
+        // here keeps the push payload identical to `channels.list` output —
+        // the client replaces the entry wholesale on applyChannelStatus.
+        this.broadcastChannelStatus(this.toStatusEntry(s));
+    };
+
     private clearCommandSweeper(): void {
         if (this.commandSweeper) {
             clearInterval(this.commandSweeper);
@@ -466,11 +579,27 @@ export class SidecarServer implements ServerRpcSurface {
         // after the clear can observe "I lost the race" and reject rather
         // than publishing a zombie ws into a freshly-cleared map.
         this.stopped = true;
+        // Phase 2: drop our transport from the fan-out set BEFORE closing it,
+        // so any frames already enqueued by an in-flight emitPush don't
+        // race the close and crash the sink. Matched in start().
+        if (this.transport) {
+            this.clientSinkRegistry?.remove(this.transport);
+        }
         await this.transport?.close();
-        // Channels own long-lived loops (long-poll / sockets); without this a
-        // real channel keeps the process alive after shutdown.
-        this.channelBindBroker.cancelAll();
-        await this.channelRegistry.stopAll();
+        // Channels own long-lived loops (long-poll / sockets). Only the owner
+        // tears them down; a non-owner stopping (e.g. one desktop disconnecting)
+        // leaves the daemon-resident channels alive for every other connection.
+        if (this.ownsChannels) {
+            this.channelBindBroker.cancelAll();
+            await this.channelRegistry.stopAll();
+        }
+        // Every instance unsubscribes from the shared emitters — otherwise
+        // a dead connection's rebroadcast would keep firing on every status
+        // change, and EventEmitter would eventually warn at >10 listeners.
+        this.channelBindBroker.off("status", this.onBrokerStatus);
+        if (this.conversationRouter) {
+            this.conversationRouter.off("conversation", this.onRouterConversation);
+        }
         for (const ws of this.workspaceMap.values()) {
             await ws.dispose();
         }
@@ -550,6 +679,23 @@ export class SidecarServer implements ServerRpcSurface {
         const reg = getRegisteredMethod(req.method);
         if (!reg) {
             return err(req.id, ErrorCodes.UnknownMethod, `unknown method: ${req.method}`);
+        }
+
+        // Daemon non-owner forwarding: connection servers do not host IM
+        // workspaces — they live on the resident imHost, along with the live
+        // AttachedSession and SessionEventLog. Forward im://-scoped session
+        // RPCs to the host so schema validation, command idempotency, and
+        // execution all happen against the single owner. Responses carry the
+        // original id verbatim. Non-im:// RPCs execute locally as before.
+        if (!this.ownsChannels) {
+            const cwd =
+                (req.params as { workspace?: string; cwd?: string } | undefined)?.workspace ??
+                (req.params as { cwd?: string } | undefined)?.cwd;
+            if (typeof cwd === "string" && cwd.startsWith(IM_CWD_PREFIX)) {
+                const forwarded = await this.imHost?.dispatchRpc?.(req);
+                if (forwarded) return forwarded;
+                return err(req.id, ErrorCodes.InvalidState, "IM host unavailable");
+            }
         }
 
         // Schema validation — only when the registration declared a typebox
@@ -1113,11 +1259,22 @@ export class SidecarServer implements ServerRpcSurface {
      * After invalidating, broadcast an `im.policy_changed` push so any open
      * desktop editor re-pulls `imPolicy.get` on the same tick. The broadcast
      * is best-effort — a handler error must not abort the write.
+     *
+     * On a non-owner (daemon connection server), IM workspaces live on the
+     * resident host — `invalidateImWorkspaces` against this server's empty
+     * `workspaceMap` would silently do nothing, leaving stale policy on the
+     * host until restart. Delegate the mutation + invalidate to the host,
+     * then broadcast locally so the connection's own desktop still re-pulls.
      */
     async setImChannelDefault(
         channelId: string,
         patch: Parameters<ImWorkspacePolicyStore["setChannelDefault"]>[1],
     ): Promise<void> {
+        if (!this.ownsChannels) {
+            await this.imHost?.imPolicy?.setChannelDefault(channelId, patch);
+            this.broadcastImPolicyChanged(channelId);
+            return;
+        }
         await this.imPolicyStore.setChannelDefault(channelId, patch);
         await this.invalidateImWorkspaces(channelId);
         this.broadcastImPolicyChanged(channelId);
@@ -1127,6 +1284,11 @@ export class SidecarServer implements ServerRpcSurface {
         route: Parameters<ImWorkspacePolicyStore["setChatOverride"]>[0],
         patch: Parameters<ImWorkspacePolicyStore["setChatOverride"]>[1],
     ): Promise<void> {
+        if (!this.ownsChannels) {
+            await this.imHost?.imPolicy?.setChatOverride(route, patch);
+            this.broadcastImPolicyChanged(route.channelId);
+            return;
+        }
         await this.imPolicyStore.setChatOverride(route, patch);
         await this.invalidateImWorkspaces(route.channelId);
         this.broadcastImPolicyChanged(route.channelId);
@@ -1136,6 +1298,11 @@ export class SidecarServer implements ServerRpcSurface {
         input: { route: ImRoute } | { chatKey: string },
         channelId: string,
     ): Promise<void> {
+        if (!this.ownsChannels) {
+            await this.imHost?.imPolicy?.clearChatOverride(input, channelId);
+            this.broadcastImPolicyChanged(channelId);
+            return;
+        }
         if ("route" in input) {
             await this.imPolicyStore.clearChatOverride(input.route);
         } else {
@@ -1464,72 +1631,17 @@ export class SidecarServer implements ServerRpcSurface {
         if (workspace.startsWith(IM_CWD_PREFIX)) {
             const parsed = parseImCwd(workspace);
             if (parsed) this.channelRegistry.push(parsed.channelId, frame);
+            // Phase 2: deliver the same frame to every connected desktop's
+            // transport so an already-open IM session view sees real-time
+            // peer messages / mid-turn updates. Fanout is unconditional —
+            // each desktop filters frames by session id at the app layer,
+            // so a frame addressed to one im:// workspace reaches every
+            // sink and the irrelevant ones are dropped downstream. Gated on
+            // `parsed` to skip malformed im:// strings that can't identify
+            // a channel.
+            if (parsed) this.clientSinkRegistry?.fanout(frame);
         }
     }
-}
-
-function toCommandOutcome(response: RpcResponse): CommandOutcome {
-    return response.ok
-        ? { ok: true, result: response.result }
-        : { ok: false, error: response.error };
-}
-
-function withRequestId(id: string, outcome: CommandOutcome): RpcResponse {
-    return outcome.ok
-        ? { id, ok: true, result: outcome.result }
-        : { id, ok: false, error: outcome.error };
-}
-
-function getTurnKey(params: unknown): string | undefined {
-    if (!params || typeof params !== "object") return undefined;
-    const { workspace, sessionId } = params as { workspace?: unknown; sessionId?: unknown };
-    if (typeof workspace !== "string" || typeof sessionId !== "string") return undefined;
-    return `${workspace}\u0000${sessionId}`;
-}
-
-// ─────────── helpers ───────────
-
-function ok(id: string, result: unknown): RpcResponse {
-    return { id, ok: true, result };
-}
-
-function err(id: string, code: string, message: string, data?: unknown): RpcResponse {
-    return { id, ok: false, error: { code, message, data } };
-}
-
-/**
- * Converts any throwable to RpcResponse.error.
- *
- * Safety contract:
- *   - RpcHandlerError: re-thrown as-is (our own, code/message are safe).
- *   - Any other error: we don't control its message content, so we
- *     sanitise it (truncate to 200 chars, redact long alphanumeric tokens
- *     and UUIDs, prefix with "[upstream] ") and set code = "internal".
- *     This gives users enough to diagnose without becoming a leak channel.
- */
-export function normalizeError(id: string, e: unknown): RpcResponse {
-    if (e instanceof RpcHandlerError) {
-        return err(id, e.code, e.message, e.data);
-    }
-    // Non-contract error — redact the upstream message.
-    const raw = e instanceof Error ? e.message : String(e);
-    return err(id, ErrorCodes.Internal, redactUpstreamMessage(raw));
-}
-
-/**
- * Truncate + redact sensitive substrings (API keys, UUIDs, etc.).
- * Deliberately conservative: prefer over-redacting to under-redacting.
- */
-export function redactUpstreamMessage(raw: string): string {
-    if (raw.length === 0) return "[upstream] error";
-    // UUID first (sk-ant-api03-abc... unhyphenated keys also match long token regex;
-    // 32 hex also matches the long token regex; match the more specific UUID pattern first)
-    let s = raw.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "…uuid");
-    // Long alphanumeric tokens (sk-ant-api03-..., gsk-... etc.) replaced with mask
-    s = s.replace(/[A-Za-z0-9_-]{20,}/g, "…XXXX");
-    // Truncate to 200 chars
-    if (s.length > 200) s = `${s.slice(0, 197)}…`;
-    return `[upstream] ${s}`;
 }
 
 /**
@@ -1540,6 +1652,12 @@ export function redactUpstreamMessage(raw: string): string {
  * channels (WeChat etc.) and workspace state are connection-scoped, and
  * a UI that disconnects then reconnects gets a fresh handshake rather than
  * inheriting a dead socket.
+ *
+ * In daemon mode the connection-scoped fields above are joined by a
+ * process-level channel stack (registry / broker / router / imHost)
+ * injected by `runDaemon`. Receiving these four as a unit ensures a
+ * missing `imHost` is treated as "owner" rather than a half-configured
+ * non-owner.
  */
 export interface SharedSidecarDeps {
     sessionsRoot: string;
@@ -1560,6 +1678,22 @@ export interface SharedSidecarDeps {
      * the single process-wide scheduler.
      */
     jobs?: JobsControl;
+    /**
+     * Process-level IM channel stack. Populated by `runDaemon` so every
+     * NDJSON connection server becomes a non-owner (see SidecarServerOptions
+     * ownership rule). Empty on the stdio single-process sidecar.
+     */
+    channelRegistry?: ChannelRegistry;
+    channelBindBroker?: ChannelBindBroker;
+    conversationRouter?: ConversationRouter;
+    /** Daemon-resident IM host — see SidecarServerOptions.imHost. */
+    imHost?: ServerRpcSurface;
+    /**
+     * Process-level client-sink fan-out registry (Phase 2). Populated by
+     * `runDaemon` so every NDJSON connection server registers its transport
+     * and the resident can push IM frames to every connected desktop.
+     */
+    clientSinkRegistry?: ClientSinkRegistry;
 }
 
 /**
@@ -1596,6 +1730,11 @@ export function startServer(deps: SharedSidecarDeps, transport: Transport): Star
         mcpServers: deps.mcpServers,
         channels: deps.channels,
         jobs: deps.jobs,
+        channelRegistry: deps.channelRegistry,
+        channelBindBroker: deps.channelBindBroker,
+        conversationRouter: deps.conversationRouter,
+        imHost: deps.imHost,
+        clientSinkRegistry: deps.clientSinkRegistry,
     });
     const ready = server.start(transport);
     return {

@@ -14,13 +14,23 @@
  */
 
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createLogger } from "../lib/logger.ts";
 import type { UpgradeMarker } from "./types.ts";
 
 const log = createLogger("sidecar.upgrader.marker");
 
 const JSON_INDENT = 2;
+
+/** Compare two install-root paths for equality. resolve() normalizes
+ *  trailing slashes and `.`/`..` segments; Windows compares
+ *  case-insensitively (NTFS). Not a realpath — both sides are expected to
+ *  come from the same resolution strategy (createRequire.resolve). */
+export function sameInstallPath(a: string, b: string): boolean {
+    const na = resolve(a);
+    const nb = resolve(b);
+    return process.platform === "win32" ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
 
 /** Read + parse the upgrade marker. Missing / malformed → null. */
 export async function readUpgradeMarker(path: string): Promise<UpgradeMarker | null> {

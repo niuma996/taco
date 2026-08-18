@@ -96,6 +96,7 @@ function makeSessionRegistry(): SessionRegistry {
         spawnSkillSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
         availableAgentTypes: [],
         skills: [],
+        getToolContext: () => ({ env, workspace: cwd as WorkspaceId }),
     });
 }
 
@@ -246,6 +247,7 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             spawnSkillSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
             availableAgentTypes: [],
             skills: [],
+            getToolContext: () => ({ env, workspace: cwd as WorkspaceId }),
         });
         const mr = new ModelRegistry({
             models,

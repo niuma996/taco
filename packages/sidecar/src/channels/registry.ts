@@ -70,6 +70,12 @@ export class ChannelRegistry {
         });
     }
 
+    /** Ids of channels currently loaded. Used by per-connection servers to
+     *  advertise daemon-level capabilities without re-starting channels. */
+    startedIds(): string[] {
+        return [...this.loaded.keys()];
+    }
+
     /** Runs a channel's interactive bind flow.
      *  @throws if the channel is unknown or does not support binding. */
     async login(channelId: string, force?: boolean): Promise<void> {

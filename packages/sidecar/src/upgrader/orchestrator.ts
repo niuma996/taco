@@ -20,11 +20,9 @@
  * Why we don't broadcast `control.upgrade_available`:
  *   The plan reserved a server-pushed event for this, but the
  *   ServerPush type requires a `workspace` field and a registered
- *   method name in `@taco-ai/protocol`. Both widening for one event
- *   is out of PR4 scope; the reconnect-loop + marker dance is
+ *   method name in `@taco-ai/protocol`. Widening the protocol for one
+ *   event is out of PR4 scope; the reconnect-loop + marker dance is
  *   functionally equivalent and stays within the daemon + CLI.
- *   PR5 may revisit and add a typed push if multi-UI scenarios need
- *   per-client notice instead of a global disconnect.
  *
  * Why we don't restart ourselves:
  *   launchd restart uses the SAME binary + args (the wrapper script's
@@ -37,7 +35,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tacoHome } from "../config/tacoHome.ts";
 import { createLogger } from "../lib/logger.ts";
-import { clearUpgradeMarker, readUpgradeMarker } from "./marker.ts";
+import { clearUpgradeMarker, readUpgradeMarker, sameInstallPath } from "./marker.ts";
 import type { UpgradeMarker } from "./types.ts";
 
 const log = createLogger("sidecar.upgrader");
@@ -46,6 +44,13 @@ export interface OrchestratorDeps {
     /** Absolute path to the upgrade-marker.json. Tests typically use
      *  a tmpdir; production reads the constant below. */
     markerPath: string;
+    /** This daemon's own install root (TACO_SIDECAR_RESOURCES). Multiple
+     *  installations can share one $TACO_HOME (e.g. an npm-installed
+     *  sidecar and the desktop app's bundled sidecar) but only one marker
+     *  exists — a marker whose live_dir points at a different root belongs
+     *  to the other installation and must be left for its own daemon to
+     *  honor. When unset, every marker is honored (legacy behavior). */
+    liveDir?: string;
     /** Asks the daemon to exit cleanly. The daemon's existing
      *  shutdown hook unlinks sockets + closes the servers. */
     requestShutdown: (reason: string) => Promise<void> | void;
@@ -104,6 +109,15 @@ export class UpgradeOrchestrator {
     private async runOnce(): Promise<void> {
         const marker = await readUpgradeMarker(this.deps.markerPath);
         if (!marker) return;
+        if (this.deps.liveDir && !sameInstallPath(marker.live_dir, this.deps.liveDir)) {
+            // Foreign marker: another installation sharing $TACO_HOME has a
+            // pending upgrade. Not ours to honor — and NOT ours to clear:
+            // its own daemon will shut down on it and its owner will apply.
+            log.debug(
+                `ignoring marker for another install (live=${marker.live_dir}, own=${this.deps.liveDir})`,
+            );
+            return;
+        }
         if (!(await stagingExists(marker))) {
             // The staging dir is gone (commonly /tmp cleanup), so this upgrade
             // can never complete. Keeping the marker would re-warn on every
