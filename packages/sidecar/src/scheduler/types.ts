@@ -46,6 +46,25 @@ export interface JobHistoryEntry {
     error?: string;
 }
 
+/** Per-call caller identity, attached to jobs.* RPC params so the server
+ *  can enforce IM-scope (one channel/peer) vs IDE-scope (one fs workspace).
+ *  Tool calls close over the actor at construction; legacy desktop paths
+ *  pass undefined for backward-compatible admin access. */
+export type Actor =
+    | { kind: "im"; channelId: string; peerId: string; chatId: string }
+    | { kind: "ide"; workspace: string };
+
+/** How the scheduler picks a session when an `agent.invoke` job fires.
+ *  - `new`  : every fire creates a fresh `sched-<uuid>` session (default;
+ *             preserves prior behavior).
+ *  - `reuse`: IM only — finds the existing session attached to the
+ *             (channelId, peerId, chatId) triple and re-prompts it. Lets a
+ *             scheduled task continue an ongoing chat conversation.
+ *  - `pin`  : first fire creates `sched-pin-<jobId>` and stores the id on
+ *             the job; subsequent fires attach that session. Lets a job
+ *             maintain a single persistent context across many fires. */
+export type SessionStrategy = "new" | "reuse" | "pin";
+
 export interface Job {
     id: string;
     name: string;
@@ -62,8 +81,24 @@ export interface Job {
     run_on_startup: boolean;
     last_run_at?: string;
     next_run_at?: string;
-    /** Newest-first; capped at HISTORY_LIMIT (20) entries. */
+    /** Newest-first; capped at HISTORY_LIMIT (20) entries. The store
+     *  normalizes older on-disk files (where this field was absent) to
+     *  an empty array on read, so in-memory Jobs always carry one. */
     history: JobHistoryEntry[];
+    /** IM scope (server-derived from `args.workspace` when im://). Callers
+     *  MUST NOT set this directly — JobsController derives it from the
+     *  workspace at create/update time and ignores caller-supplied values
+     *  so a malicious IM tool can't escape its sandbox by editing the
+     *  fields. */
+    channelId?: string;
+    /** Peer scope — same derivation rule as channelId. */
+    peerId?: string;
+    /** Default `new`. `reuse` is only valid when `args.workspace` is
+     *  `im://` (the router can resolve a triple to an existing session). */
+    sessionStrategy?: SessionStrategy;
+    /** Set after the first fire of a `pin` job. The dispatcher stores the
+     *  sessionId here so subsequent fires can attach the same session. */
+    pinnedSessionId?: string;
 }
 
 export const HISTORY_LIMIT = 20;

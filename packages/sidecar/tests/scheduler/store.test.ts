@@ -152,10 +152,198 @@ test("JobStore.list filters tampered entries whose basenames are not safe IDs", 
     });
 });
 
+test("get() normalizes a legacy job file (no history field) to an empty array", async () => {
+    await withTmp(async (dir) => {
+        // Plant a job file exactly as the user-facing open_source_ai_monitor
+        // looked on disk: every current field, no `history`. The store is
+        // the canonical layer where this gets normalized so the runner's
+        // `[entry, ...job.history]` spread never sees undefined.
+        const legacy = {
+            id: "legacy",
+            name: "legacy",
+            schedule: { kind: "interval", ms: 60_000 },
+            command: "agent.invoke",
+            args: { workspace: "im://ch/p/c" },
+            enabled: true,
+            run_on_startup: false,
+            sessionStrategy: "pin",
+            channelId: "ch",
+            peerId: "p",
+        };
+        await writeFile(join(dir, "legacy.json"), JSON.stringify(legacy));
+        const store = new JobStore(dir);
+        const loaded = await store.get("legacy");
+        ok(loaded);
+        deepStrictEqual(loaded.history, []);
+        // All other fields survive untouched.
+        strictEqual(loaded.id, "legacy");
+        strictEqual(loaded.sessionStrategy, "pin");
+        strictEqual(loaded.channelId, "ch");
+    });
+});
+
+test("list() normalizes legacy job files identical to get()", async () => {
+    await withTmp(async (dir) => {
+        await writeFile(
+            join(dir, "legacy.json"),
+            JSON.stringify({
+                id: "legacy",
+                name: "legacy",
+                schedule: { kind: "interval", ms: 60_000 },
+                command: "agent.invoke",
+                args: { workspace: "im://ch/p/c" },
+                enabled: true,
+                run_on_startup: false,
+            }),
+        );
+        const store = new JobStore(dir);
+        const jobs = await store.list();
+        strictEqual(jobs.length, 1);
+        strictEqual(jobs[0].history?.length, 0);
+    });
+});
+
+test("get() migrates a legacy shell-style command into agent.invoke + args.prompt", async () => {
+    await withTmp(async (dir) => {
+        // Job files written before the `agent.invoke`-only check landed
+        // put the task in `command` (e.g. `command: "mmx search query"`)
+        // instead of `args.prompt`. The store is the canonical boundary
+        // between the loose on-disk format and the in-memory Job contract,
+        // so we bridge the gap here — by the time the dispatcher or jobs
+        // handler sees the job, `command` is `agent.invoke` and the
+        // original intent is in `args.prompt`.
+        const legacy = {
+            id: "legacy",
+            name: "legacy",
+            schedule: { kind: "interval", ms: 60_000 },
+            command: "mmx search query",
+            args: {
+                q: "github trending open source AI project today 2026",
+                output: "json",
+                quiet: "",
+                workspace: "im://ch/p/c",
+            },
+            enabled: true,
+            run_on_startup: false,
+        };
+        await writeFile(join(dir, "legacy.json"), JSON.stringify(legacy));
+        const store = new JobStore(dir);
+        const loaded = await store.get("legacy");
+        ok(loaded);
+        strictEqual(loaded.command, "agent.invoke");
+        strictEqual(
+            typeof loaded.args.prompt === "string" &&
+                loaded.args.prompt.startsWith("mmx search query"),
+            true,
+        );
+        // The legacy `q` value lands in the prompt verbatim; the agent has
+        // enough context to run the same query.
+        const prompt = String(loaded.args.prompt ?? "");
+        ok(prompt.includes("github trending open source AI project today 2026"));
+        // workspace survives the migration verbatim.
+        strictEqual(loaded.args.workspace, "im://ch/p/c");
+        // Noise flags are dropped from the prompt so the agent's view is
+        // focused on intent rather than echoing shell syntax.
+        ok(!prompt.includes("--output"));
+    });
+});
+
+test("get() leaves agent.invoke jobs untouched (no migration artifact)", async () => {
+    await withTmp(async (dir) => {
+        await writeFile(
+            join(dir, "fresh.json"),
+            JSON.stringify({
+                id: "fresh",
+                name: "fresh",
+                schedule: { kind: "interval", ms: 60_000 },
+                command: "agent.invoke",
+                args: { workspace: "/tmp/repo", prompt: "summarize the latest commits" },
+                enabled: true,
+                run_on_startup: false,
+            }),
+        );
+        const store = new JobStore(dir);
+        const loaded = await store.get("fresh");
+        ok(loaded);
+        strictEqual(loaded.command, "agent.invoke");
+        // The original prompt comes through verbatim — no migration rewrites
+        // a job the user already shaped correctly.
+        strictEqual(loaded.args.prompt, "summarize the latest commits");
+    });
+});
+
+test("get() leaves a legacy job with empty command alone (dispatcher rejects it later)", async () => {
+    await withTmp(async (dir) => {
+        // Empty / non-string command values are unrecognizable legacy
+        // payloads. Better to let the dispatcher's
+        // UnsupportedScheduledCommand surface them on the next fire than
+        // to silently drop a job the user actually wanted.
+        await writeFile(
+            join(dir, "empty.json"),
+            JSON.stringify({
+                id: "empty",
+                name: "empty",
+                schedule: { kind: "interval", ms: 60_000 },
+                command: "",
+                args: { workspace: "/tmp/repo" },
+                enabled: true,
+                run_on_startup: false,
+            }),
+        );
+        const store = new JobStore(dir);
+        const loaded = await store.get("empty");
+        ok(loaded);
+        strictEqual(loaded.command, "");
+    });
+});
+
+test("get() persists the migrated agent.invoke form back to disk", async () => {
+    await withTmp(async (dir) => {
+        // A legacy file on disk → after `get` returns the migrated form,
+        // the file should converge to the canonical shape so subsequent
+        // reads (and any daemon restart with an older bundle) see the
+        // same data the UI now shows. Otherwise the UI keeps displaying
+        // the legacy `command` until something else triggers a save.
+        await writeFile(
+            join(dir, "legacy.json"),
+            JSON.stringify({
+                id: "legacy",
+                name: "legacy",
+                schedule: { kind: "interval", ms: 300_000 },
+                command: "mmx search query",
+                args: {
+                    q: "github trending open source AI project today 2026",
+                    workspace: "im://ch/p/c",
+                },
+                enabled: true,
+                run_on_startup: false,
+            }),
+        );
+        const store = new JobStore(dir);
+        const loaded = await store.get("legacy");
+        ok(loaded);
+        strictEqual(loaded.command, "agent.invoke");
+
+        // The save is fire-and-forget; wait a microtask for the rename
+        // to settle before we re-read the file from disk.
+        await Promise.resolve();
+        await Promise.resolve();
+        const raw = await readFile(join(dir, "legacy.json"), "utf8");
+        const onDisk = JSON.parse(raw);
+        // The on-disk form is the canonical one — a re-read will hit the
+        // early-return branch (command === "agent.invoke") and not
+        // re-trigger migration.
+        strictEqual(onDisk.command, "agent.invoke");
+        ok(typeof onDisk.args.prompt === "string");
+        ok(onDisk.args.prompt.includes("github trending"));
+        // Legacy-only `q` field is preserved verbatim so the agent's
+        // intent survives the round-trip.
+        strictEqual(onDisk.args.q, "github trending open source AI project today 2026");
+    });
+});
+
 async function writeBad(dir: string, name: string, contents: string): Promise<void> {
     const { writeFile } = await import("node:fs/promises");
     await writeFile(join(dir, name), contents, "utf8");
     ok(true);
 }
-
-void readFile; // keep import live for symmetry with other tests that may add file reads later

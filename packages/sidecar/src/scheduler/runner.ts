@@ -15,7 +15,7 @@
  * counts as a run with status=err; the error message lands in history.
  */
 
-import { unlink, writeFile } from "node:fs/promises";
+import { readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../lib/logger.ts";
 import type { ScheduledHandle } from "./cronerAdapter.ts";
@@ -24,10 +24,25 @@ import { HISTORY_LIMIT, type Job, type JobHistoryEntry } from "./types.ts";
 
 const log = createLogger("sidecar.scheduler");
 
+/** Probe whether a pid is alive. We don't care why it's gone — ESRCH means
+ *  the OS doesn't have the process, EPERM means it's not ours to signal.
+ *  Both are safe to treat as "not a current owner" for lock cleanup. */
+function isPidAlive(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        return code === undefined; // undefined = no error, signal accepted
+    }
+}
+
 /** Function signature for the command dispatcher — the daemon supplies an
- *  implementation that routes `command` + `args` to the existing RPC
- *  pipeline (e.g. agent.invoke → session.create + session.prompt). */
-export type CommandInvoker = (command: string, args: Record<string, unknown>) => Promise<void>;
+ *  implementation that routes the job's `command` to the existing RPC
+ *  pipeline (e.g. agent.invoke → session.create + session.prompt). The
+ *  dispatcher receives the whole job so it can read sessionStrategy /
+ *  pinnedSessionId without the runner having to unpack them. */
+export type CommandInvoker = (job: Job) => Promise<void>;
 
 export interface SchedulerOptions {
     store: {
@@ -41,7 +56,20 @@ export interface SchedulerOptions {
     invoke: CommandInvoker;
     /** Override `Date.now` / `new Date()` for deterministic tests. */
     now?: () => Date;
+    /** Per-fire timeout. If `invoke` doesn't settle in this window it is
+     *  rejected with a "fire timeout" error so the runner's finally block
+     *  can land the history entry + clear the lock. Default 5 min — long
+     *  enough for a model turn with reasoning, short enough that a hung
+     *  push frame doesn't wedge the schedule forever. */
+    fireTimeoutMs?: number;
+    /** A lock file older than this is considered abandoned and removed at
+     *  start(). A lock from a process that crashed won't be reaped by the
+     *  OS — only by this heuristic. Default 1 h. */
+    staleLockMs?: number;
 }
+
+const DEFAULT_FIRE_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_STALE_LOCK_MS = 60 * 60_000;
 
 export class Scheduler {
     private readonly handles = new Map<string, ScheduledHandle>();
@@ -57,6 +85,7 @@ export class Scheduler {
     async start(): Promise<void> {
         if (this.running) return;
         this.running = true;
+        await this.cleanStaleLocks();
         const jobs = await this.opts.store.list();
         if (!this.bootReplayed) {
             this.bootReplayed = true;
@@ -148,10 +177,14 @@ export class Scheduler {
             started_at: this.nowString(),
             status: "running",
         };
-        job.history = [entry, ...job.history].slice(0, HISTORY_LIMIT);
+        // Defensive: callers may hand us a job object that bypassed the
+        // store (e.g. a future direct-API path). The store already
+        // normalizes `history` to [] on read, but a missing field would
+        // crash the spread above and lose the entire run.
+        job.history = [entry, ...(job.history ?? [])].slice(0, HISTORY_LIMIT);
 
         try {
-            await this.opts.invoke(job.command, job.args);
+            await this.invokeWithTimeout(job);
             entry.status = "ok";
         } catch (err) {
             entry.status = "err";
@@ -160,9 +193,24 @@ export class Scheduler {
         } finally {
             entry.ended_at = this.nowString();
             job.last_run_at = entry.ended_at;
-            await this.opts.store.save(job).catch((err) => {
-                log.error(`failed to persist history for ${job.id}: ${String(err)}`);
-            });
+            // Re-read before writing. `job` was captured before invoke ran,
+            // and invoke legitimately mutates the stored copy mid-fire — the
+            // pin strategy's onPinnedSessionCreated writes `pinnedSessionId`
+            // while we're awaiting. Saving our stale snapshot would drop that
+            // field, so every subsequent fire would re-enter the "no pinned
+            // session yet" branch and create another session (we found 9
+            // duplicate jsonl files for one pin job this way). Only the two
+            // fields this fire owns are layered onto the latest copy.
+            const latest = await this.opts.store.get(job.id).catch(() => null);
+            await this.opts.store
+                .save({
+                    ...(latest ?? job),
+                    history: job.history,
+                    last_run_at: entry.ended_at,
+                })
+                .catch((err) => {
+                    log.error(`failed to persist history for ${job.id}: ${String(err)}`);
+                });
             await unlink(lockPath).catch(() => {
                 /* lock may have been removed by another process — fine */
             });
@@ -187,5 +235,80 @@ export class Scheduler {
         const lastRunMs = Date.parse(job.last_run_at);
         if (!Number.isFinite(lastRunMs)) return true;
         return this.nowMs() - lastRunMs > 5_000;
+    }
+
+    /** Bound a fire so a hung agent.invoke (e.g. a pinned session stuck
+     *  waiting for push frames nobody is subscribed to) can't trap the
+     *  history + lock forever. The timeout rejects with an Error so the
+     *  caller's catch path turns it into `status: "err"` exactly like any
+     *  other failure. The underlying invoke keeps running in the
+     *  background — we can't cancel it from this layer, but we don't need
+     *  to: when it finally settles, its then/catch is detached and the
+     *  process holds no more state for the job than its own promise. */
+    private invokeWithTimeout(job: Job): Promise<void> {
+        const timeoutMs = this.opts.fireTimeoutMs ?? DEFAULT_FIRE_TIMEOUT_MS;
+        const fire = this.opts.invoke(job);
+        let timer: NodeJS.Timeout | undefined;
+        const timeout = new Promise<void>((_, reject) => {
+            timer = setTimeout(
+                () => reject(new Error(`fire timeout after ${Math.round(timeoutMs / 60_000)}m`)),
+                timeoutMs,
+            );
+            // Don't keep the event loop alive just for the watchdog.
+            timer.unref();
+        });
+        return Promise.race([fire, timeout]).finally(() => {
+            if (timer) clearTimeout(timer);
+        });
+    }
+
+    /** Remove lock files that nobody is going to release: either the
+     *  owning pid is dead, or the lock is older than `staleLockMs`.
+     *  Without this, a daemon that crashed mid-fire leaves a `<id>.lock`
+     *  on disk and the next process's `start()` sees the schedule as
+     *  permanently busy. We deliberately don't touch locks held by a
+     *  live pid — even if it's been held "a while", the owner might
+     *  just be a slow model turn. */
+    private async cleanStaleLocks(): Promise<void> {
+        const lockDir = this.opts.lockDir;
+        if (!lockDir) return;
+        const staleMs = this.opts.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+        const cutoff = this.nowMs() - staleMs;
+        let entries: string[];
+        try {
+            entries = await readdir(lockDir);
+        } catch (err) {
+            if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+            log.warn(`could not scan ${lockDir} for stale locks: ${String(err)}`);
+            return;
+        }
+        for (const entry of entries) {
+            if (!entry.endsWith(".lock")) continue;
+            const path = join(lockDir, entry);
+            try {
+                const raw = await readFile(path, "utf-8").catch(() => null);
+                let owner: { pid?: number; started_at?: string } | null = null;
+                if (raw) {
+                    try {
+                        owner = JSON.parse(raw) as { pid?: number; started_at?: string };
+                    } catch {
+                        owner = null;
+                    }
+                }
+                const startedMs = owner?.started_at ? Date.parse(owner.started_at) : NaN;
+                const ageExpired = Number.isFinite(startedMs) && startedMs < cutoff;
+                const pidDead = owner?.pid !== undefined && !isPidAlive(owner.pid);
+                if (ageExpired || pidDead || !owner) {
+                    await unlink(path).catch(() => {
+                        /* raced with another process — fine */
+                    });
+                    log.warn(
+                        `removed stale lock ${path} (pidDead=${pidDead} ageExpired=${ageExpired})`,
+                    );
+                }
+            } catch (err) {
+                log.warn(`failed to inspect lock ${path}: ${String(err)}`);
+            }
+        }
     }
 }

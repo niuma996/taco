@@ -8,7 +8,7 @@
  */
 
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -271,8 +271,8 @@ test("invoke receives the command name + args verbatim", async () => {
         const scheduler = new Scheduler({
             store,
             lockDir: dir,
-            invoke: async (command, args) => {
-                calls.push({ command, args });
+            invoke: async (job) => {
+                calls.push({ command: job.command, args: job.args });
             },
         });
         await scheduler.start();
@@ -299,8 +299,8 @@ test("start() replays run_on_startup jobs that missed a fire window", async () =
         const scheduler = new Scheduler({
             store: store as never,
             lockDir: dir,
-            invoke: async (cmd) => {
-                invocations.push(cmd);
+            invoke: async (job) => {
+                invocations.push(job.command);
             },
             now: () => new Date("2026-08-17T12:00:00.000Z"),
         });
@@ -311,6 +311,7 @@ test("start() replays run_on_startup jobs that missed a fire window", async () =
         // Wait long enough to confirm we did NOT double-fire.
         await new Promise((r) => setTimeout(r, 100));
         strictEqual(invocations.length, 1);
+        scheduler.stop();
     });
 });
 
@@ -328,13 +329,14 @@ test("start() does NOT replay run_on_startup=false jobs", async () => {
         const scheduler = new Scheduler({
             store: store as never,
             lockDir: dir,
-            invoke: async (cmd) => {
-                invocations.push(cmd);
+            invoke: async (job) => {
+                invocations.push(job.command);
             },
         });
         await scheduler.start();
         await new Promise((r) => setTimeout(r, 100));
         strictEqual(invocations.length, 0);
+        scheduler.stop();
     });
 });
 
@@ -352,8 +354,8 @@ test("start() does NOT replay run_on_startup=true jobs that already ran in the s
         const scheduler = new Scheduler({
             store: store as never,
             lockDir: dir,
-            invoke: async (cmd) => {
-                invocations.push(cmd);
+            invoke: async (job) => {
+                invocations.push(job.command);
             },
         });
         await scheduler.start();
@@ -364,5 +366,228 @@ test("start() does NOT replay run_on_startup=true jobs that already ran in the s
         // Boot-replay is per-process. Restarting in the same process does NOT
         // re-fire the missed run — operators get that on the next launch.
         strictEqual(invocations.length, 1);
+        scheduler.stop();
+    });
+});
+
+test("invoke that exceeds fireTimeoutMs is rejected with a timeout error and the lock is cleared", async () => {
+    await withTmp(async (dir) => {
+        const store = new MemoryStore();
+        store.jobs.set("hang", intervalJob("hang", 60_000, { enabled: false }));
+        let settled = false;
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            fireTimeoutMs: 50,
+            invoke: () =>
+                new Promise<void>((resolve) => {
+                    setTimeout(() => {
+                        settled = true;
+                        resolve();
+                    }, 5_000);
+                }),
+        });
+        await scheduler.start();
+        const ran = await scheduler.runNow("hang");
+        strictEqual(ran, true);
+        const saved = store.jobs.get("hang");
+        ok(saved);
+        strictEqual(saved.history.length, 1);
+        strictEqual(saved.history[0].status, "err");
+        ok(
+            /fire timeout/.test(saved.history[0].error ?? ""),
+            `unexpected error: ${saved.history[0].error}`,
+        );
+        ok(saved.history[0].ended_at, "ended_at should be stamped");
+        scheduler.stop();
+        // The lock should be gone — the fire released it in finally.
+        // The underlying invoke is still pending (we don't cancel it),
+        // but the lock file is the runner's responsibility, not invoke's.
+        await readFile(join(dir, "hang.lock")).then(
+            () => {
+                throw new Error("lock should have been cleared");
+            },
+            (err: NodeJS.ErrnoException) => {
+                strictEqual(err.code, "ENOENT");
+            },
+        );
+        // Settle the underlying invoke so the test process can exit cleanly.
+        await new Promise((r) => setTimeout(r, 20));
+        strictEqual(settled, false, "invoke promise is intentionally not cancelled");
+    });
+});
+
+test("start() removes lock files whose owning pid is dead", async () => {
+    await withTmp(async (dir) => {
+        // Plant a lock owned by an obviously-dead pid. process.kill(pid, 0)
+        // returns false for it (ESRCH), so the cleanup pass deletes the file.
+        await writeFile(
+            join(dir, "ghost.lock"),
+            JSON.stringify({ pid: 2_147_483_647, started_at: new Date().toISOString() }),
+        );
+        const store = new MemoryStore();
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {},
+        });
+        await scheduler.start();
+        await readFile(join(dir, "ghost.lock")).then(
+            () => {
+                throw new Error("dead-pid lock should have been removed");
+            },
+            (err: NodeJS.ErrnoException) => {
+                strictEqual(err.code, "ENOENT");
+            },
+        );
+        scheduler.stop();
+    });
+});
+
+test("runJob on a legacy job (no history field) does not crash and writes ok", async () => {
+    await withTmp(async (dir) => {
+        // Plant a legacy job object — `history` is undefined. This is the
+        // exact on-disk shape the user's open_source_ai_monitor.json
+        // had before the field existed. The store normalizes on read,
+        // so the runner's spread should never see undefined there. The
+        // runner's defensive `?? []` is the second line of defense for
+        // direct callers (e.g. a future RPC path that hands a Job straight
+        // to the scheduler); this test exercises that path.
+        const legacyJob = {
+            id: "legacy",
+            name: "legacy",
+            schedule: { kind: "interval", ms: 60_000 },
+            command: "agent.invoke",
+            args: { workspace: "im://ch/p/c" },
+            enabled: false,
+            run_on_startup: false,
+        } as unknown as Job;
+        const store = new MemoryStore();
+        store.jobs.set("legacy", legacyJob);
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {},
+        });
+        await scheduler.start();
+        const ran = await scheduler.runNow("legacy");
+        strictEqual(ran, true);
+        const saved = store.jobs.get("legacy");
+        ok(saved);
+        ok(Array.isArray(saved.history));
+        strictEqual(saved.history.length, 1);
+        strictEqual(saved.history[0].status, "ok");
+        scheduler.stop();
+    });
+});
+
+test("a field invoke writes mid-fire survives the history save", async () => {
+    await withTmp(async (dir) => {
+        // Regression guard. The runner captures `job` before invoke runs,
+        // but invoke legitimately mutates the stored copy: the pin
+        // strategy's onPinnedSessionCreated writes `pinnedSessionId` while
+        // the fire is still awaiting. Saving the pre-invoke snapshot in the
+        // finally block dropped that field, so the next fire re-entered the
+        // "no pinned session yet" branch and created another session —
+        // which is how one pin job accumulated 9 duplicate jsonl files.
+        const store = new MemoryStore();
+        const job = intervalJob("pinjob", 60_000, { enabled: false });
+        store.jobs.set("pinjob", job);
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async (j) => {
+                const current = await store.get(j.id);
+                ok(current);
+                await store.save({ ...current, pinnedSessionId: "sched-pin-pinjob" });
+            },
+        });
+        const ran = await scheduler.runNow("pinjob");
+        strictEqual(ran, true);
+        const saved = store.jobs.get("pinjob");
+        ok(saved);
+        // The field invoke wrote is still there...
+        strictEqual(saved.pinnedSessionId, "sched-pin-pinjob");
+        // ...and this fire's own history/last_run_at landed too.
+        strictEqual(saved.history.length, 1);
+        strictEqual(saved.history[0].status, "ok");
+        ok(saved.last_run_at);
+        scheduler.stop();
+    });
+});
+
+test("history still persists when the job file vanishes mid-fire", async () => {
+    await withTmp(async (dir) => {
+        // The re-read in the finally block must not turn a deleted job into
+        // a crash or a lost history entry — it falls back to the captured
+        // snapshot so the fire's outcome is still recorded.
+        const store = new MemoryStore();
+        store.jobs.set("gone", intervalJob("gone", 60_000, { enabled: false }));
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {
+                await store.delete("gone");
+            },
+        });
+        const ran = await scheduler.runNow("gone");
+        strictEqual(ran, true);
+        const saved = store.jobs.get("gone");
+        ok(saved);
+        strictEqual(saved.history.length, 1);
+        strictEqual(saved.history[0].status, "ok");
+        scheduler.stop();
+    });
+});
+
+test("start() removes lock files older than staleLockMs", async () => {
+    await withTmp(async (dir) => {
+        // Lock from two hours ago, current pid (alive but old). Cutoff is 1h
+        // so this should be reaped even though the owner is technically live.
+        const oldIso = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+        await writeFile(
+            join(dir, "ancient.lock"),
+            JSON.stringify({ pid: process.pid, started_at: oldIso }),
+        );
+        const store = new MemoryStore();
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            staleLockMs: 60 * 60_000,
+            invoke: async () => {},
+        });
+        await scheduler.start();
+        await readFile(join(dir, "ancient.lock")).then(
+            () => {
+                throw new Error("ancient lock should have been reaped");
+            },
+            (err: NodeJS.ErrnoException) => {
+                strictEqual(err.code, "ENOENT");
+            },
+        );
+        scheduler.stop();
+    });
+});
+
+test("start() leaves lock files held by a live, recent pid alone", async () => {
+    await withTmp(async (dir) => {
+        // Live pid, recent timestamp — the cleanup pass must NOT touch it.
+        // This is the common case when a previous boot's runJob finally
+        // hasn't quite released yet, or another instance is racing us.
+        await writeFile(
+            join(dir, "fresh.lock"),
+            JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }),
+        );
+        const store = new MemoryStore();
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {},
+        });
+        await scheduler.start();
+        // File should still be there.
+        const raw = await readFile(join(dir, "fresh.lock"), "utf-8");
+        ok(raw.length > 0);
+        scheduler.stop();
     });
 });
