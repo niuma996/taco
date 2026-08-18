@@ -1,5 +1,5 @@
 /**
- * memory tool — schema-level tests.
+ * memory tool — schema-level + execute tests.
  *
  * Guards against the failure mode where the model first sent a flat-string action
  * but the old schema demanded a nested object, and then sent a snake_case id
@@ -11,6 +11,7 @@ import { describe, it } from "node:test";
 import type { MemoryUpsertParams } from "@taco-ai/protocol";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
+import type { TacoToolContext } from "../../src/tools/context.ts";
 import { createMemoryTool, type MemoryToolInput } from "../../src/tools/memory.ts";
 
 const VALID: MemoryToolInput = {
@@ -23,12 +24,7 @@ const VALID: MemoryToolInput = {
 };
 
 describe("memory tool schema", () => {
-    const tool = createMemoryTool({
-        workspace: "/tmp/ws",
-        async call() {
-            throw new Error("call() should not run in schema tests");
-        },
-    });
+    const tool = createMemoryTool();
 
     it("accepts flat envelope (action at top level)", () => {
         assert.equal(Value.Check(tool.parameters, VALID), true);
@@ -136,20 +132,17 @@ describe("memory tool schema", () => {
 describe("memory tool execute", () => {
     it("dispatches flat params directly to memory.upsert RPC", async () => {
         let captured: MemoryUpsertParams | undefined;
-        const tool = createMemoryTool({
+        const tool = createMemoryTool();
+        const ctx: TacoToolContext = {
+            env: undefined as never,
             workspace: "/tmp/ws",
-            // The deps type is `<P, R>(method, workspace, params) => Promise<R>`,
-            // so the mock must preserve `R` as a free type parameter. Casting
-            // the captured params is enough for assertions below.
-            async call<P, R>(_method: string, _workspace: string, params: P): Promise<R> {
+            call: async <P, R>(_method: string, _workspace: string, params: P): Promise<R> => {
                 captured = params as unknown as MemoryUpsertParams;
                 return { ok: true, outcome: "created" } as unknown as R;
             },
-        });
+        };
 
-        const result = await tool.execute("tc-1", VALID, undefined, undefined, {
-            env: undefined as never,
-        });
+        const result = await tool.execute("tc-1", VALID, undefined, undefined, ctx);
 
         // Critical: the params handed to memory.upsert must be flat, with
         // `action` as a string — not nested under another `action` envelope.
@@ -167,5 +160,17 @@ describe("memory tool execute", () => {
             "memory.upsert created: web-search-preference",
         );
         assert.deepEqual(result.details, { ok: true, outcome: "created" });
+    });
+
+    it("throws clearly when ctx.call is missing", async () => {
+        const tool = createMemoryTool();
+        await assert.rejects(
+            () =>
+                tool.execute("tc-1", VALID, undefined, undefined, {
+                    env: undefined as never,
+                    workspace: "/tmp/ws",
+                } as TacoToolContext),
+            /no self-RPC dispatcher/,
+        );
     });
 });

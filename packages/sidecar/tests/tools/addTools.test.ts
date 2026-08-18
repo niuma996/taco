@@ -4,7 +4,6 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import { Value } from "typebox/value";
 import {
     DefaultDeferredToolRegistry,
@@ -15,6 +14,7 @@ import {
     DefaultSessionToolController,
 } from "../../src/runtime/sessionToolController.ts";
 import { type AddToolsToolInput, createAddToolsTool } from "../../src/tools/addTools.ts";
+import type { TacoToolContext } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 import { FakeToolCollection } from "../_helpers/fakeToolCollection.ts";
 
@@ -50,7 +50,7 @@ function makeTool(names: string[]): { tool: TacoTool; controller: DefaultSession
     return { tool: createAddToolsTool(controller), controller };
 }
 
-const ctx = {} as ExecutionToolContext;
+const ctx = { env: undefined as never, workspace: "/tmp/test" } as TacoToolContext;
 
 describe("addTools tool schema", () => {
     it("accepts comma-separated toolNames", () => {

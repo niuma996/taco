@@ -4,13 +4,17 @@
  *
  * Routes through the `memory.upsert` RPC rather than the store directly — the
  * handler is the single point of validation and boundary enforcement.
+ *
+ * The harness injects `workspace` + `call` via `toolContext` (see
+ * `tools/context.ts`); the schema only carries business fields.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
-import type { MemoryUpsertParams, MemoryUpsertResult, WorkspaceId } from "@taco-ai/protocol";
+import type { AgentHarnessTool } from "@earendil-works/pi-agent-core";
+import type { MemoryUpsertParams, MemoryUpsertResult } from "@taco-ai/protocol";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
 
@@ -71,19 +75,7 @@ export type MemoryToolInput = Static<typeof memoryToolSchema>;
 
 // ─── tool factory ────────────────────────────────────────────────────────────
 
-export interface MemoryToolDeps {
-    workspace: WorkspaceId;
-    /**
-     * Self-RPC outbound — turns (method, workspace, params) into an
-     * RpcRequest dispatched to this sidecar's `ServerRpcSurface.dispatchRpc` (the
-     * same handler path as cross-process RPC, keeping validation). The tool
-     * avoids importing the whole `typedRpc` module to dodge an in-process
-     * circular import.
-     */
-    call: <P, R>(method: string, workspace: WorkspaceId, params: P) => Promise<R>;
-}
-
-export function createMemoryTool(deps: MemoryToolDeps): AgentHarnessTool<ExecutionToolContext> {
+export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
     return {
         name: "memory",
         label: "memory",
@@ -123,23 +115,26 @@ export function createMemoryTool(deps: MemoryToolDeps): AgentHarnessTool<Executi
             params: MemoryToolInput,
             _signal: AbortSignal | undefined,
             _onUpdate: unknown | undefined,
-            _ctx: ExecutionToolContext,
+            ctx: TacoToolContext,
         ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
-            const input = params;
-            const result = await deps.call<MemoryUpsertParams, MemoryUpsertResult>(
+            const { workspace, call } = ctx;
+            if (!call) {
+                throw new Error("memory.upsert: no self-RPC dispatcher in this workspace");
+            }
+            const result = await call<MemoryUpsertParams, MemoryUpsertResult>(
                 "memory.upsert",
-                deps.workspace,
+                workspace,
                 {
-                    workspace: deps.workspace,
-                    action: input.action,
-                    id: input.id,
-                    name: input.name,
-                    description: input.description,
-                    content: input.content,
-                    type: input.type,
+                    workspace,
+                    action: params.action,
+                    id: params.id,
+                    name: params.name,
+                    description: params.description,
+                    content: params.content,
+                    type: params.type,
                 },
             );
-            const text = `memory.upsert ${result.outcome}: ${input.id}`;
+            const text = `memory.upsert ${result.outcome}: ${params.id}`;
             return {
                 content: [{ type: "text", text }],
                 details: result,

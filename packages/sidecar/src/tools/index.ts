@@ -5,26 +5,25 @@
  *  - grep / glob           — context-aware search
  *  - shell                 — context-aware shell (platform-conditional)
  *  - agent / Skill         — per-session; main-session only
+ *
+ * The shared `TacoToolContext` (`tools/context.ts`) is injected by the
+ * harness via `toolContext` and read by every tool that needs per-turn
+ * state (workspace, call, actor). Tools no longer take constructor deps —
+ * adding a new tool is a single-file change with no caller signature updates.
  */
 import type { AgentHarnessTool } from "@earendil-works/pi-agent-core";
-import {
-    createEditTool,
-    createReadTool,
-    createWriteTool,
-    type ExecutionToolContext,
-} from "@earendil-works/pi-agent-core";
+import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-agent-core";
 import type { SessionId } from "@taco-ai/protocol";
+import type { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { PlanSnapshotPublisher } from "../plan/planPushAdapter.ts";
 import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 import type { TaskStore } from "../tasks/taskTypes.ts";
 import { createAskUserTool } from "./askUser.ts";
+import type { TacoToolContext } from "./context.ts";
 import { createGlobTool } from "./glob.ts";
 import { createGrepTool } from "./grep.ts";
-import { createMemoryTool, type MemoryToolDeps } from "./memory.ts";
-
-export type { MemoryToolDeps };
-
-import type { PermissionBroker } from "../permissions/permissionBroker.ts";
+import { createJobsTools } from "./jobs.ts";
+import { createMemoryTool } from "./memory.ts";
 import { createPlanEnterTool } from "./planEnter.ts";
 import { createPlanExitTool } from "./planExit.ts";
 import type { PlanModeState } from "./planModeState.ts";
@@ -34,7 +33,7 @@ import { createTaskListTool } from "./taskList.ts";
 import { createTaskUpdateTool } from "./taskUpdate.ts";
 import { createTodoWriteTool } from "./todoWrite.ts";
 
-export type TacoTool = AgentHarnessTool<ExecutionToolContext>;
+export type TacoTool = AgentHarnessTool<TacoToolContext>;
 
 /**
  * Metadata the system-prompt builder reads off each tool. Optional — tools
@@ -66,9 +65,16 @@ declare module "@earendil-works/pi-agent-core" {
     }
 }
 
-/** Platform-independent base tools (no agent / memory / tasks / plan). */
+/**
+ * Platform-independent base tools (no agent / tasks / plan). The memory
+ * tool is always pushed — it reads `ctx.call` at execute time and throws
+ * a clear error when the workspace has no self-RPC dispatcher, instead of
+ * silently disappearing when a caller forgets to set `hasSelfRpc: true`.
+ *
+ * Callers that never wire `dispatchRpc` (e.g. the desktop's read-only admin
+ * console) should filter the returned array themselves.
+ */
 export function defaultTools(opts?: {
-    memoryDeps?: MemoryToolDeps;
     permissionBroker?: PermissionBroker;
     sessionId?: SessionId;
     disabledTools?: string[];
@@ -110,15 +116,13 @@ export function defaultTools(opts?: {
         createAskUserTool(),
     ];
     tools.push(createShellTool(opts));
-    if (opts?.memoryDeps) {
-        tools.push(createMemoryTool(opts.memoryDeps));
-    }
+    tools.push(createMemoryTool());
     const disabled = new Set(opts?.disabledTools ?? []);
     return disabled.size > 0 ? tools.filter((t) => !disabled.has(t.name)) : tools;
 }
 
 /**
- * Base tools + 5 task-management tools + 2 plan-mode tools + memory tool.
+ * Base tools + 5 task-management tools + 2 plan-mode tools + memory + jobs.
  * AttachedSession calls this on attach.
  *
  * Tool order is the system-prompt order — `toolSummaryForPrompt` reads the
@@ -135,16 +139,16 @@ export function defaultToolsWithTasks(
     taskAdapter: TaskSnapshotPublisher,
     planPublisher: PlanSnapshotPublisher,
     sessionId: SessionId,
-    memoryDeps?: MemoryToolDeps,
     permissionBroker?: PermissionBroker,
     disabledTools?: string[],
 ): TacoTool[] {
-    const tools = defaultTools({ memoryDeps, permissionBroker, sessionId, disabledTools });
+    const tools = defaultTools({ permissionBroker, sessionId, disabledTools });
     tools.push(createTodoWriteTool(store, baseDir, taskAdapter, sessionId));
     tools.push(createTaskCreateTool(store, baseDir, taskAdapter, sessionId));
     tools.push(createTaskUpdateTool(store, baseDir, taskAdapter, sessionId));
     tools.push(createTaskListTool(store));
     tools.push(createPlanEnterTool(planState, projectDir, planPublisher, sessionId));
     tools.push(createPlanExitTool(planState, projectDir, planPublisher, sessionId));
+    tools.push(...createJobsTools());
     return tools;
 }
