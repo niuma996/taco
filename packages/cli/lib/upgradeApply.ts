@@ -40,6 +40,10 @@ export interface UpgradeApplyOptions {
     tacoHome?: string;
     /** Stop hook — injected so tests can skip the control-channel call. */
     stop?: () => Promise<void>;
+    /** Test seam: override fs.rename. Production callers omit this; the
+     *  rollback + EXDEV paths can't otherwise be exercised deterministically
+     *  from a tmpdir (rename almost never fails on a single filesystem). */
+    rename?: (src: string, dest: string) => Promise<void>;
 }
 
 export async function upgradeApplyCommand(
@@ -78,20 +82,22 @@ export async function upgradeApplyCommand(
     // Clear any stale rollback target from a prior failed attempt.
     await rm(prevDir, { recursive: true, force: true });
 
+    const renameFn = opts.rename ?? rename;
+
     // Step 1: live → prev
     try {
-        await rename(marker.live_dir, prevDir);
+        await renameFn(marker.live_dir, prevDir);
     } catch (err) {
         throw new Error(`failed to move live_dir → prev: ${String(err)}`);
     }
 
     // Step 2: staging → live. Try the same-fs atomic rename first; on EXDEV
     // (cross-filesystem) fall back to recursive copy + unlink so cross-mount
-    // installs aren't wedged. If the copy fails mid-flight, rename(prevDir,
+    // installs aren't wedged. If the copy fails mid-flight, renameFn(prevDir,
     // liveDir) restores the original.
     try {
         try {
-            await rename(marker.staging_dir, marker.live_dir);
+            await renameFn(marker.staging_dir, marker.live_dir);
         } catch (err) {
             const code = (err as NodeJS.ErrnoException).code;
             if (code !== "EXDEV") throw err;
@@ -103,7 +109,7 @@ export async function upgradeApplyCommand(
         log.error(`swap failed, rolling back: ${String(err)}`);
         try {
             await rm(marker.live_dir, { recursive: true, force: true });
-            await rename(prevDir, marker.live_dir);
+            await renameFn(prevDir, marker.live_dir);
         } catch (rollbackErr) {
             log.error(`rollback also failed: ${String(rollbackErr)}`);
         }

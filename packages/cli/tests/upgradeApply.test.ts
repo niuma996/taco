@@ -235,3 +235,115 @@ test("upgradeApplyCommand keeps marker when staging present but malformed", asyn
         ok(await readUpgradeMarker(join(home, "upgrade-marker.json")));
     });
 });
+
+test("upgradeApplyCommand rolls back to .prev when staging->live rename fails", async () => {
+    await withTmp(async (home) => {
+        const staging = join(home, "staging", "sidecar-darwin-arm64-0.2.0");
+        const live = join(home, "live");
+        await writeBundleShape(staging, "0.2.0");
+        await writeLiveShape(live);
+        const marker: UpgradeMarker = {
+            version: "0.2.0",
+            staging_dir: staging,
+            live_dir: live,
+            written_at: "2026-01-01T00:00:00.000Z",
+        };
+        await writeUpgradeMarker(join(home, "upgrade-marker.json"), marker);
+
+        // Snapshot the live contents before swap so we can verify rollback.
+        const beforeManifest = JSON.parse(
+            await readFile(join(live, "manifest.json"), "utf8"),
+        ) as { version: string };
+        strictEqual(beforeManifest.version, "0.1.0");
+
+        await rejects(
+            upgradeApplyCommand({
+                tacoHome: home,
+                // Fail ONLY the staging->live rename; let the live->prev
+                // pass through and the rollback (prev->live) pass through.
+                // Failing all three would make the rollback itself fail and
+                // leave the system in a worse state than we want to test.
+                rename: async (src, dest) => {
+                    if (src === staging) {
+                        throw Object.assign(
+                            new Error("ENOSPC: no space left on device"),
+                            { code: "ENOSPC" },
+                        );
+                    }
+                    return await import("node:fs/promises").then((m) =>
+                        m.rename(src, dest),
+                    );
+                },
+            }),
+            /ENOSPC/,
+        );
+
+        // After rollback, live must have the pre-swap contents back.
+        const restoredManifest = JSON.parse(
+            await readFile(join(live, "manifest.json"), "utf8"),
+        ) as { version: string };
+        strictEqual(
+            restoredManifest.version,
+            "0.1.0",
+            "live_dir must be restored to pre-swap contents",
+        );
+        // .prev must NOT exist (rollback moved it back into live).
+        await rejects(readFile(`${live}.prev/manifest.json`, "utf8"), /ENOENT/);
+        // Marker is NOT cleared on failure (operator can retry after fix).
+        const markerAfter = await readUpgradeMarker(
+            join(home, "upgrade-marker.json"),
+        );
+        ok(markerAfter);
+        strictEqual(markerAfter!.version, "0.2.0");
+    });
+});
+
+test("upgradeApplyCommand falls back to copyFile + unlink on EXDEV (cross-device rename)", async () => {
+    await withTmp(async (home) => {
+        const staging = join(home, "staging", "sidecar-darwin-arm64-0.2.0");
+        const live = join(home, "live");
+        await writeBundleShape(staging, "0.2.0");
+        await writeLiveShape(live);
+        const marker: UpgradeMarker = {
+            version: "0.2.0",
+            staging_dir: staging,
+            live_dir: live,
+            written_at: "2026-01-01T00:00:00.000Z",
+        };
+        await writeUpgradeMarker(join(home, "upgrade-marker.json"), marker);
+
+        const result = await upgradeApplyCommand({
+            tacoHome: home,
+            // Fail ONLY the staging->live rename with EXDEV; let live->prev
+            // pass through so the prevDir rollback target exists. The
+            // successful EXDEV path doesn't use rename again afterwards
+            // (no rollback needed).
+            rename: async (src, dest) => {
+                if (src === staging) {
+                    throw Object.assign(new Error("EXDEV: cross-device link"), {
+                        code: "EXDEV",
+                    });
+                }
+                return await import("node:fs/promises").then((m) =>
+                    m.rename(src, dest),
+                );
+            },
+        });
+
+        strictEqual(result.version, "0.2.0");
+        // Live must contain the new bundle contents (copied, not renamed).
+        const newManifest = JSON.parse(
+            await readFile(join(live, "manifest.json"), "utf8"),
+        ) as { version: string };
+        strictEqual(newManifest.version, "0.2.0");
+        const newBundle = await readFile(join(live, "lib", "index.mjs"), "utf8");
+        strictEqual(newBundle.trim(), "// new bundle");
+        // Marker cleared (success).
+        ok(!(await readUpgradeMarker(join(home, "upgrade-marker.json"))));
+        // Staging dir must be gone (the fallback's rm cleaned it).
+        await rejects(
+            import("node:fs/promises").then((m) => m.stat(staging)),
+            /ENOENT/,
+        );
+    });
+});
