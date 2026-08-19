@@ -49,7 +49,7 @@ const EXPECTED_METHODS: Record<string, MethodMeta> = {
     "channels.list": { ensureWorkspace: false },
     "channels.submitVerifyCode": { ensureWorkspace: false, command: true },
     "channels.unbind": { ensureWorkspace: false, command: true },
-    "command_permission.resolve": { ensureWorkspace: true, command: true },
+    "commandPermission.resolve": { ensureWorkspace: true, command: true },
     "extensions.status": { ensureWorkspace: false },
     "memory.deleteTopic": { ensureWorkspace: true },
     "memory.list": { ensureWorkspace: true },
@@ -150,7 +150,7 @@ describe("registry snapshot", () => {
             "session.rename",
             "session.events.get",
             // non-session mixed into session.ts
-            "command_permission.resolve",
+            "commandPermission.resolve",
             "providers.list",
             // settings
             "settings.get",

@@ -22,7 +22,7 @@ import { registerBuiltinMethods } from "../../src/server/methods.ts";
 const NAMESPACES = [
     "workspace",
     "session",
-    "command_permission",
+    "commandPermission",
     "providers",
     "provider",
     "imPolicy",

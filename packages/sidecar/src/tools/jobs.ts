@@ -166,7 +166,7 @@ function buildJobsTool<TInput, TResult>(
 export function createJobsListTool(): AgentHarnessTool<TacoToolContext> {
     return buildJobsTool<JobsListInput, { jobs: Job[] }>({
         name: "jobsList",
-        label: "jobs.list",
+        label: "jobsList",
         summary:
             "List every scheduled job visible to the current session — IM jobs filtered to the current channel/peer, IDE jobs to the current workspace. Use before create/update to discover existing ids and avoid collisions.",
         mutates: false,
@@ -193,7 +193,7 @@ export function createJobsListTool(): AgentHarnessTool<TacoToolContext> {
 export function createJobsGetTool(): AgentHarnessTool<TacoToolContext> {
     return buildJobsTool<JobsGetInput, { job: Job | null }>({
         name: "jobsGet",
-        label: "jobs.get",
+        label: "jobsGet",
         summary:
             "Read one scheduled job by id — returns the full record (schedule, args, history last entry). Use when the list summary is too terse to decide the next action.",
         mutates: false,
@@ -208,7 +208,7 @@ export function createJobsGetTool(): AgentHarnessTool<TacoToolContext> {
 export function createJobsCreateTool(): AgentHarnessTool<TacoToolContext> {
     return buildJobsTool<JobsCreateInput, { job: Job }>({
         name: "jobsCreate",
-        label: "jobs.create",
+        label: "jobsCreate",
         summary:
             "Create a new scheduled job in this session's scope. The daemon generates the globally unique id. Channel sessions default to reuse the current conversation; non-channel sessions default to pin a dedicated session and may explicitly choose new.",
         mutates: true,
@@ -237,7 +237,7 @@ export function createJobsCreateTool(): AgentHarnessTool<TacoToolContext> {
 export function createJobsUpdateTool(): AgentHarnessTool<TacoToolContext> {
     return buildJobsTool<JobsUpdateInput, { job: Job }>({
         name: "jobsUpdate",
-        label: "jobs.update",
+        label: "jobsUpdate",
         summary:
             "Replace an existing scheduled job by id. The scope cannot be changed. Channel jobs only use reuse; non-channel jobs default to pin and may explicitly choose new.",
         mutates: true,
@@ -260,7 +260,7 @@ export function createJobsUpdateTool(): AgentHarnessTool<TacoToolContext> {
 export function createJobsDeleteTool(): AgentHarnessTool<TacoToolContext> {
     return buildJobsTool<JobsDeleteInput, { deleted: boolean }>({
         name: "jobsDelete",
-        label: "jobs.delete",
+        label: "jobsDelete",
         summary:
             "Remove a scheduled job by id. The daemon also drops its in-flight lock file, so any currently running fire finishes naturally without leaking state.",
         mutates: true,
@@ -274,7 +274,7 @@ export function createJobsDeleteTool(): AgentHarnessTool<TacoToolContext> {
 export function createJobsRunNowTool(): AgentHarnessTool<TacoToolContext> {
     return buildJobsTool<JobsRunNowInput, { ran: boolean }>({
         name: "jobsRunNow",
-        label: "jobs.run_now",
+        label: "jobsRunNow",
         summary:
             "Force-fire a job immediately, outside its schedule. Returns ran=true if the fire actually started, ran=false if an existing fire holds the lock (the new fire is dropped, not queued).",
         mutates: true,

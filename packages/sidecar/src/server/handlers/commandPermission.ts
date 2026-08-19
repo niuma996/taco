@@ -1,5 +1,5 @@
 /**
- * command_permission.resolve handler — isolated from the session domain.
+ * commandPermission.resolve handler — isolated from the session domain.
  *
  * Resolves permission requests with optional global rule persistence.
  */

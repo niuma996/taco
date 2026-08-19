@@ -138,7 +138,7 @@ export class Scheduler {
     }
 
     /** Force-fire a job immediately, bypassing the schedule. Used by
-     *  `jobs.run_now` RPC. Returns true if the fire actually ran, false
+     *  `jobs.runNow` RPC. Returns true if the fire actually ran, false
      *  if it was rejected by an existing lock. */
     async runNow(id: string): Promise<boolean> {
         const job = await this.opts.store.get(id);

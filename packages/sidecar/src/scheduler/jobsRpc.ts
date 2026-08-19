@@ -6,13 +6,19 @@
  * `clients/taco-desktop/src/lib/jobsRpc.ts` — a single integration test
  * catches drift.
  *
+ * Naming follows the shared `namespace.action` convention used elsewhere
+ * (`workspace.list`, `session.create`, `channels.bind`), with camelCase
+ * segments throughout. The LLM-facing tool names live in `tools/jobs.ts`
+ * and drop the dot — they use the camelCase prefix form (`jobsList`,
+ * `jobsRunNow`) that matches every other tool in the harness.
+ *
  * Method names:
  *   jobs.list      — list every job in $TACO_HOME/jobs
  *   jobs.get       — read a single job by id
  *   jobs.create    — create a new job (server assigns id when missing)
  *   jobs.update    — replace an existing job
  *   jobs.delete    — remove a job + its lock file
- *   jobs.run_now   — force-fire a job outside its schedule
+ *   jobs.runNow    — force-fire a job outside its schedule
  *   jobs.history   — read just the history entries (no live state)
  */
 
@@ -22,7 +28,7 @@ export const JOBS_RPC = {
     create: "jobs.create",
     update: "jobs.update",
     delete: "jobs.delete",
-    runNow: "jobs.run_now",
+    runNow: "jobs.runNow",
     history: "jobs.history",
 } as const;
 

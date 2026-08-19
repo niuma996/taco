@@ -61,7 +61,7 @@ function makeClient(jobs: Partial<ScriptedJobsClient> = {}): TacoClient {
             if (method === "jobs.create") return full.create(params);
             if (method === "jobs.update") return full.update(params);
             if (method === "jobs.delete") return full.delete();
-            if (method === "jobs.run_now") return full.runNow();
+            if (method === "jobs.runNow") return full.runNow();
             if (method === "jobs.history") return full.history();
             throw new Error(`unexpected method ${method}`);
         },

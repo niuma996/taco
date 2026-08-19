@@ -30,7 +30,7 @@ export const RPC = {
     sessionPrompt: "session.prompt",
     sessionSteer: "session.steer",
     sessionAbort: "session.abort",
-    commandPermissionResolve: "command_permission.resolve",
+    commandPermissionResolve: "commandPermission.resolve",
     sessionSetModel: "session.setModel",
     sessionListModels: "session.listModels",
     /** List the availability view of built-in providers (configured + models) for the Model settings UI. */

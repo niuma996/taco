@@ -7,6 +7,9 @@
  * here; an integration test in the sidecar (`tests/server/rpcRegistry.test.ts`)
  * enforces that the registered handlers use exactly these names, so the
  * two sides can't drift silently.
+ *
+ * Segment casing follows the shared `namespace.action` convention; the
+ * LLM-facing tool names drop the dot and live in `tools/jobs.ts`.
  */
 
 export const JOBS_RPC = {
@@ -15,7 +18,7 @@ export const JOBS_RPC = {
     create: "jobs.create",
     update: "jobs.update",
     delete: "jobs.delete",
-    runNow: "jobs.run_now",
+    runNow: "jobs.runNow",
     history: "jobs.history",
 } as const;
 

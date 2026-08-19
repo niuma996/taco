@@ -7,7 +7,7 @@
  * `clients/taco-desktop/src/lib/jobsClient.ts`), so on the server
  * `params = { job: { ... } }`. The same shape applies to
  * `jobs.update` (also a `{ job }` wrapper). `jobs.delete` /
- * `jobs.run_now` / `jobs.history` / `jobs.get` use a flat `{ id }`
+ * `jobs.runNow` / `jobs.history` / `jobs.get` use a flat `{ id }`
  * payload — their `params` is `{ id }` directly.
  *
  * The previous test wrapped each input in a redundant
@@ -190,9 +190,9 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
         assert.deepEqual(controllerCalls, []);
     });
 
-    it("jobs.run_now rejects traversal id without invoking scheduler", async () => {
+    it("jobs.runNow rejects traversal id without invoking scheduler", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.run_now");
+        const reg = getRegisteredMethod("jobs.runNow");
         assert.ok(reg);
 
         const controllerCalls: string[] = [];
@@ -329,10 +329,10 @@ describe("jobs RPC — workspace routing (regression)", () => {
         assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
     });
 
-    it("jobs.run_now dispatches without params.workspace", async () => {
+    it("jobs.runNow dispatches without params.workspace", async () => {
         registerBuiltinMethods();
         const controllerCalls: string[] = [];
-        const resp = await dispatchThroughServer("jobs.run_now", { id: "abc" }, controllerCalls);
+        const resp = await dispatchThroughServer("jobs.runNow", { id: "abc" }, controllerCalls);
         assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
     });
 });
