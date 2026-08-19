@@ -330,8 +330,15 @@ async function runDaemon(
             invoke: createJobDispatcher(
                 (workspace) => (workspace.startsWith(IM_CWD_PREFIX) ? imHost : schedulerSidecar),
                 // Pin strategy writes the created sessionId back to the job so
-                // subsequent fires can attach the same session. The store stays
-                // authoritative for job state; the dispatcher never mutates it.
+                // subsequent fires can attach the same session. The callback
+                // here IS a write — earlier comments claimed "the dispatcher
+                // never mutates the store", which was misleading once we
+                // added onPinnedSessionCreated. The store is still the
+                // single-writer for job JSON on disk (every write goes
+                // through JobStore.mutate, whose per-id queue serialises
+                // against the runner's history write and the controller's
+                // update), but the dispatcher triggers that write rather
+                // than leaving it implicit.
                 {
                     onPinnedSessionCreated: async (jobId, sessionId) => {
                         await jobStore.mutate(jobId, (job) =>
@@ -341,18 +348,31 @@ async function runDaemon(
                 },
             ),
         });
+        // Construct + mount the JobsController BEFORE scheduler.start(). Boot
+        // replay fires jobs as fire-and-forget invokes: a replayed agent
+        // turn can itself call jobs.* RPCs (e.g. to introspect or disable
+        // its sibling jobs). If we deferred mounting until after
+        // scheduler.start(), those in-flight calls would land on a server
+        // whose `jobs` field is still undefined and would return an
+        // opaque "jobs not mounted" error. Mounting first closes that
+        // window — the controller never fires jobs of its own, so
+        // construction before scheduler.start() has no risk of recursion.
+        const jobsController = new JobsController(
+            jobStore,
+            scheduler,
+            jobsDir,
+            // Keep the reverse-only route index in sync with pin-job
+            // lifecycle: deleting a pin job or switching away from the
+            // `pin` strategy must drop the out-of-band session binding,
+            // otherwise an IM reply for the orphaned session would race
+            // past findRouteBySessionId into "reply dropped".
+            conversationRouter,
+        );
+        imHost.setJobsControl?.(jobsController);
+        schedulerSidecar.setJobsControl?.(jobsController);
         await scheduler.start().catch((err: unknown) => {
             log.error(`scheduler failed to start: ${String(err)}`);
         });
-        const jobsController = new JobsController(jobStore, scheduler, jobsDir);
-
-        // Mount the controller on every SidecarServer instance that exposes
-        // jobs.* RPCs. Connection servers pick it up via `sharedDeps.jobs`;
-        // the two residents (imHost + schedulerSidecar) need an explicit setter
-        // because their `start()` already ran before the controller existed
-        // (the controller's Scheduler depends on them — see dispatch resolver).
-        imHost.setJobsControl?.(jobsController);
-        schedulerSidecar.setJobsControl?.(jobsController);
 
         const sharedDeps = {
             ...toSharedSidecarDeps(deps),

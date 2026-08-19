@@ -36,3 +36,35 @@ export function scheduleNext(spec: ScheduleSpec, cb: () => void): ScheduledHandl
         nextRun: () => cron.nextRun(),
     };
 }
+
+/**
+ * Compute the next fire time strictly after `from`. For interval jobs
+ * this is `from + interval.ms` (deterministic, timezone-free). For
+ * cron jobs we instantiate a non-running `Cron` solely to call
+ * `nextRun(from)` — the scheduler uses this to decide if a job missed a
+ * fire window during downtime so the boot-replay path can replay it.
+ *
+ * Returns `undefined` when the schedule has no future fire (e.g. a cron
+ * that already terminated, or an invalid spec). Callers treat that as
+ * "no missed fire" rather than an error — a schedule that has run out
+ * is its own terminal state.
+ *
+ * No scheduling side effects: croner starts an internal timer only when
+ * a callback is supplied; we pass none, so this is safe to call from the
+ * boot replay hot path.
+ */
+export function nextFireAfter(spec: ScheduleSpec, from: Date): Date | undefined {
+    if (spec.kind === "interval") {
+        const next = new Date(from.getTime() + spec.ms);
+        return Number.isFinite(next.getTime()) ? next : undefined;
+    }
+    try {
+        const cron = new Cron(spec.expr, spec.tz ? { timezone: spec.tz } : {});
+        return cron.nextRun(from) ?? undefined;
+    } catch {
+        // Bad cron expression: surface as "no missed fire" rather than
+        // crashing the boot. The next regular attach will fail to
+        // schedule and the user will see the error in history.
+        return undefined;
+    }
+}

@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { parseImCwd } from "@taco-ai/protocol";
+import type { ConversationRouter } from "../channels/conversationRouter.ts";
 import { JobsScopeError } from "../lib/jobsErrors.ts";
 import type { JobsControl } from "../runtime/serverRpcSurface.ts";
 import { createJobId } from "./jobId.ts";
@@ -36,16 +37,31 @@ export class JobsController implements JobsControl {
         private readonly store: {
             list: () => Promise<Job[]>;
             get: (id: string) => Promise<Job | null>;
-            save: (job: Job) => Promise<void>;
-            create?: (job: Job) => Promise<void>;
-            mutate?: (
+            // Required — every controller write goes through `mutate` so
+            // the per-id write queue in JobStore serialises against
+            // concurrent dispatcher callbacks (pin-session writes) and
+            // the runner's history write. The earlier optional-fallback
+            // path to `get + save` had the ABA problem `mutate` exists
+            // to prevent.
+            mutate: (
                 id: string,
                 update: (current: Job | null) => Job | null,
             ) => Promise<Job | null>;
+            /** Kept for tests / admin paths that explicitly create a
+             *  fresh job; not the controller's main write primitive. */
+            create?: (job: Job) => Promise<void>;
+            save?: (job: Job) => Promise<void>;
             delete: (id: string) => Promise<void>;
         },
         private readonly scheduler: Scheduler,
         private readonly lockDir: string,
+        /** Reverse-only router index kept in sync with this controller's
+         *  lifecycle: a pin job that disappears or switches strategy must
+         *  drop its out-of-band session binding, otherwise the agent's
+         *  reply would race into a deleted session or hijack the wrong
+         *  peer's conversation. Optional for tests that don't load the
+         *  channel stack. */
+        private readonly conversationRouter?: Pick<ConversationRouter, "unregisterExternalSession">,
     ) {}
 
     async list(actor?: Actor): Promise<Job[]> {
@@ -79,8 +95,16 @@ export class JobsController implements JobsControl {
             }),
         );
         assertActorMatchesJob(normalized, actor);
-        if (this.store.create) await this.store.create(normalized);
-        else await this.store.save(normalized);
+        // create is preferred when supplied so we get the
+        // already-exists guarantee (the controller's create path
+        // throws JobAlreadyExistsError for duplicate ids instead of
+        // silently overwriting). save is the fallback for backends
+        // that only implement the broader write API.
+        if (this.store.create) {
+            await this.store.create(normalized);
+        } else if (this.store.save) {
+            await this.store.save(normalized);
+        }
         // Re-load picks up the new copy; if `enabled`, the timer attaches.
         await this.scheduler.reload(normalized.id);
         return normalized;
@@ -92,60 +116,59 @@ export class JobsController implements JobsControl {
             throw new JobsScopeError("not_found", `job not found: ${job.id}`);
         }
         assertActorMatchesJob(existing, actor);
-        let saved: Job | null;
-        if (this.store.mutate) {
-            saved = await this.store.mutate(job.id, (current) => {
-                // The generation detects delete-and-recreate ABA: an update
-                // that read the previous incarnation must never mutate a new
-                // job that was recreated with the same trusted internal id.
-                if (!current || current.generation !== existing.generation) {
-                    throw new JobsScopeError("not_found", `job not found: ${job.id}`);
-                }
-                // Build from the serialized store value, not the pre-mutation
-                // snapshot. A pin callback or runner history write may have
-                // landed while this update was waiting for the per-job queue.
-                return normalizeSessionStrategy(
-                    normalizeScopeFields({
-                        ...job,
-                        args: { ...job.args, workspace: current.args.workspace },
-                        channelId: current.channelId,
-                        peerId: current.peerId,
-                        generation: current.generation,
-                        history: current.history,
-                        last_run_at: current.last_run_at,
-                        next_run_at: current.next_run_at,
-                        sessionStrategy: job.sessionStrategy ?? current.sessionStrategy,
-                        pinnedSessionId:
-                            job.sessionStrategy !== undefined &&
-                            job.sessionStrategy !== current.sessionStrategy
-                                ? undefined
-                                : current.pinnedSessionId,
-                    }),
-                );
-            });
-        } else {
-            const normalized = normalizeSessionStrategy(
+        // Capture the previous pinned id BEFORE the write so we can
+        // unregister it on strategy flip. The new copy nulls
+        // `pinnedSessionId` itself when sessionStrategy changes; here we
+        // just need to know if there WAS a value to clean up.
+        const previousPinned = existing.pinnedSessionId;
+        // mutate is the canonical write boundary: the per-id queue in
+        // JobStore serialises against concurrent dispatcher callbacks
+        // and the runner's history write, so the closure sees the
+        // latest committed job — never a stale snapshot.
+        const saved = await this.store.mutate(job.id, (current) => {
+            // The generation detects delete-and-recreate ABA: an update
+            // that read the previous incarnation must never mutate a new
+            // job that was recreated with the same trusted internal id.
+            if (!current || current.generation !== existing.generation) {
+                throw new JobsScopeError("not_found", `job not found: ${job.id}`);
+            }
+            // Build from the serialized store value, not the pre-mutation
+            // snapshot. A pin callback or runner history write may have
+            // landed while this update was waiting for the per-job queue.
+            return normalizeSessionStrategy(
                 normalizeScopeFields({
                     ...job,
-                    args: { ...job.args, workspace: existing.args.workspace },
-                    channelId: existing.channelId,
-                    peerId: existing.peerId,
-                    generation: existing.generation,
-                    history: existing.history,
-                    last_run_at: existing.last_run_at,
-                    next_run_at: existing.next_run_at,
-                    sessionStrategy: job.sessionStrategy ?? existing.sessionStrategy,
+                    args: { ...job.args, workspace: current.args.workspace },
+                    channelId: current.channelId,
+                    peerId: current.peerId,
+                    generation: current.generation,
+                    history: current.history,
+                    last_run_at: current.last_run_at,
+                    next_run_at: current.next_run_at,
+                    sessionStrategy: job.sessionStrategy ?? current.sessionStrategy,
                     pinnedSessionId:
                         job.sessionStrategy !== undefined &&
-                        job.sessionStrategy !== existing.sessionStrategy
+                        job.sessionStrategy !== current.sessionStrategy
                             ? undefined
-                            : existing.pinnedSessionId,
+                            : current.pinnedSessionId,
                 }),
             );
-            await this.store.save(normalized);
-            saved = normalized;
-        }
+        });
         if (!saved) throw new JobsScopeError("not_found", `job not found: ${job.id}`);
+        // Strategy flipped (e.g. pin → new) or the user removed the
+        // pin entirely — the old pinned session is now orphaned from
+        // the scheduler's point of view. Unregister its reverse-route
+        // binding so it cannot address an IM reply to a peer it no
+        // longer belongs to. We compare on the SAVED job (not the
+        // pre-update `existing`) because a strategy match leaves the
+        // pinned id intact; only a true change must drop it.
+        if (
+            previousPinned &&
+            saved.sessionStrategy !== "pin" &&
+            previousPinned !== saved.pinnedSessionId
+        ) {
+            this.conversationRouter?.unregisterExternalSession(previousPinned);
+        }
         await this.scheduler.reload(saved.id);
         return saved;
     }
@@ -159,6 +182,14 @@ export class JobsController implements JobsControl {
         // "deleted"; the controller itself never throws on scope mismatch
         // here.
         if (actor && !isJobVisibleToActor(existing, actor)) return;
+        // If this job had pinned an out-of-band session, drop the
+        // reverse-route binding before the store delete so a reply that
+        // races the unlink can't address a session no scheduler will
+        // ever re-pin. Safe to call on a non-IM / unpinned job — the
+        // underlying map silently no-ops.
+        if (existing.pinnedSessionId) {
+            this.conversationRouter?.unregisterExternalSession(existing.pinnedSessionId);
+        }
         // Remove the in-flight lock too — a job deleted mid-run should
         // not leak its lock file. We can't kill the running callback,
         // but the callback itself releases the lock on its `finally`
@@ -206,16 +237,12 @@ export class JobsController implements JobsControl {
                 };
             });
             if (!mutated) continue;
-            if (this.store.mutate) {
-                await this.store
-                    .mutate(job.id, (current) => {
-                        if (!current || current.generation !== job.generation) return current;
-                        return { ...current, history: nextHistory };
-                    })
-                    .catch(() => undefined);
-            } else {
-                await this.store.save({ ...job, history: nextHistory }).catch(() => undefined);
-            }
+            await this.store
+                .mutate(job.id, (current) => {
+                    if (!current || current.generation !== job.generation) return current;
+                    return { ...current, history: nextHistory };
+                })
+                .catch(() => undefined);
         }
     }
 }

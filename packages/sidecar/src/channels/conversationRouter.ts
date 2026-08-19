@@ -316,6 +316,29 @@ export class ConversationRouter extends EventEmitter {
         this.externalRoutes.set(sessionId, workspace);
     }
 
+    /**
+     * Drop a sessionId from the reverse index. Called when:
+     *   - the underlying session is deleted (`session.delete` RPC or its
+     *     `session.deleted` workspace event),
+     *   - the pin job that owned the session is deleted (the session
+     *     may still be on disk but no scheduler is referencing it),
+     *   - the pin job is edited away from `pin` strategy (the session
+     *     becomes orphaned; the next fire won't reuse it).
+     *
+     * Returns true when a binding was actually removed. The reverse-only
+     * index (`externalRoutes`) is not persisted — a stale entry here
+     * survives only until the next daemon restart, when rebuildFromJsonl
+     * re-walks the jsonl files. So an unregister that races a persist
+     * on the same sessionId is at worst self-correcting: the rebuild
+     * either restores the binding (jsonl still has the metadata) or
+     * doesn't (jsonl was already gone), and we cannot tell those apart
+     * from the in-memory state alone. Deletion is still correct because
+     * a session without on-disk metadata cannot be addressed anyway.
+     */
+    unregisterExternalSession(sessionId: string): boolean {
+        return this.externalRoutes.delete(sessionId);
+    }
+
     /** Uses session.history (not session.list, which filters subagents).
      *  Any failure is treated as "session does not exist" — triggers the create path. */
     private async sessionExists(

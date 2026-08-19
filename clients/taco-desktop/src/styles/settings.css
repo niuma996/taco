@@ -698,3 +698,31 @@
     padding: 0.5rem 0.75rem;
     border-radius: var(--radius-sm);
 }
+
+/* Action-level error (create/update/delete/runNow failure) is sticky
+   and carries its own dismiss button so the user can clear it
+   without having to retrigger the action that surfaced it. The list
+   banner keeps the bare text-only shape — it auto-clears on the next
+   successful refresh and doesn't need a manual close affordance. */
+.schedules-error--action {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    justify-content: space-between;
+}
+
+.schedules-error-dismiss {
+    background: transparent;
+    border: 1px solid var(--error);
+    color: var(--error);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.5rem;
+    border-radius: var(--radius-sm);
+}
+
+.schedules-error-dismiss:hover {
+    background: var(--error);
+    color: var(--bg-elevated);
+}

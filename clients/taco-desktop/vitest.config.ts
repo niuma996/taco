@@ -22,6 +22,7 @@ export default defineConfig({
             "tests/components/settings/CustomProviderForm.test.tsx",
             "tests/components/settings/McpSection.test.tsx",
             "tests/components/settings/PermissionsTab.test.tsx",
+            "tests/components/settings/SchedulesTab.test.tsx",
         ],
     },
 });

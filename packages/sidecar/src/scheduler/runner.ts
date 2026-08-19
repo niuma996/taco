@@ -19,7 +19,7 @@ import { readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../lib/logger.ts";
 import type { ScheduledHandle } from "./cronerAdapter.ts";
-import { scheduleNext } from "./cronerAdapter.ts";
+import { nextFireAfter, scheduleNext } from "./cronerAdapter.ts";
 import { HISTORY_LIMIT, type Job, type JobHistoryEntry } from "./types.ts";
 
 const log = createLogger("sidecar.scheduler");
@@ -48,7 +48,14 @@ export interface SchedulerOptions {
     store: {
         list: () => Promise<Job[]>;
         save: (job: Job) => Promise<void>;
-        mutate?: (id: string, update: (current: Job | null) => Job | null) => Promise<Job | null>;
+        // Required — the runner uses `mutate` as its sole read-modify-
+        // write primitive to avoid races with concurrent dispatcher
+        // callbacks (see JobsController's update + onPinnedSessionCreated
+        // paths). JobStore implements it; callers that supply a custom
+        // store MUST implement it too. The earlier optional-fallback
+        // branch to `get + save` is gone because that path has the
+        // exact ABA problem `mutate`'s queue solves.
+        mutate: (id: string, update: (current: Job | null) => Job | null) => Promise<Job | null>;
         get: (id: string) => Promise<Job | null>;
         delete: (id: string) => Promise<void>;
     };
@@ -221,25 +228,14 @@ export class Scheduler {
             // session yet" branch and create another session (we found 9
             // duplicate jsonl files for one pin job this way). Only the two
             // fields this fire owns are layered onto the latest copy.
-            if (this.opts.store.mutate) {
-                await this.opts.store
-                    .mutate(job.id, (latest) => {
-                        if (!latest || latest.generation !== job.generation) return latest;
-                        return { ...latest, history: job.history, last_run_at: entry.ended_at };
-                    })
-                    .catch((err) => {
-                        log.error(`failed to persist history for ${job.id}: ${String(err)}`);
-                    });
-            } else {
-                const latest = await this.opts.store.get(job.id).catch(() => null);
-                if (latest) {
-                    await this.opts.store
-                        .save({ ...latest, history: job.history, last_run_at: entry.ended_at })
-                        .catch((err) => {
-                            log.error(`failed to persist history for ${job.id}: ${String(err)}`);
-                        });
-                }
-            }
+            await this.opts.store
+                .mutate(job.id, (latest) => {
+                    if (!latest || latest.generation !== job.generation) return latest;
+                    return { ...latest, history: job.history, last_run_at: entry.ended_at };
+                })
+                .catch((err) => {
+                    log.error(`failed to persist history for ${job.id}: ${String(err)}`);
+                });
             if (releaseLockAfterInvocation) {
                 await unlink(lockPath).catch(() => {
                     /* lock may have been removed by another process — fine */
@@ -257,15 +253,42 @@ export class Scheduler {
         return this.opts.now ? this.opts.now().getTime() : Date.now();
     }
 
-    /** Replay a job only if it last ran in the past. A job that has never
-     *  run is always eligible (a "missed run" since the daemon has never
-     *  seen it). The 5-second grace window prevents a clock skew between
-     *  store and host from double-firing an honest just-completed run. */
+    /**
+     * Decide if a `run_on_startup` job actually missed a fire window
+     * during downtime — we should only replay when the schedule would
+     * have fired at least once between `last_run_at` (or job creation
+     * if it never ran) and now.
+     *
+     * Earlier we treated "last ran more than 5s ago" as a miss. That was
+     * wrong on two fronts:
+     *   - For interval jobs: a 24h schedule on a job that ran 1m ago is
+     *     not "missed" — the next fire is still 23h59m in the future.
+     *   - For cron jobs: a "every day at 09:00" schedule that last ran
+     *     yesterday at 09:00 and the daemon restarted at 10:00 should
+     *     replay (missed today's 09:00), but the same schedule on a
+     *     job that ran an hour ago should not.
+     *
+     * `nextFireAfter(spec, lastRunAt)` gives us the next scheduled
+     * fire strictly after `lastRunAt`. If that time has already
+     * passed at startup time, we missed it. If `last_run_at` is unset
+     * we treat the job as freshly created and let the first
+     * scheduled fire do its normal thing — boot replay shouldn't
+     * synthesize a run that was never actually scheduled.
+     *
+     * The 5-second skew window still applies at the comparison edge:
+     * without it, a clock-jump or a "fire just landed as we shut down"
+     * race could double-fire an honest just-completed run.
+     */
     private shouldReplayMissedRun(job: Job): boolean {
-        if (!job.last_run_at) return true;
+        if (!job.last_run_at) return false;
         const lastRunMs = Date.parse(job.last_run_at);
-        if (!Number.isFinite(lastRunMs)) return true;
-        return this.nowMs() - lastRunMs > 5_000;
+        if (!Number.isFinite(lastRunMs)) return false;
+        const expected = nextFireAfter(job.schedule, new Date(lastRunMs));
+        if (!expected) return false;
+        // The scheduled fire time has passed during downtime AND we're
+        // outside the skew grace. The grace keeps clock drift between
+        // the scheduler and the host from double-firing.
+        return this.nowMs() - expected.getTime() > 5_000;
     }
 
     /** Bound a fire so a hung agent.invoke (e.g. a pinned session stuck

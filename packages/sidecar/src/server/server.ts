@@ -1186,6 +1186,13 @@ export class SidecarServer implements ServerRpcSurface {
             // cursor would discard it as a duplicate). Retain the tombstone
             // for reconnect recovery, then release the stream after a short TTL.
             this.emitPush(PushMethods.SessionDeleted, workspaceKey, e.sessionId, {});
+            // Clean up the reverse-only route index. A scheduler pin job
+            // may have registered this session out-of-band; with the
+            // underlying jsonl gone, the reverse binding would silently
+            // leak until the next daemon restart and let any reply emit
+            // race past `findRouteBySessionId` into "no peer for
+            // session, reply dropped".
+            this.conversationRouter?.unregisterExternalSession(e.sessionId);
             setTimeout(
                 () => this.sessionEvents.clearSession(workspaceKey, e.sessionId),
                 TOMBSTONE_TTL_MS,

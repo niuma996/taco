@@ -136,9 +136,22 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
     return (
         <div className="settings-tab schedules-tab">
             <h3>{t("settings.tabSchedules", "Schedules")}</h3>
-            {jobs.error ? (
+            {jobs.listError ? (
                 <p className="schedules-error" role="alert">
-                    {jobs.error}
+                    {jobs.listError}
+                </p>
+            ) : null}
+            {jobs.actionError ? (
+                <p className="schedules-error schedules-error--action" role="alert">
+                    <span>{jobs.actionError}</span>
+                    <button
+                        type="button"
+                        className="schedules-error-dismiss"
+                        aria-label={t("schedules.actionDismiss", "Dismiss")}
+                        onClick={() => jobs.setActionError(null)}
+                    >
+                        ×
+                    </button>
                 </p>
             ) : null}
             <table className="schedules-table">
@@ -169,7 +182,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                     .update({ ...job, enabled })
                                     .then(() => jobs.refresh())
                                     .catch((err: unknown) =>
-                                        jobs.setError(
+                                        jobs.setActionError(
                                             err instanceof Error ? err.message : String(err),
                                         ),
                                     );
@@ -189,14 +202,16 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                 try {
                                     const accepted = await jobs.runNow(job.id);
                                     if (!accepted) {
-                                        jobs.setError(
+                                        jobs.setActionError(
                                             t("schedules.busy", "上次运行还没结束,请稍候再触发"),
                                         );
                                     } else {
-                                        jobs.setError(null);
+                                        jobs.setActionError(null);
                                     }
                                 } catch (err) {
-                                    jobs.setError(err instanceof Error ? err.message : String(err));
+                                    jobs.setActionError(
+                                        err instanceof Error ? err.message : String(err),
+                                    );
                                 } finally {
                                     await jobs.refresh();
                                     setRunningId((prev) => (prev === job.id ? null : prev));
@@ -207,7 +222,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                     .delete(job.id)
                                     .then(() => jobs.refresh())
                                     .catch((err: unknown) =>
-                                        jobs.setError(
+                                        jobs.setActionError(
                                             err instanceof Error ? err.message : String(err),
                                         ),
                                     );
@@ -459,14 +474,28 @@ function useJobsClient(client: TacoClient) {
     const jobsClient = useMemo(() => createJobsClient(client), [client]);
     const [list, setList] = useState<Job[]>([]);
     const [busy, setBusy] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    // Two error buckets: a list-level failure (network/daemon down) is
+    // transient and clears on the next successful refresh; an
+    // action-level failure (create/update/delete/runNow) is sticky
+    // because the user needs to see WHY their edit didn't land and
+    // clearing it on a refresh would silently lose context. Earlier
+    // we used a single `error` field that refresh could overwrite,
+    // which meant a successful refresh after a failed create hid the
+    // form error without any user action.
+    const [listError, setListError] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         setBusy(true);
         try {
-            setList(await jobsClient.list());
+            const next = await jobsClient.list();
+            setList(next);
+            // Refresh success ⇒ the daemon is reachable again, so any
+            // prior list failure is no longer the user's truth. Leave
+            // actionError alone — it's a different state machine.
+            setListError(null);
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            setListError(err instanceof Error ? err.message : String(err));
         } finally {
             setBusy(false);
         }
@@ -479,8 +508,13 @@ function useJobsClient(client: TacoClient) {
     return {
         list,
         busy,
-        error,
-        setError,
+        listError,
+        actionError,
+        setActionError,
+        // Back-compat alias used by the row-level action handlers so
+        // their `.catch((err) => jobs.setError(...))` lines stay readable.
+        // Routes to actionError (the sticky bucket) by design.
+        setError: setActionError,
         refresh,
         create: jobsClient.create,
         update: jobsClient.update,

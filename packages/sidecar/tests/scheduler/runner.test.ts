@@ -17,7 +17,12 @@ import type { Job } from "../../src/scheduler/types.ts";
 
 class MemoryStore {
     public jobs = new Map<string, Job>();
-    public savedCount = 0;
+    // Combined write counter — `save` and `mutate` both increment.
+    // P2-1 collapsed the runner's read-modify-write to `mutate`, so a
+    // handful of tests that used to assert `savedCount >= N` now read
+    // the same counter and still mean "at least N writes happened".
+    public writeCount = 0;
+    public mutateCount = 0;
     async list(): Promise<Job[]> {
         return [...this.jobs.values()];
     }
@@ -28,7 +33,26 @@ class MemoryStore {
         // Deep clone so test assertions can compare against the original
         // pre-mutation copy without seeing the runner's edits.
         this.jobs.set(job.id, structuredClone(job));
-        this.savedCount += 1;
+        this.writeCount += 1;
+    }
+    // Required since P2-1: the runner's history write goes through
+    // mutate exclusively (the get+save fallback had an ABA race with
+    // concurrent dispatcher callbacks). Implementation mirrors
+    // JobStore.mutate's contract: read the latest, run the updater,
+    // commit the result. Returning null deletes the job (not used by
+    // any runner test today but the API requires it for symmetry).
+    async mutate(id: string, update: (current: Job | null) => Job | null): Promise<Job | null> {
+        this.mutateCount += 1;
+        this.writeCount += 1;
+        const current = this.jobs.get(id) ?? null;
+        const next = update(current);
+        if (next === current) return current;
+        if (next === null) {
+            this.jobs.delete(id);
+            return null;
+        }
+        this.jobs.set(id, structuredClone(next));
+        return this.jobs.get(id) ?? null;
     }
     async delete(id: string): Promise<void> {
         this.jobs.delete(id);
@@ -104,7 +128,7 @@ test("successful invoke writes a history entry with status=ok", async () => {
             now: fixedDate("2026-01-01T00:00:00.000Z"),
         });
         await scheduler.start();
-        await waitFor(() => store.savedCount >= 1, 500);
+        await waitFor(() => store.writeCount >= 1, 500);
         scheduler.stop();
         const saved = store.jobs.get("a");
         ok(saved);
@@ -127,7 +151,7 @@ test("failing invoke writes status=err + error message", async () => {
             },
         });
         await scheduler.start();
-        await waitFor(() => store.savedCount >= 1, 500);
+        await waitFor(() => store.writeCount >= 1, 500);
         scheduler.stop();
         const saved = store.jobs.get("a");
         ok(saved);
@@ -172,7 +196,7 @@ test("history is truncated to HISTORY_LIMIT (20) entries", async () => {
         });
         await scheduler.start();
         // Fire ~25 times.
-        await waitFor(() => store.savedCount >= 25, 2_000);
+        await waitFor(() => store.writeCount >= 25, 2_000);
         scheduler.stop();
         const saved = store.jobs.get("a");
         ok(saved);
