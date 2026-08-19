@@ -190,10 +190,6 @@ fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
     let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
 
     // Bind a fake control socket so the reap ping probe gets a connection.
-    // Sandbox / macOS SUN_LEN may deny the bind -- skip the alive-listener
-    // assertion rather than fail the suite. The "reap doesn't reap a
-    // foreign daemon" + "idempotent when nothing to do" tests already
-    // cover the reap-not-killing-foreign case.
     let ctl_path = dir.join("run").join("sidecar-ctl.sock");
     let listener = match UnixListener::bind(&ctl_path) {
         Ok(l) => Some(l),
@@ -203,13 +199,32 @@ fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
             return;
         }
     };
-    let _ = listener;
-    let pid = std::process::id();
+    // Hold the listener alive so reap's `connect()` succeeds; we don't
+    // speak the protocol, so ping_control_socket reads EOF and returns
+    // None. The test exercises the path where ping fails despite the
+    // socket existing.
+    let _listener = listener;
+
+    // CRITICAL: do NOT use `std::process::id()` as the pid in the file.
+    // `pid_alive()` would return true (the test process IS alive), and
+    // reap's kill path would SIGTERM the test binary itself -- the whole
+    // suite dies. Spawn a long-lived child process whose pid we own and
+    // reap can safely signal; we kill it at end so the test doesn't leak.
+    let mut helper = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 30")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to spawn helper sleep");
+    let helper_pid = helper.id();
+
     let pid_file = dir.join("run").join("sidecar.pid");
     fs::write(
         &pid_file,
         format!(
-            r#"{{"version":1,"pid":{pid},"install_id":"{own_id}","started_at":"2026-08-19T10:00:00.000Z"}}"#
+            r#"{{"version":1,"pid":{helper_pid},"install_id":"{own_id}","started_at":"2026-08-19T10:00:00.000Z"}}"#
         ),
     )
     .unwrap();
@@ -222,10 +237,18 @@ fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
         resources_root: PathBuf::from("/fake/install"),
     };
 
-    // Should not panic. Reaping our own pid would actually kill the test
-    // process, so we trust the unit-tested ping_control_socket + pid_alive
-    // code paths to do the right thing without exercising the kill here.
+    // reap will: ping (returns None because listener doesn't speak JSON),
+    // then pid_alive(helper_pid) returns true, then SIGTERM the helper.
+    // 3s later, pid_alive still true, then SIGKILL. The helper dies
+    // outside our test process so the suite stays alive.
     let _outcome = reap_previous_daemon(&inputs);
+
+    // Reap the helper in case the test framework inherited it as a zombie.
+    // Best-effort: kill -0 then SIGKILL if still around.
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", &helper_pid.to_string()])
+        .status();
+    let _ = helper.wait();
 
     let _ = fs::remove_dir_all(&dir);
 }

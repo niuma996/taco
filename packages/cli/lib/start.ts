@@ -20,8 +20,11 @@
  * alive would tie the daemon's lifetime to whoever ran `taco start`.
  */
 
-import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { createRequire } from "node:module";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { computeInstallId, parsePidFile } from "./installId.ts";
 import { findPlatformPkg } from "./installHelpers.ts";
@@ -103,7 +106,12 @@ function pidAlive(pid: number): boolean {
  *
  *  Without this path a wedged daemon made every subsequent launch fail
  *  until the machine was rebooted. */
-async function killWedgedDaemon(runDir: string, socket: string, control: string): Promise<void> {
+async function killWedgedDaemon(
+    runDir: string,
+    socket: string,
+    control: string,
+    ownInstallId: string,
+): Promise<void> {
     const pidFile = join(runDir, "sidecar.pid");
     let parsed: ReturnType<typeof parsePidFile> | null = null;
     try {
@@ -111,10 +119,6 @@ async function killWedgedDaemon(runDir: string, socket: string, control: string)
     } catch {
         parsed = null;
     }
-    const ownInstallId = computeInstallId(
-        process.env.TACO_SIDECAR_RESOURCES ?? "",
-        TACO_HOME,
-    );
     // install_id is null for legacy bare-int files. We reap those — a
     // pre-PR-A daemon is the only thing that could have written them,
     // and the migration to the new format happens naturally on the next
@@ -180,6 +184,60 @@ export interface StartOptions {
  *  Best-effort: a failed apply (e.g. staging dir wiped) must not block the
  *  daemon from starting on the old bundle — the marker-clearing policy
  *  lives in upgradeApplyCommand. */
+/** Resolve the resources root the daemon would use when started by this CLI.
+ *  Mirrors `sidecarLauncher.ts::launchSidecar`'s dev/prod branch so the
+ *  install_id we stamp on the reap check matches the id the daemon will
+ *  stamp on its own pid file (sidecar/index.ts computes its id from
+ *  TACO_SIDECAR_RESOURCES). Without this symmetry, standalone \`taco start\`
+ *  (npm global) — whose own process doesn't see TACO_SIDECAR_RESOURCES —
+ *  computed hash("") and skipped every wedged reap as ForeignInstall,
+ *  leaving the wedged daemon alive until the next start. */
+function resolveDaemonResourcesRoot(): string | undefined {
+    const repoRoot = (() => {
+        try {
+            // Replicate sidecarLauncher.ts:findRepoRoot's pnpm-workspace.yaml walk.
+            const url = new URL(import.meta.url);
+            let dir = path.dirname(fileURLToPath(url));
+            for (let i = 0; i < 8; i++) {
+                if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
+                const parent = path.dirname(dir);
+                if (parent === dir) break;
+                dir = parent;
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    })();
+    const useDev =
+        repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0";
+    if (useDev && repoRoot) {
+        return join(repoRoot, "packages", "sidecar", "src");
+    }
+    // Prod: walk @taco-ai/sidecar-<platform>/ optional deps.
+    try {
+        const req = createRequire(import.meta.url);
+        for (const key of [
+            "@taco-ai/sidecar-darwin-arm64",
+            "@taco-ai/sidecar-darwin-x64",
+            "@taco-ai/sidecar-linux-arm64",
+            "@taco-ai/sidecar-linux-x64",
+            "@taco-ai/sidecar-win32-arm64",
+            "@taco-ai/sidecar-win32-x64",
+        ]) {
+            try {
+                const pkgJsonPath = req.resolve(`${key}/package.json`);
+                return path.dirname(pkgJsonPath);
+            } catch {
+                /* try next platform */
+            }
+        }
+    } catch {
+        /* no platform pkg installed */
+    }
+    return undefined;
+}
+
 async function applyOwnedPendingUpgrade(tacoHome: string): Promise<void> {
     const marker = await readUpgradeMarker(join(tacoHome, "upgrade-marker.json"));
     if (!marker) return;
@@ -221,7 +279,12 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
         process.stderr.write(
             "[taco] sidecar daemon accepts connections but does not serve; killing it\n",
         );
-        await killWedgedDaemon(runDir, socket, control);
+        const daemonResourcesRoot = resolveDaemonResourcesRoot();
+        const ownInstallId = computeInstallId(
+            daemonResourcesRoot ?? "",
+            tacoHome,
+        );
+        await killWedgedDaemon(runDir, socket, control, ownInstallId);
     }
 
     const lock = await acquireStartLock(runDir);

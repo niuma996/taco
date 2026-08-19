@@ -792,21 +792,28 @@ fn reap_stale_at(taco_home: &std::path::Path, app: &tauri::AppHandle) {
         compute_install_id, daemon_paths, reap_previous_daemon, ReapInputs,
     };
     let (pid_file, socket_path, control_socket_path) = daemon_paths(taco_home);
-    // Best-effort resources root -- release uses app resource_dir,
-    // dev uses the repo source root. Both can be empty if resolution
-    // failed; the install_id computation still produces a stable value
-    // and reap can still proceed (any non-matching id means "leave it
-    // alone" which is the safe default for foreign daemons).
-    let resources_root = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|p| p.join("sidecar").to_string_lossy().into_owned())
-        .or_else(|| {
-            let root = find_repo_root();
-            Some(root.join("packages").join("sidecar").join("src").to_string_lossy().into_owned())
-        })
-        .unwrap_or_default();
+    // Best-effort resources root -- mirrors `resolve_sidecar`'s
+    // priority exactly: debug builds always use the repo source root
+    // (where `pnpm tauri:dev` runs the bundle from), release uses
+    // Tauri's resource_dir (where the bundled sidecar sits). Without
+    // the debug_assertions gate, dev runs would compute the id from
+    // Tauri's target/debug resource_dir (which exists too), mismatch
+    // the daemon's repo/packages/sidecar/src id, and reap would always
+    // return ForeignInstall -- silently disabling dev-mode desktop reap.
+    let resources_root = if cfg!(debug_assertions) {
+        let root = find_repo_root();
+        root.join("packages")
+            .join("sidecar")
+            .join("src")
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        app.path()
+            .resource_dir()
+            .ok()
+            .map(|p| p.join("sidecar").to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
     let own_install_id =
         compute_install_id(&resources_root, &taco_home.to_string_lossy());
     let inputs = ReapInputs {

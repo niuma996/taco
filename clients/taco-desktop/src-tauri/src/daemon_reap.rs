@@ -295,27 +295,6 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
     Some(Pong { pid, uptime_s })
 }
 
-/// Convenience helper for the install path which needs to know "is there
-/// a daemon already up that I should defer to before spawning one?"
-/// without taking any destructive action.
-#[cfg(unix)]
-pub fn probe_daemon_alive(inputs: &ReapInputs<'_>) -> bool {
-    let raw = match std::fs::read_to_string(inputs.pid_file.as_path()) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let parsed = match parse_pid_file(&raw) {
-        Some(p) => p,
-        None => return false,
-    };
-    if let Some(ref id) = parsed.install_id {
-        if id != inputs.own_install_id {
-            return false;
-        }
-    }
-    ping_control_socket(inputs.control_socket_path.as_path(), Duration::from_millis(500)).is_some()
-}
-
 /// Resolve the canonical pid/socket paths under `$TACO_HOME/run/`. Mirrors
 /// `packages/cli/lib/paths.ts` so the Rust side doesn't have to repeat
 /// the join math at every call site.
@@ -353,6 +332,6 @@ pub fn reap_previous_daemon(_inputs: &()) -> ReapOutcome {
 pub mod __test_only {
     pub use super::{
         compute_install_id, daemon_paths, parse_pid_file, PidRecord, Pong, ReapInputs,
-        ReapOutcome, ping_control_socket, probe_daemon_alive, reap_previous_daemon,
+        ReapOutcome, ping_control_socket, reap_previous_daemon,
     };
 }
