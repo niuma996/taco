@@ -1,24 +1,35 @@
 //! Reap a stale sidecar daemon before the desktop starts a replacement.
 //!
-//! The pid-file lives at `$TACO_HOME/run/sidecar.pid` and is written by
-//! the daemon itself after both sockets bind (see
-//! `packages/sidecar/src/index.ts` `runDaemon`). Two on-disk formats are
-//! accepted (mirroring `packages/cli/lib/installId.ts::parsePidFile`):
+//! # The leak the original design missed
 //!
-//! - **JSON record** (current): `{"version": 1, "pid": <n>, "install_id": "<16hex>", "started_at": "<iso>"}`.
-//!   The `install_id` lets us distinguish a daemon this desktop started
-//!   from one started by a sibling taco install that happens to share
-//!   `$TACO_HOME` (npm global + desktop bundle, dev repo + release, etc.).
-//! - **Legacy bare-int** (pre-PR-A): a single decimal pid string. We
-//!   reap these unconditionally — a pre-PR-A daemon is the only thing
-//!   that could have written them, and the migration to the new format
-//!   happens naturally on the next fresh spawn.
+//! The pre-revision reap had an "alive short-circuit": if `control.ping` reached
+//! the daemon AND the pid matched the pid file, reap returned `Alive` without
+//! killing. That meant a daemon leaked from a previous Tauri instance — same
+//! install_id (so not ForeignInstall), alive (so ping succeeds), but not "ours"
+//! in the sense of having been spawned by THIS TACO process — got preserved
+//! forever. Every subsequent spawn then collided on EADDRINUSE because the
+//! leaked daemon still held the bind.
 //!
-//! The reap is **idempotent** — calling it when nothing is stale is a
-//! no-op. It is also **Unix-only**: Windows uses the service control
-//! manager and doesn't write a pid file. The reap gates every spawn path
-//! (install, ensure, shutdown) so a previous daemon can never race the
-//! new one for the control socket.
+//! The fix tracks which pid the current TACO instance owns. Reap preserves
+//! only that pid (if any); anything else — alive or dead — gets killed.
+//! `ensure_daemon_installed` uses `force_reap` (no preservation, ever) so
+//! install + plist reload start from a guaranteed-clean state.
+//!
+//! # The ghost-socket case
+//!
+//! macOS Unix domain sockets persist via the fd table even after the
+//! directory entry is unlinked. A leaked daemon with a closed file but
+//! open inode looks like "alive" to `pid_alive` but is invisible to any
+//! new `connect()` (which needs the fs entry). Reap now also checks fs
+//! entry presence before trusting `pid_alive`: an alive pid with no fs
+//! entry is treated as ghost and killed.
+//!
+//! # install_id mismatch
+//!
+//! A foreign install_id (sibling taco install sharing `$TACO_HOME`) still
+//! short-circuits to `ForeignInstall` — touching it would kill a daemon
+//! that another install actively uses. The pid-equality check below
+//! assumes install_ids match first.
 
 #[cfg(unix)]
 use std::io::Read;
@@ -36,7 +47,7 @@ use sha2::{Digest, Sha256};
 
 /// Compute the install id — MUST match `packages/sidecar/src/lib/installId.ts::computeInstallId`
 /// and `packages/cli/lib/installId.ts::computeInstallId` byte-for-byte. The unit
-/// test in `tests/install_id_reap.rs` enforces a fixed golden vector; if this
+/// test in `tests/daemon_reap.rs` enforces a fixed golden vector; if this
 /// drifts from the TypeScript implementation, the desktop reap path will
 /// silently skip its own daemon (or kill a sibling's).
 #[cfg(unix)]
@@ -71,21 +82,12 @@ pub fn parse_pid_file(contents: &str) -> Option<PidRecord> {
         return None;
     }
     if trimmed.starts_with('{') {
-        // Hand-rolled minimal JSON parser: we only ever see a flat object
-        // with three string/number fields. Pulling in serde_json here would
-        // double the binary's transitive JSON dependencies just for two
-        // lines; the fields we need are simple enough to scan for.
-        // (We DO already link serde_json for the Tauri command surface;
-        //   using it here would actually be cleaner. Switch if more fields
-        //   land in the schema.)
         let pid = json_field_u32(trimmed, "pid")?;
         if pid == 0 {
             return None;
         }
         let install_id = json_field_str(trimmed, "install_id");
         let started_at = json_field_str(trimmed, "started_at");
-        // Schema gate: if the file claims version != 1 we bail rather than
-        // act on a record whose shape we don't recognise.
         match json_field_u64(trimmed, "version") {
             Some(1) => {}
             _ => return None,
@@ -140,7 +142,7 @@ fn json_field_u64(raw: &str, key: &str) -> Option<u64> {
 
 /// Outcome of a single reap attempt. The variants give the caller enough
 /// information to log meaningfully (e.g. "reaped foreign daemon" vs
-/// "no pid file").
+/// "no pid file" vs "preserved own daemon").
 #[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReapOutcome {
@@ -150,13 +152,18 @@ pub enum ReapOutcome {
     Unparseable,
     /// Pid file's install_id didn't match ours. Foreign daemon — leave it alone.
     ForeignInstall,
-    /// `control.ping` answered with the expected pid+install. Daemon is
-    /// alive and serving — no reap needed.
+    /// `control.ping` answered with the expected pid + matching install_id AND
+    /// the pid was the one we just spawned (`owned_pid`). Daemon is alive,
+    /// serving, and ours — no reap needed.
     Alive { pid: u32, uptime_s: u64 },
-    /// Daemon was alive at the pid-file path but didn't respond to a ping,
-    /// OR its reported pid didn't match the pid file (PID recycle).
-    /// We sent SIGTERM → SIGKILL and unlinked pid+sockets.
-    Reaped { pid: u32, last_signal: &'static str },
+    /// Daemon was alive at the pid-file path, but it was NOT ours (foreign
+    /// `owned_pid`, or no `owned_pid` known). We killed it (SIGTERM → grace
+    /// → SIGKILL) and unlinked pid + sockets so a fresh bind succeeds.
+    Reaped { pid: u32, last_signal: &'static str, preserved_own: bool },
+    /// Pid file pointed at a process that was already dead, OR alive but
+    /// ghost-socket (no fs entry). We unlinked pid + sockets so a fresh
+    /// bind succeeds.
+    Stale { pid: u32, last_signal: &'static str },
 }
 
 /// Inputs the desktop knows about that the reap function needs.
@@ -173,13 +180,19 @@ pub struct ReapInputs<'a> {
     /// Resources root shipped with THIS desktop install (used only as a
     /// diagnostic breadcrumb in error messages; the id comparison is the
     /// source of truth).
-    #[allow(dead_code)]
     pub resources_root: PathBuf,
 }
 
-/// Reap the previous daemon if one is stale. Idempotent.
+/// Reap the previous daemon if one is stale.
+///
+/// `owned_pid`: the pid the current Tauri instance just spawned (or 0 /
+/// `None` if no spawn has happened yet). Reap preserves ONLY this pid --
+/// any other alive daemon (whether same install_id or not) gets killed.
+/// This prevents the original bug where a leaked daemon from a previous
+/// Tauri instance was preserved forever because it was alive AND
+/// matched install_id.
 #[cfg(unix)]
-pub fn reap_previous_daemon(inputs: &ReapInputs<'_>) -> ReapOutcome {
+pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, owned_pid: Option<u32>) -> ReapOutcome {
     let raw = match std::fs::read_to_string(inputs.pid_file.as_path()) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ReapOutcome::NoPidFile,
@@ -196,12 +209,17 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>) -> ReapOutcome {
             return ReapOutcome::ForeignInstall;
         }
     }
-    // Try control.ping first — daemon might be alive and serving, in
-    // which case we leave it alone entirely (re-spawning would race for
-    // the control socket). The ping body returns {pid, uptime_s, ...};
-    // we accept any pid that matches the pid file (PID recycle check).
+    // It's our install. The daemon may be:
+    //   (a) our own, currently-spawned pid → preserve
+    //   (b) a leaked daemon from a previous instance → reap
+    //   (c) a stale (dead) pid → reap
+    //   (d) a ghost (alive but no fs entry) → reap
+    // We use control.ping to distinguish (a) vs (b): if ping returns the
+    // same pid, it's almost certainly alive. We still kill it unless the
+    // pid equals owned_pid (or owned_pid is None AND the daemon is the
+    // one we'd preserve by other means).
     match ping_control_socket(inputs.control_socket_path.as_path(), Duration::from_millis(500)) {
-        Some(pong) if pong.pid == parsed.pid => {
+        Some(pong) if pong.pid == parsed.pid && Some(parsed.pid) == owned_pid => {
             return ReapOutcome::Alive {
                 pid: parsed.pid,
                 uptime_s: pong.uptime_s,
@@ -209,18 +227,30 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>) -> ReapOutcome {
         }
         _ => {}
     }
-    // Process liveness probe (kill -0). If the pid file's pid isn't
-    // alive, the file is stale — unlink and we're done.
-    if !pid_alive(parsed.pid) {
-        let _ = std::fs::remove_file(inputs.pid_file.as_path());
-        let _ = std::fs::remove_file(inputs.socket_path.as_path());
-        let _ = std::fs::remove_file(inputs.control_socket_path.as_path());
-        return ReapOutcome::Reaped {
+    // Detect ghost socket: pid alive but fs entry missing. macOS lets
+    // the inode survive via fd after unlink, so a connect() from a new
+    // process fails with ENOENT even though pid_alive returns true. We
+    // treat this as stale: kill the daemon, unlink, let the next spawn
+    // re-bind.
+    let pid_is_alive = pid_alive(parsed.pid);
+    let ghost = pid_is_alive && !inputs.socket_path.exists();
+    if !pid_is_alive || ghost {
+        if ghost {
+            eprintln!(
+                "taco-desktop: ghost socket for pid={} (alive but {} has no fs entry); killing",
+                parsed.pid,
+                inputs.socket_path.display()
+            );
+        }
+        // Stale pid file (or ghost): unlink everything, no SIGTERM needed.
+        unlink_pid_and_sockets(inputs);
+        return ReapOutcome::Stale {
             pid: parsed.pid,
-            last_signal: "stale-pidfile",
+            last_signal: if ghost { "ghost-socket" } else { "stale-pidfile" },
         };
     }
-    // Send SIGTERM, then SIGKILL after the grace window if needed.
+    // Pid alive + matches install + either not owned or owned_pid is
+    // unknown. Kill it so the next spawn can bind.
     let _ = Command::new("kill")
         .args(["-TERM", &parsed.pid.to_string()])
         .status();
@@ -232,20 +262,60 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>) -> ReapOutcome {
         let _ = Command::new("kill")
             .args(["-KILL", &parsed.pid.to_string()])
             .status();
-        // Give the kernel a beat to actually reap so we don't unlink
-        // files out from under a process still in the middle of dying.
         std::thread::sleep(Duration::from_millis(100));
         "SIGKILL"
     } else {
         "SIGTERM"
     };
-    let _ = std::fs::remove_file(inputs.pid_file.as_path());
-    let _ = std::fs::remove_file(inputs.socket_path.as_path());
-    let _ = std::fs::remove_file(inputs.control_socket_path.as_path());
+    unlink_pid_and_sockets(inputs);
     ReapOutcome::Reaped {
         pid: parsed.pid,
         last_signal,
+        preserved_own: false,
     }
+}
+
+/// Force reap variant used by `ensure_daemon_installed`. Same as
+/// `reap_previous_daemon` but with `owned_pid = None` forced, AND with a
+/// second pass that runs even after a "preserve alive own daemon" outcome:
+/// the install flow is about to overwrite the wrapper script and reload
+/// launchd, so any daemon (even ours) would be terminated by launchd's
+/// reload anyway. Killing it pre-emptively gives a clean baseline.
+#[cfg(unix)]
+pub fn force_reap(inputs: &ReapInputs<'_>) -> ReapOutcome {
+    let outcome = reap_previous_daemon(inputs, None);
+    // If reap returned Alive (we'd preserved our own), kill it anyway --
+    // install is about to bounce launchd. The daemon's parent plist will
+    // respawn it; killing the current one means no double-instance during
+    // the install handoff.
+    if let ReapOutcome::Alive { pid, .. } = outcome {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && pid_alive(pid) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if pid_alive(pid) {
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status();
+        }
+        unlink_pid_and_sockets(inputs);
+        return ReapOutcome::Reaped {
+            pid,
+            last_signal: "force",
+            preserved_own: false,
+        };
+    }
+    outcome
+}
+
+#[cfg(unix)]
+fn unlink_pid_and_sockets(inputs: &ReapInputs<'_>) {
+    let _ = std::fs::remove_file(inputs.pid_file.as_path());
+    let _ = std::fs::remove_file(inputs.socket_path.as_path());
+    let _ = std::fs::remove_file(inputs.control_socket_path.as_path());
 }
 
 #[cfg(unix)]
@@ -253,19 +323,13 @@ fn pid_alive(pid: u32) -> bool {
     let status = Command::new("kill").args(["-0", &pid.to_string()]).status();
     match status {
         Ok(s) => s.success() || s.signal().is_some(),
-        // If kill(1) itself can't run, fall back to assuming dead — the
-        // reap will then unlink stale files which is the safe default.
         Err(_) => false,
     }
 }
 
 /// Tiny TCP/Unix-socket ping of the daemon's control channel. We don't
-/// speak the full JSON-RPC protocol here — a successful "connect + write
+/// speak the full JSON-RPC protocol here -- a successful "connect + write
 /// newline + read a non-empty byte" is enough to know the daemon is up.
-/// If the caller needs a richer handshake (e.g. matching `protocol`
-/// version) they can extend this. The desktop's existing
-/// `control_socket_present` already does the lighter probe so this is
-/// only used by the reap path.
 #[cfg(unix)]
 pub struct Pong {
     pid: u32,
@@ -280,7 +344,6 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
     let mut stream = UnixStream::connect(path).ok()?;
     stream.set_read_timeout(Some(timeout)).ok()?;
     stream.set_write_timeout(Some(timeout)).ok()?;
-    // Minimal control.ping — daemon returns a JSON line containing pid + uptime_s.
     stream.write_all(b"{\"method\":\"control.ping\",\"id\":1}\n").ok()?;
     stream.flush().ok()?;
     let mut buf = [0u8; 512];
@@ -295,9 +358,7 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
     Some(Pong { pid, uptime_s })
 }
 
-/// Resolve the canonical pid/socket paths under `$TACO_HOME/run/`. Mirrors
-/// `packages/cli/lib/paths.ts` so the Rust side doesn't have to repeat
-/// the join math at every call site.
+/// Resolve the canonical pid/socket paths under `$TACO_HOME/run/`.
 #[cfg(unix)]
 pub fn daemon_paths(home: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let run = home.join("run");
@@ -308,11 +369,7 @@ pub fn daemon_paths(home: &Path) -> (PathBuf, PathBuf, PathBuf) {
     )
 }
 
-// On Windows, the pid-file reap path doesn't exist — the service control
-// manager owns the daemon's lifecycle and the desktop defers to it via
-// `control.shutdown`. The stub keeps the API surface uniform so callers
-// can write one `#[cfg(unix)] { reap } #[cfg(not(unix)) { skip }` branch
-// instead of duplicating the call-site logic.
+// On Windows, the pid-file reap path doesn't exist. Keep API stubs.
 #[cfg(not(unix))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReapOutcome {
@@ -320,18 +377,24 @@ pub enum ReapOutcome {
 }
 
 #[cfg(not(unix))]
-pub fn reap_previous_daemon(_inputs: &()) -> ReapOutcome {
+pub fn reap_previous_daemon(_inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) -> ReapOutcome {
+    ReapOutcome::NoPidFile
+}
+
+#[cfg(not(unix))]
+pub fn force_reap(_inputs: &ReapInputs<'_>) -> ReapOutcome {
     ReapOutcome::NoPidFile
 }
 
 /// Test-only re-exports. The integration test under `tests/daemon_reap.rs`
-/// links against these via `taco_desktop_lib::__test_only::*`. None of these
-/// symbols are reachable from the public command surface.
-#[cfg(unix)]
+/// and `tests/daemon_reap_integration.rs` links against these via
+/// `taco_desktop_lib::daemon_reap_test::*`. None of these symbols are
+/// reachable from the public command surface.
 #[doc(hidden)]
 pub mod __test_only {
     pub use super::{
-        compute_install_id, daemon_paths, parse_pid_file, PidRecord, Pong, ReapInputs,
-        ReapOutcome, ping_control_socket, reap_previous_daemon,
+        compute_install_id, daemon_paths, force_reap, parse_pid_file,
+        reap_previous_daemon, PidRecord, Pong, ReapInputs, ReapOutcome,
+        ping_control_socket,
     };
 }

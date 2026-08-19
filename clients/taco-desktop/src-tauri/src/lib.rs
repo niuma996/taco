@@ -11,7 +11,7 @@
  */
 
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -116,6 +116,11 @@ pub struct AppState {
     /// dispose 期间为 true —— ensure 在 spawn 前后都会检查,避免在 dispose 之后
     /// install 一个马上被杀的进程(orphan)。
     shutdown_initiated: AtomicBool,
+    /// Pid of the daemon the current Tauri instance last successfully spawned
+    /// (release-mode launcher pid == daemon pid). Used by reap_previous_daemon
+    /// to distinguish "alive and ours" from "alive and leaked from a prior
+    /// instance". 0 = no spawn yet.
+    owned_sidecar_pid: AtomicU32,
     /// Per-process log file family, set when a sidecar is installed. None
     /// before the first install; recreated on each new sidecar process so the
     /// file's lifetime matches the process lifetime — simpler reasoning, and
@@ -160,6 +165,7 @@ impl Default for AppState {
             sidecar: Mutex::new(None),
             next_process_generation: AtomicU64::new(1),
             shutdown_initiated: AtomicBool::new(false),
+            owned_sidecar_pid: AtomicU32::new(0),
             log_files: Arc::new(StdMutex::new(None)),
             stderr_reader: StdMutex::new(None),
             handshake_line: StdMutex::new(None),
@@ -347,7 +353,8 @@ async fn workspace_ensure(
     #[cfg(unix)]
     {
         if let Ok(taco_home) = resolve_taco_home(&app) {
-            reap_stale_at(&taco_home, &app);
+            let owned = state.owned_sidecar_pid.load(Ordering::Acquire);
+            reap_stale_at(&taco_home, &app, if owned > 0 { Some(owned) } else { None });
         }
     }
 
@@ -393,10 +400,26 @@ async fn workspace_ensure(
     for (key, value) in &resolution.extra_env {
         cmd.env(key, value);
     }
+    // Tee daemon stderr to the same file launchd uses (best-effort).
+    // The desktop spawn path does not go through launchd, so without
+    // this the daemon's logs would only survive in the parent's captured
+    // stderr buffer (capped at 4 KiB and lost on app quit).
+    let stderr_log_path = resolved_home.join("logs").join("daemon.err.log");
+    cmd.env("TACO_STDERR_LOG", &stderr_log_path);
 
     let mut launcher = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar launcher: {e}"))?;
+    // Record the pid we just spawned. reap_previous_daemon uses this
+    // to distinguish "alive and ours" from "alive and leaked from a prior
+    // instance". launcher.pid == daemon.pid in release mode (release
+    // spawns the daemon bundle directly, not via a CLI launcher).
+    // tokio::process::Child::id() returns Option<u32>; on a successful
+    // spawn the OS has assigned a pid so this is always Some, but the
+    // type forces us to handle None. 0 means "no spawn yet" in our
+    // owned_sidecar_pid encoding, so any future reap correctly falls
+    // into the "kill any alien daemon" path.
+    let spawned_pid = launcher.id().unwrap_or(0);
     let generation = state.next_process_generation.fetch_add(1, Ordering::Relaxed);
 
     // Drain the launcher's stderr into stderr_buf (capped at 4 KiB). Kept
@@ -616,6 +639,12 @@ async fn workspace_ensure(
         launcher: Some(launcher),
         generation,
     });
+    // Stamp owned_sidecar_pid from the spawned launcher. The slot's
+    // launcher is the daemon in release mode; in dev mode the launcher
+    // is the CLI which exits, but the slot's existing generation tracking
+    // handles the bookkeeping for dev. Either way, recording the pid we
+    // just spawned lets the next reap preserve our own daemon.
+    state.owned_sidecar_pid.store(spawned_pid, Ordering::Release);
     // Release the slot lock before awaiting the hello so concurrent ensure()
     // callers aren't serialized behind it (the hello normally lands in ms).
     drop(slot);
@@ -717,10 +746,15 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
             // Reap covers the dev-mode orphan (CLI launcher already
             // exited; daemon detached and unreachable via launcher
             // handle) AND the rare prod case where the daemon is
-            // wedged and ignored control.shutdown. Idempotent: a
-            // missing pid file is a no-op.
+            // wedged and ignored control.shutdown. We pass owned_pid
+            // so a daemon we ourselves spawned this session isn't
+            // needlessly killed -- though we're already tearing it down
+            // via control.shutdown above, this is a belt-and-braces
+            // for the wedged-daemon case where the daemon ignored
+            // control.shutdown entirely.
             if let Ok(home) = resolve_taco_home(app) {
-                reap_stale_at(&home, app);
+                let owned = state.owned_sidecar_pid.load(Ordering::Acquire);
+                reap_stale_at(&home, app, if owned > 0 { Some(owned) } else { None });
             }
         }
         // Final fallback: kill the launcher handle directly. In dev
@@ -736,6 +770,9 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
             }
         }
     }
+    // Clear owned_sidecar_pid so the next spawn's reap doesn't
+    // accidentally try to preserve a pid we just tore down.
+    state.owned_sidecar_pid.store(0, Ordering::Release);
     state.shutdown_initiated.store(false, Ordering::Release);
 }
 
@@ -787,7 +824,11 @@ async fn set_fs_scope(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn reap_stale_at(taco_home: &std::path::Path, app: &tauri::AppHandle) {
+fn reap_stale_at(
+    taco_home: &std::path::Path,
+    app: &tauri::AppHandle,
+    owned_pid: Option<u32>,
+) {
     use crate::daemon_reap::{
         compute_install_id, daemon_paths, reap_previous_daemon, ReapInputs,
     };
@@ -823,7 +864,7 @@ fn reap_stale_at(taco_home: &std::path::Path, app: &tauri::AppHandle) {
         own_install_id: &own_install_id,
         resources_root: std::path::PathBuf::from(&resources_root),
     };
-    let outcome = reap_previous_daemon(&inputs);
+    let outcome = reap_previous_daemon(&inputs, owned_pid);
     // Best-effort log only -- never block setup on a reap that finds
     // nothing. Operators see this in `pnpm tauri:dev` stderr.
     eprintln!("taco-desktop: reap outcome = {:?}", outcome);
@@ -837,20 +878,19 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
         Ok(h) => h,
         Err(_) => return Ok(()),
     };
+    // force_reap BEFORE checking control_socket_present. The previous
+    // order (probe then reap) leaked state when a daemon from an earlier
+    // TACO instance was alive: control_socket_present returned true
+    // (skip install), but the daemon wasn't ours -- it was a relic
+    // holding the bind. After reap, control_socket_present gives an
+    // honest read.
+    #[cfg(unix)]
+    {
+        reap_stale_at(&taco_home, app.handle(), None);
+    }
     let control = control_socket_path(&taco_home);
     if control_socket_present(&control) {
         return Ok(());
-    }
-    // Reap any stale daemon before installing the launchd/schtasks
-    // service. Without this, a previously-killed daemon could leave a
-    // pid file + socket file behind; the freshly-loaded plist would
-    // then race the install probe for the same control socket and
-    // launchd would either bounce (Crashed=true) or skip the spawn
-    // entirely depending on the timing. Idempotent on Unix; Windows
-    // is a no-op since pid files aren't written there.
-    #[cfg(unix)]
-    {
-        reap_stale_at(&taco_home, app.handle());
     }
     let Some(launcher) = resolve_install_launcher(app) else {
         return Ok(());

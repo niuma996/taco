@@ -562,6 +562,33 @@ async function main(): Promise<void> {
         log.info("augmented PATH from login shell");
     }
 
+    // Diagnostic: macOS launches .app bundles with cwd="/" by default,
+    // which means relative paths (e.g. for runtime resources) resolve
+    // against /. Surface this early so the desktop log shows it.
+    // Also tee stderr to ~/.taco/logs/daemon.err.log when the env var
+    // points there -- launchd-managed daemons get this for free via the
+    // plist's StandardErrorPath, but direct-spawned (release-mode
+    // workspace_ensure) daemons would otherwise lose their stderr to a
+    // captured pipe buffer in the parent.
+    if (process.cwd() === "/") {
+        log.warn("cwd is / (typical for .app bundles); runtime resources must use absolute paths");
+    }
+    if (process.env.TACO_STDERR_LOG) {
+        try {
+            const fs = await import("node:fs/promises");
+            await fs.appendFile(process.env.TACO_STDERR_LOG, `\n--- sidecar started pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()} ---\n`);
+            const origWrite = process.stderr.write.bind(process.stderr);
+            // deno-lint-ignore no-explicit-any
+            (process.stderr as any).write = (chunk: any, ...rest: any[]) => {
+                fs.appendFile(process.env.TACO_STDERR_LOG!, chunk.toString()).catch(() => {});
+                return origWrite(chunk, ...rest);
+            };
+            log.info("stderr tee active -> " + process.env.TACO_STDERR_LOG);
+        } catch (err) {
+            log.warn("failed to set up stderr tee: " + String(err));
+        }
+    }
+
     const deps = await resolveDeps();
 
     if (process.env.TACO_DAEMON_MODE === "1") {

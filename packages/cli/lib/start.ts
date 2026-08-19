@@ -287,6 +287,21 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
         await killWedgedDaemon(runDir, socket, control, ownInstallId);
     }
 
+    // Belt-and-braces: reap any leftover pid file even when probe was
+    // "absent". A pid file pointing at a dead pid doesn't show up as
+    // "wedged" (no listener) but it does mean our subsequent spawn
+    // could race with cleanup. Force-reap for a deterministic baseline.
+    // Belt-and-braces: at this point probe is narrowed to "absent".
+    // A pid file pointing at a dead pid doesn't show up as "wedged" (no
+    // listener) but it does mean our subsequent spawn could race with
+    // cleanup. Force-reap for a deterministic baseline.
+    const daemonResourcesRoot = resolveDaemonResourcesRoot();
+    const ownInstallId = computeInstallId(
+        daemonResourcesRoot ?? "",
+        tacoHome,
+    );
+    await killWedgedDaemon(runDir, socket, control, ownInstallId);
+
     const lock = await acquireStartLock(runDir);
     if (!lock) {
         // Another process is mid-spawn. Wait for its daemon rather than racing

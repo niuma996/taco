@@ -160,6 +160,20 @@ export async function installLaunchd(input: InstallLaunchdInput): Promise<Instal
     });
     writeFileSync(plistPath, plistContent, { mode: 0o644 });
 
+    // bootout-then-load. `launchctl load -w` on a service that's ALREADY
+    // loaded is a no-op in some macOS versions (the service keeps running
+    // the old wrapper binary even though the plist on disk changed). We
+    // force a bootout first so the new plist + wrapper always take effect.
+    // `bootout` on a non-loaded service is exit 3 ("No such process"),
+    // which we tolerate.
+    try {
+        await execFile("launchctl", ["bootout", plistPath], {
+            allowFailure: true,
+        });
+    } catch {
+        // Older launchctl versions may not accept bootout without a target
+        // domain; the subsequent load still works as before.
+    }
     // `-w` persists the load across reboots; without it launchd forgets the
     // agent on the next login and the desktop has to re-install.
     await execFile("launchctl", ["load", "-w", plistPath]);
