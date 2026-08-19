@@ -32,8 +32,8 @@ afterEach(cleanup);
 
 interface ScriptedJobsClient {
     list: () => Promise<unknown>;
-    create: () => Promise<unknown>;
-    update: () => Promise<unknown>;
+    create: (params: Record<string, unknown>) => Promise<unknown>;
+    update: (params: Record<string, unknown>) => Promise<unknown>;
     delete: () => Promise<unknown>;
     runNow: () => Promise<unknown>;
     history: () => Promise<unknown>;
@@ -46,8 +46,8 @@ interface ScriptedJobsClient {
 function makeClient(jobs: Partial<ScriptedJobsClient> = {}): TacoClient {
     const defaults: ScriptedJobsClient = {
         list: () => Promise.resolve({ jobs: [] }),
-        create: ({ job }: { job: unknown }) => Promise.resolve({ job }),
-        update: ({ job }: { job: unknown }) => Promise.resolve({ job }),
+        create: ({ job }: Record<string, unknown>) => Promise.resolve({ job }),
+        update: ({ job }: Record<string, unknown>) => Promise.resolve({ job }),
         delete: () => Promise.resolve({ deleted: true }),
         runNow: () => Promise.resolve({ ran: true }),
         history: () => Promise.resolve({ history: null }),
