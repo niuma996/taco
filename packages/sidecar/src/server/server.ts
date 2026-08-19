@@ -402,6 +402,10 @@ export class SidecarServer implements ServerRpcSurface {
         this.conversationRouter?.registerExternalSession(workspace, sessionId);
     }
 
+    lookupRoute(workspace: string): { sessionId: string } | undefined {
+        return this.conversationRouter?.lookupByWorkspace(workspace);
+    }
+
     /**
      * `ServerRpcSurface.markInitialized` — flip the `not_initialized` guard after the
      * `initialize` handler accepts the client's protocol version. Idempotent.

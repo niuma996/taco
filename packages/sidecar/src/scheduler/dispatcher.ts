@@ -7,7 +7,7 @@
  * `SidecarServer.dispatchRpc`.
  *
  * Session strategy governs how a fire maps onto a session id:
- *   - `new` (default): every fire creates a fresh `sched-<uuid>` session
+ *   - `new` (non-channel explicit): every fire creates a fresh `sched-<uuid>` session
  *     via `session.create({ initialPrompt })` — creating + running in one
  *     wire call avoids any create→prompt race window if the scheduler
  *     dies between them.
@@ -28,7 +28,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { parseImCwd, type RpcRequest, type RpcResponse } from "@taco-ai/protocol";
+import type { RpcRequest, RpcResponse } from "@taco-ai/protocol";
 
 import { createLogger } from "../lib/logger.ts";
 import type { Job, SessionStrategy } from "./types.ts";
@@ -39,12 +39,7 @@ const log = createLogger("sidecar.scheduler.dispatcher");
  *  so tests can stub it without dragging in the full ServerRpcSurface. */
 interface DispatchSurface {
     dispatchRpc(req: RpcRequest): Promise<RpcResponse>;
-    /** Bind a session to its (channel, peer, chat) triple so the channel's
-     *  reply router can address outbound messages. Required after the
-     *  pin strategy creates a session via `session.create` directly —
-     *  that path bypasses `conversationRouter.route()` and would otherwise
-     *  leave the session unrouteable. No-op for non-IM workspaces. */
-    registerRoute?(workspace: string, sessionId: string): Promise<void>;
+    lookupRoute?(workspace: string): { sessionId: string } | undefined;
 }
 
 /** Resolve the runtime server a job's invoke should dispatch to, based on
@@ -154,11 +149,6 @@ async function invokeAgent(
             // Falling through to the create branch re-pins a fresh session
             // instead, so the job self-heals on its next tick.
             if (pinned && (await sessionExists(server, workspace, pinned))) {
-                // Register before prompting: the reverse index is in-memory
-                // only, so after a daemon restart the attach path is the
-                // only thing that can rebuild it. Skipping it here means
-                // every fire after a restart drops its replies.
-                await registerRouteBestEffort(server, workspace, pinned);
                 await attachAndPrompt(server, workspace, pinned, prompt);
                 return;
             }
@@ -168,17 +158,6 @@ async function invokeAgent(
                 );
             }
             const id = `sched-pin-${job.id}`;
-            const im = isImWorkspace(workspace) ? parseImCwd(workspace) : undefined;
-            // imRouting is stored in the session file header and read by
-            // rebuildFromJsonl to seed the forward route map. We use
-            // "scheduler" as the channelId so rebuildFromJsonl seeds the pin
-            // session under a different routes key than the peer's live
-            // conversation (im://scheduler/... vs im://wechat/...). The peer's
-            // peerId and chatId are preserved so findRouteBySessionId still
-            // resolves the correct destination for the agent's replies.
-            const imRouting = im
-                ? { channelId: "scheduler", peerId: im.peerId, chatId: im.chatId }
-                : undefined;
             const res = await server.dispatchRpc({
                 id,
                 method: "session.create",
@@ -186,11 +165,9 @@ async function invokeAgent(
                     workspace,
                     sessionId: id,
                     initialPrompt: prompt,
-                    ...(imRouting ? { imRouting } : {}),
                 },
             });
             if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
-            await registerRouteBestEffort(server, workspace, id);
             if (onPinnedSessionCreated) {
                 await onPinnedSessionCreated(job.id, id);
             }
@@ -205,7 +182,15 @@ async function invokeAgent(
  *  immediately rather than silently falling back to a different behavior.
  *  Unknown stored values coerce to the safe default `new`. */
 function resolveStrategy(raw: SessionStrategy | undefined, workspace: string): SessionStrategy {
-    if (!raw || raw === "new") return "new";
+    if (!raw) return isImWorkspace(workspace) ? "reuse" : "pin";
+    if (raw === "new") {
+        if (isImWorkspace(workspace)) {
+            throw new InvalidSessionStrategy(
+                "new strategy is only available for non-channel workspaces",
+            );
+        }
+        return "new";
+    }
     if (raw === "reuse") {
         if (!isImWorkspace(workspace)) {
             throw new InvalidSessionStrategy(
@@ -214,8 +199,15 @@ function resolveStrategy(raw: SessionStrategy | undefined, workspace: string): S
         }
         return "reuse";
     }
-    if (raw === "pin") return "pin";
-    return "new";
+    if (raw === "pin") {
+        if (isImWorkspace(workspace)) {
+            throw new InvalidSessionStrategy(
+                "pin strategy is only available for non-channel workspaces",
+            );
+        }
+        return "pin";
+    }
+    return "pin";
 }
 
 function isImWorkspace(workspace: string): boolean {
@@ -252,44 +244,16 @@ async function sessionExists(
     }
 }
 
-/** Bind a scheduler-owned session to its IM triple so channel replies can
- *  address the peer. Never throws: the session already exists (and may
- *  already be mid-turn), so a routing-index failure is worth a warning but
- *  not worth failing the fire and losing the agent's work. The symptom of a
- *  miss is a dropped reply, which the channel logs on its own. */
-async function registerRouteBestEffort(
-    server: DispatchSurface,
-    workspace: string,
-    sessionId: string,
-): Promise<void> {
-    if (!server.registerRoute) return;
-    try {
-        await server.registerRoute(workspace, sessionId);
-    } catch (err) {
-        log.warn(`failed to register route for ${sessionId} on ${workspace}: ${String(err)}`);
-    }
-}
-
 /** Find the sessionId bound to an IM workspace via the routing table.
  *  `session.list` returns every session under the workspace; we pick the
  *  most recently updated one matching the routing entry. Returns undefined
  *  when nothing is routed yet — the caller decides whether to fall back,
- *  error, or create (currently `reuse` errors; `pin` with no id creates). */
+ *  error, or create (currently `reuse` errors). */
 async function lookupSession(
     server: DispatchSurface,
     workspace: string,
 ): Promise<string | undefined> {
-    const res = await server.dispatchRpc({
-        id: randomUUID(),
-        method: "session.list",
-        params: { workspace },
-    });
-    if (!res.ok) return undefined;
-    const sessions = ((res.result as { sessions?: unknown }).sessions ?? []) as Array<{
-        sessionId?: string;
-    }>;
-    const first = sessions.find((s) => typeof s.sessionId === "string")?.sessionId;
-    return first;
+    return server.lookupRoute?.(workspace)?.sessionId;
 }
 
 async function attachAndPrompt(

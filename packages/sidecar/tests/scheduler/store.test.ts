@@ -8,6 +8,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { JobAlreadyExistsError } from "../../src/lib/jobsErrors.ts";
 import { InvalidJobIdError } from "../../src/scheduler/jobId.ts";
 import { JobStore } from "../../src/scheduler/store.ts";
 import type { Job } from "../../src/scheduler/types.ts";
@@ -67,6 +68,32 @@ test("save overwrites the existing file atomically (no leftover .tmp)", async ()
         // suggest a half-finished write that future saves would clobber.
         const tmpPath = join(dir, "abc-123.json.tmp");
         await rejects(stat(tmpPath), /ENOENT/);
+    });
+});
+
+test("concurrent saves for one job serialize without temp-file collisions", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        await Promise.all(
+            Array.from({ length: 20 }, (_, index) =>
+                store.save(sampleJob({ name: `write-${index}` })),
+            ),
+        );
+        const saved = await store.get("abc-123");
+        ok(saved);
+        ok(/^write-\d+$/.test(saved.name));
+    });
+});
+
+test("create is exclusive and never overwrites an existing job", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        await store.create(sampleJob({ name: "first" }));
+        await rejects(
+            () => store.create(sampleJob({ name: "second" })),
+            (err: unknown) => err instanceof JobAlreadyExistsError,
+        );
+        strictEqual((await store.get("abc-123"))?.name, "first");
     });
 });
 

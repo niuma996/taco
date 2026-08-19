@@ -94,7 +94,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         });
     });
 
-    it("jobsCreate dispatches to JOBS_RPC.create (IM, explicit pin)", async () => {
+    it("jobsCreate dispatches to JOBS_RPC.create (IM, explicit reuse)", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -106,14 +106,14 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 args: { prompt: "summarize" },
                 enabled: true,
                 run_on_startup: false,
-                sessionStrategy: "pin",
+                sessionStrategy: "reuse",
             },
         } as unknown as JobsCreateInput;
         await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
         assert.equal(records[0].method, JOBS_RPC.create);
         const params = records[0].params as { job: Job; actor: unknown };
         assert.equal(params.job.id, "morning-brief");
-        assert.equal(params.job.sessionStrategy, "pin");
+        assert.equal(params.job.sessionStrategy, "reuse");
         // Critical: args.workspace is injected from ctx.workspace (the im:// URL
         // for IM sessions), NOT from anything the model passed. This is what
         // makes the model-side schema permissive while the wire-side
@@ -169,7 +169,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         assert.equal(params.job.args.workspace, "/tmp/ws");
     });
 
-    it("jobsCreate fills default 'pin' for IM when sessionStrategy is omitted", async () => {
+    it("jobsCreate fills default 'reuse' for IM when sessionStrategy is omitted", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -185,10 +185,10 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         } as unknown as JobsCreateInput;
         await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
         const params = records[0].params as { job: Job };
-        assert.equal(params.job.sessionStrategy, "pin");
+        assert.equal(params.job.sessionStrategy, "reuse");
     });
 
-    it("jobsCreate fills default 'reuse' for IDE when sessionStrategy is omitted", async () => {
+    it("jobsCreate fills default 'pin' for IDE when sessionStrategy is omitted", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -204,10 +204,10 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         } as unknown as JobsCreateInput;
         await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
         const params = records[0].params as { job: Job };
-        assert.equal(params.job.sessionStrategy, "reuse");
+        assert.equal(params.job.sessionStrategy, "pin");
     });
 
-    it("jobsCreate rejects 'reuse' on IM sessions (must pin)", async () => {
+    it("jobsCreate allows 'reuse' on IM sessions", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -222,14 +222,11 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "reuse",
             },
         } as unknown as JobsCreateInput;
-        await assert.rejects(
-            () => tool.execute("tc-1", input, undefined, undefined, makeImCtx(records)),
-            /sessionStrategy="reuse" is not allowed in an IM session/,
-        );
-        assert.equal(records.length, 0, "tool must not dispatch when strategy is rejected");
+        await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
+        assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "reuse");
     });
 
-    it("jobsCreate rejects 'new' on IM sessions (must pin)", async () => {
+    it("jobsCreate rejects 'new' on IM sessions (must reuse)", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -246,12 +243,12 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         } as unknown as JobsCreateInput;
         await assert.rejects(
             () => tool.execute("tc-1", input, undefined, undefined, makeImCtx(records)),
-            /sessionStrategy="new" is not allowed in an IM session/,
+            /channel jobs only support sessionStrategy="reuse"/,
         );
         assert.equal(records.length, 0);
     });
 
-    it("jobsCreate rejects 'pin' on IDE sessions (must reuse)", async () => {
+    it("jobsCreate allows 'pin' on IDE sessions", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -266,14 +263,11 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "pin",
             },
         } as unknown as JobsCreateInput;
-        await assert.rejects(
-            () => tool.execute("tc-1", input, undefined, undefined, makeCtx(records)),
-            /sessionStrategy="pin" is not allowed in an IDE session/,
-        );
-        assert.equal(records.length, 0);
+        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "pin");
     });
 
-    it("jobsCreate rejects 'new' on IDE sessions (must reuse)", async () => {
+    it("jobsCreate allows explicit 'new' on IDE sessions", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -288,11 +282,8 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "new",
             },
         } as unknown as JobsCreateInput;
-        await assert.rejects(
-            () => tool.execute("tc-1", input, undefined, undefined, makeCtx(records)),
-            /sessionStrategy="new" is not allowed in an IDE session/,
-        );
-        assert.equal(records.length, 0);
+        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "new");
     });
 
     it("jobsUpdate also fills actor-aware defaults and rejects mismatches", async () => {
@@ -309,25 +300,25 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 run_on_startup: false,
             },
         } as unknown as JobsCreateInput;
-        // IM: defaults to pin
+        // IM: defaults to reuse
         await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
         const params = records[0].params as { job: Job };
-        assert.equal(params.job.sessionStrategy, "pin");
+        assert.equal(params.job.sessionStrategy, "reuse");
 
-        // IDE: defaults to reuse, rejects explicit pin
+        // IDE: defaults to pin, rejects explicit reuse
         await assert.rejects(
             () =>
                 tool.execute(
                     "tc-1",
                     {
                         ...input,
-                        job: { ...input.job, sessionStrategy: "pin" },
+                        job: { ...input.job, sessionStrategy: "reuse" },
                     } as unknown as JobsCreateInput,
                     undefined,
                     undefined,
                     makeCtx(records),
                 ),
-            /sessionStrategy="pin" is not allowed in an IDE session/,
+            /reuse strategy requires a channel workspace/,
         );
     });
 
@@ -469,12 +460,12 @@ describe("jobs tools — list rendering", () => {
             makeCtxWithActor({ kind: "ide", workspace: "/tmp/ws" }),
         );
         assert.ok(
-            (imResult.content[0] as { text: string }).text.includes("strategy=pin"),
-            "IM scope should default to pin",
+            (imResult.content[0] as { text: string }).text.includes("strategy=reuse"),
+            "IM scope should default to reuse",
         );
         assert.ok(
-            (ideResult.content[0] as { text: string }).text.includes("strategy=reuse"),
-            "IDE scope should default to reuse",
+            (ideResult.content[0] as { text: string }).text.includes("strategy=pin"),
+            "IDE scope should default to pin",
         );
     });
 });

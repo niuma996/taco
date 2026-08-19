@@ -21,11 +21,13 @@
  * escape its sandbox by editing those fields directly.
  */
 
+import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { parseImCwd } from "@taco-ai/protocol";
 import { JobsScopeError } from "../lib/jobsErrors.ts";
 import type { JobsControl } from "../runtime/serverRpcSurface.ts";
+import { createJobId } from "./jobId.ts";
 import type { Scheduler } from "./runner.ts";
 import type { Actor, Job, JobHistoryEntry } from "./types.ts";
 
@@ -35,6 +37,11 @@ export class JobsController implements JobsControl {
             list: () => Promise<Job[]>;
             get: (id: string) => Promise<Job | null>;
             save: (job: Job) => Promise<void>;
+            create?: (job: Job) => Promise<void>;
+            mutate?: (
+                id: string,
+                update: (current: Job | null) => Job | null,
+            ) => Promise<Job | null>;
             delete: (id: string) => Promise<void>;
         },
         private readonly scheduler: Scheduler,
@@ -58,9 +65,22 @@ export class JobsController implements JobsControl {
     }
 
     async create(job: Job, actor?: Actor): Promise<Job> {
-        const normalized = normalizeScopeFields(job);
+        const normalized = normalizeSessionStrategy(
+            normalizeScopeFields({
+                ...job,
+                // RPC create clears caller-provided ids before reaching here. Keep
+                // an explicit id for trusted internal callers/tests, while the
+                // store's exclusive create still prevents replacement.
+                id: job.id || createJobId(),
+                generation: randomUUID(),
+                history: [],
+                last_run_at: undefined,
+                next_run_at: undefined,
+            }),
+        );
         assertActorMatchesJob(normalized, actor);
-        await this.store.save(normalized);
+        if (this.store.create) await this.store.create(normalized);
+        else await this.store.save(normalized);
         // Re-load picks up the new copy; if `enabled`, the timer attaches.
         await this.scheduler.reload(normalized.id);
         return normalized;
@@ -71,19 +91,63 @@ export class JobsController implements JobsControl {
         if (!existing) {
             throw new JobsScopeError("not_found", `job not found: ${job.id}`);
         }
-        // Don't let the caller shift a job from one channel to another
-        // (or from fs to IM) by submitting a new workspace. Anchor the
-        // update to the existing scope — the caller can only edit
-        // prompt/name/schedule/enabled, not the channel binding.
-        const normalized = normalizeScopeFields({
-            ...job,
-            channelId: existing.channelId,
-            peerId: existing.peerId,
-        });
         assertActorMatchesJob(existing, actor);
-        await this.store.save(normalized);
-        await this.scheduler.reload(normalized.id);
-        return normalized;
+        let saved: Job | null;
+        if (this.store.mutate) {
+            saved = await this.store.mutate(job.id, (current) => {
+                // The generation detects delete-and-recreate ABA: an update
+                // that read the previous incarnation must never mutate a new
+                // job that was recreated with the same trusted internal id.
+                if (!current || current.generation !== existing.generation) {
+                    throw new JobsScopeError("not_found", `job not found: ${job.id}`);
+                }
+                // Build from the serialized store value, not the pre-mutation
+                // snapshot. A pin callback or runner history write may have
+                // landed while this update was waiting for the per-job queue.
+                return normalizeSessionStrategy(
+                    normalizeScopeFields({
+                        ...job,
+                        args: { ...job.args, workspace: current.args.workspace },
+                        channelId: current.channelId,
+                        peerId: current.peerId,
+                        generation: current.generation,
+                        history: current.history,
+                        last_run_at: current.last_run_at,
+                        next_run_at: current.next_run_at,
+                        sessionStrategy: job.sessionStrategy ?? current.sessionStrategy,
+                        pinnedSessionId:
+                            job.sessionStrategy !== undefined &&
+                            job.sessionStrategy !== current.sessionStrategy
+                                ? undefined
+                                : current.pinnedSessionId,
+                    }),
+                );
+            });
+        } else {
+            const normalized = normalizeSessionStrategy(
+                normalizeScopeFields({
+                    ...job,
+                    args: { ...job.args, workspace: existing.args.workspace },
+                    channelId: existing.channelId,
+                    peerId: existing.peerId,
+                    generation: existing.generation,
+                    history: existing.history,
+                    last_run_at: existing.last_run_at,
+                    next_run_at: existing.next_run_at,
+                    sessionStrategy: job.sessionStrategy ?? existing.sessionStrategy,
+                    pinnedSessionId:
+                        job.sessionStrategy !== undefined &&
+                        job.sessionStrategy !== existing.sessionStrategy
+                            ? undefined
+                            : existing.pinnedSessionId,
+                }),
+            );
+            await this.store.save(normalized);
+            saved = normalized;
+        }
+        if (!saved) throw new JobsScopeError("not_found", `job not found: ${job.id}`);
+        await this.scheduler.reload(saved.id);
+        return saved;
     }
 
     async delete(id: string, actor?: Actor): Promise<void> {
@@ -142,9 +206,16 @@ export class JobsController implements JobsControl {
                 };
             });
             if (!mutated) continue;
-            await this.store.save({ ...job, history: nextHistory }).catch(() => {
-                /* swallow — process is on the failure path */
-            });
+            if (this.store.mutate) {
+                await this.store
+                    .mutate(job.id, (current) => {
+                        if (!current || current.generation !== job.generation) return current;
+                        return { ...current, history: nextHistory };
+                    })
+                    .catch(() => undefined);
+            } else {
+                await this.store.save({ ...job, history: nextHistory }).catch(() => undefined);
+            }
         }
     }
 }
@@ -163,6 +234,19 @@ function normalizeScopeFields(job: Job): Job {
     delete next.channelId;
     delete next.peerId;
     return next;
+}
+
+function normalizeSessionStrategy(job: Job): Job {
+    const workspace = typeof job.args.workspace === "string" ? job.args.workspace : "";
+    const isIm = workspace.startsWith("im://");
+    const strategy = job.sessionStrategy ?? (isIm ? "reuse" : "pin");
+    if (isIm && strategy !== "reuse") {
+        throw new JobsScopeError("forbidden", 'channel jobs only support sessionStrategy="reuse"');
+    }
+    if (!isIm && strategy === "reuse") {
+        throw new JobsScopeError("forbidden", "reuse strategy requires a channel workspace");
+    }
+    return { ...job, sessionStrategy: strategy };
 }
 
 /** Is `actor` allowed to see `job`? The "admin" case (undefined actor)

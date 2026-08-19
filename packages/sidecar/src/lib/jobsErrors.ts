@@ -23,3 +23,10 @@ export class JobsScopeError extends Error {
         this.name = "JobsScopeError";
     }
 }
+
+export class JobAlreadyExistsError extends Error {
+    constructor(id: string) {
+        super(`job already exists: ${id}`);
+        this.name = "JobAlreadyExistsError";
+    }
+}

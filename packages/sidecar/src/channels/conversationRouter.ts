@@ -115,6 +115,7 @@ export class ConversationRouter extends EventEmitter {
                                 channelId: string;
                                 peerId: string;
                                 chatId: string;
+                                routeRole?: "conversation" | "external";
                             };
                         };
                     };
@@ -130,10 +131,12 @@ export class ConversationRouter extends EventEmitter {
                         } catch {
                             /* stat failed — fall back to 0 rather than dropping the route */
                         }
-                        this.routes.set(makeImCwd(im.channelId, im.peerId, im.chatId), {
-                            sessionId: header.id,
-                            lastUsedAt,
-                        });
+                        const workspace = makeImCwd(im.channelId, im.peerId, im.chatId);
+                        if (im.routeRole === "external") {
+                            this.externalRoutes.set(header.id, workspace);
+                        } else {
+                            this.routes.set(workspace, { sessionId: header.id, lastUsedAt });
+                        }
                     }
                 } catch (e) {
                     // Skip corrupt files without affecting other routes — but say
@@ -172,6 +175,11 @@ export class ConversationRouter extends EventEmitter {
         const workspace = makeImCwd(channelId, peerId, chatId);
         const entry = this.routes.get(workspace);
         return entry ? { workspace, sessionId: entry.sessionId } : undefined;
+    }
+
+    lookupByWorkspace(workspace: string): { sessionId: string } | undefined {
+        const entry = this.routes.get(workspace);
+        return entry ? { sessionId: entry.sessionId } : undefined;
     }
 
     /**

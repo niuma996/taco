@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { RpcHandlerError } from "../server/methodRegistry.ts";
 
 /** Conservative ASCII subset that is safe to embed in a file basename
@@ -15,6 +16,10 @@ export class InvalidJobIdError extends Error {
 
 export function isSafeJobId(id: string): boolean {
     return typeof id === "string" && SAFE_JOB_ID.test(id);
+}
+
+export function createJobId(): string {
+    return randomUUID();
 }
 
 export function assertSafeJobId(id: string): void {

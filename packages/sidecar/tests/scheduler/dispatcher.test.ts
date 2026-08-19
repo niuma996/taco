@@ -4,12 +4,12 @@
  * ScheduledCommandFailed so the runner records a meaningful reason.
  *
  * Strategy coverage:
- *  - `new`     (default): single session.create carrying initialPrompt.
+ *  - `new`     (non-channel explicit): single session.create carrying initialPrompt.
  *  - `reuse`   (IM only): session.attach + session.prompt against an
  *              existing session for the imCwd.
- *  - `pin`     : first fire creates `sched-pin-<jobId>` and invokes
+ *  - `pin`     (non-channel default): first fire creates `sched-pin-<jobId>` and invokes
  *              onPinnedSessionCreated; subsequent fires attach that id.
- *              A pin against a deleted session errors (history=err).
+ *              A pin against a deleted session re-creates and re-pins it.
  */
 
 import { strict as assert } from "node:assert";
@@ -34,24 +34,16 @@ type FakeResponse =
 interface FakeServer {
     calls: RpcRequest[];
     dispatchRpc(req: RpcRequest): Promise<RpcResponse>;
-    /** Records each route registration so tests can assert the dispatcher
-     *  binds the pinned session to the IM triple after creation. */
-    registeredRoutes: Array<{ workspace: string; sessionId: string }>;
-    registerRoute(workspace: string, sessionId: string): Promise<void>;
+    lookupRoute?(workspace: string): { sessionId: string } | undefined;
 }
 
 function makeFakeServer(respond: (req: RpcRequest) => Promise<FakeResponse>): FakeServer {
     const calls: RpcRequest[] = [];
-    const registeredRoutes: Array<{ workspace: string; sessionId: string }> = [];
     return {
         calls,
-        registeredRoutes,
         dispatchRpc: async (req) => {
             calls.push(req);
             return respond(req) as Promise<RpcResponse>;
-        },
-        registerRoute: async (workspace, sessionId) => {
-            registeredRoutes.push({ workspace, sessionId });
         },
     };
 }
@@ -86,7 +78,7 @@ describe("createJobDispatcher — agent.invoke path (new)", () => {
             return { id: req.id, ok: true, result: { sessionId: req.id } };
         });
         const dispatcher = createJobDispatcher(() => fake);
-        await dispatcher(invokeJob("/tmp/w", "echo hello"));
+        await dispatcher(invokeJob("/tmp/w", "echo hello", { sessionStrategy: "new" }));
         assert.equal(fake.calls.length, 1);
     });
 
@@ -102,8 +94,8 @@ describe("createJobDispatcher — agent.invoke path (new)", () => {
             return { id: req.id, ok: true, result: { sessionId } };
         });
         const dispatcher = createJobDispatcher(() => fake);
-        await dispatcher(invokeJob("/tmp/w", "a"));
-        await dispatcher(invokeJob("/tmp/w", "b"));
+        await dispatcher(invokeJob("/tmp/w", "a", { sessionStrategy: "new" }));
+        await dispatcher(invokeJob("/tmp/w", "b", { sessionStrategy: "new" }));
         assert.equal(seenIds.size, 2);
     });
 
@@ -156,10 +148,12 @@ describe("createJobDispatcher — server resolver", () => {
         );
 
         const imWorkspace = makeImCwd("ch", "u", "c");
+        imServer.lookupRoute = (workspace) =>
+            workspace === imWorkspace ? { sessionId: "current-channel-session" } : undefined;
         await dispatcher(invokeJob(imWorkspace, "hi"));
         await dispatcher(invokeJob("/tmp/repo", "hi"));
 
-        assert.equal(imServer.calls.length, 1);
+        assert.equal(imServer.calls.length, 2);
         assert.equal((imServer.calls[0].params as { workspace?: string }).workspace, imWorkspace);
         assert.equal(fsServer.calls.length, 1);
         assert.equal((fsServer.calls[0].params as { workspace?: string }).workspace, "/tmp/repo");
@@ -171,13 +165,6 @@ describe("createJobDispatcher — reuse strategy", () => {
         const im = makeImCwd("ch1", "peer-1", "chat-1");
         const existingId = "existing-sess-1";
         const fake = makeFakeServer(async (req) => {
-            if (req.method === "session.list") {
-                return {
-                    id: req.id,
-                    ok: true as const,
-                    result: { sessions: [{ sessionId: existingId }] },
-                };
-            }
             if (req.method === "session.attach") {
                 const p = req.params as { sessionId?: string; workspace?: string };
                 assert.equal(p.sessionId, existingId);
@@ -198,11 +185,13 @@ describe("createJobDispatcher — reuse strategy", () => {
             }
             throw new Error(`unexpected method ${req.method}`);
         });
+        fake.lookupRoute = (workspace) =>
+            workspace === im ? { sessionId: existingId } : undefined;
         const dispatcher = createJobDispatcher(() => fake);
         await dispatcher(invokeJob(im, "ping", { sessionStrategy: "reuse" }));
-        assert.equal(fake.calls.length, 3);
+        assert.equal(fake.calls.length, 2);
         const methods = fake.calls.map((c) => c.method);
-        assert.deepEqual(methods, ["session.list", "session.attach", "session.prompt"]);
+        assert.deepEqual(methods, ["session.attach", "session.prompt"]);
     });
 
     it("throws InvalidSessionStrategy when reuse is set on an fs workspace", async () => {
@@ -220,9 +209,6 @@ describe("createJobDispatcher — reuse strategy", () => {
     it("errors when no session exists for the imCwd", async () => {
         const im = makeImCwd("ch1", "peer-1", "chat-1");
         const fake = makeFakeServer(async (req) => {
-            if (req.method === "session.list") {
-                return { id: req.id, ok: true as const, result: { sessions: [] } };
-            }
             throw new Error(`unexpected method ${req.method}`);
         });
         const dispatcher = createJobDispatcher(() => fake);
@@ -370,104 +356,6 @@ describe("createJobDispatcher — pin strategy", () => {
                 ),
             (err: unknown): err is ScheduledCommandFailed =>
                 err instanceof ScheduledCommandFailed && err.code === "invalid_state",
-        );
-    });
-
-    it("re-registers the route on the attach path (index is lost on restart)", async () => {
-        // The reverse index is in-memory only. After a daemon restart the
-        // pinned session already exists, so every fire takes the attach
-        // branch — if that branch doesn't re-register, replies are dropped
-        // for the rest of the daemon's life.
-        const im = makeImCwd("wechat", "peer-1", "chat-1");
-        const fake = makeFakeServer(async (req) => ({
-            id: req.id,
-            ok: true as const,
-            result: {},
-        }));
-        const dispatcher = createJobDispatcher(() => fake);
-        await dispatcher(
-            invokeJob(im, "tick", {
-                sessionStrategy: "pin",
-                pinnedSessionId: "sched-pin-test-job",
-            }),
-        );
-        assert.deepEqual(fake.registeredRoutes, [
-            {
-                workspace: im,
-                sessionId: "sched-pin-test-job",
-            },
-        ]);
-        // Registration must land before the prompt, else the first reply of
-        // the turn races the binding. The probe precedes both.
-        const methods = fake.calls.map((c) => c.method);
-        assert.deepEqual(methods, ["session.history", "session.attach", "session.prompt"]);
-    });
-
-    it("registers the pinned IM session so channel replies can address the peer", async () => {
-        // Without registerRoute the dispatcher would create a
-        // `sched-pin-*` session but never tell conversationRouter about it,
-        // so the channel's resolvePeer(sessionId) misses and the agent's
-        // reply is logged as "no peer for session, reply dropped".
-        const im = makeImCwd("wechat", "peer-1", "chat-1");
-        const fake = makeFakeServer(async (req) => {
-            if (req.method === "session.create") {
-                return {
-                    id: req.id,
-                    ok: true as const,
-                    result: { sessionId: "sched-pin-test-job" },
-                };
-            }
-            throw new Error(`unexpected method ${req.method}`);
-        });
-        const dispatcher = createJobDispatcher(() => fake);
-        await dispatcher(invokeJob(im, "kickoff", { sessionStrategy: "pin" }));
-        assert.equal(fake.registeredRoutes.length, 1);
-        assert.deepEqual(fake.registeredRoutes[0], {
-            workspace: im,
-            sessionId: "sched-pin-test-job",
-        });
-    });
-
-    it("registerRoute failure does not fail the fire (logged as warning)", async () => {
-        // The pin session was created; the agent may already be running.
-        // If registerRoute throws, the better tradeoff is to let the fire
-        // complete (history=ok) and surface the routing miss in the next
-        // outbound reply than to nuke a multi-second agent turn.
-        const im = makeImCwd("wechat", "peer-1", "chat-1");
-        let registerCalled = false;
-        const fake: FakeServer = {
-            calls: [],
-            registeredRoutes: [],
-            dispatchRpc: async (req) => ({
-                id: req.id,
-                ok: true as const,
-                result: { sessionId: "sched-pin-test-job" },
-            }),
-            registerRoute: async () => {
-                registerCalled = true;
-                throw new Error("routing store locked");
-            },
-        };
-        const dispatcher = createJobDispatcher(() => fake);
-        await dispatcher(invokeJob(im, "kickoff", { sessionStrategy: "pin" }));
-        assert.equal(registerCalled, true);
-    });
-
-    it("skips registerRoute when server does not provide it (back-compat)", async () => {
-        // Tests / future call sites that only implement dispatchRpc should
-        // still work — registerRoute is optional on the surface.
-        const fake = makeFakeServer(async () => ({
-            id: "x",
-            ok: true as const,
-            result: { sessionId: "sched-pin-test-job" },
-        }));
-        // Strip registerRoute off the surface.
-        const surface: { dispatchRpc: FakeServer["dispatchRpc"] } = {
-            dispatchRpc: fake.dispatchRpc,
-        };
-        const dispatcher = createJobDispatcher(() => surface);
-        await dispatcher(
-            invokeJob(makeImCwd("wechat", "p", "c"), "kickoff", { sessionStrategy: "pin" }),
         );
     });
 });

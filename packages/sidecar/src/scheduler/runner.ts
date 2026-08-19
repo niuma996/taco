@@ -48,6 +48,7 @@ export interface SchedulerOptions {
     store: {
         list: () => Promise<Job[]>;
         save: (job: Job) => Promise<void>;
+        mutate?: (id: string, update: (current: Job | null) => Job | null) => Promise<Job | null>;
         get: (id: string) => Promise<Job | null>;
         delete: (id: string) => Promise<void>;
     };
@@ -70,6 +71,13 @@ export interface SchedulerOptions {
 
 const DEFAULT_FIRE_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_STALE_LOCK_MS = 60 * 60_000;
+
+class FireTimeoutError extends Error {
+    constructor(timeoutMs: number) {
+        super(`fire timeout after ${Math.round(timeoutMs / 60_000)}m`);
+        this.name = "FireTimeoutError";
+    }
+}
 
 export class Scheduler {
     private readonly handles = new Map<string, ScheduledHandle>();
@@ -183,12 +191,24 @@ export class Scheduler {
         // crash the spread above and lose the entire run.
         job.history = [entry, ...(job.history ?? [])].slice(0, HISTORY_LIMIT);
 
+        let releaseLockAfterInvocation = true;
+        let completion: Promise<void> | undefined;
         try {
-            await this.invokeWithTimeout(job);
+            const invocation = this.invokeWithTimeout(job);
+            completion = invocation.completion;
+            await invocation.result;
             entry.status = "ok";
         } catch (err) {
             entry.status = "err";
             entry.error = err instanceof Error ? err.message : String(err);
+            if (err instanceof FireTimeoutError && completion) {
+                releaseLockAfterInvocation = false;
+                void completion
+                    .catch(() => undefined)
+                    .finally(() => {
+                        void unlink(lockPath).catch(() => undefined);
+                    });
+            }
             log.warn(`job ${job.id} failed: ${entry.error}`);
         } finally {
             entry.ended_at = this.nowString();
@@ -201,19 +221,30 @@ export class Scheduler {
             // session yet" branch and create another session (we found 9
             // duplicate jsonl files for one pin job this way). Only the two
             // fields this fire owns are layered onto the latest copy.
-            const latest = await this.opts.store.get(job.id).catch(() => null);
-            await this.opts.store
-                .save({
-                    ...(latest ?? job),
-                    history: job.history,
-                    last_run_at: entry.ended_at,
-                })
-                .catch((err) => {
-                    log.error(`failed to persist history for ${job.id}: ${String(err)}`);
+            if (this.opts.store.mutate) {
+                await this.opts.store
+                    .mutate(job.id, (latest) => {
+                        if (!latest || latest.generation !== job.generation) return latest;
+                        return { ...latest, history: job.history, last_run_at: entry.ended_at };
+                    })
+                    .catch((err) => {
+                        log.error(`failed to persist history for ${job.id}: ${String(err)}`);
+                    });
+            } else {
+                const latest = await this.opts.store.get(job.id).catch(() => null);
+                if (latest) {
+                    await this.opts.store
+                        .save({ ...latest, history: job.history, last_run_at: entry.ended_at })
+                        .catch((err) => {
+                            log.error(`failed to persist history for ${job.id}: ${String(err)}`);
+                        });
+                }
+            }
+            if (releaseLockAfterInvocation) {
+                await unlink(lockPath).catch(() => {
+                    /* lock may have been removed by another process — fine */
                 });
-            await unlink(lockPath).catch(() => {
-                /* lock may have been removed by another process — fine */
-            });
+            }
         }
         return acquired;
     }
@@ -245,21 +276,19 @@ export class Scheduler {
      *  background — we can't cancel it from this layer, but we don't need
      *  to: when it finally settles, its then/catch is detached and the
      *  process holds no more state for the job than its own promise. */
-    private invokeWithTimeout(job: Job): Promise<void> {
+    private invokeWithTimeout(job: Job): { result: Promise<void>; completion: Promise<void> } {
         const timeoutMs = this.opts.fireTimeoutMs ?? DEFAULT_FIRE_TIMEOUT_MS;
-        const fire = this.opts.invoke(job);
+        const fire = Promise.resolve().then(() => this.opts.invoke(job));
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<void>((_, reject) => {
-            timer = setTimeout(
-                () => reject(new Error(`fire timeout after ${Math.round(timeoutMs / 60_000)}m`)),
-                timeoutMs,
-            );
+            timer = setTimeout(() => reject(new FireTimeoutError(timeoutMs)), timeoutMs);
             // Don't keep the event loop alive just for the watchdog.
             timer.unref();
         });
-        return Promise.race([fire, timeout]).finally(() => {
+        const result = Promise.race([fire, timeout]).finally(() => {
             if (timer) clearTimeout(timer);
         });
+        return { result, completion: fire };
     }
 
     /** Remove lock files that nobody is going to release: either the

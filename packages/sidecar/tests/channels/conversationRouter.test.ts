@@ -142,6 +142,27 @@ describe("ConversationRouter", () => {
         assert.equal(reloaded.lookup("ch1", "u9", "c9")?.sessionId, "sess-xyz");
     });
 
+    it("rebuilds scheduler external routes without replacing the live forward route", async () => {
+        const home = mkdtempSync(path.join(tmpdir(), "router-external-"));
+        const sessionDir = path.join(home, "sessions", "im", "ch1");
+        mkdirSync(sessionDir, { recursive: true });
+        writeFileSync(
+            path.join(sessionDir, "live.jsonl"),
+            `${JSON.stringify({ id: "live", metadata: { imRouting: { channelId: "ch1", peerId: "u1", chatId: "c1" } } })}\n`,
+        );
+        writeFileSync(
+            path.join(sessionDir, "pinned.jsonl"),
+            `${JSON.stringify({ id: "pinned", metadata: { imRouting: { channelId: "ch1", peerId: "u1", chatId: "c1", routeRole: "external" } } })}\n`,
+        );
+        const router = await ConversationRouter.load(home);
+        assert.equal(router.lookup("ch1", "u1", "c1")?.sessionId, "live");
+        assert.deepEqual(router.findRouteBySessionId("pinned"), {
+            channelId: "ch1",
+            peerId: "u1",
+            chatId: "c1",
+        });
+    });
+
     describe("listAll", () => {
         it("returns every routed conversation, newest first", async () => {
             const home = mkdtempSync(path.join(tmpdir(), "router-"));

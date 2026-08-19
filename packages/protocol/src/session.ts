@@ -37,7 +37,11 @@ export interface SessionMeta {
     /** User-defined title from the most recent session_info event. */
     name?: string;
     /** IM routing triple. The authoritative source for ConversationRouter's route rebuilds. */
-    imRouting?: { channelId: string; peerId: string; chatId: string };
+    imRouting?: {
+        channelId: string;
+        peerId: string;
+        chatId: string;
+    };
 }
 
 /** Default page size for `session.list` when the caller omits `limit`. */
@@ -172,7 +176,11 @@ export interface CreateSessionParams {
      */
     uiLocale?: SupportedLocale;
     /** IM routing triple, written to jsonl metadata as the authoritative routing source. */
-    imRouting?: { channelId: string; peerId: string; chatId: string };
+    imRouting?: {
+        channelId: string;
+        peerId: string;
+        chatId: string;
+    };
 }
 
 export interface CreateSessionResult {

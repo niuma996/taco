@@ -66,7 +66,7 @@ export type Actor =
 export interface JobsClient {
     list(actor?: Actor): Promise<Job[]>;
     get(id: string, actor?: Actor): Promise<Job | null>;
-    create(job: Job, actor?: Actor): Promise<Job>;
+    create(job: Omit<Job, "id">, actor?: Actor): Promise<Job>;
     update(job: Job, actor?: Actor): Promise<Job>;
     delete(id: string, actor?: Actor): Promise<boolean>;
     runNow(id: string, actor?: Actor): Promise<boolean>;

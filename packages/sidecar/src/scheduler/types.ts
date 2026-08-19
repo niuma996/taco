@@ -55,12 +55,11 @@ export type Actor =
     | { kind: "ide"; workspace: string };
 
 /** How the scheduler picks a session when an `agent.invoke` job fires.
- *  - `new`  : every fire creates a fresh `sched-<uuid>` session (default;
- *             preserves prior behavior).
+ *  - `new`  : non-IM only — every fire creates a fresh `sched-<uuid>` session.
  *  - `reuse`: IM only — finds the existing session attached to the
  *             (channelId, peerId, chatId) triple and re-prompts it. Lets a
- *             scheduled task continue an ongoing chat conversation.
- *  - `pin`  : first fire creates `sched-pin-<jobId>` and stores the id on
+ *             scheduled task continue the current channel conversation.
+ *  - `pin`  : non-IM default — first fire creates `sched-pin-<jobId>` and stores the id on
  *             the job; subsequent fires attach that session. Lets a job
  *             maintain a single persistent context across many fires. */
 export type SessionStrategy = "new" | "reuse" | "pin";
@@ -85,6 +84,8 @@ export interface Job {
      *  normalizes older on-disk files (where this field was absent) to
      *  an empty array on read, so in-memory Jobs always carry one. */
     history: JobHistoryEntry[];
+    /** Server-generated identity for this incarnation of the job. */
+    generation?: string;
     /** IM scope (server-derived from `args.workspace` when im://). Callers
      *  MUST NOT set this directly — JobsController derives it from the
      *  workspace at create/update time and ignores caller-supplied values
@@ -93,8 +94,8 @@ export interface Job {
     channelId?: string;
     /** Peer scope — same derivation rule as channelId. */
     peerId?: string;
-    /** Default `new`. `reuse` is only valid when `args.workspace` is
-     *  `im://` (the router can resolve a triple to an existing session). */
+    /** IM defaults to `reuse` and only permits `reuse`. Filesystem workspaces
+     *  default to `pin` and may explicitly select `new`. */
     sessionStrategy?: SessionStrategy;
     /** Set after the first fire of a `pin` job. The dispatcher stores the
      *  sessionId here so subsequent fires can attach the same session. */

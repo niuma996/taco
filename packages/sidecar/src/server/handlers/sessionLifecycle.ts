@@ -95,10 +95,11 @@ export function registerSessionLifecycleHandlers(): void {
                 );
             }
             const sessionId = params.sessionId ?? createSessionId();
+            const imRouting = params.imRouting ?? workspace.imRouting;
             const session = await workspace.repo.create({
                 id: sessionId,
                 cwd: workspace.sessionCwd,
-                ...(workspace.imRouting ? { metadata: { imRouting: workspace.imRouting } } : {}),
+                ...(imRouting ? { metadata: { imRouting } } : {}),
             });
             workspace.invalidateListCache();
             const meta = await session.getMetadata();

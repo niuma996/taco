@@ -42,7 +42,7 @@ const scheduleSchema = Type.Union([
 ]);
 
 const jobSchema = Type.Object({
-    id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    id: Type.Optional(Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" })),
     name: Type.String({ minLength: 1, maxLength: 120 }),
     schedule: scheduleSchema,
     // The scheduler dispatcher only routes `agent.invoke` to a fresh agent
@@ -210,7 +210,7 @@ export function createJobsCreateTool(): AgentHarnessTool<TacoToolContext> {
         name: "jobsCreate",
         label: "jobs.create",
         summary:
-            "Create a new scheduled job in this session's scope (IM: current channel/peer; IDE: current workspace). id must be unique. `command` is fixed to 'agent.invoke' — every fire boots an agent session and runs `args.prompt` as the initial message. To schedule a shell call (e.g. `mmx search query`), describe it in `args.prompt` and let the agent pick the matching tool; the agent re-routes through the workspace's permission policy. sessionStrategy controls how fires map to sessions — IM sessions default to 'pin' (one persistent session per job, conversations accumulate across fires); IDE sessions default to 'reuse' (always run in the same session). Other strategy values are rejected for the current session type.",
+            "Create a new scheduled job in this session's scope. The daemon generates the globally unique id. Channel sessions default to reuse the current conversation; non-channel sessions default to pin a dedicated session and may explicitly choose new.",
         mutates: true,
         schema: jobsCreateSchema,
         rpcMethod: JOBS_RPC.create,
@@ -239,7 +239,7 @@ export function createJobsUpdateTool(): AgentHarnessTool<TacoToolContext> {
         name: "jobsUpdate",
         label: "jobs.update",
         summary:
-            "Replace an existing scheduled job by id. The scope (channel/peer for IM) cannot be changed — delete + recreate if you need to move a job across channels. sessionStrategy is filled by the runtime based on the session type (IM: 'pin'; IDE: 'reuse') — pass it explicitly to override.",
+            "Replace an existing scheduled job by id. The scope cannot be changed. Channel jobs only use reuse; non-channel jobs default to pin and may explicitly choose new.",
         mutates: true,
         schema: jobsUpdateSchema,
         rpcMethod: JOBS_RPC.update,
@@ -309,11 +309,11 @@ function formatSchedule(job: Job): string {
 }
 
 /** Default `sessionStrategy` per actor kind:
--   - IM (channelId/peerId triple): `"pin"` — every fire reuses the same
--     per-job session so the conversation accumulates.
--   - IDE (fs workspace): `"reuse"` — every fire runs in the same session
--     that the user is already in (no "other session" concept for IDE).
--   - undefined actor (admin / tests): `"new"` — preserve prior behavior.
+-   - IM (channelId/peerId triple): `"reuse"` — every fire continues the
+-     current channel conversation.
+-   - IDE (fs workspace): `"pin"` — every fire reuses the job's dedicated
+-     session; callers may explicitly choose `"new"` instead.
+-   - undefined actor (admin / tests): `"pin"`.
 -   The schema intentionally still lists `"new` / `"reuse` / `"pin` so the
 -   model sees one vocabulary; the tool fills in the right default and
 -   rejects mismatches with a clear message instead of silently falling
@@ -321,8 +321,8 @@ function formatSchedule(job: Job): string {
 -   rule server-side; the tool layer rejects earlier so the LLM never
 -   has to round-trip a request that's known to fail. */
 function defaultStrategyFor(ctx: TacoToolContext): SessionStrategy {
-    if (!ctx.actor) return "new";
-    return ctx.actor.kind === "im" ? "pin" : "reuse";
+    if (!ctx.actor) return "pin";
+    return ctx.actor.kind === "im" ? "reuse" : "pin";
 }
 
 function resolveSessionStrategy(
@@ -332,35 +332,12 @@ function resolveSessionStrategy(
 ): SessionStrategy {
     const { actor } = ctx;
     if (!actor) {
-        // Admin / test path: leave the value alone (default-new behavior).
-        return raw ?? "new";
+        return raw ?? "pin";
     }
     if (actor.kind === "im") {
-        if (raw === undefined || raw === "pin") return "pin";
-        if (raw === "reuse") {
-            throw new Error(
-                `jobs.${verb}: sessionStrategy="reuse" is not allowed in an IM session — ` +
-                    `IM jobs always pin to a per-job session (default). Drop the field or pass "pin".`,
-            );
-        }
-        // raw === "new"
-        throw new Error(
-            `jobs.${verb}: sessionStrategy="new" is not allowed in an IM session — ` +
-                "every fire would create a fresh session and break the IM conversation. " +
-                `Drop the field to use the default ("pin").`,
-        );
+        if (raw === undefined || raw === "reuse") return "reuse";
+        throw new Error(`jobs.${verb}: channel jobs only support sessionStrategy="reuse"`);
     }
-    // actor.kind === "ide"
-    if (raw === undefined || raw === "reuse") return "reuse";
-    if (raw === "pin") {
-        throw new Error(
-            `jobs.${verb}: sessionStrategy="pin" is not allowed in an IDE session — ` +
-                "IDE jobs always reuse the current session (default). Drop the field to use the default.",
-        );
-    }
-    // raw === "new"
-    throw new Error(
-        `jobs.${verb}: sessionStrategy="new" is not allowed in an IDE session — ` +
-            `every fire would create a fresh session. Drop the field to use the default ("reuse").`,
-    );
+    if (raw === undefined || raw === "pin" || raw === "new") return raw ?? "pin";
+    throw new Error(`jobs.${verb}: reuse strategy requires a channel workspace`);
 }

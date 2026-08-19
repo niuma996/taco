@@ -16,7 +16,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import { createJobsClient, type Job, type JobScheduleSpec } from "../../lib/jobsClient.ts";
+import {
+    createJobsClient,
+    type Job,
+    type JobScheduleSpec,
+    type SessionStrategy,
+} from "../../lib/jobsClient.ts";
 import type { TacoClient } from "../../lib/tacoClientTauri.ts";
 
 export interface SchedulesTabProps {
@@ -30,6 +35,7 @@ interface DraftJob {
     argsJson: string;
     enabled: boolean;
     run_on_startup: boolean;
+    sessionStrategy: SessionStrategy;
 }
 
 const EMPTY_DRAFT: DraftJob = {
@@ -39,6 +45,7 @@ const EMPTY_DRAFT: DraftJob = {
     argsJson: "{}",
     enabled: true,
     run_on_startup: false,
+    sessionStrategy: "pin",
 };
 
 export function SchedulesTab({ client }: SchedulesTabProps) {
@@ -79,18 +86,17 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
             setFormError("cron expr must not be empty");
             return;
         }
-        const id = editingId ?? newJobId();
-        const next: Job = {
-            id,
+        const common = {
             name: draft.name.trim(),
             schedule: draft.schedule,
             command: draft.command.trim() || "agent.invoke",
             args,
             enabled: draft.enabled,
             run_on_startup: draft.run_on_startup,
-            history: editingId ? (jobs.list.find((j) => j.id === id)?.history ?? []) : [],
+            sessionStrategy: draft.sessionStrategy,
+            history: [],
         };
-        const target = editingId ? jobs.update(next) : jobs.create(next);
+        const target = editingId ? jobs.update({ id: editingId, ...common }) : jobs.create(common);
         void target
             .then(() => {
                 setDraft(EMPTY_DRAFT);
@@ -111,6 +117,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
             argsJson: JSON.stringify(job.args, null, 2),
             enabled: job.enabled,
             run_on_startup: job.run_on_startup,
+            sessionStrategy: job.sessionStrategy ?? "pin",
         });
         setFormError(null);
     }, []);
@@ -341,6 +348,21 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                         onChange={(event) => setDraft({ ...draft, argsJson: event.target.value })}
                     />
                 </label>
+                <label>
+                    <span>{t("schedules.fieldSessionStrategy", "Session strategy")}</span>
+                    <select
+                        value={draft.sessionStrategy}
+                        onChange={(event) =>
+                            setDraft({
+                                ...draft,
+                                sessionStrategy: event.target.value as SessionStrategy,
+                            })
+                        }
+                    >
+                        <option value="pin">pin — fixed dedicated session</option>
+                        <option value="new">new — fresh session per fire</option>
+                    </select>
+                </label>
                 <label className="schedules-toggle">
                     <input
                         type="checkbox"
@@ -465,13 +487,4 @@ function useJobsClient(client: TacoClient) {
         delete: jobsClient.delete,
         runNow: jobsClient.runNow,
     };
-}
-
-function newJobId(): string {
-    // Crypto-random UUID without a runtime dep — the scheduler's lock
-    // path already uses randomUUID, so this matches.
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-        return crypto.randomUUID();
-    }
-    return `job-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

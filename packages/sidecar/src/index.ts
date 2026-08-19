@@ -214,111 +214,29 @@ async function runDaemon(
     socketPath: string,
     controlSocketPath: string,
 ): Promise<void> {
-    // PR4: scheduler boots once per process; every per-connection
-    // SidecarServer shares the same JobsController so jobs.create/update/
-    // delete mutate the single process-wide scheduler.
-    const jobsDir = join(tacoHome(), "jobs");
-    const jobStore = new JobStore(jobsDir);
-
-    // Process-level IM channel stack. Constructed once and shared with every
-    // NDJSON connection's SidecarServer so a desktop disconnect cannot kill
-    // inbound IM bots and only one routing.json writer exists. `imHost` is
-    // the resident host that owns the channel stack — connection servers
-    // forward im:// RPCs to it via dispatchRpc.
-    //
-    // The resident is constructed BEFORE the single-instance probe so a
-    // hostile / stale probe can't race channel startup. Channel startup
-    // failures are isolated: a bot failing to bind must not block the
-    // socket bind or fs-workspace RPCs.
-    const conversationRouter = await ConversationRouter.load(tacoHome());
-    const sharedChannelStack = {
-        channelRegistry: new ChannelRegistry(),
-        channelBindBroker: new ChannelBindBroker(),
-        conversationRouter,
-    };
-    // Phase 2: process-level fan-out registry. The resident uses it to push
-    // IM frames to every connected desktop's NDJSON transport so an open
-    // IM session view stays live (new peer messages, mid-turn updates).
-    // Without this the host's emitPush would only hit NullTransport and
-    // Phase 1's regression — already-open IM views going stale — would
-    // remain. Each SidecarServer adds its own transport on start().
-    const clientSinkRegistry = new ClientSinkRegistry();
-
-    // Two runtimes, one process:
-    //  - `imHost` owns IM workspaces + the channel stack; im:// cwd sessions
-    //    run here so a desktop disconnect never kills the inbound IM bot.
-    //  - `schedulerSidecar` owns fs workspaces; fs cwd sessions invoked by
-    //    scheduled jobs run here so the scheduler doesn't depend on any
-    //    desktop connection being up. It does NOT share the channel stack
-    //    (no IM traffic) and does NOT register with clientSinkRegistry
-    //    (desktop sessions don't track scheduler-generated sched-* ids).
-    //
-    // Both must be constructed AND started before Scheduler.start(), which
-    // may fire boot-replay jobs as fire-and-forget invokes; the resolver
-    // closes over both references.
-    const imHost = new SidecarServer({
-        ...toSharedSidecarDeps(deps),
-        ...sharedChannelStack,
-        clientSinkRegistry,
+    // Claim the control socket before constructing channels, runtimes, or the
+    // scheduler. A probe alone is not ownership: two daemons can both observe
+    // an absent path and start expensive/replaying state before one loses the
+    // bind race.
+    let ndjsonServer!: Server;
+    let shutdown: ((sig: string) => Promise<void>) | undefined;
+    let shutdownRequestedDuringStartup = false;
+    const controlServer = createNetServer((socket: Socket) => {
+        handleControlChannel(socket, async () => {
+            if (shutdown) {
+                await shutdown("CONTROL_SHUTDOWN");
+            } else {
+                // The control socket is deliberately claimed before the
+                // scheduler/runtime stack is ready. Honor a shutdown received
+                // in that small startup window once the complete shutdown
+                // routine has been installed instead of exiting halfway
+                // through initialization.
+                shutdownRequestedDuringStartup = true;
+            }
+        });
+        socket.on("error", (err) => log.warn(`control socket error: ${err.message}`));
     });
-    const schedulerSidecar = new SidecarServer({ ...toSharedSidecarDeps(deps) });
-    await imHost.start(new NullTransport(), deps.cfg.channels ?? []).catch((err: unknown) => {
-        log.error(`IM host failed to start: ${String(err)}`);
-    });
-    // `NullTransport` is no-op for open/close/send, so the scheduler
-    // runtime has no remote client and no channel bots. start() still
-    // wires broker/router subscriptions + command-record sweeper + the
-    // transport field that getTransport() falls back to — without
-    // setting it, emitPush inside job invokes would create a fresh
-    // StdioTransport and write to actual stdout.
-    await schedulerSidecar.start(new NullTransport(), []).catch((err: unknown) => {
-        log.error(`scheduler runtime failed to start: ${String(err)}`);
-    });
-
-    const scheduler = new Scheduler({
-        store: jobStore,
-        lockDir: jobsDir,
-        invoke: createJobDispatcher(
-            (workspace) => (workspace.startsWith(IM_CWD_PREFIX) ? imHost : schedulerSidecar),
-            // Pin strategy writes the created sessionId back to the job so
-            // subsequent fires can attach the same session. The store stays
-            // authoritative for job state; the dispatcher never mutates it.
-            {
-                onPinnedSessionCreated: async (jobId, sessionId) => {
-                    const job = await jobStore.get(jobId);
-                    if (!job) return;
-                    await jobStore.save({ ...job, pinnedSessionId: sessionId });
-                },
-            },
-        ),
-    });
-    await scheduler.start().catch((err: unknown) => {
-        log.error(`scheduler failed to start: ${String(err)}`);
-    });
-    const jobsController = new JobsController(jobStore, scheduler, jobsDir);
-
-    // Mount the controller on every SidecarServer instance that exposes
-    // jobs.* RPCs. Connection servers pick it up via `sharedDeps.jobs`;
-    // the two residents (imHost + schedulerSidecar) need an explicit setter
-    // because their `start()` already ran before the controller existed
-    // (the controller's Scheduler depends on them — see dispatch resolver).
-    imHost.setJobsControl?.(jobsController);
-    schedulerSidecar.setJobsControl?.(jobsController);
-
-    const sharedDeps = {
-        ...toSharedSidecarDeps(deps),
-        ...sharedChannelStack,
-        jobs: jobsController,
-        imHost,
-        clientSinkRegistry,
-    };
-
-    // The control socket doubles as the single-instance marker. A healthy
-    // listener means another daemon already owns this $TACO_HOME, which is a
-    // normal outcome (launchd RunAtLoad + a desktop-initiated `taco start` can
-    // both fire). Exit 0 so launchd's KeepAlive.SuccessfulExit=false does not
-    // treat it as a crash and restart us in a loop. Checked before any
-    // unlinkSocketSync call so we never touch a live daemon's socket files.
+    controlServer.on("error", (err) => log.error(`control server error: ${err.message}`));
     const controlState = IS_UNIX ? await probeNdjsonSocket(controlSocketPath) : "absent";
     if (controlState === "ready") {
         log.info(`another daemon already owns ${controlSocketPath}; exiting`);
@@ -328,152 +246,241 @@ async function runDaemon(
         log.warn(`removing stale control socket at ${controlSocketPath}`);
         unlinkSocketSync(controlSocketPath);
     }
-
-    // Stale-socket cleanup before we try to bind. A previous daemon that
-    // crashed (kill -9 / power loss) leaves the socket file on disk; bind()
-    // would fail with EADDRINUSE forever. probeNdjsonSocket → "stale" means
-    // a file exists with no listener, which is exactly the recoverable case.
-    const ndjsonState = IS_UNIX ? await probeNdjsonSocket(socketPath) : "absent";
-    if (ndjsonState === "stale") {
-        log.warn(`removing stale NDJSON socket at ${socketPath}`);
-        unlinkSocketSync(socketPath);
-    }
-
-    const ndjsonServer = createNetServer((socket: Socket) => {
-        const transport = new StdioTransport(socket, socket);
-        const started = startServer(sharedDeps, transport);
-        started.ready.catch((err) => {
-            log.error(`connection failed to start: ${err?.stack ?? err}`);
-            socket.destroy();
-        });
-        socket.on("close", () => {
-            started.stop().catch((err) => log.error(`stop failed: ${err?.stack ?? err}`));
-        });
-        socket.on("error", (err) => log.error(`ndjson socket error: ${err.message}`));
-    });
-    ndjsonServer.on("error", (err) => log.error(`ndjson server error: ${err.message}`));
-
-    const controlServer = createNetServer((socket: Socket) => {
-        // Each control client is short-lived (one ping, maybe a shutdown);
-        // handleControlChannel owns its own readline + reply frame, and the
-        // socket ends when the client ends. control.shutdown triggers our
-        // own graceful shutdown via the callback below.
-        handleControlChannel(socket, async () => {
-            log.info("control.shutdown received, stopping daemon...");
-            await closeServer(ndjsonServer);
-            await closeServer(controlServer);
-            unlinkSocketSync(socketPath);
-            unlinkSocketSync(controlSocketPath);
-            process.exit(0);
-        });
-        socket.on("error", (err) => log.warn(`control socket error: ${err.message}`));
-    });
-    controlServer.on("error", (err) => log.error(`control server error: ${err.message}`));
-
-    // Atomic dual-bind: control first (it's the single-instance marker probed
-    // above), then NDJSON. If NDJSON bind fails, roll back the control bind +
-    // unlink the control socket so we don't leave a half-running daemon that
-    // the next launcher thinks is live.
     await new Promise<void>((resolve, reject) => {
-        const onControlError = (err: Error) => {
-            ndjsonServer.removeListener("error", onNdjsonError);
-            // Lost the bind race to a daemon that came up between our probe and
-            // this bind. Same reasoning as the probe above: normal outcome, exit
-            // 0. Do NOT unlink — the socket file belongs to the winner now.
+        const onError = (err: Error) => {
             if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") {
                 log.info(`another daemon bound ${controlSocketPath} first; exiting`);
                 process.exit(0);
             }
             reject(err);
         };
-        const onNdjsonError = (err: Error) => {
-            controlServer.removeListener("error", onControlError);
-            reject(err);
-        };
-        controlServer.once("error", onControlError);
-        ndjsonServer.once("error", onNdjsonError);
+        controlServer.once("error", onError);
         controlServer.once("listening", () => {
-            ndjsonServer.once("listening", () => resolve());
-            ndjsonServer.once("error", (err: Error) => {
-                controlServer.close(() => {
-                    unlinkSocketSync(controlSocketPath);
-                    reject(err);
-                });
-            });
-            ndjsonServer.listen(socketPath);
+            controlServer.removeListener("error", onError);
+            resolve();
         });
         controlServer.listen(controlSocketPath);
     });
 
-    log.info(
-        `daemon listening ndjson=${socketPath} control=${controlSocketPath} sessionsRoot=${deps.sessionsRoot}`,
-    );
+    try {
+        // PR4: scheduler boots once per process; every per-connection
+        // SidecarServer shares the same JobsController so jobs.create/update/
+        // delete mutate the single process-wide scheduler.
+        const jobsDir = join(tacoHome(), "jobs");
+        const jobStore = new JobStore(jobsDir);
 
-    // PR4 upgrade orchestrator: read the marker on boot + every 6h; when a
-    // pending upgrade targeting THIS install (marker.live_dir === our own
-    // TACO_SIDECAR_RESOURCES root) is staged, shut down so the owner can run
-    // `taco upgrade --apply`. Constructed AFTER the servers are bound: the
-    // shutdown closure captures them, and a marker present at boot used to
-    // fire the closure before the `const` declarations were reached (TDZ).
-    const upgradeOrchestrator = new UpgradeOrchestrator({
-        markerPath: DEFAULT_MARKER_PATH,
-        liveDir: process.env.TACO_SIDECAR_RESOURCES,
-        requestShutdown: async (reason) => {
-            log.info(`upgrade orchestrator: ${reason}; shutting down daemon`);
+        // Process-level IM channel stack. Constructed once and shared with every
+        // NDJSON connection's SidecarServer so a desktop disconnect cannot kill
+        // inbound IM bots and only one routing.json writer exists. `imHost` is
+        // the resident host that owns the channel stack — connection servers
+        // forward im:// RPCs to it via dispatchRpc.
+        //
+        // The resident is constructed BEFORE the single-instance probe so a
+        // hostile / stale probe can't race channel startup. Channel startup
+        // failures are isolated: a bot failing to bind must not block the
+        // socket bind or fs-workspace RPCs.
+        const conversationRouter = await ConversationRouter.load(tacoHome());
+        const sharedChannelStack = {
+            channelRegistry: new ChannelRegistry(),
+            channelBindBroker: new ChannelBindBroker(),
+            conversationRouter,
+        };
+        // Phase 2: process-level fan-out registry. The resident uses it to push
+        // IM frames to every connected desktop's NDJSON transport so an open
+        // IM session view stays live (new peer messages, mid-turn updates).
+        // Without this the host's emitPush would only hit NullTransport and
+        // Phase 1's regression — already-open IM views going stale — would
+        // remain. Each SidecarServer adds its own transport on start().
+        const clientSinkRegistry = new ClientSinkRegistry();
+
+        // Two runtimes, one process:
+        //  - `imHost` owns IM workspaces + the channel stack; im:// cwd sessions
+        //    run here so a desktop disconnect never kills the inbound IM bot.
+        //  - `schedulerSidecar` owns fs workspaces; fs cwd sessions invoked by
+        //    scheduled jobs run here so the scheduler doesn't depend on any
+        //    desktop connection being up. It does NOT share the channel stack
+        //    (no IM traffic) and does NOT register with clientSinkRegistry
+        //    (desktop sessions don't track scheduler-generated sched-* ids).
+        //
+        // Both must be constructed AND started before Scheduler.start(), which
+        // may fire boot-replay jobs as fire-and-forget invokes; the resolver
+        // closes over both references.
+        const imHost = new SidecarServer({
+            ...toSharedSidecarDeps(deps),
+            ...sharedChannelStack,
+            clientSinkRegistry,
+        });
+        const schedulerSidecar = new SidecarServer({ ...toSharedSidecarDeps(deps) });
+        await imHost.start(new NullTransport(), deps.cfg.channels ?? []).catch((err: unknown) => {
+            log.error(`IM host failed to start: ${String(err)}`);
+        });
+        // `NullTransport` is no-op for open/close/send, so the scheduler
+        // runtime has no remote client and no channel bots. start() still
+        // wires broker/router subscriptions + command-record sweeper + the
+        // transport field that getTransport() falls back to — without
+        // setting it, emitPush inside job invokes would create a fresh
+        // StdioTransport and write to actual stdout.
+        await schedulerSidecar.start(new NullTransport(), []).catch((err: unknown) => {
+            log.error(`scheduler runtime failed to start: ${String(err)}`);
+        });
+
+        const scheduler = new Scheduler({
+            store: jobStore,
+            lockDir: jobsDir,
+            invoke: createJobDispatcher(
+                (workspace) => (workspace.startsWith(IM_CWD_PREFIX) ? imHost : schedulerSidecar),
+                // Pin strategy writes the created sessionId back to the job so
+                // subsequent fires can attach the same session. The store stays
+                // authoritative for job state; the dispatcher never mutates it.
+                {
+                    onPinnedSessionCreated: async (jobId, sessionId) => {
+                        await jobStore.mutate(jobId, (job) =>
+                            job ? { ...job, pinnedSessionId: sessionId } : null,
+                        );
+                    },
+                },
+            ),
+        });
+        await scheduler.start().catch((err: unknown) => {
+            log.error(`scheduler failed to start: ${String(err)}`);
+        });
+        const jobsController = new JobsController(jobStore, scheduler, jobsDir);
+
+        // Mount the controller on every SidecarServer instance that exposes
+        // jobs.* RPCs. Connection servers pick it up via `sharedDeps.jobs`;
+        // the two residents (imHost + schedulerSidecar) need an explicit setter
+        // because their `start()` already ran before the controller existed
+        // (the controller's Scheduler depends on them — see dispatch resolver).
+        imHost.setJobsControl?.(jobsController);
+        schedulerSidecar.setJobsControl?.(jobsController);
+
+        const sharedDeps = {
+            ...toSharedSidecarDeps(deps),
+            ...sharedChannelStack,
+            jobs: jobsController,
+            imHost,
+            clientSinkRegistry,
+        };
+
+        // Stale-socket cleanup before we try to bind. A previous daemon that
+        // crashed (kill -9 / power loss) leaves the socket file on disk; bind()
+        // would fail with EADDRINUSE forever. probeNdjsonSocket → "stale" means
+        // a file exists with no listener, which is exactly the recoverable case.
+        const ndjsonState = IS_UNIX ? await probeNdjsonSocket(socketPath) : "absent";
+        if (ndjsonState === "stale") {
+            log.warn(`removing stale NDJSON socket at ${socketPath}`);
+            unlinkSocketSync(socketPath);
+        }
+
+        ndjsonServer = createNetServer((socket: Socket) => {
+            const transport = new StdioTransport(socket, socket);
+            const started = startServer(sharedDeps, transport);
+            started.ready.catch((err) => {
+                log.error(`connection failed to start: ${err?.stack ?? err}`);
+                socket.destroy();
+            });
+            socket.on("close", () => {
+                started.stop().catch((err) => log.error(`stop failed: ${err?.stack ?? err}`));
+            });
+            socket.on("error", (err) => log.error(`ndjson socket error: ${err.message}`));
+        });
+        ndjsonServer.on("error", (err) => log.error(`ndjson server error: ${err.message}`));
+
+        // Control is already bound and owned. Bind NDJSON second; if it fails,
+        // release the control ownership so the next launch can recover.
+        await new Promise<void>((resolve, reject) => {
+            ndjsonServer.once("error", (err: Error) => {
+                void closeServer(controlServer).finally(() => {
+                    unlinkSocketSync(controlSocketPath);
+                    reject(err);
+                });
+            });
+            ndjsonServer.once("listening", () => resolve());
+            ndjsonServer.listen(socketPath);
+        });
+
+        log.info(
+            `daemon listening ndjson=${socketPath} control=${controlSocketPath} sessionsRoot=${deps.sessionsRoot}`,
+        );
+
+        // PR4 upgrade orchestrator: read the marker on boot + every 6h; when a
+        // pending upgrade targeting THIS install (marker.live_dir === our own
+        // TACO_SIDECAR_RESOURCES root) is staged, shut down so the owner can run
+        // `taco upgrade --apply`. Constructed AFTER the servers are bound: the
+        // shutdown closure captures them, and a marker present at boot used to
+        // fire the closure before the `const` declarations were reached (TDZ).
+        const upgradeOrchestrator = new UpgradeOrchestrator({
+            markerPath: DEFAULT_MARKER_PATH,
+            liveDir: process.env.TACO_SIDECAR_RESOURCES,
+            requestShutdown: async (reason) => {
+                log.info(`upgrade orchestrator: ${reason}; shutting down daemon`);
+                await closeServer(ndjsonServer);
+                await closeServer(controlServer);
+                unlinkSocketSync(socketPath);
+                unlinkSocketSync(controlSocketPath);
+                process.exit(0);
+            },
+        });
+        upgradeOrchestrator.start();
+
+        shutdown = async (sig: string) => {
+            log.info(`caught ${sig}, shutting down daemon...`);
+            scheduler.stop();
+            upgradeOrchestrator.stop();
+            // Stop the resident first so its channels cancel before we tear down
+            // the socket listeners — long-poll / webhook handlers otherwise keep
+            // the event loop alive across process.exit.
+            await imHost.stop().catch((err: unknown) => {
+                log.error(`IM host stop failed: ${String(err)}`);
+            });
+            // Scheduler runtime last: any in-flight job invokes have already
+            // been cancelled by scheduler.stop() above, so tearing this down
+            // only reclaims the fs workspaces the scheduler built. NullTransport
+            // close is a no-op; the value of stop() is the workspaceMap dispose.
+            await schedulerSidecar.stop().catch((err: unknown) => {
+                log.error(`scheduler runtime stop failed: ${String(err)}`);
+            });
             await closeServer(ndjsonServer);
             await closeServer(controlServer);
             unlinkSocketSync(socketPath);
             unlinkSocketSync(controlSocketPath);
             process.exit(0);
-        },
-    });
-    upgradeOrchestrator.start();
-
-    const shutdown = async (sig: string) => {
-        log.info(`caught ${sig}, shutting down daemon...`);
-        scheduler.stop();
-        upgradeOrchestrator.stop();
-        // Stop the resident first so its channels cancel before we tear down
-        // the socket listeners — long-poll / webhook handlers otherwise keep
-        // the event loop alive across process.exit.
-        await imHost.stop().catch((err: unknown) => {
-            log.error(`IM host stop failed: ${String(err)}`);
+        };
+        const stopDaemon = shutdown;
+        if (shutdownRequestedDuringStartup) {
+            void stopDaemon("CONTROL_SHUTDOWN");
+        }
+        process.on("SIGINT", () => void stopDaemon("SIGINT"));
+        process.on("SIGTERM", () => void stopDaemon("SIGTERM"));
+        // Crash-exit fallback: async shutdown may not finish if the process is
+        // dying. process.on('exit') runs synchronously after the event loop drains
+        // and is the last chance to clean up before the process image is replaced.
+        process.on("exit", () => {
+            unlinkSocketSync(socketPath);
+            unlinkSocketSync(controlSocketPath);
         });
-        // Scheduler runtime last: any in-flight job invokes have already
-        // been cancelled by scheduler.stop() above, so tearing this down
-        // only reclaims the fs workspaces the scheduler built. NullTransport
-        // close is a no-op; the value of stop() is the workspaceMap dispose.
-        await schedulerSidecar.stop().catch((err: unknown) => {
-            log.error(`scheduler runtime stop failed: ${String(err)}`);
+        // Uncaught error while a job is mid-fire: flip its `running` history
+        // entry to `err` so a hung scheduler doesn't leave a permanent "still
+        // running" record. A custom uncaughtException listener suppresses
+        // Node's automatic exit, so persist the marks for a bounded interval
+        // and then explicitly terminate non-zero. The OS reaps any leftover
+        // `<id>.lock` on next start via stale cleanup in Scheduler.start().
+        process.on("uncaughtException", (err) => {
+            log.error(`uncaught exception: ${err?.stack ?? err}`);
+            const reason = err?.message ?? "uncaughtException";
+            void Promise.race([
+                jobsController.markRunningAsErr(reason),
+                new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+            ]).finally(() => {
+                process.exitCode = 1;
+                process.exit(1);
+            });
         });
-        await closeServer(ndjsonServer);
-        await closeServer(controlServer);
-        unlinkSocketSync(socketPath);
+    } catch (err) {
+        await closeServer(controlServer).catch(() => undefined);
         unlinkSocketSync(controlSocketPath);
-        process.exit(0);
-    };
-    process.on("SIGINT", () => void shutdown("SIGINT"));
-    process.on("SIGTERM", () => void shutdown("SIGTERM"));
-    // Stdio is closed by the launcher (we don't read it in daemon mode), but a
-    // premature close still means "the parent went away, exit now".
-    process.stdin.on("end", () => void shutdown("STDIN_EOF"));
-    // Crash-exit fallback: async shutdown may not finish if the process is
-    // dying. process.on('exit') runs synchronously after the event loop drains
-    // and is the last chance to clean up before the process image is replaced.
-    process.on("exit", () => {
-        unlinkSocketSync(socketPath);
-        unlinkSocketSync(controlSocketPath);
-    });
-    // Uncaught error while a job is mid-fire: flip its `running` history
-    // entry to `err` so a hung scheduler doesn't leave a permanent "still
-    // running" record. We deliberately don't rethrow — Node prints the
-    // stack trace and exits with code 1; the marks are best-effort and
-    // the OS reaps any leftover `<id>.lock` on next start via stale
-    // cleanup in Scheduler.start().
-    process.on("uncaughtException", (err) => {
-        log.error(`uncaught exception: ${err?.stack ?? err}`);
-        void jobsController.markRunningAsErr(err?.message ?? "uncaughtException");
-    });
+        throw err;
+    }
 }
 
 /**

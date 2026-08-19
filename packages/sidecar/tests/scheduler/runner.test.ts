@@ -370,7 +370,7 @@ test("start() does NOT replay run_on_startup=true jobs that already ran in the s
     });
 });
 
-test("invoke that exceeds fireTimeoutMs is rejected with a timeout error and the lock is cleared", async () => {
+test("invoke timeout records an error but retains the lock until the invocation settles", async () => {
     await withTmp(async (dir) => {
         const store = new MemoryStore();
         store.jobs.set("hang", intervalJob("hang", 60_000, { enabled: false }));
@@ -400,17 +400,10 @@ test("invoke that exceeds fireTimeoutMs is rejected with a timeout error and the
         );
         ok(saved.history[0].ended_at, "ended_at should be stamped");
         scheduler.stop();
-        // The lock should be gone — the fire released it in finally.
-        // The underlying invoke is still pending (we don't cancel it),
-        // but the lock file is the runner's responsibility, not invoke's.
-        await readFile(join(dir, "hang.lock")).then(
-            () => {
-                throw new Error("lock should have been cleared");
-            },
-            (err: NodeJS.ErrnoException) => {
-                strictEqual(err.code, "ENOENT");
-            },
-        );
+        // The underlying invocation is still active, so a second fire must be
+        // rejected instead of overlapping the same job/session turn.
+        ok(await readFile(join(dir, "hang.lock")));
+        strictEqual(await scheduler.runNow("hang"), false);
         // Settle the underlying invoke so the test process can exit cleanly.
         await new Promise((r) => setTimeout(r, 20));
         strictEqual(settled, false, "invoke promise is intentionally not cancelled");
@@ -516,11 +509,8 @@ test("a field invoke writes mid-fire survives the history save", async () => {
     });
 });
 
-test("history still persists when the job file vanishes mid-fire", async () => {
+test("a job deleted mid-fire is not resurrected by the runner", async () => {
     await withTmp(async (dir) => {
-        // The re-read in the finally block must not turn a deleted job into
-        // a crash or a lost history entry — it falls back to the captured
-        // snapshot so the fire's outcome is still recorded.
         const store = new MemoryStore();
         store.jobs.set("gone", intervalJob("gone", 60_000, { enabled: false }));
         const scheduler = new Scheduler({
@@ -532,10 +522,7 @@ test("history still persists when the job file vanishes mid-fire", async () => {
         });
         const ran = await scheduler.runNow("gone");
         strictEqual(ran, true);
-        const saved = store.jobs.get("gone");
-        ok(saved);
-        strictEqual(saved.history.length, 1);
-        strictEqual(saved.history[0].status, "ok");
+        strictEqual(store.jobs.get("gone"), undefined);
         scheduler.stop();
     });
 });

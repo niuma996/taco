@@ -92,7 +92,7 @@ function makeCtx(server: AnyServer, params: unknown): Ctx {
 }
 
 describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
-    it("jobs.create rejects traversal id before persistence", async () => {
+    it("jobs.create ignores caller-supplied ids before persistence", async () => {
         registerBuiltinMethods();
         const reg = getRegisteredMethod("jobs.create");
         assert.ok(reg);
@@ -101,29 +101,24 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
         const server = makeStubServer(controllerCalls);
 
         // Real wire shape: { job: { ... } }
-        await assert.rejects(
-            () =>
-                reg.handler(
-                    makeCtx(server, {
-                        job: {
-                            id: "../../etc/passwd",
-                            name: "x",
-                            schedule: { kind: "interval", ms: 1000 },
-                            command: "agent.invoke",
-                            args: { workspace: "/tmp/test", prompt: "x" },
-                            enabled: true,
-                            run_on_startup: false,
-                            history: [],
-                        },
-                    }),
-                ),
-            (e: unknown) =>
-                e instanceof RpcHandlerError && (e as { code: string }).code === "invalid_params",
+        await reg.handler(
+            makeCtx(server, {
+                job: {
+                    id: "../../etc/passwd",
+                    name: "x",
+                    schedule: { kind: "interval", ms: 1000 },
+                    command: "agent.invoke",
+                    args: { workspace: "/tmp/test", prompt: "x" },
+                    enabled: true,
+                    run_on_startup: false,
+                    history: [],
+                },
+            }),
         );
-        assert.deepEqual(controllerCalls, []);
+        assert.deepEqual(controllerCalls, ["create::none"]);
     });
 
-    it("jobs.create accepts a valid id long enough to reach the controller", async () => {
+    it("jobs.create strips a valid caller id before reaching the controller", async () => {
         registerBuiltinMethods();
         const reg = getRegisteredMethod("jobs.create");
         assert.ok(reg);
@@ -146,7 +141,7 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                 },
             }),
         );
-        assert.deepEqual(controllerCalls, ["create:nightly-cleanup:none"]);
+        assert.deepEqual(controllerCalls, ["create::none"]);
     });
 
     it("jobs.update rejects traversal id before persistence", async () => {
@@ -281,7 +276,7 @@ describe("jobs RPC — workspace routing (regression)", () => {
             controllerCalls,
         );
         assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
-        assert.deepEqual(controllerCalls, ["create:nightly-cleanup:none"]);
+        assert.deepEqual(controllerCalls, ["create::none"]);
     });
 
     it("jobs.update dispatches without params.workspace", async () => {

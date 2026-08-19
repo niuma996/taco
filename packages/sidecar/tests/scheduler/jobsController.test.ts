@@ -95,6 +95,53 @@ test("update() persists + reloads; disabling removes the timer", async () => {
     });
 });
 
+test("update() rejects a stale incarnation after delete and recreate with the same id", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
+        await scheduler.start();
+
+        let replaceBeforeMutate = false;
+        const controllerStore = {
+            list: () => store.list(),
+            get: async (id: string) => {
+                const current = await store.get(id);
+                if (!replaceBeforeMutate || !current) return current;
+                replaceBeforeMutate = false;
+                await store.delete(id);
+                await store.create(
+                    sampleJob(id, {
+                        name: "replacement",
+                        enabled: false,
+                        generation: "replacement-generation",
+                    }),
+                );
+                return current;
+            },
+            save: (job: Job) => store.save(job),
+            create: (job: Job) => store.create(job),
+            mutate: (id: string, update: (current: Job | null) => Job | null) =>
+                store.mutate(id, update),
+            delete: (id: string) => store.delete(id),
+        };
+        const ctrl = new JobsController(controllerStore, scheduler, dir);
+        await ctrl.create(sampleJob("a", { enabled: false }));
+        const stale = await store.get("a");
+        ok(stale);
+
+        replaceBeforeMutate = true;
+        await rejects(
+            () => ctrl.update({ ...stale, name: "stale update" }),
+            (err: unknown): err is JobsScopeError =>
+                err instanceof JobsScopeError && err.code === "not_found",
+        );
+        const replacement = await store.get("a");
+        strictEqual(replacement?.name, "replacement");
+        strictEqual(replacement?.generation, "replacement-generation");
+        scheduler.stop();
+    });
+});
+
 test("delete() removes the file + lock; reload leaves no timer", async () => {
     await withTmp(async (dir) => {
         const store = new JobStore(dir);
@@ -123,7 +170,7 @@ test("runNow() returns false for unknown id, true when fired", async () => {
     });
 });
 
-test("history() returns the persisted history entries or null for unknown job", async () => {
+test("history() starts empty for a newly created job and returns null for unknown job", async () => {
     await withTmp(async (dir) => {
         const store = new JobStore(dir);
         const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
@@ -140,7 +187,7 @@ test("history() returns the persisted history entries or null for unknown job", 
         ];
         await ctrl.create(seeded);
         const hist = await ctrl.history("a");
-        deepStrictEqual(hist, seeded.history);
+        deepStrictEqual(hist, []);
         scheduler.stop();
     });
 });
