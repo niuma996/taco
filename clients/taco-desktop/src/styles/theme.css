@@ -112,17 +112,21 @@
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* Light theme — warm paper bg + Nord blue accent. Same hue as dark theme (no cross-theme hue shift).
+/* Light theme — neutral warm-gray surfaces + Nord blue accent. Same hue as dark theme (no cross-theme hue shift).
    Dark uses #88c0d0 (Nord 8), light uses #5e81ac (Nord 10): brightness increases, saturation decreases.
    --assistant uses deeper blue #4078c0 to distinguish from --accent. Only theme-varying tokens
    are overridden here; layout tokens inherit from :root. */
 :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #fbf7f2;
-    /* Chat area background — slightly lighter than --bg, warm white. */
-    --chat-bg: #fdfaf4;
-    /* Chat panel + input top-half: warm white between panel bg and model messages. */
-    --chat-panel-bg: #fcf9f4;
+    /* Four low-saturation warm-gray surfaces. Keep light mode neutral while avoiding pure white. */
+    --warm-gray-1: #f7f6f3;
+    --warm-gray-2: #f3f1ee;
+    --warm-gray-3: #eeece8;
+    --warm-gray-4: #e8e5e0;
+
+    --bg: var(--warm-gray-2);
+    --chat-bg: var(--warm-gray-1);
+    --chat-panel-bg: var(--warm-gray-1);
     --fg: #2b2620;
     --fg-dim: #8a8177;
     --accent: #5e81ac; /* Nord 10, deep blue — matches dark #88c0d0 family */
@@ -130,8 +134,8 @@
     --assistant: #4078c0; /* darker than --accent for role differentiation */
     --system: #8a5aa8;
     --tool: #a8760a;
-    --border: #ece3d5;
-    --input-bg: #f3ede4;
+    --border: #dedbd5;
+    --input-bg: var(--warm-gray-4);
 
     --error: #c0392b;
     --error-bg: rgba(192, 57, 43, 0.12);
@@ -162,25 +166,25 @@
     --shadow-color: rgba(43, 38, 32, 0.18);
     --shadow-color-strong: rgba(43, 38, 32, 0.22);
     --tooltip-bg: #2b2620;
-    --tooltip-fg: #fbf7f2;
-    --bg-elevated: #ffffff;
+    --tooltip-fg: var(--warm-gray-1);
+    --bg-elevated: var(--warm-gray-1);
     --surface-tint: rgba(0, 0, 0, 0.02);
 
-    /* Secondary surface — slightly darker than --bg-elevated (#ffffff). Used by content card bodies. */
-    --bg-secondary: #fdfaf4;
+    /* Secondary surface — same neutral scale as the main application surfaces. */
+    --bg-secondary: var(--warm-gray-2);
     /* Hover overlay on light theme — light gray semi-transparent. */
     --hover-overlay: rgba(0, 0, 0, 0.04);
     --danger: var(--error);
 
-    /* Second column bg: darker than --bg, lighter than --input-bg. Creates a subtle layer difference. */
-    --pane-bg: #f5f0e8;
+    /* Second column bg: darker than --bg, lighter than --input-bg. */
+    --pane-bg: var(--warm-gray-3);
     /* List area bg: slightly lighter than --pane-bg. */
-    --pane-list-bg: #f9f4ee;
+    --pane-list-bg: var(--warm-gray-2);
 
     /* User message background — solid light blue, same family as --accent. Mirror of dark theme #1a2a3a. */
     --user-msg-bg: #dbe5ee;
     /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
-    --assistant-msg-bg: #faf6f0;
+    --assistant-msg-bg: var(--warm-gray-1);
 
     /* Diff colors — more saturated red/green for light theme readability. */
     --diff-old-fg: #c0392b;
