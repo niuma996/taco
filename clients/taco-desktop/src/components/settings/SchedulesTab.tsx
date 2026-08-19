@@ -62,6 +62,20 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
      *  block whether the fire was accepted or skipped. */
     const [runningId, setRunningId] = useState<string | null>(null);
 
+    // Channel jobs (im:// workspace) only support sessionStrategy="reuse"
+    // server-side — JobsController rejects anything else. Detect the
+    // workspace from the args draft so the form can lock the strategy
+    // picker instead of letting the user save a guaranteed failure.
+    const isImWorkspace = useMemo(() => {
+        try {
+            const parsed = JSON.parse(draft.argsJson) as { workspace?: unknown };
+            return typeof parsed?.workspace === "string" && parsed.workspace.startsWith("im://");
+        } catch {
+            // Unparseable draft — submit() reports the JSON error itself.
+            return false;
+        }
+    }, [draft.argsJson]);
+
     const submit = useCallback(() => {
         setFormError(null);
         let args: Record<string, unknown>;
@@ -93,7 +107,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
             args,
             enabled: draft.enabled,
             run_on_startup: draft.run_on_startup,
-            sessionStrategy: draft.sessionStrategy,
+            sessionStrategy: isImWorkspace ? ("reuse" as const) : draft.sessionStrategy,
             history: [],
         };
         const target = editingId ? jobs.update({ id: editingId, ...common }) : jobs.create(common);
@@ -106,7 +120,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
             .catch((err: unknown) => {
                 setFormError(err instanceof Error ? err.message : String(err));
             });
-    }, [draft, editingId, jobs]);
+    }, [draft, editingId, jobs, isImWorkspace]);
 
     const beginEdit = useCallback((job: Job) => {
         setEditingId(job.id);
@@ -366,7 +380,8 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                 <label>
                     <span>{t("schedules.fieldSessionStrategy", "Session strategy")}</span>
                     <select
-                        value={draft.sessionStrategy}
+                        value={isImWorkspace ? "reuse" : draft.sessionStrategy}
+                        disabled={isImWorkspace}
                         onChange={(event) =>
                             setDraft({
                                 ...draft,
@@ -374,8 +389,17 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                             })
                         }
                     >
-                        <option value="pin">pin — fixed dedicated session</option>
-                        <option value="new">new — fresh session per fire</option>
+                        {isImWorkspace ? (
+                            // Channel jobs continue the peer's live
+                            // conversation; the server rejects any other
+                            // strategy, so the picker locks to reuse.
+                            <option value="reuse">reuse — continue the channel session</option>
+                        ) : (
+                            <>
+                                <option value="pin">pin — fixed dedicated session</option>
+                                <option value="new">new — fresh session per fire</option>
+                            </>
+                        )}
                     </select>
                 </label>
                 <label className="schedules-toggle">

@@ -10,6 +10,7 @@
 import {
     Bot,
     Brain,
+    CalendarClock,
     History,
     MessageSquare,
     Plug,
@@ -31,6 +32,7 @@ type ActivityView =
     | "channels"
     | "memory"
     | "checkpoints"
+    | "schedules"
     | "mcp"
     | "settings";
 
@@ -46,6 +48,7 @@ type ItemDef = {
         | "activity.channels"
         | "activity.memory"
         | "activity.checkpoints"
+        | "activity.schedules"
         | "activity.mcp"
         | "activity.settings";
 };
@@ -60,6 +63,7 @@ const ACTIVITY_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "channels", icon: Radio, labelKey: "activity.channels" },
     { type: "memory", icon: Brain, labelKey: "activity.memory" },
     { type: "checkpoints", icon: History, labelKey: "activity.checkpoints" },
+    { type: "schedules", icon: CalendarClock, labelKey: "activity.schedules" },
 ];
 
 const SETTINGS_ITEM: ItemDef = { type: "settings", icon: Settings, labelKey: "activity.settings" };

@@ -202,10 +202,14 @@ test("get() normalizes a legacy job file (no history field) to an empty array", 
         const loaded = await store.get("legacy");
         ok(loaded);
         deepStrictEqual(loaded.history, []);
-        // All other fields survive untouched.
+        // Other fields survive untouched — except sessionStrategy: pin on
+        // an im:// workspace is the legacy shape the channel-strategy
+        // migration coerces to "reuse" (and persists back to disk).
         strictEqual(loaded.id, "legacy");
-        strictEqual(loaded.sessionStrategy, "pin");
+        strictEqual(loaded.sessionStrategy, "reuse");
         strictEqual(loaded.channelId, "ch");
+        const onDisk = JSON.parse(await readFile(join(dir, "legacy.json"), "utf8")) as Job;
+        strictEqual(onDisk.sessionStrategy, "reuse", "migration must persist to the job file");
     });
 });
 

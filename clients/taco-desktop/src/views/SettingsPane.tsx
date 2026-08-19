@@ -7,8 +7,7 @@
  * width-capped content column instead of a 420px-wide drawer.
  *
  * MCP is not here — it lives on the activity rail as its own top-level view.
- *
- * PR4 adds the `schedules` section (daemon-side scheduler UI).
+ * Schedules likewise moved to the activity rail (daemon-side scheduler UI).
  */
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { useState } from "react";
@@ -19,7 +18,6 @@ import { DebugTab } from "../components/settings/DebugTab.tsx";
 import type { ModelOption } from "../components/settings/ModelPicker.tsx";
 import { ModelTab } from "../components/settings/ModelTab.tsx";
 import { PermissionsTab } from "../components/settings/PermissionsTab.tsx";
-import { SchedulesTab } from "../components/settings/SchedulesTab.tsx";
 import { UpdatesTab } from "../components/settings/UpdatesTab.tsx";
 import { useT } from "../i18n/useI18n.ts";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
@@ -30,7 +28,6 @@ export type SettingsSection =
     | "compaction"
     | "context"
     | "permissions"
-    | "schedules"
     | "debug"
     | "updates";
 
@@ -40,7 +37,6 @@ type SectionLabelKey =
     | "settings.tabCompaction"
     | "settings.tabContext"
     | "settings.tabPermissions"
-    | "settings.tabSchedules"
     | "settings.tabDebug"
     | "settings.tabUpdates";
 
@@ -50,7 +46,6 @@ const SECTIONS: ReadonlyArray<{ key: SettingsSection; labelKey: SectionLabelKey 
     { key: "compaction", labelKey: "settings.tabCompaction" },
     { key: "context", labelKey: "settings.tabContext" },
     { key: "permissions", labelKey: "settings.tabPermissions" },
-    { key: "schedules", labelKey: "settings.tabSchedules" },
     { key: "debug", labelKey: "settings.tabDebug" },
     { key: "updates", labelKey: "settings.tabUpdates" },
 ];
@@ -106,7 +101,6 @@ export function SettingsPane(props: SettingsPaneProps) {
                     {section === "compaction" && <CompactionTab client={props.client} />}
                     {section === "context" && <ContextTab client={props.client} />}
                     {section === "permissions" && <PermissionsTab client={props.client} />}
-                    {section === "schedules" && <SchedulesTab client={props.client} />}
                     {section === "debug" && <DebugTab onRestart={props.onRestartSidecar} />}
                     {section === "updates" && (
                         <UpdatesTab

@@ -165,6 +165,27 @@ export class JobStore {
             // spread never sees `undefined`. We still write the array back
             // (next save) so the file picks up the field naturally.
             const withHistory = job.history ? job : { ...job, history: [] };
+            // Channel jobs (im:// workspace) only support
+            // sessionStrategy="reuse". Files written before that rule —
+            // or via the old schedules UI, whose strategy picker had no
+            // "reuse" option and silently saved "pin" — carry a strategy
+            // the dispatcher rejects on every fire. Coerce + persist so
+            // the job self-heals on first read instead of needing a
+            // manual edit. An absent field is left absent: the
+            // dispatcher already defaults im:// to "reuse".
+            const workspace =
+                typeof withHistory.args?.workspace === "string" ? withHistory.args.workspace : "";
+            const withStrategy =
+                workspace.startsWith("im://") &&
+                withHistory.sessionStrategy !== undefined &&
+                withHistory.sessionStrategy !== "reuse"
+                    ? { ...withHistory, sessionStrategy: "reuse" as const }
+                    : withHistory;
+            if (withStrategy !== withHistory && persistMigration) {
+                await this.save(withStrategy).catch((err: unknown) =>
+                    log.warn(`failed to persist strategy migration for ${path}: ${String(err)}`),
+                );
+            }
             // Older jobs also carried their intent in `command` (e.g.
             // `command: "mmx search query"`) instead of in `args.prompt`.
             // The dispatcher only routes `agent.invoke` — translate the
@@ -180,15 +201,18 @@ export class JobStore {
             // else triggers a `save` — and a job nobody edits never gets
             // that opportunity. A write failure is logged but doesn't
             // break the read; the next read will retry the migration.
-            if (typeof withHistory.command === "string" && withHistory.command !== "agent.invoke") {
-                const taskText = [withHistory.command, ...positionalArgs(withHistory.args)]
+            if (
+                typeof withStrategy.command === "string" &&
+                withStrategy.command !== "agent.invoke"
+            ) {
+                const taskText = [withStrategy.command, ...positionalArgs(withStrategy.args)]
                     .join(" ")
                     .trim();
                 if (taskText) {
                     const migrated = {
-                        ...withHistory,
+                        ...withStrategy,
                         command: "agent.invoke" as const,
-                        args: { ...withHistory.args, prompt: taskText },
+                        args: { ...withStrategy.args, prompt: taskText },
                     };
                     if (persistMigration) {
                         await this.save(migrated).catch((err: unknown) =>
@@ -198,7 +222,7 @@ export class JobStore {
                     return migrated;
                 }
             }
-            return withHistory;
+            return withStrategy;
         } catch (err) {
             log.warn(`malformed job file ${path}: ${String(err)}`);
             return null;

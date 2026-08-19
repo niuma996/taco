@@ -94,6 +94,7 @@
     "agents": "智能体",
     "plugins": "插件",
     "channels": "渠道",
+    "schedules": "定时任务",
     "mcp": "MCP",
     "settings": "设置",
     "expand": "展开",

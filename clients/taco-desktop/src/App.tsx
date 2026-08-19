@@ -22,6 +22,7 @@ import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { TaskPanel } from "./components/panels/TaskPanel";
 import { RenameModal } from "./components/RenameModal";
 import { McpSection } from "./components/settings/McpSection.tsx";
+import { SchedulesTab } from "./components/settings/SchedulesTab.tsx";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
@@ -219,6 +220,7 @@ export default function App() {
         | "channels"
         | "memory"
         | "checkpoints"
+        | "schedules"
         | "mcp"
         | "settings"
     >("chat");
@@ -794,6 +796,14 @@ export default function App() {
                             restore={checkpoints.restore}
                             hasActiveSession={Boolean(activeSid)}
                         />
+                    ) : mainView === "schedules" ? (
+                        <div className="settings-pane">
+                            <div className="settings-pane-content">
+                                <div className="settings-pane-content-inner">
+                                    <SchedulesTab client={client} />
+                                </div>
+                            </div>
+                        </div>
                     ) : mainView === "settings" ? (
                         <SettingsPane
                             client={client}
