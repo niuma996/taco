@@ -22,11 +22,6 @@ interface RouteEntry {
  *  any user history. */
 export class ConversationRouter extends EventEmitter {
     private readonly routes = new Map<string, RouteEntry>(); // key = imCwd
-    /** Reverse-only index for sessions created outside `route()` (scheduler
-     *  pin jobs). key = sessionId, value = imCwd. Kept separate from
-     *  `routes` because that map is 1:1 per workspace and is owned by the
-     *  peer's live conversation — see `registerExternalSession`. */
-    private readonly externalRoutes = new Map<string, string>();
     private readonly inflight = new Map<
         string,
         Promise<{ workspace: string; sessionId: string }>
@@ -115,7 +110,6 @@ export class ConversationRouter extends EventEmitter {
                                 channelId: string;
                                 peerId: string;
                                 chatId: string;
-                                routeRole?: "conversation" | "external";
                             };
                         };
                     };
@@ -132,11 +126,7 @@ export class ConversationRouter extends EventEmitter {
                             /* stat failed — fall back to 0 rather than dropping the route */
                         }
                         const workspace = makeImCwd(im.channelId, im.peerId, im.chatId);
-                        if (im.routeRole === "external") {
-                            this.externalRoutes.set(header.id, workspace);
-                        } else {
-                            this.routes.set(workspace, { sessionId: header.id, lastUsedAt });
-                        }
+                        this.routes.set(workspace, { sessionId: header.id, lastUsedAt });
                     }
                 } catch (e) {
                     // Skip corrupt files without affecting other routes — but say
@@ -155,11 +145,7 @@ export class ConversationRouter extends EventEmitter {
         for (const [workspace, entry] of this.routes) {
             if (entry.sessionId === sessionId) return parseImCwd(workspace);
         }
-        // Fall back to sessions registered out-of-band (scheduler pin jobs).
-        // Checked second so a live conversation always wins on the (rare)
-        // chance both indexes name the same id.
-        const external = this.externalRoutes.get(sessionId);
-        return external ? parseImCwd(external) : undefined;
+        return undefined;
     }
 
     lookup(
@@ -290,53 +276,6 @@ export class ConversationRouter extends EventEmitter {
             lastUsedAt,
         });
         return { workspace, sessionId: sid };
-    }
-
-    /** Register a session that was created outside of `route()` (e.g. by the
-     *  scheduler's pin strategy, which dispatches `session.create` directly
-     *  with a stable id and skips the conversation-router create path).
-     *
-     *  Without this, `findRouteBySessionId(pinnedId)` returns nothing — the
-     *  channel's reverse-lookup (`resolvePeer`) misses, and any reply the
-     *  agent emits gets logged as "no peer for session, reply dropped".
-     *
-     *  This deliberately does NOT touch `routes`. That map is the forward
-     *  index (`workspace -> the one session inbound messages go to`), and a
-     *  peer's live conversation owns the same key. Writing the scheduler's
-     *  session there would evict the human's session, so the peer's next
-     *  message would land in the scheduler's session instead — hijacking
-     *  the conversation. Outbound reply addressing only ever needs the
-     *  reverse direction, so it gets its own many-to-one index and the
-     *  forward map is left alone. Not persisted: it is rebuilt by whoever
-     *  re-creates or re-attaches the session after a restart.
-     *
-     *  No-op on fs workspaces (no IM triple to bind). */
-    registerExternalSession(workspace: string, sessionId: string): void {
-        if (!parseImCwd(workspace)) return;
-        this.externalRoutes.set(sessionId, workspace);
-    }
-
-    /**
-     * Drop a sessionId from the reverse index. Called when:
-     *   - the underlying session is deleted (`session.delete` RPC or its
-     *     `session.deleted` workspace event),
-     *   - the pin job that owned the session is deleted (the session
-     *     may still be on disk but no scheduler is referencing it),
-     *   - the pin job is edited away from `pin` strategy (the session
-     *     becomes orphaned; the next fire won't reuse it).
-     *
-     * Returns true when a binding was actually removed. The reverse-only
-     * index (`externalRoutes`) is not persisted — a stale entry here
-     * survives only until the next daemon restart, when rebuildFromJsonl
-     * re-walks the jsonl files. So an unregister that races a persist
-     * on the same sessionId is at worst self-correcting: the rebuild
-     * either restores the binding (jsonl still has the metadata) or
-     * doesn't (jsonl was already gone), and we cannot tell those apart
-     * from the in-memory state alone. Deletion is still correct because
-     * a session without on-disk metadata cannot be addressed anyway.
-     */
-    unregisterExternalSession(sessionId: string): boolean {
-        return this.externalRoutes.delete(sessionId);
     }
 
     /** Uses session.history (not session.list, which filters subagents).

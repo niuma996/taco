@@ -102,9 +102,15 @@ test("concurrent save() on the same id — last write wins, no torn entries", as
         ok(persisted);
         // Final committed value is one of the writers, not a torn merge.
         const names = Array.from({ length: 20 }, (_, i) => `v${i + 1}`);
-        ok(
-            names.includes(persisted.name),
-            `final name ${persisted.name} should be one of the writers`,
+        const winner = names.indexOf(persisted.name);
+        ok(winner !== -1, `final name ${persisted.name} should be one of the writers`);
+        // Fields must come from the SAME writer — a hybrid (name from
+        // one save, generation from another) is a torn write even when
+        // every individual field value is legal.
+        strictEqual(
+            persisted.generation,
+            `g-${winner}`,
+            "name and generation must belong to the same writer",
         );
     });
 });
@@ -318,6 +324,28 @@ test("fire timeout surfaces as err and rejects overlapping fires", async () => {
         // setTimeout keeps the event loop alive past the test
         // boundary and the file-level test times out.
         await invokeDone;
+        // The lock is released via the completion.finally path once
+        // the slow invoke settles — poll for the unlink rather than
+        // assuming the microtask has already run.
+        let lockGone = false;
+        for (let i = 0; i < 20 && !lockGone; i += 1) {
+            try {
+                await readFile(join(dir, "slow.lock"));
+                await new Promise((r) => setTimeout(r, 5));
+            } catch (err) {
+                if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+                    lockGone = true;
+                } else {
+                    throw err;
+                }
+            }
+        }
+        ok(lockGone, "lock must be released after the timed-out invoke settles");
+        // And the next tick can re-enter: a fresh fire acquires the
+        // lock (returns true). It times out again — the invoke still
+        // takes 200ms against the 20ms fireTimeoutMs — so we assert
+        // re-entry only, not the outcome.
+        strictEqual(await scheduler.runNow("slow"), true);
     });
 });
 

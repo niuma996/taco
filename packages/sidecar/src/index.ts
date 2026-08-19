@@ -357,17 +357,7 @@ async function runDaemon(
         // opaque "jobs not mounted" error. Mounting first closes that
         // window — the controller never fires jobs of its own, so
         // construction before scheduler.start() has no risk of recursion.
-        const jobsController = new JobsController(
-            jobStore,
-            scheduler,
-            jobsDir,
-            // Keep the reverse-only route index in sync with pin-job
-            // lifecycle: deleting a pin job or switching away from the
-            // `pin` strategy must drop the out-of-band session binding,
-            // otherwise an IM reply for the orphaned session would race
-            // past findRouteBySessionId into "reply dropped".
-            conversationRouter,
-        );
+        const jobsController = new JobsController(jobStore, scheduler, jobsDir);
         imHost.setJobsControl?.(jobsController);
         schedulerSidecar.setJobsControl?.(jobsController);
         await scheduler.start().catch((err: unknown) => {

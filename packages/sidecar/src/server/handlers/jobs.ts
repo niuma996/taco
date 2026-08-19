@@ -17,7 +17,7 @@
  */
 
 import { Type } from "typebox";
-import { JobsScopeError } from "../../lib/jobsErrors.ts";
+import { JobAlreadyExistsError, JobsScopeError } from "../../lib/jobsErrors.ts";
 import { safeJobId } from "../../scheduler/jobId.ts";
 import { JOBS_RPC } from "../../scheduler/jobsRpc.ts";
 import type { Actor, Job, SessionStrategy } from "../../scheduler/types.ts";
@@ -335,6 +335,12 @@ function isSessionStrategy(value: unknown): value is SessionStrategy {
 function scopeErrorToRpc(err: unknown): RpcHandlerError {
     if (err instanceof JobsScopeError) {
         return new RpcHandlerError(err.code, err.message);
+    }
+    // Duplicate-id create gets a dedicated code — without this branch it
+    // would fall through to normalizeError and surface as a redacted
+    // "[upstream] internal" error the caller can't branch on.
+    if (err instanceof JobAlreadyExistsError) {
+        return new RpcHandlerError("conflict", err.message);
     }
     // Re-throw unknown errors so the existing try/catch chain (or the
     // handler wrapper) maps them to internal_error.

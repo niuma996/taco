@@ -142,27 +142,6 @@ describe("ConversationRouter", () => {
         assert.equal(reloaded.lookup("ch1", "u9", "c9")?.sessionId, "sess-xyz");
     });
 
-    it("rebuilds scheduler external routes without replacing the live forward route", async () => {
-        const home = mkdtempSync(path.join(tmpdir(), "router-external-"));
-        const sessionDir = path.join(home, "sessions", "im", "ch1");
-        mkdirSync(sessionDir, { recursive: true });
-        writeFileSync(
-            path.join(sessionDir, "live.jsonl"),
-            `${JSON.stringify({ id: "live", metadata: { imRouting: { channelId: "ch1", peerId: "u1", chatId: "c1" } } })}\n`,
-        );
-        writeFileSync(
-            path.join(sessionDir, "pinned.jsonl"),
-            `${JSON.stringify({ id: "pinned", metadata: { imRouting: { channelId: "ch1", peerId: "u1", chatId: "c1", routeRole: "external" } } })}\n`,
-        );
-        const router = await ConversationRouter.load(home);
-        assert.equal(router.lookup("ch1", "u1", "c1")?.sessionId, "live");
-        assert.deepEqual(router.findRouteBySessionId("pinned"), {
-            channelId: "ch1",
-            peerId: "u1",
-            chatId: "c1",
-        });
-    });
-
     describe("listAll", () => {
         it("returns every routed conversation, newest first", async () => {
             const home = mkdtempSync(path.join(tmpdir(), "router-"));
@@ -278,81 +257,6 @@ describe("ConversationRouter", () => {
             // And the reloaded view must agree with the in-memory one.
             const reloaded = await ConversationRouter.load(home);
             assert.equal(reloaded.listAll().length, 4);
-        });
-    });
-
-    describe("registerExternalSession", () => {
-        it("binds an out-of-band session so findRouteBySessionId resolves", async () => {
-            // The scheduler's pin strategy creates a session via
-            // `session.create` directly and never goes through `route()`,
-            // so the reverse index wouldn't otherwise learn the binding
-            // and the channel's reply router would drop every reply with
-            // "no peer for session, reply dropped".
-            const home = mkdtempSync(path.join(tmpdir(), "router-"));
-            const router = await ConversationRouter.load(home);
-            router.registerExternalSession("im://ch1/u1/c1", "sched-pin-foo");
-            const found = router.findRouteBySessionId("sched-pin-foo");
-            assert.deepEqual(found, { channelId: "ch1", peerId: "u1", chatId: "c1" });
-        });
-
-        it("does NOT evict the peer's live session from the forward route map", async () => {
-            // Regression guard. `routes` is 1:1 per workspace and owned by
-            // the peer's conversation; a pin job targets the SAME key. If
-            // registerExternalSession wrote there, the peer's next inbound
-            // message would route into the scheduler's session — silently
-            // hijacking a human conversation. Outbound addressing only
-            // needs the reverse direction, so the forward map stays put.
-            const home = mkdtempSync(path.join(tmpdir(), "router-"));
-            const hook = stubHook();
-            const router = await ConversationRouter.load(home);
-            const live = await router.route(hook, "ch1", "u1", "c1");
-
-            router.registerExternalSession("im://ch1/u1/c1", "sched-pin-foo");
-
-            // Inbound routing still lands in the human's session.
-            const after = await router.route(hook, "ch1", "u1", "c1");
-            assert.equal(after.sessionId, live.sessionId);
-            assert.equal(router.lookup("ch1", "u1", "c1")?.sessionId, live.sessionId);
-            // And only one session was ever created.
-            assert.equal(hook.created.length, 1);
-            // Yet the pinned session is still addressable for replies.
-            assert.deepEqual(router.findRouteBySessionId("sched-pin-foo"), {
-                channelId: "ch1",
-                peerId: "u1",
-                chatId: "c1",
-            });
-        });
-
-        it("keeps the live conversation out of the external index (listAll unaffected)", async () => {
-            // The scheduler's session must not show up as a conversation in
-            // the desktop IM list — it is not a chat the user started.
-            const home = mkdtempSync(path.join(tmpdir(), "router-"));
-            const router = await ConversationRouter.load(home);
-            router.registerExternalSession("im://ch1/u1/c1", "sched-pin-foo");
-            assert.equal(router.listAll().length, 0);
-        });
-
-        it("tracks multiple pinned sessions on the same workspace", async () => {
-            // Two pin jobs bound to one chat both need reply addressing;
-            // a 1:1 map would have dropped the first.
-            const home = mkdtempSync(path.join(tmpdir(), "router-"));
-            const router = await ConversationRouter.load(home);
-            router.registerExternalSession("im://ch1/u1/c1", "sched-pin-a");
-            router.registerExternalSession("im://ch1/u1/c1", "sched-pin-b");
-            for (const sid of ["sched-pin-a", "sched-pin-b"]) {
-                assert.deepEqual(router.findRouteBySessionId(sid), {
-                    channelId: "ch1",
-                    peerId: "u1",
-                    chatId: "c1",
-                });
-            }
-        });
-
-        it("is a no-op on non-IM workspaces (fs paths have no peer to bind)", async () => {
-            const home = mkdtempSync(path.join(tmpdir(), "router-"));
-            const router = await ConversationRouter.load(home);
-            router.registerExternalSession("/tmp/repo", "any-session-id");
-            assert.equal(router.findRouteBySessionId("any-session-id"), undefined);
         });
     });
 });

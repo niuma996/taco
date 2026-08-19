@@ -25,7 +25,6 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { parseImCwd } from "@taco-ai/protocol";
-import type { ConversationRouter } from "../channels/conversationRouter.ts";
 import { JobsScopeError } from "../lib/jobsErrors.ts";
 import type { JobsControl } from "../runtime/serverRpcSurface.ts";
 import { createJobId } from "./jobId.ts";
@@ -55,13 +54,6 @@ export class JobsController implements JobsControl {
         },
         private readonly scheduler: Scheduler,
         private readonly lockDir: string,
-        /** Reverse-only router index kept in sync with this controller's
-         *  lifecycle: a pin job that disappears or switches strategy must
-         *  drop its out-of-band session binding, otherwise the agent's
-         *  reply would race into a deleted session or hijack the wrong
-         *  peer's conversation. Optional for tests that don't load the
-         *  channel stack. */
-        private readonly conversationRouter?: Pick<ConversationRouter, "unregisterExternalSession">,
     ) {}
 
     async list(actor?: Actor): Promise<Job[]> {
@@ -116,11 +108,6 @@ export class JobsController implements JobsControl {
             throw new JobsScopeError("not_found", `job not found: ${job.id}`);
         }
         assertActorMatchesJob(existing, actor);
-        // Capture the previous pinned id BEFORE the write so we can
-        // unregister it on strategy flip. The new copy nulls
-        // `pinnedSessionId` itself when sessionStrategy changes; here we
-        // just need to know if there WAS a value to clean up.
-        const previousPinned = existing.pinnedSessionId;
         // mutate is the canonical write boundary: the per-id queue in
         // JobStore serialises against concurrent dispatcher callbacks
         // and the runner's history write, so the closure sees the
@@ -155,20 +142,6 @@ export class JobsController implements JobsControl {
             );
         });
         if (!saved) throw new JobsScopeError("not_found", `job not found: ${job.id}`);
-        // Strategy flipped (e.g. pin → new) or the user removed the
-        // pin entirely — the old pinned session is now orphaned from
-        // the scheduler's point of view. Unregister its reverse-route
-        // binding so it cannot address an IM reply to a peer it no
-        // longer belongs to. We compare on the SAVED job (not the
-        // pre-update `existing`) because a strategy match leaves the
-        // pinned id intact; only a true change must drop it.
-        if (
-            previousPinned &&
-            saved.sessionStrategy !== "pin" &&
-            previousPinned !== saved.pinnedSessionId
-        ) {
-            this.conversationRouter?.unregisterExternalSession(previousPinned);
-        }
         await this.scheduler.reload(saved.id);
         return saved;
     }
@@ -182,14 +155,6 @@ export class JobsController implements JobsControl {
         // "deleted"; the controller itself never throws on scope mismatch
         // here.
         if (actor && !isJobVisibleToActor(existing, actor)) return;
-        // If this job had pinned an out-of-band session, drop the
-        // reverse-route binding before the store delete so a reply that
-        // races the unlink can't address a session no scheduler will
-        // ever re-pin. Safe to call on a non-IM / unpinned job — the
-        // underlying map silently no-ops.
-        if (existing.pinnedSessionId) {
-            this.conversationRouter?.unregisterExternalSession(existing.pinnedSessionId);
-        }
         // Remove the in-flight lock too — a job deleted mid-run should
         // not leak its lock file. We can't kill the running callback,
         // but the callback itself releases the lock on its `finally`

@@ -48,7 +48,9 @@ export function err(id: string, code: string, message: string, data?: unknown): 
 
 /** Build the routing key (`workspace\0sessionId`) the active-turn
  *  cache uses to coalesce turns across RPC frames, or `undefined` if
- *  `params` is missing either field. */
+ *  `params` is missing either field. The NUL separator keeps the two
+ *  segments unambiguous — plain concatenation would collide keys like
+ *  ("/foo" + "bar/x") with ("/foobar" + "/x"). */
 export function getTurnKey(params: unknown): string | undefined {
     if (!params || typeof params !== "object") return undefined;
     const { workspace, sessionId } = params as { workspace?: unknown; sessionId?: unknown };

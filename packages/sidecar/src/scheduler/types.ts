@@ -15,9 +15,11 @@
  *
  * `run_on_startup` (deliberately snake_case — the JSON shape is the user-
  * facing contract) governs catch-up behavior on daemon restart: a missed
- * fire during downtime is replayed once if true, dropped if false. Most
- * recurring jobs want false (a "every morning at 9am" job after a 3-day
- * downtime should not run 3 times in a row).
+ * fire during downtime is replayed once if true, dropped if false; a job
+ * that has never run also fires once at boot, since arming the flag asks
+ * for a run on the next startup. Most recurring jobs want false (a "every
+ * morning at 9am" job after a 3-day downtime should not run 3 times in
+ * a row).
  */
 
 import type { TSchema } from "typebox";

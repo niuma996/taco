@@ -254,10 +254,9 @@ export class Scheduler {
     }
 
     /**
-     * Decide if a `run_on_startup` job actually missed a fire window
-     * during downtime — we should only replay when the schedule would
-     * have fired at least once between `last_run_at` (or job creation
-     * if it never ran) and now.
+     * Decide whether a `run_on_startup` job should fire at boot: either it
+     * has never run at all, or the schedule would have fired at least once
+     * between `last_run_at` and now (a missed window during downtime).
      *
      * Earlier we treated "last ran more than 5s ago" as a miss. That was
      * wrong on two fronts:
@@ -270,17 +269,18 @@ export class Scheduler {
      *
      * `nextFireAfter(spec, lastRunAt)` gives us the next scheduled
      * fire strictly after `lastRunAt`. If that time has already
-     * passed at startup time, we missed it. If `last_run_at` is unset
-     * we treat the job as freshly created and let the first
-     * scheduled fire do its normal thing — boot replay shouldn't
-     * synthesize a run that was never actually scheduled.
+     * passed at startup time, we missed it. A job that has never run
+     * (`last_run_at` unset) replays unconditionally: the user armed
+     * `run_on_startup` precisely to get a run on the next boot, and
+     * without this a fresh 24h-interval job would sit idle for a full
+     * interval after the restart that created it.
      *
      * The 5-second skew window still applies at the comparison edge:
      * without it, a clock-jump or a "fire just landed as we shut down"
      * race could double-fire an honest just-completed run.
      */
     private shouldReplayMissedRun(job: Job): boolean {
-        if (!job.last_run_at) return false;
+        if (!job.last_run_at) return true;
         const lastRunMs = Date.parse(job.last_run_at);
         if (!Number.isFinite(lastRunMs)) return false;
         const expected = nextFireAfter(job.schedule, new Date(lastRunMs));

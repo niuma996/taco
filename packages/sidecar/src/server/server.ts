@@ -391,17 +391,6 @@ export class SidecarServer implements ServerRpcSurface {
         return this.handleRpcRequest(req);
     }
 
-    /** Register a session as the destination for an IM workspace so
-     *  channel replies can address the right peer. Used by the scheduler
-     *  dispatcher after a pin-strategy session.create — that path doesn't
-     *  go through conversationRouter.route(), so the route map needs an
-     *  explicit binding or the agent's replies hit
-     *  "no peer for session, reply dropped". No-op when conversationRouter
-     *  isn't initialized or the workspace isn't an `im://` URL. */
-    async registerRoute(workspace: string, sessionId: string): Promise<void> {
-        this.conversationRouter?.registerExternalSession(workspace, sessionId);
-    }
-
     lookupRoute(workspace: string): { sessionId: string } | undefined {
         return this.conversationRouter?.lookupByWorkspace(workspace);
     }
@@ -1186,13 +1175,6 @@ export class SidecarServer implements ServerRpcSurface {
             // cursor would discard it as a duplicate). Retain the tombstone
             // for reconnect recovery, then release the stream after a short TTL.
             this.emitPush(PushMethods.SessionDeleted, workspaceKey, e.sessionId, {});
-            // Clean up the reverse-only route index. A scheduler pin job
-            // may have registered this session out-of-band; with the
-            // underlying jsonl gone, the reverse binding would silently
-            // leak until the next daemon restart and let any reply emit
-            // race past `findRouteBySessionId` into "no peer for
-            // session, reply dropped".
-            this.conversationRouter?.unregisterExternalSession(e.sessionId);
             setTimeout(
                 () => this.sessionEvents.clearSession(workspaceKey, e.sessionId),
                 TOMBSTONE_TTL_MS,

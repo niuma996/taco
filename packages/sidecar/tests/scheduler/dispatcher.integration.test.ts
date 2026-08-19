@@ -25,13 +25,10 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { before, describe, it } from "node:test";
 import type { RpcRequest, RpcResponse, SessionId } from "@taco-ai/protocol";
 import type { ConversationRouter as ConversationRouterType } from "../../src/channels/conversationRouter.ts";
-import { ConversationRouter } from "../../src/channels/conversationRouter.ts";
 import type { ServerRpcSurface } from "../../src/runtime/serverRpcSurface.ts";
 import { createJobDispatcher } from "../../src/scheduler/dispatcher.ts";
 import type { Job } from "../../src/scheduler/types.ts";
@@ -185,15 +182,6 @@ function makeRealServer(opts: { workspaces: Record<string, WorkspaceStub> }): Fa
     };
 }
 
-async function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-    const dir = await mkdtemp(join(tmpdir(), "taco-disp-int-"));
-    try {
-        return await fn(dir);
-    } finally {
-        await rm(dir, { recursive: true, force: true });
-    }
-}
-
 function pinJob(workspace: string, overrides: Partial<Job> = {}): Job {
     return {
         id: "pin-job",
@@ -330,95 +318,6 @@ describe("createJobDispatcher → session.create handler integration", () => {
         );
 
         assert.deepEqual(callOrder, ["rpc:session.history", "rpc:session.create", "callback"]);
-    });
-
-    it("the IM routeRole-tagged session is rebuilt into ConversationRouter.externalRoutes on load", async () => {
-        // This is the integration we want to lock down: a session
-        // created with `routeRole: "external"` in its jsonl metadata
-        // shows up in `findRouteBySessionId` after a daemon restart
-        // (modelled here by a fresh router.load()). Without the
-        // routeRole branch in rebuildFromJsonl, the scheduler's pin
-        // session would never be addressable for outbound replies —
-        // the agent would emit, the channel would drop with "no peer
-        // for session, reply dropped".
-        await withTmp(async (dir) => {
-            // Lay down a jsonl that mimics what JsonlSessionRepo would
-            // have written for an IM workspace session tagged as
-            // external. The router doesn't know or care that we wrote
-            // this by hand — its only contract is the metadata shape.
-            const channelRoot = join(dir, "sessions", "im", "ch1");
-            await mkdir(channelRoot, { recursive: true });
-            const sessionId = "sched-pin-foo";
-            const path = join(channelRoot, `${sessionId}.jsonl`);
-            const header = {
-                type: "session_info",
-                id: sessionId,
-                cwd: "/tmp/test-ws",
-                createdAt: "2026-08-19T00:00:00.000Z",
-                metadata: {
-                    imRouting: {
-                        channelId: "ch1",
-                        peerId: "peer-1",
-                        chatId: "chat-1",
-                        routeRole: "external",
-                    },
-                },
-            };
-            await writeFile(path, `${JSON.stringify(header)}\n`);
-
-            const router = await ConversationRouter.load(dir);
-            assert.deepEqual(router.findRouteBySessionId(sessionId), {
-                channelId: "ch1",
-                peerId: "peer-1",
-                chatId: "chat-1",
-            });
-            // Cleanup verification: unregistering via the API drops
-            // the binding without touching the jsonl. This is the
-            // cleanup hook the session.deleted listener + JobsController
-            // delete/update paths rely on.
-            assert.equal(router.unregisterExternalSession(sessionId), true);
-            assert.equal(router.findRouteBySessionId(sessionId), undefined);
-            // A second unregister is a no-op (returns false), not an
-            // error — the caller may not know whether the jsonl
-            // survived.
-            assert.equal(router.unregisterExternalSession(sessionId), false);
-        });
-    });
-
-    it("session.delete unregisters the external route binding", async () => {
-        // End-to-end via a real ConversationRouter + simulated
-        // session.deleted event: this is what the SidecarServer
-        // session.deleted listener calls when the workspace emits the
-        // event after a successful session.delete RPC. We pin the
-        // behaviour here so the listener wiring stays correct.
-        await withTmp(async (dir) => {
-            const channelRoot = join(dir, "sessions", "im", "ch1");
-            await mkdir(channelRoot, { recursive: true });
-            const sessionId = "sched-pin-bar";
-            const path = join(channelRoot, `${sessionId}.jsonl`);
-            const header = {
-                type: "session_info",
-                id: sessionId,
-                cwd: "/tmp/test-ws",
-                createdAt: "2026-08-19T00:00:00.000Z",
-                metadata: {
-                    imRouting: {
-                        channelId: "ch1",
-                        peerId: "peer-1",
-                        chatId: "chat-1",
-                        routeRole: "external",
-                    },
-                },
-            };
-            await writeFile(path, `${JSON.stringify(header)}\n`);
-
-            const router = await ConversationRouter.load(dir);
-            assert.ok(router.findRouteBySessionId(sessionId));
-            // Simulate session.deleted: SidecarServer.wireWorkspacePush
-            // calls `conversationRouter?.unregisterExternalSession(id)`.
-            router.unregisterExternalSession(sessionId);
-            assert.equal(router.findRouteBySessionId(sessionId), undefined);
-        });
     });
 });
 

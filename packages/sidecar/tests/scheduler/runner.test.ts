@@ -339,6 +339,31 @@ test("start() replays run_on_startup jobs that missed a fire window", async () =
     });
 });
 
+test("start() replays a run_on_startup job that has never run", async () => {
+    // A job created while the daemon was down (or just before a restart)
+    // has no last_run_at. Arming run_on_startup asks for a run on the
+    // next boot — without this a fresh 24h-interval job would sit idle
+    // for a full interval after the restart that created it.
+    await withTmp(async (dir) => {
+        const store = new MemoryStore();
+        store.jobs.set("fresh", intervalJob("fresh", 60_000, { run_on_startup: true }));
+        const invocations: string[] = [];
+        const scheduler = new Scheduler({
+            store: store as never,
+            lockDir: dir,
+            invoke: async (job) => {
+                invocations.push(job.command);
+            },
+        });
+        await scheduler.start();
+        await waitFor(() => invocations.length === 1, 1000);
+        // Wait long enough to confirm we did NOT double-fire.
+        await new Promise((r) => setTimeout(r, 100));
+        strictEqual(invocations.length, 1);
+        scheduler.stop();
+    });
+});
+
 test("start() does NOT replay run_on_startup=false jobs", async () => {
     await withTmp(async (dir) => {
         const store = new MemoryStore();
