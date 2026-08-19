@@ -185,9 +185,15 @@ describe("createJobDispatcher — reuse strategy", () => {
                 return { id: req.id, ok: true as const, result: null };
             }
             if (req.method === "session.prompt") {
-                const p = req.params as { sessionId?: string; prompt?: string };
+                // PromptParams.text (not prompt) is the wire format.
+                const p = req.params as { sessionId?: string; text?: string };
                 assert.equal(p.sessionId, existingId);
-                assert.equal(p.prompt, "ping");
+                assert.equal(p.text, "ping");
+                assert.equal(
+                    (req.params as Record<string, unknown>).prompt,
+                    undefined,
+                    "session.prompt must send 'text', not 'prompt'",
+                );
                 return { id: req.id, ok: true as const, result: null };
             }
             throw new Error(`unexpected method ${req.method}`);
@@ -259,9 +265,15 @@ describe("createJobDispatcher — pin strategy", () => {
                 return { id: req.id, ok: true as const, result: null };
             }
             if (req.method === "session.prompt") {
-                const p = req.params as { sessionId?: string; prompt?: string };
+                // PromptParams.text (not prompt) is the wire format.
+                const p = req.params as { sessionId?: string; text?: string };
                 assert.equal(p.sessionId, "sched-pin-test-job");
-                assert.equal(p.prompt, "followup");
+                assert.equal(p.text, "followup");
+                assert.equal(
+                    (req.params as Record<string, unknown>).prompt,
+                    undefined,
+                    "session.prompt must send 'text', not 'prompt'",
+                );
                 return { id: req.id, ok: true as const, result: null };
             }
             throw new Error(`unexpected method ${req.method}`);
@@ -380,7 +392,10 @@ describe("createJobDispatcher — pin strategy", () => {
             }),
         );
         assert.deepEqual(fake.registeredRoutes, [
-            { workspace: im, sessionId: "sched-pin-test-job" },
+            {
+                workspace: im,
+                sessionId: "sched-pin-test-job",
+            },
         ]);
         // Registration must land before the prompt, else the first reply of
         // the turn races the binding. The probe precedes both.

@@ -169,6 +169,16 @@ async function invokeAgent(
             }
             const id = `sched-pin-${job.id}`;
             const im = isImWorkspace(workspace) ? parseImCwd(workspace) : undefined;
+            // imRouting is stored in the session file header and read by
+            // rebuildFromJsonl to seed the forward route map. We use
+            // "scheduler" as the channelId so rebuildFromJsonl seeds the pin
+            // session under a different routes key than the peer's live
+            // conversation (im://scheduler/... vs im://wechat/...). The peer's
+            // peerId and chatId are preserved so findRouteBySessionId still
+            // resolves the correct destination for the agent's replies.
+            const imRouting = im
+                ? { channelId: "scheduler", peerId: im.peerId, chatId: im.chatId }
+                : undefined;
             const res = await server.dispatchRpc({
                 id,
                 method: "session.create",
@@ -176,7 +186,7 @@ async function invokeAgent(
                     workspace,
                     sessionId: id,
                     initialPrompt: prompt,
-                    ...(im ? { imRouting: im } : {}),
+                    ...(imRouting ? { imRouting } : {}),
                 },
             });
             if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
@@ -297,7 +307,7 @@ async function attachAndPrompt(
     const promptRes = await server.dispatchRpc({
         id: randomUUID(),
         method: "session.prompt",
-        params: { workspace, sessionId, prompt },
+        params: { workspace, sessionId, text: prompt },
     });
     if (!promptRes.ok) {
         throw new ScheduledCommandFailed(promptRes.error.code, promptRes.error.message);

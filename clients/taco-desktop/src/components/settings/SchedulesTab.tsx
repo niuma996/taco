@@ -182,14 +182,11 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                 try {
                                     const accepted = await jobs.runNow(job.id);
                                     if (!accepted) {
-                                        // The daemon skipped the fire —
-                                        // the previous run is still
-                                        // holding the lock. Surface that
-                                        // distinctly so the user knows
-                                        // it's not a transient failure.
                                         jobs.setError(
                                             t("schedules.busy", "上次运行还没结束,请稍候再触发"),
                                         );
+                                    } else {
+                                        jobs.setError(null);
                                     }
                                 } catch (err) {
                                     jobs.setError(err instanceof Error ? err.message : String(err));
@@ -446,7 +443,6 @@ function useJobsClient(client: TacoClient) {
         setBusy(true);
         try {
             setList(await jobsClient.list());
-            setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
