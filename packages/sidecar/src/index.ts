@@ -26,6 +26,7 @@ import { loadExtensions } from "./extensions/index.ts";
 import type { ExtensionRegistry } from "./extensions/registry.ts";
 import { createLogger } from "./lib/logger.ts";
 import { augmentProcessPath } from "./lib/loginShellPath.ts";
+import { buildSidecarPidRecord, computeInstallId } from "./lib/installId.ts";
 import { ProviderKeyStore } from "./runtime/providerKeyStore.ts";
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";
 import { JobsController } from "./scheduler/jobsController.ts";
@@ -413,14 +414,23 @@ async function runDaemon(
             `daemon listening ndjson=${socketPath} control=${controlSocketPath} sessionsRoot=${deps.sessionsRoot}`,
         );
 
-        // Pid file for the CLI's wedged-daemon reaper (`taco start` kills a
-        // daemon that accepts connections but won't serve them). Written only
-        // after both sockets are bound so a half-booted process never
-        // advertises itself; removed on the shutdown/exit paths below.
+        // Pid file — single source of truth for "which daemon owns this
+        // $TACO_HOME/run/". The CLI's wedged-daemon reaper reads it on
+        // every `taco start`; the desktop's reap path reads it before
+        // spawning a replacement; both check `install_id` to avoid
+        // killing a sibling taco install that happens to share the home.
+        // Written only after both sockets are bound so a half-booted
+        // process never advertises itself; removed on the shutdown/exit
+        // paths below.
         const pidPath = join(dirname(socketPath), "sidecar.pid");
         if (IS_UNIX) {
             try {
-                writeFileSync(pidPath, String(process.pid), "utf8");
+                const installId = computeInstallId(
+                    process.env.TACO_SIDECAR_RESOURCES ?? "",
+                    tacoHome(),
+                );
+                const record = buildSidecarPidRecord(process.pid, installId);
+                writeFileSync(pidPath, JSON.stringify(record), "utf8");
             } catch (err) {
                 log.warn(`failed to write pid file ${pidPath}: ${String(err)}`);
             }

@@ -27,6 +27,14 @@ pub use log_file::LogFiles;
 
 mod paths;
 mod sidecar_launcher;
+mod daemon_reap;
+/// Test-only re-exports for the daemon_reap integration test under
+/// `tests/daemon_reap.rs`. Hidden from the public docs because the
+/// symbols are crate-internal helpers, not a stable API.
+#[doc(hidden)]
+pub mod daemon_reap_test {
+    pub use crate::daemon_reap::__test_only::*;
+}
 pub mod upgrade_commands;
 
 use crate::paths::{control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home};
@@ -330,6 +338,19 @@ async fn workspace_ensure(
         }
     }
 
+    // 第二道关（PR-C）:进 spawn 之前先 reap 磁盘上的残留 daemon。
+    //   - 没有 pid 文件 → 无事可做
+    //   - pid 文件的 install_id 不匹配 → 别的安装的 daemon，**不能**碰
+    //   - pid 文件的进程还活着但 ping 不通（PID 回收 / 进程 hang）→ 杀
+    //   - pid 文件的进程死了（stale）→ unlink，让 spawn 重新 bind
+    // 在 ensure_lock 内做，避免 reap 与并发 ensure 互相打架。
+    #[cfg(unix)]
+    {
+        if let Ok(taco_home) = resolve_taco_home(&app) {
+            reap_stale_at(&taco_home, &app);
+        }
+    }
+
     let resolution = resolve_sidecar(&app)?;
     let socket_path = resolution.socket_path.clone();
 
@@ -464,8 +485,12 @@ async fn workspace_ensure(
                 ));
             }
             // Exit 0 — daemon should be up; one more short socket poll
-            // before we call it a failure.
-            wait_for_daemon_socket(&socket_path, Duration::from_millis(500)).await
+            // before we call it a failure. Window widened from 500ms to 2s:
+            // on slow machines the daemon can take 1-2s to bind NDJSON
+            // after the CLI exits 0, so the old window produced
+            // misleading "sidecar exited" errors on first cold-start.
+            // The next ensure() would self-heal via probeNdjsonSocket.
+            wait_for_daemon_socket(&socket_path, Duration::from_millis(2_000)).await
         }
     };
     wait_result?;
@@ -641,9 +666,21 @@ async fn workspace_dispose_all(app: AppHandle) -> Result<(), String> {
 }
 
 /// Gracefully stop the shared sidecar child and reset the shutdown flag.
-/// Extracted from `workspace_dispose_all` so other teardown paths
-/// (e.g. the `RunEvent::ExitRequested` handler on app quit) can reuse the
-/// same 3-second EOF flush window instead of duplicating the logic.
+///
+/// PR-D reorders the teardown so the daemon gets a chance to clean up its
+/// own sockets + pid file before any signal lands:
+///   1. Set `shutdown_initiated` so concurrent `workspace_ensure` aborts.
+///   2. Take the slot; drop `stdin_tx` so the writer task flushes
+///      pending NDJSON frames before the socket closes.
+///   3. Send `control.shutdown` to the daemon's control socket and wait
+///      up to 3s for it to ack + exit. This is the only path that
+///      cleans up sockets + pid file from inside the daemon process.
+///   4. If the daemon didn't ack (dev mode orphan, prod where the
+///      launcher IS the daemon and the bundle refused shutdown), reap
+///      via the pid file -- this catches the case where the launcher
+///      handle points at a CLI process that's already exited.
+///   5. As a final fallback, kill the launcher handle directly.
+///   6. Reset the shutdown flag.
 async fn shutdown_sidecar(app: &tauri::AppHandle) {
     // 在 acquire 锁之前先 set flag —— 让任何正在进行的 ensure(第一道关内已过、
     // 第二段 spawn 中的)在 install 前能看到 flag,从而杀掉孤儿 launcher 而非被
@@ -656,18 +693,39 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
         slot.take()
     };
     if let Some(mut s) = dead {
-        // Drop stdin_tx first so the writer task sees channel-closed and
-        // flushes any pending NDJSON frames to the socket before the launcher
-        // is killed. Then wait for the launcher to exit on its own; force-kill
-        // after the grace window if it doesn't.
-        //
-        // PR2 note: in dev, the launcher is the @taco-ai/cli (which has
-        // already exited by the time we get here — the daemon bundle is
-        // reparented). s.launcher is `Some` until CLI naturally exits, then
-        // `None` (the writer task or a follow-up cleanup drops it). On
-        // prod, the launcher IS the daemon bundle; the grace window gives
-        // control.shutdown + SIGTERM a chance to land.
         drop(s.stdin_tx);
+        // Compute the control socket path so we can ask the daemon to
+        // shut itself down. Resolved lazily -- failure to resolve
+        // TACO_HOME just means we skip the control.shutdown step and
+        // fall through to the reap path.
+        let control_path = resolve_taco_home(app)
+            .ok()
+            .map(|h| control_socket_path(&h));
+        if let Some(control) = control_path {
+            // Best-effort: 3s window for control.shutdown to land. A
+            // success path means the daemon ack'd and is exiting on its
+            // own -- no signal needed, sockets + pid file get cleaned
+            // up by the daemon's shutdown handler.
+            let _ = tokio::time::timeout(
+                Duration::from_secs(3),
+                send_control_shutdown(control.clone()),
+            )
+            .await;
+        }
+        #[cfg(unix)]
+        {
+            // Reap covers the dev-mode orphan (CLI launcher already
+            // exited; daemon detached and unreachable via launcher
+            // handle) AND the rare prod case where the daemon is
+            // wedged and ignored control.shutdown. Idempotent: a
+            // missing pid file is a no-op.
+            if let Ok(home) = resolve_taco_home(app) {
+                reap_stale_at(&home, app);
+            }
+        }
+        // Final fallback: kill the launcher handle directly. In dev
+        // this is the CLI (already exited; kill is a no-op); in prod
+        // this is the daemon bundle itself.
         if let Some(mut launcher) = s.launcher.take() {
             match tokio::time::timeout(Duration::from_secs(3), launcher.wait()).await {
                 Ok(_) => {}
@@ -679,6 +737,41 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
         }
     }
     state.shutdown_initiated.store(false, Ordering::Release);
+}
+
+/// Send `control.shutdown` to the daemon's control socket and read the
+/// ack. Returns Ok if the daemon responded within the caller's timeout;
+/// any error means "didn't ack in time" and the caller should fall
+/// through to reap/kill.
+async fn send_control_shutdown(path: std::path::PathBuf) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    #[cfg(unix)]
+    {
+        let mut stream = UnixStream::connect(&path)
+            .await
+            .map_err(|e| format!("connect {} failed: {e}", path.display()))?;
+        stream
+            .write_all(b"{\"method\":\"control.shutdown\",\"id\":1}\n")
+            .await
+            .map_err(|e| format!("write failed: {e}"))?;
+        let mut buf = [0u8; 256];
+        let _ = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut buf)).await;
+        // Either an ack or EOF is success -- the daemon flushes the
+        // reply then exits, so any read completion means shutdown was
+        // accepted.
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        // Windows: control.shutdown is sent via a JSON-RPC frame over
+        // the named pipe. The CLI's `taco stop` already exercises this;
+        // the desktop's shutdown path defers to launchd/schtasks on
+        // Windows. Reserved for the future case where the desktop
+        // runs without a service manager (dev mode).
+        Ok(())
+    }
 }
 
 /// Grant the FS plugin access to `path` and all its subdirectories.
@@ -693,6 +786,42 @@ async fn set_fs_scope(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn reap_stale_at(taco_home: &std::path::Path, app: &tauri::AppHandle) {
+    use crate::daemon_reap::{
+        compute_install_id, daemon_paths, reap_previous_daemon, ReapInputs,
+    };
+    let (pid_file, socket_path, control_socket_path) = daemon_paths(taco_home);
+    // Best-effort resources root -- release uses app resource_dir,
+    // dev uses the repo source root. Both can be empty if resolution
+    // failed; the install_id computation still produces a stable value
+    // and reap can still proceed (any non-matching id means "leave it
+    // alone" which is the safe default for foreign daemons).
+    let resources_root = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|p| p.join("sidecar").to_string_lossy().into_owned())
+        .or_else(|| {
+            let root = find_repo_root();
+            Some(root.join("packages").join("sidecar").join("src").to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
+    let own_install_id =
+        compute_install_id(&resources_root, &taco_home.to_string_lossy());
+    let inputs = ReapInputs {
+        pid_file,
+        socket_path,
+        control_socket_path,
+        own_install_id: &own_install_id,
+        resources_root: std::path::PathBuf::from(&resources_root),
+    };
+    let outcome = reap_previous_daemon(&inputs);
+    // Best-effort log only -- never block setup on a reap that finds
+    // nothing. Operators see this in `pnpm tauri:dev` stderr.
+    eprintln!("taco-desktop: reap outcome = {:?}", outcome);
+}
+
 /// Auto-register the sidecar as an OS-level service on first run.
 /// Registration is best-effort so startup remains available when a platform
 /// launcher or optional service manager is unavailable.
@@ -704,6 +833,17 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
     let control = control_socket_path(&taco_home);
     if control_socket_present(&control) {
         return Ok(());
+    }
+    // Reap any stale daemon before installing the launchd/schtasks
+    // service. Without this, a previously-killed daemon could leave a
+    // pid file + socket file behind; the freshly-loaded plist would
+    // then race the install probe for the same control socket and
+    // launchd would either bounce (Crashed=true) or skip the spawn
+    // entirely depending on the timing. Idempotent on Unix; Windows
+    // is a no-op since pid files aren't written there.
+    #[cfg(unix)]
+    {
+        reap_stale_at(&taco_home, app.handle());
     }
     let Some(launcher) = resolve_install_launcher(app) else {
         return Ok(());
@@ -727,23 +867,33 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Cross-platform check for an existing control socket.
+/// Probe whether a sidecar daemon is currently bound to the control socket.
 ///
-/// Unix: a filesystem entry at $TACO_HOME/run/sidecar-ctl.sock. Note this
-/// doesn't distinguish a live listener from a stale file (daemon crashed
-/// without unlinking); PR2's `clear_stale_socket` handles that path on
-/// connect.
+/// Unix: previously used `Path::exists()`, which could not tell a live
+/// listener from a stale socket file left by a crashed daemon. The
+/// pre-PR-C install path then skipped registration and the desktop
+/// later raced for the same socket. We now actually attempt to connect
+/// -- a successful connect proves a listener is bound (file alive);
+/// ECONNREFUSED proves the file is stale (caller should reap+reinstall);
+/// ENOENT means no daemon has ever run on this $TACO_HOME.
 ///
-/// Windows: a named pipe (`\\.\pipe\taco-sidecar-ctl`). Opening the
-/// client end via `OpenOptions` succeeds iff a server is bound — named
-/// pipes don't leave filesystem entries, so `Path::exists()` would
-/// always return false here. The call returns immediately when no
-/// listener is present (FILE_NOT_FOUND / ERROR_PIPE_BUSY → surfaced as
-/// OpenOptions error, not a blocking wait like a real read would).
+/// Windows: named pipes do not leave filesystem entries, so the probe is
+/// `OpenOptions::open()` -- succeeds iff a server is bound.
 fn control_socket_present(control: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
-        control.exists()
+        use std::os::unix::net::UnixStream;
+        if !control.exists() {
+            return false;
+        }
+        match UnixStream::connect(control) {
+            Ok(s) => {
+                // Drop immediately -- we only need to know a listener exists.
+                drop(s);
+                true
+            }
+            Err(_) => false,
+        }
     }
     #[cfg(windows)]
     {

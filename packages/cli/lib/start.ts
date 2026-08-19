@@ -23,6 +23,7 @@
 import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
+import { computeInstallId, parsePidFile } from "./installId.ts";
 import { findPlatformPkg } from "./installHelpers.ts";
 import { controlSocketPath, ndjsonSocketPath, RUN_DIR, TACO_HOME } from "./paths.ts";
 import { launchSidecar } from "./sidecarLauncher.ts";
@@ -87,23 +88,41 @@ function pidAlive(pid: number): boolean {
     }
 }
 
-/** Reap a daemon that accepts connections but won't serve them. SIGTERM
- *  via the pid file first (lets it unlink the sockets itself), SIGKILL
- *  after the grace window, then remove the socket files regardless —
- *  SIGKILL skips the daemon's exit handlers, and a leftover socket file
- *  would make the next daemon's single-instance probe see a ghost
- *  listener and exit. Without this path a wedged daemon made every
- *  subsequent launch fail until the machine was rebooted. */
+/** Reap a daemon that accepts connections but won't serve them.
+ *
+ *  Order matters:
+ *    1. Read pid file with `parsePidFile` (JSON record preferred, bare-int
+ *       legacy accepted for backward compat).
+ *    2. Skip reap if the file's `install_id` (when present) does not match
+ *       this CLI's own install id — otherwise we'd kill a sibling taco
+ *       install that happens to share $TACO_HOME.
+ *    3. SIGTERM via the pid, grace window, then SIGKILL — SIGKILL skips
+ *       the daemon's exit handlers so we unlink sockets + pid file
+ *       ourselves, otherwise the next daemon's single-instance probe
+ *       would see a ghost listener and exit.
+ *
+ *  Without this path a wedged daemon made every subsequent launch fail
+ *  until the machine was rebooted. */
 async function killWedgedDaemon(runDir: string, socket: string, control: string): Promise<void> {
     const pidFile = join(runDir, "sidecar.pid");
-    let pid: number | undefined;
+    let parsed: ReturnType<typeof parsePidFile> | null = null;
     try {
-        const parsed = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
-        if (Number.isFinite(parsed)) pid = parsed;
+        parsed = parsePidFile(readFileSync(pidFile, "utf8"));
     } catch {
-        pid = undefined;
+        parsed = null;
     }
-    if (pid !== undefined) {
+    const ownInstallId = computeInstallId(
+        process.env.TACO_SIDECAR_RESOURCES ?? "",
+        TACO_HOME,
+    );
+    // install_id is null for legacy bare-int files. We reap those — a
+    // pre-PR-A daemon is the only thing that could have written them,
+    // and the migration to the new format happens naturally on the next
+    // fresh spawn.
+    const ownerMatches =
+        parsed !== null && (parsed.installId === null || parsed.installId === ownInstallId);
+    if (parsed !== null && ownerMatches) {
+        const pid = parsed.pid;
         try {
             process.kill(pid, "SIGTERM");
         } catch {
