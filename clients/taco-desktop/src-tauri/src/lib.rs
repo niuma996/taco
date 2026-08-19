@@ -136,6 +136,14 @@ pub struct AppState {
     /// and the sidecar's handshake is one-shot. Rust does not interpret the line;
     /// the client validates it.
     pub handshake_line: StdMutex<Option<(u64, String)>>,
+    /// Serializes the whole workspace_ensure sequence (spawn → connect → hello
+    /// wait). Without it, N concurrent first-start callers each spawn their own
+    /// launcher, and every caller that loses the slot race reads an empty
+    /// `handshake_line` and returns None — the frontend then waits for a hello
+    /// the reader never re-emits as `sidecar-event`, a guaranteed 10s
+    /// "sidecar hello timeout". Under the lock, a later caller always observes
+    /// a consistent state: no slot, or slot + stored handshake.
+    pub ensure_lock: Mutex<()>,
 }
 
 impl Default for AppState {
@@ -147,6 +155,7 @@ impl Default for AppState {
             log_files: Arc::new(StdMutex::new(None)),
             stderr_reader: StdMutex::new(None),
             handshake_line: StdMutex::new(None),
+            ensure_lock: Mutex::new(()),
         }
     }
 }
@@ -299,6 +308,10 @@ async fn workspace_ensure(
     let _ = debug_mode;
     let _ = llm_dump_to_file;
 
+    // Single-flight: serialize the whole ensure so concurrent first-starts
+    // can't race the slot/handshake window (see ensure_lock on AppState).
+    let _ensure_guard = state.ensure_lock.lock().await;
+
     // 第一道关:已存在共享连接或 dispose 已发起 → 不 spawn。
     {
         let slot = state.sidecar.lock().await;
@@ -412,8 +425,9 @@ async fn workspace_ensure(
 
     // Wait for the daemon to bind the socket, then connect. The bundle (in
     // daemon mode) prints nothing on stdout, so we poll the socket path
-    // instead. Timeout mirrors the CLI's waitForSocket — 5s is enough on a
-    // warm cache; a stalled spawn surfaces here rather than hanging the UI.
+    // instead. 15s mirrors the CLI's waitForSocket and covers a cold dev
+    // boot (tsx recompiling the sidecar source); a stalled spawn surfaces
+    // here rather than hanging the UI.
     //
     // Race: if the launcher exits non-zero *before* the socket is ready, the
     //   real cause is whatever the launcher printed to stderr. Surface that
@@ -425,7 +439,7 @@ async fn workspace_ensure(
     // exits 0 — can otherwise lose the race and produce a misleading
     // "launcher exited" error on slow machines).
     let wait_result = tokio::select! {
-        r = wait_for_daemon_socket(&socket_path, Duration::from_secs(5)) => r,
+        r = wait_for_daemon_socket(&socket_path, Duration::from_secs(15)) => r,
         exit = launcher.wait() => {
             let status = match exit {
                 Ok(s) => s,

@@ -20,7 +20,7 @@
  * alive would tie the daemon's lifetime to whoever ran `taco start`.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { findPlatformPkg } from "./installHelpers.ts";
@@ -30,27 +30,104 @@ import { acquireStartLock, readStartLock } from "./startLock.ts";
 import { upgradeApplyCommand } from "./upgradeApply.ts";
 import { markerTargetsInstall, readUpgradeMarker } from "./upgradeMarker.ts";
 
-const READY_TIMEOUT_MS = 5_000;
+const READY_TIMEOUT_MS = 15_000;
 const PROBE_INTERVAL_MS = 50;
 /** How long a lock loser waits for the winner's daemon. Longer than
  *  READY_TIMEOUT_MS because the winner may only just have started spawning. */
-const FOLLOWER_WAIT_MS = 10_000;
+const FOLLOWER_WAIT_MS = 20_000;
+/** Grace window between SIGTERM and SIGKILL when reaping a wedged daemon. */
+const KILL_GRACE_MS = 3_000;
 
-/** True when something accepts a connection on `path`.
+/** Result of probing the NDJSON socket for a live, serving daemon. */
+type DaemonProbe = "ready" | "absent" | "wedged";
+
+/** True readiness probe: connect to the NDJSON socket and wait for the
+ *  daemon's one-shot `sidecar.hello` frame. A bare TCP connect is NOT a
+ *  valid probe — the kernel completes connections from the listen backlog
+ *  even when the daemon's event loop is wedged, and the control socket is
+ *  bound early in boot (long before the NDJSON listener exists), so both
+ *  older probes reported "ready" against daemons that couldn't serve a
+ *  single frame. The desktop then timed out waiting for a hello that was
+ *  never going to come.
  *
- *  Deliberately duplicated rather than imported from the sidecar: the CLI does
- *  not depend on sidecar TS source (only the bundled platform pkg ships at
- *  runtime). Same reasoning as the note atop `upgradeMarker.ts`. */
-function isListening(path: string): Promise<boolean> {
+ *  Deliberately self-contained rather than imported from the sidecar: the
+ *  CLI does not depend on sidecar TS source (only the bundled platform pkg
+ *  ships at runtime). Same reasoning as the note atop `upgradeMarker.ts`. */
+function probeDaemonHello(path: string, timeoutMs = 2_000): Promise<DaemonProbe> {
     return new Promise((resolve) => {
         const sock: Socket = connect(path);
-        const finish = (result: boolean) => {
+        let buf = "";
+        const timer = setTimeout(() => finish("wedged"), timeoutMs);
+        function finish(result: DaemonProbe): void {
+            clearTimeout(timer);
             sock.destroy();
             resolve(result);
-        };
-        sock.once("connect", () => finish(true));
-        sock.once("error", () => finish(false));
+        }
+        sock.on("data", (chunk) => {
+            buf += chunk.toString("utf8");
+            const nl = buf.indexOf("\n");
+            if (nl === -1) return;
+            try {
+                const frame = JSON.parse(buf.slice(0, nl)) as { method?: unknown };
+                finish(frame.method === "sidecar.hello" ? "ready" : "wedged");
+            } catch {
+                finish("wedged");
+            }
+        });
+        sock.once("error", () => finish("absent"));
     });
+}
+
+function pidAlive(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (err) {
+        return (err as NodeJS.ErrnoException)?.code === "EPERM";
+    }
+}
+
+/** Reap a daemon that accepts connections but won't serve them. SIGTERM
+ *  via the pid file first (lets it unlink the sockets itself), SIGKILL
+ *  after the grace window, then remove the socket files regardless —
+ *  SIGKILL skips the daemon's exit handlers, and a leftover socket file
+ *  would make the next daemon's single-instance probe see a ghost
+ *  listener and exit. Without this path a wedged daemon made every
+ *  subsequent launch fail until the machine was rebooted. */
+async function killWedgedDaemon(runDir: string, socket: string, control: string): Promise<void> {
+    const pidFile = join(runDir, "sidecar.pid");
+    let pid: number | undefined;
+    try {
+        const parsed = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+        if (Number.isFinite(parsed)) pid = parsed;
+    } catch {
+        pid = undefined;
+    }
+    if (pid !== undefined) {
+        try {
+            process.kill(pid, "SIGTERM");
+        } catch {
+            /* already dead */
+        }
+        const deadline = Date.now() + KILL_GRACE_MS;
+        while (Date.now() < deadline && pidAlive(pid)) {
+            await new Promise((r) => setTimeout(r, 100));
+        }
+        if (pidAlive(pid)) {
+            try {
+                process.kill(pid, "SIGKILL");
+            } catch {
+                /* already dead */
+            }
+        }
+    }
+    for (const p of [socket, control, pidFile]) {
+        try {
+            unlinkSync(p);
+        } catch {
+            /* absent — fine */
+        }
+    }
 }
 
 async function waitForSocket(path: string, timeoutMs: number): Promise<void> {
@@ -108,11 +185,24 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
 
     // Fast path: a healthy daemon already owns this $TACO_HOME. The desktop
     // reaches `taco start` from more than one place, so this is the common
-    // case, not an edge case.
-    if (await isListening(control)) {
+    // case, not an edge case. The probe reads the NDJSON hello rather than
+    // touching the control socket, which is bound long before the daemon
+    // can serve (see probeDaemonHello).
+    const probe = await probeDaemonHello(socket);
+    if (probe === "ready") {
         process.stdout.write(`${socket}\n`);
         process.stderr.write(`[taco] sidecar daemon already running (socket=${socket})\n`);
         return;
+    }
+    if (probe === "wedged") {
+        // The socket answers connects but no hello arrives — the daemon is
+        // alive at the kernel level and dead at the application level.
+        // Reap it and fall through to a fresh spawn, or every launch from
+        // here on would attach to the same unresponsive process.
+        process.stderr.write(
+            "[taco] sidecar daemon accepts connections but does not serve; killing it\n",
+        );
+        await killWedgedDaemon(runDir, socket, control);
     }
 
     const lock = await acquireStartLock(runDir);
@@ -150,7 +240,7 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
 
         // If the bundle exits before binding the socket, surface its stderr
         // (already inherited) and a clear error rather than letting the caller
-        // hang on the 5s ready timeout.
+        // hang on the ready timeout.
         const exitedEarly = new Promise<never>((_, reject) => {
             child.once("exit", (code, sig) => {
                 reject(new Error(`sidecar exited before binding socket (code=${code} sig=${sig})`));

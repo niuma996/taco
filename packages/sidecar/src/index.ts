@@ -8,14 +8,14 @@
  *   3. CLI args (--default-model, --system-prompt, ...)
  */
 
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import {
     createServer as createNetServer,
     connect as netConnect,
     type Server,
     type Socket,
 } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { ChannelBindBroker } from "./channels/channelBindBroker.ts";
@@ -413,6 +413,19 @@ async function runDaemon(
             `daemon listening ndjson=${socketPath} control=${controlSocketPath} sessionsRoot=${deps.sessionsRoot}`,
         );
 
+        // Pid file for the CLI's wedged-daemon reaper (`taco start` kills a
+        // daemon that accepts connections but won't serve them). Written only
+        // after both sockets are bound so a half-booted process never
+        // advertises itself; removed on the shutdown/exit paths below.
+        const pidPath = join(dirname(socketPath), "sidecar.pid");
+        if (IS_UNIX) {
+            try {
+                writeFileSync(pidPath, String(process.pid), "utf8");
+            } catch (err) {
+                log.warn(`failed to write pid file ${pidPath}: ${String(err)}`);
+            }
+        }
+
         // PR4 upgrade orchestrator: read the marker on boot + every 6h; when a
         // pending upgrade targeting THIS install (marker.live_dir === our own
         // TACO_SIDECAR_RESOURCES root) is staged, shut down so the owner can run
@@ -454,6 +467,7 @@ async function runDaemon(
             await closeServer(controlServer);
             unlinkSocketSync(socketPath);
             unlinkSocketSync(controlSocketPath);
+            unlinkSocketSync(pidPath);
             process.exit(0);
         };
         const stopDaemon = shutdown;
@@ -468,6 +482,7 @@ async function runDaemon(
         process.on("exit", () => {
             unlinkSocketSync(socketPath);
             unlinkSocketSync(controlSocketPath);
+            unlinkSocketSync(pidPath);
         });
         // Uncaught error while a job is mid-fire: flip its `running` history
         // entry to `err` so a hung scheduler doesn't leave a permanent "still
