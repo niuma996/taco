@@ -25,6 +25,22 @@ import {
     type SidecarSpawnOptions,
 } from "./sidecar";
 import { SidecarEpochs } from "./sidecarEpoch";
+import {
+    type EpochTransition,
+    SessionEpochEntry,
+    SessionEpochs,
+} from "./sessionEpoch";
+
+/** Payload delivered to `onSessionEpochChanged` listeners.
+ *  Fires per (workspace, sessionId) transition; "replaced" is the
+ *  operationally interesting case — it means the daemon process owning
+ *  this session changed (typical on daemon restart; rare on upgrade
+ *  swap mid-session). */
+export interface SessionEpochEvent {
+    workspace: WorkspaceId;
+    sessionId: string;
+    transition: EpochTransition;
+}
 
 export interface TacoClientOptions {
     sidecar?: SidecarClient;
@@ -90,6 +106,14 @@ export class TacoClient extends TacoClientBase {
     private reconnectInFlight = false;
     private readonly epochs = new SidecarEpochs();
     private readonly epochChangeHandlers = new Set<(workspace: WorkspaceId) => void>();
+    /** Most recent instanceId observed on hello; the tag SessionEpochs
+     *  stamps every Attached push with so a daemon restart can fire
+     *  synthetic "replaced" transitions for every tracked session. */
+    private currentInstanceId: string | undefined;
+    private readonly sessionEpochs = new SessionEpochs();
+    private readonly sessionEpochChangeHandlers = new Set<
+        (event: SessionEpochEvent) => void
+    >();
 
     constructor(opts: TacoClientOptions = {}) {
         // Tauri side stays silent on bad frames; only the Node client surfaces them.
@@ -254,6 +278,7 @@ export class TacoClient extends TacoClientBase {
         if (!this.unlisten) {
             this.unlisten = await this.sidecar.onPush((frame) => {
                 this.observeHello(frame);
+                this.observeSessionLifecycle(frame);
                 this.buffer.push(`${frame.line}\n`);
             });
         }
@@ -400,6 +425,70 @@ export class TacoClient extends TacoClientBase {
         // waits on the same promise; resolution flips processInitialized so
         // later starts reuse the completed handshake without re-sending.
         void this.runInitialize();
+    }
+
+    /**
+     * Parse a push frame for session-lifecycle events and update the
+     * SessionEpochs tracker. Called from the same onPush listener that
+     * feeds `observeHello`, so the parse cost is paid once per frame.
+     *
+     * Events we care about:
+     *   - session.attached   -> observe (workspace, sessionId, currentInstanceId)
+     *   - session.detached   -> forget (session is no longer live on this daemon)
+     *   - session.deleted    -> forget (same as detached -- the session is gone)
+     *
+     * All other push methods are ignored: tool_call_start, session.event,
+     * etc. carry sessionId but their lifecycle is owned by SessionCursor /
+     * the reducer, not by SessionEpochs. The latter only cares about
+     * "is this session still attached on this daemon instance?" */
+    private observeSessionLifecycle(frame: SidecarFrame): void {
+        if (this.currentInstanceId === undefined) return;
+        let parsed: { method?: unknown; workspace?: unknown; session?: unknown };
+        try {
+            parsed = JSON.parse(frame.line) as typeof parsed;
+        } catch {
+            return;
+        }
+        const method = parsed.method;
+        const workspace = parsed.workspace;
+        const session = parsed.session;
+        if (typeof workspace !== "string" || typeof session !== "string") return;
+        if (method === PushMethods.Attached) {
+            const transition = this.sessionEpochs.observe(
+                workspace,
+                session,
+                this.currentInstanceId,
+            );
+            // We don't fire handlers for "new" / "unchanged" by default --
+            // the lifecycle push (Attached) already drives the UI via the
+            // reducer. Only "replaced" is interesting here: it means the
+            // session is alive on a *new* daemon instance while the
+            // UI's existing state is for the old one (e.g. upgrade swap).
+            if (transition === "replaced") {
+                this.emitSessionEpoch(workspace, session, "replaced");
+            }
+            return;
+        }
+        if (method === PushMethods.Detached || method === PushMethods.SessionDeleted) {
+            this.sessionEpochs.forget(workspace, session);
+        }
+    }
+
+    /** Fire `onSessionEpochChanged` for one (workspace, sessionId, transition).
+     *  Public-ish: called both from the synthetic "replaced" sweep in
+     *  observeHello and from observeSessionLifecycle for live transitions. */
+    private emitSessionEpoch(
+        workspace: string,
+        sessionId: string,
+        transition: EpochTransition,
+    ): void {
+        for (const handler of this.sessionEpochChangeHandlers) {
+            try {
+                handler({ workspace, sessionId, transition });
+            } catch (err) {
+                console.error("[taco] session-epoch handler threw", err);
+            }
+        }
     }
 
     /**
