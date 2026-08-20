@@ -36,9 +36,7 @@ test("killWedgedDaemon pre-condition: foreign install_id must not be reaped", as
             }),
             "utf8",
         );
-        const contents = (
-            await import("node:fs/promises")
-        ).readFile;
+        const contents = (await import("node:fs/promises")).readFile;
         const raw = await contents(join(runDir, "sidecar.pid"), "utf8");
         const parsed = (await import("../lib/installId.ts")).parsePidFile(raw);
         ok(parsed);

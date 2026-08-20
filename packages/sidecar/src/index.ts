@@ -25,7 +25,7 @@ import { defaultSessionsRoot, resolveConfig, THINKING_LEVELS, tacoHome } from ".
 import { loadExtensions } from "./extensions/index.ts";
 import type { ExtensionRegistry } from "./extensions/registry.ts";
 import { createLogger } from "./lib/logger.ts";
-import { augmentProcessPath } from "./lib/loginShellPath.ts";
+import { augmentProcessPath, resolveLoginShellPathCached } from "./lib/loginShellPath.ts";
 import { buildSidecarPidRecord, computeInstallId } from "./lib/installId.ts";
 import { ProviderKeyStore } from "./runtime/providerKeyStore.ts";
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";
@@ -558,7 +558,7 @@ async function main(): Promise<void> {
     // `/usr/bin:/bin:...`; agent shell commands (mmx, etc.) installed in
     // nvm/Homebrew dirs would be invisible. Agents inherit process.env, so
     // fixing it here covers both daemon and stdio modes.
-    if (augmentProcessPath()) {
+    if (augmentProcessPath(resolveLoginShellPathCached)) {
         log.info("augmented PATH from login shell");
     }
 
@@ -574,16 +574,28 @@ async function main(): Promise<void> {
         log.warn("cwd is / (typical for .app bundles); runtime resources must use absolute paths");
     }
     if (process.env.TACO_STDERR_LOG) {
+        const logPath = process.env.TACO_STDERR_LOG;
         try {
             const fs = await import("node:fs/promises");
-            await fs.appendFile(process.env.TACO_STDERR_LOG, `\n--- sidecar started pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()} ---\n`);
+            await fs.appendFile(
+                logPath,
+                `\n--- sidecar started pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()} ---\n`,
+            );
             const origWrite = process.stderr.write.bind(process.stderr);
-            // deno-lint-ignore no-explicit-any
-            (process.stderr as any).write = (chunk: any, ...rest: any[]) => {
-                fs.appendFile(process.env.TACO_STDERR_LOG!, chunk.toString()).catch(() => {});
-                return origWrite(chunk, ...rest);
+            // Mirror the overloads of WriteStream.write so the tee is type-safe
+            // without `any`: a string/bytes chunk, an optional encoding or
+            // callback, and a trailing callback.
+            type StderrWrite = (
+                chunk: string | Uint8Array,
+                encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+                callback?: (err?: Error | null) => void,
+            ) => boolean;
+            const tee: StderrWrite = (chunk, encodingOrCallback, callback) => {
+                fs.appendFile(logPath, chunk.toString()).catch(() => {});
+                return (origWrite as StderrWrite)(chunk, encodingOrCallback, callback);
             };
-            log.info("stderr tee active -> " + process.env.TACO_STDERR_LOG);
+            process.stderr.write = tee;
+            log.info("stderr tee active -> " + logPath);
         } catch (err) {
             log.warn("failed to set up stderr tee: " + String(err));
         }

@@ -12,12 +12,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-
 import {
     COMPACTION_THRESHOLD_MAX,
     COMPACTION_THRESHOLD_MIN,
     DEFAULT_COMPACTION_ENABLED,
     DEFAULT_COMPACTION_THRESHOLD,
+} from "@taco-ai/protocol";
+
+import {
     mergeCompactionPatch,
     readGlobalConfig,
     resolveConfig,

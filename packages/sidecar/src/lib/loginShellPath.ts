@@ -28,12 +28,16 @@
  *   3. `/bin/sh` (POSIX-required to exist; last-resort).
  *
  * Failure modes are all swallowed: a missing/hung shell just means we keep
- * the inherited PATH. This only runs once at startup, so the ~50–200 ms
- * shell spawn is not on any hot path.
+ * the inherited PATH. The probe result is cached under TACO_HOME keyed on
+ * (shell, rc-file mtimes) — see resolveLoginShellPathCached — so steady-state
+ * starts skip the shell spawn entirely.
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, resolve as resolvePath } from "node:path";
+import { tacoHome } from "../config/tacoHome.ts";
 
 /** Marker that separates our echo from any MOTD / profile chatter the shell
  *  prints before running the command. We search for the last occurrence so a
@@ -154,4 +158,95 @@ export function augmentProcessPath(
     if (next === inherited) return false;
     env.PATH = next;
     return true;
+}
+
+// ─────────── disk cache for the probe result ───────────
+//
+// The probe spawns a login shell (up to PROBE_TIMEOUT_MS on pathological rc
+// files) on every daemon start. The result only changes when the user edits
+// a shell rc file or switches shells, so it is cached under TACO_HOME keyed
+// on (resolved shell, max rc-file mtime). Any rc edit invalidates on the
+// next start — the cache can never resurrect the stale-PATH bug this module
+// exists to fix. Corrupt/missing cache is a plain miss (probe + rewrite).
+
+/** Rc files across the common shells, stat'ed regardless of the active shell
+ *  so a shell switch is covered by the shell key alone. /etc/paths and other
+ *  system files are skipped: they change with OS updates, not user intent. */
+const RC_FILES = [
+    ".zshenv",
+    ".zprofile",
+    ".zshrc",
+    ".zlogin",
+    ".bash_profile",
+    ".bash_login",
+    ".profile",
+    ".bashrc",
+] as const;
+
+interface LoginPathCacheEntry {
+    shell: string;
+    stamp: number;
+    path: string;
+}
+
+/** Max mtimeMs across existing rc files; 0 when none exist. */
+function rcStamp(): number {
+    let stamp = 0;
+    const home = homedir();
+    for (const f of RC_FILES) {
+        try {
+            const m = statSync(resolvePath(home, f)).mtimeMs;
+            if (m > stamp) stamp = m;
+        } catch {
+            // not present — contributes nothing to the stamp
+        }
+    }
+    return stamp;
+}
+
+function loginPathCacheFile(): string {
+    return resolvePath(tacoHome(), "run", "login-path-cache.json");
+}
+
+/**
+ * resolveLoginShellPath with a disk cache: on cache hit the shell spawn is
+ * skipped entirely. Skipped on Windows like the raw probe. The probe is
+ * injectable so tests can observe hit vs miss.
+ */
+export function resolveLoginShellPathCached(
+    probe: () => string | undefined = resolveLoginShellPath,
+    shell: string | undefined = process.env.SHELL,
+    uid: number | undefined = typeof process.getuid === "function" ? process.getuid() : undefined,
+): string | undefined {
+    if (process.platform === "win32") return undefined;
+    const resolvedShell = resolveShell(shell, process.platform, uid);
+    const file = loginPathCacheFile();
+    const stamp = rcStamp();
+    try {
+        const entry = JSON.parse(readFileSync(file, "utf8")) as Partial<LoginPathCacheEntry>;
+        if (
+            entry.shell === resolvedShell &&
+            entry.stamp === stamp &&
+            typeof entry.path === "string" &&
+            entry.path.length > 0
+        ) {
+            return entry.path;
+        }
+    } catch {
+        // miss (missing / corrupt cache) — fall through to the probe
+    }
+    const path = probe();
+    if (path !== undefined) {
+        try {
+            mkdirSync(dirname(file), { recursive: true });
+            writeFileSync(
+                file,
+                JSON.stringify({ shell: resolvedShell, stamp, path } satisfies LoginPathCacheEntry),
+                "utf8",
+            );
+        } catch {
+            // best-effort — next start probes again
+        }
+    }
+    return path;
 }

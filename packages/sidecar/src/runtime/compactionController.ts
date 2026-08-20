@@ -11,9 +11,8 @@ import {
     shouldCompact,
 } from "@earendil-works/pi-agent-core";
 import type { CompactionFailureReason, SessionCompactResult } from "@taco-ai/protocol";
+import { DEFAULT_COMPACTION_ENABLED, DEFAULT_COMPACTION_THRESHOLD } from "@taco-ai/protocol";
 import {
-    DEFAULT_COMPACTION_ENABLED,
-    DEFAULT_COMPACTION_THRESHOLD,
     type ResolvedCompaction,
     readGlobalConfig,
     validateCompactionConfig,

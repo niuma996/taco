@@ -1,6 +1,13 @@
 import { strictEqual } from "node:assert/strict";
-import { test } from "node:test";
-import { augmentProcessPath, resolveLoginShellPath } from "../../src/lib/loginShellPath.ts";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, test } from "node:test";
+import {
+    augmentProcessPath,
+    resolveLoginShellPath,
+    resolveLoginShellPathCached,
+} from "../../src/lib/loginShellPath.ts";
 
 test("resolveLoginShellPath is skipped on Windows", () => {
     strictEqual(resolveLoginShellPath("win32", "/bin/zsh"), undefined);
@@ -79,4 +86,77 @@ test("augmentProcessPath returns false when nothing would change", () => {
         false,
     );
     strictEqual(env.PATH, "/usr/bin:/bin");
+});
+
+// ─────────── resolveLoginShellPathCached (disk cache) ───────────
+
+let cacheHome: string | undefined;
+const savedTacoHome = process.env.TACO_HOME;
+
+before(() => {
+    if (process.platform === "win32") return;
+    cacheHome = mkdtempSync(join(tmpdir(), "login-path-cache-"));
+    process.env.TACO_HOME = cacheHome;
+});
+
+after(() => {
+    if (cacheHome) rmSync(cacheHome, { recursive: true, force: true });
+    if (savedTacoHome === undefined) {
+        delete process.env.TACO_HOME;
+    } else {
+        process.env.TACO_HOME = savedTacoHome;
+    }
+});
+
+test("resolveLoginShellPathCached: miss probes and writes, second call hits without probing", () => {
+    if (process.platform === "win32" || !cacheHome) return;
+    let probes = 0;
+    const probe = () => {
+        probes += 1;
+        return "/cached/bin:/usr/bin";
+    };
+    const shell = "/bin/zsh";
+
+    strictEqual(resolveLoginShellPathCached(probe, shell), "/cached/bin:/usr/bin");
+    strictEqual(probes, 1);
+    // Cache file written with the probe result.
+    const entry = JSON.parse(readFileSync(join(cacheHome, "run", "login-path-cache.json"), "utf8"));
+    strictEqual(entry.path, "/cached/bin:/usr/bin");
+    strictEqual(entry.shell, shell);
+
+    // Second call is served from disk — probe not invoked again.
+    strictEqual(resolveLoginShellPathCached(probe, shell), "/cached/bin:/usr/bin");
+    strictEqual(probes, 1);
+});
+
+test("resolveLoginShellPathCached: shell mismatch in cache re-probes", () => {
+    if (process.platform === "win32" || !cacheHome) return;
+    // Self-contained: wipe the cache the previous test primed.
+    rmSync(join(cacheHome, "run"), { recursive: true, force: true });
+    let probes = 0;
+    const probe = () => {
+        probes += 1;
+        return "/fresh/bin";
+    };
+    // Prime the cache with one shell, then resolve with another.
+    resolveLoginShellPathCached(probe, "/bin/zsh");
+    strictEqual(resolveLoginShellPathCached(probe, "/bin/bash"), "/fresh/bin");
+    strictEqual(probes, 2);
+});
+
+test("resolveLoginShellPathCached: failed probe leaves no cache file behind", () => {
+    if (process.platform === "win32" || !cacheHome) return;
+    // Wipe whatever earlier tests wrote, then fail the probe.
+    rmSync(join(cacheHome, "run"), { recursive: true, force: true });
+    strictEqual(
+        resolveLoginShellPathCached(() => undefined, "/bin/zsh"),
+        undefined,
+    );
+    let threw = false;
+    try {
+        readFileSync(join(cacheHome, "run", "login-path-cache.json"), "utf8");
+    } catch {
+        threw = true;
+    }
+    strictEqual(threw, true);
 });

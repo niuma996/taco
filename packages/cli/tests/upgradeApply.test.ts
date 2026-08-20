@@ -251,9 +251,9 @@ test("upgradeApplyCommand rolls back to .prev when staging->live rename fails", 
         await writeUpgradeMarker(join(home, "upgrade-marker.json"), marker);
 
         // Snapshot the live contents before swap so we can verify rollback.
-        const beforeManifest = JSON.parse(
-            await readFile(join(live, "manifest.json"), "utf8"),
-        ) as { version: string };
+        const beforeManifest = JSON.parse(await readFile(join(live, "manifest.json"), "utf8")) as {
+            version: string;
+        };
         strictEqual(beforeManifest.version, "0.1.0");
 
         await rejects(
@@ -265,14 +265,11 @@ test("upgradeApplyCommand rolls back to .prev when staging->live rename fails", 
                 // leave the system in a worse state than we want to test.
                 rename: async (src, dest) => {
                     if (src === staging) {
-                        throw Object.assign(
-                            new Error("ENOSPC: no space left on device"),
-                            { code: "ENOSPC" },
-                        );
+                        throw Object.assign(new Error("ENOSPC: no space left on device"), {
+                            code: "ENOSPC",
+                        });
                     }
-                    return await import("node:fs/promises").then((m) =>
-                        m.rename(src, dest),
-                    );
+                    return await import("node:fs/promises").then((m) => m.rename(src, dest));
                 },
             }),
             /ENOSPC/,
@@ -290,11 +287,9 @@ test("upgradeApplyCommand rolls back to .prev when staging->live rename fails", 
         // .prev must NOT exist (rollback moved it back into live).
         await rejects(readFile(`${live}.prev/manifest.json`, "utf8"), /ENOENT/);
         // Marker is NOT cleared on failure (operator can retry after fix).
-        const markerAfter = await readUpgradeMarker(
-            join(home, "upgrade-marker.json"),
-        );
+        const markerAfter = await readUpgradeMarker(join(home, "upgrade-marker.json"));
         ok(markerAfter);
-        strictEqual(markerAfter!.version, "0.2.0");
+        strictEqual(markerAfter?.version, "0.2.0");
     });
 });
 
@@ -324,17 +319,15 @@ test("upgradeApplyCommand falls back to copyFile + unlink on EXDEV (cross-device
                         code: "EXDEV",
                     });
                 }
-                return await import("node:fs/promises").then((m) =>
-                    m.rename(src, dest),
-                );
+                return await import("node:fs/promises").then((m) => m.rename(src, dest));
             },
         });
 
         strictEqual(result.version, "0.2.0");
         // Live must contain the new bundle contents (copied, not renamed).
-        const newManifest = JSON.parse(
-            await readFile(join(live, "manifest.json"), "utf8"),
-        ) as { version: string };
+        const newManifest = JSON.parse(await readFile(join(live, "manifest.json"), "utf8")) as {
+            version: string;
+        };
         strictEqual(newManifest.version, "0.2.0");
         const newBundle = await readFile(join(live, "lib", "index.mjs"), "utf8");
         strictEqual(newBundle.trim(), "// new bundle");

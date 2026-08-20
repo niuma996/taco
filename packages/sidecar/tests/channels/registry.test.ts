@@ -19,7 +19,6 @@ const mockManifest: ChannelManifest = {
     name: "mock",
     version: "0.1.0",
     capabilities: { maxMessageLength: 4096 },
-    configSchema: [],
 };
 
 function failingResolver(): Channel {

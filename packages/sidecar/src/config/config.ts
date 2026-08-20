@@ -39,17 +39,6 @@ import { tacoHome } from "./tacoHome.ts";
 
 const log = createLogger("config");
 
-/**
- * Re-export the protocol-level compaction constants so legacy callers can
- * keep importing them from `@taco-ai/sidecar`. New code should import from
- * `@taco-ai/protocol` directly.
- */
-export {
-    COMPACTION_THRESHOLD_MAX,
-    COMPACTION_THRESHOLD_MIN,
-    DEFAULT_COMPACTION_ENABLED,
-    DEFAULT_COMPACTION_THRESHOLD,
-} from "@taco-ai/protocol";
 export { tacoHome };
 
 export interface ResolvedCompaction {

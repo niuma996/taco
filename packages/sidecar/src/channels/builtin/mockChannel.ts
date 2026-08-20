@@ -8,7 +8,6 @@ export const mockChannelManifest: ChannelManifest = {
     description:
         "Test-only channel. Inbound driven by tests via ctx.ingress.submit(); push frames stored in memory for assertions.",
     capabilities: { maxMessageLength: 4096 },
-    configSchema: [],
 };
 
 export class MockChannel implements Channel {

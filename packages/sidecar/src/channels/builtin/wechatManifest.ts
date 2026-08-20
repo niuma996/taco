@@ -16,5 +16,4 @@ export const wechatChannelManifest: ChannelManifest = {
     },
     // Credentials come from the QR bind flow and live in ChannelConfigStore,
     // never in taco.json.
-    configSchema: [],
 };

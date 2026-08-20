@@ -4,7 +4,6 @@ export interface ChannelManifest {
     readonly name: string;
     readonly version: string;
     readonly capabilities: ChannelCapabilities;
-    readonly configSchema: readonly ChannelConfigField[];
     readonly description?: string;
 }
 
@@ -13,14 +12,6 @@ export interface ChannelCapabilities {
     readonly maxMessageLength: number;
     readonly requiresPersistentProcess?: boolean;
     readonly approvalButton?: boolean;
-}
-
-export type ChannelConfigFieldType = "string" | "secret" | "boolean" | "number";
-export interface ChannelConfigField {
-    readonly key: string;
-    readonly type: ChannelConfigFieldType;
-    readonly required?: boolean;
-    readonly description?: string;
 }
 
 export interface Channel {
