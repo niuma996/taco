@@ -71,11 +71,24 @@ async fn default_workspace_dir(app: AppHandle) -> Result<String, String> {
 /// 前端据此剔除已失效的历史 workspace(目录被移动 / 删除 / `/tmp` 被清理)。
 /// 走 Rust 而不是前端 fs plugin:待检查的路径不在 fs scope 里,plugin 会直接
 /// 拒绝,而这里只读元数据、不读内容。
+///
+/// macOS TCC:授权未决时 `~/Documents` 下的 stat 返回 EPERM 而非成功——
+/// `is_dir()` 会把它当成"目录不存在",导致真实 workspace 被 prune 掉。
+/// PermissionDenied 因此视为"存在":宁可保留一个 stale 条目,也不能把
+/// 只是还没授权的 workspace 从列表里删掉。
 #[tauri::command]
 async fn paths_are_dirs(paths: Vec<String>) -> Result<Vec<bool>, String> {
     Ok(paths
         .into_iter()
-        .map(|p| std::path::Path::new(&p).is_dir())
+        .map(|p| {
+            match std::fs::metadata(&p) {
+                Ok(m) => m.is_dir(),
+                // PermissionDenied covers EACCES (unix) and ERROR_ACCESS_DENIED
+                // (windows) — both mean "there but not yours to see".
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => true,
+                Err(_) => false,
+            }
+        })
         .collect())
 }
 
@@ -299,6 +312,54 @@ async fn wait_for_daemon_socket(path: &std::path::Path, timeout: Duration) -> Re
     }
 }
 
+/// macOS only: open the workspace directory once from this frontmost app
+/// process. The first access to a TCC-protected ancestor (e.g. ~/Documents)
+/// then surfaces the "allow access" consent prompt immediately as a modal.
+/// Without this, the first access happens inside the background sidecar
+/// process, and macOS defers that prompt to a banner tens of seconds later —
+/// blocking session load until the user notices it. The grant covers the
+/// whole app (sidecar child included), so the prompt appears at most once
+/// per protected folder.
+#[cfg(target_os = "macos")]
+fn prewarm_workspace_access(cwd: &str) {
+    if let Err(e) = std::fs::read_dir(cwd) {
+        eprintln!("taco-desktop: workspace prewarm read_dir({cwd}) failed: {e}");
+    }
+}
+
+/// Give `tauri dev` the same rounded dock icon the installed app gets.
+///
+/// The bundled icon.icns is deliberately full-bleed with opaque corners: macOS 26
+/// draws icons carrying transparent margins shrunken inside a gray tray, and the
+/// system applies its own squircle mask to whatever the bundle ships. In dev
+/// there is no bundle, so Tauri passes icon.icns to setApplicationIconImage
+/// unmasked and the art reads as a hard-edged square.
+///
+/// icon-dev-dock.png is that same art pre-masked with the system squircle. Tauri
+/// sets the dev dock icon on RunEvent::Ready, so this has to run after that or it
+/// gets overwritten. Release builds never reach here — the bundle icon is already
+/// correct.
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn apply_dev_dock_icon() {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let png = include_bytes!("../icons/icon-dev-dock.png");
+    // Ready is delivered on the main thread, which is what NSApplication requires.
+    let Some(mtm) = MainThreadMarker::new() else {
+        eprintln!("taco-desktop: dev dock icon skipped — not on main thread");
+        return;
+    };
+    let data = NSData::with_bytes(png);
+    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        eprintln!("taco-desktop: dev dock icon decode failed");
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    unsafe { app.setApplicationIconImage(Some(&image)) };
+}
+
 /// 确保共享 sidecar 进程存在。首次调用 spawn,后续任意 cwd 直接返回 —— sidecar
 /// 会在收到带 `params.workspace` 的 RPC 时自行懒建 WorkspaceRuntime,Rust 无需
 /// 为新 workspace 做任何事。
@@ -318,6 +379,9 @@ async fn workspace_ensure(
     debug_mode: Option<bool>,
     llm_dump_to_file: Option<bool>,
 ) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    prewarm_workspace_access(&cwd);
+    #[cfg(not(target_os = "macos"))]
     let _ = cwd;
     let _ = debug_mode;
     let _ = llm_dump_to_file;
@@ -1095,6 +1159,10 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
+        // Tauri sets the dev dock icon from icon.icns during this same event;
+        // overriding here lands after it.
+        #[cfg(all(target_os = "macos", debug_assertions))]
+        tauri::RunEvent::Ready => apply_dev_dock_icon(),
         tauri::RunEvent::ExitRequested { api, .. } => {
             // The second ExitRequested fires after `h.exit(0)` below; the
             // gate flips on the first call so the second one falls through

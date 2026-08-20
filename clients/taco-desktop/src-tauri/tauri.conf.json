@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "node scripts/stageSidecar.mjs && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "node scripts/stageSidecar.mjs && pnpm build",
+    "beforeBuildCommand": "node scripts/stageSidecar.mjs && node scripts/generateMacOSIcon.mjs && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
