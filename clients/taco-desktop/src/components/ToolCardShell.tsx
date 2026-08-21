@@ -26,11 +26,20 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
         : isError
           ? "tool-card error"
           : "tool-card ok";
+    const iconClass = isRunning
+        ? "tool-card-icon tool-card-icon--running"
+        : isError
+          ? "tool-card-icon tool-card-icon--error"
+          : "tool-card-icon tool-card-icon--ok";
 
     return (
         <div className={statusClass} data-tool-id={tool.id} aria-busy={isRunning}>
             <div className="tool-card-head">
-                <Icon size={14} aria-hidden="true" className={isRunning ? "spin" : undefined} />
+                <Icon
+                    size={14}
+                    aria-hidden="true"
+                    className={`${iconClass} ${isRunning ? "spin" : ""}`.trim()}
+                />
                 <span className="tool-card-name">{tool.name}</span>
                 {summary && <span className="tool-card-summary">{summary}</span>}
             </div>

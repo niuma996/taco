@@ -32,7 +32,12 @@ export interface Job {
     run_on_startup: boolean;
     last_run_at?: string;
     next_run_at?: string;
-    history: JobHistoryEntry[];
+    /** Past run records — server-managed. The desktop never sends
+     *  `history` over the wire; the server seeds `[]` on create and
+     *  preserves the existing list on update regardless of what the
+     *  client includes. Marked optional so the create/update input
+     *  shape doesn't require callers to stub it. */
+    history?: JobHistoryEntry[];
     /** IM scope, server-derived. Desktop callers should not set these —
      *  the daemon derives them from `args.workspace` on create/update and
      *  ignores caller-supplied values (sandbox escape prevention). */

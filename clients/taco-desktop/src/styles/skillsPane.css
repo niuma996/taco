@@ -116,7 +116,7 @@
     margin: 0;
     font-size: 0.8rem;
     color: var(--fg-dim);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     word-break: break-all;
 }
 
@@ -155,7 +155,7 @@
 .skills-detail-content {
     margin: 0;
     font-size: 0.8rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     color: var(--fg);
     background: var(--bg-secondary);
     border: 1px solid var(--border);

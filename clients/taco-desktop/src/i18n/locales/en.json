@@ -569,6 +569,22 @@
     "columnSchedule": "Schedule",
     "columnCommand": "Command",
     "columnEnabled": "Enabled",
-    "columnActions": "Actions"
+    "columnActions": "Actions",
+    "addButton": "+ New schedule",
+    "newDescription": "Fill in the fields below to register a job with the scheduler.",
+    "editDescription": "Update this schedule — changes apply on save.",
+    "runningNow": "Running…",
+    "busy": "Previous run still in progress, please wait",
+    "actionDismiss": "Dismiss",
+    "fieldIntervalMsHint": "Trigger interval in milliseconds. Must be a positive integer.",
+    "fieldCronExprHint": "Standard 5-field cron expression, e.g. 30 22 * * *.",
+    "fieldCronTzHint": "Leave empty to use the host local timezone, e.g. Asia/Shanghai.",
+    "fieldArgsHint": "JSON object passed to the command, e.g. { workspace, prompt }.",
+    "errorArgsNotObject": "args must be a JSON object, not an array or primitive.",
+    "errorArgsJson": "JSON parse failed — check braces and quotes.",
+    "fieldEnabledHint": "When off the job stays registered but does not fire.",
+    "sessionStrategyImHint": "im:// workspaces can only reuse the current session; the server rejects other strategies.",
+    "errorIntervalMs": "Interval (ms) must be a positive integer.",
+    "errorCronExpr": "Cron expression must not be empty."
   }
 }

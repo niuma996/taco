@@ -568,6 +568,22 @@
     "columnSchedule": "计划",
     "columnCommand": "命令",
     "columnEnabled": "启用",
-    "columnActions": "操作"
+    "columnActions": "操作",
+    "addButton": "＋ 新建定时任务",
+    "newDescription": "填好下面这几项就可以把任务挂到调度器上。",
+    "editDescription": "修改这条定时任务的参数；保存后立即生效。",
+    "runningNow": "运行中…",
+    "busy": "上次运行还没结束，请稍候再触发",
+    "actionDismiss": "忽略错误",
+    "fieldIntervalMsHint": "触发间隔（毫秒），需为正整数。",
+    "fieldCronExprHint": "标准 5 段 cron 表达式，例如 30 22 * * *。",
+    "fieldCronTzHint": "留空则使用宿主本地时区，例如 Asia/Shanghai。",
+    "fieldArgsHint": "传递给命令的 JSON 对象，例如 { workspace, prompt }。",
+    "errorArgsNotObject": "args 必须是 JSON 对象，不能是数组或基本类型。",
+    "errorArgsJson": "JSON 解析失败，请检查括号和引号。",
+    "fieldEnabledHint": "关闭后任务保留但不会触发。",
+    "sessionStrategyImHint": "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
+    "errorIntervalMs": "间隔（毫秒）必须是正整数。",
+    "errorCronExpr": "Cron 表达式不能为空。"
   }
 }

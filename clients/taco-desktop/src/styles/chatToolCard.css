@@ -30,6 +30,18 @@
     gap: 0.4rem;
     font-weight: 500;
 }
+.tool-card-icon {
+    flex-shrink: 0;
+}
+.tool-card.running .tool-card-icon {
+    color: var(--brand-orange);
+}
+.tool-card.error .tool-card-icon {
+    color: var(--error);
+}
+.tool-card.ok .tool-card-icon {
+    color: var(--user);
+}
 .tool-card-name {
     color: var(--fg);
 }
@@ -42,7 +54,7 @@
     margin: 0.3rem 0 0 1.4rem;
     padding: 0.3rem 0.5rem;
     background: var(--tool-result-bg, var(--input-bg));
-    border: 1px solid var(--code-block-border, #d4c9b0);
+    border: 1px solid var(--code-block-border);
     border-radius: var(--radius-xs);
     white-space: pre-wrap;
     /* pre-wrap only breaks on whitespace; tool output is often a single

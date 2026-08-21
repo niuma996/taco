@@ -798,8 +798,13 @@ export default function App() {
                         />
                     ) : mainView === "schedules" ? (
                         <div className="settings-pane">
+                            {/* Wide variant — schedules table needs more
+                                room than the 720px default so action
+                                buttons don't get squeezed; the dialog
+                                itself is centred and capped at 1100px
+                                (see .settings-pane-content-inner--wide). */}
                             <div className="settings-pane-content">
-                                <div className="settings-pane-content-inner">
+                                <div className="settings-pane-content-inner settings-pane-content-inner--wide">
                                     <SchedulesTab client={client} />
                                 </div>
                             </div>

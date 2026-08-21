@@ -21,7 +21,7 @@
     width: 6px;
     height: 6px;
     border-radius: var(--radius-circle);
-    background: var(--muted, var(--fg-dim));
+    background: var(--muted);
     opacity: 0.5;
 }
 .session-status-dot.running {
@@ -54,7 +54,7 @@
     gap: 10px;
     padding: 8px 12px;
     border: 1px dashed var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     background: var(--surface-tint);
     color: var(--fg-dim);
     font-size: 12px;
@@ -68,7 +68,7 @@
     padding: 10px 14px;
     background: var(--accent-bg-active);
     border: 1px solid var(--accent-border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     font-size: 13px;
     color: var(--fg);
 }
@@ -98,7 +98,7 @@
     gap: 6px;
     padding: 12px 14px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     background: var(--input-bg);
     color: var(--fg);
 }

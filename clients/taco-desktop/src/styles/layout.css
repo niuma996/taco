@@ -112,7 +112,7 @@ header.topbar .drag-spacer {
     height: 12px;
     padding: 0;
     border: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     cursor: pointer;
 }
 
@@ -417,7 +417,7 @@ button.topbar-context-indicator {
     width: max-content;
     font-size: 0.78rem;
     line-height: 1.6;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--shadow-color);
 }
 
 .context-indicator-popover__row + .context-indicator-popover__row {
@@ -450,10 +450,10 @@ button.topbar-context-indicator {
     align-items: center;
     gap: 6px;
     padding: 4px 10px;
-    border-radius: 999px;
-    background: var(--accent-soft, rgba(120, 180, 255, 0.15));
-    color: var(--accent-fg, #74b9ff);
-    font-size: 12px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-soft);
+    color: var(--accent-fg);
+    font-size: var(--text-sm);
     font-weight: 500;
     line-height: 1;
     white-space: nowrap;
@@ -463,7 +463,7 @@ button.topbar-context-indicator {
 .plan-mode-indicator .plan-mode-dot {
     width: 6px;
     height: 6px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: currentColor;
 }
 
@@ -491,14 +491,14 @@ button.topbar-context-indicator {
     padding: 0;
     background: none;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     color: var(--fg-dim);
     cursor: pointer;
 }
 
 .task-panel-collapse:hover {
     background: var(--hover);
-    color: var(--fg-primary, inherit);
+    color: var(--fg-primary);
 }
 
 /* ── Active list area ── */
@@ -615,11 +615,11 @@ button.topbar-context-indicator {
     color: inherit;
     font: inherit;
     font-size: 12px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 .task-history-row:hover {
-    background: var(--hover, rgba(255, 255, 255, 0.04));
+    background: var(--hover);
 }
 
 .task-history-name {

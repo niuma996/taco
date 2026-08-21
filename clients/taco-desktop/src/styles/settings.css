@@ -56,6 +56,14 @@
     margin: 0 auto;
 }
 
+/* Wide variant — used by views whose primary content is a wide table
+   (schedules) so rows don't squeeze action buttons. Still centred and
+   capped to viewport so very wide windows don't push the table off
+   screen. */
+.settings-pane-content-inner--wide {
+    max-width: 1100px;
+}
+
 .settings-tab h3 {
     margin: 0 0 0.4rem 0;
     font-size: var(--text-md);
@@ -629,12 +637,6 @@
     font-size: var(--text-sm);
 }
 
-.schedules-empty {
-    color: var(--fg-dim);
-    font-style: italic;
-    text-align: center;
-}
-
 .schedules-row-actions {
     display: flex;
     gap: 0.4rem;
@@ -667,7 +669,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 0.4rem 0.5rem;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--mono);
 }
 
 .schedules-schedule {
@@ -725,4 +727,98 @@
 .schedules-error-dismiss:hover {
     background: var(--error);
     color: var(--bg-elevated);
+}
+
+/* ── Schedule table layout ── */
+/* Header row: title on the left, "+ New" affordance on the right. The
+   table view needs a quick path to add without scrolling to a stale
+   inline form, so the button sits next to the title. */
+.schedules-tab-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.schedules-tab-header h3 {
+    margin: 0;
+}
+
+/* Column widths — keep the cron expression and command visible without
+   wrapping, leave the action row enough room for three short buttons.
+   `min-width` on the cells prevents the browser from collapsing a
+   column past the longest single token. */
+.schedules-table col.schedules-col-name {
+    width: 22%;
+}
+.schedules-table col.schedules-col-schedule {
+    width: 28%;
+}
+.schedules-table col.schedules-col-command {
+    width: 22%;
+}
+.schedules-table col.schedules-col-enabled {
+    width: 8%;
+}
+.schedules-table col.schedules-col-actions {
+    width: 20%;
+}
+
+.schedules-table td.schedules-cell-name,
+.schedules-table td.schedules-cell-schedule,
+.schedules-table td.schedules-cell-command {
+    /* Single-line truncation keeps rows aligned; long values can be
+       read in full via the edit dialog. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.schedules-cell-actions {
+    white-space: nowrap;
+}
+
+.schedules-row-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* ── Schedule form dialog ── */
+/* Wider than the default .modal (420px) so the cron expression, JSON
+   args textarea, and toggle row all sit on one comfortable column.
+   `max-height` + `overflow-y` keeps the dialog within the viewport on
+   small windows. */
+.schedules-modal {
+    width: 620px;
+    max-width: calc(100vw - 4rem);
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+/* Two-checkbox row for the booleans; native inputs stay accessible and
+   the visual layout reads as a single fieldset without the <fieldset>
+   overhead (which would break FormField's vertical rhythm). */
+.schedules-modal-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+    padding: 0.5rem 0 0.25rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.25rem;
+}
+
+.schedules-modal-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+
+.schedules-modal-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
 }

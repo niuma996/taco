@@ -6,9 +6,23 @@
  */
 
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { resolveTheme } from "../../src/lib/theme";
+
+describe("solid accent controls", () => {
+    it("uses a contrasting foreground for the AskUser submit button", () => {
+        const css = readFileSync(
+            new URL("../../src/styles/toolCards.css", import.meta.url),
+            "utf8",
+        );
+        const submitRule = css.match(/\.askuser-submit\s*\{[^}]*\}/)?.[0];
+
+        assert.ok(submitRule, "expected .askuser-submit CSS rule");
+        assert.match(submitRule, /color:\s*var\(--accent-contrast-fg\);/);
+    });
+});
 
 describe("resolveTheme", () => {
     it("passes through explicit light", () => {

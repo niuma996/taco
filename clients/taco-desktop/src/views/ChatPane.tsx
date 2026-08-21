@@ -140,7 +140,7 @@ export function ChatPane(props: ChatPaneProps) {
             rafId = requestAnimationFrame(() => {
                 rafId = null;
                 if (!stick) return;
-                el.scrollTo({ top: 1e9 });
+                el.scrollTo({ top: el.scrollHeight });
             });
         };
         const mo = new MutationObserver(schedule);
@@ -329,12 +329,17 @@ export function ChatPane(props: ChatPaneProps) {
                                 className="input-context-indicator"
                             />
                             {pending ? (
-                                <button className="prompt-button stop" onClick={onAbort}>
+                                <button
+                                    type="button"
+                                    className="prompt-button stop"
+                                    onClick={onAbort}
+                                >
                                     <Square size={16} aria-hidden="true" />
                                     {t("input.stop")}
                                 </button>
                             ) : (
                                 <button
+                                    type="button"
                                     className="prompt-button send"
                                     onClick={() => {
                                         const el = textareaRef.current;

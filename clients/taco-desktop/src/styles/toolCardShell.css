@@ -7,13 +7,13 @@
 .tool-card-shell-cmd {
     margin-top: 0.4rem;
     padding: 0.3rem 0.5rem;
-    background: var(--terminal-bg, #1e1e1e);
-    border: 1px solid var(--code-block-border, #d4c9b0);
+    background: var(--terminal-bg);
+    border: 1px solid var(--code-block-border);
     border-bottom: none;
     border-radius: var(--radius-xs) var(--radius-xs) 0 0;
-    font-family: var(--mono, monospace);
+    font-family: var(--mono);
     font-size: 0.85em;
-    color: var(--terminal-fg, #d4d4d4);
+    color: var(--terminal-fg);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
@@ -23,7 +23,7 @@
     font-weight: 700;
 }
 .tool-card-shell-cmd-text {
-    color: var(--terminal-fg, #d4d4d4);
+    color: var(--terminal-fg);
 }
 
 /* Output area: dark gray bg contrasts with the command/input area, simulating terminal appearance.
@@ -32,14 +32,14 @@
 .tool-card-shell-result {
     margin: 0;
     padding: 0.3rem 0.5rem;
-    background: var(--terminal-bg, #1e1e1e);
-    color: var(--terminal-fg, #d4d4d4);
-    border: 1px solid var(--code-block-border, #d4c9b0);
+    background: var(--terminal-bg);
+    color: var(--terminal-fg);
+    border: 1px solid var(--code-block-border);
     border-top: none;
     border-radius: 0 0 var(--radius-xs) var(--radius-xs);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-family: var(--mono, monospace);
+    font-family: var(--mono);
     font-size: 0.85em;
 }
 
@@ -47,15 +47,6 @@
 :root[data-theme="light"] .tool-card-shell-cmd,
 :root[data-theme="light"] .tool-card-result {
     --tool-result-bg: var(--input-bg);
-}
-/* Light theme: shell output / code block share a warm dark gray bg. */
-:root[data-theme="light"] .tool-card-shell-result,
-:root[data-theme="light"] .md-code-block {
-    --terminal-bg: #2a2722;
-    --terminal-fg: #d8d3cc;
-}
-:root[data-theme="light"] .tool-card-shell-result.streaming {
-    --terminal-fg: #e8e3dc;
 }
 /* When command is absent (rare, command is a schema-required field), the result block
    is the only child — all four corners are rounded. */

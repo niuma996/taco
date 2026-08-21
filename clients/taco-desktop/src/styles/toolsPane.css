@@ -130,16 +130,16 @@
     border-color: var(--system);
 }
 .tools-list-tag.tag-subagent-ok {
-    color: var(--success, #4caf50);
-    border-color: var(--success, #4caf50);
+    color: var(--success);
+    border-color: var(--success);
 }
 .tools-list-tag.tag-subagent-no {
-    color: var(--warning, #f0a020);
-    border-color: var(--warning, #f0a020);
+    color: var(--warning);
+    border-color: var(--warning);
 }
 .tools-list-tag.tag-session {
-    color: var(--info, #4a90e2);
-    border-color: var(--info, #4a90e2);
+    color: var(--info);
+    border-color: var(--info);
 }
 .tools-list-tag.tag-mcp {
     color: var(--accent);
@@ -147,8 +147,8 @@
     background: var(--accent-bg-hover);
 }
 .tools-list-tag.tag-loading-always {
-    color: var(--success, #4caf50);
-    border-color: var(--success, #4caf50);
+    color: var(--success);
+    border-color: var(--success);
 }
 .tools-list-tag.tag-loading-deferred {
     color: var(--fg-dim);

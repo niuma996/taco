@@ -8,6 +8,12 @@
  * UI is stateless — `useEffect` re-fetches on mount + after every
  * mutation; the daemon is the source of truth.
  *
+ * Add / edit moved to a Radix Dialog (`ScheduleFormDialog`) so the
+ * table view stays scannable. The earlier inline form pushed the
+ * table below the fold and squeezed the action buttons; the dialog
+ * also gives the form room for hint / error text without breaking
+ * the 720px content cap.
+ *
  * Scope kept narrow for PR4: the panel does not yet visualize history
  * (the plan defers that), support per-job timezone pickers, or fold
  * the command editor into a structured form. The `args` field is
@@ -16,479 +22,25 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import {
-    createJobsClient,
-    type Job,
-    type JobScheduleSpec,
-    type SessionStrategy,
-} from "../../lib/jobsClient.ts";
+import { createJobsClient, type Job } from "../../lib/jobsClient.ts";
 import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import { Button } from "../ui/Button.tsx";
+import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
 
 export interface SchedulesTabProps {
     client: TacoClient;
 }
 
-interface DraftJob {
-    name: string;
-    schedule: JobScheduleSpec;
-    command: string;
-    argsJson: string;
-    enabled: boolean;
-    run_on_startup: boolean;
-    sessionStrategy: SessionStrategy;
-}
+/** Dialog mode — distinguishes between creating a new job (no `existing`
+ *  set) and editing one (existing carries the row to pre-fill). The
+ *  discriminator lets the dialog pick its own title + submit label
+ *  without the parent reaching into the dialog's internals. */
+type DialogMode =
+    | { kind: "closed" }
+    | { kind: "create"; lastError: string | null }
+    | { kind: "edit"; job: Job; lastError: string | null };
 
-const EMPTY_DRAFT: DraftJob = {
-    name: "",
-    schedule: { kind: "interval", ms: 60_000 },
-    command: "agent.invoke",
-    argsJson: "{}",
-    enabled: true,
-    run_on_startup: false,
-    sessionStrategy: "pin",
-};
-
-export function SchedulesTab({ client }: SchedulesTabProps) {
-    const jobs = useJobsClient(client);
-    const { t } = useT();
-    const [draft, setDraft] = useState<DraftJob>(EMPTY_DRAFT);
-    const [formError, setFormError] = useState<string | null>(null);
-    const [editingId, setEditingId] = useState<string | null>(null);
-    /** Job id whose Run Now click is currently in flight. The button text
-     *  flips to "running…" while this is set so the click registers visibly
-     *  — without this the only feedback is a history entry that lands
-     *  minutes later (the agent session itself runs for a while), and the
-     *  user assumes the click was a no-op. Cleared in the same finally
-     *  block whether the fire was accepted or skipped. */
-    const [runningId, setRunningId] = useState<string | null>(null);
-
-    // Channel jobs (im:// workspace) only support sessionStrategy="reuse"
-    // server-side — JobsController rejects anything else. Detect the
-    // workspace from the args draft so the form can lock the strategy
-    // picker instead of letting the user save a guaranteed failure.
-    const isImWorkspace = useMemo(() => {
-        try {
-            const parsed = JSON.parse(draft.argsJson) as { workspace?: unknown };
-            return typeof parsed?.workspace === "string" && parsed.workspace.startsWith("im://");
-        } catch {
-            // Unparseable draft — submit() reports the JSON error itself.
-            return false;
-        }
-    }, [draft.argsJson]);
-
-    const submit = useCallback(() => {
-        setFormError(null);
-        let args: Record<string, unknown>;
-        try {
-            args = JSON.parse(draft.argsJson) as Record<string, unknown>;
-            if (typeof args !== "object" || args === null || Array.isArray(args)) {
-                throw new Error("args must be a JSON object");
-            }
-        } catch (err) {
-            setFormError(`args: ${err instanceof Error ? err.message : String(err)}`);
-            return;
-        }
-        if (!draft.name.trim()) {
-            setFormError("name must not be empty");
-            return;
-        }
-        if (draft.schedule.kind === "interval" && draft.schedule.ms <= 0) {
-            setFormError("interval.ms must be a positive integer");
-            return;
-        }
-        if (draft.schedule.kind === "cron" && !draft.schedule.expr.trim()) {
-            setFormError("cron expr must not be empty");
-            return;
-        }
-        const common = {
-            name: draft.name.trim(),
-            schedule: draft.schedule,
-            command: draft.command.trim() || "agent.invoke",
-            args,
-            enabled: draft.enabled,
-            run_on_startup: draft.run_on_startup,
-            sessionStrategy: isImWorkspace ? ("reuse" as const) : draft.sessionStrategy,
-            history: [],
-        };
-        const target = editingId ? jobs.update({ id: editingId, ...common }) : jobs.create(common);
-        void target
-            .then(() => {
-                setDraft(EMPTY_DRAFT);
-                setEditingId(null);
-                void jobs.refresh();
-            })
-            .catch((err: unknown) => {
-                setFormError(err instanceof Error ? err.message : String(err));
-            });
-    }, [draft, editingId, jobs, isImWorkspace]);
-
-    const beginEdit = useCallback((job: Job) => {
-        setEditingId(job.id);
-        setDraft({
-            name: job.name,
-            schedule: job.schedule,
-            command: job.command,
-            argsJson: JSON.stringify(job.args, null, 2),
-            enabled: job.enabled,
-            run_on_startup: job.run_on_startup,
-            sessionStrategy: job.sessionStrategy ?? "pin",
-        });
-        setFormError(null);
-    }, []);
-
-    const cancelEdit = useCallback(() => {
-        setEditingId(null);
-        setDraft(EMPTY_DRAFT);
-        setFormError(null);
-    }, []);
-
-    const sorted = useMemo(
-        () => [...jobs.list].sort((a, b) => a.name.localeCompare(b.name)),
-        [jobs.list],
-    );
-
-    return (
-        <div className="settings-tab schedules-tab">
-            <h3>{t("settings.tabSchedules", "Schedules")}</h3>
-            {jobs.listError ? (
-                <p className="schedules-error" role="alert">
-                    {jobs.listError}
-                </p>
-            ) : null}
-            {jobs.actionError ? (
-                <p className="schedules-error schedules-error--action" role="alert">
-                    <span>{jobs.actionError}</span>
-                    <button
-                        type="button"
-                        className="schedules-error-dismiss"
-                        aria-label={t("schedules.actionDismiss", "Dismiss")}
-                        onClick={() => jobs.setActionError(null)}
-                    >
-                        ×
-                    </button>
-                </p>
-            ) : null}
-            <table className="schedules-table">
-                <thead>
-                    <tr>
-                        <th>{t("schedules.columnName", "Name")}</th>
-                        <th>{t("schedules.columnSchedule", "Schedule")}</th>
-                        <th>{t("schedules.columnCommand", "Command")}</th>
-                        <th>{t("schedules.columnEnabled", "Enabled")}</th>
-                        <th>{t("schedules.columnActions", "Actions")}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {sorted.length === 0 ? (
-                        <tr>
-                            <td colSpan={5} className="schedules-empty">
-                                {t("schedules.empty", "No schedules yet.")}
-                            </td>
-                        </tr>
-                    ) : null}
-                    {sorted.map((job) => (
-                        <ScheduleRow
-                            key={job.id}
-                            job={job}
-                            isRunning={runningId === job.id}
-                            onToggle={(enabled) => {
-                                void jobs
-                                    .update({ ...job, enabled })
-                                    .then(() => jobs.refresh())
-                                    .catch((err: unknown) =>
-                                        jobs.setActionError(
-                                            err instanceof Error ? err.message : String(err),
-                                        ),
-                                    );
-                            }}
-                            onRunNow={async () => {
-                                // Reflect the click instantly in the UI —
-                                // runNow returns immediately even when the
-                                // underlying fire will take minutes, so
-                                // without flipping the button text the
-                                // click looks like nothing happened. Set
-                                // runningId first so the disabled / label
-                                // change commits before the awaited RPC,
-                                // and clear it in the same finally so we
-                                // never get stuck showing "运行中…" if the
-                                // call rejects.
-                                setRunningId(job.id);
-                                try {
-                                    const accepted = await jobs.runNow(job.id);
-                                    if (!accepted) {
-                                        jobs.setActionError(
-                                            t("schedules.busy", "上次运行还没结束,请稍候再触发"),
-                                        );
-                                    } else {
-                                        jobs.setActionError(null);
-                                    }
-                                } catch (err) {
-                                    jobs.setActionError(
-                                        err instanceof Error ? err.message : String(err),
-                                    );
-                                } finally {
-                                    await jobs.refresh();
-                                    setRunningId((prev) => (prev === job.id ? null : prev));
-                                }
-                            }}
-                            onDelete={() => {
-                                void jobs
-                                    .delete(job.id)
-                                    .then(() => jobs.refresh())
-                                    .catch((err: unknown) =>
-                                        jobs.setActionError(
-                                            err instanceof Error ? err.message : String(err),
-                                        ),
-                                    );
-                            }}
-                            onEdit={() => beginEdit(job)}
-                        />
-                    ))}
-                </tbody>
-            </table>
-
-            <h4>
-                {editingId
-                    ? t("schedules.editTitle", "Edit schedule")
-                    : t("schedules.newTitle", "New schedule")}
-            </h4>
-            <form
-                className="schedules-form"
-                onSubmit={(event) => {
-                    event.preventDefault();
-                    submit();
-                }}
-            >
-                <label>
-                    <span>{t("schedules.fieldName", "Name")}</span>
-                    <input
-                        type="text"
-                        value={draft.name}
-                        onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                    />
-                </label>
-                <fieldset className="schedules-schedule">
-                    <legend>{t("schedules.fieldSchedule", "Schedule")}</legend>
-                    <label>
-                        <span>{t("schedules.fieldScheduleKind", "Kind")}</span>
-                        <select
-                            value={draft.schedule.kind}
-                            onChange={(event) => {
-                                const kind = event.target.value;
-                                if (kind === "cron") {
-                                    setDraft({
-                                        ...draft,
-                                        schedule: { kind: "cron", expr: "*/5 * * * *" },
-                                    });
-                                } else {
-                                    setDraft({
-                                        ...draft,
-                                        schedule: { kind: "interval", ms: 60_000 },
-                                    });
-                                }
-                            }}
-                        >
-                            <option value="interval">interval</option>
-                            <option value="cron">cron</option>
-                        </select>
-                    </label>
-                    {draft.schedule.kind === "interval" ? (
-                        <label>
-                            <span>{t("schedules.fieldIntervalMs", "Interval (ms)")}</span>
-                            <input
-                                type="number"
-                                min={1}
-                                value={draft.schedule.ms}
-                                onChange={(event) =>
-                                    setDraft({
-                                        ...draft,
-                                        schedule: {
-                                            kind: "interval",
-                                            ms: Number.parseInt(event.target.value, 10) || 0,
-                                        },
-                                    })
-                                }
-                            />
-                        </label>
-                    ) : (
-                        <>
-                            <label>
-                                <span>{t("schedules.fieldCronExpr", "Cron expression")}</span>
-                                <input
-                                    type="text"
-                                    value={
-                                        draft.schedule.kind === "cron" ? draft.schedule.expr : ""
-                                    }
-                                    onChange={(event) =>
-                                        setDraft({
-                                            ...draft,
-                                            schedule: {
-                                                kind: "cron",
-                                                expr: event.target.value,
-                                                tz:
-                                                    draft.schedule.kind === "cron"
-                                                        ? draft.schedule.tz
-                                                        : undefined,
-                                            },
-                                        })
-                                    }
-                                />
-                            </label>
-                            <label>
-                                <span>{t("schedules.fieldCronTz", "Timezone (optional)")}</span>
-                                <input
-                                    type="text"
-                                    value={
-                                        draft.schedule.kind === "cron"
-                                            ? (draft.schedule.tz ?? "")
-                                            : ""
-                                    }
-                                    onChange={(event) =>
-                                        setDraft({
-                                            ...draft,
-                                            schedule: {
-                                                kind: "cron",
-                                                expr:
-                                                    draft.schedule.kind === "cron"
-                                                        ? draft.schedule.expr
-                                                        : "",
-                                                tz: event.target.value || undefined,
-                                            },
-                                        })
-                                    }
-                                />
-                            </label>
-                        </>
-                    )}
-                </fieldset>
-                <label>
-                    <span>{t("schedules.fieldCommand", "Command")}</span>
-                    <input
-                        type="text"
-                        value={draft.command}
-                        onChange={(event) => setDraft({ ...draft, command: event.target.value })}
-                    />
-                </label>
-                <label>
-                    <span>{t("schedules.fieldArgs", "Args (JSON object)")}</span>
-                    <textarea
-                        rows={4}
-                        value={draft.argsJson}
-                        onChange={(event) => setDraft({ ...draft, argsJson: event.target.value })}
-                    />
-                </label>
-                <label>
-                    <span>{t("schedules.fieldSessionStrategy", "Session strategy")}</span>
-                    <select
-                        value={isImWorkspace ? "reuse" : draft.sessionStrategy}
-                        disabled={isImWorkspace}
-                        onChange={(event) =>
-                            setDraft({
-                                ...draft,
-                                sessionStrategy: event.target.value as SessionStrategy,
-                            })
-                        }
-                    >
-                        {isImWorkspace ? (
-                            // Channel jobs continue the peer's live
-                            // conversation; the server rejects any other
-                            // strategy, so the picker locks to reuse.
-                            <option value="reuse">reuse — continue the channel session</option>
-                        ) : (
-                            <>
-                                <option value="pin">pin — fixed dedicated session</option>
-                                <option value="new">new — fresh session per fire</option>
-                            </>
-                        )}
-                    </select>
-                </label>
-                <label className="schedules-toggle">
-                    <input
-                        type="checkbox"
-                        checked={draft.enabled}
-                        onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
-                    />
-                    <span>{t("schedules.fieldEnabled", "Enabled")}</span>
-                </label>
-                <label className="schedules-toggle">
-                    <input
-                        type="checkbox"
-                        checked={draft.run_on_startup}
-                        onChange={(event) =>
-                            setDraft({ ...draft, run_on_startup: event.target.checked })
-                        }
-                    />
-                    <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
-                </label>
-                {formError ? <p className="schedules-error">{formError}</p> : null}
-                <div className="schedules-form-actions">
-                    <button type="submit" disabled={jobs.busy}>
-                        {editingId
-                            ? t("schedules.actionSave", "Save")
-                            : t("schedules.actionCreate", "Create")}
-                    </button>
-                    {editingId ? (
-                        <button type="button" onClick={cancelEdit}>
-                            {t("schedules.actionCancel", "Cancel")}
-                        </button>
-                    ) : null}
-                </div>
-            </form>
-        </div>
-    );
-}
-
-interface ScheduleRowProps {
-    job: Job;
-    /** True while a Run Now click for this row is awaiting the daemon's
-     *  fire-accepted response. Disables the button + changes its label so
-     *  the click registers visibly. */
-    isRunning: boolean;
-    onToggle: (enabled: boolean) => void;
-    onRunNow: () => void;
-    onDelete: () => void;
-    onEdit: () => void;
-}
-
-function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: ScheduleRowProps) {
-    const { t } = useT();
-    const scheduleLabel =
-        job.schedule.kind === "cron"
-            ? `cron: ${job.schedule.expr}${job.schedule.tz ? ` (${job.schedule.tz})` : ""}`
-            : `every ${job.schedule.ms}ms`;
-    return (
-        <tr>
-            <td>{job.name}</td>
-            <td>
-                <code>{scheduleLabel}</code>
-            </td>
-            <td>
-                <code>{job.command}</code>
-            </td>
-            <td>
-                <input
-                    type="checkbox"
-                    checked={job.enabled}
-                    onChange={(event) => onToggle(event.target.checked)}
-                    aria-label={t("schedules.toggleAria", "Toggle schedule enabled")}
-                />
-            </td>
-            <td className="schedules-row-actions">
-                <button type="button" onClick={onRunNow} disabled={isRunning}>
-                    {isRunning
-                        ? t("schedules.runningNow", "运行中…")
-                        : t("schedules.actionRunNow", "Run now")}
-                </button>
-                <button type="button" onClick={onEdit}>
-                    {t("schedules.actionEdit", "Edit")}
-                </button>
-                <button type="button" onClick={onDelete}>
-                    {t("schedules.actionDelete", "Delete")}
-                </button>
-            </td>
-        </tr>
-    );
-}
+const EMPTY_DIALOG_MODE: DialogMode = { kind: "closed" };
 
 /** Tiny custom hook: wraps the jobs client with refresh-on-mount + a
  *  busy / error state the UI can render. Stays local to this file —
@@ -535,14 +87,273 @@ function useJobsClient(client: TacoClient) {
         listError,
         actionError,
         setActionError,
-        // Back-compat alias used by the row-level action handlers so
-        // their `.catch((err) => jobs.setError(...))` lines stay readable.
-        // Routes to actionError (the sticky bucket) by design.
-        setError: setActionError,
         refresh,
         create: jobsClient.create,
         update: jobsClient.update,
         delete: jobsClient.delete,
         runNow: jobsClient.runNow,
     };
+}
+
+export function SchedulesTab({ client }: SchedulesTabProps) {
+    const jobs = useJobsClient(client);
+    const { t } = useT();
+    /** Dialog mode drives the modal's open state, title, and which
+     *  fields it pre-fills. Closed by default so the table is the only
+     *  thing on screen. */
+    const [dialog, setDialog] = useState<DialogMode>(EMPTY_DIALOG_MODE);
+    /** Job id whose Run Now click is currently in flight. The button text
+     *  flips to "running…" while this is set so the click registers visibly
+     *  — without this the only feedback is a history entry that lands
+     *  minutes later (the agent session itself runs for a while), and the
+     *  user assumes the click was a no-op. Cleared in the same finally
+     *  block whether the fire was accepted or skipped. */
+    const [runningId, setRunningId] = useState<string | null>(null);
+
+    const sorted = useMemo(
+        () => [...jobs.list].sort((a, b) => a.name.localeCompare(b.name)),
+        [jobs.list],
+    );
+
+    const openCreate = useCallback(() => {
+        // Clear the global actionError so the prior failure doesn't
+        // show up under a new dialog via the sticky banner — the
+        // dialog's own `lastError` carries per-instance errors instead.
+        jobs.setActionError(null);
+        setDialog({ kind: "create", lastError: null });
+    }, [jobs]);
+
+    const openEdit = useCallback(
+        (job: Job) => {
+            jobs.setActionError(null);
+            setDialog({ kind: "edit", job, lastError: null });
+        },
+        [jobs],
+    );
+
+    const closeDialog = useCallback(() => {
+        setDialog(EMPTY_DIALOG_MODE);
+    }, []);
+
+    const handleSave = useCallback(
+        (mode: DialogMode, submit: ScheduleSubmit) => {
+            if (mode.kind === "closed") return;
+            // Clear any prior per-dialog error before re-attempting —
+            // the rejection handler below re-stamps it on failure.
+            setDialog((prev) => (prev.kind === "closed" ? prev : { ...prev, lastError: null }));
+            // `history` is a server-managed field (past run records);
+            // the desktop must NOT send it on update, otherwise saving
+            // an edit wipes the run history. Create accepts it because
+            // the server treats `[]` as "no runs yet" — but we still
+            // skip sending it to keep create/update symmetric.
+            const rpc =
+                mode.kind === "edit"
+                    ? jobs.update({ id: mode.job.id, ...submit })
+                    : jobs.create(submit);
+            void rpc
+                .then(() => {
+                    setDialog(EMPTY_DIALOG_MODE);
+                    void jobs.refresh();
+                })
+                .catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : String(err);
+                    // Pin the error to THIS dialog instance, not the
+                    // global hook — otherwise closing and reopening
+                    // shows a stale message from the previous attempt.
+                    setDialog((prev) =>
+                        prev.kind === "closed" ? prev : { ...prev, lastError: message },
+                    );
+                });
+        },
+        [jobs],
+    );
+
+    // Per-dialog derived props. `errorMessage` only carries a value when
+    // the dialog is open AND has surfaced an error since opening; this
+    // prevents stale errors from a previous dialog session from leaking
+    // into a freshly opened one.
+    const dialogSaving = jobs.busy;
+    const dialogExisting = dialog.kind === "edit" ? dialog.job : undefined;
+    const dialogErrorMessage = dialog.kind !== "closed" ? dialog.lastError : null;
+
+    return (
+        <div className="settings-tab schedules-tab">
+            <div className="schedules-tab-header">
+                <h3>{t("settings.tabSchedules", "Schedules")}</h3>
+                <Button variant="primary" size="sm" onClick={openCreate}>
+                    {t("schedules.addButton", "+ New schedule")}
+                </Button>
+            </div>
+
+            {jobs.listError ? (
+                <p className="schedules-error" role="alert">
+                    {jobs.listError}
+                </p>
+            ) : null}
+            {jobs.actionError ? (
+                <p className="schedules-error schedules-error--action" role="alert">
+                    <span>{jobs.actionError}</span>
+                    <button
+                        type="button"
+                        className="schedules-error-dismiss"
+                        aria-label={t("schedules.actionDismiss", "Dismiss")}
+                        onClick={() => jobs.setActionError(null)}
+                    >
+                        ×
+                    </button>
+                </p>
+            ) : null}
+
+            <table className="schedules-table">
+                <colgroup>
+                    <col className="schedules-col-name" />
+                    <col className="schedules-col-schedule" />
+                    <col className="schedules-col-command" />
+                    <col className="schedules-col-enabled" />
+                    <col className="schedules-col-actions" />
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>{t("schedules.columnName", "Name")}</th>
+                        <th>{t("schedules.columnSchedule", "Schedule")}</th>
+                        <th>{t("schedules.columnCommand", "Command")}</th>
+                        <th>{t("schedules.columnEnabled", "Enabled")}</th>
+                        <th className="schedules-cell-actions">
+                            {t("schedules.columnActions", "Actions")}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {sorted.length === 0 ? (
+                        <tr>
+                            <td colSpan={5} className="schedules-empty">
+                                {t("schedules.empty", "No schedules yet.")}
+                            </td>
+                        </tr>
+                    ) : null}
+                    {sorted.map((job) => (
+                        <ScheduleRow
+                            key={job.id}
+                            job={job}
+                            isRunning={runningId === job.id}
+                            onToggle={(enabled) => {
+                                void jobs
+                                    .update({ ...job, enabled })
+                                    .then(() => jobs.refresh())
+                                    .catch((err: unknown) =>
+                                        jobs.setActionError(
+                                            err instanceof Error ? err.message : String(err),
+                                        ),
+                                    );
+                            }}
+                            onRunNow={async () => {
+                                // Reflect the click instantly in the UI —
+                                // runNow returns immediately even when the
+                                // underlying fire will take minutes, so
+                                // without flipping the button text the
+                                // click looks like nothing happened. Set
+                                // runningId first so the disabled / label
+                                // change commits before the awaited RPC,
+                                // and clear it in the same finally so we
+                                // never get stuck showing "运行中…" if the
+                                // call rejects.
+                                setRunningId(job.id);
+                                try {
+                                    const accepted = await jobs.runNow(job.id);
+                                    if (!accepted) {
+                                        jobs.setActionError(
+                                            t("schedules.busy", "上次运行还没结束，请稍候再触发"),
+                                        );
+                                    } else {
+                                        jobs.setActionError(null);
+                                    }
+                                } catch (err) {
+                                    jobs.setActionError(
+                                        err instanceof Error ? err.message : String(err),
+                                    );
+                                } finally {
+                                    await jobs.refresh();
+                                    setRunningId((prev) => (prev === job.id ? null : prev));
+                                }
+                            }}
+                            onDelete={() => {
+                                void jobs
+                                    .delete(job.id)
+                                    .then(() => jobs.refresh())
+                                    .catch((err: unknown) =>
+                                        jobs.setActionError(
+                                            err instanceof Error ? err.message : String(err),
+                                        ),
+                                    );
+                            }}
+                            onEdit={() => openEdit(job)}
+                        />
+                    ))}
+                </tbody>
+            </table>
+
+            <ScheduleFormDialog
+                open={dialog.kind !== "closed"}
+                existing={dialogExisting}
+                saving={dialogSaving}
+                errorMessage={dialogErrorMessage}
+                onSave={(submit) => handleSave(dialog, submit)}
+                onCancel={closeDialog}
+            />
+        </div>
+    );
+}
+
+interface ScheduleRowProps {
+    job: Job;
+    /** True while a Run Now click for this row is awaiting the daemon's
+     *  fire-accepted response. Disables the button + changes its label so
+     *  the click registers visibly. */
+    isRunning: boolean;
+    onToggle: (enabled: boolean) => void;
+    onRunNow: () => void;
+    onDelete: () => void;
+    onEdit: () => void;
+}
+
+function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: ScheduleRowProps) {
+    const { t } = useT();
+    const scheduleLabel =
+        job.schedule.kind === "cron"
+            ? `cron: ${job.schedule.expr}${job.schedule.tz ? ` (${job.schedule.tz})` : ""}`
+            : `every ${job.schedule.ms}ms`;
+    return (
+        <tr>
+            <td className="schedules-cell-name">{job.name}</td>
+            <td className="schedules-cell-schedule">
+                <code>{scheduleLabel}</code>
+            </td>
+            <td className="schedules-cell-command">
+                <code>{job.command}</code>
+            </td>
+            <td>
+                <input
+                    type="checkbox"
+                    checked={job.enabled}
+                    onChange={(event) => onToggle(event.target.checked)}
+                    aria-label={t("schedules.toggleAria", "Toggle schedule enabled")}
+                />
+            </td>
+            <td className="schedules-cell-actions">
+                <div className="schedules-row-actions">
+                    <Button size="sm" variant="default" onClick={onRunNow} disabled={isRunning}>
+                        {isRunning
+                            ? t("schedules.runningNow", "运行中…")
+                            : t("schedules.actionRunNow", "Run now")}
+                    </Button>
+                    <Button size="sm" variant="default" onClick={onEdit}>
+                        {t("schedules.actionEdit", "Edit")}
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={onDelete}>
+                        {t("schedules.actionDelete", "Delete")}
+                    </Button>
+                </div>
+            </td>
+        </tr>
+    );
 }

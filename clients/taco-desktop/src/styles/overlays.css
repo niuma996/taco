@@ -222,8 +222,8 @@
     max-height: 60vh;
     display: flex;
     flex-direction: column;
-    background: var(--border);
-    color: var(--accent-contrast-fg);
+    background: var(--bg-elevated);
+    color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: 0 8px 24px var(--shadow-color);
@@ -235,7 +235,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.55rem 0.8rem;
-    background: var(--border);
+    background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
 }
 .llm-dump-actions {
@@ -249,7 +249,7 @@
     padding: 0.5rem;
 }
 .llm-dump-entry {
-    background: var(--border);
+    background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     margin-bottom: 0.5rem;
@@ -266,7 +266,7 @@
     background: var(--bg-elevated);
     color: var(--fg);
     border-radius: var(--radius-sm);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-family: var(--mono);
     font-size: 0.78rem;
     line-height: 1.45;
     max-height: 320px;
@@ -357,7 +357,7 @@
     background: var(--input-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: 0.78rem;
     color: var(--fg);
     white-space: pre-wrap;
@@ -746,7 +746,7 @@
 .files-preview-pane {
     overflow: auto;
     padding: 0.6rem 0.8rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-family: var(--mono);
     font-size: 0.78rem;
     line-height: 1.45;
     color: var(--fg);

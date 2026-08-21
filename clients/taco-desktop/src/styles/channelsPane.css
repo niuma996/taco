@@ -44,7 +44,7 @@
 .channels-status-dot {
     width: 8px;
     height: 8px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: var(--fg-dim);
     flex-shrink: 0;
 }
@@ -80,7 +80,7 @@
     gap: 4px;
     padding: 3px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     background: var(--input-bg);
     align-self: flex-start;
 }
@@ -90,7 +90,7 @@
     gap: 6px;
     padding: 5px 14px;
     border: none;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--fg-dim);
     font-size: 12px;
@@ -114,7 +114,7 @@
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--tool);
     color: var(--bg);
     font-size: 11px;
@@ -130,7 +130,7 @@
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
     background: var(--surface-tint);
     color: var(--fg);
     font: inherit;
@@ -207,7 +207,7 @@
        even when the app is in dark mode. */
     padding: 16px;
     background: var(--qr-bg);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
 }
 .channel-bind-form {
     display: flex;

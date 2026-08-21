@@ -13,9 +13,13 @@
     min-width: 0;
 }
 
+.message-text {
+    white-space: pre-wrap;
+}
+
 .message.user {
-    background: var(--accent);
-    color: var(--bg);
+    background: var(--user-msg-bg);
+    color: var(--fg);
     margin-top: 0.75rem;
     /* Consistent font size with .md-assistant (0.85em) for uniform reading rhythm. */
     font-size: 0.85rem;
@@ -63,4 +67,12 @@
     color: var(--fg-dim);
     font-style: italic;
     font-size: 12px;
+    white-space: pre-wrap;
+}
+
+.thinking-chevron {
+    transition: transform 0.1s;
+}
+.thinking-chevron--open {
+    transform: rotate(90deg);
 }

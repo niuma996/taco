@@ -27,7 +27,7 @@ footer.input {
     display: inline-block;
     width: 0.5rem;
     height: 0.5rem;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: var(--warning, #ebcb8b);
     animation: input-status-pulse 1.4s ease-in-out infinite;
 }

@@ -64,21 +64,21 @@ export const Message = memo(function Message({
                         ))}
                     </div>
                 )}
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+                <div className="message-text">{m.text}</div>
             </div>
         );
     }
     if (m.kind === "system") {
         return (
             <div className="message system">
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+                <div className="message-text">{m.text}</div>
             </div>
         );
     }
     if (m.kind === "tool") {
         return (
             <div className="message tool">
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+                <div className="message-text">{m.text}</div>
             </div>
         );
     }
@@ -237,18 +237,13 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
             <button type="button" className="thinking-header" onClick={toggle} aria-expanded={open}>
                 <ChevronRight
                     size={11}
-                    style={{
-                        transform: open ? "rotate(90deg)" : undefined,
-                        transition: "transform 0.1s",
-                    }}
+                    className={`thinking-chevron ${open ? "thinking-chevron--open" : ""}`}
                     aria-hidden="true"
                 />
                 <span>{label}</span>
             </button>
             {open && !block.redacted && block.thinking.length > 0 && (
-                <div className="thinking-body" style={{ whiteSpace: "pre-wrap" }}>
-                    {block.thinking}
-                </div>
+                <div className="thinking-body">{block.thinking}</div>
             )}
         </div>
     );

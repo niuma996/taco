@@ -110,6 +110,31 @@
 
     /* Mono font stack — consolidates scattered ui-monospace,... hardcoded values. */
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --font-mono: var(--mono);
+
+    /* Soft semantic aliases — maps undefined tokens that leaked into component
+       CSS back to the existing palette so fallbacks can be removed. */
+    --bg-hover: var(--hover-overlay);
+    --fg-primary: var(--fg);
+    --fg-muted: var(--fg-dim);
+    --muted: var(--fg-dim);
+    --hover: var(--hover-overlay);
+    --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
+    --border-soft: color-mix(in srgb, var(--border) 40%, transparent);
+    --info: var(--accent);
+    --cache-hit: var(--success);
+    --accent-soft: rgba(136, 192, 208, 0.15);
+    --accent-fg: var(--accent);
+
+    /* Terminal output colors — dark theme defaults. */
+    --terminal-bg: #1e1e1e;
+    --terminal-fg: #d4d4d4;
+    --fg-streaming: #e8e8e8;
+
+    /* QR plates and orange-surface text stay consistent across themes. */
+    --qr-bg: #ffffff;
+    --qr-hint-fg: #57606a;
+    --brand-orange-fg: #ffffff;
 }
 
 /* Light theme — neutral warm-gray surfaces + Nord blue accent. Same hue as dark theme (no cross-theme hue shift).
@@ -193,6 +218,24 @@
     --diff-new-bg: rgba(91, 138, 60, 0.1);
     --diff-gutter-fg: rgba(43, 38, 32, 0.45);
 
+    /* Soft semantic aliases for light theme. */
+    --bg-hover: var(--hover-overlay);
+    --fg-primary: var(--fg);
+    --fg-muted: var(--fg-dim);
+    --muted: var(--fg-dim);
+    --hover: var(--hover-overlay);
+    --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
+    --border-soft: color-mix(in srgb, var(--border) 40%, transparent);
+    --info: var(--accent);
+    --cache-hit: var(--success);
+    --accent-soft: rgba(94, 129, 172, 0.15);
+    --accent-fg: var(--accent);
+
+    /* Terminal output colors for light theme. */
+    --terminal-bg: #2a2722;
+    --terminal-fg: #d8d3cc;
+    --fg-streaming: #e8e3dc;
+
     /* QR plates stay light across themes — scanners need reliable contrast
        regardless of the app's appearance. */
     --qr-bg: #ffffff;
@@ -203,9 +246,6 @@
     /* Foreground color for content rendered on --brand-orange surfaces
        (the toolbar buttons in overlays.css). */
     --brand-orange-fg: #ffffff;
-    /* Streaming tool output uses a slightly brighter shade than the
-       completed-output gray so live edits are visually distinct. */
-    --fg-streaming: #e8e8e8;
 }
 
 :root[data-platform="macos"] {
