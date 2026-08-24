@@ -11,7 +11,7 @@
  */
 
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -25,9 +25,9 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 pub mod log_file;
 pub use log_file::LogFiles;
 
+mod daemon_reap;
 mod paths;
 mod sidecar_launcher;
-mod daemon_reap;
 /// Test-only re-exports for the daemon_reap integration test under
 /// `tests/daemon_reap.rs`. Hidden from the public docs because the
 /// symbols are crate-internal helpers, not a stable API.
@@ -37,7 +37,9 @@ pub mod daemon_reap_test {
 }
 pub mod upgrade_commands;
 
-use crate::paths::{control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home};
+use crate::paths::{
+    control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home, resolve_taco_runtime_dir,
+};
 use crate::sidecar_launcher::{resolve_install_launcher, resolve_sidecar, PASSTHROUGH_ENV};
 
 /// Gate that lets a programmatic `AppHandle::exit` pass through without
@@ -48,7 +50,6 @@ use crate::sidecar_launcher::{resolve_install_launcher, resolve_sidecar, PASSTHR
 /// one as "already handled" so it falls through and the process actually
 /// terminates.
 static EXIT_GATE: AtomicBool = AtomicBool::new(false);
-
 
 /// 默认 workspace 的绝对路径,并保证目录存在。
 ///
@@ -119,7 +120,6 @@ async fn desktop_config_write(app: AppHandle, contents: String) -> Result<(), St
 /// (Implementation lives in `upgrade_commands.rs` so this Tauri-command
 ///  layer stays focused on the workspace_* handlers.)
 
-
 pub struct AppState {
     /// 唯一共享 sidecar 进程。锁仅在 install / dispose 路径持;spawn 在锁外执行
     /// —— 这样 dispose 期间可以 acquire 锁、设 shutdown flag,ensure 在 install
@@ -129,11 +129,6 @@ pub struct AppState {
     /// dispose 期间为 true —— ensure 在 spawn 前后都会检查,避免在 dispose 之后
     /// install 一个马上被杀的进程(orphan)。
     shutdown_initiated: AtomicBool,
-    /// Pid of the daemon the current Tauri instance last successfully spawned
-    /// (release-mode launcher pid == daemon pid). Used by reap_previous_daemon
-    /// to distinguish "alive and ours" from "alive and leaked from a prior
-    /// instance". 0 = no spawn yet.
-    owned_sidecar_pid: AtomicU32,
     /// Per-process log file family, set when a sidecar is installed. None
     /// before the first install; recreated on each new sidecar process so the
     /// file's lifetime matches the process lifetime — simpler reasoning, and
@@ -178,7 +173,6 @@ impl Default for AppState {
             sidecar: Mutex::new(None),
             next_process_generation: AtomicU64::new(1),
             shutdown_initiated: AtomicBool::new(false),
-            owned_sidecar_pid: AtomicU32::new(0),
             log_files: Arc::new(StdMutex::new(None)),
             stderr_reader: StdMutex::new(None),
             handshake_line: StdMutex::new(None),
@@ -416,9 +410,8 @@ async fn workspace_ensure(
     // 在 ensure_lock 内做，避免 reap 与并发 ensure 互相打架。
     #[cfg(unix)]
     {
-        if let Ok(taco_home) = resolve_taco_home(&app) {
-            let owned = state.owned_sidecar_pid.load(Ordering::Acquire);
-            reap_stale_at(&taco_home, &app, if owned > 0 { Some(owned) } else { None });
+        if let Ok(runtime_dir) = resolve_taco_runtime_dir(&app) {
+            reap_stale_at(&runtime_dir, &app);
         }
     }
 
@@ -446,7 +439,9 @@ async fn workspace_ensure(
     // real cause in the terminal and the UI saw a generic "sidecar hello
     // timeout" after the 5s socket-wait elapsed. The buf is capped at 4 KiB so
     // a chatty daemon cannot grow it without bound.
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
 
     cmd.env_clear();
     for key in PASSTHROUGH_ENV {
@@ -474,17 +469,9 @@ async fn workspace_ensure(
     let mut launcher = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar launcher: {e}"))?;
-    // Record the pid we just spawned. reap_previous_daemon uses this
-    // to distinguish "alive and ours" from "alive and leaked from a prior
-    // instance". launcher.pid == daemon.pid in release mode (release
-    // spawns the daemon bundle directly, not via a CLI launcher).
-    // tokio::process::Child::id() returns Option<u32>; on a successful
-    // spawn the OS has assigned a pid so this is always Some, but the
-    // type forces us to handle None. 0 means "no spawn yet" in our
-    // owned_sidecar_pid encoding, so any future reap correctly falls
-    // into the "kill any alien daemon" path.
-    let spawned_pid = launcher.id().unwrap_or(0);
-    let generation = state.next_process_generation.fetch_add(1, Ordering::Relaxed);
+    let generation = state
+        .next_process_generation
+        .fetch_add(1, Ordering::Relaxed);
 
     // Drain the launcher's stderr into stderr_buf (capped at 4 KiB). Kept
     // alive for the lifetime of the function so a fast-exiting launcher can
@@ -625,16 +612,13 @@ async fn workspace_ensure(
                         // deref to AppState; bind it so the lock guard
                         // lives long enough.
                         let state = app_for_reader.state::<AppState>();
-                        *state.handshake_line.lock().unwrap() =
-                            Some((generation, line.clone()));
+                        *state.handshake_line.lock().unwrap() = Some((generation, line.clone()));
                         if let Some(tx) = hello_tx.take() {
                             let _ = tx.send(line.clone());
                         }
                     } else {
-                        let _ = app_for_reader.emit(
-                            "sidecar-event",
-                            serde_json::json!({ "line": line }),
-                        );
+                        let _ = app_for_reader
+                            .emit("sidecar-event", serde_json::json!({ "line": line }));
                     }
                 }
                 Ok(None) => break,
@@ -661,10 +645,7 @@ async fn workspace_ensure(
             }
         };
         if dead.is_some() {
-            let _ = app_for_reader.emit(
-                "sidecar-exited",
-                serde_json::json!({ "code": null }),
-            );
+            let _ = app_for_reader.emit("sidecar-exited", serde_json::json!({ "code": null }));
         }
     });
 
@@ -703,12 +684,6 @@ async fn workspace_ensure(
         launcher: Some(launcher),
         generation,
     });
-    // Stamp owned_sidecar_pid from the spawned launcher. The slot's
-    // launcher is the daemon in release mode; in dev mode the launcher
-    // is the CLI which exits, but the slot's existing generation tracking
-    // handles the bookkeeping for dev. Either way, recording the pid we
-    // just spawned lets the next reap preserve our own daemon.
-    state.owned_sidecar_pid.store(spawned_pid, Ordering::Release);
     // Release the slot lock before awaiting the hello so concurrent ensure()
     // callers aren't serialized behind it (the hello normally lands in ms).
     drop(slot);
@@ -717,7 +692,16 @@ async fn workspace_ensure(
     // frame. On failure tear the slot down — a poisoned entry (connected but no
     // hello) would wedge every later ensure() on a handshake that never comes,
     // so force the next call to respawn against a fresh daemon instead.
-    match tokio::time::timeout(Duration::from_secs(5), hello_rx).await {
+    //
+    // 15s matches the CLI's READY_TIMEOUT_MS and the socket-wait above: a
+    // cold dev boot (tsx compiling the sidecar source) or a daemon serving a
+    // burst of initial connections can legitimately take several seconds to
+    // serve the per-connection `startServer` init before its hello lands.
+    // The old 5s window killed the slot while the detached daemon kept
+    // running, and the next ensure's reap then fought a half-initialized
+    // daemon — a kill/restart loop that surfaced as "loadWorkspaceSessions
+    // failed after retries".
+    match tokio::time::timeout(Duration::from_secs(15), hello_rx).await {
         Ok(Ok(line)) => Ok(Some(line)),
         Ok(Err(_)) | Err(_) => {
             let mut slot = state.sidecar.lock().await;
@@ -728,7 +712,7 @@ async fn workspace_ensure(
                     let _ = l.wait().await;
                 }
             }
-            Err("sidecar connected but sent no hello within 5s".into())
+            Err("sidecar connected but sent no hello within 15s".into())
         }
     }
 }
@@ -789,11 +773,11 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
         drop(s.stdin_tx);
         // Compute the control socket path so we can ask the daemon to
         // shut itself down. Resolved lazily -- failure to resolve
-        // TACO_HOME just means we skip the control.shutdown step and
-        // fall through to the reap path.
-        let control_path = resolve_taco_home(app)
+        // the daemon runtime directory just means we skip the control.shutdown
+        // step and fall through to the reap path.
+        let control_path = resolve_taco_runtime_dir(app)
             .ok()
-            .map(|h| control_socket_path(&h));
+            .map(|runtime_dir| control_socket_path(&runtime_dir));
         if let Some(control) = control_path {
             // Best-effort: 3s window for control.shutdown to land. A
             // success path means the daemon ack'd and is exiting on its
@@ -807,18 +791,12 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
         }
         #[cfg(unix)]
         {
-            // Reap covers the dev-mode orphan (CLI launcher already
-            // exited; daemon detached and unreachable via launcher
-            // handle) AND the rare prod case where the daemon is
-            // wedged and ignored control.shutdown. We pass owned_pid
-            // so a daemon we ourselves spawned this session isn't
-            // needlessly killed -- though we're already tearing it down
-            // via control.shutdown above, this is a belt-and-braces
-            // for the wedged-daemon case where the daemon ignored
-            // control.shutdown entirely.
-            if let Ok(home) = resolve_taco_home(app) {
-                let owned = state.owned_sidecar_pid.load(Ordering::Acquire);
-                reap_stale_at(&home, app, if owned > 0 { Some(owned) } else { None });
+            // Reap covers the dev-mode orphan (CLI launcher already exited;
+            // daemon detached and unreachable via launcher handle) and the
+            // rare prod case where the daemon is wedged and ignored
+            // control.shutdown.
+            if let Ok(runtime_dir) = resolve_taco_runtime_dir(app) {
+                reap_stale_at(&runtime_dir, app);
             }
         }
         // Final fallback: kill the launcher handle directly. In dev
@@ -834,9 +812,6 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
             }
         }
     }
-    // Clear owned_sidecar_pid so the next spawn's reap doesn't
-    // accidentally try to preserve a pid we just tore down.
-    state.owned_sidecar_pid.store(0, Ordering::Release);
     state.shutdown_initiated.store(false, Ordering::Release);
 }
 
@@ -888,15 +863,11 @@ async fn set_fs_scope(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn reap_stale_at(
-    taco_home: &std::path::Path,
-    app: &tauri::AppHandle,
-    owned_pid: Option<u32>,
-) {
+fn reap_stale_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
     use crate::daemon_reap::{
-        compute_install_id, daemon_paths, reap_previous_daemon, ReapInputs,
+        compute_install_id, daemon_runtime_paths, reap_previous_daemon, ReapInputs,
     };
-    let (pid_file, socket_path, control_socket_path) = daemon_paths(taco_home);
+    let (pid_file, socket_path, control_socket_path) = daemon_runtime_paths(runtime_dir);
     // Best-effort resources root -- mirrors `resolve_sidecar`'s
     // priority exactly: debug builds always use the repo source root
     // (where `pnpm tauri:dev` runs the bundle from), release uses
@@ -919,8 +890,14 @@ fn reap_stale_at(
             .map(|p| p.join("sidecar").to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let own_install_id =
-        compute_install_id(&resources_root, &taco_home.to_string_lossy());
+    // The install identity is derived from the shared user-data root, matching
+    // the sidecar's `tacoHome()` call. The pid/socket locations above are
+    // intentionally derived from the separate runtime directory.
+    let taco_home = match resolve_taco_home(app) {
+        Ok(home) => home,
+        Err(_) => return,
+    };
+    let own_install_id = compute_install_id(&resources_root, &taco_home.to_string_lossy());
     let inputs = ReapInputs {
         pid_file,
         socket_path,
@@ -928,7 +905,7 @@ fn reap_stale_at(
         own_install_id: &own_install_id,
         resources_root: std::path::PathBuf::from(&resources_root),
     };
-    let outcome = reap_previous_daemon(&inputs, owned_pid);
+    let outcome = reap_previous_daemon(&inputs, None);
     // Best-effort log only -- never block setup on a reap that finds
     // nothing. Operators see this in `pnpm tauri:dev` stderr.
     eprintln!("taco-desktop: reap outcome = {:?}", outcome);
@@ -937,22 +914,32 @@ fn reap_stale_at(
 /// Auto-register the sidecar as an OS-level service on first run.
 /// Registration is best-effort so startup remains available when a platform
 /// launcher or optional service manager is unavailable.
+fn should_auto_install_daemon_service(debug: bool) -> bool {
+    !debug
+}
+
 fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
-    let taco_home = match resolve_taco_home(app.handle()) {
-        Ok(h) => h,
+    // Development starts its own repo-source daemon from `workspace_ensure`.
+    // Never run `taco install` from a debug build: install rewrites and
+    // reloads the user's launchd/schtasks service asynchronously, which can
+    // evict a release daemon while the WebView is connecting to its socket.
+    // Production builds retain the automatic service registration behavior.
+    if !should_auto_install_daemon_service(cfg!(debug_assertions)) {
+        return Ok(());
+    }
+
+    let runtime_dir = match resolve_taco_runtime_dir(app.handle()) {
+        Ok(dir) => dir,
         Err(_) => return Ok(()),
     };
-    // force_reap BEFORE checking control_socket_present. The previous
-    // order (probe then reap) leaked state when a daemon from an earlier
-    // TACO instance was alive: control_socket_present returned true
-    // (skip install), but the daemon wasn't ours -- it was a relic
-    // holding the bind. After reap, control_socket_present gives an
-    // honest read.
+    // Remove only stale or unresponsive daemon state before checking
+    // control_socket_present. A healthy daemon is reused; installing a second
+    // service is unnecessary and would create a bind race.
     #[cfg(unix)]
     {
-        reap_stale_at(&taco_home, app.handle(), None);
+        reap_stale_at(&runtime_dir, app.handle());
     }
-    let control = control_socket_path(&taco_home);
+    let control = control_socket_path(&runtime_dir);
     if control_socket_present(&control) {
         return Ok(());
     }
@@ -1008,10 +995,7 @@ fn control_socket_present(control: &std::path::Path) -> bool {
     }
     #[cfg(windows)]
     {
-        std::fs::OpenOptions::new()
-            .read(true)
-            .open(control)
-            .is_ok()
+        std::fs::OpenOptions::new().read(true).open(control).is_ok()
     }
 }
 
@@ -1027,16 +1011,12 @@ fn control_socket_present(control: &std::path::Path) -> bool {
 /// - **Windows / Linux**: `decorations:false` frameless, sharp corners, and
 ///   the React WindowControls supplies min/max/close buttons at the top-right.
 fn build_main_window(app: &tauri::App) -> Result<(), tauri::Error> {
-    let builder = tauri::WebviewWindowBuilder::new(
-        app,
-        "main",
-        tauri::WebviewUrl::default(),
-    )
-    .title("Taco")
-    .theme(Some(tauri::Theme::Dark))
-    .inner_size(1200.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .resizable(true);
+    let builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+        .title("Taco")
+        .theme(Some(tauri::Theme::Dark))
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true);
 
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -1183,7 +1163,10 @@ pub fn run() {
         // Reopen — with no handler the window stays hidden and the app looks
         // unrecoverable. Bring the hidden window back.
         #[cfg(target_os = "macos")]
-        tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
             if !has_visible_windows {
                 focus_main(app_handle);
             }
@@ -1195,6 +1178,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::PASSTHROUGH_ENV;
+
+    #[test]
+    fn service_management_is_disabled_for_debug_builds_only() {
+        assert!(!super::should_auto_install_daemon_service(true));
+        assert!(super::should_auto_install_daemon_service(false));
+    }
 
     /// The passthrough whitelist exists to stop parent-process credentials
     /// leaking into the sidecar. Guard it so a future addition can't slip a
@@ -1211,4 +1200,3 @@ mod tests {
         }
     }
 }
-

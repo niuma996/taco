@@ -1,35 +1,21 @@
-//! Reap a stale sidecar daemon before the desktop starts a replacement.
+//! Reap an unusable sidecar daemon before the desktop starts a replacement.
 //!
-//! # The leak the original design missed
+//! A daemon is a singleton for its runtime directory. A matching install id
+//! plus a successful control ping and an existing NDJSON socket means the
+//! daemon is healthy and must be reused, even when it was started by another
+//! Tauri process or by a short-lived CLI launcher. This is important in debug
+//! mode because `tsx taco.cjs start` exits after detaching the real daemon, so
+//! the launcher pid is not the daemon pid.
 //!
-//! The pre-revision reap had an "alive short-circuit": if `control.ping` reached
-//! the daemon AND the pid matched the pid file, reap returned `Alive` without
-//! killing. That meant a daemon leaked from a previous Tauri instance — same
-//! install_id (so not ForeignInstall), alive (so ping succeeds), but not "ours"
-//! in the sense of having been spawned by THIS TACO process — got preserved
-//! forever. Every subsequent spawn then collided on EADDRINUSE because the
-//! leaked daemon still held the bind.
-//!
-//! The fix tracks which pid the current TACO instance owns. Reap preserves
-//! only that pid (if any); anything else — alive or dead — gets killed.
-//! `ensure_daemon_installed` uses `force_reap` (no preservation, ever) so
-//! install + plist reload start from a guaranteed-clean state.
+//! Only daemons that fail the health probe are reaped. A foreign install id is
+//! always left untouched, because another Taco installation may actively use
+//! the shared `$TACO_HOME`.
 //!
 //! # The ghost-socket case
 //!
-//! macOS Unix domain sockets persist via the fd table even after the
-//! directory entry is unlinked. A leaked daemon with a closed file but
-//! open inode looks like "alive" to `pid_alive` but is invisible to any
-//! new `connect()` (which needs the fs entry). Reap now also checks fs
-//! entry presence before trusting `pid_alive`: an alive pid with no fs
-//! entry is treated as ghost and killed.
-//!
-//! # install_id mismatch
-//!
-//! A foreign install_id (sibling taco install sharing `$TACO_HOME`) still
-//! short-circuits to `ForeignInstall` — touching it would kill a daemon
-//! that another install actively uses. The pid-equality check below
-//! assumes install_ids match first.
+//! macOS Unix domain sockets can leave a live process with no usable socket
+//! entry after an unclean shutdown. An alive pid with no NDJSON socket entry
+//! is treated as stale and reaped.
 
 #[cfg(unix)]
 use std::io::Read;
@@ -152,13 +138,14 @@ pub enum ReapOutcome {
     Unparseable,
     /// Pid file's install_id didn't match ours. Foreign daemon — leave it alone.
     ForeignInstall,
-    /// `control.ping` answered with the expected pid + matching install_id AND
-    /// the pid was the one we just spawned (`owned_pid`). Daemon is alive,
-    /// serving, and ours — no reap needed.
+    /// `control.ping` answered with the expected pid + matching install_id.
+    /// The daemon is alive and serving this runtime — no reap needed. The
+    /// desktop may have spawned a short-lived launcher (for example `tsx
+    /// taco.cjs start`) whose pid is intentionally different from the daemon.
     Alive { pid: u32, uptime_s: u64 },
-    /// Daemon was alive at the pid-file path, but it was NOT ours (foreign
-    /// `owned_pid`, or no `owned_pid` known). We killed it (SIGTERM → grace
-    /// → SIGKILL) and unlinked pid + sockets so a fresh bind succeeds.
+    /// Daemon was alive but did not answer the health probe. We killed it
+    /// (SIGTERM → grace → SIGKILL) and unlinked pid + sockets so a fresh bind
+    /// succeeds.
     Reaped { pid: u32, last_signal: &'static str, preserved_own: bool },
     /// Pid file pointed at a process that was already dead, OR alive but
     /// ghost-socket (no fs entry). We unlinked pid + sockets so a fresh
@@ -185,14 +172,14 @@ pub struct ReapInputs<'a> {
 
 /// Reap the previous daemon if one is stale.
 ///
-/// `owned_pid`: the pid the current Tauri instance just spawned (or 0 /
-/// `None` if no spawn has happened yet). Reap preserves ONLY this pid --
-/// any other alive daemon (whether same install_id or not) gets killed.
-/// This prevents the original bug where a leaked daemon from a previous
-/// Tauri instance was preserved forever because it was alive AND
-/// matched install_id.
+/// `owned_pid` is retained for source compatibility with older callers, but
+/// it must not be used as a daemon ownership test. In debug mode the desktop
+/// launches `tsx taco.cjs start`; that launcher exits after detaching the real
+/// daemon, so its pid is different from the pid in `sidecar.pid`. A healthy
+/// daemon matching this runtime's install id is safe to reuse regardless of
+/// which process launched it.
 #[cfg(unix)]
-pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, owned_pid: Option<u32>) -> ReapOutcome {
+pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) -> ReapOutcome {
     let raw = match std::fs::read_to_string(inputs.pid_file.as_path()) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ReapOutcome::NoPidFile,
@@ -209,23 +196,40 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, owned_pid: Option<u32>) -> 
             return ReapOutcome::ForeignInstall;
         }
     }
-    // It's our install. The daemon may be:
-    //   (a) our own, currently-spawned pid → preserve
-    //   (b) a leaked daemon from a previous instance → reap
-    //   (c) a stale (dead) pid → reap
-    //   (d) a ghost (alive but no fs entry) → reap
-    // We use control.ping to distinguish (a) vs (b): if ping returns the
-    // same pid, it's almost certainly alive. We still kill it unless the
-    // pid equals owned_pid (or owned_pid is None AND the daemon is the
-    // one we'd preserve by other means).
-    match ping_control_socket(inputs.control_socket_path.as_path(), Duration::from_millis(500)) {
-        Some(pong) if pong.pid == parsed.pid && Some(parsed.pid) == owned_pid => {
+    // A healthy daemon is the singleton for this runtime, even if it was
+    // started by a previous desktop process or by a detached CLI launcher.
+    // Reusing it is both safe and required for debug mode, where the launcher
+    // pid is not the daemon pid.
+    //
+    // The pid file is written only after both sockets are bound, so require the
+    // NDJSON entry as well as a successful control ping before declaring the
+    // daemon healthy. This prevents a control-only half-start from being
+    // mistaken for a reusable desktop connection.
+    //
+    // A daemon mid-initialization (channel stack, router load) or serving a
+    // burst of connections can miss a single 500ms ping — its control replies
+    // are scheduled on the same event loop. A false "unhealthy" here SIGKILLs
+    // a healthy daemon and turns a slow boot into a kill/restart loop, so
+    // retry the ping before declaring the daemon wedged.
+    let mut pong = None;
+    for attempt in 0..3 {
+        if let Some(p) =
+            ping_control_socket(inputs.control_socket_path.as_path(), Duration::from_millis(500))
+        {
+            pong = Some(p);
+            break;
+        }
+        if attempt < 2 {
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+    if let Some(p) = pong {
+        if p.pid == parsed.pid && inputs.socket_path.exists() {
             return ReapOutcome::Alive {
                 pid: parsed.pid,
-                uptime_s: pong.uptime_s,
+                uptime_s: p.uptime_s,
             };
         }
-        _ => {}
     }
     // Detect ghost socket: pid alive but fs entry missing. macOS lets
     // the inode survive via fd after unlink, so a connect() from a new
@@ -249,8 +253,8 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, owned_pid: Option<u32>) -> 
             last_signal: if ghost { "ghost-socket" } else { "stale-pidfile" },
         };
     }
-    // Pid alive + matches install + either not owned or owned_pid is
-    // unknown. Kill it so the next spawn can bind.
+    // Pid alive + matches install, but the daemon did not pass the health
+    // probe. Kill it so the next spawn can bind.
     let _ = Command::new("kill")
         .args(["-TERM", &parsed.pid.to_string()])
         .status();
@@ -358,14 +362,13 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
     Some(Pong { pid, uptime_s })
 }
 
-/// Resolve the canonical pid/socket paths under `$TACO_HOME/run/`.
+/// Resolve the canonical pid/socket paths inside an explicit daemon runtime directory.
 #[cfg(unix)]
-pub fn daemon_paths(home: &Path) -> (PathBuf, PathBuf, PathBuf) {
-    let run = home.join("run");
+pub fn daemon_runtime_paths(runtime_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     (
-        run.join("sidecar.pid"),
-        run.join("sidecar.sock"),
-        run.join("sidecar-ctl.sock"),
+        runtime_dir.join("sidecar.pid"),
+        runtime_dir.join("sidecar.sock"),
+        runtime_dir.join("sidecar-ctl.sock"),
     )
 }
 
@@ -393,7 +396,7 @@ pub fn force_reap(_inputs: &ReapInputs<'_>) -> ReapOutcome {
 #[doc(hidden)]
 pub mod __test_only {
     pub use super::{
-        compute_install_id, daemon_paths, force_reap, parse_pid_file,
+        compute_install_id, daemon_runtime_paths, force_reap, parse_pid_file,
         reap_previous_daemon, PidRecord, Pong, ReapInputs, ReapOutcome,
         ping_control_socket,
     };

@@ -8,7 +8,7 @@
  * where the loser exited non-zero and launchd restarted it forever.
  *
  * Flow:
- *   1. Resolve $TACO_HOME; create the run/ directory if missing.
+ *   1. Resolve shared $TACO_HOME and the daemon runtime directory; create both if missing.
  *   2. If a daemon already answers on the control socket, print the NDJSON
  *      path and return — no spawn.
  *   3. Otherwise elect a spawner via `start.lock`. The winner spawns and waits
@@ -20,15 +20,21 @@
  * alive would tie the daemon's lifetime to whoever ran `taco start`.
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import { connect, type Socket } from "node:net";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
+import { connect, type Socket } from "node:net";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { computeInstallId, parsePidFile } from "./installId.ts";
+import { fileURLToPath } from "node:url";
 import { findPlatformPkg } from "./installHelpers.ts";
-import { controlSocketPath, ndjsonSocketPath, RUN_DIR, TACO_HOME } from "./paths.ts";
+import { computeInstallId, parsePidFile } from "./installId.ts";
+import {
+    controlSocketPath,
+    ensureDirs,
+    ndjsonSocketPath,
+    resolveTacoRuntimeDir,
+    TACO_HOME,
+} from "./paths.ts";
 import { launchSidecar } from "./sidecarLauncher.ts";
 import { acquireStartLock, readStartLock } from "./startLock.ts";
 import { upgradeApplyCommand } from "./upgradeApply.ts";
@@ -57,7 +63,7 @@ type DaemonProbe = "ready" | "absent" | "wedged";
  *  Deliberately self-contained rather than imported from the sidecar: the
  *  CLI does not depend on sidecar TS source (only the bundled platform pkg
  *  ships at runtime). Same reasoning as the note atop `upgradeMarker.ts`. */
-function probeDaemonHello(path: string, timeoutMs = 2_000): Promise<DaemonProbe> {
+function probeDaemonHello(path: string, timeoutMs = 5_000): Promise<DaemonProbe> {
     return new Promise((resolve) => {
         const sock: Socket = connect(path);
         let buf = "";
@@ -107,12 +113,12 @@ function pidAlive(pid: number): boolean {
  *  Without this path a wedged daemon made every subsequent launch fail
  *  until the machine was rebooted. */
 async function killWedgedDaemon(
-    runDir: string,
+    runtimeDir: string,
     socket: string,
     control: string,
     ownInstallId: string,
 ): Promise<void> {
-    const pidFile = join(runDir, "sidecar.pid");
+    const pidFile = join(runtimeDir, "sidecar.pid");
     let parsed: ReturnType<typeof parsePidFile> | null = null;
     try {
         parsed = parsePidFile(readFileSync(pidFile, "utf8"));
@@ -178,6 +184,8 @@ async function waitForSocket(path: string, timeoutMs: number): Promise<void> {
 export interface StartOptions {
     /** Override $TACO_HOME (defaults to env / ~/.taco). */
     tacoHome?: string;
+    /** Override the daemon runtime directory (defaults to $TACO_RUNTIME_DIR or $TACO_HOME/run). */
+    runtimeDir?: string;
 }
 
 /** If an upgrade marker targets this CLI's own install root, apply it.
@@ -209,8 +217,7 @@ function resolveDaemonResourcesRoot(): string | undefined {
             return null;
         }
     })();
-    const useDev =
-        repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0";
+    const useDev = repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0";
     if (useDev && repoRoot) {
         return join(repoRoot, "packages", "sidecar", "src");
     }
@@ -254,37 +261,41 @@ async function applyOwnedPendingUpgrade(tacoHome: string): Promise<void> {
 
 export async function startCommand(opts: StartOptions = {}): Promise<void> {
     const tacoHome = opts.tacoHome ?? TACO_HOME;
-    const runDir = RUN_DIR.startsWith(tacoHome) ? RUN_DIR : `${tacoHome}/run`;
-    mkdirSync(runDir, { recursive: true });
+    const runtimeDir = resolveTacoRuntimeDir(tacoHome, opts.runtimeDir);
+    await ensureDirs(tacoHome, runtimeDir);
 
-    const socket = ndjsonSocketPath(tacoHome);
-    const control = controlSocketPath(tacoHome);
+    const socket = ndjsonSocketPath(runtimeDir);
+    const control = controlSocketPath(runtimeDir);
 
-    // Fast path: a healthy daemon already owns this $TACO_HOME. The desktop
+    // Fast path: a healthy daemon already owns this runtime directory. The desktop
     // reaches `taco start` from more than one place, so this is the common
     // case, not an edge case. The probe reads the NDJSON hello rather than
     // touching the control socket, which is bound long before the daemon
     // can serve (see probeDaemonHello).
-    const probe = await probeDaemonHello(socket);
+    let probe = await probeDaemonHello(socket);
+    if (probe === "wedged") {
+        // A daemon mid-initialization or serving a burst of connections can
+        // miss one probe. Killing on a single miss turned slow boots into a
+        // kill/restart loop, so re-probe once before declaring it wedged.
+        await new Promise((r) => setTimeout(r, 500));
+        probe = await probeDaemonHello(socket);
+    }
     if (probe === "ready") {
         process.stdout.write(`${socket}\n`);
         process.stderr.write(`[taco] sidecar daemon already running (socket=${socket})\n`);
         return;
     }
     if (probe === "wedged") {
-        // The socket answers connects but no hello arrives — the daemon is
-        // alive at the kernel level and dead at the application level.
-        // Reap it and fall through to a fresh spawn, or every launch from
-        // here on would attach to the same unresponsive process.
+        // The socket answers connects but no hello arrives across two probes —
+        // the daemon is alive at the kernel level and dead at the application
+        // level. Reap it and fall through to a fresh spawn, or every launch
+        // from here on would attach to the same unresponsive process.
         process.stderr.write(
             "[taco] sidecar daemon accepts connections but does not serve; killing it\n",
         );
         const daemonResourcesRoot = resolveDaemonResourcesRoot();
-        const ownInstallId = computeInstallId(
-            daemonResourcesRoot ?? "",
-            tacoHome,
-        );
-        await killWedgedDaemon(runDir, socket, control, ownInstallId);
+        const ownInstallId = computeInstallId(daemonResourcesRoot ?? "", tacoHome);
+        await killWedgedDaemon(runtimeDir, socket, control, ownInstallId);
     }
 
     // Belt-and-braces: reap any leftover pid file even when probe was
@@ -296,17 +307,14 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
     // listener) but it does mean our subsequent spawn could race with
     // cleanup. Force-reap for a deterministic baseline.
     const daemonResourcesRoot = resolveDaemonResourcesRoot();
-    const ownInstallId = computeInstallId(
-        daemonResourcesRoot ?? "",
-        tacoHome,
-    );
-    await killWedgedDaemon(runDir, socket, control, ownInstallId);
+    const ownInstallId = computeInstallId(daemonResourcesRoot ?? "", tacoHome);
+    await killWedgedDaemon(runtimeDir, socket, control, ownInstallId);
 
-    const lock = await acquireStartLock(runDir);
+    const lock = await acquireStartLock(runtimeDir);
     if (!lock) {
         // Another process is mid-spawn. Wait for its daemon rather than racing
         // it to bind the same socket.
-        const holder = await readStartLock(`${runDir}/start.lock`);
+        const holder = await readStartLock(`${runtimeDir}/start.lock`);
         try {
             await waitForSocket(socket, FOLLOWER_WAIT_MS);
         } catch (err) {
@@ -333,6 +341,7 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
             socketPath: socket,
             controlSocketPath: control,
             tacoHome,
+            runtimeDir,
         });
 
         // If the bundle exits before binding the socket, surface its stderr

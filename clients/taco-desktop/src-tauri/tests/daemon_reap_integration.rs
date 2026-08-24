@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use taco_desktop_lib::daemon_reap_test::{
-    compute_install_id, daemon_paths, force_reap, reap_previous_daemon,
+    compute_install_id, daemon_runtime_paths, force_reap, reap_previous_daemon,
     ReapInputs, ReapOutcome,
 };
 
@@ -61,7 +61,7 @@ impl TmpHome {
         (ndjson, ctl)
     }
     fn build_inputs<'a>(&'a self, own_id: &'a str) -> ReapInputs<'a> {
-        let (pid, sock, ctl) = daemon_paths(&self.dir);
+        let (pid, sock, ctl) = daemon_runtime_paths(&self.run());
         ReapInputs {
             pid_file: pid,
             socket_path: sock,
@@ -279,78 +279,11 @@ fn reap_idempotent_when_called_twice() {
 // owned pid we just spawned must be preserved even if alive.
 
 #[test]
-fn reap_preserves_alive_daemon_when_owned_pid_matches() {
+fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
     
 
-    // Spawn a long-lived child whose pid is the one we'll claim as owned.
-    // Reusing the alive-listener fixture from the original suite ensures the
-    // ping probe reaches the bound socket.
-    let dir = std::path::PathBuf::from("/tmp").join(format!(
-        "taco-owned-{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(dir.join("run")).unwrap();
-
-    let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
-
-    let ctl_path = dir.join("run").join("sidecar-ctl.sock");
-    if UnixListener::bind(&ctl_path).is_err() {
-        // macOS sandbox / SUN_LEN — skip rather than fail.
-        let _ = fs::remove_dir_all(&dir);
-        return;
-    }
-    let mut helper = std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg("sleep 30")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("failed to spawn helper");
-    let helper_pid = helper.id();
-
-    fs::write(
-        dir.join("run").join("sidecar.pid"),
-        format!(
-            r#"{{"version":1,"pid":{},"install_id":"{}","started_at":"2026-08-19T10:00:00.000Z"}}"#,
-            helper_pid, own_id
-        ),
-    ).unwrap();
-
-    let inputs = ReapInputs {
-        pid_file: dir.join("run").join("sidecar.pid"),
-        socket_path: dir.join("run").join("sidecar.sock"),
-        control_socket_path: ctl_path.clone(),
-        own_install_id: &own_id,
-        resources_root: PathBuf::from("/fake/install"),
-    };
-
-    // Pass owned_pid = Some(helper_pid). The daemon is alive but it's
-    // ours, so reap must NOT kill it.
-    let outcome = reap_previous_daemon(&inputs, Some(helper_pid));
-    match &outcome {
-        ReapOutcome::Alive { pid, .. } => assert_eq!(*pid, helper_pid),
-        other => panic!("expected Alive, got {:?}", other),
-    }
-    // Reaper must not have touched the helper.
-    let still_alive = is_alive(helper_pid);
-    assert!(still_alive, "reap should NOT kill the owned daemon");
-
-    // Cleanup
-    let _ = force_kill(helper_pid);
-    let _ = helper.wait();
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn reap_kills_alive_daemon_when_owned_pid_mismatches() {
-    
-
-    // Spawn a long-lived child to play the role of a "leaked daemon from a
-    // previous TACO instance". owned_pid is Some(999_999_999) -- NOT this
-    // child's pid -- so reap must kill the leaked daemon even though it's
-    // alive and pingable.
+    // An alive process with a matching pid file but no usable control ping is
+    // not healthy. It must be reaped so the next daemon can bind the runtime.
     let dir = std::path::PathBuf::from("/tmp").join(format!(
         "taco-leak-{}",
         std::process::id()
@@ -374,8 +307,8 @@ fn reap_kills_alive_daemon_when_owned_pid_mismatches() {
         .spawn()
         .expect("failed to spawn helper");
     let leaked_pid = helper.id();
-    // Pretend this leaked daemon belonged to OUR install (same install_id)
-    // -- that's exactly the case the original design mishandled.
+    // The daemon belongs to OUR install (same install_id), but its control
+    // endpoint is unresponsive, so reaping is still required.
     fs::write(
         dir.join("run").join("sidecar.pid"),
         format!(
@@ -383,6 +316,13 @@ fn reap_kills_alive_daemon_when_owned_pid_mismatches() {
             leaked_pid, own_id
         ),
     ).unwrap();
+    // NDJSON socket entry must exist — an alive pid with NO socket entry is the
+    // ghost-socket case (Stale), not the unresponsive-daemon case (Reaped).
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(dir.join("run").join("sidecar.sock"))
+        .unwrap();
 
     let inputs = ReapInputs {
         pid_file: dir.join("run").join("sidecar.pid"),
@@ -392,7 +332,8 @@ fn reap_kills_alive_daemon_when_owned_pid_mismatches() {
         resources_root: PathBuf::from("/fake/install"),
     };
 
-    // owned_pid is a fake pid that doesn't match the leaked daemon.
+    // The launcher pid is different from the daemon pid, but that alone is
+    // not a reason to kill it; the unresponsive probe is the reason here.
     let outcome = reap_previous_daemon(&inputs, Some(999_999_999));
     assert!(matches!(outcome, ReapOutcome::Reaped { .. }), "got {:?}", outcome);
     // The leaked daemon must be dead after reap.
@@ -441,6 +382,13 @@ fn force_reap_kills_alive_own_daemon() {
             helper_pid, own_id
         ),
     ).unwrap();
+    // Socket entry present so the reap path exercised is "alive but ping
+    // fails" (Reaped), not the ghost-socket shortcut (Stale).
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(dir.join("run").join("sidecar.sock"))
+        .unwrap();
 
     let inputs = ReapInputs {
         pid_file: dir.join("run").join("sidecar.pid"),
@@ -473,4 +421,90 @@ fn force_kill(pid: u32) {
     let _ = std::process::Command::new("kill")
         .args(["-KILL", &pid.to_string()])
         .status();
+}
+
+#[test]
+fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
+    // In debug mode Tauri spawns `tsx taco.cjs start`; the launcher exits after
+    // detaching the daemon, so the launcher PID is intentionally different from
+    // the PID recorded by the daemon in sidecar.pid. A healthy shared daemon must
+    // be reused rather than killed just because owned_pid names the launcher.
+    // Unix domain socket paths are limited to SUN_LEN (108 bytes on macOS),
+    // so use a deliberately short /tmp root instead of TmpHome's descriptive
+    // path for this integration case.
+    let dir = std::env::temp_dir().join(format!("trpm-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
+    let (pid_file, socket_path, control_path) = daemon_runtime_paths(&dir);
+
+    let mut helper = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 30")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to spawn helper daemon");
+    let daemon_pid = helper.id();
+    // Deliberately use a different, already-dead-looking launcher PID. The
+    // implementation must not inspect it when the daemon itself answers ping.
+    let launcher_pid = daemon_pid.saturating_add(1);
+
+    std::fs::write(
+        &pid_file,
+        format!(
+            r#"{{"version":1,"pid":{daemon_pid},"install_id":"{own_id}","started_at":"2026-08-19T10:00:00.000Z"}}"#
+        ),
+    )
+    .unwrap();
+    // A control ping alone is not enough to establish that the daemon can serve
+    // the desktop channel; keep the data socket entry present as well.
+    std::fs::File::create(&socket_path).unwrap();
+
+    let listener = match UnixListener::bind(&control_path) {
+        Ok(listener) => listener,
+        Err(_) => {
+            let _ = fs::remove_dir_all(&dir);
+            eprintln!("taco reap test: skipping launcher-pid mismatch case (bind denied)");
+            return;
+        }
+    };
+    let responder = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("ping connection");
+        let mut request = [0u8; 256];
+        let _ = std::io::Read::read(&mut stream, &mut request);
+        std::io::Write::write_all(
+            &mut stream,
+            format!(r#"{{"id":1,"result":{{"pid":{daemon_pid},"uptime_s":42}}}}\n"#)
+                .as_bytes(),
+        )
+        .expect("write ping response");
+    });
+
+    let inputs = ReapInputs {
+        pid_file: pid_file.clone(),
+        socket_path: socket_path.clone(),
+        control_socket_path: control_path.clone(),
+        own_install_id: &own_id,
+        resources_root: PathBuf::from("/fake/install"),
+    };
+    let outcome = reap_previous_daemon(&inputs, Some(launcher_pid));
+
+    assert_eq!(
+        outcome,
+        ReapOutcome::Alive {
+            pid: daemon_pid,
+            uptime_s: 42,
+        }
+    );
+    assert!(pid_file.exists(), "healthy daemon pid file must be preserved");
+    assert!(socket_path.exists(), "healthy daemon socket must be preserved");
+    assert!(control_path.exists(), "healthy control socket must be preserved");
+    assert!(is_alive(daemon_pid), "healthy daemon must not be signaled");
+
+    force_kill(daemon_pid);
+    let _ = helper.wait();
+    responder.join().expect("control responder panicked");
+    let _ = fs::remove_dir_all(&dir);
 }
