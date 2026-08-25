@@ -114,6 +114,62 @@ machine.
 A reviewer should be able to read "What + Risk" and know whether to
 approve without opening the diff.
 
+## Release
+
+Tag-driven (`desktop-v*`, `sidecar-v*`); CI publishes on tag push. The
+pipeline has three sequenced gates — any failure cascades downstream,
+so the local preflight below must pass before pushing tags.
+
+### Pre-flight (local)
+
+```bash
+# 1. Bump version (six package.json files: root + 5 workspace packages)
+#    Replace "0.1.0" -> "0.1.1" in each, then:
+pnpm install --no-frozen-lockfile
+pnpm install --frozen-lockfile   # must succeed - proves CI will install
+
+# 2. Run every CI gate locally. This is what release-sidecar.yml gates
+#    publish on, plus what ci.yml gates main on.
+pnpm ci:local
+
+# 3. Run the full release preflight (lockfile sync + storage probe)
+pnpm release:preflight
+```
+
+If `release:preflight` fails on `lockfile-sync`, you ran `pnpm
+install` / `pnpm build` after step 1 and pnpm silently re-added the
+`@taco-ai/sidecar-<platform>` snapshots. Re-run `pnpm install
+--no-frozen-lockfile` after `node scripts/prepareCiInstall.mjs`,
+verify with `pnpm install --frozen-lockfile`, commit the lockfile.
+
+If `release:preflight` fails on `artifact-storage`, clean old
+artifacts at Settings -> Actions -> General -> Artifact and log
+retention before pushing tags.
+
+### Tag + push
+
+```bash
+# Dry-run first to confirm target commit + tag state
+node scripts/release-tag.mjs 0.1.1
+
+# Force-move desktop-v0.1.1 and sidecar-v0.1.1 to HEAD and push
+node scripts/release-tag.mjs 0.1.1 --push
+```
+
+`release-tag.mjs` refuses to run with a dirty working tree unless
+`--allow-dirty` is passed. It force-moves the local tag to HEAD,
+deletes the remote tag, then pushes the new tag - the standard dance
+because Git tags are not moved by `git push --force`.
+
+### After pushing
+
+Watch the `release-sidecar / type + lint` job first - if it fails the
+rest cascade as `skipped` because matrix builds depend on it. Then
+`release-sidecar / build-libs` and the matrix builds (`build`,
+`build-mac`). If `actions/upload-artifact@v4` fails with "Artifact
+storage quota has been hit", the run is dead - quota only refreshes
+every 6-12 hours.
+
 ### Reviewing
 
 Two approvals are required for changes touching:
