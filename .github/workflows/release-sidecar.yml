@@ -293,18 +293,32 @@ jobs:
       - name: Stage platform packages
         run: node packages/sidecar/scripts/stagePlatformPackages.mjs --version ${{ steps.version.outputs.version }}
 
-      # The repo manifest carries optionalDependencies for all six platform
-      # keys, but the build matrix produces only a subset (see the build
-      # job's comments). Publish exactly what was staged — otherwise the
-      # manifest references platform packages that don't exist at this
-      # version and consumers on those platforms get a silent skip instead
-      # of an explicit "unsupported platform".
+      # The repo manifest carries only `@wechatbot/wechatbot` in
+      # `optionalDependencies` — the per-platform @taco-ai/sidecar-<triple>
+      # entries are added here at publish time so the source manifest
+      # never has to mention a registry name that won't resolve until
+      # the very release that publishes it (which is what bit us on
+      # v0.1.1: prepareCiInstall.mjs had to strip them at CI install
+      # time to keep `pnpm install --frozen-lockfile` honest, and the
+      # strip-then-restore dance drifted the lockfile repeatedly).
+      # The list of platforms below must mirror the build matrix above
+      # so consumers on a non-published platform get an explicit
+      # "unsupported platform" rather than a silent install skip.
       - name: Align optionalDependencies with staged platforms
         run: |
           V="${{ steps.version.outputs.version }}"
+          # Clear any stale per-platform entries a prior run may have left
+          # (this checkout persists across re-runs of the same tag).
           for k in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
-            npm pkg delete "optionalDependencies[@taco-ai/sidecar-$k]" --prefix packages/sidecar
+            npm pkg delete "optionalDependencies[@taco-ai/sidecar-$k]" --prefix packages/sidecar 2>/dev/null || true
           done
+          # Re-set the local-only @wechatbot/wechatbot optional in case a
+          # prior run cleared it via `npm pkg delete optionalDependencies`.
+          npm pkg set "optionalDependencies[@wechatbot/wechatbot]=2.2.0" --prefix packages/sidecar
+          # Add the staged platforms — these are the only platforms the
+          # build matrix produced, so consumers on other platforms get the
+          # "unsupported platform" error from the bin shim instead of a
+          # silent skip.
           for dir in .release-staging/sidecar-*; do
             key="$(basename "$dir")"
             npm pkg set "optionalDependencies[@taco-ai/$key]=$V" --prefix packages/sidecar

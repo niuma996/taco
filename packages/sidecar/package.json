@@ -15,12 +15,6 @@
     "node": ">=22"
   },
   "optionalDependencies": {
-    "@taco-ai/sidecar-darwin-arm64": "0.1.0",
-    "@taco-ai/sidecar-darwin-x64": "0.1.0",
-    "@taco-ai/sidecar-linux-arm64": "0.1.0",
-    "@taco-ai/sidecar-linux-x64": "0.1.0",
-    "@taco-ai/sidecar-win32-arm64": "0.1.0",
-    "@taco-ai/sidecar-win32-x64": "0.1.0",
     "@wechatbot/wechatbot": "2.2.0"
   },
   "license": "MIT",

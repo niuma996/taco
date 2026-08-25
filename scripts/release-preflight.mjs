@@ -12,8 +12,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -34,7 +33,6 @@ function run(cmd, args, opts = {}) {
 }
 
 const runPnpm = (args, opts) => run(process.env.PNPM ?? "pnpm", args, opts);
-const runNode = (args, opts) => run(process.env.NODE ?? "node", args, opts);
 
 /** Probe artifact storage via gh CLI; returns bytes used or null. */
 function probeArtifactStorage() {
@@ -64,22 +62,11 @@ function check(name, fn) {
 }
 
 check("lockfile-sync", () => {
-    // prepareCiInstall strips @taco-ai/sidecar-<platform> from sidecar's
-    // optionalDependencies; the lockfile must agree, otherwise
-    // `--frozen-lockfile` fails at install.
-    const manifest = join(REPO_ROOT, "packages/sidecar/package.json");
-    const before = readFileSync(manifest, "utf8");
-    try {
-        runNode(["scripts/prepareCiInstall.mjs"], { label: "prepareCiInstall" });
-        runPnpm(["install", "--frozen-lockfile"], { label: "lockfile-sync" });
-    } finally {
-        // Restore so a failed check leaves the tree clean.
-        const after = readFileSync(manifest, "utf8");
-        if (after !== before) {
-            writeFileSync(manifest, before);
-            console.log("  restored packages/sidecar/package.json");
-        }
-    }
+    // After dropping the @taco-ai/sidecar-<platform> optionalDependencies
+    // from packages/sidecar/package.json, the lockfile no longer tracks
+    // them and `--frozen-lockfile` is the only check needed: if it
+    // passes, lockfile and manifest agree.
+    runPnpm(["install", "--frozen-lockfile"], { label: "lockfile-sync" });
 });
 
 check("lint", () => runPnpm(["lint"], { label: "lint" }));

@@ -136,11 +136,10 @@ pnpm ci:local
 pnpm release:preflight
 ```
 
-If `release:preflight` fails on `lockfile-sync`, you ran `pnpm
-install` / `pnpm build` after step 1 and pnpm silently re-added the
-`@taco-ai/sidecar-<platform>` snapshots. Re-run `pnpm install
---no-frozen-lockfile` after `node scripts/prepareCiInstall.mjs`,
-verify with `pnpm install --frozen-lockfile`, commit the lockfile.
+If `release:preflight` fails on `lockfile-sync`, you bumped a
+`package.json` without re-running `pnpm install`. Run
+`pnpm install --no-frozen-lockfile`, verify with `pnpm install
+--frozen-lockfile`, and commit the lockfile.
 
 If `release:preflight` fails on `artifact-storage`, clean old
 artifacts at Settings -> Actions -> General -> Artifact and log
