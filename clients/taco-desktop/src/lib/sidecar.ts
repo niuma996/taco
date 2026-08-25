@@ -32,10 +32,10 @@ export interface SidecarSpawnOptions {
  * Client abstraction.
  */
 export interface SidecarClient {
-    /** Returns the first stdout line after spawning (null if already running). See the Rust
-     * comment on `workspace_ensure` for rationale — callers use this to recover any
-     * handshake frame they may have missed. */
-    ensureWorkspace(cwd: string, options?: SidecarSpawnOptions): Promise<string | null>;
+    /** Ensure the shared daemon is spawned, connected, and owned by Rust.
+     * Always resolves to null — the handshake (initialize RPC) is driven by
+     * the frontend over `send`/`onPush`, not by this call. */
+    ensureWorkspace(cwd: string, options?: SidecarSpawnOptions): Promise<null>;
     send(cwd: string, frame: object): Promise<void>;
     disposeAll(): Promise<void>;
     onPush(handler: (frame: SidecarFrame) => void): Promise<UnlistenFn>;
@@ -62,14 +62,12 @@ export function createSidecarClient(deps: {
 
     return {
         ensureWorkspace: async (cwd, options) => {
-            // Unlike the other commands this one has a return value, so it can't
-            // go through `fire` (which discards it).
-            const line = await deps.invoke("workspace_ensure", {
+            await deps.invoke("workspace_ensure", {
                 cwd,
                 debugMode: options?.debugMode ?? false,
                 llmDumpToFile: options?.llmDumpToFile ?? false,
             });
-            return typeof line === "string" ? line : null;
+            return null;
         },
         send,
         disposeAll: () => fire("workspace_dispose_all", {}),

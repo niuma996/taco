@@ -122,7 +122,7 @@ export interface RpcDispatch {
 export interface TypedRpc {
     // ── initialize (process-level bootstrap, no workspace) ──
     /**
-     * First client → server request after `sidecar.hello`. The server validates
+     * First client → server request on a connection. The server validates
      * `protocolVersion` (major must match, server.minor >= client.minor) and
      * stores `clientCapabilities`. Calling any other RPC before initialize
      * succeeds returns `not_initialized`.

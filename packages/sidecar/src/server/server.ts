@@ -74,7 +74,7 @@ import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/deferredToolRegistry.ts";
 import type { ProviderKeyStore } from "../runtime/providerKeyStore.ts";
-import { resourceRoot, sidecarVersion } from "../runtime/runtimeResources.ts";
+import { resourceRoot } from "../runtime/runtimeResources.ts";
 import type {
     ChannelControl,
     ImPolicyControl,
@@ -97,12 +97,7 @@ import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
 import { getRegisteredMethod, listRegisteredMethods, type MethodCtx } from "./methodRegistry.ts";
 import { registerBuiltinMethods } from "./methods.ts";
-import {
-    makeHelloFrame,
-    makePushFrame,
-    redactCommandPermissionRequest,
-    toToolCallPush,
-} from "./push.ts";
+import { makePushFrame, redactCommandPermissionRequest, toToolCallPush } from "./push.ts";
 import {
     type CommandOutcome,
     err,
@@ -220,8 +215,6 @@ interface RuntimePushEvent {
     event?: unknown;
     error?: unknown;
 }
-
-const SIDECAR_VERSION = sidecarVersion();
 
 /**
  * Per-locale notice sent once per IM workspace when local tools are first
@@ -529,10 +522,6 @@ export class SidecarServer implements ServerRpcSurface {
             startedChannelIds.push(...this.channelRegistry.startedIds());
         }
         this.startedChannelIds = startedChannelIds;
-
-        // Hello is liveness-only. Capability negotiation lives on the `initialize`
-        // RPC; the client reads server capabilities from the `initialize` response.
-        await transport.send(makeHelloFrame(SIDECAR_VERSION, process.pid));
 
         // Periodic TTL sweep: guarantees the command map cannot grow unbounded
         // even when no new RPC ever arrives (the original leak). unref so a
@@ -1607,8 +1596,8 @@ export class SidecarServer implements ServerRpcSurface {
         // whether a frame belongs to the main session or a subagent session,
         // without depending on the "known child session set" arrival timing
         // (see ServerPush.sessionKind). Look up the runtime's sessionKinds
-        // map synchronously; frames without a session dimension (e.g.
-        // sidecar.hello) leave it empty.
+        // map synchronously; frames without a session dimension leave it
+        // empty.
         const sessionKind =
             session !== undefined
                 ? this.workspaceMap.get(workspace)?.getSessionKind(session)
@@ -1693,8 +1682,8 @@ export interface SharedSidecarDeps {
  * Create a fresh SidecarServer over the given transport and start it.
  *
  * Returns both the server handle (so callers can stop it on socket close)
- * and a Promise that resolves once the transport has been opened and the
- * hello frame has been sent. The returned disposer stops the server.
+ * and a Promise that resolves once the transport has been opened. The
+ * returned disposer stops the server.
  *
  * This is the bridge between `src/index.ts` daemon-mode entry (which
  * accepts NDJSON socket connections) and `SidecarServer.start` (which

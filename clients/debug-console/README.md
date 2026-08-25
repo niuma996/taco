@@ -44,9 +44,10 @@ Inside `debug-console start`:
 - `/quit` / `/exit` — terminate
 
 The first line printed is `[taco] sidecar ready`, confirming the
-`hello` frame arrived and the `initialize` handshake completed.
-Anything before that line means the sidecar failed to start — see
-the same terminal's stderr for the actual error.
+`initialize` RPC handshake completed (the response carries the
+sidecar's protocol version and identity). Anything before that line
+means the sidecar failed to start — see the same terminal's stderr
+for the actual error.
 
 ## When to use it
 

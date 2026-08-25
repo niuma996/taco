@@ -37,6 +37,8 @@ import type {
 
 /** Push event method names. The client dispatcher routes by `method`. */
 export const PushMethods = {
+    /** @deprecated Being retired — use the `initialize` RPC as the readiness
+     *  signal; `InitializeResult.instanceId` replaces the hello payload. */
     Hello: "sidecar.hello",
     Attached: "session.attached",
     Detached: "session.detached",

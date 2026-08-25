@@ -20,7 +20,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_fs::FsExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, Mutex};
 
 pub mod log_file;
 pub use log_file::LogFiles;
@@ -151,19 +151,10 @@ pub struct AppState {
     /// holding independent `LogFiles` mutexes on the same fixed paths would
     /// race those renames.
     pub stderr_reader: StdMutex<Option<tokio::task::JoinHandle<()>>>,
-    /// First stdout line of the current sidecar, tagged with its generation so a
-    /// losing concurrent spawn can't publish its own. `workspace_ensure` hands it
-    /// back to a client that attached after spawn — Tauri events have no replay,
-    /// and the sidecar's handshake is one-shot. Rust does not interpret the line;
-    /// the client validates it.
-    pub handshake_line: StdMutex<Option<(u64, String)>>,
-    /// Serializes the whole workspace_ensure sequence (spawn → connect → hello
-    /// wait). Without it, N concurrent first-start callers each spawn their own
-    /// launcher, and every caller that loses the slot race reads an empty
-    /// `handshake_line` and returns None — the frontend then waits for a hello
-    /// the reader never re-emits as `sidecar-event`, a guaranteed 10s
-    /// "sidecar hello timeout". Under the lock, a later caller always observes
-    /// a consistent state: no slot, or slot + stored handshake.
+    /// Serializes the whole workspace_ensure sequence (spawn → install).
+    /// Without it, N concurrent first-start callers each spawn their own
+    /// launcher. Under the lock, a later caller always observes a consistent
+    /// state: no slot, or an installed slot.
     pub ensure_lock: Mutex<()>,
 }
 
@@ -175,7 +166,6 @@ impl Default for AppState {
             shutdown_initiated: AtomicBool::new(false),
             log_files: Arc::new(StdMutex::new(None)),
             stderr_reader: StdMutex::new(None),
-            handshake_line: StdMutex::new(None),
             ensure_lock: Mutex::new(()),
         }
     }
@@ -361,10 +351,9 @@ fn apply_dev_dock_icon() {
 /// `cwd` 仅在首次 spawn 时用于决定 repo-source 模式的工作目录;`debug_mode` 同样
 /// 只在首次生效(spawn-time env)。持锁跨 await 保证并发调用不会双 spawn。
 ///
-/// 返回值:进程已在运行时返回它 spawn 后的第一行 stdout(否则 None)。sidecar 的
-/// 握手帧只在启动时发一次,而 Tauri event 无重放 —— 一个在那之后才注册监听的
-/// client(webview 重载 / 组件树重建)否则永远等不到它。Rust 不解析这行的语义,
-/// 由前端判定是否为握手帧。
+/// Rust 是纯字节管道:所有 NDJSON 行(包括 initialize 的响应)都通过
+/// `sidecar-event` 原样转发给前端,由前端驱动握手。晚接入的 client 重发
+/// initialize 即可,无需任何重放机制。
 #[tauri::command]
 async fn workspace_ensure(
     app: AppHandle,
@@ -372,7 +361,7 @@ async fn workspace_ensure(
     cwd: String,
     debug_mode: Option<bool>,
     llm_dump_to_file: Option<bool>,
-) -> Result<Option<String>, String> {
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     prewarm_workspace_access(&cwd);
     #[cfg(not(target_os = "macos"))]
@@ -381,21 +370,14 @@ async fn workspace_ensure(
     let _ = llm_dump_to_file;
 
     // Single-flight: serialize the whole ensure so concurrent first-starts
-    // can't race the slot/handshake window (see ensure_lock on AppState).
+    // can't race the slot window (see ensure_lock on AppState).
     let _ensure_guard = state.ensure_lock.lock().await;
 
     // 第一道关:已存在共享连接或 dispose 已发起 → 不 spawn。
     {
         let slot = state.sidecar.lock().await;
-        if let Some(existing) = slot.as_ref() {
-            let line = state
-                .handshake_line
-                .lock()
-                .unwrap()
-                .as_ref()
-                .filter(|(generation, _)| *generation == existing.generation)
-                .map(|(_, line)| line.clone());
-            return Ok(line);
+        if slot.as_ref().is_some() {
+            return Ok(());
         }
         if state.shutdown_initiated.load(Ordering::Acquire) {
             return Err("sidecar shutting down".into());
@@ -436,8 +418,8 @@ async fn workspace_ensure(
     // bundle reads from TACO_SOCKET and writes to the NDJSON socket), so we
     // null them out. Capture stderr into a buffer so a launcher crash surfaces
     // in the returned error — before this change, `Stdio::inherit()` left the
-    // real cause in the terminal and the UI saw a generic "sidecar hello
-    // timeout" after the 5s socket-wait elapsed. The buf is capped at 4 KiB so
+    // real cause in the terminal and the UI saw a generic sidecar timeout
+    // after the socket-wait elapsed. The buf is capped at 4 KiB so
     // a chatty daemon cannot grow it without bound.
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -587,39 +569,18 @@ async fn workspace_ensure(
         }
     });
 
-    // Reader task: NDJSON frames from the socket are forwarded to the
-    // frontend as `sidecar-event`; the first frame is also captured as the
-    // handshake line so late ensure() callers can re-read it.
-    //
-    // The daemon's hello is that one-shot first frame, and the reader does NOT
-    // re-emit it as a `sidecar-event` (it goes into `handshake_line` instead).
-    // So the spawning caller has no other way to observe it — hand it back over
-    // a oneshot so this ensure() returns the same handshake a reconnect would
-    // read out of `handshake_line`. Returning `None` here (the pre-fix shape)
-    // left the frontend's hello wait with no source and it could only time out.
-    let (hello_tx, hello_rx) = oneshot::channel::<String>();
+    // Reader task: every NDJSON frame from the socket is forwarded to the
+    // frontend as `sidecar-event`. Rust stays a dumb byte pipe — the frontend
+    // drives the initialize handshake itself, so there is no first-frame
+    // special-casing to maintain.
     let app_for_reader = app.clone();
     let reader_handle = tokio::spawn(async move {
-        let mut hello_tx = Some(hello_tx);
         let mut reader = BufReader::new(&mut read_half).lines();
-        let mut first_line_seen = false;
         loop {
             match reader.next_line().await {
                 Ok(Some(line)) => {
-                    if !first_line_seen {
-                        first_line_seen = true;
-                        // app.state() returns a State<'_, T> that's a
-                        // deref to AppState; bind it so the lock guard
-                        // lives long enough.
-                        let state = app_for_reader.state::<AppState>();
-                        *state.handshake_line.lock().unwrap() = Some((generation, line.clone()));
-                        if let Some(tx) = hello_tx.take() {
-                            let _ = tx.send(line.clone());
-                        }
-                    } else {
-                        let _ = app_for_reader
-                            .emit("sidecar-event", serde_json::json!({ "line": line }));
-                    }
+                    let _ = app_for_reader
+                        .emit("sidecar-event", serde_json::json!({ "line": line }));
                 }
                 Ok(None) => break,
                 Err(e) => {
@@ -664,19 +625,12 @@ async fn workspace_ensure(
         std::mem::drop(reader_handle);
         return Err("sidecar shutting down".into());
     }
-    if let Some(existing) = slot.as_ref() {
+    if slot.as_ref().is_some() {
         drop(tx);
         launcher.kill().await.ok();
         launcher.wait().await.ok();
         std::mem::drop(reader_handle);
-        let line = state
-            .handshake_line
-            .lock()
-            .unwrap()
-            .as_ref()
-            .filter(|(generation, _)| *generation == existing.generation)
-            .map(|(_, line)| line.clone());
-        return Ok(line);
+        return Ok(());
     }
 
     *slot = Some(SharedSidecar {
@@ -684,37 +638,7 @@ async fn workspace_ensure(
         launcher: Some(launcher),
         generation,
     });
-    // Release the slot lock before awaiting the hello so concurrent ensure()
-    // callers aren't serialized behind it (the hello normally lands in ms).
-    drop(slot);
-
-    // Await the one-shot hello the reader captured from the daemon's first
-    // frame. On failure tear the slot down — a poisoned entry (connected but no
-    // hello) would wedge every later ensure() on a handshake that never comes,
-    // so force the next call to respawn against a fresh daemon instead.
-    //
-    // 15s matches the CLI's READY_TIMEOUT_MS and the socket-wait above: a
-    // cold dev boot (tsx compiling the sidecar source) or a daemon serving a
-    // burst of initial connections can legitimately take several seconds to
-    // serve the per-connection `startServer` init before its hello lands.
-    // The old 5s window killed the slot while the detached daemon kept
-    // running, and the next ensure's reap then fought a half-initialized
-    // daemon — a kill/restart loop that surfaced as "loadWorkspaceSessions
-    // failed after retries".
-    match tokio::time::timeout(Duration::from_secs(15), hello_rx).await {
-        Ok(Ok(line)) => Ok(Some(line)),
-        Ok(Err(_)) | Err(_) => {
-            let mut slot = state.sidecar.lock().await;
-            if let Some(s) = slot.take() {
-                drop(s.stdin_tx);
-                if let Some(mut l) = s.launcher {
-                    let _ = l.kill().await;
-                    let _ = l.wait().await;
-                }
-            }
-            Err("sidecar connected but sent no hello within 15s".into())
-        }
-    }
+    Ok(())
 }
 
 /// 所有 workspace 共用一条 stdin —— `cwd` 保留仅为 API 兼容,不参与路由。
@@ -918,6 +842,36 @@ fn should_auto_install_daemon_service(debug: bool) -> bool {
     !debug
 }
 
+/// Kick off the shared daemon spawn during app setup, overlapping its boot
+/// with the webview's own load. Without this, a cold start serializes
+/// "webview loads → frontend mounts → first workspace_ensure → daemon
+/// spawn"; with it, the daemon is already booting while React hydrates.
+/// The frontend still drives the `initialize` handshake on first mount —
+/// `ensure_lock` serializes this prewarm with the frontend's first
+/// `workspace_ensure`, so the command either finds the installed slot or
+/// waits for (rather than racing) this spawn.
+///
+/// Spawn-time env (debug_mode / llm_dump_to_file) defaults to off here:
+/// those settings live in the webview's localStorage, unreadable from
+/// Rust. A debug-mode user's cold start therefore boots a default daemon;
+/// the settings toggle's restart-sidecar flow restores the env, exactly
+/// as with a launchd-resident daemon.
+fn prewarm_daemon(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let cwd = match default_workspace_dir(handle.clone()).await {
+            Ok(dir) => dir,
+            Err(_) => return,
+        };
+        let state = handle.state::<AppState>();
+        if let Err(e) = workspace_ensure(handle.clone(), state, cwd, None, None).await {
+            // Best-effort: the frontend's first ensure surfaces the real
+            // error to the UI; this log is for `tauri:dev` users.
+            eprintln!("taco-desktop: daemon prewarm failed: {e}");
+        }
+    });
+}
+
 fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
     // Development starts its own repo-source daemon from `workspace_ensure`.
     // Never run `taco install` from a debug build: install rewrites and
@@ -927,7 +881,6 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
     if !should_auto_install_daemon_service(cfg!(debug_assertions)) {
         return Ok(());
     }
-
     let runtime_dir = match resolve_taco_runtime_dir(app.handle()) {
         Ok(dir) => dir,
         Err(_) => return Ok(()),
@@ -1121,6 +1074,7 @@ pub fn run() {
             build_main_window(app)?;
             build_tray(app)?;
             ensure_daemon_installed(app)?;
+            prewarm_daemon(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

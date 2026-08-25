@@ -1,6 +1,6 @@
 /**
  * `initialize` handler — process-level handshake, the first client → server
- * request after `sidecar.hello`. Validates the client's protocol version
+ * request on every connection. Validates the client's protocol version
  * with `isCompatibleClientProtocol` and stores the capability declaration.
  * Registered with `command: false` and `turnStart: false`; idempotent and
  * outside `commandRecords` dedup.
@@ -16,6 +16,7 @@ import {
 import { RPC } from "@taco-ai/shared";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { SIDECAR_INSTANCE_ID } from "../push.ts";
 
 interface InitializeRpcParams {
     protocolVersion?: { major?: unknown; minor?: unknown };
@@ -64,6 +65,8 @@ export function registerInitializeHandler(): void {
                 serverCapabilities: server.getServerCapabilities(),
                 protocolVersion: SIDECAR_PROTOCOL_VERSION,
                 sessionFormatVersion: CURRENT_SESSION_FORMAT_VERSION,
+                instanceId: SIDECAR_INSTANCE_ID,
+                pid: process.pid,
             };
         },
         { schema: initializeSchema },

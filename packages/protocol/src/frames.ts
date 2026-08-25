@@ -73,6 +73,12 @@ export function isCompatibleClientProtocol(client: { major: unknown; minor: unkn
     );
 }
 
+/**
+ * @deprecated The `sidecar.hello` push frame is being retired. Readiness is
+ * proven by the `initialize` RPC exchange instead — `InitializeResult` now
+ * carries `instanceId` and `pid`. Kept for one protocol transition period;
+ * do not build new consumers on it.
+ */
 export interface SidecarHelloParams {
     /** Sidecar package version, for diagnostics only. */
     version: string;
@@ -95,7 +101,7 @@ export interface ClientCapabilities {
 }
 
 /**
- * `initialize` RPC params — first client → server request after `sidecar.hello`.
+ * `initialize` RPC params — first client → server request on a connection.
  * Carries the client's protocol version (the server validates it with
  * `isCompatibleClientProtocol`) and the client's capability declaration.
  */
@@ -113,6 +119,14 @@ export interface InitializeResult {
     serverVersion: string;
     serverCapabilities: SidecarCapabilities;
     protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+    /**
+     * Stable for the lifetime of one sidecar process. Clients use it to detect
+     * daemon replacement across reconnects. Supersedes the same field on the
+     * deprecated `sidecar.hello` push frame.
+     */
+    instanceId: string;
+    /** OS process id, for diagnostics only. Supersedes `sidecar.hello`'s pid. */
+    pid: number;
     /**
      * Version of the on-disk session-history format (`SessionHistoryEntry.payload`)
      * this sidecar can read. History payloads are passthroughs of pi's jsonl

@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-    CURRENT_SESSION_FORMAT_VERSION,
-    PushMethods,
-    SIDECAR_PROTOCOL_VERSION,
-} from "@taco-ai/protocol";
+import { CURRENT_SESSION_FORMAT_VERSION, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
 import type { SidecarClient, SidecarExit, SidecarFrame } from "../../src/lib/sidecar.ts";
 import { TacoClient } from "../../src/lib/tacoClientTauri.ts";
 
@@ -12,12 +8,10 @@ class FakeSidecarClient implements SidecarClient {
     private pushHandler?: (frame: SidecarFrame) => void;
     private exitHandler?: (exit: SidecarExit) => void;
     readonly sent: Array<{ cwd: string; frame: Record<string, unknown> }> = [];
-    /** Whether ensureWorkspace auto-emits hello — tests can set false to simulate slow/missing sidecar. */
-    autoHello = true;
+    /** instanceId reported in initialize responses — bump to simulate daemon replacement. */
+    instanceId = "instance-1";
     /** Makes ensureWorkspace throw for the given cwd — simulates Rust spawn failure. */
     readonly failEnsureFor = new Set<string>();
-    /** Cached handshake line on the Rust side — simulates "process already running, hello already sent". */
-    handshakeLine: string | null = null;
     /** When false: receiving initialize does not reply — simulates server unresponsive / process half-dead. */
     ackInitialize = true;
 
@@ -27,15 +21,10 @@ class FakeSidecarClient implements SidecarClient {
             .length;
     }
 
-    async ensureWorkspace(cwd: string): Promise<string | null> {
+    async ensureWorkspace(cwd: string): Promise<null> {
         if (this.failEnsureFor.has(cwd)) {
             throw new Error(`simulated spawn failure for ${cwd}`);
         }
-        if (this.handshakeLine !== null) return this.handshakeLine;
-        if (!this.autoHello) return null;
-        queueMicrotask(() => {
-            this.emitHello("instance-1");
-        });
         return null;
     }
 
@@ -55,10 +44,11 @@ class FakeSidecarClient implements SidecarClient {
                                 serverVersion: "test",
                                 serverCapabilities: {
                                     methods: ["initialize"],
-                                    pushes: ["sidecar.hello"],
+                                    pushes: ["session.attached"],
                                 },
                                 protocolVersion: SIDECAR_PROTOCOL_VERSION,
                                 sessionFormatVersion: CURRENT_SESSION_FORMAT_VERSION,
+                                instanceId: this.instanceId,
                             },
                         }),
                     });
@@ -104,34 +94,15 @@ class FakeSidecarClient implements SidecarClient {
     emitExit(exit: SidecarExit): void {
         this.exitHandler?.(exit);
     }
-
-    emitHello(instanceId: string): void {
-        this.pushHandler?.({ line: helloLine(instanceId) });
-    }
 }
 
-function helloLine(instanceId: string): string {
-    // Process-level hello: only one per process, shared by all workspaces.
-    return JSON.stringify({
-        method: PushMethods.Hello,
-        workspace: "*",
-        params: {
-            version: "test",
-            pid: 1,
-            instanceId,
-            protocol: SIDECAR_PROTOCOL_VERSION,
-        },
-    });
-}
-
-test("desktop client waits for hello and rejects pending RPC when its sidecar exits", async () => {
+test("desktop client waits for initialize and rejects pending RPC when its sidecar exits", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 50 });
     await client.start("/workspace/a");
 
     const pending = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
-    // initialize + the session.list RPC = 2 frames sent (hello is a push,
-    // not a sent frame).
+    // initialize + the session.list RPC = 2 frames sent.
     assert.equal(sidecar.sent.length, 2);
     // Process-level exit — no workspace field.
     sidecar.emitExit({ code: 1 });
@@ -140,11 +111,11 @@ test("desktop client waits for hello and rejects pending RPC when its sidecar ex
     await client.dispose();
 });
 
-test("concurrent starts share one process hello — the storm fix", async () => {
+test("concurrent starts share one initialize handshake — the storm fix", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    // 4 concurrent start(cwd) share one hello — the old per-cwd readiness would
-    // all timeout here at 10s.
+    // 4 concurrent start(cwd) share one handshake — the old per-cwd readiness
+    // would all timeout here at 10s.
     await Promise.all([
         client.start("/workspace/a"),
         client.start("/workspace/b"),
@@ -154,16 +125,16 @@ test("concurrent starts share one process hello — the storm fix", async () => 
     await client.dispose();
 });
 
-test("a start issued after the hello resolves immediately (processReady)", async () => {
+test("a start issued after initialize resolves immediately", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a"); // hello already arrived, processReady = true
+    await client.start("/workspace/a"); // handshake already done, processInitialized = true
     // Subsequent workspace starts must not block 10s — should resolve immediately.
     await client.start("/workspace/b");
     await client.dispose();
 });
 
-test("notifies subscribers before accepting pushes from a replaced sidecar instance", async () => {
+test("daemon death notifies workspace epoch subscribers immediately", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     const replacements: string[] = [];
@@ -171,8 +142,10 @@ test("notifies subscribers before accepting pushes from a replaced sidecar insta
 
     await client.start("/workspace/a");
     await client.start("/workspace/b");
-    // Process replaced (instanceId changed) ⇒ all active workspaces reset.
-    sidecar.emitHello("instance-2");
+    // Exit fires epoch handlers for every started workspace right away —
+    // the UI resets stale state without waiting for the reconnect handshake
+    // (which sees a freshly-cleared epoch table and detects nothing).
+    sidecar.emitExit({ code: undefined });
 
     assert.deepEqual(replacements.sort(), ["/workspace/a", "/workspace/b"]);
     await client.dispose();
@@ -180,18 +153,19 @@ test("notifies subscribers before accepting pushes from a replaced sidecar insta
 
 test("a failed start rejects the shared promise so concurrent waiters don't hang", async () => {
     const sidecar = new FakeSidecarClient();
-    // Disable auto-hello so start blocks at awaitReadiness — simulates slow/missing sidecar.
-    sidecar.autoHello = false;
+    // Disable initialize acks so start blocks at awaitInitialization —
+    // simulates slow/missing sidecar.
+    sidecar.ackInitialize = false;
     const client = new TacoClient({ sidecar });
-    // Two concurrent starts share the same readiness promise.
+    // Two concurrent starts share the same initialization promise.
     const first = client.start("/workspace/a");
     const second = client.start("/workspace/b");
     // Must yield before emitExit so both starts have fully resumed their
-    // onPush/onExit awaits and passed createProcessReadiness (processReadiness = P1 ready).
+    // onPush/onExit awaits and created the shared initialization promise.
     // setImmediate fires after the microtask queue is drained, once is enough.
-    // Without it emitExit fires synchronously while processReadiness is still undefined;
-    // reject is a no-op and both starts block on 10s awaitReadiness timeout —
-    // this was the original bug in this test.
+    // Without it emitExit fires synchronously while the promise is still
+    // undefined; reject is a no-op and both starts block on the 10s
+    // awaitInitialization timeout — this was the original bug in this test.
     await new Promise<void>((resolve) => setImmediate(resolve));
     // Process exit ⇒ shared promise is rejected; both starts fail immediately, no timeout.
     sidecar.emitExit({ code: 1 });
@@ -200,8 +174,8 @@ test("a failed start rejects the shared promise so concurrent waiters don't hang
     await assert.rejects(second);
     const elapsed = Date.now() - t;
     // Key assertion: must fast-reject (<1s). Previously took 10s because emitExit
-    // landed before createProcessReadiness had set P1; reject was a no-op and both
-    // starts went through awaitReadiness 10s timeout — fixed to reject in <1s.
+    // landed before the shared promise existed; reject was a no-op and both
+    // starts went through awaitInitialization 10s timeout — fixed to reject in <1s.
     assert.ok(elapsed < 1000, `expected fast rejection, took ${elapsed}ms`);
     await client.dispose();
 });
@@ -210,71 +184,53 @@ test("after process exit, a new start can rebuild readiness", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await client.start("/workspace/a");
-    sidecar.emitExit({ code: 1 }); // process dead — ensuredCwds / processReady cleared
-    // A new start must be able to rebuild readiness and wait for a new hello.
+    sidecar.emitExit({ code: 1 }); // process dead — ensuredCwds / handshake state cleared
+    // A new start must be able to rebuild the initialize handshake.
     await client.start("/workspace/a");
     await client.dispose();
 });
 
-test("a fresh client attaching to a running sidecar replays the missed hello", async () => {
-    // Reproduces a real failure: webview reload / component tree rebuild creates a new
-    // TacoClient while the shared sidecar process is still alive — hello already sent,
-    // Tauri events are not replayed, new client blocks for 10s. After Rust hands back the
-    // handshake line, start must succeed immediately.
+test("a fresh client attaching to a running sidecar handshakes via initialize directly", async () => {
+    // Reproduces a real scenario: webview reload / component tree rebuild creates a new
+    // TacoClient while the shared sidecar process is still alive. The daemon no longer
+    // broadcasts a per-connection hello; a late-joining client simply sends its own
+    // `initialize` — no replay mechanism involved — and start resolves fast.
     const sidecar = new FakeSidecarClient();
-    sidecar.autoHello = false; // process already running, will not send hello again
-    sidecar.handshakeLine = helloLine("instance-1");
     const client = new TacoClient({ sidecar });
 
     const t = Date.now();
     await client.start("/workspace/a");
     const elapsed = Date.now() - t;
     assert.ok(elapsed < 1000, `expected immediate readiness, took ${elapsed}ms`);
-    await client.dispose();
-});
-
-test("a non-handshake first line still falls through to the normal wait", async () => {
-    // hello is sent after channel startup (server.ts); the first line of stdout is not
-    // necessarily the hello. In this case must fall back to the normal wait path
-    // instead of treating an arbitrary line as the handshake.
-    const sidecar = new FakeSidecarClient();
-    sidecar.handshakeLine = JSON.stringify({ method: "tasks.updated", params: {} });
-    const client = new TacoClient({ sidecar });
-
-    const started = client.start("/workspace/a");
-    // Non-handshake lines are ignored by observeHello ⇒ still waiting for readiness;
-    // the real hello resolves it.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    sidecar.emitHello("instance-1");
-    await started;
+    assert.equal(sidecar.initializeCount(), 1);
     await client.dispose();
 });
 
 test("start() catch rejects the shared promise — not just handleExit", async () => {
     // Differs from the above test: does not rely on handleExit to trigger reject.
     // This tests start()'s catch path — when ensureWorkspace fails, the first start's
-    // catch explicitly rejects processReadiness, making concurrent waiters fail immediately
-    // instead of each waiting the full 10s hello timeout.
+    // catch explicitly rejects the shared initialization promise, making concurrent
+    // waiters fail immediately instead of each waiting the full 10s timeout.
     const sidecar = new FakeSidecarClient();
     sidecar.failEnsureFor.add("/workspace/a");
-    sidecar.autoHello = false; // start(B)'s ensureWorkspace succeeds, blocks at awaitReadiness
+    sidecar.ackInitialize = false; // start(B)'s ensureWorkspace succeeds, blocks at awaitInitialization
     const client = new TacoClient({ sidecar });
 
     const first = client.start("/workspace/a"); // ensureWorkspace throws immediately, catch triggers
-    const second = client.start("/workspace/b"); // shares P1, waiting for hello
+    const second = client.start("/workspace/b"); // shares the promise, waiting for initialize
 
     const t = Date.now();
     await assert.rejects(first, /simulated spawn failure for \/workspace\/a/);
     await assert.rejects(second);
     const elapsed = Date.now() - t;
-    // Key assertion: must fast-reject (<1s). Without that processReadiness?.reject line,
-    // second would block on its own 10s awaitReadiness timeout.
+    // Key assertion: must fast-reject (<1s). Without the explicit reject in start()'s
+    // catch, second would block on its own 10s awaitInitialization timeout.
     assert.ok(elapsed < 1000, `expected fast rejection, took ${elapsed}ms`);
 
     await client.dispose();
 });
 
-test("start waits for hello and initialize before resolving", async () => {
+test("start sends initialize before resolving", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     let initializeSent = false;
@@ -287,7 +243,7 @@ test("start waits for hello and initialize before resolving", async () => {
     };
 
     const startPromise = client.start("/workspace/a");
-    // Initialize is sent only after hello resolves, not before start() returns.
+    // Initialize is sent during start()'s await chain, not before start() is called.
     assert.equal(initializeSent, false);
     await startPromise;
     assert.equal(initializeSent, true);
@@ -296,21 +252,21 @@ test("start waits for hello and initialize before resolving", async () => {
     await client.dispose();
 });
 
-test("replayed hello from concurrent ensure calls starts initialize only once", async () => {
+test("a late-joining client handshakes independently on the same sidecar", async () => {
+    // Webview reload creates a second TacoClient against the still-running
+    // daemon. The server allows (and expects) one initialize per connection /
+    // client instance — the late joiner must send its own.
     const sidecar = new FakeSidecarClient();
-    sidecar.autoHello = false;
-    sidecar.handshakeLine = helloLine("instance-1");
-    const client = new TacoClient({ sidecar });
-
-    await Promise.all([
-        client.start("/workspace/a"),
-        client.start("/workspace/b"),
-        client.start("/workspace/c"),
-        client.start("/workspace/d"),
-    ]);
-
+    const first = new TacoClient({ sidecar });
+    await first.start("/workspace/a");
     assert.equal(sidecar.initializeCount(), 1);
-    await client.dispose();
+
+    const second = new TacoClient({ sidecar });
+    await second.start("/workspace/b");
+    assert.equal(sidecar.initializeCount(), 2);
+
+    await first.dispose();
+    await second.dispose();
 });
 
 test("concurrent starts share one initialize", async () => {
@@ -330,7 +286,7 @@ test("later workspace start reuses the same initialize", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await client.start("/workspace/a");
-    // After processReady + processInitialized, the second start should be a
+    // After processInitialized, the second start should be a
     // no-op for the handshake (the `if (ensuredCwds.has) return` short-circuits
     // before runInitialize is touched). Confirms we do not re-handshake.
     const initBefore = sidecar.sent.filter(
@@ -340,27 +296,22 @@ test("later workspace start reuses the same initialize", async () => {
     const initAfter = sidecar.sent.filter(
         (s) => (s.frame as { method?: string }).method === "initialize",
     ).length;
-    // start /workspace/b does not send a new initialize (processReady gate).
+    // start /workspace/b does not send a new initialize (processInitialized gate).
     assert.equal(initAfter, initBefore);
     await client.dispose();
 });
 
-test("sidecar epoch replacement triggers a fresh initialize", async () => {
+test("sidecar replacement triggers a fresh initialize", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await client.start("/workspace/a");
-    const initBefore = sidecar.sent.filter(
-        (s) => (s.frame as { method?: string }).method === "initialize",
-    ).length;
-    // Replacement sidecar — a new instanceId.
-    sidecar.emitHello("instance-2");
-    // Give runInitialize a microtask to fire and FakeSidecarClient.send to push
-    // the response. Since FakeSidecarClient is synchronous, awaiting a no-op
-    // tick is enough.
-    await new Promise((resolve) => setImmediate(resolve));
-    const initAfter = sidecar.sent.filter(
-        (s) => (s.frame as { method?: string }).method === "initialize",
-    ).length;
+    const initBefore = sidecar.initializeCount();
+    // Replacement sidecar: the old process dies, the new one reports a
+    // different instanceId. The next start must re-handshake.
+    sidecar.emitExit({ code: undefined });
+    sidecar.instanceId = "instance-2";
+    await client.start("/workspace/a");
+    const initAfter = sidecar.initializeCount();
     assert.ok(
         initAfter > initBefore,
         `expected new initialize after replacement, before=${initBefore} after=${initAfter}`,
@@ -397,7 +348,7 @@ test("an initialize timeout rejects the start", async () => {
         }
     };
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 80 });
-    await assert.rejects(client.start("/workspace/a"), /initialize timeout|sidecar hello timeout/);
+    await assert.rejects(client.start("/workspace/a"), /initialize/);
     await client.dispose();
 });
 
@@ -406,8 +357,8 @@ test("sends exactly one initialize per sidecar process", async () => {
     const client = new TacoClient({ sidecar });
     await client.start("/workspace/a");
     assert.equal(sidecar.initializeCount(), 1, "one handshake per process");
-    // A live sidecar emits hello once, so the second workspace must reuse the
-    // completed handshake rather than re-negotiating.
+    // The handshake is process-scoped client state, so the second workspace
+    // must reuse the completed handshake rather than re-negotiating.
     await client.start("/workspace/b");
     assert.equal(sidecar.initializeCount(), 1, "second workspace must not re-handshake");
     await client.dispose();
@@ -438,8 +389,7 @@ test("a start after a failed handshake can still recover", async () => {
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 60 });
     await assert.rejects(client.start("/workspace/a"));
 
-    // The sidecar recovers, but it will not send a second hello — so start()
-    // itself has to drive the retry handshake.
+    // The sidecar recovers; start() itself drives the retry handshake.
     sidecar.ackInitialize = true;
     const started = Date.now();
     await client.start("/workspace/b");
@@ -458,7 +408,7 @@ test("PR4: sidecar exit schedules an upgrade-aware reconnect that re-spawns", as
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
 
     // First backoff is 500ms; wait long enough for the reconnect attempt
-    // to land, plus a margin for the second start's hello+initialize.
+    // to land, plus a margin for the second start's initialize handshake.
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     // Reconnect succeeded → start() ran again. We can't directly assert

@@ -201,6 +201,69 @@ async function probeNdjsonSocket(path: string): Promise<"ready" | "stale" | "abs
     });
 }
 
+type ControlProbe = "ready" | "stale" | "absent";
+
+/** Single ping attempt against a bound control socket. "unresponsive" means
+ *  the connect succeeded (kernel backlog) but no ping reply landed inside the
+ *  timeout — a bare connect is NOT proof of a serving daemon. */
+function pingControlOnce(path: string, timeoutMs: number): Promise<ControlProbe | "unresponsive"> {
+    return new Promise((resolve) => {
+        let settled = false;
+        const sock = netConnect(path);
+        const finish = (result: ControlProbe | "unresponsive") => {
+            if (settled) return;
+            settled = true;
+            sock.destroy();
+            resolve(result);
+        };
+        let buf = "";
+        sock.once("connect", () => {
+            sock.write(`${JSON.stringify({ method: "control.ping", id: 1 })}\n`);
+        });
+        sock.on("data", (chunk: Buffer) => {
+            buf += chunk.toString("utf8");
+            const nl = buf.indexOf("\n");
+            if (nl === -1) return;
+            try {
+                const reply = JSON.parse(buf.slice(0, nl)) as { id?: unknown; result?: unknown };
+                finish(
+                    typeof reply.id === "number" && "result" in reply ? "ready" : "unresponsive",
+                );
+            } catch {
+                finish("unresponsive");
+            }
+        });
+        sock.once("error", (err: NodeJS.ErrnoException) => {
+            if (err.code === "ECONNREFUSED") finish("stale");
+            else if (err.code === "ENOENT") finish("absent");
+            else finish("unresponsive");
+        });
+        setTimeout(() => finish("unresponsive"), timeoutMs).unref();
+    });
+}
+
+/** Single-instance check for the control socket. The control listener binds
+ *  before the heavy init (channels/scheduler), so during another daemon's
+ *  boot window the socket is bound while its event loop may still be busy —
+ *  hence 3 ping attempts before concluding. A bound-but-unresponsive daemon
+ *  still maps to "ready": ownership recovery belongs to the reap layer
+ *  (CLI start / desktop reap, which check the pid file's install_id); the
+ *  newborn must not unlink a socket it does not own. */
+async function probeControlSocket(path: string, attempts = 3): Promise<ControlProbe> {
+    if (IS_UNIX && !existsSync(path)) return "absent";
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        const result = await pingControlOnce(path, 1_000);
+        if (result !== "unresponsive") return result;
+        if (attempt < attempts - 1) {
+            await new Promise((r) => setTimeout(r, 400));
+        }
+    }
+    log.warn(
+        `control socket at ${path} is bound but unresponsive; treating as owned by another daemon`,
+    );
+    return "ready";
+}
+
 async function runDaemon(
     deps: ResolvedDeps,
     socketPath: string,
@@ -229,7 +292,7 @@ async function runDaemon(
         socket.on("error", (err) => log.warn(`control socket error: ${err.message}`));
     });
     controlServer.on("error", (err) => log.error(`control server error: ${err.message}`));
-    const controlState = IS_UNIX ? await probeNdjsonSocket(controlSocketPath) : "absent";
+    const controlState = IS_UNIX ? await probeControlSocket(controlSocketPath) : "absent";
     if (controlState === "ready") {
         log.info(`another daemon already owns ${controlSocketPath}; exiting`);
         process.exit(0);

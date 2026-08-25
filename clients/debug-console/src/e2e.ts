@@ -104,8 +104,8 @@ async function main(): Promise<number> {
 
     try {
         await client.start();
-        await client.waitForReady();
-        process.stderr.write("[e2e] sidecar ready (hello + initialize)\n");
+        await client.handshake();
+        process.stderr.write("[e2e] sidecar ready (initialize handshake complete)\n");
 
         await client.workspaceEnsure(cwd);
         process.stderr.write(`[e2e] workspace ensured (${cwd})\n`);
@@ -123,10 +123,6 @@ async function main(): Promise<number> {
         await new Promise((r) => setTimeout(r, 100));
 
         process.stderr.write("\n[e2e] assertions:\n");
-        check(
-            "sidecar.hello received",
-            pushEvents.some((p) => p.method === "sidecar.hello"),
-        );
         check(
             "session.attached received",
             pushEvents.some((p) => p.method === "session.attached"),

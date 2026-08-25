@@ -37,7 +37,7 @@ Usage:
 
 async function cmdStart() {
     const client = await createClient();
-    await client.waitForReady();
+    await client.handshake();
     process.stderr.write(
         "[taco] sidecar ready, type commands: /list, /send <text>, /cd <cwd>, /checkpoints, /restore <id>, /quit\n",
     );
@@ -170,7 +170,7 @@ async function cmdStart() {
 
 async function cmdSend(cwd: string, text: string) {
     const client = await createClient();
-    await client.waitForReady();
+    await client.handshake();
     const r = await client.sessionCreate({
         workspace: resolvePath(cwd),
         initialPrompt: text,
@@ -181,7 +181,7 @@ async function cmdSend(cwd: string, text: string) {
 
 async function cmdHistory(cwd: string, sessionId: string) {
     const client = await createClient();
-    await client.waitForReady();
+    await client.handshake();
     const r = await client.sessionHistory(resolvePath(cwd), sessionId);
     console.log(JSON.stringify(r, null, 2));
     await client.dispose();
@@ -189,7 +189,7 @@ async function cmdHistory(cwd: string, sessionId: string) {
 
 async function cmdWatch(cwd: string) {
     const client = await createClient();
-    await client.waitForReady();
+    await client.handshake();
     // Ensure the workspace on the server.
     await client.workspaceEnsure(resolvePath(cwd));
     process.stderr.write(`[taco] watching ${cwd} (ctrl-c to exit)\n`);

@@ -51,19 +51,27 @@ const KILL_GRACE_MS = 3_000;
 /** Result of probing the NDJSON socket for a live, serving daemon. */
 type DaemonProbe = "ready" | "absent" | "wedged";
 
-/** True readiness probe: connect to the NDJSON socket and wait for the
- *  daemon's one-shot `sidecar.hello` frame. A bare TCP connect is NOT a
- *  valid probe — the kernel completes connections from the listen backlog
- *  even when the daemon's event loop is wedged, and the control socket is
- *  bound early in boot (long before the NDJSON listener exists), so both
- *  older probes reported "ready" against daemons that couldn't serve a
- *  single frame. The desktop then timed out waiting for a hello that was
- *  never going to come.
+/** Protocol version this CLI advertises in its probe initialize request.
+ *  Duplicates @taco-ai/protocol's SIDECAR_PROTOCOL_VERSION because the probe
+ *  must stay self-contained (see probeDaemonInitialize). An incompatible
+ *  version still gets an error response, which proves liveness — bump in
+ *  lockstep when the major changes. */
+const PROBE_PROTOCOL_VERSION = { major: 1, minor: 0 };
+
+/** True readiness probe: connect to the NDJSON socket, send a literal
+ *  `initialize` request, and wait for its RPC response. A bare TCP connect
+ *  is NOT a valid probe — the kernel completes connections from the listen
+ *  backlog even when the daemon's event loop is wedged, and the control
+ *  socket is bound early in boot (long before the NDJSON listener exists),
+ *  so both older probes reported "ready" against daemons that couldn't
+ *  serve a single frame.
  *
  *  Deliberately self-contained rather than imported from the sidecar: the
  *  CLI does not depend on sidecar TS source (only the bundled platform pkg
- *  ships at runtime). Same reasoning as the note atop `upgradeMarker.ts`. */
-function probeDaemonHello(path: string, timeoutMs = 5_000): Promise<DaemonProbe> {
+ *  ships at runtime). Same reasoning as the note atop `upgradeMarker.ts`.
+ *  The frame duplicates the wire format in @taco-ai/protocol; keep the
+ *  shape in sync when RpcRequest / InitializeRpcParams change. */
+function probeDaemonInitialize(path: string, timeoutMs = 5_000): Promise<DaemonProbe> {
     return new Promise((resolve) => {
         const sock: Socket = connect(path);
         let buf = "";
@@ -73,13 +81,35 @@ function probeDaemonHello(path: string, timeoutMs = 5_000): Promise<DaemonProbe>
             sock.destroy();
             resolve(result);
         }
+        sock.on("connect", () => {
+            const req = {
+                id: "probe",
+                commandId: "probe",
+                method: "initialize",
+                params: {
+                    protocolVersion: PROBE_PROTOCOL_VERSION,
+                    clientCapabilities: {},
+                },
+            };
+            sock.write(`${JSON.stringify(req)}\n`);
+        });
         sock.on("data", (chunk) => {
             buf += chunk.toString("utf8");
             const nl = buf.indexOf("\n");
             if (nl === -1) return;
             try {
-                const frame = JSON.parse(buf.slice(0, nl)) as { method?: unknown };
-                finish(frame.method === "sidecar.hello" ? "ready" : "wedged");
+                const frame = JSON.parse(buf.slice(0, nl)) as {
+                    id?: unknown;
+                    ok?: unknown;
+                };
+                // An RPC response echoes the request id and carries ok —
+                // push frames never do. Success or error alike prove the
+                // event loop is serving frames.
+                finish(
+                    typeof frame.id === "string" && typeof frame.ok === "boolean"
+                        ? "ready"
+                        : "wedged",
+                );
             } catch {
                 finish("wedged");
             }
@@ -269,16 +299,16 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
 
     // Fast path: a healthy daemon already owns this runtime directory. The desktop
     // reaches `taco start` from more than one place, so this is the common
-    // case, not an edge case. The probe reads the NDJSON hello rather than
-    // touching the control socket, which is bound long before the daemon
-    // can serve (see probeDaemonHello).
-    let probe = await probeDaemonHello(socket);
+    // case, not an edge case. The probe exchanges an initialize request over
+    // the NDJSON socket rather than touching the control socket, which is
+    // bound long before the daemon can serve (see probeDaemonInitialize).
+    let probe = await probeDaemonInitialize(socket);
     if (probe === "wedged") {
         // A daemon mid-initialization or serving a burst of connections can
         // miss one probe. Killing on a single miss turned slow boots into a
         // kill/restart loop, so re-probe once before declaring it wedged.
         await new Promise((r) => setTimeout(r, 500));
-        probe = await probeDaemonHello(socket);
+        probe = await probeDaemonInitialize(socket);
     }
     if (probe === "ready") {
         process.stdout.write(`${socket}\n`);
@@ -286,10 +316,11 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
         return;
     }
     if (probe === "wedged") {
-        // The socket answers connects but no hello arrives across two probes —
-        // the daemon is alive at the kernel level and dead at the application
-        // level. Reap it and fall through to a fresh spawn, or every launch
-        // from here on would attach to the same unresponsive process.
+        // The socket answers connects but no RPC response arrives across two
+        // probes — the daemon is alive at the kernel level and dead at the
+        // application level. Reap it and fall through to a fresh spawn, or
+        // every launch from here on would attach to the same unresponsive
+        // process.
         process.stderr.write(
             "[taco] sidecar daemon accepts connections but does not serve; killing it\n",
         );

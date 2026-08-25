@@ -13,7 +13,6 @@ import {
     PushMethods,
     type RpcRequest,
     SIDECAR_PROTOCOL_VERSION,
-    type SidecarHelloParams,
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { RPC, TacoClientBase } from "@taco-ai/shared";
@@ -67,33 +66,25 @@ export class TacoClient extends TacoClientBase {
     private readonly sidecar: SidecarClient;
     private readonly rpcTimeoutMs: number;
     /**
-     * Process-level readiness — a shared sidecar sends **one** hello on start(),
-     * so readiness is per-process, not per-cwd. All concurrent start(cwd) calls
-     * share the same promise. `processReady` lets workspaces opened after hello
-     * resolve immediately instead of waiting 10s.
-     */
-    private processReadiness?: Readiness;
-    private processReady = false;
-    /**
      * Tracks whether the sidecar's `initialize` handshake has completed in this
-     * process. Reset whenever the underlying sidecar is replaced (`instanceId`
-     * change) or exits. Server-side `not_initialized` guard rejects every RPC
-     * except `initialize` while this is false, so `start(cwd)` waits for both
-     * hello and initialize.
+     * process. Reset whenever the underlying sidecar exits (handleExit /
+     * dispose). Server-side `not_initialized` guard rejects every RPC except
+     * `initialize` while this is false, so `start(cwd)` awaits it before
+     * returning. The initialize response is also the process identity source:
+     * `instanceId` change ⇒ daemon replaced ⇒ epoch reset.
      */
     private processInitialization?: Readiness;
     private processInitialized = false;
     /** The Readiness instance for which initialize has already been sent.
-     * Replayed hello frames are expected when several concurrent callers attach
-     * to the same Rust-owned socket; only one initialize request may be in flight
+     * Concurrent start(cwd) callers can both see `processInitialized === false`
+     * before the response lands; only one initialize request may be in flight
      * for a process handshake. */
     private initializeAttempt?: Readiness;
     /**
-     * Cwd the most recent `ensureWorkspace` returned. Used as a fallback for
-     * `callProcess` before the first workspace is fully added to
-     * `ensuredCwds`. Necessary so the post-hello `initialize` handshake can
-     * send a request through `callProcess` (which rejects when nothing is
-     * ensured) without changing the public Tauri contract.
+     * Cwd the most recent `ensureWorkspace` was called with. Used as a fallback
+     * channel for the `initialize` handshake before the first workspace is
+     * fully added to `ensuredCwds` — `callProcess` rejects when nothing is
+     * ensured, and the handshake cannot wait for that.
      */
     private pendingProcessCwd: WorkspaceId | undefined;
     /** PR4: cwd the last `start(cwd)` call used. Persists across `sidecar-exited`
@@ -103,13 +94,13 @@ export class TacoClient extends TacoClientBase {
     private reconnectCwd: WorkspaceId | undefined;
     /** PR4: set while a reconnect is in flight so a second `sidecar-exited`
      *  event during the same disconnect storm doesn't schedule a parallel
-     *  reconnect (which would race on `processReadiness`). */
+     *  reconnect (which would race on the shared handshake). */
     private reconnectInFlight = false;
     private readonly epochs = new SidecarEpochs();
     private readonly epochChangeHandlers = new Set<(workspace: WorkspaceId) => void>();
-    /** Most recent instanceId observed on hello; the tag SessionEpochs
-     *  stamps every Attached push with so a daemon restart can fire
-     *  synthetic "replaced" transitions for every tracked session. */
+    /** Most recent instanceId observed on the initialize response; the tag
+     *  SessionEpochs stamps every Attached push with so a daemon restart can
+     *  fire synthetic "replaced" transitions for every tracked session. */
     private currentInstanceId: string | undefined;
     private readonly sessionEpochs = new SessionEpochs();
     private readonly sessionEpochChangeHandlers = new Set<(event: SessionEpochEvent) => void>();
@@ -141,42 +132,23 @@ export class TacoClient extends TacoClientBase {
     async start(cwd: WorkspaceId, options?: SidecarSpawnOptions): Promise<void> {
         await this.ensureListeners();
         if (this.ensuredCwds.has(cwd)) return;
-        // Set the callProcess fallback BEFORE awaiting ensureWorkspace. The
-        // fake's `queueMicrotask(emitHello)` schedules before ensureWorkspace
-        // returns, and the post-hello `runInitialize` calls callProcess before
-        // we ever reach the `pendingProcessCwd = cwd` line below otherwise.
+        // Set the handshake fallback channel BEFORE awaiting ensureWorkspace —
+        // runInitialize runs concurrently with other start() callers and reads
+        // this field to find a transport channel.
         this.pendingProcessCwd = cwd;
         // PR4: remember the cwd so a sidecar-exited event can reconnect.
         this.reconnectCwd = cwd;
-        const readiness = this.createProcessReadiness();
         const initialization = this.createProcessInitialization();
         try {
-            const handshake = await this.sidecar.ensureWorkspace(cwd, options);
-            // A client that attached to an already-running sidecar has missed the
-            // one-shot hello, and Tauri events have no replay — without this the
-            // wait below can only ever time out. Replaying the line the transport
-            // handed back covers it; a non-hello line is ignored by observeHello
-            // and we fall through to the normal wait.
-            if (handshake !== null) this.observeHello({ line: handshake });
-            await this.awaitReadiness(readiness);
-            // `runInitialize` normally fires from observeHello, but a live
-            // sidecar only ever sends one hello. If a previous handshake failed
-            // (or this is a second workspace on an un-negotiated process) no
-            // further hello is coming, so drive it here. Both paths funnel
-            // through the shared promise, so this never double-sends.
+            await this.sidecar.ensureWorkspace(cwd, options);
+            // The initialize handshake doubles as the readiness wait: the
+            // response proves the daemon is serving, carries its protocol
+            // version, and identifies the process (instanceId).
             if (!this.processInitialized) void this.runInitialize();
             await this.awaitInitialization(initialization);
             this.ensuredCwds.add(cwd);
             this.pendingProcessCwd = undefined;
         } catch (error) {
-            // Concurrent starts share one promise: the first timeout/failure must
-            // reject it, otherwise other waiters dangle — if hello arrives late,
-            // observeHello can't resolve (processReadiness cleared), and other
-            // starts wait their full 10s. initFromStorage's Promise.all hits this.
-            this.processReadiness?.reject(
-                error instanceof Error ? error : new Error(String(error)),
-            );
-            this.processReadiness = undefined;
             // Settle explicitly so a concurrent start() awaiting the shared
             // handshake fails now instead of on its own 10s timeout.
             this.processInitialization?.reject(
@@ -195,9 +167,6 @@ export class TacoClient extends TacoClientBase {
         if (this.unlistenExit) this.unlistenExit();
         this.unlistenExit = undefined;
         this.rejectAllPending(new Error("client disposed"));
-        this.processReadiness?.reject(new Error("client disposed"));
-        this.processReadiness = undefined;
-        this.processReady = false;
         // Symmetric with handleExit: an in-flight handshake gets no response
         // after dispose, so settle it rather than leaving awaiters on their
         // timeout. createProcessInitialization attaches a no-op catch, so this
@@ -278,7 +247,6 @@ export class TacoClient extends TacoClientBase {
     private async ensureListeners(): Promise<void> {
         if (!this.unlisten) {
             this.unlisten = await this.sidecar.onPush((frame) => {
-                this.observeHello(frame);
                 this.observeSessionLifecycle(frame);
                 this.buffer.push(`${frame.line}\n`);
             });
@@ -289,45 +257,10 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * Process-level readiness, create-once. All concurrent start(cwd) share one
-     * instance. If hello already arrived (processReady), returns a resolved
-     * instance — otherwise workspaces opened later would wait 10s.
-     */
-    private createProcessReadiness(): Readiness {
-        if (this.processReady) {
-            return { promise: Promise.resolve(), resolve: () => {}, reject: () => {} };
-        }
-        if (this.processReadiness) return this.processReadiness;
-        let resolve!: () => void;
-        let reject!: (reason: Error) => void;
-        const promise = new Promise<void>((resolvePromise, rejectPromise) => {
-            resolve = resolvePromise;
-            reject = rejectPromise;
-        });
-        this.processReadiness = { promise, resolve, reject };
-        return this.processReadiness;
-    }
-
-    private async awaitReadiness(readiness: Readiness): Promise<void> {
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        try {
-            await Promise.race([
-                readiness.promise,
-                new Promise<never>((_, reject) => {
-                    timeout = setTimeout(() => reject(new Error("sidecar hello timeout")), 10_000);
-                }),
-            ]);
-        } finally {
-            if (timeout) clearTimeout(timeout);
-        }
-    }
-
-    /**
-     * Mirror of `createProcessReadiness` for the `initialize` handshake. Once
-     * hello resolves, the start sequence awaits this so the `not_initialized`
-     * guard does not reject the first real RPC. Concurrent starts share one
-     * promise; failed handshakes (server returning `incompatible_protocol`)
-     * reject it so subsequent starts do not silently succeed.
+     * Mirror of the old hello-wait for the `initialize` handshake. Concurrent
+     * starts share one promise; failed handshakes (server returning
+     * `incompatible_protocol`) reject it so subsequent starts do not silently
+     * succeed.
      */
     private createProcessInitialization(): Readiness {
         if (this.processInitialized) {
@@ -340,8 +273,8 @@ export class TacoClient extends TacoClientBase {
             resolve = resolvePromise;
             reject = rejectPromise;
         });
-        // Several paths reject this promise (handleExit, observeHello's protocol
-        // check, runInitialize, dispose) and any of them can fire when no
+        // Several paths reject this promise (handleExit, runInitialize,
+        // dispose) and any of them can fire when no
         // start() is awaiting — e.g. a process death after start() resolved.
         // A no-op catch keeps those rejections from surfacing as
         // unhandledRejection; real awaiters still observe the error.
@@ -368,72 +301,9 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * Process-level epoch key — hello's `workspace` field is "*" (one per
-     * process), so epoch is recorded per-process. instanceId is per-process
-     * (randomUUID), used as the restart signal on the client side.
-     */
-    private observeHello(frame: SidecarFrame): void {
-        let parsed: { method?: unknown; params?: unknown };
-        try {
-            parsed = JSON.parse(frame.line) as { method?: unknown; params?: unknown };
-        } catch {
-            return;
-        }
-        if (parsed.method !== PushMethods.Hello) return;
-        const hello = parsed.params as Partial<SidecarHelloParams> | undefined;
-        if (
-            typeof hello?.instanceId !== "string" ||
-            !hello.protocol ||
-            !isCompatibleSidecarProtocol(hello.protocol)
-        ) {
-            const sidecarVersion = hello?.protocol
-                ? `${hello.protocol.major}.${hello.protocol.minor}`
-                : "none";
-            const error = new Error(
-                `incompatible sidecar protocol: sidecar advertises ${sidecarVersion}, ` +
-                    `client requires major ${SIDECAR_PROTOCOL_VERSION.major} with ` +
-                    `minor >= ${SIDECAR_PROTOCOL_VERSION.minor}`,
-            );
-            this.processReadiness?.reject(error);
-            this.processReadiness = undefined;
-            this.processInitialization?.reject(error);
-            this.processInitialization = undefined;
-            this.initializeAttempt = undefined;
-            this.processReady = false;
-            this.processInitialized = false;
-            // Kill the shared process — it won't resend hello, so keeping it
-            // only makes subsequent starts time out. Clear start state for re-spawn.
-            this.ensuredCwds.clear();
-            this.epochs.clearAll();
-            void this.sidecar.disposeAll();
-            return;
-        }
-        const epochTransition = this.epochs.observe("*", hello.instanceId);
-        // Process-level epoch — instanceId change ⇒ process replaced, reset all
-        // workspaces AND reset the initialize handshake so the replacement
-        // sidecar re-negotiates before accepting RPCs.
-        if (epochTransition === "replaced") {
-            this.processInitialization?.reject(new Error("sidecar instance replaced"));
-            this.processInitialization = undefined;
-            this.initializeAttempt = undefined;
-            this.processInitialized = false;
-            for (const cwd of this.ensuredCwds) {
-                for (const handler of this.epochChangeHandlers) handler(cwd);
-            }
-        }
-        this.processReadiness?.resolve();
-        this.processReadiness = undefined;
-        this.processReady = true;
-        // Kick off the initialize handshake in the background. awaitInitialization
-        // waits on the same promise; resolution flips processInitialized so
-        // later starts reuse the completed handshake without re-sending.
-        void this.runInitialize();
-    }
-
-    /**
      * Parse a push frame for session-lifecycle events and update the
-     * SessionEpochs tracker. Called from the same onPush listener that
-     * feeds `observeHello`, so the parse cost is paid once per frame.
+     * SessionEpochs tracker. Called from the onPush listener, so the parse
+     * cost is paid once per frame.
      *
      * Events we care about:
      *   - session.attached   -> observe (workspace, sessionId, currentInstanceId)
@@ -478,8 +348,8 @@ export class TacoClient extends TacoClientBase {
     }
 
     /** Fire `onSessionEpochChanged` for one (workspace, sessionId, transition).
-     *  Public-ish: called both from the synthetic "replaced" sweep in
-     *  observeHello and from observeSessionLifecycle for live transitions. */
+     *  Public-ish: called both from the "replaced" sweep in runInitialize and
+     *  from observeSessionLifecycle for live transitions. */
     private emitSessionEpoch(
         workspace: string,
         sessionId: string,
@@ -508,9 +378,9 @@ export class TacoClient extends TacoClientBase {
             return;
         }
         const initialization = this.createProcessInitialization();
-        // `workspace_ensure` replays the cached hello to every concurrent
-        // caller. Those callers all invoke observeHello(), so guard the actual
-        // request separately from the shared readiness promise.
+        // Concurrent start(cwd) callers can all reach this point before the
+        // response lands; guard the actual request separately from the shared
+        // promise so only one initialize is in flight.
         if (this.initializeAttempt === initialization) {
             return;
         }
@@ -544,8 +414,9 @@ export class TacoClient extends TacoClientBase {
         const promise = this.dispatcher.registerPending(id, fallback) as Promise<{
             serverVersion: string;
             serverCapabilities: { methods: string[]; pushes: string[] };
-            protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+            protocolVersion: { major?: unknown; minor?: unknown };
             sessionFormatVersion: number;
+            instanceId?: unknown;
         }>;
         // Attach the catch immediately so a dispose-time rejection never
         // escapes as unhandledRejection. The await below observes the result.
@@ -560,6 +431,24 @@ export class TacoClient extends TacoClientBase {
         }
         try {
             const result = await promise;
+            // Wire protocol check — the response is the authority now that the
+            // hello frame is retired. Validate the shape first so a malformed
+            // response is distinguishable from a version mismatch in logs.
+            const protocol = result.protocolVersion as
+                | { major?: unknown; minor?: unknown }
+                | undefined;
+            if (
+                typeof protocol?.major !== "number" ||
+                typeof protocol?.minor !== "number" ||
+                !isCompatibleSidecarProtocol({ major: protocol.major, minor: protocol.minor })
+            ) {
+                const sidecarVersion = protocol ? `${protocol.major}.${protocol.minor}` : "none";
+                throw new Error(
+                    `incompatible sidecar protocol: sidecar advertises ${sidecarVersion}, ` +
+                        `client requires major ${SIDECAR_PROTOCOL_VERSION.major} with ` +
+                        `minor >= ${SIDECAR_PROTOCOL_VERSION.minor}`,
+                );
+            }
             // History payloads passthrough pi's jsonl entries, which the wire
             // protocol version does not cover. A sidecar advertising a newer
             // session format than this build understands cannot have its history
@@ -574,6 +463,22 @@ export class TacoClient extends TacoClientBase {
                     `sidecar session format ${result.sessionFormatVersion} is newer than supported ${CURRENT_SESSION_FORMAT_VERSION}`,
                 );
             }
+            if (typeof result.instanceId === "string") {
+                this.currentInstanceId = result.instanceId;
+                // Process-level epoch — instanceId change ⇒ daemon replaced
+                // (upgrade swap mid-session); fire per-workspace handlers so
+                // the UI resets state owned by the old instance. The handshake
+                // itself is already against the new instance, so unlike the
+                // old hello-driven path there is nothing to re-negotiate.
+                if (this.epochs.observe("*", result.instanceId) === "replaced") {
+                    for (const cwd of this.ensuredCwds) {
+                        for (const handler of this.epochChangeHandlers) handler(cwd);
+                    }
+                }
+            }
+            // A missing instanceId means a pre-P1 sidecar (version skew during
+            // a rolling upgrade): epoch tracking stays dormant until the
+            // daemon is upgraded. Not fatal — attaches still drive the UI.
             if (this.processInitialization === initialization) {
                 this.processInitialized = true;
                 initialization.resolve();
@@ -599,8 +504,6 @@ export class TacoClient extends TacoClientBase {
         const reason = new Error(
             `sidecar exited${exit.code === undefined ? "" : ` (code ${exit.code})`}${exit.reason ? `: ${exit.reason}` : ""}`,
         );
-        this.processReadiness?.reject(reason);
-        this.processReadiness = undefined;
         // Reject rather than drop: an in-flight `initialize` has no response
         // coming once the process is gone, so awaitInitialization would sit on
         // its own 10s timeout. runInitialize's catch tolerates the promise
@@ -608,7 +511,6 @@ export class TacoClient extends TacoClientBase {
         this.processInitialization?.reject(reason);
         this.processInitialization = undefined;
         this.initializeAttempt = undefined;
-        this.processReady = false;
         this.processInitialized = false;
         this.pendingProcessCwd = undefined;
         // Fan-out: every started workspace's pending RPCs fail. callProcess's
@@ -619,6 +521,14 @@ export class TacoClient extends TacoClientBase {
             this.rejectWorkspacePending(cwd, reason);
         }
         this.rejectAllPending(reason);
+        // Daemon death replaces the owner of every started workspace. Fire
+        // the epoch handlers here, before the state clear below: the
+        // reconnect handshake observes a freshly-cleared epoch table and
+        // cannot detect "replaced" on its own. UI hooks (SIDECAR_RESTARTED,
+        // compaction-state resets) must not wait for the reconnect.
+        for (const cwd of this.ensuredCwds) {
+            for (const handler of this.epochChangeHandlers) handler(cwd);
+        }
         this.ensuredCwds.clear();
         this.epochs.clearAll();
         // PR4: schedule an upgrade-aware reconnect. We don't reconnect from
@@ -637,7 +547,7 @@ export class TacoClient extends TacoClientBase {
      *    2. Probe `upgradeMarkerPresent`. If true, run `upgradeApply`
      *       (which atomically swaps staging → live and clears the marker).
      *    3. Re-call `start(cwd)` — same path the user-facing mount flow
-     *       uses, so a successful reconnect goes through the same hello +
+     *       uses, so a successful reconnect goes through the same
      *       initialize handshake and emits the same epoch transitions as a
      *       normal mount.
      *    4. On failure, repeat with the next backoff. After the last entry

@@ -7,7 +7,7 @@
  */
 
 export const RPC = {
-    // Process-level bootstrap. First client → server request after sidecar.hello.
+    // Process-level bootstrap. First client → server request on a connection.
     initialize: "initialize",
     // workspace.*
     workspaceList: "workspace.list",

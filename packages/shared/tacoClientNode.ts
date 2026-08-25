@@ -14,6 +14,7 @@ import { EventEmitter } from "node:events";
 import * as readline from "node:readline";
 import type {
     ClientCapabilities,
+    InitializeResult,
     RpcRequest,
     ServerPush,
     SidecarHelloParams,
@@ -109,7 +110,39 @@ export class TacoClient extends TacoClientBase {
         await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
-    /** Wait for the server's hello frame (used as a readiness signal). */
+    /**
+     * Liveness + capability handshake for the hello-less protocol: send
+     * `initialize` and validate the server's advertised protocol version.
+     * This is the recommended entry point before any other RPC — the
+     * server's `not_initialized` guard rejects everything else. Throws on
+     * protocol mismatch so stale-sidecar failures surface up front instead
+     * of on a specific RPC at runtime.
+     */
+    async handshake(clientCapabilities?: ClientCapabilities): Promise<InitializeResult> {
+        const result = await this.initialize(
+            { major: SIDECAR_PROTOCOL_VERSION.major, minor: SIDECAR_PROTOCOL_VERSION.minor },
+            clientCapabilities,
+        );
+        const protocol = result.protocolVersion as { major?: unknown; minor?: unknown };
+        if (
+            typeof protocol?.major !== "number" ||
+            typeof protocol?.minor !== "number" ||
+            !isCompatibleSidecarProtocol({ major: protocol.major, minor: protocol.minor })
+        ) {
+            throw new Error(
+                `sidecar protocol ${protocol?.major ?? "?"}.${protocol?.minor ?? "?"} is not supported; client is ${SIDECAR_PROTOCOL_VERSION.major}.${SIDECAR_PROTOCOL_VERSION.minor}`,
+            );
+        }
+        return result;
+    }
+
+    /**
+     * @deprecated The `sidecar.hello` push frame is being retired. Use the
+     * `initialize` RPC exchange as the readiness signal instead. Kept for one
+     * protocol transition period.
+     *
+     * Wait for the server's hello frame (used as a readiness signal).
+     */
     async waitForHello(timeoutMs = 5_000): Promise<ServerPush> {
         return new Promise((resolve, reject) => {
             const t = setTimeout(() => {
@@ -127,6 +160,10 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
+     * @deprecated Waiting on the hello frame is being retired; call
+     * `initialize` directly — its response carries `protocolVersion` and now
+     * also `instanceId`/`pid`. Kept for one protocol transition period.
+     *
      * Liveness + capability handshake: wait for hello, then send `initialize` so
      * the server's `not_initialized` guard lets subsequent RPCs through. The
      * server's protocol version comes from the hello frame; we send the same
