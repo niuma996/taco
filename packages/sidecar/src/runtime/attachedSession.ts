@@ -72,22 +72,20 @@ export interface AbortResult {
  *
  * `user-agent: taco/<version>` — set on every NON-OAuth provider. OAuth
  * providers (Anthropic OAuth in particular) need their
- * `claude-cli/<version>` identity preserved, and pi-ai's openai / anthropic
- * SDKs read `this.constructor.name` for the default UA — overriding that
- * with `taco/<version>` would lose Claude Code's OAuth beta features. The
- * OAuth check uses `checkAuth` rather than `getAuth` because the former
- * never triggers a token refresh.
+ * `claude-cli/<version>` identity preserved: pi-ai's openai / anthropic
+ * SDKs read `this.constructor.name` for the default UA, and overriding
+ * with `taco/<version>` would lose Claude Code's OAuth beta features.
+ * The OAuth check uses `checkAuth` (never triggers a token refresh)
+ * rather than `getAuth`.
  *
- * `x-taco-sidecar-version: <version>` — set on EVERY provider, OAuth or
- * not. It's metadata (which taco build made the call), not identity, so
- * it never conflicts with the OAuth UA. On an OAuth call it is the only
- * taco tag that survives, which is enough to attribute the request to a
- * taco version in the provider's access logs.
+ * `x-taco-sidecar-version: <version>` — set on EVERY provider. It's
+ * metadata, not identity, so it never conflicts with the OAuth UA. On
+ * an OAuth call it's the only taco tag that survives, which is enough
+ * to attribute the request to a taco version in the provider's logs.
  *
- * If `checkAuth` cannot classify the provider (returns undefined or
- * throws), we skip the `user-agent` override but still attach the
- * version header — the version is safe; the UA is the identity-bearing
- * field.
+ * If `checkAuth` cannot classify the provider we skip the UA override
+ * but still attach the version header — the version is safe; the UA
+ * is the identity-bearing field.
  */
 export async function withTacoUserAgent(
     streamOptions: AgentHarnessStreamOptions,

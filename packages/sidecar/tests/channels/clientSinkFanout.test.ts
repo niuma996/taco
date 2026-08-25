@@ -1,7 +1,7 @@
 /**
- * Phase 2 client-sink fan-out tests.
+ * Client-sink fan-out tests.
  *
- * Background: after the daemon-ownership refactor (PR1) the resident
+ * Background: after the daemon-ownership refactor the resident
  * SidecarServer owns the channel stack and IM workspaces. Its emitPush
  * runs over NullTransport — fine for outbound IM (which goes through
  * `channelRegistry.push`), but a desktop that already has an IM session

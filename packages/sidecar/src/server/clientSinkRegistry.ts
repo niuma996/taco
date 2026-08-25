@@ -2,13 +2,13 @@
  * ClientSinkRegistry — process-level fan-out of push frames to every
  * connected desktop's transport.
  *
- * Phase 2 of the daemon-ownership refactor. After Phase 1 the IM host
- * owns IM workspaces, but its `emitPush` only hits NullTransport — so an
- * already-open desktop IM view went stale on every new peer message or
- * mid-turn update. This registry lets the host fan out the same frame
- * to every desktop's NDJSON transport. The desktop filters frames by
- * session id at the application layer, so fanning out unconditionally
- * is correct and matches the existing wire protocol.
+ * After the daemon-ownership refactor the IM host owns IM workspaces, but
+ * its `emitPush` only hits NullTransport — so an already-open desktop IM
+ * view went stale on every new peer message or mid-turn update. This
+ * registry lets the host fan out the same frame to every desktop's
+ * NDJSON transport. The desktop filters frames by session id at the
+ * application layer, so fanning out unconditionally is correct and
+ * matches the existing wire protocol.
  *
  * Use:
  *  - `runDaemon` constructs one registry and passes it via SharedSidecarDeps.

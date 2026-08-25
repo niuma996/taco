@@ -3,28 +3,18 @@
  * syncPnpmStaging.mjs — copy the freshly-built dist/runtime/<triple>/ into
  * the installed @taco-ai/sidecar-<platform>/ package under node_modules.
  *
- * Why this exists: `taco install` writes a launchd wrapper that points at
- * `node_modules/.pnpm/@taco-ai+sidecar-<platform>@<ver>/...` — that path is
- * resolved ONCE at install time and never re-resolved. Running
- * `package:runtime` writes to packages/sidecar/dist/runtime/, which the
- * daemon does NOT see. Without this sync, a developer who rebuilds the
- * sidecar ships the new code only to the desktop's Tauri bundle; the
+ * Why: `taco install` writes a launchd wrapper that points at
+ * `node_modules/.pnpm/@taco-ai+sidecar-<platform>@<ver>/...` — that path
+ * is resolved ONCE at install time and never re-resolved, while
+ * `package:runtime` writes to packages/sidecar/dist/runtime/ which the
+ * daemon does NOT see. Without this sync a developer who rebuilds the
+ * sidecar ships new code only to the desktop's Tauri bundle; the
  * launchd-spawned daemon keeps running the old bundle and the client
  * shows "sidecar connected but sent no hello within 5s".
  *
- * This script is idempotent and safe to re-run. It only touches the
- * current-host platform's package — other platform packages (installed
- * for cross-building) are left alone.
- *
- * Pass `--rebuild` to force `package:runtime` before syncing. Earlier
- * revisions tried to skip the rebuild via a src-vs-bundle mtime
- * comparison, but the comparison missed real src changes (esbuild
- * doesn't always touch the bundle file's mtime when only a transitive
- * dep changed, and copy-then-rebuild races can leave staged mtimes
- * ahead of src). `tauri:dev`'s `stageSidecar.mjs` calls this with
- * `--rebuild` so the dev inner loop always runs against the latest
- * sidecar; the rebuild cost is bounded because it's a one-shot, not
- * a per-HMR step.
+ * Pass `--rebuild` to force `package:runtime` before syncing; a
+ * src-vs-bundle mtime comparison is unreliable because esbuild doesn't
+ * always retouch the bundle mtime on transitive dep changes.
  */
 
 import { spawnSync } from "node:child_process";

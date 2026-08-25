@@ -122,34 +122,25 @@ function toSharedSidecarDeps(deps: ResolvedDeps): SharedSidecarDeps {
     };
 }
 
-/** Daemon mode entry. Bound by the @taco-ai/cli launcher (PR2) or directly
- *  by the Tauri UI in production (see clients/taco-desktop/src-tauri/src/lib.rs).
+/** Daemon mode entry. Bound by the @taco-ai/cli launcher or directly by
+ *  the Tauri UI in production (see clients/taco-desktop/src-tauri/src/lib.rs).
+ *  Activated by TACO_DAEMON_MODE=1; the launcher writes TACO_SOCKET (NDJSON
+ *  socket) and TACO_CONTROL_SOCKET (single-instance marker — see runDaemon).
  *
- * Activated by TACO_DAEMON_MODE=1; the launcher writes:
- *   TACO_SOCKET          — NDJSON socket (Unix path or \\.\pipe\taco-sidecar)
- *   TACO_CONTROL_SOCKET  — control socket; also this daemon's single-instance
- *                          marker (see runDaemon)
+ * Each NDJSON connection gets its own SidecarServer so workspace state,
+ * channels, and the initialize handshake are scoped per UI. The daemon
+ * keeps running across disconnects; the launcher terminates it via
+ * SIGTERM (or its launchd / schtasks wrapper).
  *
- * Each NDJSON socket connection gets its own SidecarServer so workspace state,
- * channels, and the initialize handshake are scoped per UI rather than shared.
- * The daemon keeps running across disconnects — the launcher is responsible
- * for terminating it via SIGTERM (or PR3's launchd / schtasks wrapper).
- *
- * Lifecycle invariants (PR2 review):
- *  - Control socket binds first as the single-instance lock; a healthy probe
- *    of it at boot, or losing the bind race with EADDRINUSE, means another
+ * Lifecycle invariants:
+ *  - Control socket binds first as the single-instance lock; a healthy
+ *    boot probe, or losing the bind race with EADDRINUSE, means another
  *    daemon is already live and we exit 0 (see runDaemon).
- *  - NDJSON binds second; failure closes + unlinks the control socket so we
- *    don't leave a half-running daemon.
- *  - On clean shutdown (control.shutdown / SIGTERM / SIGINT / stdin EOF) both
- *    socket files are unlinked so the next start finds no stale entry. The
- *    `process.on('exit')` hook is a synchronous fallback for crash exits where
- *    the async shutdown didn't run — sync unlink is the only thing Node
- *    allows in that phase.
- *  - At startup we probe the NDJSON socket path: if a file exists but
- *    `connect()` fails with ECONNREFUSED it's a stale entry from a previous
- *    crash, so we unlink it before binding. Without this the next start hits
- *    EADDRINUSE and exits.
+ *  - NDJSON binds second; failure closes + unlinks the control socket.
+ *  - On clean shutdown both socket files are unlinked; the
+ *    `process.on('exit')` hook is a sync fallback for crash exits.
+ *  - At startup we probe the NDJSON socket path and unlink a stale
+ *    ECONNREFUSED entry from a previous crash before binding.
  */
 
 const IS_UNIX = process.platform !== "win32";
