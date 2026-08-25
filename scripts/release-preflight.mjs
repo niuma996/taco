@@ -43,11 +43,15 @@ function probeArtifactStorage() {
     // surfaces are /settings/billing (org/repo) or /actions/cache/usage
     // (cache only). Try cache as a lightweight signal — storage exhaustion
     // tends to correlate across artifacts and cache.
-    const result = spawnSync(gh, ["api", "repos/{owner}/{repo}/actions/cache/usage", "--jq", ".size_in_bytes"], {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        env: { ...process.env, GH_REPO: process.env.GH_REPO ?? "" },
-    });
+    const result = spawnSync(
+        gh,
+        ["api", "repos/{owner}/{repo}/actions/cache/usage", "--jq", ".size_in_bytes"],
+        {
+            cwd: REPO_ROOT,
+            encoding: "utf8",
+            env: { ...process.env, GH_REPO: process.env.GH_REPO ?? "" },
+        },
+    );
     if (result.status !== 0 || !result.stdout.trim()) return null;
     const bytes = Number(result.stdout.trim());
     return Number.isFinite(bytes) ? bytes : null;
@@ -87,19 +91,23 @@ check("protocol+shared:build", () => {
     runPnpm(["protocol:build"], { label: "protocol:build" });
     runPnpm(["shared:build"], { label: "shared:build" });
 });
-check("desktop:build", () => runPnpm(["--filter", "@taco-ai/desktop", "build"], { label: "desktop:build" }));
+check("desktop:build", () =>
+    runPnpm(["--filter", "@taco-ai/desktop", "build"], { label: "desktop:build" }),
+);
 check("pack:smoke", () => runPnpm(["pack:smoke"], { label: "pack:smoke" }));
 check("artifact-storage", () => {
     const bytes = probeArtifactStorage();
     if (bytes === null) {
-        console.log("  could not probe artifact storage (gh unavailable or no GH_REPO set) — skipping");
+        console.log(
+            "  could not probe artifact storage (gh unavailable or no GH_REPO set) — skipping",
+        );
         return;
     }
     const gb = (bytes / 1024 / 1024 / 1024).toFixed(2);
     if (bytes > 1.5 * 1024 ** 3) {
         throw new Error(
             `artifact storage at ${gb}GB; clean old artifacts before release ` +
-                `(Settings → Actions → General → Artifact and log retention)`,
+                "(Settings → Actions → General → Artifact and log retention)",
         );
     }
     console.log(`  artifact storage at ${gb}GB — OK`);
@@ -118,7 +126,7 @@ for (const { name, fn } of checks) {
     }
 }
 
-console.log(`\n=== summary ===`);
+console.log("\n=== summary ===");
 if (failed > 0) {
     console.error(`${failed} check(s) failed`);
     process.exit(1);

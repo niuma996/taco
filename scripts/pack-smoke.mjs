@@ -210,6 +210,19 @@ function assertSidecarShimInstalled(consumerDir) {
 
 async function assertSidecarBinShimErrorsCleanlyOnNoPlatform(consumerDir) {
     console.log("[CHECK] sidecar: bin shim behaves on missing platform");
+    // The shim's missing-platform branch only fires when no matching
+    // @taco-ai/sidecar-<platform> optional dep is installed. The release
+    // matrix publishes darwin-* and win32-* tarballs but NOT linux-*,
+    // so the CI ubuntu runner always hits this branch. macOS / Windows
+    // devs running pack-smoke locally have their native platform tarball
+    // installed by pnpm, so the shim runs the real binary and this
+    // assertion would always fail there. Skip on non-linux platforms.
+    if (process.platform !== "linux") {
+        console.log(
+            `  [SKIP] non-linux platform (${process.platform}) - native sidecar-* tarball installed`,
+        );
+        return;
+    }
     const shim = join(consumerDir, "node_modules", ".bin", "taco-sidecar");
     const result = capture("node", [shim, "--help"], { cwd: consumerDir });
     // Expected: exit 1 + stderr matches "no platform-specific binary found".
