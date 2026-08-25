@@ -17,6 +17,7 @@ import {
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { RPC, TacoClientBase } from "@taco-ai/shared";
+import { type EpochTransition, SessionEpochs } from "./sessionEpoch";
 import {
     defaultSidecarClient,
     type SidecarClient,
@@ -25,11 +26,6 @@ import {
     type SidecarSpawnOptions,
 } from "./sidecar";
 import { SidecarEpochs } from "./sidecarEpoch";
-import {
-    type EpochTransition,
-    SessionEpochEntry,
-    SessionEpochs,
-} from "./sessionEpoch";
 
 /** Payload delivered to `onSessionEpochChanged` listeners.
  *  Fires per (workspace, sessionId) transition; "replaced" is the
@@ -87,6 +83,11 @@ export class TacoClient extends TacoClientBase {
      */
     private processInitialization?: Readiness;
     private processInitialized = false;
+    /** The Readiness instance for which initialize has already been sent.
+     * Replayed hello frames are expected when several concurrent callers attach
+     * to the same Rust-owned socket; only one initialize request may be in flight
+     * for a process handshake. */
+    private initializeAttempt?: Readiness;
     /**
      * Cwd the most recent `ensureWorkspace` returned. Used as a fallback for
      * `callProcess` before the first workspace is fully added to
@@ -111,9 +112,7 @@ export class TacoClient extends TacoClientBase {
      *  synthetic "replaced" transitions for every tracked session. */
     private currentInstanceId: string | undefined;
     private readonly sessionEpochs = new SessionEpochs();
-    private readonly sessionEpochChangeHandlers = new Set<
-        (event: SessionEpochEvent) => void
-    >();
+    private readonly sessionEpochChangeHandlers = new Set<(event: SessionEpochEvent) => void>();
 
     constructor(opts: TacoClientOptions = {}) {
         // Tauri side stays silent on bad frames; only the Node client surfaces them.
@@ -184,6 +183,7 @@ export class TacoClient extends TacoClientBase {
                 error instanceof Error ? error : new Error(String(error)),
             );
             this.processInitialization = undefined;
+            this.initializeAttempt = undefined;
             this.pendingProcessCwd = undefined;
             throw error;
         }
@@ -204,6 +204,7 @@ export class TacoClient extends TacoClientBase {
         // is safe even when nobody is awaiting.
         this.processInitialization?.reject(new Error("client disposed"));
         this.processInitialization = undefined;
+        this.initializeAttempt = undefined;
         this.processInitialized = false;
         this.pendingProcessCwd = undefined;
         this.ensuredCwds.clear();
@@ -397,6 +398,7 @@ export class TacoClient extends TacoClientBase {
             this.processReadiness = undefined;
             this.processInitialization?.reject(error);
             this.processInitialization = undefined;
+            this.initializeAttempt = undefined;
             this.processReady = false;
             this.processInitialized = false;
             // Kill the shared process — it won't resend hello, so keeping it
@@ -413,6 +415,7 @@ export class TacoClient extends TacoClientBase {
         if (epochTransition === "replaced") {
             this.processInitialization?.reject(new Error("sidecar instance replaced"));
             this.processInitialization = undefined;
+            this.initializeAttempt = undefined;
             this.processInitialized = false;
             for (const cwd of this.ensuredCwds) {
                 for (const handler of this.epochChangeHandlers) handler(cwd);
@@ -505,6 +508,19 @@ export class TacoClient extends TacoClientBase {
             return;
         }
         const initialization = this.createProcessInitialization();
+        // `workspace_ensure` replays the cached hello to every concurrent
+        // caller. Those callers all invoke observeHello(), so guard the actual
+        // request separately from the shared readiness promise.
+        if (this.initializeAttempt === initialization) {
+            return;
+        }
+        const fallback = this.pendingProcessCwd ?? this.ensuredCwds.values().next().value;
+        if (!fallback) {
+            // No transport channel yet — start() will surface the failure via
+            // its own awaitInitialization timeout.
+            return;
+        }
+        this.initializeAttempt = initialization;
         // Send the `initialize` request directly via the dispatcher so this
         // file owns the pending-promise chain end-to-end. Using the typed
         // `client.initialize` wrapper would hand the promise to two consumers
@@ -512,12 +528,6 @@ export class TacoClient extends TacoClientBase {
         // dispose-time rejection on the dispatcher could escape as an
         // unhandledRejection. Sending it ourselves lets us attach a catch
         // exactly once before any await.
-        const fallback = this.pendingProcessCwd ?? this.ensuredCwds.values().next().value;
-        if (!fallback) {
-            // No transport channel yet — start() will surface the failure via
-            // its own awaitInitialization timeout.
-            return;
-        }
         const id = `init_${++this.rpcSeq}_${Date.now()}`;
         const req: RpcRequest = {
             id,
@@ -568,6 +578,7 @@ export class TacoClient extends TacoClientBase {
                 this.processInitialized = true;
                 initialization.resolve();
                 this.processInitialization = undefined;
+                this.initializeAttempt = undefined;
             } else {
                 this.processInitialized = true;
             }
@@ -578,6 +589,7 @@ export class TacoClient extends TacoClientBase {
             if (this.processInitialization === initialization) {
                 initialization.reject(error instanceof Error ? error : new Error(String(error)));
                 this.processInitialization = undefined;
+                this.initializeAttempt = undefined;
             }
         }
     }
@@ -595,6 +607,7 @@ export class TacoClient extends TacoClientBase {
         // already being settled here (it re-checks identity before settling).
         this.processInitialization?.reject(reason);
         this.processInitialization = undefined;
+        this.initializeAttempt = undefined;
         this.processReady = false;
         this.processInitialized = false;
         this.pendingProcessCwd = undefined;

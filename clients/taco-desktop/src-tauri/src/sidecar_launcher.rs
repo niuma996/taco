@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::paths::{
     control_socket_path, find_repo_root, ndjson_socket_path, resolve_repo_source_program,
-    resolve_taco_home, strip_win_verbatim,
+    resolve_taco_home, resolve_taco_runtime_dir, strip_win_verbatim,
 };
 
 /// Env vars forwarded from the desktop process into the sidecar subprocess
@@ -34,6 +34,7 @@ pub(crate) const PASSTHROUGH_ENV: &[&str] = &[
     "TZ",
     "NODE_ENV",
     "TACO_HOME",
+    "TACO_RUNTIME_DIR",
     "TACO_SESSIONS_ROOT",
     "TACO_EXTENSIONS_DIR",
     "TACO_EXTENSION_ROOT",
@@ -73,8 +74,8 @@ pub(crate) const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
 /// that inherits stdio, the desktop asks the @taco-ai/cli launcher (dev)
 /// or the bundled `taco-sidecar-node` (prod) to bring the daemon up,
 /// then connects to the NDJSON socket it exposes. The two processes
-/// share the same socket paths under `$TACO_HOME/run/` so the
-/// launcher's "ready" signal is the same path Rust connects to.
+/// share the same socket paths under the resolved daemon runtime directory so
+/// the launcher's "ready" signal is the same path Rust connects to.
 ///
 /// `extra_env` carries variables PR2 needs in addition to PASSTHROUGH_ENV:
 /// `TACO_DAEMON_MODE=1` flips the bundle into socket-listening mode;
@@ -102,18 +103,21 @@ pub(crate) struct SidecarResolution {
     pub(crate) extra_env: Vec<(String, String)>,
 }
 
-pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
-    // PR2: socket paths under `$TACO_HOME/run/` (or Windows named pipes).
-    // Both the @taco-ai/cli launcher and the desktop must agree on these
-    // paths, so we resolve them once here and pass them to whichever
-    // process we spawn.
-    let resolved_home = resolve_taco_home(app)?;
-    let socket_path = ndjson_socket_path(&resolved_home);
-    let control_socket_path = control_socket_path(&resolved_home);
-    // Daemon-mode env every spawned child needs. The launcher's
-    // TACO_DAEMON_MODE / TACO_SOCKET / TACO_CONTROL_SOCKET come from this
-    // vector so the bundle (or CLI) flips into socket-listening mode.
-    let daemon_env: Vec<(String, String)> = vec![
+fn daemon_environment(
+    taco_home: &std::path::Path,
+    runtime_dir: &std::path::Path,
+    socket_path: &std::path::Path,
+    control_socket_path: &std::path::Path,
+) -> Vec<(String, String)> {
+    vec![
+        (
+            "TACO_HOME".to_string(),
+            taco_home.to_string_lossy().into_owned(),
+        ),
+        (
+            "TACO_RUNTIME_DIR".to_string(),
+            runtime_dir.to_string_lossy().into_owned(),
+        ),
         ("TACO_DAEMON_MODE".to_string(), "1".to_string()),
         (
             "TACO_SOCKET".to_string(),
@@ -123,7 +127,27 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
             "TACO_CONTROL_SOCKET".to_string(),
             control_socket_path.to_string_lossy().into_owned(),
         ),
-    ];
+    ]
+}
+
+pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, String> {
+    // Socket paths live in the resolved daemon runtime directory (or Windows
+    // named pipes). Both the @taco-ai/cli launcher and the desktop must agree on these
+    // paths, so we resolve them once here and pass them to whichever
+    // process we spawn.
+    let resolved_home = resolve_taco_home(app)?;
+    let runtime_dir = resolve_taco_runtime_dir(app)?;
+    let socket_path = ndjson_socket_path(&runtime_dir);
+    let control_socket_path = control_socket_path(&runtime_dir);
+    // Daemon-mode env every spawned child needs. The launcher's
+    // TACO_DAEMON_MODE / TACO_SOCKET / TACO_CONTROL_SOCKET come from this
+    // vector so the bundle (or CLI) flips into socket-listening mode.
+    let daemon_env = daemon_environment(
+        &resolved_home,
+        &runtime_dir,
+        &socket_path,
+        &control_socket_path,
+    );
 
     // ① 显式覆盖 —— 测试 / e2e 可以直接指定 launcher 程序
     if let (Ok(program), Ok(args_str)) = (
@@ -156,7 +180,8 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
         return Ok(SidecarResolution {
             program: tsx,
             args: vec![cli_bin.to_string_lossy().into_owned(), "start".to_string()],
-            // CLI 自己计算 socket 路径并 spawn sidecar,不需要 desktop 再注入。
+            // The CLI resolves the runtime paths and spawns the sidecar; desktop
+            // forwards the shared home plus isolated runtime through extra_env.
             resources_root: Some(repo_root.join("packages").join("sidecar").join("src")),
             use_repo_source: true,
             socket_path,
@@ -243,19 +268,17 @@ pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLaunch
         }
         return None;
     }
-    let resources = app
-        .path()
-        .resource_dir()
-        .ok()?
-        .join("cli")
-        .join("taco.mjs");
+    let resources = app.path().resource_dir().ok()?.join("cli").join("taco.mjs");
     let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
     let bundle = sidecar_root.join("lib").join("index.mjs");
-    let node = std::env::current_exe().ok()?.parent()?.join(if cfg!(windows) {
-        "taco-sidecar-node.exe"
-    } else {
-        "taco-sidecar-node"
-    });
+    let node = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(if cfg!(windows) {
+            "taco-sidecar-node.exe"
+        } else {
+            "taco-sidecar-node"
+        });
     if !resources.exists() || !node.exists() || !bundle.exists() {
         return None;
     }
@@ -263,9 +286,18 @@ pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLaunch
         program: node.to_string_lossy().into_owned(),
         prefix_args: vec![resources.to_string_lossy().into_owned()],
         env: vec![
-            ("TACO_SIDECAR_NODE".into(), node.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_BUNDLE".into(), bundle.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_RESOURCES".into(), sidecar_root.to_string_lossy().into_owned()),
+            (
+                "TACO_SIDECAR_NODE".into(),
+                node.to_string_lossy().into_owned(),
+            ),
+            (
+                "TACO_SIDECAR_BUNDLE".into(),
+                bundle.to_string_lossy().into_owned(),
+            ),
+            (
+                "TACO_SIDECAR_RESOURCES".into(),
+                sidecar_root.to_string_lossy().into_owned(),
+            ),
         ],
     })
 }
@@ -298,11 +330,14 @@ pub(crate) fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<Ins
     let resources = app.path().resource_dir().ok()?.join("cli").join("taco.mjs");
     let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
     let bundle = sidecar_root.join("lib").join("index.mjs");
-    let node = std::env::current_exe().ok()?.parent()?.join(if cfg!(windows) {
-        "taco-sidecar-node.exe"
-    } else {
-        "taco-sidecar-node"
-    });
+    let node = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(if cfg!(windows) {
+            "taco-sidecar-node.exe"
+        } else {
+            "taco-sidecar-node"
+        });
     if !resources.exists() || !node.exists() || !bundle.exists() {
         return None;
     }
@@ -310,16 +345,26 @@ pub(crate) fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<Ins
         program: node.to_string_lossy().into_owned(),
         prefix_args: vec![resources.to_string_lossy().into_owned()],
         env: vec![
-            ("TACO_SIDECAR_NODE".into(), node.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_BUNDLE".into(), bundle.to_string_lossy().into_owned()),
-            ("TACO_SIDECAR_RESOURCES".into(), sidecar_root.to_string_lossy().into_owned()),
+            (
+                "TACO_SIDECAR_NODE".into(),
+                node.to_string_lossy().into_owned(),
+            ),
+            (
+                "TACO_SIDECAR_BUNDLE".into(),
+                bundle.to_string_lossy().into_owned(),
+            ),
+            (
+                "TACO_SIDECAR_RESOURCES".into(),
+                sidecar_root.to_string_lossy().into_owned(),
+            ),
         ],
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::PASSTHROUGH_ENV;
+    use super::{daemon_environment, PASSTHROUGH_ENV};
+    use std::path::Path;
 
     /// Guard against anyone adding a credential-bearing var to
     /// PASSTHROUGH_ENV. `env_clear()` runs in the spawn path; the only
@@ -327,13 +372,45 @@ mod tests {
     /// this list. Matches case-insensitively because Windows env vars
     /// are case-insensitive.
     #[test]
+    fn daemon_environment_keeps_shared_home_and_isolated_runtime() {
+        let env = daemon_environment(
+            Path::new("/Users/test/.taco"),
+            Path::new("/Users/test/.taco-dev/run"),
+            Path::new("/Users/test/.taco-dev/run/sidecar.sock"),
+            Path::new("/Users/test/.taco-dev/run/sidecar-ctl.sock"),
+        );
+        assert!(env.contains(&(String::from("TACO_HOME"), String::from("/Users/test/.taco"))));
+        assert!(env.contains(&(
+            String::from("TACO_RUNTIME_DIR"),
+            String::from("/Users/test/.taco-dev/run"),
+        )));
+        assert!(env.contains(&(
+            String::from("TACO_SOCKET"),
+            String::from("/Users/test/.taco-dev/run/sidecar.sock"),
+        )));
+        assert!(env.contains(&(
+            String::from("TACO_CONTROL_SOCKET"),
+            String::from("/Users/test/.taco-dev/run/sidecar-ctl.sock"),
+        )));
+    }
+
+    #[test]
     fn passthrough_env_contains_no_credentials() {
         for key in PASSTHROUGH_ENV {
             let upper = key.to_ascii_uppercase();
             assert!(!upper.contains("KEY"), "{key} looks like a credential var");
-            assert!(!upper.contains("SECRET"), "{key} looks like a credential var");
-            assert!(!upper.contains("PASSWORD"), "{key} looks like a credential var");
-            assert!(!upper.contains("TOKEN"), "{key} looks like a credential var");
+            assert!(
+                !upper.contains("SECRET"),
+                "{key} looks like a credential var"
+            );
+            assert!(
+                !upper.contains("PASSWORD"),
+                "{key} looks like a credential var"
+            );
+            assert!(
+                !upper.contains("TOKEN"),
+                "{key} looks like a credential var"
+            );
         }
     }
 }

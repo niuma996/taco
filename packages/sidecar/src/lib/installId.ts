@@ -32,7 +32,8 @@ export function computeInstallId(resourcesRoot: string, tacoHome: string): strin
     return h.digest("hex").slice(0, 16);
 }
 
-/** Shape of the JSON the daemon writes to $TACO_HOME/run/sidecar.pid.
+/** Shape of the JSON the daemon writes to `dirname($TACO_SOCKET)/sidecar.pid`
+ *  (i.e. the daemon runtime directory, not necessarily `$TACO_HOME/run`).
  *  Versioned so future format changes can detect old files and either
  *  upgrade or replace them rather than silently misparse. */
 export interface SidecarPidRecord {

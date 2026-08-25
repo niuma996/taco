@@ -1,11 +1,9 @@
 /**
  * Path constants for taco CLI / daemon layout under $TACO_HOME.
  *
- * Layout under $TACO_HOME:
- *   run/             # per-session runtime state
- *     sidecar.sock          # NDJSON socket (Unix) — or \\.\pipe\taco-sidecar on Windows
- *     sidecar-ctl.sock      # control socket (Unix) — or \\.\pipe\taco-sidecar-ctl on Windows
- *     sidecar.pid           # daemon pid file (Unix only; written by daemon)
+ * Shared user data lives under $TACO_HOME. Daemon coordination state lives
+ * under $TACO_RUNTIME_DIR when it is set, otherwise $TACO_HOME/run:
+ *   runtime/         # socket, control socket, pid, and start lock (Unix)
  *   bin/             # launcher wrapper scripts (taco-sidecar-daemon[.cmd])
  *   logs/            # service stdout/stderr targets
  *   staging/         # upgrade staging area
@@ -33,27 +31,45 @@ export function resolveTacoHome(): string {
 }
 
 export const TACO_HOME = resolveTacoHome();
-export const RUN_DIR = join(TACO_HOME, "run");
+
+/** Default daemon runtime directory for a user-data home. */
+export function defaultRuntimeDir(home: string = TACO_HOME): string {
+    return join(home, "run");
+}
+
+/** Resolve daemon runtime state independently from the shared user-data home. */
+export function resolveTacoRuntimeDir(
+    home: string = TACO_HOME,
+    runtimeOverride: string | undefined = process.env.TACO_RUNTIME_DIR,
+): string {
+    const raw = runtimeOverride?.trim();
+    return raw && raw.length > 0 ? raw : defaultRuntimeDir(home);
+}
+
+/** Current process daemon runtime directory. */
+export const RUNTIME_DIR = resolveTacoRuntimeDir();
 export const BIN_DIR = join(TACO_HOME, "bin");
 
-/** NDJSON socket path. Unix: filesystem path under $TACO_HOME/run. Windows: named pipe. */
-export function ndjsonSocketPath(home: string = TACO_HOME): string {
+/** NDJSON socket path. Unix: filesystem path under the runtime directory. Windows: named pipe. */
+export function ndjsonSocketPath(runtimeDir: string = RUNTIME_DIR): string {
     if (process.platform === "win32") {
         return "\\\\.\\pipe\\taco-sidecar";
     }
-    return join(home, "run", "sidecar.sock");
+    return join(runtimeDir, "sidecar.sock");
 }
 
-/** Control socket path. Unix: filesystem path under $TACO_HOME/run. Windows: named pipe. */
-export function controlSocketPath(home: string = TACO_HOME): string {
+/** Control socket path. Unix: filesystem path under the runtime directory. Windows: named pipe. */
+export function controlSocketPath(runtimeDir: string = RUNTIME_DIR): string {
     if (process.platform === "win32") {
         return "\\\\.\\pipe\\taco-sidecar-ctl";
     }
-    return join(home, "run", "sidecar-ctl.sock");
+    return join(runtimeDir, "sidecar-ctl.sock");
 }
 
 /** Daemon pid file (Unix only; Windows uses service control manager in PR3). */
-export const DAEMON_PID_FILE = join(TACO_HOME, "run", "sidecar.pid");
+export function runtimePidFile(runtimeDir: string = RUNTIME_DIR): string {
+    return join(runtimeDir, "sidecar.pid");
+}
 
 /** Upgrade marker file (PR4). */
 export const UPGRADE_MARKER = join(TACO_HOME, "upgrade-marker.json");
@@ -72,8 +88,11 @@ export const JOBS_DIR = join(TACO_HOME, "jobs");
  *  the wrapper script but a multi-user system doesn't accidentally inherit
  *  world-writable state. The helper takes an explicit `home` so callers can
  *  override $TACO_HOME for tests / dry-run scenarios. */
-export async function ensureDirs(home: string = TACO_HOME): Promise<void> {
-    await mkdir(join(home, "run"), { recursive: true, mode: 0o755 });
+export async function ensureDirs(
+    home: string = TACO_HOME,
+    runtimeDir: string = resolveTacoRuntimeDir(home),
+): Promise<void> {
+    await mkdir(runtimeDir, { recursive: true, mode: 0o755 });
     await mkdir(join(home, "bin"), { recursive: true, mode: 0o755 });
     await mkdir(join(home, "logs"), { recursive: true, mode: 0o755 });
     await mkdir(join(home, "staging"), { recursive: true, mode: 0o755 });

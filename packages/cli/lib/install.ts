@@ -5,7 +5,13 @@
 import { findPlatformPkg, type PlatformPkgPaths } from "./installHelpers.ts";
 import { installLaunchd as runInstallLaunchd } from "./installLaunchd.ts";
 import { installSchtasks as runInstallSchtasks } from "./installSchtasks.ts";
-import { controlSocketPath, ensureDirs, ndjsonSocketPath, TACO_HOME } from "./paths.ts";
+import {
+    controlSocketPath,
+    defaultRuntimeDir,
+    ensureDirs,
+    ndjsonSocketPath,
+    TACO_HOME,
+} from "./paths.ts";
 
 export interface InstallOptions {
     /** Override $TACO_HOME (defaults to env / ~/.taco). */
@@ -36,7 +42,10 @@ interface PlatformPaths {
  *  or when no platform pkg is installed (the CLI surfaces the message). */
 export async function installCommand(opts: InstallOptions = {}): Promise<InstallResult> {
     const tacoHome = opts.tacoHome ?? TACO_HOME;
-    await ensureDirs(tacoHome);
+    // Installed services always own the release runtime, not a caller's
+    // debug-only TACO_RUNTIME_DIR override.
+    const runtimeDir = defaultRuntimeDir(tacoHome);
+    await ensureDirs(tacoHome, runtimeDir);
 
     const pkg = findPlatformPkg();
     if (!pkg) {
@@ -62,8 +71,8 @@ export async function installCommand(opts: InstallOptions = {}): Promise<Install
     const paths: PlatformPaths = {
         tacoHome,
         pkg,
-        socket: ndjsonSocketPath(tacoHome),
-        control: controlSocketPath(tacoHome),
+        socket: ndjsonSocketPath(runtimeDir),
+        control: controlSocketPath(runtimeDir),
     };
 
     if (process.platform === "darwin") {

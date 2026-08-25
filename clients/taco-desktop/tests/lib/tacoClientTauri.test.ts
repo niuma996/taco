@@ -296,6 +296,23 @@ test("start waits for hello and initialize before resolving", async () => {
     await client.dispose();
 });
 
+test("replayed hello from concurrent ensure calls starts initialize only once", async () => {
+    const sidecar = new FakeSidecarClient();
+    sidecar.autoHello = false;
+    sidecar.handshakeLine = helloLine("instance-1");
+    const client = new TacoClient({ sidecar });
+
+    await Promise.all([
+        client.start("/workspace/a"),
+        client.start("/workspace/b"),
+        client.start("/workspace/c"),
+        client.start("/workspace/d"),
+    ]);
+
+    assert.equal(sidecar.initializeCount(), 1);
+    await client.dispose();
+});
+
 test("concurrent starts share one initialize", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
@@ -305,20 +322,7 @@ test("concurrent starts share one initialize", async () => {
         client.start("/workspace/c"),
         client.start("/workspace/d"),
     ]);
-    // hello is a push (not a sent frame), so the only sent frame per start
-    // is its initialize RPC. processReady gates the second/third/fourth start
-    // to reuse the first initialize, but each new cwd must run ensureWorkspace
-    // — therefore each cwd's runInitialize fires one more initialize RPC.
-    // We expect exactly N initialize frames (one per start), not 1, but the
-    // key invariant is: every initialize response shared the same
-    // processInitialized gate (no duplicate concurrent handshakes).
-    const initializeFrames = sidecar.sent.filter(
-        (s) => (s.frame as { method?: string }).method === "initialize",
-    );
-    assert.ok(
-        initializeFrames.length >= 4,
-        `expected at least 4 initialize, got ${initializeFrames.length}`,
-    );
+    assert.equal(sidecar.initializeCount(), 1);
     await client.dispose();
 });
 

@@ -104,6 +104,8 @@ export interface LaunchOptions {
     controlSocketPath: string;
     /** TACO_HOME to forward to the bundle. */
     tacoHome: string;
+    /** Daemon socket, pid, and lock runtime directory. */
+    runtimeDir: string;
     /** Extra env vars to pass through (e.g. PATH, HOME). */
     extraEnv?: Record<string, string>;
     /** When true, force dev mode even if the platform pkg is installed. */
@@ -153,6 +155,7 @@ export function launchSidecar(opts: LaunchOptions): LaunchResult {
         TACO_SOCKET: opts.socketPath,
         TACO_CONTROL_SOCKET: opts.controlSocketPath,
         TACO_HOME: opts.tacoHome,
+        TACO_RUNTIME_DIR: opts.runtimeDir,
         TACO_SIDECAR_RESOURCES: resourcesRoot,
     };
 

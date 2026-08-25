@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build",
     "test": "tsx --test 'tests/**/*.test.ts'",
     "test:all": "pnpm test && pnpm test:files && pnpm test:memory",

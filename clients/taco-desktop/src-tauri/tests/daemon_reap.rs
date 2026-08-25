@@ -72,10 +72,10 @@ fn parse_pid_file_rejects_missing_pid() {
 }
 
 #[test]
-fn daemon_paths_layout() {
-    let home = Path::new("/Users/x/.taco");
-    let (pid, sock, ctl) = daemon_paths(home);
-    assert_eq!(pid, Path::new("/Users/x/.taco/run/sidecar.pid"));
-    assert_eq!(sock, Path::new("/Users/x/.taco/run/sidecar.sock"));
-    assert_eq!(ctl, Path::new("/Users/x/.taco/run/sidecar-ctl.sock"));
+fn daemon_runtime_paths_layout() {
+    let runtime_dir = Path::new("/Users/x/.taco-dev/run");
+    let (pid, sock, ctl) = daemon_runtime_paths(runtime_dir);
+    assert_eq!(pid, Path::new("/Users/x/.taco-dev/run/sidecar.pid"));
+    assert_eq!(sock, Path::new("/Users/x/.taco-dev/run/sidecar.sock"));
+    assert_eq!(ctl, Path::new("/Users/x/.taco-dev/run/sidecar-ctl.sock"));
 }
