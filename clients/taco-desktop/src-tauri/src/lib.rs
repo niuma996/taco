@@ -208,12 +208,16 @@ async fn connect_daemon_socket(path: &std::path::Path) -> Result<DaemonStream, S
     }
     #[cfg(windows)]
     {
-        let client = tokio::net::windows::named_pipe::NamedPipeClient::open(path)
+        // tokio 1.53 named-pipe client API: the builder is
+        // `ClientOptions` (not `NamedPipeClientOptions`), and `open()`
+        // returns an already-connected handle — `CreateFileW` on a pipe
+        // client either connects immediately or fails with
+        // `ERROR_PIPE_BUSY`, so there is no separate `connect()` step
+        // on the client (the `connect()` method lives on
+        // `NamedPipeServer`).
+        let client = tokio::net::windows::named_pipe::ClientOptions::new()
+            .open(path)
             .map_err(|e| format!("named pipe open {} failed: {e}", path.display()))?;
-        client
-            .connect()
-            .await
-            .map_err(|e| format!("named pipe connect {} failed: {e}", path.display()))?;
         Ok(client)
     }
 }
@@ -744,10 +748,10 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
 /// any error means "didn't ack in time" and the caller should fall
 /// through to reap/kill.
 async fn send_control_shutdown(path: std::path::PathBuf) -> Result<(), String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::UnixStream;
     #[cfg(unix)]
     {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::UnixStream;
         let mut stream = UnixStream::connect(&path)
             .await
             .map_err(|e| format!("connect {} failed: {e}", path.display()))?;

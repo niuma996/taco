@@ -379,6 +379,14 @@ pub enum ReapOutcome {
     NoPidFile,
 }
 
+// Mirror of the unix `ReapInputs` so the windows stub functions below
+// have a concrete type to reference. Carries no real state — the windows
+// stubs ignore the input and return `NoPidFile`.
+#[cfg(not(unix))]
+pub struct ReapInputs<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
 #[cfg(not(unix))]
 pub fn reap_previous_daemon(_inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) -> ReapOutcome {
     ReapOutcome::NoPidFile
@@ -393,6 +401,7 @@ pub fn force_reap(_inputs: &ReapInputs<'_>) -> ReapOutcome {
 /// and `tests/daemon_reap_integration.rs` links against these via
 /// `taco_desktop_lib::daemon_reap_test::*`. None of these symbols are
 /// reachable from the public command surface.
+#[cfg(unix)]
 #[doc(hidden)]
 pub mod __test_only {
     pub use super::{
