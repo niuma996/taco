@@ -155,6 +155,29 @@ test("daemon replacement notifies epoch subscribers on the new handshake", async
     await client.dispose();
 });
 
+test("a throwing workspace-epoch handler does not break the replacement handshake", async () => {
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+    const goodNotifications: string[] = [];
+    // First subscriber throws; second must still fire on every replaced cwd,
+    // and the shared handshake must settle as success.
+    client.onWorkspaceEpochChanged(() => {
+        throw new Error("simulated epoch handler failure");
+    });
+    client.onWorkspaceEpochChanged((workspace) => goodNotifications.push(workspace));
+
+    await client.start("/workspace/a");
+    await client.start("/workspace/b");
+    // Replace daemon, then re-handshake so runInitialize observes "replaced".
+    sidecar.emitExit({ code: undefined });
+    sidecar.instanceId = "instance-2";
+    // start() must succeed even with a throwing handler in the set — the
+    // outer try/catch in runInitialize would have rejected initialization.
+    await client.start("/workspace/a");
+    assert.deepEqual(goodNotifications.sort(), ["/workspace/a", "/workspace/b"]);
+    await client.dispose();
+});
+
 test("a failed start rejects the shared promise so concurrent waiters don't hang", async () => {
     const sidecar = new FakeSidecarClient();
     // Disable initialize acks so start blocks at awaitInitialization —

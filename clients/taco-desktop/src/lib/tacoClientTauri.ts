@@ -482,8 +482,20 @@ export class TacoClient extends TacoClientBase {
                 // daemon answered initialize, so the UI's follow-up RPCs
                 // (re-attach etc.) hit a serving process instead of the void.
                 if (this.epochs.observe("*", result.instanceId) === "replaced") {
+                    // Match emitSessionEpoch's isolation: a listener throw must
+                    // not skip replacedCwds.clear() nor bubble to the outer
+                    // catch (which would mark the successful handshake as
+                    // failed). Per-listner try/catch — a misbehaving subscriber
+                    // only loses its own notification, not the whole sweep or
+                    // the rest of the workspace notifications.
                     for (const cwd of this.replacedCwds) {
-                        for (const handler of this.epochChangeHandlers) handler(cwd);
+                        for (const handler of this.epochChangeHandlers) {
+                            try {
+                                handler(cwd);
+                            } catch (err) {
+                                console.error("[taco] workspace-epoch handler threw", err);
+                            }
+                        }
                     }
                     this.replacedCwds.clear();
                 }

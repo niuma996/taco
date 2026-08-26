@@ -43,15 +43,20 @@ export interface TacoClient extends TacoClientBase {}
  * `.params.protocol`. The hello frame was retired in P2; the synthetic shape
  * exists only to keep the contract narrow and the migration small.
  */
-function makeLegacyHelloPush(protocol: typeof SIDECAR_PROTOCOL_VERSION): ServerPush {
+function makeLegacyHelloPush(
+    protocol: typeof SIDECAR_PROTOCOL_VERSION,
+    serverVersion: string,
+    pid: number,
+    instanceId: string,
+): ServerPush {
     return {
         method: "sidecar.hello" as ServerPush["method"],
         workspace: "*",
         session: "",
         params: {
-            version: "synthetic",
-            pid: 0,
-            instanceId: "",
+            version: serverVersion,
+            pid,
+            instanceId,
             protocol,
         } as SidecarHelloParams,
     };
@@ -198,7 +203,12 @@ export class TacoClient extends TacoClientBase {
         const result = (await this.initialize(
             { major: SIDECAR_PROTOCOL_VERSION.major, minor: SIDECAR_PROTOCOL_VERSION.minor },
             clientCapabilities,
-        )) as unknown as { protocolVersion?: { major?: unknown; minor?: unknown } };
+        )) as unknown as {
+            protocolVersion?: { major?: unknown; minor?: unknown };
+            serverVersion?: unknown;
+            pid?: unknown;
+            instanceId?: unknown;
+        };
         const protocol = result?.protocolVersion;
         if (typeof protocol?.major !== "number" || typeof protocol?.minor !== "number") {
             throw new Error("sidecar initialize response missing protocol version");
@@ -208,9 +218,22 @@ export class TacoClient extends TacoClientBase {
                 `sidecar protocol ${protocol.major}.${protocol.minor} is not supported; client is ${SIDECAR_PROTOCOL_VERSION.major}.${SIDECAR_PROTOCOL_VERSION.minor}`,
             );
         }
-        // Return a synthetic hello-shaped push so legacy callers reading
-        // `.params.protocol` keep working until they migrate to handshake().
-        return makeLegacyHelloPush(protocol as typeof SIDECAR_PROTOCOL_VERSION);
+        // Map the live serverVersion / pid / instanceId from the initialize
+        // response into the legacy hello-shaped return so debug-console REPL
+        // and node-tui keep printing real diagnostic values, not placeholders.
+        // serverVersion / pid / instanceId are required by InitializeResult
+        // but the cast above defensively narrows them so a malformed response
+        // falls back to the same placeholders we used to hard-code.
+        const serverVersion =
+            typeof result?.serverVersion === "string" ? result.serverVersion : "unknown";
+        const pid = typeof result?.pid === "number" ? result.pid : 0;
+        const instanceId = typeof result?.instanceId === "string" ? result.instanceId : "";
+        return makeLegacyHelloPush(
+            protocol as typeof SIDECAR_PROTOCOL_VERSION,
+            serverVersion,
+            pid,
+            instanceId,
+        );
     }
 
     /** Pull — single request/response. */
