@@ -26,18 +26,24 @@ python3 taco_client.py [cwd]
 ## What it does
 
 1. Spawns `taco-sidecar`
-2. Reads and validates the `sidecar.hello` push frame
-3. Sends the mandatory `initialize` handshake (protocol v1.0+) and
-   reads the server capabilities from the response
-4. Calls `workspace.list`
-5. Calls `session.create` (with `initialPrompt` to attach and run the
+2. Sends the mandatory `initialize` handshake (protocol v2+) and
+   reads the server capabilities + identity (serverVersion / pid /
+   instanceId) from the response
+3. Calls `workspace.list`
+4. Calls `session.create` (with `initialPrompt` to attach and run the
    first turn in one call)
-6. Sends `session.prompt` and demonstrates push-frame interleaving
+5. Sends `session.prompt` and demonstrates push-frame interleaving
 
 > **Why the `initialize` step matters.** Since protocol v1.0, the
 > server rejects every RPC except `initialize` with code
 > `not_initialized` until the handshake completes. The
 > `clientCapabilities` field is optional but recommended.
+>
+> **v1 → v2.** v2 removed the `sidecar.hello` push frame; the identity
+> fields that lived on it (`version` / `pid` / `instanceId`) are now
+> carried on the `initialize` response. The handshake is the same
+> single RPC, the readiness signal is the same response — only the
+> wire shape changed.
 
 ## Protocol note
 

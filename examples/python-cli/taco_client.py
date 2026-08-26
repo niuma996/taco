@@ -10,12 +10,15 @@ Usage:
 
 If `taco-sidecar` is not on PATH, set the TACO_SIDECAR_CMD environment variable.
 
-Wire flow (protocol v1.3+):
+Wire flow (protocol v2+):
     spawn sidecar
-    → read sidecar.hello push (liveness, optional)
-    → send initialize { protocolVersion: { major, minor } }           [MANDATORY]
-    → await initialize response
+    → send initialize { protocolVersion: { major: 2, minor: 0 } }     [MANDATORY]
+    → await initialize response (carries serverVersion / pid / instanceId)
     → call workspace.list, session.create, session.prompt, ...
+
+v1 of the protocol used a `sidecar.hello` push frame for liveness; v2
+removed it. The hello frame's identity fields moved onto the
+initialize response, which is now the readiness signal.
 """
 
 import json
@@ -72,28 +75,15 @@ def main() -> None:
         text=True,
     )
 
-    # ── 1. Read hello (liveness only) ────────────────────────────────────
-    hello = read_frame(proc.stdout)
-    assert hello.get("method") == "sidecar.hello", f"unexpected hello: {hello}"
-    print(
-        f"[python-cli] sidecar hello: version={hello['params']['version']}, "
-        f"pid={hello['params']['pid']}"
-    )
-
-    # ── 2. Initialize (mandatory since protocol v1.3) ──────────────────
+    # ── 1. Initialize (the readiness signal in v2) ─────────────────────
     # Without this step every subsequent RPC would be rejected with
-    # `not_initialized`. The hello frame's `params.protocol` is the sidecar's
-    # supported version; we echo the same major/minor back so the server
-    # accepts us.
-    server_protocol = hello["params"].get("protocol", {"major": 1, "minor": 3})
+    # `not_initialized`. The response carries serverVersion / pid /
+    # instanceId — same identity fields the v1 hello frame used to push.
     init_req = send(
         proc.stdin,
         "initialize",
         {
-            "protocolVersion": {
-                "major": server_protocol["major"],
-                "minor": server_protocol["minor"],
-            },
+            "protocolVersion": {"major": 2, "minor": 0},
             "clientCapabilities": {},
         },
     )
@@ -101,25 +91,28 @@ def main() -> None:
     if not init_resp.get("ok"):
         print(
             f"[python-cli] initialize failed: {init_resp.get('error')}; "
-            "is the sidecar on protocol v1.3+?"
+            "is the sidecar on protocol v2+?"
         )
         proc.stdin.close()
         proc.wait()
         sys.exit(1)
-    server_caps = init_resp["result"].get("serverCapabilities", {})
+    init_result = init_resp["result"]
+    server_caps = init_result.get("serverCapabilities", {})
     print(
-        f"[python-cli] initialize OK: server={init_resp['result']['serverVersion']}, "
-        f"protocol={init_resp['result']['protocolVersion']}, "
+        f"[python-cli] initialize OK: server={init_result['serverVersion']}, "
+        f"protocol={init_result['protocolVersion']}, "
+        f"pid={init_result.get('pid')}, "
+        f"instanceId={init_result.get('instanceId')}, "
         f"methods={len(server_caps.get('methods', []))}"
     )
 
-    # ── 3. List workspaces ───────────────────────────────────────────────
+    # ── 2. List workspaces ───────────────────────────────────────────────
     req_id = send(proc.stdin, "workspace.list")
     resp = read_response(proc.stdout, req_id)
     assert resp.get("ok"), f"workspace.list failed: {resp}"
     print(f"[python-cli] workspace.list: {resp['result']}")
 
-    # ── 4. Create a session ─────────────────────────────────────────────
+    # ── 3. Create a session ─────────────────────────────────────────────
     # session.create requires `workspace` (the cwd). Passing `initialPrompt`
     # both attaches the session and runs the first turn; without it the session
     # is created but not attached, and a later session.prompt would fail with
@@ -134,7 +127,7 @@ def main() -> None:
     session_id = resp["result"]["sessionId"]
     print(f"[python-cli] session.create: sessionId={session_id}")
 
-    # ── 5. Prompt on the attached session ──────────────────────────────
+    # ── 4. Prompt on the attached session ──────────────────────────────
     # session.prompt is a long-running RPC; the server pushes session.event
     # frames before responding. read_response() prints those pushes and returns
     # only when the id-matched response arrives.

@@ -21,7 +21,7 @@ echo '{"id":"1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}' | npx ts
 期望 stderr/stdout 输出（顺序）：
 
 ```
-{"id":"<uuid>","method":"sidecar.hello","workspace":"*","params":{"version":"0.1.0","pid":...}}
+{"id":"<uuid>","ok":true,"result":{"serverVersion":"0.1.0","protocolVersion":{"major":2,"minor":0},"pid":...,"instanceId":"..."}}
 [sidecar] listening on stdio. sessionsRoot=~/.taco/sessions, agentConfig=~/.taco/taco.json
 {"id":"1","ok":true,"result":{"cwd":"/tmp/x","sessionsRoot":"~/.taco/sessions"}}
 ```
@@ -63,7 +63,7 @@ pnpm start /tmp/x
 
 在 `taco>` 提示符输入一行文本。期望：
 
-- 连上即收到 hello
+- 连上即完成 initialize 握手（v2 不再发送 hello 推送帧）
 - 收到 `session.event` push 时终端打 `[event] ...`（payload 被截到 120 字符，**不做** token 级流式渲染）
 - 一轮完成后终端打印 `[response] ...`
 

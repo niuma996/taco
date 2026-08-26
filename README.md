@@ -65,7 +65,8 @@ cd packages/sidecar
 pnpm dev   # tsx watch, NDJSON on stdio
 ```
 
-On startup the sidecar writes `sidecar.hello` and waits for stdin. Drive it from another terminal with any NDJSON-aware client.
+On startup the sidecar is ready to serve the `initialize` RPC (protocol v2+).
+Drive it from another terminal with any NDJSON-aware client.
 
 ### Run the desktop
 
@@ -81,15 +82,14 @@ Tauri WebView opens with the sidebar (workspaces + sessions) and a chat pane. Th
 
 ## Protocol
 
-Taco enforces a two-step handshake (mandatory since v1.0):
+Taco enforces a single `initialize` handshake (mandatory since v1.0; the v1 `sidecar.hello` push frame was retired in v2):
 
 ```
-1. server writes:  sidecar.hello   { version, pid, instanceId, protocol }
-2. client sends:   initialize      { protocolVersion, clientCapabilities }
-   server replies: initialize      { serverVersion, serverCapabilities }
+client sends:   initialize      { protocolVersion, clientCapabilities }
+server replies: initialize      { serverVersion, serverCapabilities, instanceId, pid }
 ```
 
-`initialize` must succeed before any other RPC is accepted; clients that only read hello are rejected with `not_initialized` on their first real call.
+`initialize` must succeed before any other RPC is accepted; every other call returns `not_initialized` until it does.
 
 Full wire spec: [docs/sidecar-protocol.md](docs/sidecar-protocol.md). Regenerate with `pnpm sidecar:docs` after RPC changes.
 
@@ -115,7 +115,7 @@ const client = new TacoClient(
 );
 
 await client.start();
-await client.waitForReady();  // await hello + complete initialize handshake
+await client.handshake();   // protocol v2+: initialize RPC; returns InitializeResult
 client.onPush((frame) => console.log("[push]", frame.method));
 
 await client.workspaceList();

@@ -31,7 +31,7 @@
 | **协议层** | NDJSON over stdio + JSON-RPC 风格（pull 请求/响应 + push 持续帧）|
 | **运行时** | 一个 sidecar 进程内**多 workspace + 多 session**，按 cwd 路由 |
 | **pull 接口** | workspace.list / ensure / dispose、session.list / create / attach / detach / history / prompt / steer / abort / setModel / listModels，以及 settings.* / channels.* / imPolicy.* / mcp.* / memory.* / commands_permission.* / skills.* / agents.* / checkpoints.* / tools.* / provider.* / extensions.* 全部 RPC。完整列表见 `docs/sidecar-protocol.md` |
-| **push 事件** | sidecar.hello、session.attached / detached / event / error / deleted / tool_call_{start,update,end}、subagent.spawned、session.compaction_{started,finished}、tasks.updated、plan.state.updated、models.changed、channel.status_changed、channels.conversations_changed、im.tools_enabled、im.policy_changed |
+| **push 事件** | session.attached / detached / event / error / deleted / tool_call_{start,update,end}、subagent.spawned、session.compaction_{started,finished}、tasks.updated、plan.state.updated、models.changed、channel.status_changed、channels.conversations_changed、im.tools_enabled、im.policy_changed |
 | **历史还原** | 通过 `session.history` 拉取完整 chat tree（entries + leafEntryId），客户端自行重建分支 |
 | **模型配置** | 走独立 config 目录 `~/.taco/taco.json`（`TacoGlobalConfigShape`），sessions 默认在 `~/.taco/sessions/` |
 

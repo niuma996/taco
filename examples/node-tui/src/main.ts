@@ -4,8 +4,8 @@
  * Demonstrates `createDefaultSidecarSpawn`, typed `TacoClient`, and reading
  * push frames (`session.event`) while an awaited RPC is in flight.
  *
- * Flow: start sidecar → waitForReady (hello + initialize handshake) → create
- * a session in `cwd` → each line typed at the prompt is sent via
+ * Flow (protocol v2+): start sidecar → handshake() (initialize RPC) →
+ * create a session in `cwd` → each line typed at the prompt is sent via
  * `sessionPrompt` and its result printed.
  */
 
@@ -37,9 +37,13 @@ client.onPush((frame: ServerPush) => {
 
 async function main() {
     await client.start();
-    const hello = await client.waitForReady();
-    const { version, pid } = hello.params as { version: string; pid: number };
-    term.print(`[hello] version=${version} pid=${pid}`);
+    // v2: handshake() sends initialize directly and returns the typed
+    // InitializeResult (serverVersion / pid / instanceId). The v1 hello
+    // push frame is gone.
+    const init = await client.handshake();
+    term.print(
+        `[init] version=${init.serverVersion} pid=${init.pid} ` + `instanceId=${init.instanceId}`,
+    );
 
     // Create a session in `cwd`. Without an initialPrompt the session is created
     // but not attached, so we pass one to attach + get the first reply in one call.

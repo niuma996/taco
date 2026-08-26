@@ -6,7 +6,7 @@
 
 ### Tier 1 — protocol smoke (no API key needed)
 
-Start sidecar, send hello + initialize + workspace.ensure:
+Start sidecar, send initialize + workspace.ensure:
 
 ```bash
 cd packages/sidecar
@@ -16,9 +16,12 @@ pnpm dev    # starts sidecar with stdio transport
 In a second terminal, drive the protocol manually (see
 `scripts/pack-smoke.mjs` for the canonical example). Expect:
 
-- `sidecar.hello` frame (liveness)
-- `initialize` response with `serverCapabilities`
+- `initialize` response with `serverCapabilities` (and identity:
+  `serverVersion` / `pid` / `instanceId`)
 - `workspace.ensure` returns `{ ok: true, result: { cwd, sessionsRoot } }`
+
+> Protocol v2 retired the `sidecar.hello` push frame; readiness and
+> identity now travel on the `initialize` response.
 
 ### Tier 2 — Node client smoke (no API key)
 
@@ -36,10 +39,11 @@ cd examples/node-tui
 pnpm start /tmp/test
 ```
 
-Type a line at the `taco>` prompt. Expect: hello frame on connect,
-`[event] ...` lines for each `session.event` push (the terminal
-truncates the payload to 120 chars — it does not render token-level
-streaming deltas), then `[response] ...` once the turn completes.
+Type a line at the `taco>` prompt. Expect: `initialize` handshake on
+connect (the v1 hello frame is gone), `[event] ...` lines for each
+`session.event` push (the terminal truncates the payload to 120 chars —
+it does not render token-level streaming deltas), then `[response] ...`
+once the turn completes.
 
 ### Tier 4 — desktop
 

@@ -41,7 +41,7 @@ import { createDefaultSidecarSpawn } from "@taco-ai/shared/spawn";
 
 const client = new TacoClient(createDefaultSidecarSpawn());
 await client.start();
-await client.waitForReady();
+await client.handshake();   // protocol v2+: initialize RPC; returns InitializeResult
 
 const list = await client.sessionList("/tmp/myproject");
 const sid = await client.sessionCreate({

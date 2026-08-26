@@ -59,46 +59,40 @@ interface ServerPush<TParams = unknown> {
 
 ## Startup
 
-Connection setup is a two-step handshake that has been mandatory since protocol v1.0.
-The legacy one-step flow ("read hello, then call any RPC") still works for hello decoding,
-but every RPC except `initialize` will be rejected with code `not_initialized` until step 2 succeeds.
+Connection setup is a single `initialize` RPC. The server rejects every
+RPC except `initialize` with code `not_initialized` until the handshake
+succeeds, so clients must send it as their first call.
 
-### Step 1 — hello (liveness)
+> **v1 → v2.** The `sidecar.hello` push frame that v1 used for liveness
+> and identity is retired in v2. The readiness signal and identity
+> fields (`serverVersion`, `pid`, `instanceId`, `protocolVersion`) now
+> travel on the `initialize` response. v1 clients are not accepted
+> against a v2 server.
 
-The server writes a single hello frame to stdout on start:
-
-```json
-{ "method": "sidecar.hello", "workspace": "*", "params": { "version": "0.1.0", "pid": <pid>, "instanceId": "<uuid>", "protocol": { "major": 1, "minor": 0 } } }
-```
-
-The `capabilities` field on `SidecarHelloParams` is deprecated since v1.0 and is no longer
-emitted; clients should read server capabilities from the `initialize` response instead.
-
-### Step 2 — initialize (mandatory)
+### `initialize` (mandatory)
 
 The client sends a single `initialize` request:
 
 ```json
-{ "id": "<uuid>", "method": "initialize", "params": { "protocolVersion": { "major": 1, "minor": 0 }, "clientCapabilities": { "uiLocale": "en" } } }
+{ "id": "<uuid>", "method": "initialize", "params": { "protocolVersion": { "major": 2, "minor": 0 }, "clientCapabilities": { "uiLocale": "en" } } }
 ```
 
 The server validates the client's protocol version with `isCompatibleClientProtocol`
 (major must match exactly; client minor must be `<=` server minor). The response is:
 
 ```json
-{ "id": "<uuid>", "ok": true, "result": { "serverVersion": "0.1.0", "serverCapabilities": { "methods": [...], "pushes": [...], "channels": [...] }, "protocolVersion": { "major": 1, "minor": 0 } } }
+{ "id": "<uuid>", "ok": true, "result": { "serverVersion": "0.1.0", "serverCapabilities": { "methods": [...], "pushes": [...], "channels": [...] }, "protocolVersion": { "major": 2, "minor": 0 }, "instanceId": "<uuid>", "pid": <pid> } }
 ```
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
 are not gated.
 
-### What about the legacy `waitForHello`?
+### Recommended client entry point
 
-`@taco-ai/shared` exposes both:
-
-- `TacoClient.waitForHello()` — returns the hello frame only. Sufficient for diagnostic / liveness checks, but any subsequent RPC will be rejected as `not_initialized`.
-- `TacoClient.waitForReady()` — awaits hello, then issues `initialize`. **This is the recommended entry point for any client that is going to call RPCs.**
+`@taco-ai/shared`'s `TacoClient.handshake()` sends `initialize`, validates the
+returned protocol, and returns the typed `InitializeResult` — that is the
+recommended single-call readiness check for any client that is going to call RPCs.
 
 ---
 
@@ -202,7 +196,6 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 
 | Method | When |
 |--------|------|
-| `sidecar.hello` | On startup (once). |
 | `session.attached` | When a session is attached. |
 | `session.detached` | When a session is detached. |
 | `session.event` | Generic session events (message deltas, errors, tool results). |
@@ -219,7 +212,6 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 <!-- PUSH_TABLE_START -->
 | Push method | Constant |
 |-------------|----------|
-| `sidecar.hello` | Hello |
 | `session.attached` | Attached |
 | `session.detached` | Detached |
 | `session.event` | Event |

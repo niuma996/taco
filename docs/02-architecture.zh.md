@@ -42,7 +42,7 @@ type RpcResponse<TResult> =
 ```typescript
 interface ServerPush<TParams> {
     id?: string;                   // 可选(主要用作 dedupe)
-    method: string;                // "session.event" / "sidecar.hello" / "session.attached" …
+    method: string;                // "session.event" / "session.attached" …
     workspace: WorkspaceId;       // 一级路由
     session?: SessionId;          // 二级路由(可选)
     params: TParams;
@@ -76,7 +76,8 @@ export const Methods = {
 Push 帧 method：
 
 ```typescript
-"sidecar.hello"     // 启动后立即发一次
+// 协议 v2: 不再发送 sidecar.hello 推送帧; 启动身份信息(serverVersion / pid /
+// instanceId)由 initialize RPC 的响应承载。
 "session.attached"  // attach 完成
 "session.detached"
 "session.event"     // AgentHarness emit 的事件直透(详见 §2.3)

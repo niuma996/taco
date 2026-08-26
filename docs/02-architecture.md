@@ -65,7 +65,7 @@ type RpcResponse<TResult = unknown> =
 ```typescript
 interface ServerPush<TParams = unknown> {
     id?: string;              // optional, mainly used for client-side dedupe
-    method: string;           // "session.event" / "sidecar.hello" / "session.attached" ...
+    method: string;           // "session.event" / "session.attached" ...
     workspace: WorkspaceId;  // primary routing key
     session?: SessionId;     // secondary routing key (optional)
     sessionKind?: "main" | "subagent";  // routes push to right pane in the desktop

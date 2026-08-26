@@ -65,7 +65,7 @@ cd packages/sidecar
 pnpm dev   # tsx watch,stdio 输出 NDJSON
 ```
 
-启动后 sidecar 写入 `sidecar.hello` 推送帧，等待 stdin。可用任意 NDJSON 客户端驱动。
+启动后 sidecar 直接进入可服务状态，等待 stdin 接收 `initialize` RPC（协议 v2+）。可用任意 NDJSON 客户端驱动。
 
 ### 启动桌面端
 
@@ -84,12 +84,11 @@ Tauri WebView 打开后显示侧边栏（workspaces + sessions）+ 聊天面板�
 Taco 强制两步握手（自 v1.0）：
 
 ```
-1. server writes:  sidecar.hello   { version, pid, instanceId, protocol }
-2. client sends:   initialize      { protocolVersion, clientCapabilities }
-   server replies: initialize      { serverVersion, serverCapabilities }
+1. client sends:   initialize      { protocolVersion, clientCapabilities }
+   server replies: initialize      { serverVersion, serverCapabilities, instanceId, pid }
 ```
 
-`initialize` 成功后才接受其他 RPC；仅读取 hello 的旧客户端会被 `not_initialized` 拒绝。
+`initialize` 成功后才接受其他 RPC。v2 不再发送 v1 的 `sidecar.hello` 推送帧，身份信息（version/pid/instanceId）合并到 initialize 响应中。
 
 完整协议见 [docs/sidecar-protocol.md](docs/sidecar-protocol.md)。修改 RPC 后用 `pnpm sidecar:docs` 重新生成。
 
@@ -117,7 +116,7 @@ const client = new TacoClient(
 );
 
 await client.start();
-await client.waitForReady();  // 等 hello + 完成 initialize 握手
+await client.handshake();    // 协议 v2+: initialize RPC; 返回 InitializeResult
 client.onPush((frame) => console.log("[push]", frame.method));
 
 await client.workspaceList();
