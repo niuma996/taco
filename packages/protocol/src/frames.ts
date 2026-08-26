@@ -38,8 +38,9 @@ export type CompactionFailureReason =
     | "nothing"
     | "harness_error";
 
-/** Current wire compatibility contract. A major mismatch is not interoperable. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
+/** Current wire compatibility contract. A major mismatch is not interoperable.
+ *  v2 dropped the `sidecar.hello` push frame; v1 clients are not accepted. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 0 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but
@@ -74,10 +75,10 @@ export function isCompatibleClientProtocol(client: { major: unknown; minor: unkn
 }
 
 /**
- * @deprecated The `sidecar.hello` push frame is being retired. Readiness is
- * proven by the `initialize` RPC exchange instead — `InitializeResult` now
- * carries `instanceId` and `pid`. Kept for one protocol transition period;
- * do not build new consumers on it.
+ * @deprecated The `sidecar.hello` push frame was removed in v2. Readiness is
+ * proven by the `initialize` RPC exchange; `InitializeResult` carries
+ * `instanceId` and `pid`. Kept for one protocol transition period; do not
+ * build new consumers on it.
  */
 export interface SidecarHelloParams {
     /** Sidecar package version, for diagnostics only. */
