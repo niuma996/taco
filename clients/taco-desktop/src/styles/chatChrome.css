@@ -30,12 +30,12 @@ button svg {
     justify-content: center;
     width: 24px;
     height: 24px;
-    /* Idle state is one level lighter than hover (--accent-bg-hover): visible but not dominant,
-       upgrades to --accent-bg-active on hover. */
+    /* Circular button with accent tint so it reads as a distinct control,
+       not just another glyph in the bar. */
     background: var(--accent-bg-hover);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-dim);
+    border: 1px solid var(--accent-bg-active);
+    border-radius: var(--radius-circle);
+    color: var(--accent);
     cursor: pointer;
     padding: 0;
     flex: 0 0 auto;

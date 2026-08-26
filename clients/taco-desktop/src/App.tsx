@@ -47,7 +47,11 @@ import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
-import { readClientSettings } from "./lib/clientSettings";
+import {
+    readClientSettings,
+    readPersistedSidebarCollapsed,
+    writePersistedSidebarCollapsed,
+} from "./lib/clientSettings";
 import {
     type DesktopConfig,
     isOnboardingRequired,
@@ -226,7 +230,10 @@ export default function App() {
     >("chat");
     // Sidebar collapse state — collapsed sidebar shrinks to a rail with only the
     // expand button, letting ChatPane fill the main area. Chat view only.
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    // Persisted to localStorage so the layout survives restarts.
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(
+        () => readPersistedSidebarCollapsed() ?? false,
+    );
 
     // Fallback chain mirrors activeLevel:
     //   1. per-session override (already shown)
@@ -627,7 +634,13 @@ export default function App() {
                                     <ChatPane
                                         ws={ws}
                                         sidebarCollapsed={sidebarCollapsed}
-                                        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+                                        onToggleSidebar={() =>
+                                            setSidebarCollapsed((v) => {
+                                                const next = !v;
+                                                writePersistedSidebarCollapsed(next);
+                                                return next;
+                                            })
+                                        }
                                         input={input}
                                         attachments={attachments}
                                         pending={

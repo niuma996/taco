@@ -6,8 +6,6 @@
     margin-right: 1rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
-    /* No left border — only top/right/bottom edges. Makes consecutive messages feel lighter. */
-    border-left: none;
     /* Same flex-shrink guard as `main` so wide content in a message
        can't widen the message bubble beyond the chat pane. */
     min-width: 0;

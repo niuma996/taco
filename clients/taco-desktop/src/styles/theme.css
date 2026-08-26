@@ -44,7 +44,6 @@
     --code-bg: #261a0d;
     /* Inline code text color — orange, stays legible on dark bg instead of going gray. */
     --code-fg: #f27c2e;
-    --code-border: var(--code-fg);
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(0, 0, 0, 0.4);
     --shadow-color-strong: rgba(0, 0, 0, 0.35);
@@ -186,7 +185,6 @@
     --code-bg: rgba(211, 95, 16, 0.1);
     /* Inline code text — deeper orange to ensure contrast on light bg. */
     --code-fg: #b25a14;
-    --code-border: var(--code-fg);
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(43, 38, 32, 0.18);
     --shadow-color-strong: rgba(43, 38, 32, 0.22);

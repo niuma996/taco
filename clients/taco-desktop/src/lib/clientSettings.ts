@@ -66,6 +66,7 @@ export const LS_THEME = "taco.theme";
 export const LS_DEBUG_MODE = "taco.debugMode";
 export const LS_LLM_DUMP_TO_FILE = "taco.llmDumpToFile";
 export const LS_UI_LANGUAGE = "taco.uiLanguage";
+export const LS_SIDEBAR_COLLAPSED = "taco.sidebarCollapsed";
 
 function isValidTheme(v: unknown): v is ThemePreference {
     return v === "light" || v === "dark" || v === "system";
@@ -154,6 +155,15 @@ export function readPersistedUiLanguage(): UiLanguagePreference | undefined {
 
 export function writePersistedUiLanguage(pref: UiLanguagePreference | undefined): void {
     writeLs(LS_UI_LANGUAGE, pref);
+}
+
+/** Synchronously read the chat sidebar collapsed state; returns undefined when missing / invalid. */
+export function readPersistedSidebarCollapsed(): boolean | undefined {
+    return readLs(LS_SIDEBAR_COLLAPSED, isBoolean);
+}
+
+export function writePersistedSidebarCollapsed(v: boolean | undefined): void {
+    writeLs(LS_SIDEBAR_COLLAPSED, v);
 }
 
 function readRaw(): PersistedClientSettings {
