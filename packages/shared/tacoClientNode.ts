@@ -37,6 +37,26 @@ export interface TacoClientOptions {
 // The 20 typed methods are injected by `createTypedRpc` on the base class and merged via namesake interface (see TacoClientBase).
 export interface TacoClient extends TacoClientBase {}
 
+/**
+ * Build a `sidecar.hello`-shaped push from an `initialize` response so
+ * `waitForReady`'s return value still satisfies legacy callers that read
+ * `.params.protocol`. The hello frame was retired in P2; the synthetic shape
+ * exists only to keep the contract narrow and the migration small.
+ */
+function makeLegacyHelloPush(protocol: typeof SIDECAR_PROTOCOL_VERSION): ServerPush {
+    return {
+        method: "sidecar.hello" as ServerPush["method"],
+        workspace: "*",
+        session: "",
+        params: {
+            version: "synthetic",
+            pid: 0,
+            instanceId: "",
+            protocol,
+        } as SidecarHelloParams,
+    };
+}
+
 // biome-ignore lint/suspicious/noUnsafeDeclarationMerging: see interface comment above
 export class TacoClient extends TacoClientBase {
     private proc?: ChildProcess;
@@ -160,43 +180,37 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * @deprecated Waiting on the hello frame is being retired; call
-     * `initialize` directly — its response carries `protocolVersion` and now
-     * also `instanceId`/`pid`. Kept for one protocol transition period.
-     *
-     * Liveness + capability handshake: wait for hello, then send `initialize` so
-     * the server's `not_initialized` guard lets subsequent RPCs through. The
-     * server's protocol version comes from the hello frame; we send the same
-     * `SIDECAR_PROTOCOL_VERSION` the client was built with. Throws if either
-     * step fails — the new server guard is a hard switch with no fallback.
+     * Liveness + capability handshake: send `initialize` directly — its
+     * response carries `protocolVersion`, `instanceId`, and `pid`. Previously
+     * also waited on the deprecated `sidecar.hello` push, which is no longer
+     * sent by the server; the old two-step would always time out under the
+     * new protocol. Kept under the same name so debug-console and downstream
+     * callers don't need to migrate.
      */
     async waitForReady(
         clientCapabilities?: ClientCapabilities,
-        options: { helloTimeoutMs?: number } = {},
+        _options: { helloTimeoutMs?: number } = {},
     ): Promise<ServerPush> {
-        const hello = await this.waitForHello(options.helloTimeoutMs);
-        // The desktop client gates on the hello protocol before initialize; do the
-        // same here so debug tooling rejects a stale sidecar up front instead of
-        // failing on a specific RPC at runtime. Validate the frame shape first so
-        // a malformed hello is distinguishable from a version mismatch in logs.
-        const params = hello.params as unknown;
-        if (params === null || typeof params !== "object") {
-            throw new Error("sidecar hello frame missing params object");
-        }
-        const protocol = (params as SidecarHelloParams).protocol;
+        // The hello frame is gone; initialize alone is now the readiness gate
+        // (response includes protocolVersion + instanceId/pid). Validate the
+        // returned protocol against this client's expectation so a stale
+        // sidecar is rejected up front instead of failing on a specific RPC.
+        const result = (await this.initialize(
+            { major: SIDECAR_PROTOCOL_VERSION.major, minor: SIDECAR_PROTOCOL_VERSION.minor },
+            clientCapabilities,
+        )) as unknown as { protocolVersion?: { major?: unknown; minor?: unknown } };
+        const protocol = result?.protocolVersion;
         if (typeof protocol?.major !== "number" || typeof protocol?.minor !== "number") {
-            throw new Error("sidecar hello frame missing protocol version");
+            throw new Error("sidecar initialize response missing protocol version");
         }
-        if (!isCompatibleSidecarProtocol(protocol)) {
+        if (!isCompatibleSidecarProtocol(protocol as typeof SIDECAR_PROTOCOL_VERSION)) {
             throw new Error(
                 `sidecar protocol ${protocol.major}.${protocol.minor} is not supported; client is ${SIDECAR_PROTOCOL_VERSION.major}.${SIDECAR_PROTOCOL_VERSION.minor}`,
             );
         }
-        await this.initialize(
-            { major: SIDECAR_PROTOCOL_VERSION.major, minor: SIDECAR_PROTOCOL_VERSION.minor },
-            clientCapabilities,
-        );
-        return hello;
+        // Return a synthetic hello-shaped push so legacy callers reading
+        // `.params.protocol` keep working until they migrate to handshake().
+        return makeLegacyHelloPush(protocol as typeof SIDECAR_PROTOCOL_VERSION);
     }
 
     /** Pull — single request/response. */

@@ -75,8 +75,11 @@ function probeDaemonInitialize(path: string, timeoutMs = 5_000): Promise<DaemonP
     return new Promise((resolve) => {
         const sock: Socket = connect(path);
         let buf = "";
+        let settled = false;
         const timer = setTimeout(() => finish("wedged"), timeoutMs);
         function finish(result: DaemonProbe): void {
+            if (settled) return;
+            settled = true;
             clearTimeout(timer);
             sock.destroy();
             resolve(result);
@@ -95,24 +98,29 @@ function probeDaemonInitialize(path: string, timeoutMs = 5_000): Promise<DaemonP
         });
         sock.on("data", (chunk) => {
             buf += chunk.toString("utf8");
-            const nl = buf.indexOf("\n");
-            if (nl === -1) return;
-            try {
-                const frame = JSON.parse(buf.slice(0, nl)) as {
-                    id?: unknown;
-                    ok?: unknown;
-                };
-                // An RPC response echoes the request id and carries ok —
-                // push frames never do. Success or error alike prove the
-                // event loop is serving frames.
-                finish(
-                    typeof frame.id === "string" && typeof frame.ok === "boolean"
-                        ? "ready"
-                        : "wedged",
-                );
-            } catch {
-                finish("wedged");
+            // Drain every newline-terminated frame: a healthy daemon may push
+            // `session.*` / IM / channel frames ahead of the probe's RPC
+            // response (push fan-out to late-attaching connections), and the
+            // probe must not mistake those for an unresponsive event loop.
+            // Only the response carrying id === "probe" + ok:boolean settles.
+            let nl = buf.indexOf("\n");
+            while (nl !== -1) {
+                const line = buf.slice(0, nl);
+                buf = buf.slice(nl + 1);
+                let frame: { id?: unknown; ok?: unknown };
+                try {
+                    frame = JSON.parse(line) as { id?: unknown; ok?: unknown };
+                } catch {
+                    continue;
+                }
+                if (typeof frame.id !== "string" || typeof frame.ok !== "boolean") continue;
+                // Any RPC response (success or error) means the event loop
+                // reached our request and answered — the daemon is alive and
+                // serving frames, regardless of protocol-version outcome.
+                finish("ready");
+                return;
             }
+            nl = buf.indexOf("\n");
         });
         sock.once("error", () => finish("absent"));
     });

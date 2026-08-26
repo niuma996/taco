@@ -134,7 +134,7 @@ test("a start issued after initialize resolves immediately", async () => {
     await client.dispose();
 });
 
-test("daemon death notifies workspace epoch subscribers immediately", async () => {
+test("daemon replacement notifies epoch subscribers on the new handshake", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     const replacements: string[] = [];
@@ -142,11 +142,15 @@ test("daemon death notifies workspace epoch subscribers immediately", async () =
 
     await client.start("/workspace/a");
     await client.start("/workspace/b");
-    // Exit fires epoch handlers for every started workspace right away —
-    // the UI resets stale state without waiting for the reconnect handshake
-    // (which sees a freshly-cleared epoch table and detects nothing).
+    // Exit itself must NOT fire epoch handlers — the dead daemon's owner set
+    // is snapshotted (replacedCwds) and the epoch table keeps the old
+    // instanceId, so the next handshake classifies the new daemon as
+    // "replaced" and fires then, once the replacement is serving.
     sidecar.emitExit({ code: undefined });
+    assert.deepEqual(replacements, []);
 
+    sidecar.instanceId = "instance-2";
+    await client.start("/workspace/a");
     assert.deepEqual(replacements.sort(), ["/workspace/a", "/workspace/b"]);
     await client.dispose();
 });

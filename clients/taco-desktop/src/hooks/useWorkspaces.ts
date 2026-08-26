@@ -347,6 +347,22 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 });
             } else if (action.type === "SIDECAR_RESTARTED") {
                 dispatchWs({ type: "SIDECAR_RESTARTED", cwd: action.cwd });
+                // The replacement daemon starts with no attached sessions —
+                // re-attach the active one so per-session RPCs (setModel,
+                // setLevel, prompt) work again. Fires after the new daemon's
+                // initialize handshake, so the attach lands on a serving
+                // process. Without this, optimistic UI updates roll back on
+                // the first "session not attached" error.
+                const sid = workspacesRef.current[action.cwd]?.activeSession;
+                if (sid) {
+                    void attachSessionInternalRef.current(action.cwd, sid).catch((err) => {
+                        console.error(
+                            "[taco] re-attach after sidecar restart failed",
+                            action.cwd,
+                            err,
+                        );
+                    });
+                }
             } else if (action.type === "ERROR") {
                 setErrorBanner(action.message);
                 if (action.cwd && action.sid) {
@@ -534,6 +550,14 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     );
 
     const attachSession = attachSessionInternal;
+
+    // Bridge for `dispatch` (declared above attachSessionInternal — a direct
+    // reference would hit the TDZ in its deps array, and a stale closure if
+    // omitted). SIDECAR_RESTARTED's re-attach reads through this ref.
+    const attachSessionInternalRef = useRef(attachSessionInternal);
+    useEffect(() => {
+        attachSessionInternalRef.current = attachSessionInternal;
+    }, [attachSessionInternal]);
 
     const switchWorkspaceInternal = useCallback(
         async (cwd: string, persist = true): Promise<void> => {

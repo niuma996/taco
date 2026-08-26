@@ -66,6 +66,14 @@ export class TacoClient extends TacoClientBase {
     private readonly sidecar: SidecarClient;
     private readonly rpcTimeoutMs: number;
     /**
+     * Workspaces owned by a daemon that has since exited. Snapshotted in
+     * handleExit (before ensuredCwds is cleared) and consumed by the next
+     * successful initialize handshake's replaced-sweep, so epoch handlers
+     * fire exactly once per daemon replacement — at the moment the new
+     * daemon is confirmed serving, not when the old one dies.
+     */
+    private replacedCwds = new Set<WorkspaceId>();
+    /**
      * Tracks whether the sidecar's `initialize` handshake has completed in this
      * process. Reset whenever the underlying sidecar exits (handleExit /
      * dispose). Server-side `not_initialized` guard rejects every RPC except
@@ -177,6 +185,7 @@ export class TacoClient extends TacoClientBase {
         this.processInitialized = false;
         this.pendingProcessCwd = undefined;
         this.ensuredCwds.clear();
+        this.replacedCwds.clear();
         this.epochs.clearAll();
         // disposeAll SIGTERMs on the Rust side, with SIGKILL after 1s as fallback.
         await this.sidecar.disposeAll();
@@ -466,14 +475,17 @@ export class TacoClient extends TacoClientBase {
             if (typeof result.instanceId === "string") {
                 this.currentInstanceId = result.instanceId;
                 // Process-level epoch — instanceId change ⇒ daemon replaced
-                // (upgrade swap mid-session); fire per-workspace handlers so
-                // the UI resets state owned by the old instance. The handshake
-                // itself is already against the new instance, so unlike the
-                // old hello-driven path there is nothing to re-negotiate.
+                // (restart after death, upgrade swap mid-session). Fire
+                // per-workspace handlers for the cwds the dead daemon owned
+                // (snapshotted in handleExit; ensuredCwds is still repopulating
+                // at this point). Timing matters: this runs only after the new
+                // daemon answered initialize, so the UI's follow-up RPCs
+                // (re-attach etc.) hit a serving process instead of the void.
                 if (this.epochs.observe("*", result.instanceId) === "replaced") {
-                    for (const cwd of this.ensuredCwds) {
+                    for (const cwd of this.replacedCwds) {
                         for (const handler of this.epochChangeHandlers) handler(cwd);
                     }
+                    this.replacedCwds.clear();
                 }
             }
             // A missing instanceId means a pre-P1 sidecar (version skew during
@@ -521,16 +533,14 @@ export class TacoClient extends TacoClientBase {
             this.rejectWorkspacePending(cwd, reason);
         }
         this.rejectAllPending(reason);
-        // Daemon death replaces the owner of every started workspace. Fire
-        // the epoch handlers here, before the state clear below: the
-        // reconnect handshake observes a freshly-cleared epoch table and
-        // cannot detect "replaced" on its own. UI hooks (SIDECAR_RESTARTED,
-        // compaction-state resets) must not wait for the reconnect.
-        for (const cwd of this.ensuredCwds) {
-            for (const handler of this.epochChangeHandlers) handler(cwd);
-        }
+        // Daemon death replaces the owner of every started workspace. The
+        // epoch table is deliberately NOT cleared: the reconnect handshake's
+        // `observe("*", newInstance)` must see the old instanceId to classify
+        // as "replaced". Snapshot the started cwds here — `ensuredCwds` is
+        // cleared below, but the replaced-sweep in runInitialize still needs
+        // to know which workspaces the dead daemon owned.
+        this.replacedCwds = new Set(this.ensuredCwds);
         this.ensuredCwds.clear();
-        this.epochs.clearAll();
         // PR4: schedule an upgrade-aware reconnect. We don't reconnect from
         // `dispose()` because that's a deliberate shutdown — the caller
         // owns the lifecycle. `reconnectCwd` stays set so the loop knows
