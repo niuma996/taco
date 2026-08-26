@@ -22,13 +22,13 @@ function initializeFrame(id: string, minor = 0): string {
         id,
         method: "initialize",
         params: {
-            protocolVersion: { major: 1, minor },
+            protocolVersion: { major: 2, minor },
             clientCapabilities: { uiLocale: "en" },
         },
     });
 }
 
-/** Boots a server on an in-memory transport and drops the hello frame. */
+/** Boots a server on an in-memory transport. */
 async function bootServer(): Promise<{ server: SidecarServer; transport: InMemoryTransport }> {
     const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
     const transport = new InMemoryTransport();
@@ -57,7 +57,7 @@ describe("initialize handshake (stdio boundary)", () => {
         assert.equal(probeCalls, 0, "handler must not run before initialize");
     });
 
-    it("returns server version, capabilities, and protocol version", async () => {
+    it("returns server version, capabilities, protocol version, and identity", async () => {
         const { transport } = await bootServer();
         const resp = await sendLine(transport, initializeFrame("init-1"));
         assert.equal(resp.ok, true);
@@ -66,11 +66,17 @@ describe("initialize handshake (stdio boundary)", () => {
             serverVersion: string;
             serverCapabilities: { methods: string[]; pushes: string[] };
             protocolVersion: { major: number; minor: number };
+            instanceId: string;
+            pid: number;
         };
         assert.equal(typeof result.serverVersion, "string");
         assert.ok(result.serverCapabilities.methods.includes("initialize"));
-        assert.ok(result.serverCapabilities.pushes.includes("sidecar.hello"));
-        assert.deepEqual(result.protocolVersion, { major: 1, minor: 0 });
+        // v2 dropped the `sidecar.hello` push frame; the hello-shaped
+        // identity fields now travel on the initialize response.
+        assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
+        assert.deepEqual(result.protocolVersion, { major: 2, minor: 0 });
+        assert.equal(typeof result.instanceId, "string");
+        assert.equal(typeof result.pid, "number");
     });
 
     it("lets ordinary RPC through after initialize", async () => {

@@ -56,7 +56,7 @@ type DaemonProbe = "ready" | "absent" | "wedged";
  *  must stay self-contained (see probeDaemonInitialize). An incompatible
  *  version still gets an error response, which proves liveness — bump in
  *  lockstep when the major changes. */
-const PROBE_PROTOCOL_VERSION = { major: 1, minor: 0 };
+const PROBE_PROTOCOL_VERSION = { major: 2, minor: 0 };
 
 /** True readiness probe: connect to the NDJSON socket, send a literal
  *  `initialize` request, and wait for its RPC response. A bare TCP connect

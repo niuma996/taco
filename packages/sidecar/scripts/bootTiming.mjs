@@ -57,7 +57,7 @@ function waitForInitialize(path, timeoutMs = 5_000) {
                 id: "boot-timing-probe",
                 commandId: "boot-timing-probe",
                 method: "initialize",
-                params: { protocolVersion: { major: 1, minor: 0 }, clientCapabilities: {} },
+                params: { protocolVersion: { major: 2, minor: 0 }, clientCapabilities: {} },
             };
             sock.write(`${JSON.stringify(req)}\n`);
         });

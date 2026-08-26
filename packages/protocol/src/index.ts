@@ -107,7 +107,6 @@ export type {
     ServerPush,
     SessionId,
     SidecarCapabilities,
-    SidecarHelloParams,
     SupportedLocale,
     WorkspaceId,
 } from "./frames.js";

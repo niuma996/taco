@@ -5,12 +5,7 @@
  */
 
 import type { ChannelStatusChangedParams } from "./channels.js";
-import type {
-    CompactionFailureReason,
-    SessionId,
-    SidecarHelloParams,
-    WorkspaceId,
-} from "./frames.js";
+import type { CompactionFailureReason, SessionId, WorkspaceId } from "./frames.js";
 
 // Push event payloads
 
@@ -19,8 +14,8 @@ import type {
  * - streaming/lifecycle: `session.event`, `session.tool_call_*`,
  *   `session.attached`/`_detached`/`_error`/`_deleted`,
  *   `session.compaction_started` / `_finished`
- * - workspace-dimension: `sidecar.hello`, `models.changed`,
- *   `channel.status_changed`, `channels.conversations_changed`
+ * - workspace-dimension: `models.changed`, `channel.status_changed`,
+ *   `channels.conversations_changed`
  * - reverse-request: `command_permission.requested`, `subagent.spawned`,
  *   invalidate: `tasks.updated`, `plan.state.updated`
  */
@@ -37,9 +32,6 @@ import type {
 
 /** Push event method names. The client dispatcher routes by `method`. */
 export const PushMethods = {
-    /** @deprecated Being retired — use the `initialize` RPC as the readiness
-     *  signal; `InitializeResult.instanceId` replaces the hello payload. */
-    Hello: "sidecar.hello",
     Attached: "session.attached",
     Detached: "session.detached",
     Event: "session.event",
@@ -365,7 +357,6 @@ export interface ImWorkspacesInvalidatedParams {
  * surfaces as a typecheck error at the call site.
  */
 export interface PushParamsByMethod {
-    [PushMethods.Hello]: SidecarHelloParams;
     [PushMethods.Attached]: AttachedParams;
     [PushMethods.Detached]: DetachedParams;
     [PushMethods.Event]: EventParams;

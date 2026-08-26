@@ -75,22 +75,6 @@ export function isCompatibleClientProtocol(client: { major: unknown; minor: unkn
 }
 
 /**
- * @deprecated The `sidecar.hello` push frame was removed in v2. Readiness is
- * proven by the `initialize` RPC exchange; `InitializeResult` carries
- * `instanceId` and `pid`. Kept for one protocol transition period; do not
- * build new consumers on it.
- */
-export interface SidecarHelloParams {
-    /** Sidecar package version, for diagnostics only. */
-    version: string;
-    /** OS process id, for diagnostics only. */
-    pid: number;
-    /** Stable for the lifetime of one sidecar process. */
-    instanceId: string;
-    protocol: typeof SIDECAR_PROTOCOL_VERSION;
-}
-
-/**
  * Client-declared capabilities negotiated via the `initialize` RPC. The
  * shape is open: `uiLocale` is the only field declared today, but the index
  * signature lets clients and servers agree on new fields without a protocol
