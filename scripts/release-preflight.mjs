@@ -34,25 +34,37 @@ function run(cmd, args, opts = {}) {
 
 const runPnpm = (args, opts) => run(process.env.PNPM ?? "pnpm", args, opts);
 
-/** Probe artifact storage via gh CLI; returns bytes used or null. */
+/**
+ * Probe artifact + cache storage via gh CLI. GitHub does not expose a
+ * repo-level "usage / quota" endpoint on REST — the Settings → Actions
+ * page is the only canonical source — so we approximate by summing
+ * artifacts and cache usage. Returns null on any failure (gh missing,
+ * GH_REPO unset, etc).
+ */
 function probeArtifactStorage() {
     const gh = process.env.GH ?? "gh";
-    // /actions/usage endpoint does not exist on github.com; the documented
-    // surfaces are /settings/billing (org/repo) or /actions/cache/usage
-    // (cache only). Try cache as a lightweight signal — storage exhaustion
-    // tends to correlate across artifacts and cache.
-    const result = spawnSync(
+    const env = { ...process.env, GH_REPO: process.env.GH_REPO ?? "" };
+
+    const artifacts = spawnSync(
         gh,
-        ["api", "repos/{owner}/{repo}/actions/cache/usage", "--jq", ".size_in_bytes"],
-        {
-            cwd: REPO_ROOT,
-            encoding: "utf8",
-            env: { ...process.env, GH_REPO: process.env.GH_REPO ?? "" },
-        },
+        [
+            "api",
+            "repos/{owner}/{repo}/actions/artifacts",
+            "--paginate",
+            "--jq",
+            "[.artifacts[].size_in_bytes] | add // 0",
+        ],
+        { cwd: REPO_ROOT, encoding: "utf8", env },
     );
-    if (result.status !== 0 || !result.stdout.trim()) return null;
-    const bytes = Number(result.stdout.trim());
-    return Number.isFinite(bytes) ? bytes : null;
+    const cache = spawnSync(
+        gh,
+        ["api", "repos/{owner}/{repo}/actions/cache/usage", "--jq", ".active_caches_size_in_bytes"],
+        { cwd: REPO_ROOT, encoding: "utf8", env },
+    );
+    if (artifacts.status !== 0 || cache.status !== 0) return null;
+    const aBytes = Number(artifacts.stdout.trim()) || 0;
+    const cBytes = Number(cache.stdout.trim()) || 0;
+    return { artifacts: aBytes, cache: cBytes, total: aBytes + cBytes };
 }
 
 const checks = [];
@@ -83,21 +95,27 @@ check("desktop:build", () =>
 );
 check("pack:smoke", () => runPnpm(["pack:smoke"], { label: "pack:smoke" }));
 check("artifact-storage", () => {
-    const bytes = probeArtifactStorage();
-    if (bytes === null) {
+    const usage = probeArtifactStorage();
+    if (usage === null) {
         console.log(
             "  could not probe artifact storage (gh unavailable or no GH_REPO set) — skipping",
         );
         return;
     }
-    const gb = (bytes / 1024 / 1024 / 1024).toFixed(2);
-    if (bytes > 1.5 * 1024 ** 3) {
+    const fmt = (b) => (b / 1024 / 1024 / 1024).toFixed(2);
+    console.log(
+        `  artifacts: ${fmt(usage.artifacts)}GB | cache: ${fmt(usage.cache)}GB | total: ${fmt(usage.total)}GB`,
+    );
+    // GitHub Free private repo: 500MB artifact + 2GB cache (combined model varies
+    // by plan). Warn above 400MB total — releases often push 200-500MB of build
+    // artifacts and we want a soft signal, not a hard error.
+    if (usage.total > 400 * 1024 ** 2) {
         throw new Error(
-            `artifact storage at ${gb}GB; clean old artifacts before release ` +
+            `artifact storage at ${fmt(usage.total)}GB; clean old artifacts before release ` +
                 "(Settings → Actions → General → Artifact and log retention)",
         );
     }
-    console.log(`  artifact storage at ${gb}GB — OK`);
+    console.log("  under 400MB threshold — OK");
 });
 
 let failed = 0;
