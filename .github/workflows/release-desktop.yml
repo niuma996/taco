@@ -127,6 +127,15 @@ jobs:
           pnpm --version
           pnpm --filter @taco-ai/sidecar package:runtime -- --target x86_64-pc-windows-msvc --strict
 
+      # Build the CLI bundle up front so stageSidecar.mjs's fallback
+      # `pnpm --filter @taco-ai/cli build` path is never taken inside
+      # beforeBuildCommand — same Windows sub-spawn issue as the runtime
+      # build above (the child's stderr is swallowed and CI sees only
+      # "[stageSidecar] CLI bundle missing" with no actionable cause).
+      - name: Build CLI bundle
+        shell: bash
+        run: pnpm --filter @taco-ai/cli build
+
       # Override webviewInstallMode via --config JSON; leaves every other
       # field at its committed default. installMode stays at currentUser.
       - name: Bundle installer
@@ -248,6 +257,13 @@ jobs:
       # bundle jobs symmetric and makes the failure surface visible.
       - name: Build sidecar runtime
         run: pnpm --filter @taco-ai/sidecar package:runtime -- --target ${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }} --strict
+
+      # Build the CLI bundle up front so stageSidecar.mjs's fallback
+      # `pnpm --filter @taco-ai/cli build` path is never taken inside
+      # beforeBuildCommand. Kept symmetric with the Windows build job even
+      # though macOS does not hit the sub-spawn issue.
+      - name: Build CLI bundle
+        run: pnpm --filter @taco-ai/cli build
 
       # `--bundles app,dmg` is the explicit subset of bundle.targets the
       # Tauri config asks for. We pass a per-arch override so the universal
