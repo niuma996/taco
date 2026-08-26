@@ -1,7 +1,9 @@
 # Taco
 
+[English](README.md) · [中文](README.zh.md)
+
 <p align="center">
-  <img src="assets/taco.jpg" alt="Taco Logo" width="200" />
+  <img src="assets/taco.png" alt="Taco Logo" width="200" />
 </p>
 
 Taco 是一个极简 sidecar 协议层 + 多客户端调试终端，基于 Pi 的 `pi-agent-core` AgentHarness 构建，以 NDJSON-over-stdio JSON-RPC 接口暴露，使任何语言、任何客户端都能驱动多工作区、多会话的 agent 对话。

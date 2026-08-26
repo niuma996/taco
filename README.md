@@ -1,7 +1,9 @@
 # Taco
 
+[English](README.md) · [中文](README.zh.md)
+
 <p align="center">
-  <img src="assets/taco.jpg" alt="Taco Logo" width="200" />
+  <img src="assets/taco.png" alt="Taco Logo" width="200" />
 </p>
 
 A minimal sidecar protocol layer + multi-client debug terminal built on Pi's `pi-agent-core` AgentHarness, exposing an NDJSON-over-stdio JSON-RPC surface so any client in any language can drive multi-workspace, multi-session agent conversations.
