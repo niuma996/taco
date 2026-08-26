@@ -78,7 +78,12 @@ function main() {
     // `--rebuild` makes sync re-run package:runtime whenever the sidecar
     // src is newer than the staged bundle, so developers editing sidecar
     // code don't have to remember to rebuild before `tauri dev`.
-    if (!explicitTarget || explicitTarget === currentTriple()) {
+    // CI skips the sync: the launchd daemon is a dev-machine concept, and
+    // the source manifest no longer lists per-platform optionalDeps (Plan B),
+    // so sync:staging's require.resolve would fail on the runner. The release
+    // bundle stages the runtime into generated/ below and never reads the
+    // launchd path.
+    if (!process.env.CI && (!explicitTarget || explicitTarget === currentTriple())) {
         const sync = spawnSync(
             "pnpm",
             ["--filter", "@taco-ai/sidecar", "sync:staging", "--", "--rebuild"],
