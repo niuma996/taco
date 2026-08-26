@@ -16,8 +16,6 @@ import type {
     ClientCapabilities,
     InitializeResult,
     RpcRequest,
-    ServerPush,
-    SidecarHelloParams,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { isCompatibleSidecarProtocol, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
@@ -36,31 +34,6 @@ export interface TacoClientOptions {
 
 // The 20 typed methods are injected by `createTypedRpc` on the base class and merged via namesake interface (see TacoClientBase).
 export interface TacoClient extends TacoClientBase {}
-
-/**
- * Build a `sidecar.hello`-shaped push from an `initialize` response so
- * `waitForReady`'s return value still satisfies legacy callers that read
- * `.params.protocol`. The hello frame was retired in P2; the synthetic shape
- * exists only to keep the contract narrow and the migration small.
- */
-function makeLegacyHelloPush(
-    protocol: typeof SIDECAR_PROTOCOL_VERSION,
-    serverVersion: string,
-    pid: number,
-    instanceId: string,
-): ServerPush {
-    return {
-        method: "sidecar.hello" as ServerPush["method"],
-        workspace: "*",
-        session: "",
-        params: {
-            version: serverVersion,
-            pid,
-            instanceId,
-            protocol,
-        } as SidecarHelloParams,
-    };
-}
 
 // biome-ignore lint/suspicious/noUnsafeDeclarationMerging: see interface comment above
 export class TacoClient extends TacoClientBase {
@@ -159,81 +132,6 @@ export class TacoClient extends TacoClientBase {
             );
         }
         return result;
-    }
-
-    /**
-     * @deprecated The `sidecar.hello` push frame is being retired. Use the
-     * `initialize` RPC exchange as the readiness signal instead. Kept for one
-     * protocol transition period.
-     *
-     * Wait for the server's hello frame (used as a readiness signal).
-     */
-    async waitForHello(timeoutMs = 5_000): Promise<ServerPush> {
-        return new Promise((resolve, reject) => {
-            const t = setTimeout(() => {
-                unsub();
-                reject(new Error("hello timeout"));
-            }, timeoutMs);
-            const unsub = this.onPush((p) => {
-                if (p.method === "sidecar.hello") {
-                    clearTimeout(t);
-                    unsub();
-                    resolve(p);
-                }
-            });
-        });
-    }
-
-    /**
-     * Liveness + capability handshake: send `initialize` directly — its
-     * response carries `protocolVersion`, `instanceId`, and `pid`. Previously
-     * also waited on the deprecated `sidecar.hello` push, which is no longer
-     * sent by the server; the old two-step would always time out under the
-     * new protocol. Kept under the same name so debug-console and downstream
-     * callers don't need to migrate.
-     */
-    async waitForReady(
-        clientCapabilities?: ClientCapabilities,
-        _options: { helloTimeoutMs?: number } = {},
-    ): Promise<ServerPush> {
-        // The hello frame is gone; initialize alone is now the readiness gate
-        // (response includes protocolVersion + instanceId/pid). Validate the
-        // returned protocol against this client's expectation so a stale
-        // sidecar is rejected up front instead of failing on a specific RPC.
-        const result = (await this.initialize(
-            { major: SIDECAR_PROTOCOL_VERSION.major, minor: SIDECAR_PROTOCOL_VERSION.minor },
-            clientCapabilities,
-        )) as unknown as {
-            protocolVersion?: { major?: unknown; minor?: unknown };
-            serverVersion?: unknown;
-            pid?: unknown;
-            instanceId?: unknown;
-        };
-        const protocol = result?.protocolVersion;
-        if (typeof protocol?.major !== "number" || typeof protocol?.minor !== "number") {
-            throw new Error("sidecar initialize response missing protocol version");
-        }
-        if (!isCompatibleSidecarProtocol(protocol as typeof SIDECAR_PROTOCOL_VERSION)) {
-            throw new Error(
-                `sidecar protocol ${protocol.major}.${protocol.minor} is not supported; client is ${SIDECAR_PROTOCOL_VERSION.major}.${SIDECAR_PROTOCOL_VERSION.minor}`,
-            );
-        }
-        // Map the live serverVersion / pid / instanceId from the initialize
-        // response into the legacy hello-shaped return so debug-console REPL
-        // and node-tui keep printing real diagnostic values, not placeholders.
-        // serverVersion / pid / instanceId are required by InitializeResult
-        // but the cast above defensively narrows them so a malformed response
-        // falls back to the same placeholders we used to hard-code.
-        const serverVersion =
-            typeof result?.serverVersion === "string" ? result.serverVersion : "unknown";
-        const pid = typeof result?.pid === "number" ? result.pid : 0;
-        const instanceId = typeof result?.instanceId === "string" ? result.instanceId : "";
-        return makeLegacyHelloPush(
-            protocol as typeof SIDECAR_PROTOCOL_VERSION,
-            serverVersion,
-            pid,
-            instanceId,
-        );
     }
 
     /** Pull — single request/response. */
