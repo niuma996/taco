@@ -12,8 +12,6 @@ import {
     type PushMethodName,
     PushMethods,
     type ServerPush,
-    SIDECAR_PROTOCOL_VERSION,
-    type SidecarHelloParams,
     type ToolCallEndParams,
     type ToolCallStartParams,
     type ToolCallUpdateParams,
@@ -74,35 +72,12 @@ export function makePushFrame<TParams = unknown>(opts: PushEventOptions): Server
 }
 
 /** Process-level identity: stable for the lifetime of this sidecar process.
- *  Clients treat a change as "daemon replaced". Must NOT be regenerated per
- *  connection — a fresh value on every hello made reconnects look like
- *  process replacement and reset client-side epochs spuriously. */
+ *  Clients treat a change as "daemon replaced" and react accordingly. The
+ *  value is generated once at module load and must NOT be regenerated per
+ *  connection or per RPC — a fresh value per handshake would make routine
+ *  reconnects look like process replacement and reset client-side epochs
+ *  spuriously. Reported on every `initialize` response. */
 export const SIDECAR_INSTANCE_ID = randomUUID();
-
-/**
- * @deprecated The hello frame is being retired; the `initialize` RPC response
- * carries the same identity fields (`InitializeResult.instanceId` / `pid`).
- * Kept for one protocol transition period.
- *
- * Liveness-only hello frame (fired once on spawn). Capability negotiation
- * lives on the `initialize` RPC.
- */
-export function makeHelloFrame(
-    version: string,
-    pid: number,
-    instanceId = SIDECAR_INSTANCE_ID,
-): ServerPush<SidecarHelloParams> {
-    return makePushFrame<SidecarHelloParams>({
-        method: PushMethods.Hello,
-        workspace: "*",
-        params: {
-            version,
-            pid,
-            instanceId,
-            protocol: SIDECAR_PROTOCOL_VERSION,
-        },
-    });
-}
 
 /**
  * Splits the three `tool_execution_*` AgentHarnessEvent variants from the

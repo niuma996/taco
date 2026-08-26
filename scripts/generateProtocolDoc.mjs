@@ -137,9 +137,6 @@ const pushSection = renderPushTable(pushMethods);
 const updated = doc
     // Header version banner — keep the rest of the front-matter block intact.
     .replace(/> \*\*版本\*\*: [0-9A-Za-z.+-]+/, `> **版本**: ${version}`)
-    // sidecar.hello example frame's `version` field. We only touch the JSON
-    // example so the prose around it is left as-is.
-    .replace(/("method": "sidecar.hello",[\s\S]*?"version": ")[^"]+(")/, `$1${version}$2`)
     .replace(
         /<!-- RPC_TABLE_START -->[\s\S]*?<!-- RPC_TABLE_END -->/,
         `<!-- RPC_TABLE_START -->\n${rpcSection}\n<!-- RPC_TABLE_END -->`,
