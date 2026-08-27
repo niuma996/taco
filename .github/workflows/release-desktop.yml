@@ -325,20 +325,13 @@ jobs:
           set -euo pipefail
           VERSION="0.11"
           ASSET="minisign-${VERSION}-linux.tar.gz"
-          # Verify the tarball's sha256 against GitHub's release asset
-          # digest. The digest is computed by GitHub at upload time and is
-          # the same value every fetch returns; the curl below can't be
-          # trusted until it matches.
-          EXPECTED_SHA=$(gh api \
-            "/repos/jedisct1/minisign/releases/tags/v${VERSION}" \
-            --jq ".assets[] | select(.name == \"${ASSET}\") | .digest" \
-            | sed 's/^sha256://')
-          if [ -z "$EXPECTED_SHA" ]; then
-            echo "::error::could not look up sha256 for ${ASSET} (release tag v${VERSION} missing?)"
-            exit 1
-          fi
+          # Verify the tarball's sha256 against a pinned value. jedisct1/minisign
+          # release assets do not populate the GitHub release asset digest
+          # field, so we can't verify dynamically. Update the pin when bumping
+          # VERSION (download from the releases page and `shasum -a 256`).
+          EXPECTED_SHA="f0a0954413df8531befed169e447a66da6868d79052ed7e892e50a4291af7ae0"
           curl -fsSL -o /tmp/minisign.tar.gz \
-            "https://github.com/jedisct1/minisign/releases/download/v${VERSION}/${ASSET}"
+            "https://github.com/jedisct1/minisign/releases/download/${VERSION}/${ASSET}"
           ACTUAL_SHA=$(sha256sum /tmp/minisign.tar.gz | awk '{print $1}')
           if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
             echo "::error::minisign tarball sha256 mismatch (expected ${EXPECTED_SHA}, got ${ACTUAL_SHA})"
