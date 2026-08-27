@@ -338,7 +338,7 @@ jobs:
             exit 1
           fi
           tar -xzf /tmp/minisign.tar.gz -C /tmp
-          sudo install -m 0755 /tmp/minisign-${VERSION}/linux/x86_64/minisign /usr/local/bin/minisign
+          sudo install -m 0755 /tmp/minisign-linux/x86_64/minisign /usr/local/bin/minisign
           minisign -v
 
       - name: Stage private key
