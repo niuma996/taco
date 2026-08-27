@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { PermissionBroker } from "../../src/permissions/permissionBroker.ts";
+import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { createShellTool } from "../../src/tools/shellTool.ts";
 
 const ASK_CONFIG = { mode: "ask" as const, rules: [] };
@@ -119,5 +120,34 @@ describe("shellTool permission results", () => {
         assert.equal(result.isError, true);
         assert.equal(result.details.exitCode, 7);
         assert.equal(result.details.reason, undefined);
+    });
+});
+
+describe("shell tool env scrubbing", () => {
+    afterEach(() => {
+        for (const k of Object.keys(process.env)) {
+            if (k.endsWith("_API_KEY")) delete process.env[k];
+        }
+    });
+
+    it("does not expose injected provider keys to executed commands", {
+        skip: process.platform === "win32",
+    }, async () => {
+        // Constructing the store mirrors the key into process.env (for pi)
+        // and records it as injected so shell.ts can scrub it.
+        const store = new ProviderKeyStore({ anthropic: "sk-ant-secret-1234567890" });
+        assert.equal(store.has("anthropic"), true);
+        assert.equal(process.env.ANTHROPIC_API_KEY, "sk-ant-secret-1234567890");
+
+        const tool = createShellTool();
+        const result = (await tool.execute(
+            "tool-call-1",
+            { command: "env" },
+            undefined,
+            undefined,
+            context("/tmp"),
+        )) as ShellToolResult;
+
+        assert.equal(textOf(result).includes("sk-ant-secret-1234567890"), false);
     });
 });

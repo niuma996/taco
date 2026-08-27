@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { TextContent } from "@earendil-works/pi-ai";
+import { isInjectedEnvKey } from "../runtime/providerKeyStore.ts";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB
@@ -42,10 +43,18 @@ export async function runShell(
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     if (opts.signal?.aborted) throw new Error("Operation aborted");
 
+    // Scrub provider API keys from the child env: shell runs model-generated
+    // commands, so it must not inherit keys ProviderKeyStore mirrors into
+    // process.env for pi's own subprocesses. Only keys we injected are removed
+    // (isInjectedEnvKey); a user's own GOOGLE_API_KEY etc. stays put.
+    const childEnv = Object.fromEntries(
+        Object.entries(process.env).filter(([k]) => !isInjectedEnvKey(k)),
+    );
+
     const child =
         spawnArgs === null
-            ? spawn(command, { cwd: opts.cwd, shell: true, env: process.env })
-            : spawn(command, spawnArgs, { cwd: opts.cwd, env: process.env });
+            ? spawn(command, { cwd: opts.cwd, shell: true, env: childEnv })
+            : spawn(command, spawnArgs, { cwd: opts.cwd, env: childEnv });
 
     let stdout = "";
     let stderr = "";

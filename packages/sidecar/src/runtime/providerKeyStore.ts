@@ -7,20 +7,28 @@
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { injectApiKeysToEnv } from "../config/config.ts";
 
+/**
+ * Process-wide record of `*_API_KEY` env vars this class injected.
+ * `process.env` is process-global, so the record is too — shell tools read it
+ * to scrub provider keys from the environment they hand to model-run commands.
+ *
+ * syncToEnv only clears stale env keys that this class itself wrote — external
+ * shell-injected `*_API_KEY` values (not written by us) are never deleted.
+ * Without this, an empty apiKeys at startup would let syncToEnv wipe derived
+ * env keys like shell-set GOOGLE_API_KEY, violating the "credential → env"
+ * spirit of pi's resolution order.
+ */
+const injectedEnvKeys = new Set<string>();
+
+/** Whether `key` names an env var ProviderKeyStore injected (not the user's own). */
+export function isInjectedEnvKey(key: string): boolean {
+    return injectedEnvKeys.has(key);
+}
+
 export class ProviderKeyStore implements CredentialStore {
     private apiKeys: Record<string, string>;
     /** Per-provider promise chain, satisfying CredentialStore.modify's serialization contract. */
     private readonly chains = new Map<string, Promise<unknown>>();
-    /**
-     * Set of `*_API_KEY` env keys this class injected (tracked by env-var name).
-     *
-     * syncToEnv only clears stale env keys that this class itself wrote —
-     * external shell-injected `*_API_KEY` values (not written by us) are
-     * never deleted. Without this, an empty apiKeys at startup would let
-     * syncToEnv wipe derived env keys like shell-set GOOGLE_API_KEY,
-     * violating the "credential → env" spirit of pi's resolution order.
-     */
-    private readonly injectedEnvKeys = new Set<string>();
 
     constructor(initialApiKeys: Record<string, string> = {}) {
         this.apiKeys = { ...initialApiKeys };
@@ -119,15 +127,15 @@ export class ProviderKeyStore implements CredentialStore {
     private syncToEnv(): void {
         const patch = injectApiKeysToEnv(this.apiKeys);
         for (const k of Object.keys(process.env)) {
-            if (this.injectedEnvKeys.has(k) && !patch[k] && k.endsWith("_API_KEY")) {
+            if (injectedEnvKeys.has(k) && !patch[k] && k.endsWith("_API_KEY")) {
                 delete process.env[k];
-                this.injectedEnvKeys.delete(k);
+                injectedEnvKeys.delete(k);
             }
         }
         for (const k of Object.keys(patch)) {
             if (patch[k]) {
                 process.env[k] = patch[k];
-                this.injectedEnvKeys.add(k);
+                injectedEnvKeys.add(k);
             }
         }
     }
