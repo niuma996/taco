@@ -55,6 +55,7 @@ AGENTS.md
 CLAUDE.md
 DESIGN.md
 docs/plans/
+docs/local/
 
 # Tauri updater signing keys (PR5 / docs/signing.md). The keypair is
 # generated locally by the operator and never committed — only the
