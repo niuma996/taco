@@ -2,12 +2,11 @@ name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
-# Cancel superseded PR runs to save minutes. Push-to-main runs are rare and
-# short — keep them.
+# PRs gate merges; tag pushes are owned by release-desktop.yml and
+# release-sidecar.yml, which run their own type + lint + build checks.
+# Plain pushes to main skip CI.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
