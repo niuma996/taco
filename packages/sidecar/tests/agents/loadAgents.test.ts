@@ -87,6 +87,31 @@ describe("parseAgentMarkdown", () => {
         assert.ok(def);
         assert.equal(def.fewShots, undefined);
     });
+
+    it("parses context from frontmatter", () => {
+        const def = parseAgentMarkdown(
+            "---\nname: reviewer\ndescription: x\ncontext: fork\n---\nbody",
+            "/x/reviewer.md",
+            "builtin",
+        );
+        assert.ok(def);
+        assert.equal(def.context, "fork");
+    });
+
+    it("omits context when the frontmatter key is absent or invalid", () => {
+        const absent = parseAgentMarkdown(
+            "---\nname: x\ndescription: y\n---\nbody",
+            "/x/x.md",
+            "builtin",
+        );
+        assert.equal(absent?.context, undefined);
+        const invalid = parseAgentMarkdown(
+            "---\nname: x\ndescription: y\ncontext: bogus\n---\nbody",
+            "/x/x.md",
+            "builtin",
+        );
+        assert.equal(invalid?.context, undefined);
+    });
 });
 
 describe("loadAgents", () => {

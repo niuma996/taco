@@ -16,6 +16,6 @@ describe("server.ts agent loading path", () => {
         // to avoid host-fs drift on dev machines contaminating the builtin assertions.
         const agents = await loadAgents({ builtinDir, userDirs: [] });
         const types = agents.map((a) => a.agentType).sort();
-        assert.deepEqual(types, ["explorer", "verification"]);
+        assert.deepEqual(types, ["explorer", "reviewer", "verification"]);
     });
 });

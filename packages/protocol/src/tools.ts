@@ -114,6 +114,8 @@ export interface AgentEntry {
     agentType: string;
     description: string;
     whenToUse?: string;
+    /** Context mode from the definition's frontmatter; absent = "independent". */
+    context?: "independent" | "fork";
     source: "builtin" | "user";
 }
 
@@ -134,6 +136,8 @@ export interface AgentsContentResult {
     systemPrompt: string;
     description: string;
     whenToUse?: string;
+    /** Context mode from the definition's frontmatter; absent = "independent". */
+    context?: "independent" | "fork";
     source: "builtin" | "user";
 }
 

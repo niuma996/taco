@@ -27,7 +27,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import type { SubagentSpawnContext } from "../agents/types.ts";
+import type { SubagentContextMode, SubagentSpawnContext } from "../agents/types.ts";
 import type { CheckpointStore } from "../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../config/config.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
@@ -37,7 +37,7 @@ import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
 import { createSkillTool } from "../skills/skillTool.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";
-import { createAgentTool } from "../tools/agent.ts";
+import { type AgentTypeDescriptor, createAgentTool } from "../tools/agent.ts";
 import { createAgentContinueTool } from "../tools/agentContinue.ts";
 import type { TacoToolContext } from "../tools/context.ts";
 import type { TacoTool } from "../tools/index.ts";
@@ -90,6 +90,7 @@ export interface SessionRegistryOptions {
         parentToolCallId: string;
         agentType: string;
         prompt: string;
+        context?: SubagentContextMode;
         signal?: AbortSignal;
     }) => Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }>;
     /**
@@ -110,8 +111,13 @@ export interface SessionRegistryOptions {
     readonly spawnSkillSubagent: (
         opts: SpawnSkillSubagentOptions,
     ) => Promise<{ subSessionId?: string; resultText: string; isError: boolean }>;
-    /** Available agent types — describes which agentTypes the agent tool can invoke. */
-    readonly availableAgentTypes: readonly string[];
+    /**
+     * Available agent types — which agentTypes the agent tool can invoke, plus
+     * the frontmatter the model needs to choose between them. Descriptors, not
+     * bare names: the tool description is the only place the model sees agent
+     * capabilities, so a name alone makes user-defined agents unpickable.
+     */
+    readonly availableAgentTypes: readonly AgentTypeDescriptor[];
     /** Available skills — injected into SkillTool. */
     readonly skills: readonly TacoSkill[];
     /** User-level memory store — drives extraction + context injection. */
@@ -209,7 +215,7 @@ export class SessionRegistry extends EventEmitter {
     private readonly spawnSubagent: SessionRegistryOptions["spawnSubagent"];
     private readonly resumeSubagent: SessionRegistryOptions["resumeSubagent"];
     private readonly spawnSkillSubagent: SessionRegistryOptions["spawnSkillSubagent"];
-    private readonly availableAgentTypes: readonly string[];
+    private readonly availableAgentTypes: readonly AgentTypeDescriptor[];
     /**
      * Per-session tool factory: takes a sessionId and returns tools with that
      * sessionId injected. When WorkspaceRuntime owns task/plan tools and
@@ -408,6 +414,7 @@ export class SessionRegistry extends EventEmitter {
                     parentToolCallId: args.parentToolCallId,
                     agentType: args.agentType,
                     prompt: args.prompt,
+                    context: args.context,
                     signal: args.signal,
                 }),
             continue: (args) =>

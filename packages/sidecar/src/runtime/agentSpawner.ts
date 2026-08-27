@@ -12,7 +12,8 @@ import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../agents/filterTools.ts";
-import type { AgentDefinition, AgentFewShot } from "../agents/types.ts";
+import { buildForkedContext, resolveContextMode } from "../agents/forkedHistory.ts";
+import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../agents/types.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import { buildSystemPrompt, filterContributorsForTools } from "../prompts/buildSystemPrompt.ts";
@@ -70,6 +71,16 @@ export interface AgentSpawnerOptions {
     readonly parentInstructionsBlock?: string;
 }
 
+/**
+ * Agent types whose `shell` tool is swapped for a read-only-broker instance.
+ *
+ * Membership is a permission boundary, not a hint: these profiles tell the
+ * model it must not mutate anything, and prose alone does not stop a shell
+ * call. Any profile whose body claims read-only must be listed here, or the
+ * child inherits the user's root-session allowlist and can write.
+ */
+export const READ_ONLY_SHELL_AGENT_TYPES: ReadonlySet<string> = new Set(["explorer", "reviewer"]);
+
 /** Arguments for one subagent run. Shared by `executeSubagentSession` and its body. */
 export interface SubagentSessionArgs {
     parentSessionId: SessionId;
@@ -109,6 +120,13 @@ export interface SubagentSessionArgs {
      * If omitted, we compute it from the parent session's metadata.
      */
     childDepth?: number;
+    /**
+     * Pre-rendered `<forked_context>` block, or undefined when this child runs
+     * independent. Computed by `spawnSubagent` from the parent branch before
+     * delegating; injected ahead of few-shots/role and persisted into the child
+     * metadata so `agentContinue` resumes byte-identically.
+     */
+    forkedContext?: string;
 }
 
 export class AgentSpawner extends EventEmitter {
@@ -259,6 +277,7 @@ export class AgentSpawner extends EventEmitter {
                 parentSessionId: args.parentSessionId,
                 parentToolCallId: args.parentToolCallId,
                 depth: childDepth,
+                ...(args.forkedContext !== undefined ? { forkedContext: args.forkedContext } : {}),
             },
         });
         this.sessionRegistry.invalidateListCache();
@@ -281,11 +300,12 @@ export class AgentSpawner extends EventEmitter {
             await this.sessionRegistry.toolsForChildSession(childSessionId);
         const childTools = childToolsRaw.filter((tool) => allowedNames.has(tool.name));
 
-        // ─── Read-only shell for explorer ─────────────────────────────────
+        // ─── Read-only shell for read-only profiles ───────────────────────
         // After filtering, replace the shell tool with an isolated-broker
         // version so that a user's root-session allowlist cannot leak in.
         const isReadOnlyShell =
-            args.agentType === "explorer" && childTools.some((t) => t.name === "shell");
+            READ_ONLY_SHELL_AGENT_TYPES.has(args.agentType) &&
+            childTools.some((t) => t.name === "shell");
         if (isReadOnlyShell) {
             const readonlyBroker = new PermissionBroker(
                 () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
@@ -322,6 +342,9 @@ export class AgentSpawner extends EventEmitter {
             childToolNameSet,
         );
         const profileContributors: SystemPromptContributor[] = [];
+        // Fork transcript goes first so it precedes the role body — it is
+        // background for the task, not the task itself.
+        if (args.forkedContext) profileContributors.push({ append: args.forkedContext });
         if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
         if (role) profileContributors.push({ append: role });
         // Inherit parent's resolved instruction blocks (CLAUDE.md / AGENTS.md /
@@ -460,6 +483,7 @@ export class AgentSpawner extends EventEmitter {
         parentToolCallId: string;
         agentType: string;
         prompt: string;
+        context?: SubagentContextMode;
         signal?: AbortSignal;
     }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }> {
         const def = this.findAgent(args.agentType);
@@ -474,6 +498,9 @@ export class AgentSpawner extends EventEmitter {
                 isError: true,
             };
         }
+        // Unlike childDepth there is a safe default, so an omitted value is not
+        // a caller error — see resolveContextMode for the precedence rationale.
+        const contextMode = resolveContextMode(args.context, def.context);
         // Compute parent depth to feed filterToolsForAgent before delegating.
         const parentMeta = await this.sessionRegistry.openSession(args.parentSessionId);
         const parentDepth = Number(
@@ -481,6 +508,15 @@ export class AgentSpawner extends EventEmitter {
         );
         const childDepth = parentDepth + 1;
         const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
+        // Fork: render the parent transcript once, up front. Reading the branch
+        // here (not inside runSubagentSession) keeps the I/O out of the hot
+        // attach path and lets us persist the exact string the child saw so a
+        // later resume re-injects byte-identically.
+        let forkedContext: string | undefined;
+        if (contextMode === "fork") {
+            const parentSession = await this.repo.open(parentMeta);
+            forkedContext = buildForkedContext(await parentSession.getBranch());
+        }
         return this.executeSubagentSession({
             parentSessionId: args.parentSessionId,
             parentToolCallId: args.parentToolCallId,
@@ -492,6 +528,7 @@ export class AgentSpawner extends EventEmitter {
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             maxTurns: def.maxTurns,
+            forkedContext,
         });
     }
 
@@ -665,11 +702,13 @@ export class AgentSpawner extends EventEmitter {
             await this.sessionRegistry.toolsForChildSession(args.subSessionId);
         const attachedChildTools = childToolsRaw.filter((tool) => allowedNames.has(tool.name));
 
-        // ─── Read-only shell for explorer ─────────────────────────────────
+        // ─── Read-only shell for read-only profiles ───────────────────────
         // After filtering, replace the shell tool with an isolated-broker
         // version so that a user's root-session allowlist cannot leak in.
         const isReadOnlyShell =
-            agentType === "explorer" && attachedChildTools.some((t) => t.name === "shell");
+            agentType !== undefined &&
+            READ_ONLY_SHELL_AGENT_TYPES.has(agentType) &&
+            attachedChildTools.some((t) => t.name === "shell");
         if (isReadOnlyShell) {
             const readonlyBroker = new PermissionBroker(
                 () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
@@ -692,7 +731,13 @@ export class AgentSpawner extends EventEmitter {
             this.systemPromptContributors,
             childToolNameSet,
         );
+        // Re-inject the fork transcript from the spawn-time snapshot so a resume
+        // sees the same context the child started with, even if the parent has
+        // since compacted or continued.
+        const forkedContext =
+            md !== undefined && typeof md.forkedContext === "string" ? md.forkedContext : undefined;
         const profileContributors: SystemPromptContributor[] = [];
+        if (forkedContext) profileContributors.push({ append: forkedContext });
         if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
         if (role) profileContributors.push({ append: role });
         // Inherit parent's resolved instruction blocks (CLAUDE.md / AGENTS.md /

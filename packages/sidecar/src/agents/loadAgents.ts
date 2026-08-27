@@ -8,7 +8,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
-import type { AgentDefinition, AgentFewShot } from "./types.ts";
+import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "./types.ts";
 
 interface AgentFrontmatter {
     name?: string;
@@ -17,6 +17,7 @@ interface AgentFrontmatter {
     tools?: unknown;
     maxTurns?: unknown;
     fewShots?: unknown;
+    context?: unknown;
     [key: string]: unknown;
 }
 
@@ -53,6 +54,7 @@ export function parseAgentMarkdown(
         tools,
         maxTurns: Number.isFinite(maxTurns) ? maxTurns : undefined,
         fewShots: parseFewShots(frontmatter.fewShots),
+        context: parseContext(frontmatter.context),
         source,
         filePath,
     };
@@ -81,6 +83,17 @@ function parseFewShots(raw: unknown): ReadonlyArray<AgentFewShot> | undefined {
         out.push({ user: userText, assistant: assistantText });
     }
     return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Validate the optional `context:` frontmatter entry. Only "independent" and
+ * "fork" are legal; anything else (including omitted) yields undefined so the
+ * caller defaults to "independent". Mirrors maxTurns' lenient style — a bad
+ * value must not abort the whole agent load.
+ */
+function parseContext(raw: unknown): SubagentContextMode | undefined {
+    if (raw === "independent" || raw === "fork") return raw;
+    return undefined;
 }
 
 async function loadDir(dir: string, source: "builtin" | "user"): Promise<AgentDefinition[]> {

@@ -26,6 +26,7 @@ export function registerAgentsHandlers(): void {
                 agentType: a.agentType,
                 description: a.description,
                 whenToUse: a.whenToUse,
+                context: a.context,
                 source: a.source,
             }));
             return { agents };
@@ -49,6 +50,7 @@ export function registerAgentsHandlers(): void {
                 systemPrompt: def.systemPrompt,
                 description: def.description,
                 whenToUse: def.whenToUse,
+                context: def.context,
                 source: def.source,
             };
         },

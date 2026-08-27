@@ -14,20 +14,68 @@ import type { SubagentSpawnContext } from "../agents/types.ts";
 
 export type AgentTool = AgentHarnessTool<ExecutionToolContext>;
 
-const SUBAGENT_TYPE_HINTS = `
-- explorer — read-only search/tracing; CANNOT modify files
-- verification — adversarial tester: run builds, tests, checks; return PASS/FAIL/PARTIAL verdict`;
+/**
+ * What the model needs to pick a `subagent_type`. A structural subset of
+ * `AgentDefinition` so this layer does not depend on the loader's shape.
+ *
+ * `availableTypes` used to be `string[]`, which meant the hint block was a
+ * hardcoded blurb covering only the builtins: every user-defined agent reached
+ * the model as a bare name with no capability description, and the blurb drifted
+ * out of step with frontmatter whenever a profile was overridden.
+ */
+export interface AgentTypeDescriptor {
+    agentType: string;
+    /** One-line capability summary from frontmatter. May be empty. */
+    description?: string;
+    /** Longer selection guidance from frontmatter; preferred over description when present. */
+    whenToUse?: string;
+    /** Resolved default context mode; "fork" is called out since it costs more. */
+    context?: "independent" | "fork";
+}
 
-export function createAgentTool(ctx: SubagentSpawnContext, availableTypes: string[]): AgentTool {
+/** Collapse whitespace so a multi-line frontmatter string stays one bullet. */
+function oneLine(text: string): string {
+    return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Render the per-type hint bullets from the loaded definitions.
+ *
+ * `whenToUse` wins over `description` because it is written to answer "should I
+ * pick this one", which is exactly the decision being made here. Types with
+ * neither still get a bullet — a bare name is worse, but omitting the type
+ * entirely would hide that it is callable.
+ */
+function buildTypeHints(types: readonly AgentTypeDescriptor[]): string {
+    if (types.length === 0) return "";
+    const bullets = types.map((t) => {
+        const summary = oneLine(t.whenToUse ?? t.description ?? "");
+        const forkNote =
+            t.context === "fork"
+                ? " (defaults to forked context: it sees this conversation, which costs more than an independent spawn)"
+                : "";
+        return summary.length > 0
+            ? `\n- ${t.agentType} — ${summary}${forkNote}`
+            : `\n- ${t.agentType}${forkNote}`;
+    });
+    return bullets.join("");
+}
+
+export function createAgentTool(
+    ctx: SubagentSpawnContext,
+    availableTypes: readonly AgentTypeDescriptor[],
+): AgentTool {
     const MAX_TYPES_IN_DESCRIPTION = 20;
     const displayTypes = availableTypes.slice(0, MAX_TYPES_IN_DESCRIPTION);
     const overflow = availableTypes.length - displayTypes.length;
+    const names = displayTypes.map((t) => t.agentType);
     const typeList =
-        displayTypes.length > 0
+        names.length > 0
             ? overflow > 0
-                ? `${displayTypes.join(", ")} (${overflow} more, see agents.list)`
-                : displayTypes.join(", ")
+                ? `${names.join(", ")} (${overflow} more, see agents.list)`
+                : names.join(", ")
             : "(none configured)";
+    const SUBAGENT_TYPE_HINTS = buildTypeHints(displayTypes);
 
     const agentSchema = Type.Object({
         subagent_type: Type.String({
@@ -35,6 +83,12 @@ export function createAgentTool(ctx: SubagentSpawnContext, availableTypes: strin
         }),
         description: Type.String({ description: "3-5 word task summary (for display)." }),
         prompt: Type.String({ description: "The task for the subagent to perform." }),
+        context: Type.Optional(
+            Type.Union([Type.Literal("independent"), Type.Literal("fork")], {
+                description:
+                    'Context mode. Omit to use the agent type\'s configured default. "fork" additionally gives the subagent a transcript of this conversation up to now — use it when the task depends on what was already discussed or discovered.',
+            }),
+        ),
     });
 
     type AgentToolInput = Static<typeof agentSchema>;
@@ -42,7 +96,9 @@ export function createAgentTool(ctx: SubagentSpawnContext, availableTypes: strin
     return {
         name: "agent",
         label: "agent",
-        description: `Delegate a task to a subagent that runs in its own session with a constrained toolset. Available types: ${typeList}.${SUBAGENT_TYPE_HINTS} The subagent returns a text result when done. Safe to issue multiple \`agent\` calls in the same turn — each runs in its own session and they execute concurrently.`,
+        // The trailing prose starts on its own line: hint bullets are newline-led,
+        // so joining directly would run the last bullet into this sentence.
+        description: `Delegate a task to a subagent that runs in its own session with a constrained toolset. Available types: ${typeList}.${SUBAGENT_TYPE_HINTS}\nThe subagent returns a text result when done. Safe to issue multiple \`agent\` calls in the same turn — each runs in its own session and they execute concurrently.`,
         parameters: agentSchema,
         executionMode: "parallel",
         taco: {
@@ -61,6 +117,7 @@ export function createAgentTool(ctx: SubagentSpawnContext, availableTypes: strin
                 parentToolCallId: toolCallId,
                 agentType: params.subagent_type,
                 prompt: params.prompt,
+                context: params.context,
                 signal,
             });
             const text = isError ? `subagent error: ${resultText}` : resultText;

@@ -32,7 +32,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
-import type { AgentDefinition } from "../agents/types.ts";
+import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
     type ImWorkspacePolicy,
@@ -595,7 +595,16 @@ export class WorkspaceRuntime extends EventEmitter {
             spawnSubagent: (args) => this.agentSpawner.spawnSubagent(args),
             resumeSubagent: (args) => this.agentSpawner.resumeSubagent(args),
             spawnSkillSubagent: (opts) => this.agentSpawner.spawnSkillSubagent(opts),
-            availableAgentTypes: agents.map((a) => a.agentType),
+            // Descriptors, not names: the agent tool's description is the only
+            // surface where the model learns what each type is for, so pass the
+            // frontmatter through rather than re-describing builtins in a
+            // hardcoded blurb that user overrides would silently contradict.
+            availableAgentTypes: agents.map((a) => ({
+                agentType: a.agentType,
+                description: a.description,
+                whenToUse: a.whenToUse,
+                context: a.context,
+            })),
             skills,
             memoryStore: this.memoryStore,
             isIm,
@@ -872,6 +881,7 @@ export class WorkspaceRuntime extends EventEmitter {
         parentToolCallId: string;
         agentType: string;
         prompt: string;
+        context?: SubagentContextMode;
         signal?: AbortSignal;
     }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }> {
         return await this.agentSpawner.spawnSubagent(args);
