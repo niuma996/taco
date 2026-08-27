@@ -31,6 +31,7 @@ mod sidecar_launcher;
 /// Test-only re-exports for the daemon_reap integration test under
 /// `tests/daemon_reap.rs`. Hidden from the public docs because the
 /// symbols are crate-internal helpers, not a stable API.
+#[cfg(unix)]
 #[doc(hidden)]
 pub mod daemon_reap_test {
     pub use crate::daemon_reap::__test_only::*;

@@ -6,6 +6,8 @@
 //! Run:
 //!   cargo test --test daemon_reap_integration
 
+#![cfg(unix)]
+
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::net::UnixListener;

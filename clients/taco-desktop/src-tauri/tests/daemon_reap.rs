@@ -5,6 +5,8 @@
 //! Run:
 //!   cargo test --test daemon_reap
 
+#![cfg(unix)]
+
 use std::path::Path;
 use taco_desktop_lib::daemon_reap_test::*;
 
