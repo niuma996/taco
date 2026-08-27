@@ -447,7 +447,18 @@ export class AttachedSession extends EventEmitter {
 
         // harness AgentEvent → AttachedSession "event"
         const unsubEvent = harness.subscribe((event: AgentHarnessEvent) => {
-            attached.emit("event", event);
+            try {
+                attached.emit("event", event);
+            } catch (error) {
+                // A downstream listener that throws must not abort this callback:
+                // the checkpoint window close, memory extraction, and compaction
+                // bookkeeping below still have to run. One bad subscriber never
+                // starves the turn-boundary work.
+                log.warn("event listener threw; continuing turn-boundary bookkeeping", {
+                    eventType: event.type,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
 
             // Memory extraction — coordinator: same callback handles
             //   tool_execution_end ("memory") → pushes a Promise<number>
