@@ -363,7 +363,8 @@ Phase 1 is **single sidecar process, many workspaces and sessions**:
 - `call(method, params)`: write to stdin, cache a `Promise` in
   `pending: Map<id, { resolve, reject }>`, resolve on matching response.
 - `onPush(handler)`: register push listener.
-- `waitForHello()` / `waitForReady()`: lifecycle helpers.
+- `handshake()`: `initialize` RPC — validates the server's protocol version
+  and returns the typed `InitializeResult` (lifecycle + readiness gate).
 - `dispose()`: SIGTERM child, 1-second grace, SIGKILL on timeout.
 
 `createTypedRpc(dispatch)` injects 53 typed convenience methods

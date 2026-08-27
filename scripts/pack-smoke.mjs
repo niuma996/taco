@@ -151,7 +151,7 @@ async function assertProtocolLoads(consumerDir) {
         `import('@taco-ai/protocol').then(m => {` +
             ` if (typeof m.SIDECAR_PROTOCOL_VERSION !== 'object') throw new Error('SIDECAR_PROTOCOL_VERSION missing');` +
             ` if (typeof m.isCompatibleSidecarProtocol !== 'function') throw new Error('isCompatibleSidecarProtocol missing');` +
-            ` if (!m.isCompatibleSidecarProtocol({major:1, minor:5})) throw new Error('compat false on minor bump');` +
+            ` if (!m.isCompatibleSidecarProtocol({major:2, minor:5})) throw new Error('compat false on minor bump');` +
             "}).catch(e => { console.error(e.message); process.exit(1); })",
         consumerDir,
     );
