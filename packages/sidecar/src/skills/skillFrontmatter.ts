@@ -35,6 +35,18 @@ export function parseYamlFrontmatter(content: string): Record<string, unknown> {
 
 const frontmatterCache = new Map<string, SkillFrontmatter>();
 
+/**
+ * Drop every cached entry. Never happens on its own — `preloadSkillFrontmatter`
+ * / `readSkillFrontmatter` only ever add to this map, they don't expire
+ * anything. Call this before re-scanning skill directories on hot reload;
+ * otherwise an edited SKILL.md's frontmatter (runAs, inlineOnly, allowedTools,
+ * model) keeps serving the pre-edit value for the rest of the process
+ * lifetime, even though the skill body itself was re-read.
+ */
+export function clearSkillFrontmatterCache(): void {
+    frontmatterCache.clear();
+}
+
 /** Bulk-preload frontmatter for all loaded skills. Call once after loadSourcedSkills. */
 export function preloadSkillFrontmatter(skills: Skill[]): void {
     for (const s of skills) {

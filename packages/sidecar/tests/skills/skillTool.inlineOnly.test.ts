@@ -67,7 +67,7 @@ describe("SkillTool inlineOnly guard", () => {
             preloadSkillFrontmatter([skill]);
 
             let spawnCalled = false;
-            const tool = createSkillTool([skill], {
+            const tool = createSkillTool(() => [skill], {
                 parentSessionId: "sess-1",
                 getReinjector: () => undefined as unknown as SkillReinjectorHandle,
                 spawnSkillSubagent: async () => {
@@ -114,7 +114,7 @@ describe("SkillTool inlineOnly guard", () => {
             const skill = mkSkill("fan-out", fp);
             preloadSkillFrontmatter([skill]);
 
-            const tool = createSkillTool([skill], {
+            const tool = createSkillTool(() => [skill], {
                 parentSessionId: "sess-1",
                 getReinjector: () => undefined as unknown as SkillReinjectorHandle,
                 // spawnSkillSubagent omitted on purpose
@@ -148,7 +148,7 @@ describe("SkillTool inlineOnly guard", () => {
                 markInvoked: () => undefined,
                 enqueueInlineInjection: (m) => enqueued.push(m),
             };
-            const tool = createSkillTool([skill], {
+            const tool = createSkillTool(() => [skill], {
                 parentSessionId: "sess-1",
                 getReinjector: () => handle,
             });

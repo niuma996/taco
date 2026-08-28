@@ -7,6 +7,7 @@
  */
 
 import type { Skill } from "@earendil-works/pi-agent-core";
+import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
 
 export type SkillSource = "builtin" | "user";
 
@@ -20,4 +21,15 @@ export interface TacoSkill extends Skill {
      * `agentSpawner.spawnSkillSubagent`.
      */
     inlineOnly?: boolean;
+}
+
+/**
+ * One skill-directory scan: the loaded skills plus the warnings produced while
+ * loading them. Shared by `SidecarServer.loadSkills` (producer) and
+ * `WorkspaceRuntimeOptions.reloadSkills` (consumer) so hot reload cannot
+ * refresh the list while leaving diagnostics from a previous scan behind.
+ */
+export interface SkillScanResult {
+    skills: TacoSkill[];
+    diagnostics: SkillDiagnosticEntry[];
 }

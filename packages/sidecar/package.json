@@ -52,6 +52,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "@taco-ai/protocol": "workspace:*",
     "@taco-ai/shared": "workspace:*",
+    "chokidar": "4.0.3",
     "croner": "^9.0.0",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",

@@ -33,6 +33,7 @@ import {
     type SessionEventsGetResult,
     type SessionId,
     type SidecarCapabilities,
+    type SkillDiagnosticEntry,
     type SupportedLocale,
     type WorkspaceId,
 } from "@taco-ai/protocol";
@@ -83,8 +84,17 @@ import type {
 } from "../runtime/serverRpcSurface.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/slashNormalizedEnv.ts";
 import { WorkspaceRuntime } from "../runtime/workspace.ts";
-import { dedupeSkillsByName } from "../skills/dedupeSkills.ts";
-import { preloadSkillFrontmatter, readSkillFrontmatter } from "../skills/skillFrontmatter.ts";
+import { dedupeSkillsByNameWithDuplicates } from "../skills/dedupeSkills.ts";
+import {
+    checkSkillFrontmatter,
+    mapDuplicateDiagnostics,
+    mapLoaderDiagnostics,
+} from "../skills/skillDiagnostics.ts";
+import {
+    clearSkillFrontmatterCache,
+    preloadSkillFrontmatter,
+    readSkillFrontmatter,
+} from "../skills/skillFrontmatter.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import {
     applyTuiVisibilityToContent,
@@ -857,34 +867,37 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /**
-     * Load workspace-scoped assets (skills, agents, extensions). All touch the
-     * filesystem, so they are awaited before the synchronous WorkspaceRuntime
-     * constructor.
+     * Scan skill directories and return the deduped, frontmatter-stamped
+     * skill list. Extracted from `loadWorkspaceAssets` so hot reload
+     * (WorkspaceRuntime's `reloadSkills` callback) can re-run exactly this
+     * path instead of a second, drifting copy.
+     *
+     * Aggregate skills from multiple sources (<cwd>/.taco/skills +
+     * $TACO_HOME/skills + ~/.claude/skills + ~/.pi/skills + builtin
+     * skills/builtin, see defaultSkillDirs). loadSourcedSkills tags each
+     * entry with its source, and mapSkill stamps the source onto TacoSkill
+     * so skills.list RPC and the SkillsPane UI can distinguish builtin vs
+     * user skills.
+     *
+     * SlashNormalizedExecutionEnv wraps NodeExecutionEnv so listDir /
+     * fileInfo / canonicalPath return forward-slash paths even on
+     * Windows. pi-agent-core's `relativeEnvPath` compares paths with
+     * `path.startsWith(root + "/")` and falls back to returning the
+     * absolute path unchanged when separators don't match — on Windows
+     * that makes the `ignore` package throw "path should be a
+     * path.relative()'d string". Combined with `defaultSkillDirs`
+     * (also forward-slash normalized) both sides of the comparison are
+     * in `/` form and the scan succeeds.
      */
-    private async loadWorkspaceAssets(
+    private async loadSkills(
         fsCwd: string,
-        isIm: boolean,
-    ): Promise<{
-        skills: TacoSkill[];
-        agents: AgentDefinition[];
-        extensions?: Readonly<WorkspaceExtensionSet>;
-    }> {
-        // Aggregate skills from multiple sources (<cwd>/.taco/skills +
-        // $TACO_HOME/skills + ~/.claude/skills + ~/.pi/skills + builtin
-        // skills/builtin, see defaultSkillDirs). loadSourcedSkills tags each
-        // entry with its source, and mapSkill stamps the source onto TacoSkill
-        // so skills.list RPC and the SkillsPane UI can distinguish builtin vs
-        // user skills.
-        //
-        // SlashNormalizedExecutionEnv wraps NodeExecutionEnv so listDir /
-        // fileInfo / canonicalPath return forward-slash paths even on
-        // Windows. pi-agent-core's `relativeEnvPath` compares paths with
-        // `path.startsWith(root + "/")` and falls back to returning the
-        // absolute path unchanged when separators don't match — on Windows
-        // that makes the `ignore` package throw "path should be a
-        // path.relative()'d string". Combined with `defaultSkillDirs`
-        // (also forward-slash normalized) both sides of the comparison are
-        // in `/` form and the scan succeeds.
+    ): Promise<{ skills: TacoSkill[]; diagnostics: SkillDiagnosticEntry[] }> {
+        // Clear first, not after: an edited SKILL.md's frontmatter
+        // (runAs/inlineOnly/allowedTools/model) must not keep serving a
+        // pre-edit value from a previous call's cache. Clearing an empty
+        // map (the cold-start case) is a no-op, so cold start and reload
+        // run the identical sequence rather than diverging.
+        clearSkillFrontmatterCache();
         const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
         const loaded = await loadSourcedSkills(
             skillEnv,
@@ -894,20 +907,60 @@ export class SidecarServer implements ServerRpcSurface {
         // pi's loadSourcedSkills does not dedupe internally; defaultSkillDirs
         // places .taco/skills first and builtin last, so dedupeSkillsByName
         // gives ".taco wins, builtin falls back" first-match semantics.
-        const skills = dedupeSkillsByName(loaded.skills.map((entry) => entry.skill));
+        const deduped = dedupeSkillsByNameWithDuplicates(loaded.skills.map((entry) => entry.skill));
+        const skills = deduped.kept;
         preloadSkillFrontmatter(skills);
         // Stamp frontmatter-only fields (currently: inlineOnly) onto each
         // TacoSkill so skills.list can surface them. preloadSkillFrontmatter
-        // must run first — readSkillFrontmatter returns from the cache.
+        // must run first — readSkillFrontmatter returns from the cache. The
+        // same pass lints the taco-private keys pi ignores, so a malformed
+        // runAs/inlineOnly/allowedTools surfaces as a diagnostic here rather
+        // than as a tool error at call time.
+        const frontmatterDiagnostics: SkillDiagnosticEntry[] = [];
         for (const s of skills) {
             const fm = readSkillFrontmatter(s.filePath);
             if (fm.inlineOnly === true) {
                 (s as TacoSkill).inlineOnly = true;
             }
+            frontmatterDiagnostics.push(...checkSkillFrontmatter(fm, s.filePath));
         }
+        // Logs stay: they are the only channel for headless / IM runs with no
+        // client to read `skills.list`. The returned copy is additional, not a
+        // replacement.
         for (const d of loaded.diagnostics) {
             log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);
         }
+        for (const dup of deduped.duplicates) {
+            log.warn(
+                `skill duplicate_name at ${dup.dropped.filePath}: "${dup.name}" shadowed by ${dup.keptFrom.filePath}`,
+            );
+        }
+        for (const d of frontmatterDiagnostics) {
+            log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);
+        }
+        const diagnostics = [
+            ...mapLoaderDiagnostics(loaded.diagnostics),
+            ...mapDuplicateDiagnostics(deduped.duplicates),
+            ...frontmatterDiagnostics,
+        ];
+        return { skills, diagnostics };
+    }
+
+    /**
+     * Load workspace-scoped assets (skills, agents, extensions). All touch the
+     * filesystem, so they are awaited before the synchronous WorkspaceRuntime
+     * constructor.
+     */
+    private async loadWorkspaceAssets(
+        fsCwd: string,
+        isIm: boolean,
+    ): Promise<{
+        skills: TacoSkill[];
+        skillDiagnostics: SkillDiagnosticEntry[];
+        agents: AgentDefinition[];
+        extensions?: Readonly<WorkspaceExtensionSet>;
+    }> {
+        const { skills, diagnostics: skillDiagnostics } = await this.loadSkills(fsCwd);
 
         // Load agents (builtin + user-defined). Same pattern as skills:
         // file I/O is awaited here.
@@ -918,7 +971,7 @@ export class SidecarServer implements ServerRpcSurface {
         // produce a frozen WorkspaceExtensionSet.
         const extensions = await activateExtensions(this.extensionRegistry, { cwd: fsCwd, isIm });
 
-        return { skills, agents, extensions };
+        return { skills, skillDiagnostics, agents, extensions };
     }
 
     /** For handlers / method layer — lazily created on first access */
@@ -930,7 +983,7 @@ export class SidecarServer implements ServerRpcSurface {
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
         const paths = this.resolveWorkspacePaths(cwd);
-        const { skills, agents, extensions } = await this.loadWorkspaceAssets(
+        const { skills, skillDiagnostics, agents, extensions } = await this.loadWorkspaceAssets(
             paths.executionCwd,
             paths.isIm,
         );
@@ -989,9 +1042,20 @@ export class SidecarServer implements ServerRpcSurface {
                 customProviders: this.customProviders,
                 agents,
                 resources: { skills },
+                skillDiagnostics,
                 executionCwd: paths.executionCwd,
                 imPolicy: paths.imPolicy,
                 toolRegistry,
+                // Hot-reload wiring: only the user-writable dirs are watched —
+                // the builtin dir ships with the binary and only changes via
+                // an app upgrade (a full restart), not hot-editing. Passing
+                // both together is what makes WorkspaceRuntime opt into
+                // watching; omitting either leaves reload off (e.g. tests that
+                // construct WorkspaceRuntime directly without a live server).
+                skillDirs: defaultSkillDirs(paths.executionCwd)
+                    .filter((d) => d.source === "user")
+                    .map((d) => d.path),
+                reloadSkills: () => this.loadSkills(paths.executionCwd),
                 // IM channel identity for the <im_channel> context tag — the
                 // workspace only calls this for IM workspaces, passing the
                 // route's channelId; peer/chat ids never reach it.

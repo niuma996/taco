@@ -51,28 +51,42 @@ const skillSchema = Type.Object({
 type SkillToolInput = Static<typeof skillSchema>;
 
 /**
- * Factory: builds the Skill tool with access to the pre-loaded skill list.
+ * Factory: builds the Skill tool with access to the skill list.
+ * getSkills is a thunk, not a snapshot array — SessionRegistry mutates its
+ * backing skill list on hot reload (see updateSkills), and re-reading on
+ * every execute() is what makes an already-built tool object see the
+ * post-reload list without the workspace rebuilding the tool itself.
  * spawnSkillSubagent is optional — if absent, subagent mode returns a clear error.
  * parentSessionId is captured in the closure so subagent mode can set correct metadata.
  * getReinjector is a thunk that returns the per-session reinjector handle (set after
  * AttachedSession.create() wires the harness hooks).
  */
 export function createSkillTool(
-    skills: readonly Skill[],
+    getSkills: () => readonly Skill[],
     options: {
         parentSessionId: string;
         getReinjector: () => SkillReinjectorHandle | undefined;
         spawnSkillSubagent?: (opts: SpawnSkillSubagentOptions) => Promise<SkillSubagentResult>;
+        /**
+         * Appended to the tool description — where a new SKILL.md should go and
+         * which frontmatter keys taco reads. Falsy (including "") is treated as
+         * "omit": callers that don't have a workspace-resolved guidance string
+         * (e.g. ad-hoc test construction) get the base description unchanged.
+         */
+        skillAuthoringGuidance?: string;
     },
 ): AgentTool<typeof skillSchema> {
-    const { parentSessionId, getReinjector, spawnSkillSubagent } = options;
+    const { parentSessionId, getReinjector, spawnSkillSubagent, skillAuthoringGuidance } = options;
+    const baseDescription =
+        "Invoke a skill — a specialized playbook or workflow loaded from the skill library. " +
+        "Use this when the task matches a skill's description. " +
+        "The skill body is injected into context after this call completes.";
     return {
         name: "skill",
         label: "skill",
-        description:
-            "Invoke a skill — a specialized playbook or workflow loaded from the skill library. " +
-            "Use this when the task matches a skill's description. " +
-            "The skill body is injected into context after this call completes.",
+        description: skillAuthoringGuidance
+            ? `${baseDescription}\n\n${skillAuthoringGuidance}`
+            : baseDescription,
         parameters: skillSchema,
 
         async execute(
@@ -80,6 +94,7 @@ export function createSkillTool(
             params: SkillToolInput,
             signal?: AbortSignal,
         ): Promise<AgentToolResult<SkillToolDetails>> {
+            const skills = getSkills();
             const skill = skills.find((s) => s.name === params.skill);
             if (!skill) {
                 return {

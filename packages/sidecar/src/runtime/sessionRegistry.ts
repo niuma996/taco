@@ -120,6 +120,14 @@ export interface SessionRegistryOptions {
     readonly availableAgentTypes: readonly AgentTypeDescriptor[];
     /** Available skills — injected into SkillTool. */
     readonly skills: readonly TacoSkill[];
+    /**
+     * "Where does a new skill go" + taco-private frontmatter contract, appended
+     * to the skill tool's description. Rendered once by WorkspaceRuntime from
+     * `executionCwd`; SessionRegistry only forwards it. Empty string is a valid
+     * value (workspace construction never actually produces one, but no caller
+     * should crash if it does) — `createSkillTool` treats falsy as "omit".
+     */
+    readonly skillAuthoringGuidance?: string;
     /** User-level memory store — drives extraction + context injection. */
     readonly memoryStore?: MemoryStore;
     /** True for IM workspaces; disables memory extraction there. */
@@ -170,7 +178,10 @@ export class SessionRegistry extends EventEmitter {
     defaultModel?: Model<Api>;
     readonly systemPrompt: string;
     readonly tools: TacoTool[];
-    readonly resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
+    /** NOT readonly: `updateSkills()` replaces this so every attach after a
+     *  hot reload gives its new harness the same fresh skill resources that
+     *  WorkspaceRuntime exposes through `workspace.resources`. */
+    resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
     readonly streamOptions: AgentHarnessStreamOptions;
     readonly defaultThinkingLevel?: ThinkingLevel;
     readonly extensionRegistry?: never;
@@ -226,7 +237,9 @@ export class SessionRegistry extends EventEmitter {
     private readonly toolsBuilder:
         | ((sessionId: SessionId, taskState: SessionTaskState) => TacoTool[])
         | undefined;
-    private readonly skills: readonly TacoSkill[];
+    /** NOT readonly: `updateSkills()` swaps this in on hot reload. */
+    private skills: readonly TacoSkill[];
+    private readonly skillAuthoringGuidance?: string;
     private readonly memoryStore?: MemoryStore;
     private readonly isIm?: boolean;
 
@@ -256,6 +269,7 @@ export class SessionRegistry extends EventEmitter {
         this.spawnSkillSubagent = options.spawnSkillSubagent;
         this.availableAgentTypes = options.availableAgentTypes;
         this.skills = options.skills;
+        this.skillAuthoringGuidance = options.skillAuthoringGuidance;
         this.memoryStore = options.memoryStore;
         this.isIm = options.isIm;
         this.toolsBuilder = options.toolsBuilder;
@@ -270,9 +284,10 @@ export class SessionRegistry extends EventEmitter {
         listing.push(createAgentTool(listingCtx, [...this.availableAgentTypes]));
         listing.push(createAgentContinueTool(listingCtx));
         listing.push(
-            createSkillTool([...this.skills], {
+            createSkillTool(() => this.skills, {
                 parentSessionId: "",
                 getReinjector: () => undefined,
+                skillAuthoringGuidance: this.skillAuthoringGuidance,
             }),
         );
         return listing;
@@ -435,10 +450,11 @@ export class SessionRegistry extends EventEmitter {
             ...baseTools,
             createAgentTool(spawnContext, [...this.availableAgentTypes]),
             createAgentContinueTool(spawnContext),
-            createSkillTool([...this.skills], {
+            createSkillTool(() => this.skills, {
                 parentSessionId: sessionId,
                 getReinjector: () => reinjectorCell.current,
                 spawnSkillSubagent: (opts) => this.spawnSkillSubagent(opts),
+                skillAuthoringGuidance: this.skillAuthoringGuidance,
             }),
         ];
         const attached = await this.attachChild(sessionId, opts, sessionTools, taskState);
@@ -572,6 +588,23 @@ export class SessionRegistry extends EventEmitter {
         for (const session of this.attached.values()) {
             session.invalidateCompactionCache();
         }
+    }
+
+    /**
+     * Swap in a freshly-loaded skill list. Called by WorkspaceRuntime on
+     * skill hot reload. Already-built `skill` tools pick this up on their
+     * next `execute()` — `createSkillTool` closes over `() => this.skills`,
+     * not a snapshot array, so no already-attached session needs its tools
+     * rebuilt for skill *invocation* to see the new list. New attaches also
+     * receive an updated `resources` object, so their AgentHarness uses the
+     * same fresh skill list as `workspace.resources`. (Skill *discovery*
+     * — the `<available_skills>` system-prompt section — is a separate,
+     * baked-at-attach string this method does not touch; see
+     * WorkspaceRuntime.reloadSkillsNow.)
+     */
+    updateSkills(skills: readonly TacoSkill[]): void {
+        this.skills = skills;
+        this.resources = { ...this.resources, skills: [...skills] };
     }
 
     /**

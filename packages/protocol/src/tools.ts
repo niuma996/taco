@@ -84,9 +84,55 @@ export interface SkillEntry {
     inlineOnly?: boolean;
 }
 
+/**
+ * Why a skill file failed to load, or loaded but is malformed or shadowed.
+ *
+ * The first five mirror pi-agent-core's `SkillDiagnosticCode` exactly (it does
+ * not export a wire-safe copy). The rest are taco-added:
+ *  - `duplicate_name`: pi's loader does not dedupe, so same-name collisions
+ *    across the five search dirs are detected by `dedupeSkillsByName` and have
+ *    no pi counterpart.
+ *  - the `runAs` / `inlineOnly` / `allowedTools` codes: pi ignores these
+ *    taco-private frontmatter keys entirely, so a bad value loads cleanly and
+ *    only surfaces at call time. taco re-parses frontmatter at load (see
+ *    checkSkillFrontmatter) and reports them here.
+ */
+export type SkillDiagnosticCode =
+    | "file_info_failed"
+    | "list_failed"
+    | "read_failed"
+    | "parse_failed"
+    | "invalid_metadata"
+    | "duplicate_name"
+    | "unknown_run_as"
+    | "invalid_inline_only"
+    | "inline_only_conflict"
+    | "invalid_allowed_tools"
+    | "empty_allowed_tools";
+
+/** One skill load-time warning, surfaced through `skills.list`. */
+export interface SkillDiagnosticEntry {
+    code: SkillDiagnosticCode;
+    message: string;
+    /** Absolute path of the offending file or directory. */
+    path: string;
+    /** Which search root it came from. Absent when taco synthesized the entry. */
+    source?: "builtin" | "user";
+    /** Set on `duplicate_name`: the colliding skill name. */
+    skillName?: string;
+    /** Set on `duplicate_name`: path of the entry that won, i.e. what shadowed `path`. */
+    shadowedBy?: string;
+}
+
 /** `skills.list` RPC result. */
 export interface SkillsListResult {
     skills: SkillEntry[];
+    /**
+     * Load-time warnings for files that failed to parse or were shadowed.
+     * Omitted (not `[]`) when there are none, so clients written before this
+     * field existed are unaffected.
+     */
+    diagnostics?: SkillDiagnosticEntry[];
 }
 
 // skills.content

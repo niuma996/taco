@@ -241,6 +241,8 @@ export type {
     QuestionOption,
     SkillContentParams,
     SkillContentResult,
+    SkillDiagnosticCode,
+    SkillDiagnosticEntry,
     SkillEntry,
     SkillsListParams,
     SkillsListResult,

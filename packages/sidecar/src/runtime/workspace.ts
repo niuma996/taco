@@ -28,10 +28,12 @@ import type {
     RpcRequest,
     RpcResponse,
     SessionId,
+    SkillDiagnosticEntry,
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
+import { type FSWatcher, watch as watchFs } from "chokidar";
 import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -48,6 +50,7 @@ import {
 } from "../config/config.ts";
 import { renderInstructionBlock, resolveInstructions } from "../config/instructions.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
+import { SingleFlight } from "../lib/async.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import { LocalMemoryStore, NoOpMemoryStore } from "../memory/index.ts";
@@ -63,7 +66,8 @@ import {
     projectContextForPrompt,
     type SystemPromptContributor,
 } from "../prompts/index.ts";
-import type { TacoSkill } from "../skills/tacoSkill.ts";
+import { formatSkillAuthoringGuidance } from "../prompts/skillAuthoringGuidance.ts";
+import type { SkillScanResult, TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";
 import {
     NoopTaskPushAdapter,
@@ -84,6 +88,14 @@ import type { SessionTaskState } from "./sessionTaskState.ts";
 import { dedupOverride, filterToolsForImPolicy } from "./toolAssembly.ts";
 
 const log = createLogger("workspace");
+
+/**
+ * How long to wait after the last skill-directory fs event before rescanning.
+ * One `SKILL.md` save is normally several events in quick succession (write +
+ * rename + parent-dir touch), and an editor's atomic-save dance can add more,
+ * so the timer is reset on every event and only the trailing one reloads.
+ */
+const SKILL_RELOAD_DEBOUNCE_MS = 300;
 
 export type { AttachOptions, ModelInfo };
 
@@ -185,6 +197,31 @@ export interface WorkspaceRuntimeOptions {
      * Defaults to an empty directory (no dynamic-tool capability).
      */
     toolRegistry?: DeferredToolRegistry;
+    /**
+     * User-writable skill directories to watch for hot reload (from
+     * `defaultSkillDirs`, filtered to `source: "user"` — the builtin dir
+     * ships with the binary and only changes on an app upgrade, i.e. a full
+     * restart, so it is never watched). A watcher is only created when this
+     * AND `reloadSkills` are both present; either alone leaves reload off,
+     * which is the correct default for tests that construct
+     * `WorkspaceRuntime` directly without a live server.
+     */
+    skillDirs?: readonly string[];
+    /**
+     * Re-scan skill directories and return the fresh list plus its load
+     * diagnostics. Invoked by the fs watcher (debounced) and by
+     * `reloadSkillsNow()`. Injected rather than duplicated here because the
+     * scan (loadSourcedSkills → dedupe → frontmatter preload/stamp →
+     * diagnostics) already exists as `SidecarServer.loadSkills` — this
+     * callback is that same function bound to the workspace's `executionCwd`.
+     */
+    reloadSkills?: () => Promise<SkillScanResult>;
+    /**
+     * Load diagnostics from the cold-start scan (malformed SKILL.md, name
+     * collisions). Surfaced to clients through `skills.list`. Replaced
+     * wholesale on hot reload — see `reloadSkillsNow`.
+     */
+    skillDiagnostics?: readonly SkillDiagnosticEntry[];
 }
 
 export class WorkspaceRuntime extends EventEmitter {
@@ -202,15 +239,40 @@ export class WorkspaceRuntime extends EventEmitter {
     readonly sessionEnv: NodeExecutionEnv;
     readonly repo: JsonlSessionRepo;
     readonly models: MutableModels;
+    /** True for IM workspaces. Snapshot of the constructor-time check — used
+     *  by `rebuildSystemPrompt` so hot reload rebuilds with the same
+     *  `hideWorkspacePath` behavior as the original construction. */
+    private readonly isIm: boolean;
+    /** System-prompt contributors other than the `<available_skills>` section
+     *  (config override + extension contributors). `rebuildSystemPrompt`
+     *  appends a fresh skills contributor on top of this fixed base so hot
+     *  reload doesn't need to re-derive or re-order the rest. */
+    private readonly baseSystemPromptContributors: SystemPromptContributor[];
+    /** Snapshot of `defaultModel` at construction time, same non-live
+     *  contract `<model_identity>` already documents: `setSessionModel`
+     *  switches the runtime model but does not retroactively change this. */
+    private readonly modelIdentitySnapshot: string | undefined;
+    /** `.gitignore`-derived project context, read once (sync I/O) at
+     *  construction. Reused by `rebuildSystemPrompt` so hot reload doesn't
+     *  re-read the filesystem for a section that never changes post-construction. */
+    private readonly projectContextSnapshot: string;
     // Mutable: settings.write hot-reloads the default model when the user
     // picks a provider/model after the sidecar is already running. See
     // setDefaultModel — without live update, session.create would keep using
     // the construction-time fallback (first catalog model) and fail with
     // "Provider is not configured" for the unconfigured fallback provider.
     defaultModel?: Model<Api>;
-    readonly systemPrompt: string;
+    /**
+     * NOT readonly: `reloadSkillsNow()` rebuilds this (via
+     * `rebuildSystemPrompt`) so the `<available_skills>` section reflects a
+     * post-hot-reload skill list for every subsequent `attach`. An
+     * already-attached session's own baked prompt is not retroactively
+     * edited — same limitation `parentInstructionsBlock` accepts today.
+     */
+    systemPrompt: string;
     readonly tools: TacoTool[];
-    readonly resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
+    /** NOT readonly: `reloadSkillsNow()` swaps in a freshly-scanned skill list. */
+    resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
     readonly streamOptions: AgentHarnessStreamOptions;
     /**
      * Rendered parent instructions block (CLAUDE.md / AGENTS.md / DESIGN.md)
@@ -231,6 +293,14 @@ export class WorkspaceRuntime extends EventEmitter {
      * re-attaching sessions. `updateInstructionsConfig()` swaps this in.
      */
     instructionsConfig: InstructionsConfig | undefined;
+    /**
+     * "Where does a new skill go, and which frontmatter does taco read" block,
+     * rendered once from `executionCwd` via `defaultSkillDirs`. Unlike
+     * `parentInstructionsBlock`, no setting reachable via `settings.write`
+     * affects this string, so — unlike that block — there is no
+     * recompute-on-update path to mirror.
+     */
+    readonly skillAuthoringGuidance: string;
     readonly defaultThinkingLevel?: ThinkingLevel;
     /**
      * Per-workspace extension contributions, produced by `activateExtensions`.
@@ -252,6 +322,29 @@ export class WorkspaceRuntime extends EventEmitter {
     readonly permissionBroker: PermissionBroker;
     /** Dynamic-tool candidate directory (enables AddTools when present). */
     readonly toolRegistry: DeferredToolRegistry;
+
+    /**
+     * Skill load warnings from the most recent scan — malformed SKILL.md files
+     * and name collisions. Read by the `skills.list` handler.
+     *
+     * NOT readonly: `reloadSkillsNow()` replaces it wholesale, so a file the
+     * user just fixed stops being reported and a newly-broken one starts.
+     * Replacing rather than appending is the point — these describe the current
+     * state of the skill directories, not a running history.
+     */
+    skillDiagnostics: readonly SkillDiagnosticEntry[];
+
+    /** Injected by SidecarServer; absent (and no watcher created) in direct-construction tests. */
+    private readonly reloadSkillsCallback?: () => Promise<SkillScanResult>;
+    /** Collapses concurrent fs-change events (and any concurrent explicit
+     *  `reloadSkillsNow()` calls) into one in-flight scan. */
+    private readonly skillReloadFlight: SingleFlight<"skills", SkillScanResult>;
+    /** Resolves when chokidar has completed its initial scan. Tests await this
+     *  before creating a file; production need not await it because events
+     *  that happen before readiness are covered by the cold-start scan. */
+    readonly skillWatcherReady?: Promise<void>;
+    private skillWatcher?: FSWatcher;
+    private skillReloadDebounce?: NodeJS.Timeout;
 
     /**
      * Workspace task push adapter — server calls publishCurrentTaskSnapshot on
@@ -311,6 +404,10 @@ export class WorkspaceRuntime extends EventEmitter {
             : this.sessionCwd;
         this.workspaceKey = options.workspaceKey ?? this.sessionCwd;
         this.sessionsRoot = defaultSessionsRoot(options.sessionsRoot);
+        // executionCwd, not sessionCwd — defaultSkillDirs (inside
+        // formatSkillAuthoringGuidance) is what actually gets scanned against
+        // the execution location, and the two diverge for IM workspaces.
+        this.skillAuthoringGuidance = formatSkillAuthoringGuidance(this.executionCwd);
         // Two envs so storage identity and execution location cannot drift.
         this.sessionEnv = new NodeExecutionEnv({ cwd: this.sessionCwd });
         this.env = new NodeExecutionEnv({ cwd: this.executionCwd });
@@ -479,30 +576,27 @@ export class WorkspaceRuntime extends EventEmitter {
                 extTools.length > 0 ? dedupOverride(perSession, extTools) : perSession;
             return imPolicy ? filterToolsForImPolicy(perSessionMerged, imPolicy) : perSessionMerged;
         };
+        this.isIm = isIm;
         this.resources = options.resources ?? {};
         // The system prompt always uses the built-in template (assembled from the
         // current toolset + platform) and can no longer be overridden by config.
         // A configured systemPrompt is appended after it — not silently dropped,
         // but unable to replace or override the system base.
-        const contributors: SystemPromptContributor[] = [];
-        if (options.systemPrompt) contributors.push({ append: options.systemPrompt });
+        const baseContributors: SystemPromptContributor[] = [];
+        if (options.systemPrompt) baseContributors.push({ append: options.systemPrompt });
         // git-context guidance (if cwd is a git repo) comes through
         // activateExtensions → WorkspaceExtensionSet.systemPromptContributors(), which
         // runs before external contributors — this ordering is preserved.
-        contributors.push(...(this.extensions?.systemPromptContributors() ?? []));
-        // Only append the <available_skills> section when resources.skills is
-        // non-empty; formatSkillsForSystemPrompt already filters
-        // disableModelInvocation and returns "" for an empty array.
-        // `requires: ["skills"]` lets the subagent rebuilder drop this section
-        // for read-only agents that have no `skill` tool — without it, the
-        // listing would be noise (visible to the model but unreachable).
-        const skillsPrompt = formatSkillsForSystemPrompt(this.resources.skills ?? []);
-        if (skillsPrompt) contributors.push({ append: skillsPrompt, requires: ["skills"] });
+        baseContributors.push(...(this.extensions?.systemPromptContributors() ?? []));
+        // Stored (not just used locally) so `rebuildSystemPrompt` can append a
+        // fresh <available_skills> section on hot reload without re-deriving
+        // or re-ordering the rest of the contributor list.
+        this.baseSystemPromptContributors = baseContributors;
         // The model identity snapshot is fixed at workspace construction — mid-session
         // `setSessionModel` switches the runtime model but does not rebuild the
         // prompt. Documented in `<model_identity>` so the model has a stable
         // self-reference for cost / context-window reasoning within the session.
-        const modelIdentity = this.defaultModel
+        this.modelIdentitySnapshot = this.defaultModel
             ? `${this.defaultModel.provider}/${this.defaultModel.id}`
             : undefined;
         // Read .gitignore at construction time. Synchronous: only runs once
@@ -525,6 +619,7 @@ export class WorkspaceRuntime extends EventEmitter {
                 `failed to read .gitignore for system prompt: ${e instanceof Error ? e.message : String(e)}`,
             );
         }
+        this.projectContextSnapshot = projectContext;
         // Resolve project-context instructions (CLAUDE.md / AGENTS.md / DESIGN.md)
         // once at construction. The context hook re-resolves lazily on every
         // LLM call (so a settings.write patch takes effect without restart),
@@ -538,14 +633,7 @@ export class WorkspaceRuntime extends EventEmitter {
             instructionsConfig,
         );
         this.instructionsConfig = instructionsConfig;
-        this.systemPrompt = buildSystemPrompt({
-            tools: this.tools,
-            modelIdentity,
-            projectContext,
-            contributors: contributors.length > 0 ? contributors : undefined,
-            sessionKind: { role: "main", depth: 0 },
-            hideWorkspacePath: isIm,
-        });
+        this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
         this.streamOptions = options.streamOptions ?? {};
         this.defaultThinkingLevel = options.defaultThinkingLevel;
         this.defaultUiLocale = options.defaultUiLocale;
@@ -592,6 +680,7 @@ export class WorkspaceRuntime extends EventEmitter {
             extensions: this.extensions,
             defaultUiLocale: this.defaultUiLocale,
             compaction: this.compaction,
+            skillAuthoringGuidance: this.skillAuthoringGuidance,
             spawnSubagent: (args) => this.agentSpawner.spawnSubagent(args),
             resumeSubagent: (args) => this.agentSpawner.resumeSubagent(args),
             spawnSkillSubagent: (opts) => this.agentSpawner.spawnSkillSubagent(opts),
@@ -636,9 +725,12 @@ export class WorkspaceRuntime extends EventEmitter {
             tools: this.tools,
             agents,
             sessionRegistry: this.sessionRegistry,
-            systemPromptContributors: contributors.length > 0 ? contributors : undefined,
+            systemPromptContributors:
+                this.baseSystemPromptContributors.length > 0
+                    ? this.baseSystemPromptContributors
+                    : undefined,
             defaultModel: this.defaultModel,
-            projectContext,
+            projectContext: this.projectContextSnapshot,
             hideWorkspacePath: isIm,
             parentInstructionsBlock: this.parentInstructionsBlock,
         });
@@ -664,6 +756,112 @@ export class WorkspaceRuntime extends EventEmitter {
             "session.deleted",
         ]);
         forwardEvents(this.agentSpawner, this, ["subagent.spawned"]);
+
+        // Skill hot reload: only set up a watcher when both are given —
+        // `SidecarServer.buildWorkspace` always passes both, but direct
+        // construction (unit tests, and any future non-fs caller) getting
+        // neither is the correct default: no watcher, no dependency on
+        // chokidar's filesystem semantics.
+        this.skillDiagnostics = options.skillDiagnostics ?? [];
+        this.reloadSkillsCallback = options.reloadSkills;
+        this.skillReloadFlight = new SingleFlight<"skills", SkillScanResult>(async () => {
+            if (!this.reloadSkillsCallback) {
+                return {
+                    skills: [...(this.resources.skills ?? [])],
+                    diagnostics: [...this.skillDiagnostics],
+                };
+            }
+            return await this.reloadSkillsCallback();
+        });
+        if (options.skillDirs && options.skillDirs.length > 0 && options.reloadSkills) {
+            // Paths are handed to chokidar unfiltered on purpose. Most of them
+            // (~/.claude/skills, ~/.pi/skills) usually do not exist, and
+            // chokidar v4 neither throws nor emits an error for a missing
+            // path — it starts watching the nearest existing ancestor and
+            // reports the entries once they appear. Verified: creating a
+            // previously-absent dir plus a file inside it still yields
+            // addDir/add events. So do NOT add an existsSync() filter here;
+            // that would permanently miss the "user creates ~/.claude/skills
+            // for the first time" case, which is exactly a first-run path.
+            const watcher = watchFs([...options.skillDirs], { ignoreInitial: true });
+            this.skillWatcher = watcher;
+            this.skillWatcherReady = new Promise((resolve) => {
+                watcher.once("ready", resolve);
+            });
+            watcher.on("all", () => {
+                // One timer field, reset on every event — see
+                // SKILL_RELOAD_DEBOUNCE_MS for why only the trailing event in
+                // a burst should reload.
+                if (this.skillReloadDebounce) clearTimeout(this.skillReloadDebounce);
+                this.skillReloadDebounce = setTimeout(() => {
+                    this.reloadSkillsNow().catch((e) => {
+                        log.warn(
+                            `skill hot reload failed: ${e instanceof Error ? e.message : String(e)}`,
+                        );
+                    });
+                }, SKILL_RELOAD_DEBOUNCE_MS);
+            });
+            watcher.on("error", (e) => {
+                log.warn(`skill watcher error: ${e instanceof Error ? e.message : String(e)}`);
+            });
+        }
+    }
+
+    /**
+     * Render the full system prompt from the current toolset/model/project
+     * context plus a fresh `<available_skills>` section for the given skill
+     * list. Constructor and `reloadSkillsNow()` both call this — the only
+     * part that varies between a cold start and a hot reload is which skill
+     * list gets passed in.
+     */
+    private rebuildSystemPrompt(skills: readonly TacoSkill[]): string {
+        const contributors = [...this.baseSystemPromptContributors];
+        // Only append the <available_skills> section when skills is
+        // non-empty; formatSkillsForSystemPrompt already filters
+        // disableModelInvocation and returns "" for an empty array.
+        // `requires: ["skills"]` lets the subagent rebuilder drop this section
+        // for read-only agents that have no `skill` tool — without it, the
+        // listing would be noise (visible to the model but unreachable).
+        const skillsPrompt = formatSkillsForSystemPrompt([...skills]);
+        if (skillsPrompt) contributors.push({ append: skillsPrompt, requires: ["skills"] });
+        return buildSystemPrompt({
+            tools: this.tools,
+            modelIdentity: this.modelIdentitySnapshot,
+            projectContext: this.projectContextSnapshot,
+            contributors: contributors.length > 0 ? contributors : undefined,
+            sessionKind: { role: "main", depth: 0 },
+            hideWorkspacePath: this.isIm,
+        });
+    }
+
+    /**
+     * Re-scan skill directories and apply the result: `resources.skills`,
+     * the workspace's baked `systemPrompt` (used by every subsequent
+     * `attach`), every attached session's live `skill`-tool lookup
+     * (`SessionRegistry.updateSkills`), and `skillDiagnostics` all pick up the
+     * new scan. Diagnostics are replaced, not merged — they describe the
+     * current on-disk state, so a fixed file must stop being reported.
+     *
+     * Does NOT retroactively edit an already-attached session's own baked
+     * system prompt — same limitation `updateInstructionsConfig` /
+     * `parentInstructionsBlock` accept today. A session that was open before
+     * this call won't spontaneously learn a brand-new skill exists until
+     * it's re-attached, but it CAN still invoke one by name (the `skill`
+     * tool's lookup is live), and it sees frontmatter changes to skills it
+     * already knew about immediately.
+     *
+     * Concurrent calls (multiple fs-change bursts, or an explicit call
+     * racing a debounced one) collapse into a single in-flight scan via
+     * `skillReloadFlight` — same SingleFlight pattern SidecarServer uses for
+     * cold-start workspace builds.
+     */
+    async reloadSkillsNow(): Promise<void> {
+        if (!this.reloadSkillsCallback) return;
+        const { skills, diagnostics } = await this.skillReloadFlight.run("skills");
+        this.resources = { ...this.resources, skills };
+        this.systemPrompt = this.rebuildSystemPrompt(skills);
+        this.sessionRegistry.updateSkills(skills);
+        this.skillDiagnostics = diagnostics;
     }
 
     // ─────────── session list / history (delegates to SessionRegistry) ───────────
@@ -928,6 +1126,8 @@ export class WorkspaceRuntime extends EventEmitter {
         //    forwarding subscription so no pushes bubble up after abort
         //  - modelRegistry needs no dispose: the catalog is permanent and it does
         //    not subscribe to ProviderKeyStore
+        if (this.skillReloadDebounce) clearTimeout(this.skillReloadDebounce);
+        await this.skillWatcher?.close();
         this.permissionBroker.cleanupAll();
         this.agentSpawner.removeAllListeners();
         await this.sessionRegistry.dispose();
