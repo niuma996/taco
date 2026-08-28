@@ -25,6 +25,7 @@ clients/*/src-tauri/gen/
 docs/superpowers/
 .worktrees/
 .release-staging/
+.taco/
 
 # Test / coverage output
 coverage/
