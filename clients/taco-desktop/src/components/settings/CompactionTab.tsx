@@ -14,8 +14,8 @@ import {
     DEFAULT_COMPACTION_THRESHOLD,
 } from "@taco-ai/protocol";
 import { useCallback, useRef, useState } from "react";
-import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
-import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
+import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
+import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Slider } from "../ui/Slider.tsx";

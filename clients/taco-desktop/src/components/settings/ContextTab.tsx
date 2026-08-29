@@ -8,8 +8,8 @@
  * The UI still sends the full draft each time — simpler and consistent.
  */
 
-import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
-import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
+import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
+import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Switch } from "../ui/Switch.tsx";

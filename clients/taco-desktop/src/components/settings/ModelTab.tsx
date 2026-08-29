@@ -7,7 +7,7 @@
  */
 import type { ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
-import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
+import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import {
     defaultModelForNewSession,

@@ -1,7 +1,7 @@
 import type { AgentEntry } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
-import { useAutoClearError } from "./useAutoClearError";
+import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UseAgentsPaneResult {
     agents: AgentEntry[];

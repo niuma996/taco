@@ -5,8 +5,8 @@
  */
 
 import type { ImageInput } from "@taco-ai/protocol";
-import { useT } from "../i18n/useI18n";
-import { filesFromClipboard, MAX_ATTACHMENTS, readFileAsImage } from "../lib/imageAttachment";
+import { useT } from "../../i18n/useI18n";
+import { filesFromClipboard, MAX_ATTACHMENTS, readFileAsImage } from "../../lib/imageAttachment";
 import { useToast } from "./useToast";
 
 export interface UseImageAttachments {

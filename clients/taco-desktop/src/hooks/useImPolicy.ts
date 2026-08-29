@@ -13,7 +13,7 @@
 import type { ImPolicyGetResult, ImRoute, ImWorkspacePolicyPatch } from "@taco-ai/protocol";
 import { useCallback, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
-import { useAutoClearError } from "./useAutoClearError";
+import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UseImPolicyResult {
     data: ImPolicyGetResult | null;

@@ -29,7 +29,7 @@ import { useAgentsPane } from "./hooks/useAgentsPane";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { useChannelsPane } from "./hooks/useChannelsPane";
-import { useChatInputState } from "./hooks/useChatInputState";
+import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { useFilesDrawer } from "./hooks/useFilesDrawer";
@@ -41,8 +41,8 @@ import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
 import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
-import { useTheme } from "./hooks/useTheme";
-import { useToast } from "./hooks/useToast";
+import { useTheme } from "./hooks/primitives/useTheme";
+import { useToast } from "./hooks/primitives/useToast";
 import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
@@ -427,7 +427,7 @@ export default function App() {
             await navigator.clipboard.writeText(sessionId);
             setCopiedSessionId(sessionId);
             window.setTimeout(() => {
-                setCopiedSessionId((cur) => (cur === sessionId ? null : cur));
+                setCopiedSessionId((cur: string | null) => (cur === sessionId ? null : cur));
             }, 1200);
         } catch (err) {
             console.error("[taco] copy session id failed", err);

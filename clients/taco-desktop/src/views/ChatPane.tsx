@@ -20,7 +20,7 @@ import { Message } from "../components/Message";
 import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
-import { useImageAttachments } from "../hooks/useImageAttachments";
+import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";

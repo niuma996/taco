@@ -1,7 +1,7 @@
 import type { SkillDiagnosticEntry, SkillEntry } from "@taco-ai/protocol";
 import { useEffect, useMemo, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
-import { useAutoClearError } from "./useAutoClearError";
+import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UseSkillsPaneResult {
     /** Skills matching the current query (case-insensitive name/description substring). */

@@ -1,7 +1,7 @@
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useProviders } from "../../hooks/useProviders.js";
-import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.js";
+import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useWorkspaceModels } from "../../hooks/useWorkspaceModels.js";
 import { useT } from "../../i18n/useI18n.js";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";

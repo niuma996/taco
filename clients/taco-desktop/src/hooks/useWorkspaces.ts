@@ -22,7 +22,7 @@ import {
 import type { AskUserPayload } from "./useAskUser";
 import { useSessionSettings } from "./useSessionSettings";
 import type { SidecarAction } from "./useSidecarStream";
-import { useToast } from "./useToast";
+import { useToast } from "./primitives/useToast";
 import { useWorkspaceLifecycle } from "./useWorkspaceLifecycle";
 
 export type { SessionMeta, WorkspaceState } from "../lib/chat/workspaceReducer";

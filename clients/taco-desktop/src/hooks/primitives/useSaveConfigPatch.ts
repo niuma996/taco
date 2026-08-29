@@ -18,9 +18,9 @@
 
 import type { TacoGlobalConfigShape } from "@taco-ai/protocol";
 import { useCallback, useRef, useState } from "react";
-import type { TacoClientSettingsShape } from "../lib/clientSettings.ts";
-import { applyGlobalConfig, writeClientSettings } from "../lib/globalConfig.ts";
-import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import type { TacoClientSettingsShape } from "../../lib/clientSettings.ts";
+import { applyGlobalConfig, writeClientSettings } from "../../lib/globalConfig.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 
 export type SavePatchInput =
     | { kind: "global"; patch: Partial<TacoGlobalConfigShape> }

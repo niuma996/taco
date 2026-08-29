@@ -13,7 +13,7 @@ import { strict as assert } from "node:assert";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, it, vi } from "vitest";
 
-import { useSaveConfigPatch } from "../../src/hooks/useSaveConfigPatch.ts";
+import { useSaveConfigPatch } from "../../src/hooks/primitives/useSaveConfigPatch.ts";
 
 afterEach(() => {
     vi.useRealTimers();

@@ -3,7 +3,7 @@
  * Must be rendered near the root so descendants can call `useToast()`.
  */
 import type { ReactNode } from "react";
-import { ToastContext, type ToastLevel, useToastManager } from "../hooks/useToast";
+import { ToastContext, type ToastLevel, useToastManager } from "../hooks/primitives/useToast";
 
 export type { ToastLevel };
 

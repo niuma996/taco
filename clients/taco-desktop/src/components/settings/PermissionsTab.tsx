@@ -1,7 +1,7 @@
 import type { CommandPermissionMode } from "@taco-ai/protocol";
 import { useState } from "react";
-import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
-import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
+import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
+import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { ClientRuleValidationError } from "../../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleClient.ts";
@@ -118,7 +118,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                 <p className="settings-tab-desc">{t("settings.permissionsNoRules")}</p>
             ) : (
                 <ul className="permission-rule-list">
-                    {config.rules.map((rule, i) => (
+                    {config.rules.map((rule: string, i: number) => (
                         <li key={rule}>
                             <span className="permission-rule-text">
                                 <code>{rule}</code>

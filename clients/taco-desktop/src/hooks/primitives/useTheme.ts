@@ -7,8 +7,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect } from "react";
 
-import { getGlobalConfig, subscribeGlobalConfig } from "../lib/globalConfig.ts";
-import { resolveTheme } from "../lib/theme.ts";
+import { getGlobalConfig, subscribeGlobalConfig } from "../../lib/globalConfig.ts";
+import { resolveTheme } from "../../lib/theme.ts";
 
 const MEDIA = "(prefers-color-scheme: dark)";
 

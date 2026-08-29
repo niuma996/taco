@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useAutoClearError } from "../../hooks/useAutoClearError.ts";
+import { useAutoClearError } from "../../hooks/primitives/useAutoClearError.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import {
     type GlobalConfigState,

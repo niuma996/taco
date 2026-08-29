@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createToastManager } from "../../src/hooks/useToast.ts";
+import { createToastManager } from "../../src/hooks/primitives/useToast.ts";
 
 test("show displays a toast", () => {
     const m = createToastManager();

@@ -18,8 +18,8 @@
 import type { McpServerConfig, McpServerConfigView, McpServerView } from "@taco-ai/protocol";
 import { Power, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { useAutoClearError } from "../../hooks/useAutoClearError.ts";
-import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
+import { useAutoClearError } from "../../hooks/primitives/useAutoClearError.ts";
+import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import { applyGlobalConfig, getGlobalConfig } from "../../lib/globalConfig.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";

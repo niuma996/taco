@@ -7,8 +7,8 @@ import type { ThemePreference } from "../../lib/clientSettings.ts";
  * set up in `wireI18nToClientSettings()`.
  */
 
-import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
-import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
+import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
+import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { SUPPORTED_UI_LANGUAGES, type SupportedUiLanguage } from "../../i18n/index.ts";
 import { useT, useUiLanguage } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";

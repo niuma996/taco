@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, it, vi } from "vitest";
 
-import { useRetryOnError } from "../../src/hooks/useRetryOnError";
+import { useRetryOnError } from "../../src/hooks/primitives/useRetryOnError";
 
 afterEach(() => {
     vi.useRealTimers();
