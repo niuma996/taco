@@ -34,7 +34,7 @@ function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
         taskSnapshotsBySessionId: {},
         planStatesBySessionId: {},
         historyDetailsBySessionId: {},
-        forceExpandTaskPanelByCwd: {},
+        forceExpandTaskPanel: false,
         ...overrides,
     };
 }
@@ -1001,18 +1001,21 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
         assert.deepEqual(next["/ws"]?.askUserPending, {});
     });
 
-    it("ASKUSER_ANSWERED without cwd locates the workspace by toolCallId", () => {
+    it("ASKUSER_ANSWERED only clears pending in the addressed workspace", () => {
         const state = {
             "/a": baseWs({ cwd: "/a", activeSession: "s1", askUserPending: { "tc-1": true } }),
-            "/b": baseWs({ cwd: "/b", activeSession: "s2" }),
+            "/b": baseWs({ cwd: "/b", activeSession: "s2", askUserPending: { "tc-1": true } }),
         };
         const next = workspacesReducer(state, {
             type: "ASKUSER_ANSWERED",
+            cwd: "/a",
             toolCallId: "tc-1",
             answers: { q1: "opt-a" },
         });
         assert.deepEqual(next["/a"]?.askUserPending, {});
-        assert.deepEqual(next["/b"]?.askUserPending, {});
+        // A same-id pending elsewhere must survive: the reducer no longer scans,
+        // so it can never clear the wrong workspace's card.
+        assert.deepEqual(next["/b"]?.askUserPending, { "tc-1": true });
     });
 
     it("ASKUSER_ANSWERED on unknown toolCallId leaves state unchanged", () => {
@@ -1140,13 +1143,13 @@ describe("workspacesReducer — history detail (lazy-loaded on expand)", () => {
 });
 
 describe("workspacesReducer — task panel force-expand on first snapshot", () => {
-    it("TASK_PANEL_FORCE_EXPAND 写入 cwd 标记", () => {
+    it("TASK_PANEL_FORCE_EXPAND 写入标记", () => {
         const state: Record<string, WorkspaceState> = { "/ws": baseWs() };
         const next = workspacesReducer(state, {
             type: "TASK_PANEL_FORCE_EXPAND",
             cwd: "/ws",
         });
-        assert.equal(next["/ws"]?.forceExpandTaskPanelByCwd["/ws"], true);
+        assert.equal(next["/ws"]?.forceExpandTaskPanel, true);
     });
 
     it("CONSUMED 清除该 cwd 标记,其他 cwd 不动", () => {
@@ -1157,16 +1160,16 @@ describe("workspacesReducer — task panel force-expand on first snapshot", () =
         // Both cwds pre-set to force-expand
         let next = workspacesReducer(state, { type: "TASK_PANEL_FORCE_EXPAND", cwd: "/a" });
         next = workspacesReducer(next, { type: "TASK_PANEL_FORCE_EXPAND", cwd: "/b" });
-        assert.equal(next["/a"]?.forceExpandTaskPanelByCwd["/a"], true);
-        assert.equal(next["/b"]?.forceExpandTaskPanelByCwd["/b"], true);
+        assert.equal(next["/a"]?.forceExpandTaskPanel, true);
+        assert.equal(next["/b"]?.forceExpandTaskPanel, true);
 
         next = workspacesReducer(next, {
             type: "TASK_PANEL_FORCE_EXPAND_CONSUMED",
             cwd: "/a",
         });
-        assert.equal(next["/a"]?.forceExpandTaskPanelByCwd["/a"], undefined);
+        assert.equal(next["/a"]?.forceExpandTaskPanel, false);
         // /b untouched
-        assert.equal(next["/b"]?.forceExpandTaskPanelByCwd["/b"], true);
+        assert.equal(next["/b"]?.forceExpandTaskPanel, true);
     });
 
     it("unknown cwd 时两个 action 都是 no-op", () => {

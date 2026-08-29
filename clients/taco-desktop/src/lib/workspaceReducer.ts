@@ -16,11 +16,14 @@ import type {
     TasksUpdatedParams,
 } from "@taco-ai/protocol";
 import { applyEventToMessages } from "./applyEventToMessages";
+import type { SessionEventLike, UiMessage } from "./chatUtils";
 import {
-    extractAssistantTextAndThinking,
-    type SessionEventLike,
-    type UiMessage,
-} from "./chatUtils";
+    attachAskUserAnswers,
+    attachCommandPermission,
+    backfillSubagentDetails,
+    markRunningShellToolsFailed,
+    mergeAssistantFinal,
+} from "./workspaceMessagePatches";
 
 export interface SessionMeta {
     id: string;
@@ -89,11 +92,11 @@ export interface WorkspaceState {
         Record<string, { tasks: TaskItem[]; loadedAt: number }>
     >;
     /**
-     * cwd → true: TaskPanel should be force-expanded (dispatched synchronously by
-     * useSidecarStream when it first writes a task snapshot for a sid). Cleared by
-     * CONSUMED after TaskPanel reads it. Not persisted, no cross-cwd leakage.
+     * TaskPanel should be force-expanded (dispatched when the first task snapshot
+     * for a sid lands). Cleared by CONSUMED after TaskPanel reads it, so an
+     * old-snapshot re-push doesn't keep popping the panel open. Not persisted.
      */
-    forceExpandTaskPanelByCwd: Record<string, true>;
+    forceExpandTaskPanel: boolean;
     /**
      * parentToolCallId → true tracks agent tool calls awaiting subagent results.
      * Written by SUBAGENT_SPAWNED; cleared by the corresponding tool_execution_end (agent).
@@ -152,7 +155,7 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         taskSnapshotsBySessionId: {},
         planStatesBySessionId: {},
         historyDetailsBySessionId: {},
-        forceExpandTaskPanelByCwd: {},
+        forceExpandTaskPanel: false,
         listCursor: undefined,
         listTotal: undefined,
     };
@@ -248,8 +251,7 @@ export type WorkspaceAction =
       }
     | {
           type: "ASKUSER_ANSWERED";
-          /** Workspace path; if omitted, the reducer scans for the workspace holding this toolCallId. */
-          cwd?: string;
+          cwd: string;
           toolCallId: string;
           /** Selected answers: question text → option label (single) or label array (multi). */
           answers: Record<string, string | string[]>;
@@ -309,6 +311,36 @@ export function sortSessionsByUpdatedDesc(sessions: SessionMeta[]): SessionMeta[
     });
 }
 
+/**
+ * Drop one key from a record, returning the original reference when the key is
+ * absent so callers keep their no-op identity checks. Replaces the
+ * `const { [k]: _, ...rest }` + `void _` dance the omit sites used to repeat.
+ */
+function omitKey<V>(map: Record<string, V>, key: string): Record<string, V> {
+    if (!(key in map)) return map;
+    const next = { ...map };
+    delete next[key];
+    return next;
+}
+
+/**
+ * Guard + merge for the "patch exactly one workspace" shape nearly every action
+ * shares. `patch` returning undefined means "no-op": the original `state`
+ * reference is handed back, which is load-bearing — useReducer only skips the
+ * re-render on referential equality.
+ */
+function updateWs(
+    state: Record<string, WorkspaceState>,
+    cwd: string,
+    patch: (ws: WorkspaceState) => Partial<WorkspaceState> | undefined,
+): Record<string, WorkspaceState> {
+    const existing = state[cwd];
+    if (!existing) return state;
+    const next = patch(existing);
+    if (!next) return state;
+    return { ...state, [cwd]: { ...existing, ...next } };
+}
+
 export function workspacesReducer(
     state: Record<string, WorkspaceState>,
     action: WorkspaceAction,
@@ -324,45 +356,20 @@ export function workspacesReducer(
             }
             return next;
         }
-        case "SIDECAR_RESTARTED": {
-            // Only shell tools are expired here. askUser / planExit have their
-            // own history-recovery path, agent subagents are recovered via
-            // snapshot, and other tools are out of scope for this fix.
-            const markFailed = <T extends { name: string; status: string; details?: unknown }>(
-                tool: T,
-            ): T =>
-                tool.name === "shell" && tool.status === "running"
-                    ? {
-                          ...tool,
-                          status: "error" as const,
-                          details: {
-                              ...((tool.details ?? {}) as object),
-                              reason: "sidecar_restarted",
-                              exitCode: -1,
-                              interrupted: false,
-                          },
-                      }
-                    : tool;
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const messages = existing.messages.map((message) => {
-                if (message.kind !== "assistant") return message;
-                return { ...message, tools: message.tools.map(markFailed) };
+        case "SIDECAR_RESTARTED":
+            return updateWs(state, action.cwd, (existing) => {
+                const childMessagesBySubSessionId: typeof existing.childMessagesBySubSessionId = {};
+                for (const [subSid, childMessages] of Object.entries(
+                    existing.childMessagesBySubSessionId ?? {},
+                )) {
+                    childMessagesBySubSessionId[subSid] =
+                        markRunningShellToolsFailed(childMessages);
+                }
+                return {
+                    messages: markRunningShellToolsFailed(existing.messages),
+                    childMessagesBySubSessionId,
+                };
             });
-            const childMessagesBySubSessionId: typeof existing.childMessagesBySubSessionId = {};
-            for (const [subSid, childMessages] of Object.entries(
-                existing.childMessagesBySubSessionId ?? {},
-            )) {
-                childMessagesBySubSessionId[subSid] = childMessages.map((message) => {
-                    if (message.kind !== "assistant") return message;
-                    return { ...message, tools: message.tools.map(markFailed) };
-                });
-            }
-            return {
-                ...state,
-                [action.cwd]: { ...existing, messages, childMessagesBySubSessionId },
-            };
-        }
         case "SET_ACTIVE": {
             const next: Record<string, WorkspaceState> = {};
             for (const k of Object.keys(state)) {
@@ -389,40 +396,24 @@ export function workspacesReducer(
                 },
             };
         }
-        case "ADD_SESSION": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const sid = action.session.id;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    sessions: sortSessionsByUpdatedDesc([
-                        ...(existing.sessions ?? []),
-                        action.session,
-                    ]),
-                    activeSession: action.makeActive === false ? existing.activeSession : sid,
-                },
-            };
-        }
-        case "ATTACH": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            // Same-session re-attach: keep the in-flight subagent live stream intact.
-            // Only clear on switch to a different session (parent-child relation only
-            // applies to the current parent session).
-            if (existing.activeSession === action.sid) {
-                return state;
-            }
-            // Restore pending for askUser toolCallIds still waiting in history so card
-            // selection can resume the turn. The injection trigger is the pending
-            // "true → false" transition; without restore, historical askUser clicks are dead.
-            const restoredPending: Record<string, true> = {};
-            for (const id of action.pendingAskUserIds ?? []) restoredPending[id] = true;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
+        case "ADD_SESSION":
+            return updateWs(state, action.cwd, (existing) => ({
+                sessions: sortSessionsByUpdatedDesc([...(existing.sessions ?? []), action.session]),
+                activeSession:
+                    action.makeActive === false ? existing.activeSession : action.session.id,
+            }));
+        case "ATTACH":
+            return updateWs(state, action.cwd, (existing) => {
+                // Same-session re-attach: keep the in-flight subagent live stream intact.
+                // Only clear on switch to a different session (parent-child relation only
+                // applies to the current parent session).
+                if (existing.activeSession === action.sid) return undefined;
+                // Restore pending for askUser toolCallIds still waiting in history so card
+                // selection can resume the turn. The injection trigger is the pending
+                // "true → false" transition; without restore, historical askUser clicks are dead.
+                const restoredPending: Record<string, true> = {};
+                for (const id of action.pendingAskUserIds ?? []) restoredPending[id] = true;
+                return {
                     activeSession: action.sid,
                     messages: action.messages,
                     subagentSpawned: {},
@@ -430,348 +421,188 @@ export function workspacesReducer(
                     childHistoryLoaded: {},
                     askUserPending: restoredPending,
                     agentToolPending: {},
-                },
-            };
-        }
-        case "ATTACHED_PUSH": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
+                };
+            });
+        case "ATTACHED_PUSH":
             // activeSession is set uniformly by the ATTACH action (with history). This
             // push is just sidecar's ack for session.attach; overwriting activeSession
             // here would short-circuit the subsequent ATTACH (same-session) and drop
             // history — causing blank first-open or stale messages on new sessions.
             return state;
-        }
-        case "COMMAND_PERMISSION_REQUESTED": {
-            const existing = state[action.cwd];
-            if (!existing || existing.activeSession !== action.sid) return state;
-            let found = false;
-            const matchTcid = action.request.displayToolCallId ?? action.request.toolCallId;
-            const messages = existing.messages.map((message) => {
-                if (message.kind !== "assistant") return message;
-                const toolIndex = message.tools.findIndex((tool) => tool.id === matchTcid);
-                if (toolIndex < 0) return message;
-                found = true;
-                const tools = [...message.tools];
-                const tool = tools[toolIndex];
-                if (!tool) return message;
-                tools[toolIndex] = {
-                    ...tool,
-                    details: { ...(tool.details as object), commandPermission: action.request },
-                };
-                return { ...message, tools };
+        case "COMMAND_PERMISSION_REQUESTED":
+            return updateWs(state, action.cwd, (existing) => {
+                if (existing.activeSession !== action.sid) return undefined;
+                const messages = attachCommandPermission(existing.messages, action.request);
+                return messages === existing.messages ? undefined : { messages };
             });
-            if (!found) return state;
-            return { ...state, [action.cwd]: { ...existing, messages } };
-        }
-        case "REMOVE_SESSION": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const remaining = existing.sessions.filter((s) => s.id !== action.sid);
-            const wasActive = existing.activeSession === action.sid;
-            // Cursor might have pointed at the removed session — clear it so the
-            // sidebar doesn't try to load-more from a stale position. The next
-            // refreshSessionList call refills cursor + total from the server.
-            const clearedCursor =
-                existing.listCursor?.id === action.sid ? undefined : existing.listCursor;
-            // Drop the removed sid's pending slot if present. A session that is
-            // being removed (user deleted it, attach threw "session not found",
-            // or any future caller) cannot still have a live turn — any `true`
-            // here is a stale "running" indicator the sidebar would otherwise
-            // keep rendering. Per-sid delete (not whole-map reset) so other
-            // sessions' pending state survives when the user is multi-streaming.
-            const { [action.sid]: _drop, ...remainingPending } = existing.pendingBySessionId;
-            void _drop;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
+        case "REMOVE_SESSION":
+            return updateWs(state, action.cwd, (existing) => {
+                const remaining = existing.sessions.filter((s) => s.id !== action.sid);
+                const wasActive = existing.activeSession === action.sid;
+                // Cursor might have pointed at the removed session — clear it so the
+                // sidebar doesn't try to load-more from a stale position. The next
+                // refreshSessionList call refills cursor + total from the server.
+                const clearedCursor =
+                    existing.listCursor?.id === action.sid ? undefined : existing.listCursor;
+                // Drop the removed sid's pending slot if present. A session that is
+                // being removed (user deleted it, attach threw "session not found",
+                // or any future caller) cannot still have a live turn — any `true`
+                // here is a stale "running" indicator the sidebar would otherwise
+                // keep rendering. Per-sid delete (not whole-map reset) so other
+                // sessions' pending state survives when the user is multi-streaming.
+                return {
                     sessions: remaining,
                     listCursor: clearedCursor,
                     ...(existing.listTotal !== undefined
                         ? { listTotal: Math.max(0, existing.listTotal - 1) }
                         : {}),
                     ...(wasActive ? { activeSession: undefined, messages: [] } : {}),
-                    pendingBySessionId: remainingPending,
+                    pendingBySessionId: omitKey(existing.pendingBySessionId, action.sid),
+                };
+            });
+        case "SET_PENDING":
+            return updateWs(state, action.cwd, (existing) => ({
+                pendingBySessionId: {
+                    ...existing.pendingBySessionId,
+                    [action.sid]: action.pending,
                 },
-            };
-        }
-        case "SET_PENDING": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    pendingBySessionId: {
-                        ...existing.pendingBySessionId,
-                        [action.sid]: action.pending,
-                    },
-                },
-            };
-        }
-        case "BUMP_SESSION_TIME": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const target = existing.sessions.find((s) => s.id === action.sid);
-            if (!target) return state;
-            const updated = { ...target, updatedAt: action.updatedAt };
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
+            }));
+        case "BUMP_SESSION_TIME":
+            return updateWs(state, action.cwd, (existing) => {
+                const target = existing.sessions.find((s) => s.id === action.sid);
+                if (!target) return undefined;
+                const updated = { ...target, updatedAt: action.updatedAt };
+                return {
                     sessions: sortSessionsByUpdatedDesc(
                         existing.sessions.map((s) => (s.id === action.sid ? updated : s)),
                     ),
-                },
-            };
-        }
-        case "APPEND_SYSTEM": {
-            const existing = state[action.cwd];
-            if (!existing || existing.activeSession !== action.sid) return state;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    messages: [...existing.messages, action.msg],
-                    pendingBySessionId: { ...existing.pendingBySessionId, [action.sid]: false },
-                },
-            };
-        }
-        case "APPEND_ASSISTANT_FINAL": {
-            const existing = state[action.cwd];
-            if (!existing || existing.activeSession !== action.sid) return state;
-            // Final assistant message returned synchronously by sessionCreate / sessionPrompt.
-            // Previously dropped outright, which left an empty bubble + pending=false when the
-            // LLM errored immediately. Now extract text + thinking via extractAssistantTextAndThinking;
-            // if stopReason === "error", render a system-style message from errorMessage.
-            const m = action.reply as AgentMessage & {
-                stopReason?: string;
-                errorMessage?: string;
-            };
-            const { text, thinking } = extractAssistantTextAndThinking(m);
-            const isError = m.stopReason === "error";
-            const errorText = isError ? (m.errorMessage ?? "Assistant error") : null;
-            const next_msgs: UiMessage[] = [...existing.messages];
-            // Fallback: if message_start already created a same-id bubble, overwrite it; otherwise append a new assistant message.
-            const ts = String((m as { timestamp?: unknown }).timestamp ?? Date.now());
-            const id = `final-asst-${ts}`;
-            const liveIdx = next_msgs.findIndex(
-                (x) => x.kind === "assistant" && x.id === `live-asst-${ts}`,
+                };
+            });
+        case "APPEND_SYSTEM":
+            return updateWs(state, action.cwd, (existing) =>
+                existing.activeSession !== action.sid
+                    ? undefined
+                    : {
+                          messages: [...existing.messages, action.msg],
+                          pendingBySessionId: {
+                              ...existing.pendingBySessionId,
+                              [action.sid]: false,
+                          },
+                      },
             );
-            if (liveIdx >= 0) {
-                // Shallow-clone the bubble before overwriting — never mutate next_msgs[liveIdx]
-                // in place; it shares the reference with existing.messages[liveIdx], so direct
-                // assignment would pollute the input state.
-                const live = next_msgs[liveIdx] as Extract<UiMessage, { kind: "assistant" }>;
-                next_msgs[liveIdx] = { ...live, text, thinking };
-            } else {
-                next_msgs.push({
-                    id,
-                    kind: "assistant",
-                    text,
-                    ts: Date.now(),
-                    tools: [],
-                    thinking,
-                });
-            }
-            if (errorText) {
-                next_msgs.push({
-                    id: `${id}-err`,
-                    kind: "system",
-                    text: `⚠ ${errorText}`,
-                    ts: Date.now(),
-                });
-            }
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    messages: next_msgs,
-                    pendingBySessionId: { ...existing.pendingBySessionId, [action.sid]: false },
-                },
-            };
-        }
-        case "APPEND_USER": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
+        case "APPEND_ASSISTANT_FINAL":
+            return updateWs(state, action.cwd, (existing) =>
+                existing.activeSession !== action.sid
+                    ? undefined
+                    : {
+                          messages: mergeAssistantFinal(existing.messages, action.reply),
+                          pendingBySessionId: {
+                              ...existing.pendingBySessionId,
+                              [action.sid]: false,
+                          },
+                      },
+            );
+        case "APPEND_USER":
             // Optimistic user message: id is "optimistic-user-${ts}" so the
             // server push handler (applyEventToMessages.handleMessageEnd) can
             // recognise it later and replace it with the server-timestamped
             // entry instead of duplicating. See APPEND_USER's JSDoc.
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    messages: [...existing.messages, action.msg],
-                },
-            };
-        }
-        case "APPLY_EVENT": {
-            const existing = state[action.cwd];
-            // The shared messages array renders activeSession; background-session stream
-            // events must be dropped, otherwise they bleed into the currently displayed
-            // session (rebuilt from sessionEventLog / snapshot on switch-back).
-            if (!existing || existing.activeSession !== action.sid) return state;
-
-            const result = applyEventToMessages(existing.messages, action.ev, {
-                suppressedThinking: action.suppressedThinking,
-                now: action.now,
-            });
-
-            // askUser tool: tool_execution_end + waiting === true → mark pending;
-            // waiting !== true → clear pending.
-            // Note: both tool_execution_end details write to the same tool card (same toolCallId);
-            // applyEventToMessages upserts, so the second details has no questions. When clearing
-            // pending, questions must be reverse-read from the tool card in current messages.
-            let nextAskUserPending = existing.askUserPending;
-            // askUser / planExit share the same trigger: terminate + questions + waiting (two-state).
-            // toolName / isError live on the tool_execution_end branch of the
-            // SessionEventLike union; access them only after the type guard so
-            // TS narrows correctly.
-            if (
-                action.ev.type === "tool_execution_end" &&
-                !action.ev.isError &&
-                isAskUserStyleTool(action.ev.toolName)
-            ) {
-                const toolCallId = action.ev.toolCallId ?? "";
-                const details = action.ev.result?.details as { waiting?: boolean } | undefined;
-                if (details?.waiting === true) {
-                    nextAskUserPending = { ...existing.askUserPending, [toolCallId]: true };
-                } else if (toolCallId in existing.askUserPending) {
-                    // Second askUser/planExit (waiting=false) clears pending;
-                    // questions/answers are already merged and retained by applyEventToMessages, no work here.
-                    const { [toolCallId]: _, ...rest } = existing.askUserPending;
-                    nextAskUserPending = rest;
+            return updateWs(state, action.cwd, (existing) => ({
+                messages: [...existing.messages, action.msg],
+            }));
+        case "APPLY_EVENT":
+            return updateWs(state, action.cwd, (existing) => {
+                // The shared messages array renders activeSession; background-session stream
+                // events must be dropped, otherwise they bleed into the currently displayed
+                // session (rebuilt from sessionEventLog / snapshot on switch-back).
+                if (existing.activeSession !== action.sid) return undefined;
+                const result = applyEventToMessages(existing.messages, action.ev, {
+                    suppressedThinking: action.suppressedThinking,
+                    now: action.now,
+                });
+                // toolName / isError / toolCallId live on the tool_execution_end branch of
+                // the SessionEventLike union; access them only after the type guard so TS
+                // narrows correctly.
+                const endedToolCallId =
+                    action.ev.type === "tool_execution_end" ? (action.ev.toolCallId ?? "") : null;
+                let askUserPending = existing.askUserPending;
+                // askUser / planExit share the same trigger: terminate + questions + a
+                // two-state waiting flag. Both tool_execution_end frames write the same
+                // tool card, so the second one carries no questions — clearing pending
+                // relies on applyEventToMessages having already merged them.
+                if (
+                    action.ev.type === "tool_execution_end" &&
+                    !action.ev.isError &&
+                    isAskUserStyleTool(action.ev.toolName)
+                ) {
+                    const toolCallId = endedToolCallId ?? "";
+                    const details = action.ev.result?.details as { waiting?: boolean } | undefined;
+                    askUserPending =
+                        details?.waiting === true
+                            ? { ...askUserPending, [toolCallId]: true }
+                            : omitKey(askUserPending, toolCallId);
                 }
-            }
-
-            // agent tool: on tool_execution_end (agent), clear the corresponding agentToolPending entry.
-            // Reverse-lookup subSessionId → parentToolCallId via subagentSpawned, then remove from agentToolPending.
-            let nextAgentToolPending = existing.agentToolPending;
-            if (action.ev.type === "tool_execution_end") {
-                const toolCallId = action.ev.toolCallId ?? "";
-                // Clear pending for any agent / skill tool end. The previous
-                // spawnedByAgent reverse-lookup left a leak when the
-                // subagentSpawned frame was lost or arrived after tool_execution_end
-                // — the agent tool finished but pending never cleared, leaving the
-                // composer disabled forever. Now any agent end (error or not) and
-                // any skill end clears the entry directly by toolCallId.
-                const clearAgentPending =
-                    action.ev.toolName === "agent" || action.ev.toolName === "skill";
-                if (clearAgentPending && toolCallId in existing.agentToolPending) {
-                    const { [toolCallId]: _, ...rest } = existing.agentToolPending;
-                    nextAgentToolPending = rest;
-                }
-            }
-
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
+                // Clear agentToolPending on any agent / skill end, keyed directly by
+                // toolCallId. The previous subagentSpawned reverse-lookup leaked whenever
+                // that frame was lost or arrived late — the tool finished but pending never
+                // cleared, leaving the composer disabled forever.
+                const clearsAgentPending =
+                    action.ev.type === "tool_execution_end" &&
+                    (action.ev.toolName === "agent" || action.ev.toolName === "skill");
+                return {
                     messages: result.messages,
                     pendingBySessionId: result.clearPending
                         ? { ...existing.pendingBySessionId, [action.sid]: false }
                         : existing.pendingBySessionId,
-                    askUserPending: nextAskUserPending,
-                    agentToolPending: nextAgentToolPending,
-                },
-            };
-        }
-        case "SUBAGENT_SPAWNED": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const key = subagentKey(action.parentSessionId, action.parentToolCallId);
-            // Backfill the agent card's `details.subSessionId` so the expanded
-            // view can bind the live child stream while the subagent is still
-            // running. `details` normally only arrives on tool_execution_end —
-            // until then the card renders "spawning…" even though the child
-            // stream is already accumulating under `childMessagesBySubSessionId`.
-            let messages = existing.messages;
-            for (let i = messages.length - 1; i >= 0; i--) {
-                const m = messages[i];
-                if (m.kind !== "assistant") continue;
-                const toolIdx = m.tools.findIndex((t) => t.id === action.parentToolCallId);
-                if (toolIdx < 0) continue;
-                messages = messages.slice();
-                messages[i] = {
-                    ...m,
-                    tools: m.tools.map((t, j) =>
-                        j === toolIdx
-                            ? {
-                                  ...t,
-                                  details: {
-                                      ...((t.details ?? {}) as Record<string, unknown>),
-                                      subSessionId: action.subSessionId,
-                                      ...(action.agentType ? { agentType: action.agentType } : {}),
-                                  },
-                              }
-                            : t,
-                    ),
+                    askUserPending,
+                    agentToolPending: clearsAgentPending
+                        ? omitKey(existing.agentToolPending, endedToolCallId ?? "")
+                        : existing.agentToolPending,
                 };
-                break;
-            }
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    messages,
-                    subagentSpawned: {
-                        ...existing.subagentSpawned,
-                        [key]: {
-                            subSessionId: action.subSessionId,
-                            agentType: action.agentType,
-                            parentToolCallId: action.parentToolCallId,
-                        },
-                    },
-                    agentToolPending: {
-                        ...existing.agentToolPending,
-                        [action.parentToolCallId]: true,
-                    },
-                },
-            };
-        }
-        case "CHILD_MESSAGE_EVENT": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const prev = existing.childMessagesBySubSessionId[action.subSessionId] ?? [];
-            const result = applyEventToMessages(prev, action.ev, {
-                suppressedThinking: action.suppressedThinking,
-                now: action.now,
             });
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    childMessagesBySubSessionId: {
-                        ...existing.childMessagesBySubSessionId,
-                        [action.subSessionId]: result.messages,
+        case "SUBAGENT_SPAWNED":
+            return updateWs(state, action.cwd, (existing) => ({
+                messages: backfillSubagentDetails(
+                    existing.messages,
+                    action.parentToolCallId,
+                    action.subSessionId,
+                    action.agentType,
+                ),
+                subagentSpawned: {
+                    ...existing.subagentSpawned,
+                    [subagentKey(action.parentSessionId, action.parentToolCallId)]: {
+                        subSessionId: action.subSessionId,
+                        agentType: action.agentType,
+                        parentToolCallId: action.parentToolCallId,
                     },
                 },
-            };
-        }
-        case "LOAD_SUBAGENT_HISTORY": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    childHistoryLoaded: {
-                        ...existing.childHistoryLoaded,
-                        [action.subSessionId]: action.messages,
-                    },
+                agentToolPending: {
+                    ...existing.agentToolPending,
+                    [action.parentToolCallId]: true,
                 },
-            };
-        }
-        case "RESTORE_SESSION_SNAPSHOT": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            if (action.sessionKind === "subagent") {
-                return {
-                    ...state,
-                    [action.cwd]: {
-                        ...existing,
+            }));
+        case "CHILD_MESSAGE_EVENT":
+            return updateWs(state, action.cwd, (existing) => ({
+                childMessagesBySubSessionId: {
+                    ...existing.childMessagesBySubSessionId,
+                    [action.subSessionId]: applyEventToMessages(
+                        existing.childMessagesBySubSessionId[action.subSessionId] ?? [],
+                        action.ev,
+                        { suppressedThinking: action.suppressedThinking, now: action.now },
+                    ).messages,
+                },
+            }));
+        case "LOAD_SUBAGENT_HISTORY":
+            return updateWs(state, action.cwd, (existing) => ({
+                childHistoryLoaded: {
+                    ...existing.childHistoryLoaded,
+                    [action.subSessionId]: action.messages,
+                },
+            }));
+        case "RESTORE_SESSION_SNAPSHOT":
+            return updateWs(state, action.cwd, (existing) => {
+                if (action.sessionKind === "subagent") {
+                    return {
                         childMessagesBySubSessionId: {
                             ...existing.childMessagesBySubSessionId,
                             [action.sid]: action.messages,
@@ -780,172 +611,76 @@ export function workspacesReducer(
                             ...existing.childHistoryLoaded,
                             [action.sid]: action.messages,
                         },
-                    },
-                };
-            }
-            if (existing.activeSession !== action.sid) return state;
-            const askUserPending: Record<string, true> = {};
-            for (const id of action.pendingAskUserIds ?? []) askUserPending[id] = true;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
+                    };
+                }
+                if (existing.activeSession !== action.sid) return undefined;
+                const askUserPending: Record<string, true> = {};
+                for (const id of action.pendingAskUserIds ?? []) askUserPending[id] = true;
+                return {
                     messages: action.messages,
                     askUserPending,
                     pendingBySessionId: { ...existing.pendingBySessionId, [action.sid]: false },
-                },
-            };
-        }
-        case "ASKUSER_ANSWERED": {
-            const patchMessages = (messages: UiMessage[]): UiMessage[] => {
-                return messages.map((msg) => {
-                    if (msg.kind !== "assistant") return msg;
-                    const idx = (msg as Extract<UiMessage, { kind: "assistant" }>).tools.findIndex(
-                        (t) => t.id === action.toolCallId,
-                    );
-                    if (idx < 0) return msg;
-                    const tool = (msg as Extract<UiMessage, { kind: "assistant" }>).tools[idx];
-                    const updatedTool = {
-                        ...tool,
-                        details: {
-                            ...(tool.details as Record<string, unknown>),
-                            answers: action.answers,
-                        },
-                    };
-                    const nextTools = [...(msg as Extract<UiMessage, { kind: "assistant" }>).tools];
-                    nextTools[idx] = updatedTool;
-                    return { ...msg, tools: nextTools };
-                });
-            };
-            if (action.cwd) {
-                const existing = state[action.cwd];
-                if (!existing) return state;
-                const { [action.toolCallId]: _, ...rest } = existing.askUserPending;
-                return {
-                    ...state,
-                    [action.cwd]: {
-                        ...existing,
-                        askUserPending: rest,
-                        messages: patchMessages(existing.messages),
-                    },
                 };
-            }
-            // cwd omitted: scan all workspaces for the one holding this toolCallId pending.
-            for (const cwd of Object.keys(state)) {
-                const ws = state[cwd];
-                if (ws?.askUserPending[action.toolCallId]) {
-                    const { [action.toolCallId]: _, ...rest } = ws.askUserPending;
-                    return {
-                        ...state,
-                        [cwd]: {
-                            ...ws,
-                            askUserPending: rest,
-                            messages: patchMessages(ws.messages),
-                        },
-                    };
-                }
-            }
-            return state;
-        }
-        case "TASKS_UPDATED": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    taskSnapshotsBySessionId: {
-                        ...existing.taskSnapshotsBySessionId,
-                        [action.sid]: {
-                            active: action.active,
-                            history: action.history,
-                            updatedAt: Date.now(),
-                        },
+            });
+        case "ASKUSER_ANSWERED":
+            return updateWs(state, action.cwd, (existing) => ({
+                askUserPending: omitKey(existing.askUserPending, action.toolCallId),
+                messages: attachAskUserAnswers(
+                    existing.messages,
+                    action.toolCallId,
+                    action.answers,
+                ),
+            }));
+        case "TASKS_UPDATED":
+            return updateWs(state, action.cwd, (existing) => ({
+                taskSnapshotsBySessionId: {
+                    ...existing.taskSnapshotsBySessionId,
+                    [action.sid]: {
+                        active: action.active,
+                        history: action.history,
+                        updatedAt: Date.now(),
                     },
                 },
-            };
-        }
-        case "PLAN_STATE_UPDATED": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    planStatesBySessionId: {
-                        ...existing.planStatesBySessionId,
-                        [action.sid]: { active: action.active, currentSlug: action.currentSlug },
+            }));
+        case "PLAN_STATE_UPDATED":
+            return updateWs(state, action.cwd, (existing) => ({
+                planStatesBySessionId: {
+                    ...existing.planStatesBySessionId,
+                    [action.sid]: { active: action.active, currentSlug: action.currentSlug },
+                },
+            }));
+        case "HISTORY_DETAIL_LOADED":
+            return updateWs(state, action.cwd, (existing) => ({
+                historyDetailsBySessionId: {
+                    ...existing.historyDetailsBySessionId,
+                    [action.sid]: {
+                        ...(existing.historyDetailsBySessionId[action.sid] ?? {}),
+                        [action.listId]: { tasks: action.tasks, loadedAt: Date.now() },
                     },
                 },
-            };
-        }
-        case "HISTORY_DETAIL_LOADED": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const prevSession = existing.historyDetailsBySessionId[action.sid] ?? {};
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    historyDetailsBySessionId: {
-                        ...existing.historyDetailsBySessionId,
-                        [action.sid]: {
-                            ...prevSession,
-                            [action.listId]: { tasks: action.tasks, loadedAt: Date.now() },
-                        },
-                    },
-                },
-            };
-        }
-        case "TASK_PANEL_FORCE_EXPAND": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    forceExpandTaskPanelByCwd: {
-                        ...existing.forceExpandTaskPanelByCwd,
-                        [action.cwd]: true,
-                    },
-                },
-            };
-        }
-        case "TASK_PANEL_FORCE_EXPAND_CONSUMED": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
-            const { [action.cwd]: _, ...rest } = existing.forceExpandTaskPanelByCwd;
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    forceExpandTaskPanelByCwd: rest,
-                },
-            };
-        }
-        case "BEGIN_PENDING_NEW_SESSION": {
-            const existing = state[action.cwd];
-            if (!existing) return state;
+            }));
+        case "TASK_PANEL_FORCE_EXPAND":
+            return updateWs(state, action.cwd, () => ({ forceExpandTaskPanel: true }));
+        case "TASK_PANEL_FORCE_EXPAND_CONSUMED":
+            return updateWs(state, action.cwd, (existing) =>
+                existing.forceExpandTaskPanel ? { forceExpandTaskPanel: false } : undefined,
+            );
+        case "BEGIN_PENDING_NEW_SESSION":
             // Same reset shape as ATTACH's switch branch (subagent state, child streams,
             // askUser/agent-tool pendings): the new session must not inherit anything
             // from the previous one. The sessions list is kept so sidebar entries remain
             // and the user can re-attach to a prior chat. pendingBySessionId is per-sid,
             // so a late turn_end from the abandoned session hits the activeSession guard
             // in APPLY_EVENT and is dropped — clearing the whole map cannot resurrect it.
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...existing,
-                    activeSession: undefined,
-                    messages: [],
-                    subagentSpawned: {},
-                    childMessagesBySubSessionId: {},
-                    childHistoryLoaded: {},
-                    askUserPending: {},
-                    agentToolPending: {},
-                    pendingBySessionId: {},
-                },
-            };
-        }
+            return updateWs(state, action.cwd, () => ({
+                activeSession: undefined,
+                messages: [],
+                subagentSpawned: {},
+                childMessagesBySubSessionId: {},
+                childHistoryLoaded: {},
+                askUserPending: {},
+                agentToolPending: {},
+                pendingBySessionId: {},
+            }));
     }
 }

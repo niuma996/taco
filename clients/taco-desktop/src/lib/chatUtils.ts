@@ -113,33 +113,59 @@ export function textFromMessage(m: MessageLike | undefined): string {
     return JSON.stringify(m);
 }
 
-/** Single-line text for the fallback tool row (✗ name (error): ... / ✓ name: ...). */
-export function toolResultLine(name: string, isError: boolean, result: unknown): string {
-    const text = stringifyResult(result);
-    const trimmed = text.length > 240 ? `${text.slice(0, 240)}…` : text;
-    if (isError) {
-        return `✗ ${name} (error)${trimmed ? `: ${trimmed}` : ""}`;
+/** Max length of a folded result echoed into a single-line tool row. */
+const TOOL_RESULT_LINE_MAX = 240;
+
+/**
+ * Fold a `string` or a text-part array into one string. Returns undefined when
+ * the value is neither — callers decide whether that means "" or a JSON dump.
+ * Empty text parts are dropped so they don't contribute blank join lines.
+ */
+function foldTextParts(content: unknown): string | undefined {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return undefined;
+    const lines: string[] = [];
+    for (const c of content) {
+        if (!c || typeof c !== "object") continue;
+        const { type, text } = c as { type?: unknown; text?: unknown };
+        if (type === "text" && typeof text === "string" && text.length > 0) lines.push(text);
     }
-    if (!result) return `✓ ${name}`;
-    return `✓ ${name}${trimmed ? `: ${trimmed}` : ""}`;
+    return lines.join("\n");
 }
 
-/** Fold tool_result.content / string / arbitrary object into a readable single string. */
-export function stringifyResult(r: unknown): string {
-    if (!r) return "";
-    if (typeof r === "string") return r;
-    if (Array.isArray((r as { content?: unknown })?.content)) {
-        const content = (r as { content: Array<{ type?: string; text?: string }> }).content;
-        return content
-            .filter((c) => c?.type === "text" && c.text)
-            .map((c) => c.text as string)
-            .join("\n");
-    }
+/**
+ * Fold any content value (string / text parts / arbitrary object) into a
+ * readable single string, falling back to JSON for objects we don't understand.
+ */
+export function foldContent(value: unknown): string {
+    if (!value) return "";
+    const folded = foldTextParts(value);
+    if (folded !== undefined) return folded;
     try {
-        return JSON.stringify(r);
+        return JSON.stringify(value);
     } catch {
         return "";
     }
+}
+
+/**
+ * Fold a tool result, which may arrive either as a bare value or wrapped as
+ * `{ content: Part[] }` (the tool_execution_end shape). The unwrap is the only
+ * thing this adds over foldContent.
+ */
+export function stringifyResult(r: unknown): string {
+    if (!r) return "";
+    const wrapped = (r as { content?: unknown }).content;
+    return foldContent(Array.isArray(wrapped) ? wrapped : r);
+}
+
+/** Single-line text for the fallback tool row (✗ name (error): ... / ✓ name: ...).
+ *  `text` is already folded — pass stringifyResult(result) for a live event. */
+export function toolResultLine(name: string, isError: boolean, text: string): string {
+    const trimmed =
+        text.length > TOOL_RESULT_LINE_MAX ? `${text.slice(0, TOOL_RESULT_LINE_MAX)}…` : text;
+    const suffix = trimmed ? `: ${trimmed}` : "";
+    return isError ? `✗ ${name} (error)${suffix}` : `✓ ${name}${suffix}`;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -287,7 +313,7 @@ export function historyToUiMessages(
             out.push({
                 id: entryId || `user-${ts}`,
                 kind: "user",
-                text: stringifyMessageText(content),
+                text: foldTextParts(content) ?? "",
                 ts,
                 ...(images.length > 0 ? { images } : {}),
             });
@@ -310,7 +336,7 @@ export function historyToUiMessages(
                 details?: unknown;
             };
             const assistant = findLastAssistant(out);
-            const resultText = stringifyContent(tm.content);
+            const resultText = foldContent(tm.content);
             if (assistant) {
                 const t = assistant.tools.find((x) => x.id === tm.toolCallId);
                 if (t) {
@@ -326,7 +352,11 @@ export function historyToUiMessages(
                     out.push({
                         id: entryId || `tool-result-${ts}`,
                         kind: "tool",
-                        text: stringifyToolResultLine(tm, resultText),
+                        text: toolResultLine(
+                            tm.toolName ?? "tool",
+                            tm.isError ?? false,
+                            resultText,
+                        ),
                         ts,
                     });
                 }
@@ -334,7 +364,7 @@ export function historyToUiMessages(
                 out.push({
                     id: entryId || `tool-result-${ts}`,
                     kind: "tool",
-                    text: stringifyToolResultLine(tm, resultText),
+                    text: toolResultLine(tm.toolName ?? "tool", tm.isError ?? false, resultText),
                     ts,
                 });
             }
@@ -519,55 +549,6 @@ export function extractImageParts(content: unknown): ImageInput[] {
         out.push({ type: "image", data: cc.data, mimeType: cc.mimeType });
     }
     return out;
-}
-
-/** Plain text from a user/general message (text-only parts from the content array, or the string itself). */
-function stringifyMessageText(content: unknown): string {
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-        const lines: string[] = [];
-        for (const c of content) {
-            if (!c || typeof c !== "object") continue;
-            const cc = c as { type?: string; text?: unknown };
-            if (cc.type === "text") {
-                if (typeof cc.text === "string" && cc.text.length > 0) lines.push(cc.text);
-            }
-        }
-        return lines.join("\n");
-    }
-    return "";
-}
-
-/** Collapse a tool result's content (array / string / object) into a single string. */
-function stringifyContent(content: unknown): string {
-    if (!content) return "";
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-        const lines: string[] = [];
-        for (const c of content) {
-            if (!c || typeof c !== "object") continue;
-            const cc = c as { type?: string; text?: unknown };
-            if (cc.type === "text" && typeof cc.text === "string") {
-                lines.push(cc.text);
-            }
-        }
-        return lines.join("\n");
-    }
-    try {
-        return JSON.stringify(content);
-    } catch {
-        return "";
-    }
-}
-
-function stringifyToolResultLine(
-    tm: { toolName?: string; isError?: boolean },
-    content: string,
-): string {
-    const name = tm.toolName ?? "tool";
-    const trimmed = content.length > 240 ? `${content.slice(0, 240)}…` : content;
-    if (tm.isError) return `✗ ${name} (error)${trimmed ? `: ${trimmed}` : ""}`;
-    return `✓ ${name}${trimmed ? `: ${trimmed}` : ""}`;
 }
 
 export function findLastAssistant(

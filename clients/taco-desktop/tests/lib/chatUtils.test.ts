@@ -14,10 +14,13 @@ import { describe, it } from "node:test";
 import {
     extractAssistantTextAndThinking,
     findPendingAskUserIds,
+    foldContent,
     type HistoryEntryLike,
     historyToUiMessages,
     type MessageLike,
+    stringifyResult,
     summarizeToolArgs,
+    toolResultLine,
     type UiThinkingBlock,
 } from "../../src/lib/chatUtils";
 
@@ -835,5 +838,79 @@ describe("historyToUiMessages — 长耗时工具不被 expire", () => {
             if (assistant?.kind !== "assistant") return assert.fail("no assistant");
             assert.equal(assistant.tools.find((t) => t.id === "call-long-1")?.status, "error");
         });
+    });
+});
+
+describe("foldContent", () => {
+    it("returns a string value as-is", () => {
+        assert.equal(foldContent("plain"), "plain");
+    });
+
+    it("joins text parts with newlines, skipping non-text and empty parts", () => {
+        const parts = [
+            { type: "text", text: "first" },
+            { type: "image", data: "…", mimeType: "image/png" },
+            { type: "text", text: "" },
+            { type: "text", text: "second" },
+        ];
+        assert.equal(foldContent(parts), "first\nsecond");
+    });
+
+    it("falls back to JSON for objects it does not understand", () => {
+        assert.equal(foldContent({ a: 1 }), '{"a":1}');
+    });
+
+    it("maps every falsy value to the empty string", () => {
+        for (const v of [undefined, null, "", 0, false]) {
+            assert.equal(foldContent(v), "");
+        }
+    });
+});
+
+describe("stringifyResult", () => {
+    it("unwraps the { content: Part[] } tool_execution_end shape", () => {
+        const result = { content: [{ type: "text", text: "done" }], details: { edits: 1 } };
+        assert.equal(stringifyResult(result), "done");
+    });
+
+    it("folds a bare value that has no content wrapper", () => {
+        assert.equal(stringifyResult("raw"), "raw");
+        assert.equal(stringifyResult({ ok: true }), '{"ok":true}');
+    });
+
+    it("JSON-dumps a non-array content field rather than unwrapping it", () => {
+        // Only an array content is the wire shape; a string content is data.
+        assert.equal(stringifyResult({ content: "text" }), '{"content":"text"}');
+    });
+
+    it("returns the empty string for falsy results", () => {
+        assert.equal(stringifyResult(undefined), "");
+        assert.equal(stringifyResult(null), "");
+    });
+});
+
+describe("toolResultLine", () => {
+    it("marks success with a check and the folded text", () => {
+        assert.equal(toolResultLine("read", false, "content"), "✓ read: content");
+    });
+
+    it("marks errors with a cross and an (error) tag", () => {
+        assert.equal(toolResultLine("shell", true, "boom"), "✗ shell (error): boom");
+    });
+
+    it("omits the colon suffix when there is no text", () => {
+        // Guards the branch that used to be a separate `if (!result)` early return.
+        assert.equal(toolResultLine("read", false, ""), "✓ read");
+        assert.equal(toolResultLine("read", true, ""), "✗ read (error)");
+    });
+
+    it("truncates at 240 chars with an ellipsis", () => {
+        const line = toolResultLine("read", false, "x".repeat(300));
+        assert.equal(line, `✓ read: ${"x".repeat(240)}…`);
+    });
+
+    it("leaves text at exactly the limit untruncated", () => {
+        const line = toolResultLine("read", false, "x".repeat(240));
+        assert.equal(line, `✓ read: ${"x".repeat(240)}`);
     });
 });

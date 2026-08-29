@@ -319,7 +319,7 @@ function handleToolEnd(
                 {
                     id: `tool-result-${toolCallId}`,
                     kind: "tool",
-                    text: toolResultLine(name, ev.isError ?? false, ev.result),
+                    text: toolResultLine(name, ev.isError ?? false, stringifyResult(ev.result)),
                     ts: opts.now,
                 },
             ],
@@ -334,7 +334,7 @@ function handleToolEnd(
                 {
                     id: `tool-result-${toolCallId}`,
                     kind: "tool",
-                    text: toolResultLine(name, ev.isError ?? false, ev.result),
+                    text: toolResultLine(name, ev.isError ?? false, stringifyResult(ev.result)),
                     ts: opts.now,
                 },
             ],
