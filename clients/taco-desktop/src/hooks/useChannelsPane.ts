@@ -1,6 +1,7 @@
 import type { ChannelStatusEntry, ChannelsListResult } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import { useAutoClearError } from "./useAutoClearError";
 
 export interface UseChannelsPaneResult {
     channelsStatus: ChannelsListResult | null;
@@ -30,27 +31,22 @@ export function useChannelsPane(
 ): UseChannelsPaneResult {
     const [channelsStatus, setChannelsStatus] = useState<ChannelsListResult | null>(null);
     const [channelsLoading, setChannelsLoading] = useState(false);
-    const [channelsError, setChannelsError] = useState<string | null>(null);
     const [channelsSavingId, setChannelsSavingId] = useState<string | null>(null);
     const [channelsPendingRestart, setChannelsPendingRestart] = useState(false);
     const [channelsRestarting, setChannelsRestarting] = useState(false);
-
-    const failWith = useCallback((e: unknown) => {
-        setChannelsError(e instanceof Error ? e.message : String(e));
-        window.setTimeout(() => setChannelsError(null), 4000);
-    }, []);
+    const { error: channelsError, fail: failWith, clearError } = useAutoClearError();
 
     const refreshChannels = useCallback(async (): Promise<void> => {
         setChannelsLoading(true);
-        setChannelsError(null);
+        clearError();
         try {
             setChannelsStatus(await client.channelsList());
         } catch (e) {
-            setChannelsError(e instanceof Error ? e.message : String(e));
+            failWith(e);
         } finally {
             setChannelsLoading(false);
         }
-    }, [client]);
+    }, [client, clearError, failWith]);
 
     useEffect(() => {
         if (!active || !activeCwd) return;
@@ -77,7 +73,7 @@ export function useChannelsPane(
     const bindChannel = useCallback(
         async (channelId: string, force?: boolean): Promise<void> => {
             setChannelsSavingId(channelId);
-            setChannelsError(null);
+            clearError();
             try {
                 // Resolves as soon as the flow starts; the QR code and every
                 // later transition arrive via channel.status_changed. The
@@ -91,13 +87,13 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, failWith],
+        [client, clearError, failWith],
     );
 
     const unbindChannel = useCallback(
         async (channelId: string): Promise<void> => {
             setChannelsSavingId(channelId);
-            setChannelsError(null);
+            clearError();
             try {
                 await client.channelsUnbind({ channelId });
                 await refreshChannels();
@@ -107,13 +103,13 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, refreshChannels, failWith],
+        [client, clearError, refreshChannels, failWith],
     );
 
     const createChannel = useCallback(
         async (name: string): Promise<void> => {
             setChannelsSavingId(name);
-            setChannelsError(null);
+            clearError();
             try {
                 const { requiresRestart } = await client.channelsCreate({ name });
                 if (requiresRestart) setChannelsPendingRestart(true);
@@ -124,7 +120,7 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, refreshChannels, failWith],
+        [client, clearError, refreshChannels, failWith],
     );
 
     const restartForChannels = useCallback(async (): Promise<void> => {
@@ -142,7 +138,7 @@ export function useChannelsPane(
 
     const submitVerifyCode = useCallback(
         async (requestId: string, code: string): Promise<boolean> => {
-            setChannelsError(null);
+            clearError();
             try {
                 const { accepted } = await client.channelsSubmitVerifyCode({ requestId, code });
                 return accepted;
@@ -151,7 +147,7 @@ export function useChannelsPane(
                 return false;
             }
         },
-        [client, failWith],
+        [client, clearError, failWith],
     );
 
     return {

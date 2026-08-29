@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { useAutoClearError } from "../../hooks/useAutoClearError.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import {
     type GlobalConfigState,
@@ -32,7 +33,7 @@ export function DebugTab(props: DebugTabProps) {
     const [state, setState] = useState<GlobalConfigState>(() => getGlobalConfig());
     const [saving, setSaving] = useState(false);
     const [restarting, setRestarting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const { error, fail, clearError } = useAutoClearError();
     const { t } = useT();
 
     useEffect(() => subscribeGlobalConfig(setState), []);
@@ -47,13 +48,12 @@ export function DebugTab(props: DebugTabProps) {
 
     const setDebug = async (next: boolean) => {
         setSaving(true);
-        setError(null);
+        clearError();
         try {
             await writeClientSettings({ debugMode: next });
             setRestarted(false);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-            window.setTimeout(() => setError(null), 4000);
+            fail(e);
         } finally {
             setSaving(false);
         }
@@ -61,13 +61,12 @@ export function DebugTab(props: DebugTabProps) {
 
     const setLlmDumpToFile = async (next: boolean) => {
         setSaving(true);
-        setError(null);
+        clearError();
         try {
             await writeClientSettings({ llmDumpToFile: next });
             setRestarted(false);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-            window.setTimeout(() => setError(null), 4000);
+            fail(e);
         } finally {
             setSaving(false);
         }
@@ -75,13 +74,12 @@ export function DebugTab(props: DebugTabProps) {
 
     const applyAndRestart = async () => {
         setRestarting(true);
-        setError(null);
+        clearError();
         try {
             await props.onRestart();
             setRestarted(true);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-            window.setTimeout(() => setError(null), 4000);
+            fail(e);
         } finally {
             setRestarting(false);
         }

@@ -13,6 +13,7 @@ import { useT } from "../i18n/useI18n";
 
 export interface AgentsPaneProps {
     agents: AgentEntry[];
+    error: string | null;
     selectedAgentType: string | null;
     onSelect: (agentType: string) => void;
     content: string;
@@ -22,6 +23,7 @@ export interface AgentsPaneProps {
 
 export function AgentsPane({
     agents,
+    error,
     selectedAgentType,
     onSelect,
     content,
@@ -55,6 +57,7 @@ export function AgentsPane({
                     query={query}
                     onQueryChange={setQuery}
                 />
+                {error && <div className="error-banner">{error}</div>}
                 <div className="agents-list-body">
                     {filtered.length === 0 ? (
                         <div className="agents-empty">

@@ -18,6 +18,7 @@ import { useT } from "../i18n/useI18n";
 
 export interface ToolsPaneProps {
     tools: ToolEntry[];
+    error: string | null;
 }
 
 interface SubagentTagProps {
@@ -93,7 +94,7 @@ type SourceFilter = "all" | ToolEntry["category"];
 type TriFilter = "all" | "yes" | "no";
 type LoadingFilter = "all" | "always" | "deferred";
 
-export function ToolsPane({ tools }: ToolsPaneProps) {
+export function ToolsPane({ tools, error }: ToolsPaneProps) {
     const { t } = useT();
     // `userPick` tracks the user's explicit selection. When unset (or pointing
     // at a tool no longer in the list) we fall back to the first tool so the
@@ -135,6 +136,7 @@ export function ToolsPane({ tools }: ToolsPaneProps) {
                     query={query}
                     onQueryChange={setQuery}
                 />
+                {error && <div className="error-banner">{error}</div>}
                 <div className="tools-list-controls">
                     <div className="tools-filters">
                         <div className="tools-filter">

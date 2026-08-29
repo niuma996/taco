@@ -1,12 +1,15 @@
 import type { SkillDiagnosticEntry, SkillEntry } from "@taco-ai/protocol";
 import { useEffect, useMemo, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import { useAutoClearError } from "./useAutoClearError";
 
 export interface UseSkillsPaneResult {
     /** Skills matching the current query (case-insensitive name/description substring). */
     skills: SkillEntry[];
     /** Total loaded before filtering — the pane shows `shown/total` next to the search box. */
     totalCount: number;
+    /** Non-null when the skills list fetch failed; clears itself after a few seconds. */
+    skillsError: string | null;
     query: string;
     setQuery: (q: string) => void;
     diagnostics: SkillDiagnosticEntry[];
@@ -24,12 +27,21 @@ export function useSkillsPane(
     activeCwd: string | undefined,
 ): UseSkillsPaneResult {
     const [allSkills, setAllSkills] = useState<SkillEntry[]>([]);
+    const {
+        error: skillsError,
+        fail: failSkillsList,
+        clearError: clearSkillsError,
+    } = useAutoClearError();
     const [query, setQuery] = useState("");
     const [diagnostics, setDiagnostics] = useState<SkillDiagnosticEntry[]>([]);
     const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
     const [skillContent, setSkillContent] = useState<string>("");
     const [skillContentLoading, setSkillContentLoading] = useState(false);
-    const [skillContentError, setSkillContentError] = useState<string | null>(null);
+    const {
+        error: skillContentError,
+        fail: failSkillContent,
+        clearError: clearSkillContentError,
+    } = useAutoClearError();
 
     // Case-insensitive fuzzy-ish filter: every whitespace-separated term must
     // appear in the name or description, so "release note" matches release-notes.
@@ -48,7 +60,8 @@ export function useSkillsPane(
         // reset selection + content so previous workspace's state doesn't leak through
         setSelectedSkillName(null);
         setSkillContent("");
-        setSkillContentError(null);
+        clearSkillContentError();
+        clearSkillsError();
         void client
             .skillsList(activeCwd)
             .then((r) => {
@@ -58,17 +71,20 @@ export function useSkillsPane(
                     setSelectedSkillName(r.skills[0].name);
                 }
             })
-            .catch((e) => {
+            .catch((e: unknown) => {
+                // Surface it: a swallowed failure renders an empty list that is
+                // indistinguishable from a workspace with no skills.
                 console.error("[useSkillsPane] skillsList failed:", e);
+                failSkillsList(e);
             });
-    }, [active, activeCwd, client]);
+    }, [active, activeCwd, client, clearSkillContentError, clearSkillsError, failSkillsList]);
 
     // Fetch skill content when user picks a skill.
     // Cancellation flag prevents slow earlier requests from overwriting later selections.
     useEffect(() => {
         let cancelled = false;
         setSkillContent("");
-        setSkillContentError(null);
+        clearSkillContentError();
         if (!selectedSkillName || !activeCwd) return;
         const target = selectedSkillName;
         const known = allSkills.find((s) => s.name === target);
@@ -79,11 +95,10 @@ export function useSkillsPane(
             .then((r) => {
                 if (cancelled) return;
                 setSkillContent(r.content);
-                setSkillContentError(null);
             })
-            .catch((e) => {
+            .catch((e: unknown) => {
                 if (cancelled) return;
-                setSkillContentError((e as Error).message);
+                failSkillContent(e);
                 setSkillContent("");
             })
             .finally(() => {
@@ -92,11 +107,12 @@ export function useSkillsPane(
         return () => {
             cancelled = true;
         };
-    }, [selectedSkillName, activeCwd, allSkills, client]);
+    }, [selectedSkillName, activeCwd, allSkills, client, clearSkillContentError, failSkillContent]);
 
     return {
         skills,
         totalCount: allSkills.length,
+        skillsError,
         query,
         setQuery,
         diagnostics,

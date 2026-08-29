@@ -1,6 +1,7 @@
 import { type ImConversationEntry, makeImCwd } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import { useAutoClearError } from "./useAutoClearError";
 
 export interface UseConversationsPaneResult {
     conversations: ImConversationEntry[] | null;
@@ -36,7 +37,7 @@ export function useConversationsPane(
 ): UseConversationsPaneResult {
     const [conversations, setConversations] = useState<ImConversationEntry[] | null>(null);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const { error, fail: failWith, clearError } = useAutoClearError();
     // Snapshot of lastUsedAt per sessionId from the last time the user opened
     // the tab. State (not a ref): mutating it must trigger a re-render so the
     // badge clears the moment the tab opens.
@@ -46,14 +47,9 @@ export function useConversationsPane(
     // count every conversation as unread even though nothing is new.
     const [seeded, setSeeded] = useState(false);
 
-    const failWith = useCallback((e: unknown) => {
-        setError(e instanceof Error ? e.message : String(e));
-        window.setTimeout(() => setError(null), 4000);
-    }, []);
-
     const refreshConversations = useCallback(async (): Promise<void> => {
         setLoading(true);
-        setError(null);
+        clearError();
         try {
             const next = await client.channelsListConversations({});
             setConversations(next.conversations);
@@ -66,7 +62,7 @@ export function useConversationsPane(
         } finally {
             setLoading(false);
         }
-    }, [client, failWith, seeded]);
+    }, [client, clearError, failWith, seeded]);
 
     useEffect(() => {
         if (!active || !activeCwd) return;

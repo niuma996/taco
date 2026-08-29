@@ -2,6 +2,7 @@ import type { ExtensionsStatusResult } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import { applyGlobalConfig, getGlobalConfig } from "../lib/globalConfig.js";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import { useAutoClearError } from "./useAutoClearError";
 
 export interface UsePluginsPaneResult {
     extensionStatus: ExtensionsStatusResult | null;
@@ -23,33 +24,33 @@ export function usePluginsPane(
 ): UsePluginsPaneResult {
     const [extensionStatus, setExtensionStatus] = useState<ExtensionsStatusResult | null>(null);
     const [extensionLoading, setExtensionLoading] = useState(false);
-    const [extensionError, setExtensionError] = useState<string | null>(null);
     const [extensionSavingName, setExtensionSavingName] = useState<string | null>(null);
     const [extensionPendingRestart, setExtensionPendingRestart] = useState(false);
     const [extensionRestarting, setExtensionRestarting] = useState(false);
+    const { error: extensionError, fail: failWith, clearError } = useAutoClearError();
 
     useEffect(() => {
         if (!active || !activeCwd) return;
         setExtensionLoading(true);
-        setExtensionError(null);
+        clearError();
         void client
             .extensionsStatus()
             .then((r) => {
                 setExtensionStatus(r);
             })
-            .catch((e) => {
-                setExtensionError(e instanceof Error ? e.message : String(e));
+            .catch((e: unknown) => {
+                failWith(e);
             })
             .finally(() => {
                 setExtensionLoading(false);
             });
-    }, [active, activeCwd, client]);
+    }, [active, activeCwd, client, clearError, failWith]);
 
     // Toggle an extension's disabled state. Writes disabledExtensions to taco.json,
     // takes effect after restart.
     const toggleExtension = async (name: string, nextDisabled: boolean): Promise<void> => {
         setExtensionSavingName(name);
-        setExtensionError(null);
+        clearError();
         try {
             const current = getGlobalConfig().global.disabledExtensions ?? [];
             const next = nextDisabled
@@ -70,8 +71,7 @@ export function usePluginsPane(
             });
             setExtensionPendingRestart(true);
         } catch (e) {
-            setExtensionError(e instanceof Error ? e.message : String(e));
-            window.setTimeout(() => setExtensionError(null), 4000);
+            failWith(e);
         } finally {
             setExtensionSavingName(null);
         }
@@ -86,8 +86,7 @@ export function usePluginsPane(
             const r = await client.extensionsStatus();
             setExtensionStatus(r);
         } catch (e) {
-            setExtensionError(e instanceof Error ? e.message : String(e));
-            window.setTimeout(() => setExtensionError(null), 4000);
+            failWith(e);
         } finally {
             setExtensionRestarting(false);
         }

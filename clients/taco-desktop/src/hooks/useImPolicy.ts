@@ -13,6 +13,7 @@
 import type { ImPolicyGetResult, ImRoute, ImWorkspacePolicyPatch } from "@taco-ai/protocol";
 import { useCallback, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import { useAutoClearError } from "./useAutoClearError";
 
 export interface UseImPolicyResult {
     data: ImPolicyGetResult | null;
@@ -43,16 +44,12 @@ export function useImPolicy(client: TacoClient, currentScope: ImRoute | null): U
     const [data, setData] = useState<ImPolicyGetResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     // Tracks the channelId the dialog last pulled. `currentScope` is null in
     // channel-scope mode, so push reload needs its own anchor instead of
     // reading scope.channelId (which would be undefined).
     const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
 
-    const failWith = useCallback((e: unknown) => {
-        setError(e instanceof Error ? e.message : String(e));
-        window.setTimeout(() => setError(null), 4000);
-    }, []);
+    const { error, fail: failWith } = useAutoClearError();
 
     const load = useCallback(
         async (channelId: string, peerId?: string, chatId?: string) => {

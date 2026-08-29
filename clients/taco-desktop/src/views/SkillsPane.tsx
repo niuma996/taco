@@ -16,6 +16,7 @@ import { stripFrontmatter } from "../lib/markdownHelpers";
 export interface SkillsPaneProps {
     skills: SkillEntry[];
     totalCount: number;
+    skillsError: string | null;
     query: string;
     onQueryChange: (q: string) => void;
     diagnostics: SkillDiagnosticEntry[];
@@ -29,6 +30,7 @@ export interface SkillsPaneProps {
 export function SkillsPane({
     skills,
     totalCount,
+    skillsError,
     query,
     onQueryChange,
     diagnostics,
@@ -57,6 +59,7 @@ export function SkillsPane({
                     query={query}
                     onQueryChange={onQueryChange}
                 />
+                {skillsError && <div className="error-banner">{skillsError}</div>}
                 <div className="skills-list-body">
                     {problemDiagnostics.length > 0 && (
                         <div className="skills-diagnostics" role="status">

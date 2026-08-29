@@ -17,7 +17,8 @@
 
 import type { McpServerConfig, McpServerConfigView, McpServerView } from "@taco-ai/protocol";
 import { Power, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useAutoClearError } from "../../hooks/useAutoClearError.ts";
 import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import { applyGlobalConfig, getGlobalConfig } from "../../lib/globalConfig.ts";
@@ -32,8 +33,6 @@ export interface McpSectionProps {
 }
 
 type Panel = { kind: "list" } | { kind: "add" } | { kind: "edit"; server: McpServerConfig };
-
-const ERROR_TIMEOUT_MS = 4000;
 
 export function McpSection(props: McpSectionProps) {
     const { t } = useT();
@@ -52,8 +51,11 @@ export function McpSection(props: McpSectionProps) {
     const [panel, setPanel] = useState<Panel>({ kind: "list" });
     /** A config mutation (create/update/delete) is in flight — disables CRUD. */
     const [mutating, setMutating] = useState(false);
-    const [mutationError, setMutationError] = useState<string | null>(null);
-    const mutationErrorTimer = useRef<number | undefined>(undefined);
+    const {
+        error: mutationError,
+        fail: failMutation,
+        clearError: clearMutationError,
+    } = useAutoClearError();
 
     // Sync with globalConfig on external changes. applyGlobalConfig replaces
     // `global` with a new object every write, so the reference is not stable —
@@ -89,19 +91,6 @@ export function McpSection(props: McpSectionProps) {
     useEffect(() => {
         if (panel.kind === "list") void refresh();
     }, [panel.kind, servers.length, refresh]);
-
-    /** Surface a mutation failure in the error banner, auto-clearing after a delay. */
-    const failMutation = useCallback((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        setMutationError(msg);
-        if (mutationErrorTimer.current !== undefined) {
-            window.clearTimeout(mutationErrorTimer.current);
-        }
-        mutationErrorTimer.current = window.setTimeout(() => {
-            setMutationError(null);
-            mutationErrorTimer.current = undefined;
-        }, ERROR_TIMEOUT_MS);
-    }, []);
 
     /** Update the local list and the global cache so a remount / other settings
      * tab sees the new server set (mutations bypass settings.write). */
@@ -143,7 +132,7 @@ export function McpSection(props: McpSectionProps) {
         // The list only holds the masked view, so fetch the full entry before
         // opening the form — editing a view directly would strip the sensitive
         // fields on save.
-        setMutationError(null);
+        clearMutationError();
         try {
             const { config } = await props.client.mcpGetConfig(view.id);
             setPanel({ kind: "edit", server: config });
