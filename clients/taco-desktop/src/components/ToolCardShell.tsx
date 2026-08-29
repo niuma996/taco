@@ -8,8 +8,8 @@
 
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import type { UiToolCall } from "../lib/chatUtils";
-import { summarizeToolArgs } from "../lib/chatUtils";
+import type { UiToolCall } from "../lib/chat/chatUtils";
+import { summarizeToolArgs } from "../lib/chat/chatUtils";
 
 export interface ToolCardShellProps {
     tool: UiToolCall;

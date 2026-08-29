@@ -11,7 +11,7 @@ import {
 import { useEffect, useState } from "react";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
-import type { WorkspaceAction, WorkspaceState } from "../../lib/workspaceReducer";
+import type { WorkspaceAction, WorkspaceState } from "../../lib/chat/workspaceReducer";
 
 /**
  * Renders the current session's task list.

@@ -1,5 +1,5 @@
 import type { TasksUpdatedParams, WorkspaceId } from "@taco-ai/protocol";
-import type { WorkspaceState } from "../lib/workspaceReducer";
+import type { WorkspaceState } from "../lib/chat/workspaceReducer";
 
 /**
  * Reads one workspace/session task snapshot from the App-owned reducer state.

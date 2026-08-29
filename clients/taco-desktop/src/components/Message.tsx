@@ -12,7 +12,7 @@ import type { CommandPermissionScope } from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
 import { memo, useEffect, useState } from "react";
 import { useT } from "../i18n/useI18n";
-import type { UiMessage, UiThinkingBlock, UiToolCall } from "../lib/chatUtils";
+import type { UiMessage, UiThinkingBlock, UiToolCall } from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 import { ToolCardShell } from "./ToolCardShell";
 import { resolveToolView } from "./toolViews/registry";

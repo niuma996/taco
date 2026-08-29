@@ -10,7 +10,7 @@
  */
 
 import { createContext, type ReactNode, useContext, useMemo } from "react";
-import type { UiMessage } from "../lib/chatUtils";
+import type { UiMessage } from "../lib/chat/chatUtils";
 
 export interface SubagentContextValue {
     cwd: string;

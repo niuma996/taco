@@ -22,7 +22,7 @@ import {
     summarizeToolArgs,
     toolResultLine,
     type UiThinkingBlock,
-} from "../../src/lib/chatUtils";
+} from "../../../src/lib/chat/chatUtils";
 
 describe("historyToUiMessages — id join", () => {
     it("把 AssistantMessage 的 text 与 toolCall 拆开", () => {

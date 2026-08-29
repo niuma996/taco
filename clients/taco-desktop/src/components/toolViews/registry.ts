@@ -6,7 +6,7 @@
  * Five built-in tools today; the registry map is sufficient without over-abstracting.
  */
 
-import type { UiToolCall } from "../../lib/chatUtils";
+import type { UiToolCall } from "../../lib/chat/chatUtils";
 
 export interface ToolViewProps {
     tool: UiToolCall;

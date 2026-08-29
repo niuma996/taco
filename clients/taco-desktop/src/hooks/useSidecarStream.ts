@@ -19,7 +19,7 @@ import { PushMethods } from "@taco-ai/protocol";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
-import type { SessionEventLike, SessionEventParams } from "../lib/chatUtils";
+import type { SessionEventLike, SessionEventParams } from "../lib/chat/chatUtils";
 import { SessionPushProcessor, type SnapshotRecovery } from "../lib/sessionPushProcessor";
 import { bannerSeverity, formatForBanner, parseLogLine } from "../lib/sidecarLogLine";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";

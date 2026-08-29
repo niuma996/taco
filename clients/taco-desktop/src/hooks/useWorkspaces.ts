@@ -10,7 +10,7 @@
 import type { AgentMessage, ImageInput, ThinkingLevel } from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
-import { historyToUiMessages, type UiMessage } from "../lib/chatUtils";
+import { historyToUiMessages, type UiMessage } from "../lib/chat/chatUtils";
 import { getGlobalConfig } from "../lib/globalConfig";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -18,14 +18,14 @@ import {
     type WorkspaceAction,
     type WorkspaceState,
     workspacesReducer,
-} from "../lib/workspaceReducer";
+} from "../lib/chat/workspaceReducer";
 import type { AskUserPayload } from "./useAskUser";
 import { useSessionSettings } from "./useSessionSettings";
 import type { SidecarAction } from "./useSidecarStream";
 import { useToast } from "./useToast";
 import { useWorkspaceLifecycle } from "./useWorkspaceLifecycle";
 
-export type { SessionMeta, WorkspaceState } from "../lib/workspaceReducer";
+export type { SessionMeta, WorkspaceState } from "../lib/chat/workspaceReducer";
 
 // ─────────────────────────────────────────────────────────────────────
 // useWorkspaces

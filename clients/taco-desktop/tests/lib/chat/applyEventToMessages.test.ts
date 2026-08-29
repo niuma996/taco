@@ -8,8 +8,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { applyEventToMessages } from "../../src/lib/applyEventToMessages";
-import type { SessionEventLike, UiMessage } from "../../src/lib/chatUtils";
+import { applyEventToMessages } from "../../../src/lib/chat/applyEventToMessages";
+import type { SessionEventLike, UiMessage } from "../../../src/lib/chat/chatUtils";
 
 /** cast helper — assistantMessageEvent is a protocol-internal field (see applyEventToMessages.ts top comment) */
 function asEv(p: object): SessionEventLike {

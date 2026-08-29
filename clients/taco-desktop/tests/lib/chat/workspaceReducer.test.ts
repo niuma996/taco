@@ -12,12 +12,12 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import type { SessionEventLike, UiMessage } from "../../src/lib/chatUtils";
+import type { SessionEventLike, UiMessage } from "../../../src/lib/chat/chatUtils";
 import {
     sortSessionsByUpdatedDesc,
     type WorkspaceState,
     workspacesReducer,
-} from "../../src/lib/workspaceReducer";
+} from "../../../src/lib/chat/workspaceReducer";
 
 function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
     return {
@@ -137,12 +137,12 @@ describe("sortSessionsByUpdatedDesc", () => {
         ];
         const out = sortSessionsByUpdatedDesc(input);
         assert.deepEqual(
-            out.map((s) => s.id),
+            out.map((s: { id: string }) => s.id),
             ["c", "b", "a"],
         );
         // Original array is not mutated
         assert.deepEqual(
-            input.map((s) => s.id),
+            input.map((s: { id: string }) => s.id),
             ["a", "b", "c"],
         );
     });
@@ -157,7 +157,7 @@ describe("sortSessionsByUpdatedDesc", () => {
         // a has no updatedAt → falls back to createdAt (oldest), ranks last.
         // b has no updatedAt either, but its createdAt is newer; after fallback it still outranks c's updatedAt.
         assert.deepEqual(
-            out.map((s) => s.id),
+            out.map((s: { id: string }) => s.id),
             ["b", "c", "a"],
         );
     });
@@ -169,7 +169,7 @@ describe("sortSessionsByUpdatedDesc", () => {
         ];
         const out = sortSessionsByUpdatedDesc(input);
         assert.deepEqual(
-            out.map((s) => s.id),
+            out.map((s: { id: string }) => s.id),
             ["old-upd", "no-upd"],
         );
     });
@@ -181,7 +181,7 @@ describe("sortSessionsByUpdatedDesc", () => {
         ];
         const out = sortSessionsByUpdatedDesc(input);
         assert.deepEqual(
-            out.map((s) => s.id),
+            out.map((s: { id: string }) => s.id),
             ["x", "y"],
         );
     });
@@ -220,7 +220,7 @@ describe("workspacesReducer — sessions", () => {
             },
         );
         assert.deepEqual(
-            next["/ws"]?.sessions.map((s) => s.id),
+            next["/ws"]?.sessions.map((s: { id: string }) => s.id),
             ["new", "old"],
         );
     });
@@ -261,7 +261,7 @@ describe("workspacesReducer — sessions", () => {
             total: 1,
         });
         assert.deepEqual(
-            next["/ws"]?.sessions.map((s) => s.id),
+            next["/ws"]?.sessions.map((s: { id: string }) => s.id),
             ["fresh"],
         );
         assert.equal(next["/ws"]?.listCursor, undefined);
@@ -291,7 +291,7 @@ describe("workspacesReducer — sessions", () => {
         });
         // Appended rows are merged into the existing list, then sorted desc.
         assert.deepEqual(
-            next["/ws"]?.sessions.map((s) => s.id),
+            next["/ws"]?.sessions.map((s: { id: string }) => s.id),
             ["a", "b", "c", "d"],
         );
         assert.equal(next["/ws"]?.listTotal, 4);
@@ -310,7 +310,7 @@ describe("workspacesReducer — sessions", () => {
         };
         const next = workspacesReducer(state, { type: "REMOVE_SESSION", cwd: "/ws", sid: "drop" });
         assert.deepEqual(
-            next["/ws"]?.sessions.map((s) => s.id),
+            next["/ws"]?.sessions.map((s: { id: string }) => s.id),
             ["keep"],
         );
         assert.equal(next["/ws"]?.listCursor, undefined, "stale cursor must not survive");
@@ -387,12 +387,12 @@ describe("workspacesReducer — sessions", () => {
             updatedAt: "2026-06-01T00:00:00Z",
         });
         assert.deepEqual(
-            next["/ws"]?.sessions.map((s) => s.id),
+            next["/ws"]?.sessions.map((s: { id: string }) => s.id),
             ["a", "b"],
         );
         // Original state is not mutated
         assert.deepEqual(
-            state["/ws"]?.sessions.map((s) => s.id),
+            state["/ws"]?.sessions.map((s: { id: string }) => s.id),
             ["a", "b"],
         );
     });

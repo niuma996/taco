@@ -10,7 +10,7 @@
 import { ChevronRight, Loader2 } from "lucide-react";
 import { type ReactElement, useEffect, useState } from "react";
 import { useSubagent } from "../../hooks/useSubagent";
-import type { UiMessage } from "../../lib/chatUtils";
+import type { UiMessage } from "../../lib/chat/chatUtils";
 import { Message } from "../Message";
 import { truncate } from "./_util";
 import { type ToolViewProps, toolViews } from "./registry";

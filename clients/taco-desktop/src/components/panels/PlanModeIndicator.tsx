@@ -1,6 +1,6 @@
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { useT } from "../../i18n/useI18n";
-import type { WorkspaceState } from "../../lib/workspaceReducer";
+import type { WorkspaceState } from "../../lib/chat/workspaceReducer";
 
 /**
  * Read planStatesBySessionId truthiness to decide plan-mode visibility.

@@ -16,7 +16,7 @@ import type { SessionListResult } from "@taco-ai/protocol";
 import { SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { type MutableRefObject, useCallback, useEffect, useRef } from "react";
-import { findPendingAskUserIds, historyToUiMessages } from "../lib/chatUtils";
+import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
 import { readClientSettings } from "../lib/clientSettings";
 import { loadGlobalConfig } from "../lib/globalConfig";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
@@ -27,7 +27,7 @@ import {
     sortSessionsByUpdatedDesc,
     type WorkspaceAction,
     type WorkspaceState,
-} from "../lib/workspaceReducer";
+} from "../lib/chat/workspaceReducer";
 import {
     initDefaultCwd,
     isValidWorkspaceCwd,
