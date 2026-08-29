@@ -11,11 +11,19 @@
 .skills-list {
     width: var(--pane-width);
     flex-shrink: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     border-right: 1px solid var(--border);
     background: var(--pane-list-bg);
-    padding: 0.5rem 0;
+}
+
+/* The list rows scroll; the PaneHeader above stays pinned. */
+.skills-list-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.25rem 0 0.5rem;
 }
 
 .skills-list-empty {
@@ -23,6 +31,58 @@
     color: var(--fg-dim);
     font-size: 0.8rem;
     line-height: 1.6;
+}
+
+/* Header/search styles live in paneShared.css as .pane-header / .pane-search — shared
+   across Skills/Agents/Tools/Memory. */
+
+.skills-diagnostics {
+    margin: 0 4px 0.5rem 4px;
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.6rem;
+    background: var(--accent-bg-hover);
+}
+
+.skills-diagnostics-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--warning);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+}
+
+/* Same-name overrides are expected behavior, not a failure — neutral/info
+   styling instead of the warning color used for real load errors. */
+.skills-diagnostics--info {
+    border-color: var(--info);
+}
+
+.skills-diagnostics--info .skills-diagnostics-title {
+    color: var(--info);
+}
+
+.skills-diagnostic-item {
+    padding: 0.3rem 0;
+}
+
+.skills-diagnostic-item + .skills-diagnostic-item {
+    border-top: 1px solid var(--border);
+}
+
+.skills-diagnostic-message {
+    font-size: 0.75rem;
+    color: var(--fg);
+    line-height: 1.4;
+}
+
+.skills-diagnostic-path {
+    font-size: 0.68rem;
+    font-family: var(--mono);
+    color: var(--fg-dim);
+    word-break: break-all;
+    margin-top: 0.15rem;
 }
 
 .skills-list-item {
@@ -114,8 +174,17 @@
 
 .skills-detail-path {
     margin: 0;
+    word-break: break-all;
+}
+
+/* Path rendered as an inline code chip — same visual language as markdown's
+   inline code (--code-bg/--code-fg), so it reads as a path, not prose. */
+.skills-detail-path code {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border-radius: var(--radius-xs);
+    padding: 0.1em 0.4em;
     font-size: 0.8rem;
-    color: var(--fg-dim);
     font-family: var(--mono);
     word-break: break-all;
 }
@@ -152,18 +221,10 @@
     margin: 0;
 }
 
+/* Markdown-rendered skill body: no fixed max-height — it grows with content and
+   the .skills-detail column scrolls the whole page. md-assistant styles come from
+   chatMarkdown.css via the className passed to AssistantMarkdown. */
 .skills-detail-content {
+    font-size: 0.85rem;
     margin: 0;
-    font-size: 0.8rem;
-    font-family: var(--mono);
-    color: var(--fg);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 0.75rem;
-    white-space: pre-wrap;
-    word-break: break-all;
-    max-height: 500px;
-    overflow-y: auto;
-    line-height: 1.5;
 }

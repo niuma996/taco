@@ -11,11 +11,19 @@
 .memory-list {
     width: var(--pane-width);
     flex-shrink: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     border-right: 1px solid var(--border);
     background: var(--pane-list-bg);
-    padding: 0.5rem 0;
+}
+
+/* The list rows scroll; the PaneHeader above stays pinned. */
+.memory-list-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.25rem 0 0.5rem;
 }
 
 .memory-list-empty {

@@ -8,8 +8,9 @@
  */
 
 import { Pencil, RefreshCw, Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { PaneHeader } from "../components/PaneHeader";
 import { useT } from "../i18n/useI18n";
 import type { MemoryConflictPayload, MemoryListResult, MemoryTopicEntry } from "./memoryPaneTypes";
 import { MEMORY_ROOT_ID } from "./memoryPaneTypes";
@@ -51,11 +52,24 @@ export function MemoryPane(props: MemoryPaneProps) {
     const [conflict, setConflict] = useState<MemoryConflictPayload | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [confirmDiscard, setConfirmDiscard] = useState(false);
+    const [query, setQuery] = useState("");
 
     const isMemorySelected = selectedId === MEMORY_ROOT_ID;
     const selectedTopic: MemoryTopicEntry | undefined = data?.topics.find(
         (topic) => topic.id === selectedId,
     );
+
+    // Case-insensitive topic filter; the global MEMORY.md entry always stays
+    // pinned at top and is never filtered out.
+    const filteredTopics = useMemo(() => {
+        const topics = data?.topics ?? [];
+        const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (terms.length === 0) return topics;
+        return topics.filter((topic) => {
+            const haystack = `${topic.name} ${topic.type} ${topic.description ?? ""}`.toLowerCase();
+            return terms.every((term) => haystack.includes(term));
+        });
+    }, [data?.topics, query]);
 
     // While editing, ignore external refreshes that would clobber the draft.
     useEffect(() => {
@@ -160,10 +174,16 @@ export function MemoryPane(props: MemoryPaneProps) {
     return (
         <div className="memory-pane">
             <div className="memory-list">
-                <div className="pane-header">
-                    <span>
-                        {t("memory.title")} ({1 + data.topics.length})
-                    </span>
+                {/* Counts cover topics only. The global MEMORY.md row is pinned and
+                    never filtered, so including it would report "1/3" on a query
+                    that actually matched no topics. */}
+                <PaneHeader
+                    title={t("memory.title")}
+                    count={data.topics.length}
+                    shownCount={filteredTopics.length}
+                    query={query}
+                    onQueryChange={setQuery}
+                >
                     <button
                         type="button"
                         className="memory-refresh-btn"
@@ -173,36 +193,40 @@ export function MemoryPane(props: MemoryPaneProps) {
                     >
                         <RefreshCw size={14} aria-hidden="true" />
                     </button>
-                </div>
+                </PaneHeader>
 
-                <div className="memory-list-section-label">{t("memory.globalLabel")}</div>
-                <button
-                    type="button"
-                    className={`memory-list-item${isMemorySelected ? " active" : ""}`}
-                    onClick={() => onSelect(MEMORY_ROOT_ID)}
-                >
-                    <span className="memory-list-item-name">{t("memory.globalName")}</span>
-                    <span className="memory-list-item-badge">{t("memory.globalLabel")}</span>
-                </button>
+                <div className="memory-list-body">
+                    <div className="memory-list-section-label">{t("memory.globalLabel")}</div>
+                    <button
+                        type="button"
+                        className={`memory-list-item${isMemorySelected ? " active" : ""}`}
+                        onClick={() => onSelect(MEMORY_ROOT_ID)}
+                    >
+                        <span className="memory-list-item-name">{t("memory.globalName")}</span>
+                        <span className="memory-list-item-badge">{t("memory.globalLabel")}</span>
+                    </button>
 
-                <div className="memory-list-section-label">
-                    {t("memory.projectTopicsLabel")} ({data.topics.length})
+                    <div className="memory-list-section-label">
+                        {t("memory.projectTopicsLabel")} ({filteredTopics.length})
+                    </div>
+                    {filteredTopics.length === 0 ? (
+                        <div className="memory-list-empty">
+                            {query ? t("pane.noMatch") : t("memory.noTopics")}
+                        </div>
+                    ) : (
+                        filteredTopics.map((topic) => (
+                            <button
+                                key={topic.id}
+                                type="button"
+                                className={`memory-list-item${selectedId === topic.id ? " active" : ""}`}
+                                onClick={() => onSelect(topic.id)}
+                            >
+                                <span className="memory-list-item-name">{topic.name}</span>
+                                <span className="memory-list-item-badge">{topic.type}</span>
+                            </button>
+                        ))
+                    )}
                 </div>
-                {data.topics.length === 0 ? (
-                    <div className="memory-list-empty">{t("memory.noTopics")}</div>
-                ) : (
-                    data.topics.map((topic) => (
-                        <button
-                            key={topic.id}
-                            type="button"
-                            className={`memory-list-item${selectedId === topic.id ? " active" : ""}`}
-                            onClick={() => onSelect(topic.id)}
-                        >
-                            <span className="memory-list-item-name">{topic.name}</span>
-                            <span className="memory-list-item-badge">{topic.type}</span>
-                        </button>
-                    ))
-                )}
             </div>
 
             <div className="memory-detail">

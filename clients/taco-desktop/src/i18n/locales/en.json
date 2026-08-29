@@ -85,6 +85,11 @@
     "restore": "Restore",
     "hide": "Hide to background"
   },
+  "pane": {
+    "searchPlaceholder": "Filter…",
+    "searchLabel": "Search",
+    "noMatch": "No matches"
+  },
   "activity": {
     "chat": "Chat",
     "memory": "Memory",
@@ -111,6 +116,10 @@
     "contentLabel": "Content",
     "skillsEmptyState": "No skills found.",
     "skillsEmptyHint": "Add a SKILL.md file in ~/.taco/skills/ or <cwd>/.taco/skills/ (also scans ~/.pi/skills/, <cwd>/.pi/skills/).",
+    "skillsDiagnosticsTitle": "Some skill files have problems",
+    "skillsDiagnosticsOverrideTitle_one": "{{count}} same-name skill overridden by priority",
+    "skillsDiagnosticsOverrideTitle_other": "{{count}} same-name skills overridden by priority",
+    "skillsNoMatch": "No skills match your filter.",
     "systemPromptLabel": "System Prompt",
     "loading": "Loading…",
     "badgeUpdateAvailable": "Update available"

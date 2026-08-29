@@ -1,9 +1,15 @@
-import type { SkillEntry } from "@taco-ai/protocol";
-import { useEffect, useState } from "react";
+import type { SkillDiagnosticEntry, SkillEntry } from "@taco-ai/protocol";
+import { useEffect, useMemo, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
 
 export interface UseSkillsPaneResult {
+    /** Skills matching the current query (case-insensitive name/description substring). */
     skills: SkillEntry[];
+    /** Total loaded before filtering — the pane shows `shown/total` next to the search box. */
+    totalCount: number;
+    query: string;
+    setQuery: (q: string) => void;
+    diagnostics: SkillDiagnosticEntry[];
     selectedSkillName: string | null;
     setSelectedSkillName: (name: string | null) => void;
     skillContent: string;
@@ -17,11 +23,24 @@ export function useSkillsPane(
     active: boolean,
     activeCwd: string | undefined,
 ): UseSkillsPaneResult {
-    const [skills, setSkills] = useState<SkillEntry[]>([]);
+    const [allSkills, setAllSkills] = useState<SkillEntry[]>([]);
+    const [query, setQuery] = useState("");
+    const [diagnostics, setDiagnostics] = useState<SkillDiagnosticEntry[]>([]);
     const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
     const [skillContent, setSkillContent] = useState<string>("");
     const [skillContentLoading, setSkillContentLoading] = useState(false);
     const [skillContentError, setSkillContentError] = useState<string | null>(null);
+
+    // Case-insensitive fuzzy-ish filter: every whitespace-separated term must
+    // appear in the name or description, so "release note" matches release-notes.
+    const skills = useMemo(() => {
+        const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (terms.length === 0) return allSkills;
+        return allSkills.filter((s) => {
+            const haystack = `${s.name} ${s.description ?? ""}`.toLowerCase();
+            return terms.every((t) => haystack.includes(t));
+        });
+    }, [allSkills, query]);
 
     // Load list + auto-select first item so the content effect fires on entry.
     useEffect(() => {
@@ -33,7 +52,8 @@ export function useSkillsPane(
         void client
             .skillsList(activeCwd)
             .then((r) => {
-                setSkills(r.skills);
+                setAllSkills(r.skills);
+                setDiagnostics(r.diagnostics ?? []);
                 if (r.skills.length > 0) {
                     setSelectedSkillName(r.skills[0].name);
                 }
@@ -51,7 +71,7 @@ export function useSkillsPane(
         setSkillContentError(null);
         if (!selectedSkillName || !activeCwd) return;
         const target = selectedSkillName;
-        const known = skills.find((s) => s.name === target);
+        const known = allSkills.find((s) => s.name === target);
         if (!known) return;
         setSkillContentLoading(true);
         void client
@@ -72,10 +92,14 @@ export function useSkillsPane(
         return () => {
             cancelled = true;
         };
-    }, [selectedSkillName, activeCwd, skills, client]);
+    }, [selectedSkillName, activeCwd, allSkills, client]);
 
     return {
         skills,
+        totalCount: allSkills.length,
+        query,
+        setQuery,
+        diagnostics,
         selectedSkillName,
         setSelectedSkillName,
         skillContent,

@@ -85,6 +85,11 @@
     "restore": "还原",
     "hide": "隐藏到后台"
   },
+  "pane": {
+    "searchPlaceholder": "筛选…",
+    "searchLabel": "搜索",
+    "noMatch": "没有匹配项"
+  },
   "activity": {
     "chat": "聊天",
     "memory": "记忆",
@@ -111,6 +116,10 @@
     "contentLabel": "内容",
     "skillsEmptyState": "未发现 skill。",
     "skillsEmptyHint": "请在 ~/.taco/skills/ 或 <cwd>/.taco/skills/ 中添加 SKILL.md 文件（也支持 ~/.pi/skills/、<cwd>/.pi/skills/）。",
+    "skillsDiagnosticsTitle": "部分 skill 文件存在问题",
+    "skillsDiagnosticsOverrideTitle_one": "{{count}} 个同名 skill 已按优先级覆盖",
+    "skillsDiagnosticsOverrideTitle_other": "{{count}} 个同名 skill 已按优先级覆盖",
+    "skillsNoMatch": "没有匹配的 skill。",
     "systemPromptLabel": "系统提示词",
     "loading": "加载中…",
     "badgeUpdateAvailable": "有可用更新"

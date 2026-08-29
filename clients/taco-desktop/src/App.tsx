@@ -425,6 +425,10 @@ export default function App() {
     const { tools } = useToolsPane(client, mainView === "tools", activeCwd);
     const {
         skills,
+        totalCount: skillsTotalCount,
+        query: skillsQuery,
+        setQuery: setSkillsQuery,
+        diagnostics,
         selectedSkillName,
         setSelectedSkillName,
         skillContent,
@@ -845,6 +849,10 @@ export default function App() {
                     ) : (
                         <SkillsPane
                             skills={skills}
+                            totalCount={skillsTotalCount}
+                            query={skillsQuery}
+                            onQueryChange={setSkillsQuery}
+                            diagnostics={diagnostics}
                             selectedName={selectedSkillName ?? skills[0]?.name ?? null}
                             onSelect={setSelectedSkillName}
                             content={skillContent}

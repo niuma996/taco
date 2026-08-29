@@ -6,8 +6,9 @@
  */
 
 import type { AgentEntry } from "@taco-ai/protocol";
-import type { ReactElement } from "react";
+import { type ReactElement, useMemo, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
+import { PaneHeader } from "../components/PaneHeader";
 import { useT } from "../i18n/useI18n";
 
 export interface AgentsPaneProps {
@@ -28,32 +29,51 @@ export function AgentsPane({
     contentError,
 }: AgentsPaneProps): ReactElement {
     const { t } = useT();
-    const selected = selectedAgentType ?? agents[0]?.agentType ?? null;
+    const [query, setQuery] = useState("");
+
+    // Case-insensitive filter over agentType + description; every
+    // whitespace-separated term must match.
+    const filtered = useMemo(() => {
+        const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (terms.length === 0) return agents;
+        return agents.filter((a) => {
+            const haystack = `${a.agentType} ${a.description ?? ""}`.toLowerCase();
+            return terms.every((term) => haystack.includes(term));
+        });
+    }, [agents, query]);
+
+    const selected = selectedAgentType ?? filtered[0]?.agentType ?? null;
     const selectedAgent = agents.find((a) => a.agentType === selected) ?? null;
 
     return (
         <div className="agents-pane">
             <div className="agents-list">
-                <div className="pane-header">
-                    <span>
-                        {t("activity.agents")} ({agents.length})
-                    </span>
+                <PaneHeader
+                    title={t("activity.agents")}
+                    count={agents.length}
+                    shownCount={filtered.length}
+                    query={query}
+                    onQueryChange={setQuery}
+                />
+                <div className="agents-list-body">
+                    {filtered.length === 0 ? (
+                        <div className="agents-empty">
+                            {query ? t("pane.noMatch") : t("activity.noAgents")}
+                        </div>
+                    ) : (
+                        filtered.map((a) => (
+                            <button
+                                key={a.agentType}
+                                type="button"
+                                className={`agents-list-item${selected === a.agentType ? " active" : ""}`}
+                                onClick={() => onSelect(a.agentType)}
+                            >
+                                <span className="agents-list-item-name">{a.agentType}</span>
+                                <span className="agents-list-item-source">{a.source}</span>
+                            </button>
+                        ))
+                    )}
                 </div>
-                {agents.length === 0 ? (
-                    <div className="agents-empty">{t("activity.noAgents")}</div>
-                ) : (
-                    agents.map((a) => (
-                        <button
-                            key={a.agentType}
-                            type="button"
-                            className={`agents-list-item${selected === a.agentType ? " active" : ""}`}
-                            onClick={() => onSelect(a.agentType)}
-                        >
-                            <span className="agents-list-item-name">{a.agentType}</span>
-                            <span className="agents-list-item-source">{a.source}</span>
-                        </button>
-                    ))
-                )}
             </div>
             <div className="agents-detail">
                 {selectedAgent ? (

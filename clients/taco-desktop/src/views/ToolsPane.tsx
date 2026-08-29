@@ -12,8 +12,8 @@ import type { ToolEntry } from "@taco-ai/protocol";
 import { useMemo, useState } from "react";
 import { MarkdownHooks as ReactMarkdown } from "react-markdown";
 
+import { PaneHeader } from "../components/PaneHeader";
 import { Select } from "../components/ui/Select";
-import { TextInput } from "../components/ui/TextInput";
 import { useT } from "../i18n/useI18n";
 
 export interface ToolsPaneProps {
@@ -128,19 +128,14 @@ export function ToolsPane({ tools }: ToolsPaneProps) {
     return (
         <div className="tools-pane">
             <div className="tools-list">
-                <div className="pane-header">
-                    <span>
-                        {t("activity.tools")} ({filtered.length})
-                    </span>
-                </div>
+                <PaneHeader
+                    title={t("activity.tools")}
+                    count={tools.length}
+                    shownCount={filtered.length}
+                    query={query}
+                    onQueryChange={setQuery}
+                />
                 <div className="tools-list-controls">
-                    <TextInput
-                        className="tools-search"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder={t("tools.searchPlaceholder")}
-                        aria-label={t("tools.searchPlaceholder")}
-                    />
                     <div className="tools-filters">
                         <div className="tools-filter">
                             <span className="tools-filter-label">{t("tools.filterSource")}</span>
@@ -185,21 +180,23 @@ export function ToolsPane({ tools }: ToolsPaneProps) {
                         </div>
                     </div>
                 </div>
-                {filtered.length === 0 ? (
-                    <div className="tools-list-empty">{t("tools.noMatch")}</div>
-                ) : (
-                    filtered.map((tool) => (
-                        <button
-                            key={tool.name}
-                            type="button"
-                            className={`tools-list-item${selected === tool.name ? " active" : ""}`}
-                            onClick={() => setUserPick(tool.name)}
-                            title={tool.name}
-                        >
-                            <span className="tools-list-label">{tool.label}</span>
-                        </button>
-                    ))
-                )}
+                <div className="tools-list-body">
+                    {filtered.length === 0 ? (
+                        <div className="tools-list-empty">{t("tools.noMatch")}</div>
+                    ) : (
+                        filtered.map((tool) => (
+                            <button
+                                key={tool.name}
+                                type="button"
+                                className={`tools-list-item${selected === tool.name ? " active" : ""}`}
+                                onClick={() => setUserPick(tool.name)}
+                                title={tool.name}
+                            >
+                                <span className="tools-list-label">{tool.label}</span>
+                            </button>
+                        ))
+                    )}
+                </div>
             </div>
             <div className="tools-detail">
                 {!selectedTool ? (

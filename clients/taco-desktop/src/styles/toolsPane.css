@@ -11,13 +11,14 @@
 .tools-list {
     width: var(--pane-width);
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
     border-right: 1px solid var(--border);
     background: var(--pane-list-bg);
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 0.5rem 0;
+    overflow: hidden;
 }
 
+/* Pinned strip under the header — filter dropdowns stay put while rows scroll. */
 .tools-list-controls {
     display: flex;
     flex-direction: column;
@@ -27,9 +28,12 @@
     margin-bottom: 0.35rem;
 }
 
-.tools-search {
-    width: 100%;
-    font-size: 0.8rem;
+/* The list rows scroll; header + controls stay pinned. */
+.tools-list-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 0.5rem;
 }
 
 .tools-filters {

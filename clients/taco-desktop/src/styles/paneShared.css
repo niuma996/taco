@@ -13,6 +13,166 @@
     font-weight: 600;
     color: var(--fg);
 }
+
+/* Title + count badge cluster on the left; never wraps or overflows. */
+.pane-header-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Right-side cluster: extra action buttons + the search box, vertically
+   centered with even spacing regardless of how many are present. Grows only
+   when it holds an open search box (see .pane-header-actions.searching), so a
+   collapsed header keeps the actions hugged to the right edge. */
+.pane-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.pane-header-actions.searching {
+    flex: 1;
+}
+
+.pane-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 17px;
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-bg-active);
+    color: var(--accent);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Search is one bordered control — but only when it has a search surface to
+   host. When collapsed, the wrapper is invisible and the toggle reads as a
+   plain icon button (borderless, background only on hover); when open, the
+   full container reveals its border + the input area shows its own surface.
+   The icon is always present at the same width, so there is no perceived
+   jump between states. Width is 60% of the list column so it stays compact. */
+.pane-search {
+    display: flex;
+    align-items: stretch;
+    height: 22px;
+    flex: 0 0 auto;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    overflow: hidden;
+    transition:
+        border-color 0.12s ease,
+        background 0.12s ease,
+        box-shadow 0.12s ease;
+}
+
+/* Open state takes the full header row — the title and count are hidden while
+   searching, so the box gets all of it. `flex: 1` (not width: 100%) so it fills
+   whatever the row offers without overflowing the header padding. */
+.pane-search.open {
+    height: 26px;
+    flex: 1;
+    border-color: var(--border);
+    background: var(--bg-secondary);
+}
+
+.pane-search.open:focus-within {
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+}
+
+/* In collapsed state the toggle is the whole control — give it a hover
+   affordance so it reads as a button, even without a border. */
+.pane-search:not(.open) .pane-search-toggle:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+/* Collapsed: flex-basis 0 and clipped, so it takes no space and the toggle is
+   the whole control. max-width (not width) carries the slide animation, since
+   the open state needs `flex: 1` to fill the container and `auto` widths cannot
+   be transitioned. */
+.pane-search-input-wrap {
+    flex: 0 1 0;
+    max-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    display: flex;
+    transition:
+        max-width 0.18s ease,
+        opacity 0.15s ease;
+}
+
+/* Fills whatever the fixed-width toggle leaves — no percentage, so there is no
+   circular dependency with the container width and no dead space. Background
+   lives on the container, not here, so the input and the icon share one
+   continuous surface instead of the icon reading as a separate chip. */
+.pane-search-input-wrap.open {
+    flex: 1 1 auto;
+    max-width: 100%;
+    min-width: 0;
+    opacity: 1;
+}
+
+/* Borderless inside the shared control; the divider lives on the toggle. */
+.pane-search-input {
+    width: 100%;
+    height: 100%;
+    font-size: 0.78rem;
+    padding: 0 0.55rem;
+    border: none;
+    background: transparent;
+    border-radius: 0;
+    color: var(--fg);
+}
+
+.pane-search-input:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+.pane-search-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    flex: 0 0 22px;
+    align-self: stretch;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
+}
+
+/* No divider between input and icon: a border-left plus the container's rounded
+   corners made the icon read as a separate chip with its own outline and fill.
+   The icon sits on the same surface as the input; colour alone marks its state. */
+
+.pane-search-toggle.active {
+    color: var(--brand-orange);
+}
+
+/* Open state: hover only shifts the icon colour — no background, so nothing
+   re-introduces a chip outline around it. */
+.pane-search.open .pane-search-toggle:hover {
+    color: var(--fg);
+}
+
 /* ── per-session running indicator ──
    Static dot in the .session-main flex row, auto-centered with the title via align-items:center,
    not dependent on item total height — stays centered at 56px selected or natural height unselected. */
