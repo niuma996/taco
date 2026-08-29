@@ -1,7 +1,7 @@
 import type { ExtensionsStatusResult } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
-import { applyGlobalConfig, getGlobalConfig } from "../lib/globalConfig.js";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import { applyGlobalConfig, getGlobalConfig } from "../lib/globalConfig.js";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UsePluginsPaneResult {

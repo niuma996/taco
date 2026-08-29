@@ -3,9 +3,9 @@ import { useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import type { ClientRuleValidationError } from "../../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleClient.ts";
-import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 

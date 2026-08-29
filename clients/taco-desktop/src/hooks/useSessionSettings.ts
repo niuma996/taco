@@ -13,8 +13,8 @@
 import type { ThinkingLevel } from "@taco-ai/protocol";
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
-import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 
 /**
  * Optimistic per-session setter: write `next` under `sid`, await `rpc`, and on

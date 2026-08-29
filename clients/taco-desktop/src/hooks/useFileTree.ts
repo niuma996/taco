@@ -7,14 +7,13 @@
  *  - refresh() 清 cache + expanded + loadRoot()
  */
 import { useCallback, useRef, useState } from "react";
-
+import type { FsClient } from "../lib/clients/fsClient";
 import {
     type DirectoryListing,
     type FileEntry,
     filterEntries,
     sortEntries,
 } from "../lib/fileTypes";
-import type { FsClient } from "../lib/clients/fsClient";
 
 export interface UseFileTreeApi {
     entriesByDir: DirectoryListing;

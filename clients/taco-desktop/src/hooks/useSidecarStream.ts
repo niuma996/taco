@@ -20,9 +20,9 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 import type { SessionEventLike, SessionEventParams } from "../lib/chat/chatUtils";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { SessionPushProcessor, type SnapshotRecovery } from "../lib/sessionPushProcessor";
 import { bannerSeverity, formatForBanner, parseLogLine } from "../lib/sidecarLogLine";
-import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useStableCallback } from "./primitives/useStableCallback";
 
 export type SidecarAction =
@@ -365,17 +365,28 @@ export function useSidecarStream(
 
         let cancelled = false;
         const init = async () => {
-            const unlisten = await listen<{ line: string }>("sidecar-log", (event) => {
-                const line = event.payload.line;
-                if (line.startsWith(LLM_DUMP_PREFIX)) {
-                    onLlmDumpLineRef(line);
-                    return;
-                }
-                const parsed = parseLogLine(line);
-                const severity = bannerSeverity(parsed);
-                if (severity === "error") onLogLineRef(formatForBanner(parsed));
-                else if (severity === "warn") onWarningLineRef(formatForBanner(parsed));
-            });
+            // Rust batches stderr lines into one event per ~50ms / 64 lines
+            // (`{lines: string[]}` payload) so a single LLM payload's
+            // hundreds of folded `[taco:llm]` lines don't drown IPC. The
+            // single-line `{line}` payload is kept as a fallback for any
+            // out-of-tree emitter.
+            const unlisten = await listen<{ line?: string; lines?: string[] }>(
+                "sidecar-log",
+                (event) => {
+                    const lines =
+                        event.payload.lines ?? (event.payload.line ? [event.payload.line] : []);
+                    for (const line of lines) {
+                        if (line.startsWith(LLM_DUMP_PREFIX)) {
+                            onLlmDumpLineRef(line);
+                            continue;
+                        }
+                        const parsed = parseLogLine(line);
+                        const severity = bannerSeverity(parsed);
+                        if (severity === "error") onLogLineRef(formatForBanner(parsed));
+                        else if (severity === "warn") onWarningLineRef(formatForBanner(parsed));
+                    }
+                },
+            );
             if (cancelled) {
                 unlisten();
                 return;

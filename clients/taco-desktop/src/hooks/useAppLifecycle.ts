@@ -11,7 +11,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { type DesktopConfig, readDesktopConfig } from "../lib/desktopConfig.js";
+import { type DesktopConfig, readDesktopConfig, writeDesktopConfig } from "../lib/desktopConfig.js";
 import { getGlobalConfig, subscribeGlobalConfig } from "../lib/globalConfig";
 import { checkForUpdate } from "../lib/updater.ts";
 
@@ -51,6 +51,32 @@ export function useAppLifecycle(
                 console.error("[taco] failed to load desktop config", err);
                 setDesktopConfig({});
             });
+    }, []);
+
+    // ── mirror client.debugMode from webview localStorage → ~/.taco/desktop.json ─
+    // Rust's prewarm_daemon reads `debugMode` from desktop.json at spawn time
+    // to decide whether to inject TACO_DEBUG_LLM_PAYLOAD=1 into the sidecar
+    // process env (which gates the `[taco:llm]` stderr writer that feeds the
+    // in-memory LLM Dump panel). The sync must run on app mount — *before*
+    // prewarm spawns — so a user with debugMode=true from a prior session
+    // gets the env on the very next cold start. Doing it inside DebugTab's
+    // mount effect loses this race: prewarm spawns the daemon well before
+    // the user opens Settings, so the daemon reads stale disk (no debugMode)
+    // and the LLM Dump chip never appears until the next manual restart.
+    // Idempotent: only writes when the values differ.
+    useEffect(() => {
+        const localValue = getGlobalConfig().client.debugMode;
+        void (async () => {
+            try {
+                const onDisk = (await readDesktopConfig()).debugMode ?? false;
+                if (Boolean(localValue) !== onDisk) {
+                    await writeDesktopConfig({ debugMode: Boolean(localValue) });
+                }
+            } catch {
+                // Best-effort; the toggle path in DebugTab also writes disk,
+                // so a mount-sync failure self-heals on the next toggle.
+            }
+        })();
     }, []);
 
     // ── global config: keep Settings drawer changes reactive ───────────────────────

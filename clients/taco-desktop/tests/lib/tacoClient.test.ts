@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURRENT_SESSION_FORMAT_VERSION, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
-import type { SidecarClient, SidecarExit, SidecarFrame } from "../../src/lib/sidecar.ts";
 import { TacoClient } from "../../src/lib/clients/tacoClient.ts";
+import type { SidecarClient, SidecarExit, SidecarFrame } from "../../src/lib/sidecar.ts";
 
 class FakeSidecarClient implements SidecarClient {
     private pushHandler?: (frame: SidecarFrame) => void;

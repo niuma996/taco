@@ -1,16 +1,19 @@
 /**
- * DebugTab — Settings drawer Debug tab. Two independent toggles:
+ * DebugTab — Settings drawer Debug tab. One toggle:
  *  - debugMode: drives the in-memory LLM Dump panel via TACO_DEBUG_LLM_PAYLOAD=1.
- *  - llmDumpToFile: additionally persists `[taco:llm]` lines to
- *    `$TACO_HOME/logs/llm-dump.log`. Kept separate from debugMode because
- *    the in-memory panel is benign while the disk write leaves plaintext
- *    conversation in the user's home dir.
- * Both take effect only after "Apply & Restart" (dispose + re-ensure).
+ *    The toggle takes effect only after "Apply & Restart" (dispose + re-ensure).
+ *
+ *  A previous `llmDumpToFile` toggle (would-have-written `[taco:llm]` to
+ *  `~/.taco/logs/llm-dump.log`) was removed: it had no consumer. The
+ *  in-memory panel is the only dump surface; if a disk dump becomes
+ *  desired later, wire it in the same pattern as debugMode (mirror to
+ *  desktop.json, read at spawn, tee `[taco:llm]` lines to the file).
  */
 
 import { useEffect, useState } from "react";
 import { useAutoClearError } from "../../hooks/primitives/useAutoClearError.ts";
 import { useT } from "../../i18n/useI18n.ts";
+import { writeDesktopConfig } from "../../lib/desktopConfig.ts";
 import {
     type GlobalConfigState,
     getGlobalConfig,
@@ -39,7 +42,6 @@ export function DebugTab(props: DebugTabProps) {
     useEffect(() => subscribeGlobalConfig(setState), []);
 
     const diskValue = state.client.debugMode ?? false;
-    const llmDumpToFile = state.client.llmDumpToFile ?? false;
     // "Restarted" flag — reset to false after a toggle writes client settings;
     // set back to true after a successful restart. Restart is rare, so the
     // simplified rule is: any disk-value change implies "restart pending";
@@ -51,19 +53,12 @@ export function DebugTab(props: DebugTabProps) {
         clearError();
         try {
             await writeClientSettings({ debugMode: next });
-            setRestarted(false);
-        } catch (e) {
-            fail(e);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const setLlmDumpToFile = async (next: boolean) => {
-        setSaving(true);
-        clearError();
-        try {
-            await writeClientSettings({ llmDumpToFile: next });
+            // Mirror to desktop.json so the Tauri host reads it at spawn time
+            // (prewarm / restart / reconnect all read the disk). The localStorage
+            // write above only drives the instant UI toggle; Rust can't read it.
+            // Awaiting here means `restarted` only flips after disk is durable,
+            // so the user's subsequent Apply & Restart always sees the new value.
+            await writeDesktopConfig({ debugMode: next });
             setRestarted(false);
         } catch (e) {
             fail(e);
@@ -103,22 +98,6 @@ export function DebugTab(props: DebugTabProps) {
                     disabled={saving}
                     onChange={(next) => void setDebug(next)}
                     label={t("settings.debugModeEnabled")}
-                />
-            </div>
-            <div className="settings-row compaction-toggle-row">
-                <div className="compaction-toggle-text">
-                    <span className="compaction-toggle-label">
-                        {t("settings.llmDumpToFileEnabled")}
-                    </span>
-                    <span className="compaction-toggle-desc">
-                        {t("settings.llmDumpToFileDesc")}
-                    </span>
-                </div>
-                <Switch
-                    checked={llmDumpToFile}
-                    disabled={saving || !diskValue}
-                    onChange={(next) => void setLlmDumpToFile(next)}
-                    label={t("settings.llmDumpToFileEnabled")}
                 />
             </div>
             {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}

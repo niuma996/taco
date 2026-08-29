@@ -7,8 +7,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, vi } from "vitest";
 
 import { useFileTree } from "../../src/hooks/useFileTree";
-import type { FileEntry } from "../../src/lib/fileTypes";
 import type { FsClient } from "../../src/lib/clients/fsClient";
+import type { FileEntry } from "../../src/lib/fileTypes";
 
 function makeApi(map: Record<string, FileEntry[]>): FsClient {
     return {

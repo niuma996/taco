@@ -12,7 +12,11 @@ import { useEffect, useMemo, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
 import { useT } from "../i18n/useI18n";
-import type { MemoryConflictPayload, MemoryListResult, MemoryTopicEntry } from "../lib/memoryPaneTypes";
+import type {
+    MemoryConflictPayload,
+    MemoryListResult,
+    MemoryTopicEntry,
+} from "../lib/memoryPaneTypes";
 import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes";
 
 export interface MemoryPaneProps {

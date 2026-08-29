@@ -20,10 +20,10 @@ import type { ImPolicyChatOverrideEntry, ImRoute, ImWorkspacePolicyPatch } from 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useImPolicy } from "../hooks/useImPolicy.ts";
 import { useT } from "../i18n/useI18n.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import type { ClientRuleValidationError } from "../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../lib/commandPermissionRuleClient.ts";
 import { subscribeImPolicyChanged } from "../lib/imPolicyEvents.ts";
-import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { ConfirmModal } from "./ConfirmModal.tsx";
 import { ImPolicyRuleListField } from "./ImPolicyRuleListField.tsx";
 import { Button } from "./ui/Button.tsx";

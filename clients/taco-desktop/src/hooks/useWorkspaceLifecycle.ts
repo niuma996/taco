@@ -17,10 +17,6 @@ import { SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { type MutableRefObject, useCallback, useEffect, useRef } from "react";
 import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
-import { readClientSettings } from "../lib/clientSettings";
-import { loadGlobalConfig } from "../lib/globalConfig";
-import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
-import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import {
     createEmptyWorkspace,
     type SessionMeta,
@@ -28,6 +24,9 @@ import {
     type WorkspaceAction,
     type WorkspaceState,
 } from "../lib/chat/workspaceReducer";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import { loadGlobalConfig } from "../lib/globalConfig";
+import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
 import {
     initDefaultCwd,
     isValidWorkspaceCwd,
@@ -125,13 +124,10 @@ export function useWorkspaceLifecycle({
             // is fire-and-forget). initFromStorage awaits this once at mount;
             // any other code path that calls client.start must do the same.
             await sidecarLogListenerReady;
-            // debugMode is read synchronously from localStorage to avoid depending on cache.client
-            // (which may still be empty before loadGlobalConfig runs).
-            const settings = readClientSettings();
-            await client.start(cwd, {
-                debugMode: settings.debugMode,
-                llmDumpToFile: settings.llmDumpToFile,
-            });
+            // debugMode no longer needs to be passed per-call: the Rust host reads
+            // it from ~/.taco/desktop.json at spawn time, so every spawn
+            // (prewarm, reconnect, Apply & Restart) sees the current value.
+            await client.start(cwd);
             // Default page size (no full:true) — pagination must actually page on
             // initial load, not fetch every session up front.
             dispatchListResult(cwd, await client.sessionList(cwd), false);
@@ -236,6 +232,12 @@ export function useWorkspaceLifecycle({
         attachSessionRef.current = attachSession;
     }, [attachSession]);
 
+    // Indirection for the deferred cold-start retry: initFromStorage is declared
+    // before reloadAllWorkspaces, so it reaches the reload through this ref
+    // rather than naming the later-declared callback (which would be a TDZ
+    // error in the deps array).
+    const reloadAllWorkspacesRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
     const switchWorkspace = useCallback(
         async (cwd: string): Promise<void> => {
             setActiveCwd(cwd);
@@ -294,25 +296,74 @@ export function useWorkspaceLifecycle({
         // so Promise.all gives us the real sessions[0] for default attach.
         // workspacesRef depends on a useEffect sync, so reading after await may still see stale.
         //
-        // debugMode / llmDumpToFile / theme / uiLanguage are read synchronously
-        // from localStorage here on purpose. They are passed into the
-        // client.start() options below, which the Rust host forwards to the
-        // sidecar's spawn env (TACO_DEBUG_LLM_PAYLOAD) — so the values must
-        // be known before sidecar.ensureWorkspace fires. settings.get is a
-        // sidecar RPC and cannot run before the sidecar is up; LS is the only
-        // pre-spawn read available. (Workspaces, by contrast, have no
-        // pre-spawn constraint and moved to desktop.json — see
-        // workspaceStorage.ts.)
+        // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is now read
+        // from ~/.taco/desktop.json by the Rust host at spawn time, so
+        // client.start no longer takes options. Local pre-spawn LS reads are
+        // still useful for the other client fields (theme, uiLanguage) that
+        // drive synchronous UI before the sidecar answers.
         const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
-        const settings = readClientSettings();
-        // Retry the whole start+sessionList chain when the sidecar isn't ready
-        // yet — on a Vite full-page reload (triggered by JSON / non-component
-        // file changes), the sidecar process is often still spinning up and
-        // hello doesn't arrive before the 10s timeout. Without retries the
-        // cwd's sessions stay empty forever because initStartedRef blocks
-        // re-entry. Three attempts with 500/1500/3000ms backoff covers most
-        // dev startup windows without leaving the user staring at a dead pane.
-        const delays = [0, 500, 1500, 3000];
+        // Cold-start barrier: a single `client.start(activeCwd)` first to give
+        // prewarm's spawn a beat to finish before any sessionList fires.
+        // Without it the per-cwd `Promise.all` below races prewarm — prewarm's
+        // reap+respawn of a stale daemon takes a few seconds (previous app's
+        // daemon detected Alive, dies mid-reap, reaps Stale, then a fresh
+        // daemon binds sockets + answers initialize). Every per-cwd start then
+        // burns its retry budget on the same daemon, and the sidebar sits
+        // empty for 30+ seconds. After the leader succeeds the daemon is hot,
+        // per-cwd ensureWorkspace hits a populated slot in ms.
+        //
+        // The budget is deliberately SHORT (3 attempts ≈ 4s) — the common
+        // cold start resolves in 1-3s, and we don't want to hold the UI
+        // hostage for the rare case where the daemon is genuinely broken. If
+        // the leader can't get the daemon ready in that window, we DON'T keep
+        // retrying inline: we fall back to a single deferred background retry
+        // (below), so the sidebar renders immediately (empty) and self-fills
+        // ~5s later if the daemon eventually comes up.
+        const leaderDelays = [0, 1000, 3000];
+        let leaderOk = false;
+        let leaderLastErr: unknown;
+        for (const delay of leaderDelays) {
+            if (delay > 0) {
+                await new Promise((r) => setTimeout(r, delay));
+            }
+            try {
+                await client.start(activeTarget);
+                leaderOk = true;
+                break;
+            } catch (err) {
+                leaderLastErr = err;
+            }
+        }
+        if (!leaderOk) {
+            console.error(
+                "[taco] leader start failed (daemon not ready in budget); scheduling background retry",
+                activeTarget,
+                leaderLastErr,
+            );
+            // Non-blocking fallback: retry the full load once, well after the
+            // cold-start window. If the daemon is just slow (not dead), this
+            // fills the sidebar without the user staring at an empty panel;
+            // if it's truly dead, the empty state + this error is the signal.
+            setTimeout(() => {
+                void reloadAllWorkspacesRef.current().catch((e) => {
+                    console.error("[taco] background session reload failed", e);
+                });
+            }, 5000);
+        }
+        // Pull each workspace's session list directly (bypassing loadWorkspaceSessions's dispatch)
+        // so Promise.all gives us the real sessions[0] for default attach.
+        // workspacesRef depends on a useEffect sync, so reading after await may still see stale.
+        //
+        // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is read
+        // from ~/.taco/desktop.json by the Rust host at spawn time, so
+        // client.start no longer takes options. Local pre-spawn LS reads are
+        // still useful for the other client fields (theme, uiLanguage) that
+        // drive synchronous UI before the sidecar answers.
+        //
+        // Per-cwd retries are now a safety net only: with the leader barrier
+        // the daemon is already serving, so ensureWorkspace hits a populated
+        // slot and the first attempt usually succeeds.
+        const delays = [0, 1000, 2000];
         await Promise.all(
             opened.map(async (cwd) => {
                 let lastErr: unknown;
@@ -322,10 +373,7 @@ export function useWorkspaceLifecycle({
                         await new Promise((r) => setTimeout(r, delay));
                     }
                     try {
-                        await client.start(cwd, {
-                            debugMode: settings.debugMode,
-                            llmDumpToFile: settings.llmDumpToFile,
-                        });
+                        await client.start(cwd);
                         const list = await client.sessionList(cwd);
                         dispatchListResult(cwd, list, false);
                         firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
@@ -375,6 +423,10 @@ export function useWorkspaceLifecycle({
             await attachSession(activeTarget, firstSession.id);
         }
     }, [client, attachSession, dispatchListResult, workspacesRef]);
+
+    useEffect(() => {
+        reloadAllWorkspacesRef.current = reloadAllWorkspaces;
+    }, [reloadAllWorkspaces]);
 
     const openWorkspace = useCallback(
         async (rawCwd: string): Promise<boolean> => {
@@ -453,7 +505,8 @@ export function useWorkspaceLifecycle({
             const prevActive = activeCwd;
             try {
                 // Same path openWorkspace uses: awaits sidecarLogListenerReady,
-                // passes debugMode/llmDumpToFile to client.start, and loads the
+                // passes debugMode to client.start (read from desktop.json by the Rust host),
+                // and loads the workspace sessions for the sidebar.
                 // session list. A bare client.start() would leave ws.sessions
                 // empty, so the Sidebar would render no sessions for an IM
                 // conversation even though the chat itself attached fine.

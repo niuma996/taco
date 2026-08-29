@@ -94,6 +94,28 @@ async fn paths_are_dirs(paths: Vec<String>) -> Result<Vec<bool>, String> {
         .collect())
 }
 
+/// Read `debugMode` from `~/.taco/desktop.json`. Returns false on any
+/// failure path (missing file, parse error, non-bool value) — safe default.
+/// Sidecar spawn-time env injection is driven by this so the Debug tab's
+/// toggle takes effect on every subsequent spawn, including the cold-start
+/// `prewarm_daemon` (which runs before the WebView exists and so cannot
+/// read localStorage).
+fn read_desktop_config_debug_mode(app: &tauri::AppHandle) -> bool {
+    let path = match resolve_taco_home(app) {
+        Ok(p) => p.join("desktop.json"),
+        Err(_) => return false,
+    };
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    parsed.get("debugMode").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
 #[tauri::command]
 async fn desktop_config_read(app: AppHandle) -> Result<String, String> {
     let path = resolve_taco_home(&app)?.join("desktop.json");
@@ -353,8 +375,12 @@ fn apply_dev_dock_icon() {
 /// 会在收到带 `params.workspace` 的 RPC 时自行懒建 WorkspaceRuntime,Rust 无需
 /// 为新 workspace 做任何事。
 ///
-/// `cwd` 仅在首次 spawn 时用于决定 repo-source 模式的工作目录;`debug_mode` 同样
-/// 只在首次生效(spawn-time env)。持锁跨 await 保证并发调用不会双 spawn。
+/// `cwd` 仅在首次 spawn 时用于决定 repo-source 模式的工作目录。
+///
+/// Sidecar spawn-time env (e.g. `TACO_DEBUG_LLM_PAYLOAD` from the Debug
+/// tab's `debugMode` toggle) is read from `~/.taco/desktop.json` at every
+/// spawn so prewarm, reconnect, and Apply & Restart all see the same
+/// value — localStorage alone is unreachable from this Tauri command.
 ///
 /// Rust 是纯字节管道:所有 NDJSON 行(包括 initialize 的响应)都通过
 /// `sidecar-event` 原样转发给前端,由前端驱动握手。晚接入的 client 重发
@@ -364,15 +390,11 @@ async fn workspace_ensure(
     app: AppHandle,
     state: State<'_, AppState>,
     cwd: String,
-    debug_mode: Option<bool>,
-    llm_dump_to_file: Option<bool>,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     prewarm_workspace_access(&cwd);
     #[cfg(not(target_os = "macos"))]
     let _ = cwd;
-    let _ = debug_mode;
-    let _ = llm_dump_to_file;
 
     // Single-flight: serialize the whole ensure so concurrent first-starts
     // can't race the slot window (see ensure_lock on AppState).
@@ -446,6 +468,19 @@ async fn workspace_ensure(
     for (key, value) in &resolution.extra_env {
         cmd.env(key, value);
     }
+    // Sidecar spawn-time env: read `debugMode` from `~/.taco/desktop.json`,
+    // which the Debug tab mirrors to disk on every toggle. Disk is the
+    // authoritative source so every spawn path (prewarm, reconnect, the
+    // explicit Apply & Restart) reflects the user's setting — the Debug tab
+    // is the only place this can change, and it always writes disk before
+    // allowing a restart. The `debug_mode` parameter on this command is
+    // kept for backwards compatibility but ignored: the disk value is the
+    // contract. (The previous daemon-mode refactor dropped this injection
+    // entirely; restore it next to `extra_env` so future refactors don't
+    // strand the parameter again.)
+    if read_desktop_config_debug_mode(&app) {
+        cmd.env("TACO_DEBUG_LLM_PAYLOAD", "1");
+    }
     // Tee daemon stderr to the same file launchd uses (best-effort).
     // The desktop spawn path does not go through launchd, so without
     // this the daemon's logs would only survive in the parent's captured
@@ -460,46 +495,93 @@ async fn workspace_ensure(
         .next_process_generation
         .fetch_add(1, Ordering::Relaxed);
 
-    // Drain the launcher's stderr into stderr_buf (capped at 4 KiB). Kept
-    // alive for the lifetime of the function so a fast-exiting launcher can
-    // still surface its last few lines before we read the buffer.
+    // Drain the launcher's stderr two ways at once:
+    //   1. Forward lines to the frontend as `sidecar-log` Tauri events so
+    //      the Debug tab's LLM Dump panel (`[taco:llm]` filtered by
+    //      useSidecarStream) and the warning/error banner (parseLogLine)
+    //      can react in real time. This channel was dead in the daemon-mode
+    //      refactor — the old inline sidecar had a 1:1 stdout pipe Rust
+    //      forwarded; the new launcher→daemon chain only read stderr to
+    //      capture a launch-failure tail buffer and never emitted.
+    //
+    //      Lines are **batched** (one event carries `{lines: string[]}`,
+    //      not one event per line) because a single LLM call dumps hundreds
+    //      of folded `[taco:llm]` lines and one-event-per-line overwhelmed
+    //      Tauri IPC — the header line of a payload could be queued behind
+    //      its own body lines, making the LLM Dump chip sit on "(waiting)"
+    //      for seconds. A 50ms / 64-line flush keeps end-to-end latency
+    //      under ~100ms while dropping IPC traffic by an order of magnitude.
+    //   2. Keep the last 4 KiB in stderr_buf for error reporting on a
+    //      non-zero launcher exit.
     let stderr_buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(4096)));
-    if let Some(mut stderr) = launcher.stderr.take() {
+    if let Some(stderr) = launcher.stderr.take() {
         let buf = std::sync::Arc::clone(&stderr_buf);
+        let app_for_stderr = app.clone();
         tokio::spawn(async move {
-            use tokio::io::AsyncReadExt;
-            let mut tmp = [0u8; 1024];
-            // Fill a local buffer first, then commit under a short lock.
-            // This avoids holding the MutexGuard across `await` points, which
-            // would make the future !Send.
-            let mut local: Vec<u8> = Vec::with_capacity(4096);
+            use std::time::Duration;
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            use tokio::time::MissedTickBehavior;
+            let mut line_buf: Vec<u8> = Vec::with_capacity(512);
+            let mut reader = BufReader::new(stderr);
+            let mut batch: Vec<String> = Vec::with_capacity(64);
+            let mut ticker = tokio::time::interval(Duration::from_millis(50));
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
-                match stderr.read(&mut tmp).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if local.len() + n > 4096 {
-                            let take = 4096 - local.len();
-                            local.extend_from_slice(&tmp[..take]);
-                            // Drain the rest to keep the pipe from blocking.
-                            let mut discard = [0u8; 1024];
-                            while let Ok(n) = stderr.read(&mut discard).await {
-                                if n == 0 {
-                                    break;
+                tokio::select! {
+                    read = reader.read_until(b'\n', &mut line_buf) => {
+                        match read {
+                            Ok(0) => {
+                                // EOF: flush whatever is buffered, then exit.
+                                if !batch.is_empty() {
+                                    let _ = app_for_stderr.emit(
+                                        "sidecar-log",
+                                        serde_json::json!({ "lines": &batch }),
+                                    );
                                 }
+                                break;
                             }
-                            break;
+                            Ok(_) => {
+                                // Tail buffer: append raw bytes (incl. newline).
+                                {
+                                    let mut g = buf.lock().unwrap();
+                                    let room = 4096usize.saturating_sub(g.len());
+                                    if room > 0 {
+                                        if line_buf.len() > room {
+                                            let start = line_buf.len() - room;
+                                            g.extend_from_slice(&line_buf[start..]);
+                                        } else {
+                                            g.extend_from_slice(&line_buf);
+                                        }
+                                    }
+                                }
+                                let trimmed =
+                                    line_buf.strip_suffix(b"\n").unwrap_or(&line_buf);
+                                let line = String::from_utf8_lossy(trimmed).into_owned();
+                                if !line.is_empty() {
+                                    batch.push(line);
+                                    if batch.len() >= 64 {
+                                        let _ = app_for_stderr.emit(
+                                            "sidecar-log",
+                                            serde_json::json!({ "lines": &batch }),
+                                        );
+                                        batch.clear();
+                                    }
+                                }
+                                line_buf.clear();
+                            }
+                            Err(_) => break,
                         }
-                        local.extend_from_slice(&tmp[..n]);
                     }
-                    Err(_) => break,
-                }
-            }
-            if !local.is_empty() {
-                let mut g = buf.lock().unwrap();
-                if g.len() < 4096 {
-                    let take = (4096 - g.len()).min(local.len());
-                    g.extend_from_slice(&local[..take]);
+                    _ = ticker.tick() => {
+                        if !batch.is_empty() {
+                            let _ = app_for_stderr.emit(
+                                "sidecar-log",
+                                serde_json::json!({ "lines": &batch }),
+                            );
+                            batch.clear();
+                        }
+                    }
                 }
             }
         });
@@ -717,6 +799,17 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
                 send_control_shutdown(control.clone()),
             )
             .await;
+            // control.shutdown is ack-then-async-teardown: the daemon replies,
+            // then stops IM/scheduler and only afterwards closes + unlinks its
+            // sockets. A re-ensure landing in that teardown window would probe
+            // the still-bound socket, see "ready", and reuse the dying daemon —
+            // silently keeping the old spawn env (e.g. no TACO_DEBUG_LLM_PAYLOAD
+            // after a debug-mode restart). Wait until the control socket stops
+            // accepting connections before returning so the next ensure spawns
+            // a fresh process.
+            let _ =
+                tokio::time::timeout(Duration::from_secs(3), wait_for_control_socket_gone(control))
+                    .await;
         }
         #[cfg(unix)]
         {
@@ -742,6 +835,21 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
         }
     }
     state.shutdown_initiated.store(false, Ordering::Release);
+}
+
+/// Poll the control socket until it stops accepting connections — i.e. the
+/// daemon finished its async teardown and exited. Returns on the first failed
+/// connect; callers wrap this in a timeout. Unix-only (named-pipe daemons on
+/// Windows go through the service manager, not this path).
+#[cfg(unix)]
+async fn wait_for_control_socket_gone(path: std::path::PathBuf) {
+    use tokio::net::UnixStream;
+    loop {
+        if UnixStream::connect(&path).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// Send `control.shutdown` to the daemon's control socket and read the
@@ -869,7 +977,7 @@ fn prewarm_daemon(app: &tauri::AppHandle) {
             Err(_) => return,
         };
         let state = handle.state::<AppState>();
-        if let Err(e) = workspace_ensure(handle.clone(), state, cwd, None, None).await {
+        if let Err(e) = workspace_ensure(handle.clone(), state, cwd).await {
             // Best-effort: the frontend's first ensure surfaces the real
             // error to the UI; this log is for `tauri:dev` users.
             eprintln!("taco-desktop: daemon prewarm failed: {e}");

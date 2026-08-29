@@ -927,13 +927,20 @@ export class SidecarServer implements ServerRpcSurface {
         // Logs stay: they are the only channel for headless / IM runs with no
         // client to read `skills.list`. The returned copy is additional, not a
         // replacement.
-        for (const d of loaded.diagnostics) {
-            log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);
-        }
+        //
+        // `duplicate_name` is logged at info, not warn: a skill shadowed by a
+        // same-named skill in another directory is expected (e.g. the same
+        // skill under both ~/.claude/skills and ~/.taco/skills) and not a
+        // degradation. The desktop forwards `[warn]` stderr lines to a toast,
+        // so warn here would spam every boot. Loader/frontmatter diagnostics
+        // stay warn — they signal genuinely broken skills.
         for (const dup of deduped.duplicates) {
-            log.warn(
+            log.info(
                 `skill duplicate_name at ${dup.dropped.filePath}: "${dup.name}" shadowed by ${dup.keptFrom.filePath}`,
             );
+        }
+        for (const d of loaded.diagnostics) {
+            log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);
         }
         for (const d of frontmatterDiagnostics) {
             log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);

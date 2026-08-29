@@ -3,8 +3,8 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, it, vi } from "vitest";
 
 import { useFilePreview } from "../../src/hooks/useFilePreview";
-import { TEXT_TRUNCATE_BYTES } from "../../src/lib/fileTypes";
 import type { FsClient } from "../../src/lib/clients/fsClient";
+import { TEXT_TRUNCATE_BYTES } from "../../src/lib/fileTypes";
 
 function makeApi(opts: { text?: string; throws?: boolean } = {}): FsClient {
     return {

@@ -41,7 +41,9 @@ export function FilesDrawer(props: FilesDrawerProps) {
         // Dummy api while cwd is null; the hook only calls it from effects.
         fsClient ?? { readDir: async () => [], readText: async () => "" },
     );
-    const preview = useFilePreview(fsClient ?? { readDir: async () => [], readText: async () => "" });
+    const preview = useFilePreview(
+        fsClient ?? { readDir: async () => [], readText: async () => "" },
+    );
 
     // Drawer open / workspace switch → refresh tree + clear preview.
     // Merged into one effect to avoid loadRoot + refresh both firing

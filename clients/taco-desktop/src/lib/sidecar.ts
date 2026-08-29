@@ -19,23 +19,17 @@ export interface SidecarExit {
     reason?: string;
 }
 
-/** Client-only spawn preferences (spawn-time decisions, not interpreted by the sidecar runtime).
- *  - debugMode: enables TACO_DEBUG_LLM_PAYLOAD=1 in the sidecar (LLM Dump panel reads this from memory; safe by default).
- *  - llmDumpToFile: on top of debugMode, additionally writes [taco:llm] lines to $TACO_HOME/logs/llm-dump.log.
- *    Writes plaintext conversation to disk; defaults to false; changing requires restartSidecar. */
-export interface SidecarSpawnOptions {
-    debugMode?: boolean;
-    llmDumpToFile?: boolean;
-}
-
 /**
  * Client abstraction.
  */
 export interface SidecarClient {
     /** Ensure the shared daemon is spawned, connected, and owned by Rust.
      * Always resolves to null — the handshake (initialize RPC) is driven by
-     * the frontend over `send`/`onPush`, not by this call. */
-    ensureWorkspace(cwd: string, options?: SidecarSpawnOptions): Promise<null>;
+     * the frontend over `send`/`onPush`, not by this call.
+     *
+     * Spawn-time env (e.g. `TACO_DEBUG_LLM_PAYLOAD`) is read from
+     * `~/.taco/desktop.json` by the Rust host, not passed per-call. */
+    ensureWorkspace(cwd: string): Promise<null>;
     send(cwd: string, frame: object): Promise<void>;
     disposeAll(): Promise<void>;
     onPush(handler: (frame: SidecarFrame) => void): Promise<UnlistenFn>;
@@ -61,12 +55,8 @@ export function createSidecarClient(deps: {
         fire("workspace_send", { cwd, line: JSON.stringify(frame) });
 
     return {
-        ensureWorkspace: async (cwd, options) => {
-            await deps.invoke("workspace_ensure", {
-                cwd,
-                debugMode: options?.debugMode ?? false,
-                llmDumpToFile: options?.llmDumpToFile ?? false,
-            });
+        ensureWorkspace: async (cwd) => {
+            await deps.invoke("workspace_ensure", { cwd });
             return null;
         },
         send,

@@ -18,8 +18,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { McpSection } from "../../../src/components/settings/McpSection";
-import { loadGlobalConfig } from "../../../src/lib/globalConfig";
 import type { TacoClient } from "../../../src/lib/clients/tacoClient.ts";
+import { loadGlobalConfig } from "../../../src/lib/globalConfig";
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({

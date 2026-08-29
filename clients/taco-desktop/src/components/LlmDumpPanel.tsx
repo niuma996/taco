@@ -19,20 +19,38 @@ function formatClock(ts: number): string {
 
 export interface LlmDumpChipProps {
     count: number;
+    /** When true, the chip renders even with zero entries so the user has
+     *  immediate feedback that debug mode is on. Count badge is suppressed
+     *  in that case and a "waiting" hint takes its place. */
+    debugMode?: boolean;
     onClick: () => void;
 }
 
-/** Topbar inline entry. Only mounted when there are entries; callers omit it otherwise. */
+/** Topbar inline entry. Mounted whenever debug mode is on or there are
+ *  entries — see App.tsx for the gating condition. */
 export function LlmDumpChip(props: LlmDumpChipProps) {
     const { t } = useT();
+    const waiting = props.count === 0;
     return (
         <button
             type="button"
             className="llm-dump-chip"
             onClick={props.onClick}
-            title={t("debug.showLlmRequestDump")}
+            title={
+                waiting
+                    ? t("debug.showLlmRequestDumpWaiting", {
+                          defaultValue: props.debugMode
+                              ? "Debug mode is on — dump entries will appear after the next LLM call."
+                              : "Open the LLM request dump panel.",
+                      })
+                    : t("debug.showLlmRequestDump")
+            }
         >
-            {t("debug.llmRequestDump")} ({props.count})
+            {waiting
+                ? t("debug.llmRequestDumpWaiting", {
+                      defaultValue: props.debugMode ? "LLM Dump (waiting)" : "LLM Request Dump",
+                  })
+                : `${t("debug.llmRequestDump")} (${props.count})`}
         </button>
     );
 }

@@ -31,10 +31,6 @@ export type UiLanguagePreference = "zh" | "en";
  *  - debugMode: the Tauri host reads this when spawning the sidecar to
  *    decide whether to inject TACO_DEBUG_LLM_PAYLOAD=1; the sidecar only
  *    sees an env gate and is unaware of this field.
- *  - llmDumpToFile: a second, independent opt-in that, when on, also writes
- *    `[taco:llm]` lines to `$TACO_HOME/logs/llm-dump.log` on disk. Kept
- *    separate from `debugMode` because the in-memory panel is benign while
- *    the disk write puts plaintext conversation in the user's home dir.
  *
  * Future pure-UI preferences (font size, etc.) also live here.
  */
@@ -48,13 +44,6 @@ export interface TacoClientSettingsShape {
      */
     debugMode?: boolean;
     /**
-     * When on, `[taco:llm]` lines are also written to
-     * `$TACO_HOME/logs/llm-dump.log` on disk. Off by default. Takes effect
-     * only after a sidecar restart. Independent of `debugMode` so users
-     * can use the in-memory panel without persisting their conversation.
-     */
-    llmDumpToFile?: boolean;
-    /**
      * Desktop UI language. Drives react-i18next + the per-turn `<reply_language>`
      * tag sent to the LLM. Pure client field — never crosses the sidecar boundary.
      * Defaults to undefined (= system / browser locale resolved at first paint).
@@ -64,7 +53,6 @@ export interface TacoClientSettingsShape {
 
 export const LS_THEME = "taco.theme";
 export const LS_DEBUG_MODE = "taco.debugMode";
-export const LS_LLM_DUMP_TO_FILE = "taco.llmDumpToFile";
 export const LS_UI_LANGUAGE = "taco.uiLanguage";
 export const LS_SIDEBAR_COLLAPSED = "taco.sidebarCollapsed";
 
@@ -117,7 +105,6 @@ function writeLs<T>(key: string, value: T | undefined): void {
 export interface PersistedClientSettings {
     theme?: ThemePreference;
     debugMode?: boolean;
-    llmDumpToFile?: boolean;
     uiLanguage?: UiLanguagePreference;
 }
 
@@ -137,15 +124,6 @@ function readPersistedDebugMode(): boolean | undefined {
 
 function writePersistedDebugMode(v: boolean | undefined): void {
     writeLs(LS_DEBUG_MODE, v);
-}
-
-/** Synchronously read the llmDumpToFile preference; same shape as debugMode. */
-export function readPersistedLlmDumpToFile(): boolean | undefined {
-    return readLs(LS_LLM_DUMP_TO_FILE, isBoolean);
-}
-
-function writePersistedLlmDumpToFile(v: boolean | undefined): void {
-    writeLs(LS_LLM_DUMP_TO_FILE, v);
 }
 
 /** Synchronously read the uiLanguage preference; returns undefined for missing / invalid values. */
@@ -169,12 +147,10 @@ export function writePersistedSidebarCollapsed(v: boolean | undefined): void {
 function readRaw(): PersistedClientSettings {
     const theme = readPersistedThemePreference();
     const debugMode = readPersistedDebugMode();
-    const llmDumpToFile = readPersistedLlmDumpToFile();
     const uiLanguage = readPersistedUiLanguage();
     const out: PersistedClientSettings = {};
     if (theme !== undefined) out.theme = theme;
     if (debugMode !== undefined) out.debugMode = debugMode;
-    if (llmDumpToFile !== undefined) out.llmDumpToFile = llmDumpToFile;
     if (uiLanguage !== undefined) out.uiLanguage = uiLanguage;
     return out;
 }
@@ -182,7 +158,6 @@ function readRaw(): PersistedClientSettings {
 function writeRaw(next: PersistedClientSettings): void {
     writePersistedThemePreference(next.theme);
     writePersistedDebugMode(next.debugMode);
-    writePersistedLlmDumpToFile(next.llmDumpToFile);
     writePersistedUiLanguage(next.uiLanguage);
 }
 
@@ -215,13 +190,6 @@ export function saveClientSettings(
             next.debugMode = undefined;
         } else {
             next.debugMode = patch.debugMode;
-        }
-    }
-    if ("llmDumpToFile" in patch) {
-        if (patch.llmDumpToFile === undefined) {
-            next.llmDumpToFile = undefined;
-        } else {
-            next.llmDumpToFile = patch.llmDumpToFile;
         }
     }
     if ("uiLanguage" in patch) {

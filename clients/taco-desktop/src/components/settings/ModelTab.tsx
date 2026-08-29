@@ -9,13 +9,13 @@ import type { ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import {
     defaultModelForNewSession,
     type GlobalConfigState,
     getGlobalConfig,
     subscribeGlobalConfig,
 } from "../../lib/globalConfig.ts";
-import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { ModelMenu } from "./ModelMenu";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
 import { ProviderSection } from "./ProviderSection";

@@ -22,7 +22,6 @@ import {
     type SidecarClient,
     type SidecarExit,
     type SidecarFrame,
-    type SidecarSpawnOptions,
 } from "../sidecar";
 import { SidecarEpochs } from "../sidecarEpoch";
 
@@ -137,7 +136,7 @@ export class TacoClient extends TacoClientBase {
      * `options.debugMode` is passed to Rust to decide whether to inject
      * TACO_DEBUG_LLM_PAYLOAD=1 (spawn-time env, invisible to sidecar runtime).
      */
-    async start(cwd: WorkspaceId, options?: SidecarSpawnOptions): Promise<void> {
+    async start(cwd: WorkspaceId): Promise<void> {
         await this.ensureListeners();
         if (this.ensuredCwds.has(cwd)) return;
         // Set the handshake fallback channel BEFORE awaiting ensureWorkspace —
@@ -148,7 +147,7 @@ export class TacoClient extends TacoClientBase {
         this.reconnectCwd = cwd;
         const initialization = this.createProcessInitialization();
         try {
-            await this.sidecar.ensureWorkspace(cwd, options);
+            await this.sidecar.ensureWorkspace(cwd);
             // The initialize handshake doubles as the readiness wait: the
             // response proves the daemon is serving, carries its protocol
             // version, and identifies the process (instanceId).

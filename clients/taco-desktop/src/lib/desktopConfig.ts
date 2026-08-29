@@ -33,6 +33,15 @@ export interface WorkspaceListState {
 export interface DesktopConfig {
     onboarding?: OnboardingStatus;
     workspaces?: WorkspaceListState;
+    /**
+     * Sidecar spawn-time env mirror. Written by the Debug tab so the Rust
+     * host can read it at spawn time (prewarm + reconnect + restart all
+     * read this — localStorage alone is unreachable from the Tauri host).
+     * `debugMode=true` injects `TACO_DEBUG_LLM_PAYLOAD=1` into the sidecar
+     * process env, which gates the `[taco:llm]` stderr writer that feeds
+     * the in-memory LLM Dump panel.
+     */
+    debugMode?: boolean;
 }
 
 async function readRaw(): Promise<string> {

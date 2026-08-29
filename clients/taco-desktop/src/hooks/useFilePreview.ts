@@ -5,9 +5,8 @@
  * matches the current nonce — if not, the result is discarded. Rapid A→B→A only shows A's final state.
  */
 import { useCallback, useRef, useState } from "react";
-
-import { isBinary, TEXT_TRUNCATE_BYTES } from "../lib/fileTypes";
 import type { FsClient } from "../lib/clients/fsClient";
+import { isBinary, TEXT_TRUNCATE_BYTES } from "../lib/fileTypes";
 import { lastSegment } from "../lib/workspaceStorage";
 
 export interface UseFilePreviewApi {

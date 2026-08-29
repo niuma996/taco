@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
-import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import type { WorkspaceAction, WorkspaceState } from "../../lib/chat/workspaceReducer";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 
 /**
  * Renders the current session's task list.

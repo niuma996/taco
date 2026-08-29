@@ -25,11 +25,13 @@ import { SchedulesTab } from "./components/settings/SchedulesTab.tsx";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
+import { useChatInputState } from "./hooks/primitives/useChatInputState";
+import { useTheme } from "./hooks/primitives/useTheme";
+import { useToast } from "./hooks/primitives/useToast";
 import { useAgentsPane } from "./hooks/useAgentsPane";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { useChannelsPane } from "./hooks/useChannelsPane";
-import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { useFilesDrawer } from "./hooks/useFilesDrawer";
@@ -41,21 +43,18 @@ import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
 import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
-import { useTheme } from "./hooks/primitives/useTheme";
-import { useToast } from "./hooks/primitives/useToast";
 import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
 import {
-    readClientSettings,
     readPersistedSidebarCollapsed,
     writePersistedSidebarCollapsed,
 } from "./lib/clientSettings";
+import { TacoClient } from "./lib/clients/tacoClient.ts";
 import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig.js";
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
-import { TacoClient } from "./lib/clients/tacoClient.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
@@ -302,16 +301,16 @@ export default function App() {
         el.style.height = `${el.scrollHeight}px`;
     }
 
-    // DebugTab restart: dispose → restart all workspaces so sidecar picks up the
-    // new debugMode (TACO_DEBUG_LLM_PAYLOAD). Clear cursors first — new sidecar
-    // resets session seq to 1, so stale cursors would drop new frames as dupes.
-    // Reload settings + global config + workspaces after: dispose() clears
-    // ensuredCwds, and old attached session IDs are stale in the new process.
+    // DebugTab restart: dispose → restart all workspaces so the new sidecar
+    // process picks up the current debugMode from `~/.taco/desktop.json`
+    // (Rust reads disk at spawn time — prewarm, reconnect, and this path
+    // all funnel through `workspace_ensure`). Clear cursors first — a new
+    // sidecar resets session seq to 1, so stale cursors would drop new
+    // frames as dupes. Reload settings + global config + workspaces after:
+    // dispose() clears ensuredCwds, and old attached session IDs are stale
+    // in the new process.
     const restartSidecar = async (): Promise<void> => {
         const cwds = Object.keys(workspaces);
-        // debugMode / llmDumpToFile read sync localStorage to avoid depending on
-        // cache.client (may not have loadGlobalConfig yet).
-        const settings = readClientSettings();
         await client.dispose();
         clearCursors();
         // The listener is the same one we set up at mount; awaiting it here
@@ -319,14 +318,7 @@ export default function App() {
         // so the restarted sidecar's first lines aren't lost to a torn-down
         // listener that React is still reattaching.
         await sidecarLogListenerReady;
-        await Promise.all(
-            cwds.map((cwd) =>
-                client.start(cwd, {
-                    debugMode: settings.debugMode,
-                    llmDumpToFile: settings.llmDumpToFile,
-                }),
-            ),
-        );
+        await Promise.all(cwds.map((cwd) => client.start(cwd)));
         try {
             await loadGlobalConfig(client);
         } catch (e) {
@@ -483,9 +475,10 @@ export default function App() {
                             <span>{t("session.new")}</span>
                         </button>
                     </div>
-                    {llmDump.entries.length > 0 && (
+                    {(globalConfigState.client.debugMode || llmDump.entries.length > 0) && (
                         <LlmDumpChip
                             count={llmDump.entries.length}
+                            debugMode={globalConfigState.client.debugMode ?? false}
                             onClick={() => setLlmDumpOpen(true)}
                         />
                     )}

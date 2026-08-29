@@ -9,11 +9,11 @@ import type { CustomProviderConfig, ProviderView, WorkspaceId } from "@taco-ai/p
 import { KeyRound, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
-import { useProviders } from "../../hooks/useProviders.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
+import { useProviders } from "../../hooks/useProviders.ts";
 import { useT } from "../../i18n/useI18n.ts";
-import { getGlobalConfig } from "../../lib/globalConfig.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { getGlobalConfig } from "../../lib/globalConfig.ts";
 import { CustomProviderForm } from "./CustomProviderForm.tsx";
 import { ProviderKeyDialog } from "./ProviderKeyDialog.tsx";
 
