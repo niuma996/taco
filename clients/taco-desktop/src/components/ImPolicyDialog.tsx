@@ -25,10 +25,10 @@ import { validatePermissionRuleClient } from "../lib/commandPermissionRuleClient
 import { subscribeImPolicyChanged } from "../lib/imPolicyEvents.ts";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { ConfirmModal } from "./ConfirmModal.tsx";
+import { ImPolicyRuleListField } from "./ImPolicyRuleListField.tsx";
 import { Button } from "./ui/Button.tsx";
 import { FormField } from "./ui/FormField.tsx";
 import { Select } from "./ui/Select.tsx";
-import { Switch } from "./ui/Switch.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
 export interface ImPolicyDialogProps {
     open: boolean;
@@ -149,6 +149,10 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                       : "off",
             ),
         );
+        // A push reload invalidates any client-side validation message left
+        // over from a previous edit (e.g. cwd-not-absolute) — the server's
+        // new patch is canonical.
+        setClientError(null);
         setConfirmingKey(null);
         // Depend on the source field (`rawPatch`) so the effect re-fires only
         // when the server actually delivers a new patch — not on every render.
@@ -167,6 +171,10 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     const resolvedShell = resolved?.tools.shell ?? "deny";
     const resolvedMode = resolved?.commands.mode ?? "ask";
     const resolvedScratch = resolved?.perChatScratch ? "on" : "off";
+
+    // Disable the form during the initial load: editing now would clobber
+    // local state when the server's first patch arrives.
+    const formDisabled = policy.loading || policy.saving;
 
     const buildPatch = useCallback((): ImWorkspacePolicyPatch | string => {
         const patch: ImWorkspacePolicyPatch = {};
@@ -275,7 +283,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         <Select
                             value={fsTools}
                             onValueChange={(v) => setFsTools(v as TriString)}
-                            disabled={policy.saving}
+                            disabled={formDisabled}
                             options={[
                                 {
                                     value: INHERIT,
@@ -293,7 +301,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         <Select
                             value={shell}
                             onValueChange={(v) => setShell(v as TriString)}
-                            disabled={policy.saving}
+                            disabled={formDisabled}
                             options={[
                                 {
                                     value: INHERIT,
@@ -311,7 +319,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         <Select
                             value={mode}
                             onValueChange={(v) => setMode(v as TriString)}
-                            disabled={policy.saving}
+                            disabled={formDisabled}
                             options={[
                                 {
                                     value: INHERIT,
@@ -325,7 +333,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                     </FormField>
 
                     {/* allow rules */}
-                    <RuleListField
+                    <ImPolicyRuleListField
                         title={t("imPolicy.allowRules")}
                         enabled={allowEnabled}
                         onEnabledChange={setAllowEnabled}
@@ -333,9 +341,9 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         input={newAllowRule}
                         onInputChange={setNewAllowRule}
                         onAdd={() => addRule("allow")}
-                        onRemove={(r) => removeRule("allow", r)}
+                        onRemove={(r: string) => removeRule("allow", r)}
                         error={allowRuleError}
-                        disabled={policy.saving}
+                        disabled={formDisabled}
                         addLabel={t("imPolicy.addRule")}
                         removeLabel={t("imPolicy.removeRule")}
                         inputPlaceholder={t("imPolicy.rulePlaceholder")}
@@ -343,7 +351,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                     />
 
                     {/* deny rules */}
-                    <RuleListField
+                    <ImPolicyRuleListField
                         title={t("imPolicy.denyRules")}
                         enabled={denyEnabled}
                         onEnabledChange={setDenyEnabled}
@@ -351,9 +359,9 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         input={newDenyRule}
                         onInputChange={setNewDenyRule}
                         onAdd={() => addRule("deny")}
-                        onRemove={(r) => removeRule("deny", r)}
+                        onRemove={(r: string) => removeRule("deny", r)}
                         error={denyRuleError}
-                        disabled={policy.saving}
+                        disabled={formDisabled}
                         addLabel={t("imPolicy.addRule")}
                         removeLabel={t("imPolicy.removeRule")}
                         inputPlaceholder={t("imPolicy.rulePlaceholder")}
@@ -365,7 +373,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         <TextInput
                             type="text"
                             value={cwd}
-                            disabled={policy.saving}
+                            disabled={formDisabled}
                             placeholder={t("imPolicy.executionCwdPlaceholder")}
                             onChange={(e) => setCwd(e.target.value)}
                         />
@@ -376,7 +384,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                         <Select
                             value={perChatScratch}
                             onValueChange={(v) => setPerChatScratch(v as TriString)}
-                            disabled={policy.saving}
+                            disabled={formDisabled}
                             options={[
                                 {
                                     value: INHERIT,
@@ -413,7 +421,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                                             <Button
                                                 size="sm"
                                                 variant={confirming ? "danger" : "ghost"}
-                                                disabled={policy.saving}
+                                                disabled={formDisabled}
                                                 onClick={() => {
                                                     if (confirming) {
                                                         void clearOverrideEntry(entry);
@@ -434,13 +442,13 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                     )}
 
                     <div className="modal-actions">
-                        <Button variant="ghost" onClick={onClose} disabled={policy.saving}>
+                        <Button variant="ghost" onClick={onClose} disabled={formDisabled}>
                             {t("imPolicy.cancel")}
                         </Button>
                         <Button
                             variant="primary"
                             onClick={() => setConfirmingSave(true)}
-                            disabled={policy.saving}
+                            disabled={formDisabled}
                         >
                             {t("imPolicy.save")}
                         </Button>
@@ -460,103 +468,5 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                 onCancel={() => setConfirmingSave(false)}
             />
         </Dialog.Root>
-    );
-}
-
-interface RuleListFieldProps {
-    title: string;
-    enabled: boolean;
-    onEnabledChange: (next: boolean) => void;
-    rules: string[];
-    input: string;
-    onInputChange: (next: string) => void;
-    onAdd: () => void;
-    onRemove: (rule: string) => void;
-    error: ClientRuleValidationError | null;
-    disabled: boolean;
-    addLabel: string;
-    removeLabel: string;
-    inputPlaceholder: string;
-    emptyLabel: string;
-}
-
-function RuleListField(props: RuleListFieldProps): React.ReactElement {
-    const { t } = useT();
-    const {
-        title,
-        enabled,
-        onEnabledChange,
-        rules,
-        input,
-        onInputChange,
-        onAdd,
-        onRemove,
-        error,
-        disabled,
-        addLabel,
-        removeLabel,
-        inputPlaceholder,
-        emptyLabel,
-    } = props;
-    return (
-        <div className="im-policy-rules">
-            <div className="im-policy-rules-header">
-                <span className="ui-form-label">{title}</span>
-                <Switch label={title} onChange={onEnabledChange} checked={enabled} />
-            </div>
-            {enabled && (
-                <>
-                    <div className="settings-row">
-                        <TextInput
-                            type="text"
-                            value={input}
-                            disabled={disabled}
-                            placeholder={inputPlaceholder}
-                            onChange={(e) => onInputChange(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") onAdd();
-                            }}
-                        />
-                        <button
-                            type="button"
-                            className="settings-btn"
-                            disabled={disabled || input.trim().length === 0}
-                            onClick={onAdd}
-                        >
-                            {addLabel}
-                        </button>
-                    </div>
-                    {error && (
-                        <div className="error-banner">
-                            {error.kind === "empty"
-                                ? t("imPolicy.ruleErrorEmpty")
-                                : t("imPolicy.ruleErrorShellWrapper", { shell: error.shell })}
-                        </div>
-                    )}
-                    {rules.length === 0 ? (
-                        <p className="settings-tab-desc">{emptyLabel}</p>
-                    ) : (
-                        <ul className="permission-rule-list">
-                            {rules.map((rule) => (
-                                <li key={rule}>
-                                    <span className="permission-rule-text">
-                                        <code>{rule}</code>
-                                    </span>
-                                    <button
-                                        type="button"
-                                        className="permission-rule-remove"
-                                        disabled={disabled}
-                                        onClick={() => onRemove(rule)}
-                                        aria-label={removeLabel}
-                                    >
-                                        ×
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </>
-            )}
-        </div>
     );
 }
