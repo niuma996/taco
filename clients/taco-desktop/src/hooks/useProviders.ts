@@ -9,7 +9,7 @@ import type { ProviderView, WorkspaceId } from "@taco-ai/protocol";
  */
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
-import { useStableCallback } from "../lib/useStableCallback";
+import { useStableCallback } from "./useStableCallback";
 import { useRetryOnError } from "./useRetryOnError";
 
 export interface UseProvidersResult {

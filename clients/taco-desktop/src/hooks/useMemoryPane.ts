@@ -1,7 +1,7 @@
 import type { MemoryListResult } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
-import { MEMORY_ROOT_ID } from "../views/memoryPaneTypes.js";
+import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes.js";
 
 export interface MemoryConflict {
     currentContent: string;

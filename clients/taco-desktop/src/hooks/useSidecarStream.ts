@@ -23,7 +23,7 @@ import type { SessionEventLike, SessionEventParams } from "../lib/chatUtils";
 import { SessionPushProcessor, type SnapshotRecovery } from "../lib/sessionPushProcessor";
 import { bannerSeverity, formatForBanner, parseLogLine } from "../lib/sidecarLogLine";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
-import { useStableCallback } from "../lib/useStableCallback";
+import { useStableCallback } from "./useStableCallback";
 
 export type SidecarAction =
     | { type: "EVENT"; cwd: string; sid: string; ev: SessionEventLike }

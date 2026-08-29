@@ -8,7 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryPane } from "../../src/views/MemoryPane";
-import { MEMORY_ROOT_ID } from "../../src/views/memoryPaneTypes";
+import { MEMORY_ROOT_ID } from "../../src/lib/memoryPaneTypes";
 
 // Mock react-i18next at module level so every t() call gets a fresh identity translator.
 vi.mock("react-i18next", () => ({

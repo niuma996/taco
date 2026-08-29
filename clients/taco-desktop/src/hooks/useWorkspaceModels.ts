@@ -7,7 +7,7 @@ import type { WorkspaceId } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { ModelOption } from "../components/settings/ModelPicker";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
-import { useStableCallback } from "../lib/useStableCallback";
+import { useStableCallback } from "./useStableCallback";
 import { useRetryOnError } from "./useRetryOnError";
 
 export interface UseWorkspaceModelsResult {
