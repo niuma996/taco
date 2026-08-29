@@ -9,6 +9,7 @@
  */
 
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type {
     AgentHarnessResources,
@@ -774,15 +775,30 @@ export class WorkspaceRuntime extends EventEmitter {
             return await this.reloadSkillsCallback();
         });
         if (options.skillDirs && options.skillDirs.length > 0 && options.reloadSkills) {
-            // Paths are handed to chokidar unfiltered on purpose. Most of them
-            // (~/.claude/skills, ~/.pi/skills) usually do not exist, and
-            // chokidar v4 neither throws nor emits an error for a missing
-            // path — it starts watching the nearest existing ancestor and
-            // reports the entries once they appear. Verified: creating a
-            // previously-absent dir plus a file inside it still yields
-            // addDir/add events. So do NOT add an existsSync() filter here;
-            // that would permanently miss the "user creates ~/.claude/skills
-            // for the first time" case, which is exactly a first-run path.
+            // chokidar v4 watches the nearest *existing* ancestor of a missing
+            // path and reports it once it appears — but only when some ancestor
+            // exists. For a path whose whole parent chain is absent (the common
+            // first-run case for `<cwd>/.taco/skills`, since `.taco/` itself is
+            // only created lazily), chokidar watches nothing and never emits.
+            // Verified against chokidar 4.0.3: `getWatched()` is `{}` and the
+            // first `mkdir -p` + SKILL.md write produces zero events. So ensure
+            // the taco-owned leaf exists first (`<cwd>/.taco/skills`,
+            // `$TACO_HOME/skills`). mkdir is idempotent and these are taco's own
+            // dirs; we deliberately do NOT watch an ancestor like `cwd`, because
+            // that would fire a rescan on every unrelated file change in the
+            // project. `~/.claude/skills` / `~/.pi/skills` belong to other tools
+            // — never created here; for those the parent dir already exists, so
+            // the nearest-ancestor fallback works.
+            for (const dir of options.skillDirs) {
+                if (!dir.includes("/.taco/")) continue;
+                try {
+                    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+                } catch (e) {
+                    log.warn(
+                        `could not create skill dir ${dir} for watching: ${e instanceof Error ? e.message : String(e)}`,
+                    );
+                }
+            }
             const watcher = watchFs([...options.skillDirs], { ignoreInitial: true });
             this.skillWatcher = watcher;
             this.skillWatcherReady = new Promise((resolve) => {

@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { loadAgents } from "../../src/agents/loadAgents.ts";
+import { isStrictReadOnly } from "../../src/permissions/commandPolicy.ts";
 import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/agentSpawner.ts";
 
 const BUILTIN_DIR = join(import.meta.dirname, "..", "..", "src", "agents", "builtin");
@@ -64,5 +65,40 @@ describe("read-only shell gate", () => {
         const agents = await loadAgents({ builtinDir: BUILTIN_DIR, userDirs: [] });
         const reviewer = agents.find((a) => a.agentType === "reviewer");
         assert.equal(reviewer?.context, "fork");
+    });
+
+    it("every shell command reviewer.md names as allowed actually passes the read-only gate", async () => {
+        // The doc tells the model which shell commands it may run. Each such
+        // base command must survive isStrictReadOnly, or the profile instructs
+        // the model to run things the broker will deny — wasted turns and false
+        // "cannot verify" reports. Extract the promised commands from the doc
+        // itself and bind them to the real allowlist. (`git branch` is excluded
+        // deliberately: it sits in READ_ONLY_BASES and is denied even bare,
+        // because it shares the mutating-flag escalation rule with checkout.)
+        const agents = await loadAgents({ builtinDir: BUILTIN_DIR, userDirs: [] });
+        const reviewer = agents.find((a) => a.agentType === "reviewer");
+        assert.ok(reviewer, "expected the reviewer builtin");
+        const promised = [...reviewer.systemPrompt.matchAll(/`((?:git )?[a-z][a-z -]*?)`/g)]
+            .map((m) => m[1].trim())
+            .filter((s) => /^(pwd|ls|which|git )/.test(s));
+        // Sanity: the doc must promise exactly the base commands the gate accepts
+        // and nothing it denies (git branch is a READ_ONLY_BASE — denied bare).
+        assert.deepEqual(
+            [...promised].sort(),
+            ["git diff", "git log", "git show", "git status", "ls", "pwd", "which"],
+            "reviewer.md's promised shell commands drifted from the read-only allowlist",
+        );
+        for (const cmd of promised) {
+            assert.ok(
+                isStrictReadOnly(cmd),
+                `reviewer.md promises "${cmd}" but the read-only broker denies it`,
+            );
+        }
+        // The doc must NOT tell the model it can run builds/tests — those are
+        // denied; the profile points at `verification` for execution instead.
+        assert.ok(
+            !/run a build\/test to verify[^.]*allowed/i.test(reviewer.systemPrompt),
+            "reviewer.md must not claim builds/tests are allowed — the broker denies them",
+        );
     });
 });

@@ -23,7 +23,7 @@ description: Use when drafting release notes, summarizing what shipped, or turni
 
 Read the resolved paths off the `skill` tool's description rather than guessing — they depend on `TACO_HOME` and the workspace. The default is the user-wide `$TACO_HOME/skills/` (typically `~/.taco/skills/`), so the skill is available across every workspace. Drop the file under `<workspace>/.taco/skills/` only when the user explicitly asks for a project-local skill.
 
-The directory name must equal `name` in the frontmatter, or the skill is dropped.
+The directory name should equal `name` in the frontmatter — a mismatch doesn't drop the skill, but it surfaces as an `invalid_metadata` diagnostic, and the skill falls back to the directory name when `name` is absent. What actually drops a skill is a missing or empty `description`.
 
 ## Layout for a skill with scripts
 
@@ -76,7 +76,7 @@ If a skill only makes sense inline — because it needs to see the conversation,
 1. Write the description first. That is what determines whether the skill ever fires.
 2. Write the body. Push deterministic work into `scripts/`, long reference material into `references/`.
 3. Save. Reload is automatic (~300ms) — no restart.
-4. Check `skills.list`. If the skill is missing or misbehaving, its `diagnostics` say why: YAML that didn't parse, a name that doesn't match its directory, a same-name skill shadowing yours, or a bad frontmatter value. Read the diagnostic before re-reading your file.
+4. Check what loaded. The user sees `skills.list` diagnostics rendered in the desktop app's skills pane — YAML that didn't parse, a same-name skill shadowing yours, or a bad frontmatter value — and the sidecar also logs them. If you're running this, you can't call `skills.list` yourself (it's an RPC, not a tool), so check the sidecar log or ask the user what the pane shows. Read the diagnostic before re-reading your file.
 5. Invoke it with the `skill` tool. Run any scripts end to end — a script that fails on a real path is the most common defect, and it never shows up until you run it.
 6. Watch a couple of real uses and tighten what the model got wrong. Reload is fast enough to iterate in one sitting.
 

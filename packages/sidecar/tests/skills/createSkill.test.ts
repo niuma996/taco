@@ -121,6 +121,29 @@ describe("create-skill builtin skill", () => {
             /diagnostic/i.test(md),
             "must say the word diagnostics so the user knows what to look for",
         );
+        // The model cannot call skills.list itself (it is an RPC, not a tool), so
+        // the body must not instruct "you" to check it as if the model could —
+        // that would be a dead instruction. It should name who actually sees it.
+        assert.ok(
+            /skills pane|sidecar log|user sees/i.test(md),
+            "must name a reachable consumer (skills pane or sidecar log), not assume the model can call skills.list",
+        );
+    });
+
+    it("body states the real load-drop rule: name mismatch warns, empty description drops", () => {
+        // pi's loadSkillFromFile: a name/dir mismatch only yields an
+        // invalid_metadata warning (validateName), while a missing/empty
+        // description is the sole `return { skill: null }` path. The body once
+        // claimed a mismatch drops the skill — that was false. Guard the truth.
+        const md = body();
+        assert.ok(
+            !/must equal `?name`?[^.]*dropped/i.test(md),
+            "must not claim a name/dir mismatch drops the skill — it only warns",
+        );
+        assert.ok(
+            /description/i.test(md) && /drop/i.test(md),
+            "must name empty description as what actually drops a skill",
+        );
     });
 
     it("body teaches the supporting-file layout that the loader actually permits", () => {

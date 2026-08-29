@@ -107,4 +107,48 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
             await ws.dispose();
         }
     });
+
+    // The watcher's blind spot this guards: when a skill dir's whole parent
+    // chain is absent (first-run `<cwd>/.taco/skills`), chokidar watches nothing
+    // and the first `mkdir -p` + SKILL.md write produces zero events — a silent
+    // hot-reload miss for exactly the create-skill flow. The runtime pre-creates
+    // the taco-owned leaf to fix this; this test proves a first-time write under
+    // an absent parent chain is picked up. See workspace.ts mkdir note.
+    it("picks up a SKILL.md created for the first time under an absent parent chain", async () => {
+        // Deliberately NOT pre-created: join(tmpDir, ".taco/skills") with no
+        // .taco in between — the chain that defeated the bare watcher.
+        const freshSkillsDir = join(tmpDir, ".taco", "skills");
+        let scanResult: TacoSkill[] = [];
+        const ws = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            cwd: tmpDir,
+            resources: { skills: [] },
+            skillDirs: [freshSkillsDir],
+            reloadSkills: async () => ({ skills: scanResult, diagnostics: [] }),
+        });
+
+        try {
+            await ws.skillWatcherReady;
+
+            const newSkillDir = join(freshSkillsDir, "fresh-skill");
+            scanResult = [
+                {
+                    name: "fresh-skill",
+                    description: "created under an absent parent chain",
+                    filePath: join(newSkillDir, "SKILL.md"),
+                    content: "# fresh-skill",
+                    source: "user",
+                },
+            ];
+            // mkdir + write in one burst: the dir now exists (pre-created by the
+            // runtime), so this is a post-ready `add` under a watched dir.
+            mkdirSync(newSkillDir, { recursive: true });
+            writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: fresh-skill\n---\nbody");
+
+            await waitFor(() => (ws.resources.skills?.length ?? 0) > 0, 2000, 40);
+            assert.equal(ws.resources.skills?.[0]?.name, "fresh-skill");
+        } finally {
+            await ws.dispose();
+        }
+    });
 });
