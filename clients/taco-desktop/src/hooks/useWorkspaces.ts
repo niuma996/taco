@@ -1,117 +1,31 @@
 /**
- * useWorkspaces — workspace / session state machine, persistence, thinking level, and CRUD.
+ * useWorkspaces — workspace / session state machine, persistence, and CRUD.
  *
- * workspaces and sessionLevels are two independent useReducers; errorBanner is a separate
- * useState (kept out of reducers so it does not pollute business state).
- * input / pendingDeleteSession / confirmNewSession stay in App.tsx (UI state, not domain state).
+ * Domain state lives in the workspaces reducer; per-session thinking level and
+ * model are delegated to useSessionSettings. errorBanner is a plain useState,
+ * kept out of the reducer so error display does not pollute business state.
+ * input / pendingDeleteSession / confirmNewSession stay in App.tsx (UI state).
  */
 
-import type {
-    AgentMessage,
-    ImageInput,
-    SessionListEntry,
-    SessionListResult,
-    ThinkingLevel,
-} from "@taco-ai/protocol";
-import { SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import {
-    type Dispatch,
-    type SetStateAction,
-    useCallback,
-    useEffect,
-    useReducer,
-    useRef,
-    useState,
-} from "react";
+import type { AgentMessage, ImageInput, ThinkingLevel } from "@taco-ai/protocol";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
-import { findPendingAskUserIds, historyToUiMessages, type UiMessage } from "../lib/chatUtils";
-import { readClientSettings } from "../lib/clientSettings";
-import {
-    defaultThinkingLevelForNewSession,
-    getGlobalConfig,
-    loadGlobalConfig,
-} from "../lib/globalConfig";
+import { historyToUiMessages, type UiMessage } from "../lib/chatUtils";
+import { getGlobalConfig } from "../lib/globalConfig";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
 import type { TacoClient } from "../lib/tacoClientTauri.ts";
 import {
-    createEmptyWorkspace,
-    type SessionMeta,
-    sortSessionsByUpdatedDesc,
     type WorkspaceAction,
     type WorkspaceState,
     workspacesReducer,
 } from "../lib/workspaceReducer";
-import {
-    initDefaultCwd,
-    isValidWorkspaceCwd,
-    loadActiveCwd,
-    loadOpenedCwds,
-    persistActiveCwd,
-    persistCwds,
-    pruneMissingCwds,
-    resolveActiveCwd,
-} from "../lib/workspaceStorage";
 import type { AskUserPayload } from "./useAskUser";
-import { type SidecarAction, sidecarLogListenerReady } from "./useSidecarStream";
+import { useSessionSettings } from "./useSessionSettings";
+import type { SidecarAction } from "./useSidecarStream";
 import { useToast } from "./useToast";
+import { useWorkspaceLifecycle } from "./useWorkspaceLifecycle";
 
 export type { SessionMeta, WorkspaceState } from "../lib/workspaceReducer";
-
-/** Map a server session entry to client SessionMeta. */
-function toSessionMeta(s: SessionListEntry): SessionMeta {
-    return {
-        id: s.id,
-        createdAt: s.createdAt,
-        updatedAt: s.updatedAt,
-        filePath: s.filePath,
-        name: s.name,
-    };
-}
-
-/**
- * Decide whether streaming thinking_* sub-events should be suppressed for
- * this session. Per-session override wins; otherwise fall back to the global
- * default. Used by both the live APPLY_EVENT path and any future "is this
- * session showing thinking" check.
- */
-function suppressedThinkingFor(sessionLevels: Record<string, ThinkingLevel>, sid: string): boolean {
-    return sessionLevels[sid] !== undefined
-        ? sessionLevels[sid] === "off"
-        : defaultThinkingLevelForNewSession(getGlobalConfig().global) === "off";
-}
-
-/**
- * Optimistic per-session setter: write `next` under `sid`, await `rpc`, and on
- * throw roll back to the previous value if any (else drop the key). Re-throws
- * after rollback so the caller can show its own error UI (banner / toast).
- * Centralizes the hadPrev/prev/destructure dance so model/thinking rollback
- * rules don't drift between call sites.
- */
-async function applyOptimistic<K extends string, V>(
-    map: Record<K, V>,
-    setter: Dispatch<SetStateAction<Record<K, V>>>,
-    sid: K,
-    next: V,
-    rpc: () => Promise<void>,
-    label: string,
-): Promise<void> {
-    const hadPrev = Object.hasOwn(map, sid);
-    const prev = map[sid];
-    setter((m) => ({ ...m, [sid]: next }));
-    try {
-        await rpc();
-    } catch (err) {
-        console.error(`[taco] ${label} failed`, err);
-        setter((m) => {
-            if (hadPrev) return { ...m, [sid]: prev as V };
-            const { [sid]: _drop, ...rest } = m;
-            void _drop;
-            return rest as Record<K, V>;
-        });
-        throw err;
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // useWorkspaces
@@ -210,8 +124,6 @@ export interface UseWorkspacesApi {
 
 export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const [workspaces, dispatchWs] = useReducer(workspacesReducer, {});
-    const [sessionLevels, setSessionLevels] = useState<Record<string, ThinkingLevel>>({});
-    const [sessionModels, setSessionModels] = useState<Record<string, ModelSelection>>({});
     // Active cwd is read from desktop.json (via the IPC) inside initFromStorage;
     // the lazy initializer can only return a synchronous value, so we seed with
     // the empty string and let initFromStorage set the real value once the
@@ -226,8 +138,6 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
 
     // workspacesRef — for read-after-write paths (attachSession / switchWorkspace, etc.).
     const workspacesRef = useRef<Record<string, WorkspaceState>>(workspaces);
-    /** StrictMode double-run guard — see initFromStorage top. */
-    const initStartedRef = useRef(false);
     /**
      * In-flight flag for the lazy-create branch of sendPrompt. Set to true the
      * moment the empty `sessionCreate` fires, cleared on success/failure. A
@@ -238,26 +148,35 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
      * no bubble added) until the first finishes.
      */
     const pendingCreateRef = useRef(false);
-    /**
-     * Model picked while no active session exists (a fresh session before its
-     * first send). Consumed by sendPrompt's lazy-create branch as the new
-     * session's initial model; cleared on create. Without this the ModelMenu
-     * change is a no-op — setSessionModel bails on `!activeSession` and the
-     * selection is silently dropped. State (not ref) so the ModelMenu re-renders
-     * when the staged choice changes.
-     */
-    const [pendingNewSessionModel, setPendingNewSessionModel] = useState<ModelSelection | null>(
-        null,
-    );
-    const pendingNewSessionModelRef = useRef<ModelSelection | null>(null);
-    // Keep the ref in sync so sendPrompt's lazy-create branch reads the staged
-    // model without pulling state into its dependency chain.
-    useEffect(() => {
-        pendingNewSessionModelRef.current = pendingNewSessionModel;
-    }, [pendingNewSessionModel]);
     useEffect(() => {
         workspacesRef.current = workspaces;
     }, [workspaces]);
+
+    const settings = useSessionSettings({
+        client,
+        activeCwd,
+        activeSession: workspaces[activeCwd]?.activeSession,
+        setErrorBanner,
+    });
+    // sendPrompt's lazy-create branch awaits sessionCreate before recording the
+    // new session's level/model, so it must read the settings API as of
+    // await-resolution time rather than through its render-time closure.
+    const settingsRef = useRef(settings);
+    useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
+
+    // ── workspace CRUD / lifecycle ──
+    const lifecycle = useWorkspaceLifecycle({
+        client,
+        dispatchWs,
+        workspacesRef,
+        activeCwd,
+        setActiveCwd,
+        setErrorBanner,
+        showToast,
+    });
+    const { refreshSessionList, attachSessionRef } = lifecycle;
 
     // askUserAnswersRef — holds user-selected answers + questions per pending toolCallId,
     // read by the askUserPending → session.submitAnswers useEffect below.
@@ -312,7 +231,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     type: "APPLY_EVENT",
                     cwd: action.cwd,
                     sid: action.sid,
-                    suppressedThinking: suppressedThinkingFor(sessionLevels, action.sid),
+                    suppressedThinking: settings.isThinkingSuppressed(action.sid),
                     now: Date.now(),
                     ev: action.ev,
                 });
@@ -355,7 +274,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 // the first "session not attached" error.
                 const sid = workspacesRef.current[action.cwd]?.activeSession;
                 if (sid) {
-                    void attachSessionInternalRef.current(action.cwd, sid).catch((err) => {
+                    void attachSessionRef.current(action.cwd, sid).catch((err: unknown) => {
                         console.error(
                             "[taco] re-attach after sidecar restart failed",
                             action.cwd,
@@ -418,509 +337,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             }
             // Note: answers only land in the ref, read by the useEffect.
         },
-        [sessionLevels],
-    );
-
-    // ── workspace CRUD ──
-
-    /** Apply a SessionListResult to the reducer. Centralizes the
-     *  result→dispatch mapping so initial load, refresh, and load-more share
-     *  one place to thread nextCursor + total through. dispatchWs is a
-     *  useReducer dispatch, so no deps are needed. */
-    const dispatchListResult = useCallback(
-        (cwd: string, result: SessionListResult, append: boolean): void => {
-            const sessions: SessionMeta[] = (result.sessions ?? []).map(toSessionMeta);
-            dispatchWs({
-                type: "LOAD_SESSIONS",
-                cwd,
-                sessions,
-                nextCursor: result.nextCursor
-                    ? { updatedAt: result.nextCursor.updatedAt, id: result.nextCursor.id }
-                    : undefined,
-                total: result.total,
-                append,
-            });
-        },
-        [],
-    );
-
-    const loadWorkspaceSessions = useCallback(
-        async (cwd: string): Promise<void> => {
-            // The stderr listener must be up before the sidecar can emit a
-            // startup line, or the first log is dropped (Tauri's event bus
-            // is fire-and-forget). initFromStorage awaits this once at mount;
-            // any other code path that calls client.start must do the same.
-            await sidecarLogListenerReady;
-            // debugMode is read synchronously from localStorage to avoid depending on cache.client
-            // (which may still be empty before loadGlobalConfig runs).
-            await client.start(cwd, {
-                debugMode: readClientSettings().debugMode,
-                llmDumpToFile: readClientSettings().llmDumpToFile,
-            });
-            // Default page size (no full:true) — pagination must actually page on
-            // initial load, not fetch every session up front.
-            const list = await client.sessionList(cwd);
-            dispatchListResult(cwd, list, false);
-        },
-        [client, dispatchListResult],
-    );
-
-    /** Refresh only one workspace's session list (pull latest name etc. for the sidebar).
-     * Does NOT `client.start`, attach, or change activeSession. Used after send / rename to
-     * refresh sidebar titles. Strictly distinct from `reloadAllWorkspaces` (which force-attaches
-     * sessions[0] after a restart) — that one would swap the user's current panel away. */
-    const refreshSessionList = useCallback(
-        async (cwd: string): Promise<void> => {
-            try {
-                // Re-fetch as one page sized to what the user has already paged
-                // in, so a refresh after a turn keeps an expanded list expanded
-                // instead of collapsing it back to the first page.
-                const loaded = workspacesRef.current[cwd]?.sessions.length ?? 0;
-                const list = await client.sessionList(
-                    cwd,
-                    loaded > SESSION_LIST_DEFAULT_LIMIT ? { limit: loaded } : undefined,
-                );
-                dispatchListResult(cwd, list, false);
-            } catch (err) {
-                console.error("[taco] refreshSessionList failed", cwd, err);
-            }
-        },
-        [client, dispatchListResult],
-    );
-
-    const attachSessionInternal = useCallback(
-        async (cwd: string, sessionId: string): Promise<void> => {
-            let inFlightAgentToolCallIds: string[] | undefined;
-            try {
-                const attachResult = await client.sessionAttach(cwd, sessionId);
-                inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
-            } catch (err) {
-                const msg = `Cannot open session: ${(err as Error).message}`;
-                console.error("[taco] sessionAttach failed", cwd, sessionId, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
-                // The session is gone from the server — prune it from the local list
-                // so the sidebar no longer shows a dead entry. REMOVE_SESSION's
-                // reducer strips this sid's pendingBySessionId slot in the same
-                // commit, so the sidebar's "running" dot clears with the row.
-                dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
-                return;
-            }
-            const hist = await client.sessionHistory(cwd, sessionId);
-            const msgs = historyToUiMessages(
-                hist.entries as Parameters<typeof historyToUiMessages>[0],
-                { inFlightAgentToolCallIds },
-            );
-            dispatchWs({
-                type: "ATTACH",
-                cwd,
-                sid: sessionId,
-                messages: msgs,
-                pendingAskUserIds: findPendingAskUserIds(msgs),
-            });
-            // tasks / planState fallback — sidecar also pushes on session.attached, but we proactively
-            // pull once here to cover push-channel drops. RPC reads sidecar memory directly,
-            // independent of the push channel.
-            //
-            // These two single-shot reads look redundant next to session.snapshot.get (which returns
-            // history + tasks + planState in one call, and is what restoreSessionSnapshot below uses).
-            // Attach deliberately does NOT use it: snapshot.get carries a snapshotSeq that exists to
-            // reset the push cursor, and session.attached's own sequenced tasks/plan pushes land right
-            // after this attach. Swapping these reads for snapshot.get without also reconciling the
-            // cursor would let those pushes be discarded as duplicates. Keep the split until someone
-            // is deliberately changing push-recovery semantics.
-            try {
-                const r = await client.sessionTasksGet(cwd, sessionId);
-                dispatchWs({
-                    type: "TASKS_UPDATED",
-                    cwd,
-                    sid: sessionId,
-                    active: r.active,
-                    history: r.history,
-                });
-            } catch {
-                /* Older sidecar may lack this RPC — rely on push. */
-            }
-            try {
-                const p = await client.sessionPlanStateGet(cwd, sessionId);
-                dispatchWs({
-                    type: "PLAN_STATE_UPDATED",
-                    cwd,
-                    sid: sessionId,
-                    active: p.active,
-                    currentSlug: p.currentSlug,
-                });
-            } catch {
-                /* Same as above. */
-            }
-        },
-        [client, showToast],
-    );
-
-    const attachSession = attachSessionInternal;
-
-    // Bridge for `dispatch` (declared above attachSessionInternal — a direct
-    // reference would hit the TDZ in its deps array, and a stale closure if
-    // omitted). SIDECAR_RESTARTED's re-attach reads through this ref.
-    const attachSessionInternalRef = useRef(attachSessionInternal);
-    useEffect(() => {
-        attachSessionInternalRef.current = attachSessionInternal;
-    }, [attachSessionInternal]);
-
-    const switchWorkspaceInternal = useCallback(
-        async (cwd: string, persist = true): Promise<void> => {
-            setActiveCwd(cwd);
-            if (persist) persistActiveCwd(cwd);
-            dispatchWs({ type: "SET_ACTIVE", cwd });
-            const ws = workspacesRef.current[cwd];
-            if (ws && ws.messages.length === 0 && !ws.activeSession && ws.sessions[0]) {
-                await attachSessionInternal(cwd, ws.sessions[0].id);
-            }
-        },
-        [attachSessionInternal],
-    );
-
-    const switchWorkspace = switchWorkspaceInternal;
-
-    const initFromStorage = useCallback(async () => {
-        // StrictMode double-run guard: React 18 dev mount effects run twice. client.start is
-        // idempotent (ensuredCwds + shared readiness) and already blocks duplicate spawn, but
-        // the full init (sessionList / attach / loadGlobalConfig / dispatch) must not repeat.
-        // The in-flight ref guarantees a single run.
-        if (initStartedRef.current) return;
-        initStartedRef.current = true;
-        // Block until the stderr listener is up — otherwise startup lines
-        // emitted by the sidecar between cmd.spawn and the listener's
-        // `await listen(...)` returning are lost. Tauri's event bus is
-        // fire-and-forget; there is no replay for late subscribers.
-        await sidecarLogListenerReady;
-        // Resolve the real default cwd ($TACO_HOME/workspace, created on demand)
-        // before reading storage — loadOpenedCwds / resolveActiveCwd fall back to
-        // it, and the sync placeholder value points at a path that may not exist.
-        await initDefaultCwd();
-        // Read opened + active from desktop.json (via the Rust host). The read
-        // also runs the one-shot migration from the legacy localStorage keys,
-        // so an upgrade-in-place user lands in the same workspaces as before.
-        const opened = await pruneMissingCwds(await loadOpenedCwds());
-        // loadActiveCwd reads the same desktop.json block (separate IPC call so
-        // callers that only need active don't pay for the full opened list).
-        const storedActive = await loadActiveCwd();
-        // resolveActiveCwd is a pure function: prefers the stored active, then
-        // opened[0], then the default cwd. We still validate storedActive
-        // against opened because the desktop.json active can outlive a workspace
-        // that was dropped during pruning.
-        const activeTarget = resolveActiveCwd(
-            storedActive && opened.includes(storedActive) ? storedActive : null,
-            opened,
-        );
-        setActiveCwd(activeTarget);
-        // Persist the post-prune list back so a workspace that disappeared
-        // between sessions does not get carried forward. Failure is logged but
-        // non-fatal — the in-memory `opened` already excludes the dropped ones.
-        await persistCwds(opened);
-        const placeholder: Record<string, WorkspaceState> = {};
-        for (const cwd of opened) {
-            placeholder[cwd] = createEmptyWorkspace(cwd, cwd === activeTarget);
-        }
-        dispatchWs({ type: "INIT", workspaces: placeholder });
-        // Pull each workspace's session list directly (bypassing loadWorkspaceSessions's dispatch)
-        // so Promise.all gives us the real sessions[0] for default attach.
-        // workspacesRef depends on a useEffect sync, so reading after await may still see stale.
-        //
-        // debugMode / llmDumpToFile / theme / uiLanguage are read synchronously
-        // from localStorage here on purpose. They are passed into the
-        // client.start() options below, which the Rust host forwards to the
-        // sidecar's spawn env (TACO_DEBUG_LLM_PAYLOAD) — so the values must
-        // be known before sidecar.ensureWorkspace fires. settings.get is a
-        // sidecar RPC and cannot run before the sidecar is up; LS is the only
-        // pre-spawn read available. (Workspaces, by contrast, have no
-        // pre-spawn constraint and moved to desktop.json — see
-        // workspaceStorage.ts.)
-        const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
-        const settings = readClientSettings();
-        // Retry the whole start+sessionList chain when the sidecar isn't ready
-        // yet — on a Vite full-page reload (triggered by JSON / non-component
-        // file changes), the sidecar process is often still spinning up and
-        // hello doesn't arrive before the 10s timeout. Without retries the
-        // cwd's sessions stay empty forever because initStartedRef blocks
-        // re-entry. Three attempts with 500/1500/3000ms backoff covers most
-        // dev startup windows without leaving the user staring at a dead pane.
-        const delays = [0, 500, 1500, 3000];
-        await Promise.all(
-            opened.map(async (cwd) => {
-                let lastErr: unknown;
-                for (const delay of delays) {
-                    if (delay > 0) {
-                        console.warn(`[taco] retrying start+sessionList for ${cwd} in ${delay}ms`);
-                        await new Promise((r) => setTimeout(r, delay));
-                    }
-                    try {
-                        await client.start(cwd, {
-                            debugMode: settings.debugMode,
-                            llmDumpToFile: settings.llmDumpToFile,
-                        });
-                        const list = await client.sessionList(cwd);
-                        dispatchListResult(cwd, list, false);
-                        firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
-                        return;
-                    } catch (err) {
-                        lastErr = err;
-                    }
-                }
-                console.error("[taco] loadWorkspaceSessions failed after retries", cwd, lastErr);
-            }),
-        );
-        try {
-            await loadGlobalConfig(client);
-        } catch (e) {
-            console.error("[taco] loadGlobalConfig failed", e);
-        }
-        const firstSession = firstSessionByCwd[activeTarget];
-        if (firstSession) {
-            await attachSessionInternal(activeTarget, firstSession.id);
-        }
-    }, [client, attachSessionInternal, dispatchListResult]);
-
-    /** Called after sidecar restart — the sidecar process is replaced, so all attached session
-     * IDs become invalid in the new process. Refetch every workspace's session list + attach the
-     * first, syncing client state with the new sidecar. */
-    const reloadAllWorkspaces = useCallback(async (): Promise<void> => {
-        const openedCwds = Object.keys(workspacesRef.current);
-        // Active cwd lives in desktop.json now (it survives the sidecar restart
-        // that triggered this reload — localStorage would also have survived, but
-        // we go through the new path to keep both sources in sync).
-        const storedActive = await loadActiveCwd();
-        const activeTarget = resolveActiveCwd(storedActive, openedCwds);
-        const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
-        await Promise.all(
-            openedCwds.map(async (cwd) => {
-                try {
-                    const list = await client.sessionList(cwd);
-                    dispatchListResult(cwd, list, false);
-                    firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
-                } catch (err) {
-                    console.error("[taco] sessionList failed (restart)", cwd, err);
-                }
-            }),
-        );
-        const firstSession = firstSessionByCwd[activeTarget];
-        if (firstSession) {
-            await attachSessionInternal(activeTarget, firstSession.id);
-        }
-    }, [client, attachSessionInternal, dispatchListResult]);
-
-    const openWorkspace = useCallback(
-        async (rawCwd: string): Promise<boolean> => {
-            const cwd = rawCwd.trim().replace(/\/+$/, "");
-            if (!cwd) return false;
-            if (!isValidWorkspaceCwd(cwd)) {
-                const msg = `Invalid workspace path: ${JSON.stringify(cwd)} (contains glob or shell metacharacters; use a real directory path)`;
-                console.error("[taco] openWorkspace rejected", cwd);
-                setErrorBanner(msg);
-                showToast(msg, "error");
-                return false;
-            }
-            const alreadyOpen = Boolean(workspacesRef.current[cwd]);
-            if (!alreadyOpen) {
-                // Build next inside the updater and persistCwds(Object.keys(next)) immediately,
-                // avoiding the stale-read of workspacesRef.current right after dispatchWs that
-                // would drop the new cwd from localStorage.
-                const nextCwds = [...Object.keys(workspacesRef.current), cwd];
-                dispatchWs({
-                    type: "INIT",
-                    workspaces: {
-                        ...workspacesRef.current,
-                        [cwd]: createEmptyWorkspace(cwd),
-                    },
-                });
-                persistCwds(nextCwds);
-            }
-            try {
-                await loadWorkspaceSessions(cwd);
-                await switchWorkspaceInternal(cwd);
-                return true;
-            } catch (err) {
-                const msg = `Failed to open ${cwd}: ${(err as Error).message}`;
-                console.error("[taco] openWorkspace failed", cwd, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
-                return false;
-            }
-        },
-        [loadWorkspaceSessions, showToast, switchWorkspaceInternal],
-    );
-
-    const browseAndOpen = useCallback(async () => {
-        try {
-            const picked = await openDialog({ directory: true, multiple: false });
-            if (typeof picked === "string" && picked.length > 0) {
-                await openWorkspace(picked);
-            }
-        } catch (err) {
-            const msg = `Failed to open folder picker: ${(err as Error).message}`;
-            console.error("[taco] browse failed", err);
-            setErrorBanner(msg);
-        }
-    }, [openWorkspace]);
-
-    const openImConversation = useCallback(
-        async (cwd: string, sid: string): Promise<void> => {
-            const addedNew = !workspacesRef.current[cwd];
-            // Seed WorkspaceState FIRST — the ATTACH reducer is a no-op without
-            // an existing entry, so the order is load-bearing.
-            if (addedNew) {
-                dispatchWs({
-                    type: "INIT",
-                    workspaces: {
-                        ...workspacesRef.current,
-                        [cwd]: createEmptyWorkspace(cwd),
-                    },
-                });
-            }
-            const prevActive = activeCwd;
-            try {
-                // Same path openWorkspace uses: awaits sidecarLogListenerReady,
-                // passes debugMode/llmDumpToFile to client.start, and loads the
-                // session list. A bare client.start() would leave ws.sessions
-                // empty, so the Sidebar would render no sessions for an IM
-                // conversation even though the chat itself attached fine.
-                await loadWorkspaceSessions(cwd);
-                // Activate inline rather than via switchWorkspaceInternal: that
-                // helper auto-attaches sessions[0] when the workspace has no
-                // active session, which would attach the wrong conversation (or
-                // flash it) before our own attach lands. It also persists
-                // activeCwd, and an im:// key must not reach the desktop.json
-                // `workspaces.active` field — the next launch would resolve an
-                // activeCwd with no WorkspaceState.
-                setActiveCwd(cwd);
-                dispatchWs({ type: "SET_ACTIVE", cwd });
-                await attachSessionInternal(cwd, sid);
-            } catch (err) {
-                const msg = `Failed to open IM conversation: ${(err as Error).message}`;
-                console.error("[taco] openImConversation failed", cwd, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
-                // Roll back the half-opened workspace so a later retry starts
-                // from a clean state instead of a dangling empty entry.
-                if (addedNew) {
-                    dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
-                }
-                if (prevActive) {
-                    setActiveCwd(prevActive);
-                    dispatchWs({ type: "SET_ACTIVE", cwd: prevActive });
-                }
-            }
-        },
-        [loadWorkspaceSessions, attachSessionInternal, showToast, activeCwd],
-    );
-
-    const restoreSessionSnapshot = useCallback(
-        async (
-            cwd: string,
-            sessionId: string,
-            _sessionKind: "main" | "subagent",
-        ): Promise<SnapshotRecovery> => {
-            try {
-                const snapshot = await client.sessionSnapshotGet(cwd, sessionId);
-                const messages = historyToUiMessages(
-                    snapshot.history.entries as Parameters<typeof historyToUiMessages>[0],
-                );
-                dispatchWs({
-                    type: "RESTORE_SESSION_SNAPSHOT",
-                    cwd,
-                    sid: sessionId,
-                    sessionKind: snapshot.sessionKind,
-                    messages,
-                    pendingAskUserIds:
-                        snapshot.sessionKind === "main"
-                            ? findPendingAskUserIds(messages)
-                            : undefined,
-                });
-                if (snapshot.tasks) {
-                    dispatchWs({
-                        type: "TASKS_UPDATED",
-                        cwd,
-                        sid: sessionId,
-                        active: snapshot.tasks.active,
-                        history: snapshot.tasks.history,
-                    });
-                }
-                if (snapshot.planState) {
-                    dispatchWs({
-                        type: "PLAN_STATE_UPDATED",
-                        cwd,
-                        sid: sessionId,
-                        active: snapshot.planState.active,
-                        currentSlug: snapshot.planState.currentSlug,
-                    });
-                }
-                return { recovered: true, snapshotSeq: snapshot.snapshotSeq };
-            } catch (err) {
-                console.error("[taco] session snapshot recovery failed", cwd, sessionId, err);
-                setErrorBanner(`Session recovery failed: ${(err as Error).message}`);
-                return { recovered: false };
-            }
-        },
-        [client],
-    );
-
-    const deleteSession = useCallback(
-        async (cwd: string, sessionId: string): Promise<void> => {
-            try {
-                await client.sessionDelete(cwd, sessionId);
-            } catch (err) {
-                const msg = `Failed to delete session: ${(err as Error).message}`;
-                console.error("[taco] deleteSession failed", cwd, sessionId, err);
-                setErrorBanner(msg);
-                return;
-            }
-            // workspacesRef is still stale after dispatchWs (sync happens on next render's useEffect),
-            // so filter the remaining list on the old ref to avoid attaching to a just-deleted session.
-            const existing = workspacesRef.current[cwd];
-            const wasActive = existing?.activeSession === sessionId;
-            const remaining = (existing?.sessions ?? []).filter((s) => s.id !== sessionId);
-            dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
-            if (wasActive && remaining[0]) {
-                await attachSessionInternal(cwd, remaining[0].id);
-            }
-        },
-        [client, attachSessionInternal],
-    );
-
-    /** Sidebar "load more" handler. Reads the cursor from reducer state and
-     *  appends the next page. If the cursor is missing (e.g. a refresh reset
-     *  it), the call is a no-op. */
-    const loadMoreSessions = useCallback(
-        async (cwd: string): Promise<void> => {
-            const cursor = workspacesRef.current[cwd]?.listCursor;
-            if (!cursor) return;
-            try {
-                const list = await client.sessionList(cwd, { cursor });
-                dispatchListResult(cwd, list, true);
-            } catch (err) {
-                console.error("[taco] loadMoreSessions failed", cwd, err);
-            }
-        },
-        [client, dispatchListResult],
-    );
-
-    const renameSession = useCallback(
-        async (cwd: string, sessionId: string, name: string): Promise<void> => {
-            try {
-                await client.sessionRename(cwd, sessionId, name);
-            } catch (err) {
-                const msg = `Failed to rename session: ${(err as Error).message}`;
-                console.error("[taco] renameSession failed", cwd, sessionId, err);
-                setErrorBanner(msg);
-                return;
-            }
-            // Reload only the current workspace's session list so the sidebar sees the new name.
-            // Rename doesn't change the session set/order, so reloadAllWorkspaces (which iterates
-            // every cwd and may accidentally attach) is unnecessary; the backend _nameCache was
-            // precisely updated by rename, so this list call won't hit disk.
-            await refreshSessionList(cwd);
-        },
-        [client, refreshSessionList],
+        // attachSessionRef is a stable ref object; its .current is read at call
+        // time on purpose, so it must not be a dependency.
+        [settings, attachSessionRef],
     );
 
     const beginPendingNewSession = useCallback((cwd: string): void => {
@@ -935,7 +354,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         // the explicit "abandon the current pending session" signal, so the guard
         // must not carry over.
         pendingCreateRef.current = false;
-        setPendingNewSessionModel(null); // staged model belongs to the abandoned session
+        settingsRef.current.clearStagedModel(); // belongs to the abandoned session
         dispatchWs({ type: "BEGIN_PENDING_NEW_SESSION", cwd });
     }, []);
 
@@ -947,8 +366,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         if (!trimmed && (!images || images.length === 0)) return false;
         const cwd = activeCwd;
         const ws = workspacesRef.current[cwd];
-        const state = getGlobalConfig();
-        const uiLocale = state.client.uiLanguage;
+        const uiLocale = getGlobalConfig().client.uiLanguage;
         if (!ws?.activeSession) {
             // Double-Enter race: a second Enter before the first sessionCreate
             // resolves would read ws.activeSession === undefined again and
@@ -975,7 +393,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 };
                 dispatchWs({ type: "APPEND_USER", cwd, msg: optimisticUserMsg });
 
-                const initialLevel = defaultThinkingLevelForNewSession(state.global);
+                // initialModel was staged while this session had no id yet
+                // (fresh-session pre-send). The server attaches with it, and
+                // adoptNewSession records both under the allocated id so the
+                // menus keep showing them once the session exists.
+                const defaults = settingsRef.current.newSessionDefaults();
+                const initialModel = defaults.initialModel;
                 // Two-step create: allocate the session id first (no prompt), then
                 // send the prompt through the same blocking-but-push-friendly path
                 // that sessionPrompt uses for existing sessions. This keeps the
@@ -985,23 +408,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 // events through instead of dropping them.
                 const created = await client.sessionCreate({
                     workspace: cwd,
-                    thinkingLevel: initialLevel,
+                    thinkingLevel: defaults.initialLevel,
                 });
-                setSessionLevels((m) => ({ ...m, [created.sessionId]: initialLevel }));
-                // Model staged while this session had no id yet (fresh-session
-                // pre-send). Apply it as the new session's initial model (server
-                // attaches with it) and record it in the per-session map so the
-                // ModelMenu keeps showing it once the session exists. Cleared
-                // here — it only applies to the first turn's attach; subsequent
-                // switches go through session.setModel.
-                const initialModel = pendingNewSessionModelRef.current;
-                setPendingNewSessionModel(null); // ref syncs via effect
-                if (initialModel) {
-                    setSessionModels((m) => ({
-                        ...m,
-                        [created.sessionId]: initialModel,
-                    }));
-                }
+                settingsRef.current.adoptNewSession(created.sessionId, defaults);
                 dispatchWs({
                     type: "ADD_SESSION",
                     cwd,
@@ -1141,58 +550,6 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         }
     }
 
-    async function setSessionModel(next: ModelSelection): Promise<void> {
-        const sid = activeWs?.activeSession;
-        if (!sid) {
-            // No session yet (fresh-session pre-send state): stage the choice so
-            // sendPrompt's lazy-create branch applies it as the initial model.
-            setPendingNewSessionModel(next);
-            return;
-        }
-        try {
-            await applyOptimistic(
-                sessionModels,
-                setSessionModels,
-                sid,
-                next,
-                async () => {
-                    await client.sessionSetModel(activeCwd, sid, next.provider, next.id);
-                },
-                "sessionSetModel",
-            );
-        } catch (err) {
-            setErrorBanner(`Model change failed: ${(err as Error).message}`);
-        }
-    }
-
-    async function setSessionLevel(next: ThinkingLevel): Promise<void> {
-        const sid = activeWs?.activeSession;
-        if (!sid) return;
-        try {
-            await applyOptimistic(
-                sessionLevels,
-                setSessionLevels,
-                sid,
-                next,
-                async () => {
-                    await client.sessionSetThinkingLevel(activeCwd, sid, next);
-                },
-                "sessionSetThinkingLevel",
-            );
-        } catch (err) {
-            setErrorBanner(`Thinking level change failed: ${(err as Error).message}`);
-        }
-    }
-
-    const activeLevel: ThinkingLevel | null = activeWs?.activeSession
-        ? (sessionLevels[activeWs.activeSession] ??
-          defaultThinkingLevelForNewSession(getGlobalConfig().global))
-        : null;
-
-    const activeModel: ModelSelection | null = activeWs?.activeSession
-        ? (sessionModels[activeWs.activeSession] ?? null)
-        : pendingNewSessionModel;
-
     async function loadSubagentHistory(subSessionId: string): Promise<void> {
         const cwd = activeCwd;
         try {
@@ -1211,29 +568,29 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         workspaces,
         activeCwd,
         activeWs,
-        sessionLevels,
+        sessionLevels: settings.sessionLevels,
         errorBanner,
         dispatch,
         dispatchWs,
         setErrorBanner,
-        initFromStorage,
-        reloadAllWorkspaces,
-        loadMoreSessions,
-        openWorkspace,
-        browseAndOpen,
-        openImConversation,
-        switchWorkspace,
-        attachSession,
-        restoreSessionSnapshot,
-        deleteSession,
-        renameSession,
+        initFromStorage: lifecycle.initFromStorage,
+        reloadAllWorkspaces: lifecycle.reloadAllWorkspaces,
+        loadMoreSessions: lifecycle.loadMoreSessions,
+        openWorkspace: lifecycle.openWorkspace,
+        browseAndOpen: lifecycle.browseAndOpen,
+        openImConversation: lifecycle.openImConversation,
+        switchWorkspace: lifecycle.switchWorkspace,
+        attachSession: lifecycle.attachSession,
+        restoreSessionSnapshot: lifecycle.restoreSessionSnapshot,
+        deleteSession: lifecycle.deleteSession,
+        renameSession: lifecycle.renameSession,
         beginPendingNewSession,
         sendPrompt,
         abortPrompt,
-        setSessionModel,
-        setSessionLevel,
-        activeModel,
-        activeLevel,
+        setSessionModel: settings.setSessionModel,
+        setSessionLevel: settings.setSessionLevel,
+        activeModel: settings.activeModel,
+        activeLevel: settings.activeLevel,
         loadSubagentHistory,
         setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => {
             askUserAnswersRef.current[toolCallId] = payload;

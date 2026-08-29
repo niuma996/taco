@@ -53,7 +53,7 @@ export type SidecarAction =
     | { type: "ERROR"; cwd?: string; sid?: string; message: string }
     | {
           type: "ASKUSER_ANSWERED";
-          cwd?: string;
+          cwd: string;
           toolCallId: string;
           answers: Record<string, string | string[]>;
       }
@@ -116,113 +116,129 @@ export interface UseSidecarStreamOpts {
 
 const LLM_DUMP_PREFIX = "[taco:llm]";
 
+// ─── frame normalizer ─────────────────────────────────────────────────────────
+
 /** Normalizes a validated push frame into a workspace reducer action. */
-function normalizePushFrame(p: ServerPush, onAction: (action: SidecarAction) => void): void {
+function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void): void {
     if (!p.workspace || !p.session) return;
-    if (p.method === PushMethods.Attached) {
-        onAction({ type: "ATTACHED", cwd: p.workspace, sid: p.session });
-        return;
-    }
-    if (p.method === PushMethods.SessionDeleted) {
-        // Reuse REMOVE_SESSION: filters the session from the local list and
-        // clears activeSession if it was the one deleted.
-        onAction({ type: "REMOVE_SESSION", cwd: p.workspace, sid: p.session });
-        return;
-    }
-    if (p.method === PushMethods.Error) {
-        const errMsg =
-            (p.params as { error?: unknown } | undefined)?.error ?? "unknown sidecar error";
-        const message = `[session.error] ${String(errMsg)}`;
-        console.error("[taco] session.error", p.workspace, p.session, errMsg);
-        onAction({ type: "ERROR", cwd: p.workspace, sid: p.session, message });
-        return;
-    }
-    if (p.method === PushMethods.CommandPermissionRequested) {
-        onAction({
-            type: "COMMAND_PERMISSION_REQUESTED",
-            cwd: p.workspace,
-            sid: p.session,
-            request: p.params as CommandPermissionRequest,
-        });
-        return;
-    }
-    if (p.method === PushMethods.SubagentSpawned) {
-        const params = (p.params ?? {}) as Partial<SubagentSpawnedPayload>;
-        const parentToolCallId =
-            typeof params.parentToolCallId === "string" ? params.parentToolCallId : "";
-        const subSessionId = typeof params.subSessionId === "string" ? params.subSessionId : "";
-        const agentType = typeof params.agentType === "string" ? params.agentType : "";
-        if (!parentToolCallId || !subSessionId) return;
-        onAction({
-            type: "SUBAGENT_SPAWNED",
-            cwd: p.workspace,
-            parentSessionId: p.session,
-            parentToolCallId,
-            subSessionId,
-            agentType,
-        });
-        return;
-    }
 
-    let ev: SessionEventLike | undefined;
-    if (p.method === PushMethods.Event) {
-        ev = (p.params as SessionEventParams | undefined)?.event;
-    } else if (p.method === PushMethods.ToolCallStart) {
-        const params = (p.params ?? {}) as { toolCallId: string; toolName: string; args?: unknown };
-        ev = {
-            type: "tool_execution_start",
-            toolCallId: params.toolCallId,
-            toolName: params.toolName,
-            args: params.args,
-        };
-    } else if (p.method === PushMethods.ToolCallUpdate) {
-        const params = (p.params ?? {}) as { toolCallId: string; partialResult?: unknown };
-        ev = {
-            type: "tool_execution_update",
-            toolCallId: params.toolCallId,
-            partialResult: params.partialResult,
-        };
-    } else if (p.method === PushMethods.ToolCallEnd) {
-        const params = (p.params ?? {}) as {
-            toolCallId: string;
-            toolName?: string;
-            isError: boolean;
-            result?: { content?: Array<{ type?: string; text?: string }>; details?: unknown };
-        };
-        ev = {
-            type: "tool_execution_end",
-            toolCallId: params.toolCallId,
-            toolName: params.toolName,
-            isError: params.isError,
-            result: params.result,
-        };
-    } else if (p.method === PushMethods.TasksUpdated) {
-        const params = (p.params ?? {}) as TasksUpdatedParams;
-        onAction({
-            type: "TASKS_UPDATED",
-            cwd: p.workspace,
-            sid: p.session,
-            active: params.active,
-            history: params.history,
-        });
-        return;
-    } else if (p.method === PushMethods.PlanStateUpdated) {
-        const params = (p.params ?? {}) as PlanStateUpdatedParams;
-        onAction({
-            type: "PLAN_STATE_UPDATED",
-            cwd: p.workspace,
-            sid: p.session,
-            active: params.active,
-            currentSlug: params.currentSlug,
-        });
-        return;
-    }
-    if (!ev) return;
+    switch (p.method) {
+        case PushMethods.Attached:
+            return void dispatch({ type: "ATTACHED", cwd: p.workspace, sid: p.session });
+        case PushMethods.SessionDeleted:
+            return void dispatch({ type: "REMOVE_SESSION", cwd: p.workspace, sid: p.session });
+        case PushMethods.Error: {
+            const errMsg =
+                (p.params as { error?: unknown } | undefined)?.error ?? "unknown sidecar error";
+            const message = `[session.error] ${String(errMsg)}`;
+            console.error("[taco] session.error", p.workspace, p.session, errMsg);
+            return void dispatch({ type: "ERROR", cwd: p.workspace, sid: p.session, message });
+        }
+        case PushMethods.CommandPermissionRequested:
+            return void dispatch({
+                type: "COMMAND_PERMISSION_REQUESTED",
+                cwd: p.workspace,
+                sid: p.session,
+                request: p.params as CommandPermissionRequest,
+            });
+        case PushMethods.SubagentSpawned: {
+            const params = (p.params ?? {}) as Partial<SubagentSpawnedPayload>;
+            const parentToolCallId =
+                typeof params.parentToolCallId === "string" ? params.parentToolCallId : "";
+            const subSessionId = typeof params.subSessionId === "string" ? params.subSessionId : "";
+            const agentType = typeof params.agentType === "string" ? params.agentType : "";
+            if (!parentToolCallId || !subSessionId) return;
+            return void dispatch({
+                type: "SUBAGENT_SPAWNED",
+                cwd: p.workspace,
+                parentSessionId: p.session,
+                parentToolCallId,
+                subSessionId,
+                agentType,
+            });
+        }
+        case PushMethods.TasksUpdated: {
+            const params = (p.params ?? {}) as TasksUpdatedParams;
+            return void dispatch({
+                type: "TASKS_UPDATED",
+                cwd: p.workspace,
+                sid: p.session,
+                active: params.active,
+                history: params.history,
+            });
+        }
+        case PushMethods.PlanStateUpdated: {
+            const params = (p.params ?? {}) as PlanStateUpdatedParams;
+            return void dispatch({
+                type: "PLAN_STATE_UPDATED",
+                cwd: p.workspace,
+                sid: p.session,
+                active: params.active,
+                currentSlug: params.currentSlug,
+            });
+        }
 
-    if (p.sessionKind === "subagent") {
-        onAction({ type: "CHILD_MESSAGE_EVENT", cwd: p.workspace, sid: p.session, ev });
-    } else {
-        onAction({ type: "EVENT", cwd: p.workspace, sid: p.session, ev });
+        // Build a session event and dispatch as EVENT or CHILD_MESSAGE_EVENT.
+        case PushMethods.Event: {
+            const ev = (p.params as SessionEventParams | undefined)?.event;
+            if (!ev) return;
+            return void dispatch(
+                p.sessionKind === "subagent"
+                    ? { type: "CHILD_MESSAGE_EVENT", cwd: p.workspace, sid: p.session, ev }
+                    : { type: "EVENT", cwd: p.workspace, sid: p.session, ev },
+            );
+        }
+        case PushMethods.ToolCallStart: {
+            const params = (p.params ?? {}) as {
+                toolCallId: string;
+                toolName: string;
+                args?: unknown;
+            };
+            return void dispatch({
+                type: p.sessionKind === "subagent" ? "CHILD_MESSAGE_EVENT" : "EVENT",
+                cwd: p.workspace,
+                sid: p.session,
+                ev: {
+                    type: "tool_execution_start",
+                    toolCallId: params.toolCallId,
+                    toolName: params.toolName,
+                    args: params.args,
+                },
+            });
+        }
+        case PushMethods.ToolCallUpdate: {
+            const params = (p.params ?? {}) as { toolCallId: string; partialResult?: unknown };
+            return void dispatch({
+                type: p.sessionKind === "subagent" ? "CHILD_MESSAGE_EVENT" : "EVENT",
+                cwd: p.workspace,
+                sid: p.session,
+                ev: {
+                    type: "tool_execution_update",
+                    toolCallId: params.toolCallId,
+                    partialResult: params.partialResult,
+                },
+            });
+        }
+        case PushMethods.ToolCallEnd: {
+            const params = (p.params ?? {}) as {
+                toolCallId: string;
+                toolName?: string;
+                isError: boolean;
+                result?: { content?: Array<{ type?: string; text?: string }>; details?: unknown };
+            };
+            return void dispatch({
+                type: p.sessionKind === "subagent" ? "CHILD_MESSAGE_EVENT" : "EVENT",
+                cwd: p.workspace,
+                sid: p.session,
+                ev: {
+                    type: "tool_execution_end",
+                    toolCallId: params.toolCallId,
+                    toolName: params.toolName,
+                    isError: params.isError,
+                    result: params.result,
+                },
+            });
+        }
     }
 }
 

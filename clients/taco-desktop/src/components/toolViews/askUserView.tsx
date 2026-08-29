@@ -33,7 +33,7 @@ function normalizeAnswers(raw: unknown): AskUserAnswers {
 }
 
 export function AskUserToolView({ tool }: ToolViewProps) {
-    const { dispatchAskUser, setAskUserAnswers } = useAskUser();
+    const { answerAskUser, setAskUserAnswers } = useAskUser();
 
     const details = tool.details as
         | { questions?: AskUserQuestion[]; answers?: unknown; waiting?: boolean }
@@ -68,11 +68,7 @@ export function AskUserToolView({ tool }: ToolViewProps) {
 
     /** User clicks Submit: dispatch ASKUSER_ANSWERED, clear pending, fire submitAnswers. */
     function submitAnswers() {
-        dispatchAskUser({
-            type: "ASKUSER_ANSWERED",
-            toolCallId: tool.id,
-            answers: localAnswers,
-        });
+        answerAskUser(tool.id, localAnswers);
     }
 
     // Single-question / single-select: clicking an option submits directly
@@ -88,11 +84,7 @@ export function AskUserToolView({ tool }: ToolViewProps) {
             questions,
             toolName: tool.name,
         });
-        dispatchAskUser({
-            type: "ASKUSER_ANSWERED",
-            toolCallId: tool.id,
-            answers: { [question]: label },
-        });
+        answerAskUser(tool.id, { [question]: label });
     }
 
     function applySingleAnswer(question: string, label: string) {

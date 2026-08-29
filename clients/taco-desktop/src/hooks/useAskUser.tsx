@@ -4,7 +4,7 @@
  */
 
 import type { AskUserQuestion } from "@taco-ai/protocol";
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { SidecarAction } from "./useSidecarStream";
 
 export type AskUserAnswers = Record<string, string | string[]>;
@@ -21,7 +21,8 @@ export interface AskUserPayload {
 }
 
 export interface AskUserContextValue {
-    dispatchAskUser: (action: SidecarAction) => void;
+    /** Submit the user's selection for one pending askUser / planExit card. */
+    answerAskUser: (toolCallId: string, answers: AskUserAnswers) => void;
     /** Write answers + questions; consumed by useWorkspaces.sendPrompt for injection. */
     setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => void;
 }
@@ -29,6 +30,9 @@ export interface AskUserContextValue {
 const AskUserContext = createContext<AskUserContextValue | null>(null);
 
 export interface AskUserProviderProps {
+    /** Workspace the rendered cards belong to; the provider stamps it onto every
+     *  ASKUSER_ANSWERED so tool views never handle workspace paths. */
+    cwd: string;
     dispatchAskUser: (action: SidecarAction) => void;
     /** Write user-selected answers + questions; read by sendPrompt for injection. */
     setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => void;
@@ -36,20 +40,20 @@ export interface AskUserProviderProps {
 }
 
 export function AskUserProvider({
+    cwd,
     dispatchAskUser,
     setAskUserAnswers,
     children,
 }: AskUserProviderProps) {
-    return (
-        <AskUserContext.Provider
-            value={{
-                dispatchAskUser,
-                setAskUserAnswers,
-            }}
-        >
-            {children}
-        </AskUserContext.Provider>
+    const value = useMemo<AskUserContextValue>(
+        () => ({
+            answerAskUser: (toolCallId, answers) =>
+                dispatchAskUser({ type: "ASKUSER_ANSWERED", cwd, toolCallId, answers }),
+            setAskUserAnswers,
+        }),
+        [cwd, dispatchAskUser, setAskUserAnswers],
     );
+    return <AskUserContext.Provider value={value}>{children}</AskUserContext.Provider>;
 }
 
 export function useAskUser(): AskUserContextValue {

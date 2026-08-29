@@ -8,10 +8,9 @@
 
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Plus } from "lucide-react";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ConfirmModal } from "./components/ConfirmModal";
@@ -27,6 +26,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useAgentsPane } from "./hooks/useAgentsPane";
+import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { useChannelsPane } from "./hooks/useChannelsPane";
 import { useChatInputState } from "./hooks/useChatInputState";
@@ -52,21 +52,10 @@ import {
     readPersistedSidebarCollapsed,
     writePersistedSidebarCollapsed,
 } from "./lib/clientSettings";
-import {
-    type DesktopConfig,
-    isOnboardingRequired,
-    type OnboardingStatus,
-    readDesktopConfig,
-} from "./lib/desktopConfig.js";
-import {
-    defaultModelForNewSession,
-    getGlobalConfig,
-    loadGlobalConfig,
-    subscribeGlobalConfig,
-} from "./lib/globalConfig";
+import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig.js";
+import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { TacoClient } from "./lib/tacoClientTauri.ts";
-import { checkForUpdate } from "./lib/updater.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
@@ -81,7 +70,6 @@ import { ToolsPane } from "./views/ToolsPane";
 
 export default function App() {
     const [client] = useState(() => new TacoClient());
-    const [desktopConfig, setDesktopConfig] = useState<DesktopConfig | null>(null);
     const wsApi = useWorkspaces(client);
     const filesDrawer = useFilesDrawer();
     useTheme();
@@ -210,10 +198,8 @@ export default function App() {
         hadConfiguredRef.current = hasConfigured;
     });
 
-    // Subscribe to globalConfig so Settings drawer changes propagate to the picker
-    // immediately (without a hard reload).
-    const [globalConfigState, setGlobalConfigState] = useState(() => getGlobalConfig());
-    useEffect(() => subscribeGlobalConfig(setGlobalConfigState), []);
+    // Mount-time lifecycle: init, config, update check, FS scope, globalConfig subscription.
+    const lifecycle = useAppLifecycle(activeCwd, initFromStorage);
 
     const [mainView, setMainView] = useState<
         | "chat"
@@ -240,6 +226,7 @@ export default function App() {
     //   2. global default from settings (TacoGlobalConfigShape.defaultModel)
     //   3. first catalog option (last-resort)
     //   4. null (no options loaded yet, no default, no session)
+    const globalConfigState = lifecycle.globalConfigState;
     const defaultModel = defaultModelForNewSession(globalConfigState.global);
     const activeModelWithFallback =
         activeModel ??
@@ -281,76 +268,6 @@ export default function App() {
         // needed here; reserved for a future desktop notice.
         onImWorkspacesInvalidated: (_channelId) => {},
     });
-
-    // Run once on mount.
-    useEffect(() => {
-        void initFromStorage();
-    }, [initFromStorage]);
-
-    // Load desktop-only config for onboarding gate (global config already loaded by initFromStorage).
-    useEffect(() => {
-        readDesktopConfig()
-            .then(setDesktopConfig)
-            .catch((err) => {
-                console.error("[taco] failed to load desktop config", err);
-                setDesktopConfig({});
-            });
-    }, []);
-
-    // Silent auto-check on mount. Populates updateStatus so the
-    // Settings activity-rail entry can show a badge and the Updates
-    // tab can render status text — but does NOT auto-open the dialog.
-    // The user clicks the Settings rail (or the Check now button) to
-    // act. Skipped in dev because the manifest endpoint 404s and
-    // hot-reload would otherwise spam GitHub's API.
-    const [updateStatus, setUpdateStatus] = useState<{
-        checking: boolean;
-        available: { version: string } | null;
-        error: string | null;
-    }>({ checking: false, available: null, error: null });
-    const [updateDialog, setUpdateDialog] = useState<{ open: boolean; version?: string }>({
-        open: false,
-    });
-    // Manual check: always runs. The Check now button needs to work in
-    // dev too so the Updates tab is actually demoable — without it the
-    // button would be a no-op whenever import.meta.env.DEV is true.
-    const runUpdateCheck = useCallback(() => {
-        setUpdateStatus((s) => ({ ...s, checking: true, error: null }));
-        void (async () => {
-            const status = await checkForUpdate();
-            if (status.state === "available" && status.version) {
-                setUpdateStatus({
-                    checking: false,
-                    available: { version: status.version },
-                    error: null,
-                });
-                setUpdateDialog({ open: true, version: status.version });
-            } else if (status.state === "error") {
-                setUpdateStatus({
-                    checking: false,
-                    available: null,
-                    error: status.error ?? "unknown error",
-                });
-            } else {
-                setUpdateStatus({ checking: false, available: null, error: null });
-            }
-        })();
-    }, []);
-
-    // Silent mount-time auto-check. Guarded by import.meta.env.DEV so
-    // hot-reload doesn't spam GitHub's API on every code edit.
-    useEffect(() => {
-        if (import.meta.env.DEV) return;
-        runUpdateCheck();
-    }, [runUpdateCheck]);
-    // Accumulate FS scope entries for each newly activated workspace.
-    // Scope grows per activeCwd; tauri-plugin-fs 2.x never revokes paths.
-    useEffect(() => {
-        if (!activeCwd) return;
-        void tauriInvoke("set_fs_scope", { path: activeCwd }).catch((e: unknown) => {
-            console.warn("[taco] set_fs_scope failed:", e);
-        });
-    }, [activeCwd]);
 
     // Task snapshot clearing on session switch is done synchronously in
     // attachSessionInternal (no React effect, no race with first push).
@@ -422,13 +339,14 @@ export default function App() {
 
     // Secondary pane state + domain logic live in dedicated hooks. Each hook
     // gates its fetch on `mainView === "<view>"` so inactive panes stay idle.
-    const { tools } = useToolsPane(client, mainView === "tools", activeCwd);
+    const { tools, error: toolsError } = useToolsPane(client, mainView === "tools", activeCwd);
     const {
         skills,
         totalCount: skillsTotalCount,
         query: skillsQuery,
         setQuery: setSkillsQuery,
         diagnostics,
+        skillsError,
         selectedSkillName,
         setSelectedSkillName,
         skillContent,
@@ -437,6 +355,7 @@ export default function App() {
     } = useSkillsPane(client, mainView === "skills", activeCwd);
     const {
         agents,
+        agentsError,
         selectedAgentType,
         setSelectedAgentType,
         agentContent,
@@ -527,7 +446,7 @@ export default function App() {
             <ActivityRail
                 activeView={mainView}
                 onSelect={setMainView}
-                hasUpdateBadge={updateStatus.available !== null}
+                hasUpdateBadge={lifecycle.updateStatus.available !== null}
             />
             <div className="app-main">
                 <header className="topbar" data-tauri-drag-region>
@@ -632,6 +551,7 @@ export default function App() {
                                 }
                             >
                                 <AskUserProvider
+                                    cwd={activeCwd}
                                     dispatchAskUser={dispatch}
                                     setAskUserAnswers={wsApi.setAskUserAnswers}
                                 >
@@ -727,9 +647,7 @@ export default function App() {
                                             client={client}
                                             dispatchWs={dispatchWs}
                                             forceExpand={
-                                                !!workspaces[activeCwd]?.forceExpandTaskPanelByCwd[
-                                                    activeCwd
-                                                ]
+                                                workspaces[activeCwd]?.forceExpandTaskPanel ?? false
                                             }
                                         />
                                     )}
@@ -737,10 +655,11 @@ export default function App() {
                             </SubagentProvider>
                         </>
                     ) : mainView === "tools" ? (
-                        <ToolsPane tools={tools} />
+                        <ToolsPane tools={tools} error={toolsError} />
                     ) : mainView === "agents" ? (
                         <AgentsPane
                             agents={agents}
+                            error={agentsError}
                             selectedAgentType={selectedAgentType ?? agents[0]?.agentType ?? null}
                             onSelect={setSelectedAgentType}
                             content={agentContent}
@@ -833,10 +752,10 @@ export default function App() {
                             modelOptions={filteredOptions}
                             workspace={activeCwd || null}
                             onRefreshModels={refreshAfterKeyChange}
-                            updateAvailable={updateStatus.available}
-                            updateChecking={updateStatus.checking}
-                            updateError={updateStatus.error}
-                            onCheckUpdate={runUpdateCheck}
+                            updateAvailable={lifecycle.updateStatus.available}
+                            updateChecking={lifecycle.updateStatus.checking}
+                            updateError={lifecycle.updateStatus.error}
+                            onCheckUpdate={lifecycle.runUpdateCheck}
                         />
                     ) : mainView === "mcp" ? (
                         <div className="settings-pane">
@@ -850,6 +769,7 @@ export default function App() {
                         <SkillsPane
                             skills={skills}
                             totalCount={skillsTotalCount}
+                            skillsError={skillsError}
                             query={skillsQuery}
                             onQueryChange={setSkillsQuery}
                             diagnostics={diagnostics}
@@ -929,20 +849,20 @@ export default function App() {
                     onCollapse={() => setLlmDumpOpen(false)}
                 />
             )}
-            {desktopConfig !== null && isOnboardingRequired(desktopConfig) && (
+            {lifecycle.desktopConfig !== null && isOnboardingRequired(lifecycle.desktopConfig) && (
                 <OnboardingModal
                     client={client}
                     wsApi={wsApi}
                     defaultCwd={getDefaultCwd()}
                     onComplete={(status: OnboardingStatus) => {
-                        setDesktopConfig((prev) => ({ ...prev, onboarding: status }));
+                        lifecycle.setDesktopConfig((prev) => ({ ...prev, onboarding: status }));
                     }}
                 />
             )}
             <UpdateDialog
-                open={updateDialog.open}
-                initialVersion={updateDialog.version}
-                onDismiss={() => setUpdateDialog({ open: false })}
+                open={lifecycle.updateDialog.open}
+                initialVersion={lifecycle.updateDialog.version}
+                onDismiss={lifecycle.closeUpdateDialog}
             />
         </div>
     );
