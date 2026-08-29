@@ -22,8 +22,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import { createJobsClient, type Job } from "../../lib/jobsClient.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import { createJobsClient, type Job } from "../../lib/clients/jobsClient.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
 

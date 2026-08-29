@@ -14,7 +14,7 @@ import { FilesDrawer } from "../../src/components/FilesDrawer";
 import * as useI18n from "../../src/i18n/useI18n";
 
 // Mock @tauri-apps/plugin-fs
-// The createFsApi wrapper normalises (cwd, rel) → absolute path via resolveFsPath,
+// The createFsClient wrapper normalises (cwd, rel) → absolute path via resolveFsPath,
 // so we match on absolute paths.  cwd is "/proj" in this test.
 vi.mock("@tauri-apps/plugin-fs", () => ({
     readDir: vi.fn(async (abs: string) => {

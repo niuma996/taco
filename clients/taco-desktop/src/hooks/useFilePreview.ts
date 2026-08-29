@@ -7,7 +7,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { isBinary, TEXT_TRUNCATE_BYTES } from "../lib/fileTypes";
-import type { FsApi } from "../lib/fsApi";
+import type { FsClient } from "../lib/clients/fsClient";
 import { lastSegment } from "../lib/workspaceStorage";
 
 export interface UseFilePreviewApi {
@@ -21,7 +21,7 @@ export interface UseFilePreviewApi {
     clear(): void;
 }
 
-export function useFilePreview(api: FsApi): UseFilePreviewApi {
+export function useFilePreview(api: FsClient): UseFilePreviewApi {
     const [selectedRelPath, setSelected] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [content, setContent] = useState<string | null>(null);

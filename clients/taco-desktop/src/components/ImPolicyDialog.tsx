@@ -23,7 +23,7 @@ import { useT } from "../i18n/useI18n.ts";
 import type { ClientRuleValidationError } from "../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../lib/commandPermissionRuleClient.ts";
 import { subscribeImPolicyChanged } from "../lib/imPolicyEvents.ts";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { ConfirmModal } from "./ConfirmModal.tsx";
 import { Button } from "./ui/Button.tsx";
 import { FormField } from "./ui/FormField.tsx";

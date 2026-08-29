@@ -1,5 +1,5 @@
 /**
- * fsApi — thin wrapper over Tauri plugin-fs.
+ * fsClient — thin wrapper over Tauri plugin-fs.
  *
  * Treats cwd as the IO context, using `resolveFsPath` to combine (cwd, rel)
  * into an absolute path before calling @tauri-apps/plugin-fs's readDir /
@@ -7,13 +7,13 @@
  * the browser) and is just a light normalization.
  *
  * The module has zero React dependencies; the UI layer (hooks) calls
- * `createFsApi(cwd)` inside effects.
+ * `createFsClient(cwd)` inside effects.
  */
 import { readDir, readTextFile } from "@tauri-apps/plugin-fs";
 
-import type { FileEntry } from "./fileTypes";
+import type { FileEntry } from "../fileTypes";
 
-export interface FsApi {
+export interface FsClient {
     readDir(relPath: string): Promise<FileEntry[]>;
     readText(relPath: string): Promise<string>;
 }
@@ -26,8 +26,8 @@ export function resolveFsPath(cwd: string, relPath: string): string {
     return `${c}/${r}`;
 }
 
-export function createFsApi(cwd: string): FsApi {
-    const api: FsApi = {
+export function createFsClient(cwd: string): FsClient {
+    const api: FsClient = {
         async readDir(relPath: string): Promise<FileEntry[]> {
             const abs = resolveFsPath(cwd, relPath);
             const entries = await readDir(abs);

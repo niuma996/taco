@@ -55,7 +55,7 @@ import {
 import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig.js";
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
-import { TacoClient } from "./lib/tacoClientTauri.ts";
+import { TacoClient } from "./lib/clients/tacoClient.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";

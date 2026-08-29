@@ -20,7 +20,7 @@ import { findPendingAskUserIds, historyToUiMessages } from "../lib/chatUtils";
 import { readClientSettings } from "../lib/clientSettings";
 import { loadGlobalConfig } from "../lib/globalConfig";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import {
     createEmptyWorkspace,
     type SessionMeta,

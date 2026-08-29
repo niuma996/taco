@@ -3,7 +3,7 @@ import type { ImPolicyGetResult, ImWorkspacePolicyPatch } from "@taco-ai/protoco
 import { act, renderHook } from "@testing-library/react";
 import { describe, it, vi } from "vitest";
 import { useImPolicy } from "../../src/hooks/useImPolicy";
-import type { TacoClient } from "../../src/lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../src/lib/clients/tacoClient.ts";
 
 function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
     return {

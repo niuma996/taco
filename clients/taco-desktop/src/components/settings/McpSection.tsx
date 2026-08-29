@@ -22,7 +22,7 @@ import { useAutoClearError } from "../../hooks/useAutoClearError.ts";
 import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import { applyGlobalConfig, getGlobalConfig } from "../../lib/globalConfig.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { McpServerCard } from "./McpServerCard.tsx";
 import { McpServerForm } from "./McpServerForm.tsx";
 

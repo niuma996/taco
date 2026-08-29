@@ -13,7 +13,7 @@ import type { ModelSelection } from "../components/settings/ModelPicker";
 import { historyToUiMessages, type UiMessage } from "../lib/chatUtils";
 import { getGlobalConfig } from "../lib/globalConfig";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import {
     type WorkspaceAction,
     type WorkspaceState,

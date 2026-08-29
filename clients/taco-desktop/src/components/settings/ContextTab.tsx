@@ -11,7 +11,7 @@
 import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Switch } from "../ui/Switch.tsx";
 
 export interface ContextTabProps {

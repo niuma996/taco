@@ -14,7 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PermissionsTab } from "../../../src/components/settings/PermissionsTab";
-import type { TacoClient } from "../../../src/lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../../src/lib/clients/tacoClient.ts";
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({

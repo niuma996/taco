@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { resolveFsPath } from "../../src/lib/fsApi";
+import { resolveFsPath } from "../../src/lib/clients/fsClient";
 
 describe("resolveFsPath", () => {
     it("returns cwd as-is for empty relPath", () => {

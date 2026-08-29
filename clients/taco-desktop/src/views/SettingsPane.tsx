@@ -20,7 +20,7 @@ import { ModelTab } from "../components/settings/ModelTab.tsx";
 import { PermissionsTab } from "../components/settings/PermissionsTab.tsx";
 import { UpdatesTab } from "../components/settings/UpdatesTab.tsx";
 import { useT } from "../i18n/useI18n.ts";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
 export type SettingsSection =
     | "appearance"

@@ -4,9 +4,9 @@ import { describe, it, vi } from "vitest";
 
 import { useFilePreview } from "../../src/hooks/useFilePreview";
 import { TEXT_TRUNCATE_BYTES } from "../../src/lib/fileTypes";
-import type { FsApi } from "../../src/lib/fsApi";
+import type { FsClient } from "../../src/lib/clients/fsClient";
 
-function makeApi(opts: { text?: string; throws?: boolean } = {}): FsApi {
+function makeApi(opts: { text?: string; throws?: boolean } = {}): FsClient {
     return {
         readDir: vi.fn(async () => {
             return [];
@@ -85,7 +85,7 @@ describe("useFilePreview — cancellation", () => {
         // We use an array so each select call gets its own resolver regardless of call order.
         const resolveA: Array<(v: string) => void> = [];
         let resolveB: (s: string) => void = () => {};
-        const api: FsApi = {
+        const api: FsClient = {
             readDir: vi.fn(async () => {
                 return [];
             }),

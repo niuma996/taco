@@ -23,7 +23,7 @@ import { Button } from "../components/ui/Button.tsx";
 import i18n from "../i18n/index.ts";
 import { useT } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime.js";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
 /** Status → i18n key. A Record so adding a ChannelState breaks the build. */
 const STATE_LABEL_KEY: Record<ChannelState, string> = {

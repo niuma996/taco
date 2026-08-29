@@ -16,7 +16,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import type { Job, JobScheduleSpec, SessionStrategy } from "../../lib/jobsClient.ts";
+import type { Job, JobScheduleSpec, SessionStrategy } from "../../lib/clients/jobsClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Select } from "../ui/Select.tsx";

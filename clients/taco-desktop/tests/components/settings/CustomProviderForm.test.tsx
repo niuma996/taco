@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CustomProviderForm } from "../../../src/components/settings/CustomProviderForm";
-import type { TacoClient } from "../../../src/lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../../src/lib/clients/tacoClient.ts";
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({

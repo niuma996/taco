@@ -9,7 +9,7 @@
 
 import type { CheckpointsListResult, CheckpointsRestoreResult } from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
 export type RestoreResult = { ok: true; protectionId?: string } | { ok: false; reason: string };
 

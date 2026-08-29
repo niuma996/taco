@@ -34,7 +34,7 @@ export class SessionEpochs {
     }
 
     /** Iterate every tracked (workspace, sessionId) and its instanceId.
-     *  Used by `tacoClientTauri.ts` on daemon restart to emit synthetic
+     *  Used by `tacoClient.ts` on daemon restart to emit synthetic
      *  "replaced" transitions for every session that was alive on the
      *  old daemon. Yields tuples to keep the call-site trivial. */
     *entries(): IterableIterator<SessionEpochEntry> {

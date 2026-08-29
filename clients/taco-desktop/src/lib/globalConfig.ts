@@ -20,7 +20,7 @@
 import type { TacoGlobalConfigView, ThinkingLevel } from "@taco-ai/protocol";
 import type { TacoClientSettingsShape } from "./clientSettings.ts";
 import { readClientSettings, saveClientSettings } from "./clientSettings.ts";
-import type { TacoClient } from "./tacoClientTauri.ts";
+import type { TacoClient } from "./clients/tacoClient.ts";
 
 /** thinkingLevel value domain (synced with sidecar config.ts) */
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [

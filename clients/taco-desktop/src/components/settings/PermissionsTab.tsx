@@ -5,7 +5,7 @@ import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { ClientRuleValidationError } from "../../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleClient.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 

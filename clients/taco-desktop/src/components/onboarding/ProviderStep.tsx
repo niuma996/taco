@@ -2,7 +2,7 @@ import type { WorkspaceId } from "@taco-ai/protocol";
 import { useEffect } from "react";
 import { useProviders } from "../../hooks/useProviders.js";
 import { useT } from "../../i18n/useI18n.js";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { ProviderSection } from "../settings/ProviderSection.js";
 
 export interface ProviderStepProps {

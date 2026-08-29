@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 /**
- * useFileTree tests — mock fsApi, no React render dependency.
+ * useFileTree tests — mock fsClient, no React render dependency.
  * Uses renderHook (@testing-library/react) to drive the hook.
  */
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -8,9 +8,9 @@ import { describe, it, vi } from "vitest";
 
 import { useFileTree } from "../../src/hooks/useFileTree";
 import type { FileEntry } from "../../src/lib/fileTypes";
-import type { FsApi } from "../../src/lib/fsApi";
+import type { FsClient } from "../../src/lib/clients/fsClient";
 
-function makeApi(map: Record<string, FileEntry[]>): FsApi {
+function makeApi(map: Record<string, FileEntry[]>): FsClient {
     return {
         readDir: vi.fn(async (rel: string) => map[rel] ?? []),
         readText: vi.fn(async () => ""),
@@ -41,8 +41,8 @@ describe("useFileTree.loadRoot", () => {
         );
     });
 
-    it("set error message when fsApi throws", async () => {
-        const api: FsApi = {
+    it("set error message when fsClient throws", async () => {
+        const api: FsClient = {
             readDir: vi.fn(async () => {
                 throw new Error("EACCES");
             }),

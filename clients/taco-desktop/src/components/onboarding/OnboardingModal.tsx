@@ -3,7 +3,7 @@ import { useProviders } from "../../hooks/useProviders.js";
 import type { UseWorkspacesApi } from "../../hooks/useWorkspaces.js";
 import { useT } from "../../i18n/useI18n.js";
 import { type OnboardingStatus, writeDesktopConfig } from "../../lib/desktopConfig.js";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import type { ModelSelection } from "../settings/ModelPicker.js";
 import { Button } from "../ui/Button.tsx";
 import { DoneStep } from "./DoneStep.js";

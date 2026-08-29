@@ -8,7 +8,7 @@ import type { ProviderView, WorkspaceId } from "@taco-ai/protocol";
  * pi-native:provider 全部常驻,configured 由 sidecar 按 key 存在性计算。
  */
 import { useCallback, useEffect, useState } from "react";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useStableCallback } from "./useStableCallback";
 import { useRetryOnError } from "./useRetryOnError";
 

@@ -12,7 +12,7 @@ import { useEffect, useMemo } from "react";
 import { useFilePreview } from "../hooks/useFilePreview";
 import { useFileTree } from "../hooks/useFileTree";
 import { useT } from "../i18n/useI18n";
-import { createFsApi, type FsApi } from "../lib/fsApi";
+import { createFsClient, type FsClient } from "../lib/clients/fsClient";
 import { FilesPreviewPane } from "./FilesPreviewPane";
 import { FilesTreeView } from "./FilesTreeView";
 import { Switch } from "./ui/Switch.tsx";
@@ -31,17 +31,17 @@ export function FilesDrawer(props: FilesDrawerProps) {
     const { open, activeCwd, onClose } = props;
     const { t } = useT();
 
-    // Rebuild fsApi whenever activeCwd changes (the closure captures cwd).
-    const fsApi: FsApi | null = useMemo(() => {
+    // Rebuild fsClient whenever activeCwd changes (the closure captures cwd).
+    const fsClient: FsClient | null = useMemo(() => {
         if (!activeCwd) return null;
-        return createFsApi(activeCwd);
+        return createFsClient(activeCwd);
     }, [activeCwd]);
 
     const tree = useFileTree(
         // Dummy api while cwd is null; the hook only calls it from effects.
-        fsApi ?? { readDir: async () => [], readText: async () => "" },
+        fsClient ?? { readDir: async () => [], readText: async () => "" },
     );
-    const preview = useFilePreview(fsApi ?? { readDir: async () => [], readText: async () => "" });
+    const preview = useFilePreview(fsClient ?? { readDir: async () => [], readText: async () => "" });
 
     // Drawer open / workspace switch → refresh tree + clear preview.
     // Merged into one effect to avoid loadRoot + refresh both firing
@@ -49,10 +49,10 @@ export function FilesDrawer(props: FilesDrawerProps) {
     // drawer doesn't trigger reads.
     // biome-ignore lint/correctness/useExhaustiveDependencies: tree/preview objects are rebuilt each render and can't go in deps
     useEffect(() => {
-        if (!open || !activeCwd || !fsApi) return;
+        if (!open || !activeCwd || !fsClient) return;
         void tree.refresh();
         preview.clear();
-    }, [open, activeCwd, fsApi]);
+    }, [open, activeCwd, fsClient]);
 
     // When cwd is null, render a minimal Radix shell. The early return must
     // come after all hooks.

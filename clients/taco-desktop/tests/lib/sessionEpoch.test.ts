@@ -94,7 +94,7 @@ describe("SessionEpochs", () => {
 
         // Simulate a hello(inst-B) arriving. None of the sessions have
         // been observed under inst-B yet, so calling observe() now would
-        // return "new" for each. The caller (tacoClientTauri.ts) iterates
+        // return "new" for each. The caller (tacoClient.ts) iterates
         // entries() FIRST, emits "replaced" for each, then clearAll()s.
         const beforeRestart = [...epochs.entries()].map((e) => e.sessionId).sort();
         assert.deepEqual(beforeRestart, ["sess-1", "sess-1", "sess-2"]);

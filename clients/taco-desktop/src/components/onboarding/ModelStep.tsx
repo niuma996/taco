@@ -4,7 +4,7 @@ import { useProviders } from "../../hooks/useProviders.js";
 import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.js";
 import { useWorkspaceModels } from "../../hooks/useWorkspaceModels.js";
 import { useT } from "../../i18n/useI18n.js";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { ModelMenu } from "../settings/ModelMenu.js";
 import type { ModelOption, ModelSelection } from "../settings/ModelPicker.js";
 

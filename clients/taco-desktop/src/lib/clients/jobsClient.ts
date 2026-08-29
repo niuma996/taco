@@ -17,8 +17,8 @@
  * `undefined` for legacy un-scoped access.
  */
 
-import { JOBS_RPC } from "./jobsRpc.ts";
-import type { TacoClient } from "./tacoClientTauri.ts";
+import { JOBS_RPC } from "../jobsRpc.ts";
+import type { TacoClient } from "./tacoClient.ts";
 
 /** Job shape — mirrors the sidecar's `Job` type. Kept here rather than
  *  imported from `@taco-ai/protocol` so PR4 doesn't widen that package. */

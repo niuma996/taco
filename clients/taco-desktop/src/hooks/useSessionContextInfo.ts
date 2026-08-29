@@ -13,7 +13,7 @@ import type {
 } from "@taco-ai/protocol";
 import { PushMethods } from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
 /** Event types that require a fresh indicator snapshot. */
 const REFRESH_EVENT_TYPES = new Set<string>([

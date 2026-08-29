@@ -14,7 +14,7 @@ import {
     filterEntries,
     sortEntries,
 } from "../lib/fileTypes";
-import type { FsApi } from "../lib/fsApi";
+import type { FsClient } from "../lib/clients/fsClient";
 
 export interface UseFileTreeApi {
     entriesByDir: DirectoryListing;
@@ -27,7 +27,7 @@ export interface UseFileTreeApi {
     refresh(): Promise<void>;
 }
 
-export function useFileTree(api: FsApi): UseFileTreeApi {
+export function useFileTree(api: FsClient): UseFileTreeApi {
     const [entriesByDir, setEntriesByDir] = useState<DirectoryListing>(new Map());
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
     const [error, setError] = useState<string | null>(null);

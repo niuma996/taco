@@ -16,15 +16,15 @@ import {
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { RPC, TacoClientBase } from "@taco-ai/shared";
-import { type EpochTransition, SessionEpochs } from "./sessionEpoch";
+import { type EpochTransition, SessionEpochs } from "../sessionEpoch";
 import {
     defaultSidecarClient,
     type SidecarClient,
     type SidecarExit,
     type SidecarFrame,
     type SidecarSpawnOptions,
-} from "./sidecar";
-import { SidecarEpochs } from "./sidecarEpoch";
+} from "../sidecar";
+import { SidecarEpochs } from "../sidecarEpoch";
 
 /** Payload delivered to `onSessionEpochChanged` listeners.
  *  Fires per (workspace, sessionId) transition; "replaced" is the

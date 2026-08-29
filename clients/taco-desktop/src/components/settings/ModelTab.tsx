@@ -15,7 +15,7 @@ import {
     getGlobalConfig,
     subscribeGlobalConfig,
 } from "../../lib/globalConfig.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { ModelMenu } from "./ModelMenu";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
 import { ProviderSection } from "./ProviderSection";

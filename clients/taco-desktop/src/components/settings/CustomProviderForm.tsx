@@ -9,7 +9,7 @@ import type { CustomModelEntry, CustomProviderApi, CustomProviderConfig } from "
 import { CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Select } from "../ui/Select.tsx";

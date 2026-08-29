@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { SessionEventLike, SessionEventParams } from "../lib/chatUtils";
 import { SessionPushProcessor, type SnapshotRecovery } from "../lib/sessionPushProcessor";
 import { bannerSeverity, formatForBanner, parseLogLine } from "../lib/sidecarLogLine";
-import type { TacoClient } from "../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useStableCallback } from "./useStableCallback";
 
 export type SidecarAction =

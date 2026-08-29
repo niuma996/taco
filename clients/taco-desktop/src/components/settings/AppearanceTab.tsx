@@ -11,7 +11,7 @@ import { useGlobalConfig } from "../../hooks/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/useSaveConfigPatch.ts";
 import { SUPPORTED_UI_LANGUAGES, type SupportedUiLanguage } from "../../i18n/index.ts";
 import { useT, useUiLanguage } from "../../i18n/useI18n.ts";
-import type { TacoClient } from "../../lib/tacoClientTauri.ts";
+import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Select } from "../ui/Select.tsx";
 
 export interface AppearanceTabProps {
