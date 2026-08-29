@@ -521,6 +521,14 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // tasks / planState fallback — sidecar also pushes on session.attached, but we proactively
             // pull once here to cover push-channel drops. RPC reads sidecar memory directly,
             // independent of the push channel.
+            //
+            // These two single-shot reads look redundant next to session.snapshot.get (which returns
+            // history + tasks + planState in one call, and is what restoreSessionSnapshot below uses).
+            // Attach deliberately does NOT use it: snapshot.get carries a snapshotSeq that exists to
+            // reset the push cursor, and session.attached's own sequenced tasks/plan pushes land right
+            // after this attach. Swapping these reads for snapshot.get without also reconciling the
+            // cursor would let those pushes be discarded as duplicates. Keep the split until someone
+            // is deliberately changing push-recovery semantics.
             try {
                 const r = await client.sessionTasksGet(cwd, sessionId);
                 dispatchWs({

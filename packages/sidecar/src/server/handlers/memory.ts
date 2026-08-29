@@ -5,7 +5,7 @@
  * Key constraint: reuse MethodCtx.workspace.memoryStore; never `new`
  * a fresh instance. Writes must share the same writeChain as the
  * extractor — that shared chain is the whole reason this design holds.
- * All three methods are ensureWorkspace: true (workspace-scoped);
+ * Every method here is ensureWorkspace: true (workspace-scoped);
  * MethodCtx auto-injects the workspace.
  */
 
@@ -31,6 +31,7 @@ import {
 import { RPC } from "@taco-ai/shared";
 
 import { hashOf } from "../../memory/local/store.ts";
+import type { MemoryStore } from "../../memory/types.ts";
 import { MemoryConflictError } from "../../memory/types.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -53,6 +54,16 @@ function toWireTopic(entry: {
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
     };
+}
+
+/**
+ * Single deletion path shared by `memory.deleteTopic` (MemoryPane) and
+ * `memory.upsert` action=remove (the model's `memory` tool). Both reach the
+ * same store call; routing them through one helper keeps a future change
+ * (audit log, cache invalidation) from landing on only one of them.
+ */
+async function deleteTopic(store: MemoryStore, id: string): Promise<void> {
+    await store.deleteTopic(id);
 }
 
 export function registerMemoryHandlers(): void {
@@ -103,7 +114,7 @@ export function registerMemoryHandlers(): void {
             workspace,
             params,
         }: MethodCtx<MemoryDeleteTopicParams>): Promise<MemoryDeleteTopicResult> => {
-            await workspace.memoryStore.deleteTopic(params.id);
+            await deleteTopic(workspace.memoryStore, params.id);
             return { ok: true };
         },
         { schema: memoryDeleteTopicSchema },
@@ -178,7 +189,7 @@ export function registerMemoryHandlers(): void {
                     return { ok: true, outcome: "updated" };
                 }
                 case "remove": {
-                    await store.deleteTopic(validatedId);
+                    await deleteTopic(store, validatedId);
                     return { ok: true, outcome: "deleted" };
                 }
                 default: {

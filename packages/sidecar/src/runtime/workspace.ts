@@ -284,7 +284,8 @@ export class WorkspaceRuntime extends EventEmitter {
      * NOT readonly: `updateInstructionsConfig()` recomputes this so a
      * settings.write that toggles `inheritToSubagents` or flips a file
      * enable takes effect on the next subagent spawn, not only on next
-     * workspace attach.
+     * workspace attach. AgentSpawner reaches it through a thunk for that
+     * reason — handing it the string would re-pin children to startup state.
      */
     parentInstructionsBlock: string;
     /**
@@ -429,105 +430,17 @@ export class WorkspaceRuntime extends EventEmitter {
         // first prompt throws "No default stream function configured".
         setDefaultStreamFn(this.models.streamSimple);
 
-        // defaultModel resolution — never throws on a bad id.
-        //
-        // If defaultModel is missing or invalid, log a warning and leave it
-        // undefined. A throw here would lock the user out of the UI (no way
-        // to fix a stale model id in taco.json) — session.create surfaces
-        // the explicit invalid_state error instead.
-        let defaultModel: Model<Api> | undefined;
-        if (options.defaultModel) {
-            if (typeof options.defaultModel === "string") {
-                // Prefer lookup under defaultProvider to avoid colliding with a
-                // same-named model id from another provider.
-                const found = options.defaultProvider
-                    ? this.models.getModel(options.defaultProvider, options.defaultModel)
-                    : findModelById(this.models, options.defaultModel);
-                if (!found) {
-                    const label = options.defaultProvider
-                        ? `${options.defaultProvider}/${options.defaultModel}`
-                        : options.defaultModel;
-                    log.error(
-                        `default model "${label}" not found in catalog — starting without a default model. Configure a provider and model in Settings.`,
-                    );
-                }
-                defaultModel = found;
-            } else {
-                defaultModel = options.defaultModel;
-            }
-        } else {
-            const all = this.models.getModels();
-            if (all.length > 0) defaultModel = all[0];
-        }
-        this.defaultModel = defaultModel;
+        this.defaultModel = this.resolveDefaultModel(options);
 
         // extensions (per-workspace) must be assigned before tools / systemPrompt are built.
         this.extensions = options.extensions;
 
-        // Session-agnostic task push adapter: mutation tools and
-        // publishCurrentTaskSnapshot both push tasks.updated through it. The task
+        // Session-agnostic push adapters: mutation tools and
+        // publishCurrentTaskSnapshot / the plan tool push through them. The task
         // store / planState are per-session, hydrated at attach time.
-        const taskAdapter: TaskSnapshotPublisher =
-            options.taskPushAdapter ?? new NoopTaskPushAdapter();
-        this.taskAdapter = taskAdapter;
+        this.taskAdapter = options.taskPushAdapter ?? new NoopTaskPushAdapter();
+        this.planAdapter = options.planPushAdapter ?? new NoopPlanPushAdapter();
 
-        // Session-agnostic plan push adapter: planEnter/planExit push
-        // plan.state.updated through it; the caller injects the sessionId.
-        const planAdapter: PlanSnapshotPublisher =
-            options.planPushAdapter ?? new NoopPlanPushAdapter();
-        this.planAdapter = planAdapter;
-
-        const ephemeralTaskState: SessionTaskState = {
-            taskStore: { currentListId: null, lists: new Map() },
-            planState: { active: false, currentSlug: null },
-            tasksDir: "",
-        };
-        // Per-workspace self-RPC thunk. Both memory.upsert and jobs.* close
-        // over this in their constructor-free factory; tools read it from
-        // the harness's `toolContext` instead of taking deps. id uses
-        // `self-${random}` so log lines can spot in-process tool calls; the
-        // handler ignores it except to echo back into `RpcResponse.id`.
-        const dispatchRpc = options.dispatchRpc;
-        const selfRpc: SelfRpcCall | undefined = dispatchRpc
-            ? async <P, R>(method: string, _ws: WorkspaceId, params: P): Promise<R> => {
-                  const req: RpcRequest = {
-                      id: `self-${crypto.randomUUID().toLowerCase()}`,
-                      method,
-                      params,
-                  };
-                  const resp = await dispatchRpc(req);
-                  if (resp.ok) return resp.result as R;
-                  throw new Error(`${resp.error.code}: ${resp.error.message}`);
-              }
-            : undefined;
-        const imRouting = this.imRouting;
-        const actor = imRouting
-            ? ({
-                  kind: "im",
-                  channelId: imRouting.channelId,
-                  peerId: imRouting.peerId,
-                  chatId: imRouting.chatId,
-              } as const)
-            : options.dispatchRpc
-              ? ({ kind: "ide", workspace: this.sessionCwd } as const)
-              : undefined;
-        // The thunk lets the harness re-resolve the tool context per turn
-        // snapshot. We capture `selfRpc` / `actor` / `this.env` / `this.workspaceKey`
-        // — none of them change after construction, so a thunk returning
-        // the same object each call is cheap and lets future wiring (e.g.
-        // a re-keyed actor after `setImChannel`) hot-update without
-        // reattaching sessions.
-        //
-        // `ctx.workspace` is the routing key (im:// URL for IM sessions, fs
-        // cwd for IDE), not `sessionCwd` (which is the IM scratch root fs
-        // path). jobs.* RPC needs the routing key on `job.args.workspace` so
-        // server-side scope derivation matches the actor.
-        const toolContext = (): TacoToolContext => ({
-            env: this.env,
-            workspace: this.workspaceKey,
-            ...(selfRpc ? { call: selfRpc } : {}),
-            ...(actor ? { actor } : {}),
-        });
         this.toolRegistry =
             options.toolRegistry ?? new DefaultDeferredToolRegistry({ candidates: [] });
         const imPolicy =
@@ -539,101 +452,18 @@ export class WorkspaceRuntime extends EventEmitter {
                 imCommandPolicy: () => imPolicy?.commands,
             },
         );
-        const baseTools =
-            options.tools ??
-            defaultToolsWithTasks(
-                ephemeralTaskState.taskStore,
-                ephemeralTaskState.tasksDir,
-                ephemeralTaskState.planState,
-                this.executionCwd,
-                taskAdapter,
-                planAdapter,
-                "",
-                this.permissionBroker,
-                undefined,
-            );
-        const extTools = this.extensions?.toolsWithSource() ?? [];
-        const merged = extTools.length > 0 ? dedupOverride(baseTools, extTools) : baseTools;
-        this.tools = imPolicy ? filterToolsForImPolicy(merged, imPolicy) : merged;
+        const toolContext = this.buildToolContextThunk(options);
+        const { tools, toolsBuilder } = this.assembleTools(options, imPolicy);
+        this.tools = tools;
 
-        // Per-session tool factory: at attach time, rebuild the task tools against
-        // that session's hydrated taskState so pushes route to the right session and
-        // each session owns an independent store / planState.
-        const toolsBuilder = (sessionId: SessionId, taskState: SessionTaskState): TacoTool[] => {
-            const perSession =
-                options.tools ??
-                defaultToolsWithTasks(
-                    taskState.taskStore,
-                    taskState.tasksDir,
-                    taskState.planState,
-                    this.executionCwd,
-                    taskAdapter,
-                    planAdapter,
-                    sessionId,
-                    this.permissionBroker,
-                    undefined,
-                );
-            const perSessionMerged =
-                extTools.length > 0 ? dedupOverride(perSession, extTools) : perSession;
-            return imPolicy ? filterToolsForImPolicy(perSessionMerged, imPolicy) : perSessionMerged;
-        };
         this.isIm = isIm;
         this.resources = options.resources ?? {};
-        // The system prompt always uses the built-in template (assembled from the
-        // current toolset + platform) and can no longer be overridden by config.
-        // A configured systemPrompt is appended after it — not silently dropped,
-        // but unable to replace or override the system base.
-        const baseContributors: SystemPromptContributor[] = [];
-        if (options.systemPrompt) baseContributors.push({ append: options.systemPrompt });
-        // git-context guidance (if cwd is a git repo) comes through
-        // activateExtensions → WorkspaceExtensionSet.systemPromptContributors(), which
-        // runs before external contributors — this ordering is preserved.
-        baseContributors.push(...(this.extensions?.systemPromptContributors() ?? []));
-        // Stored (not just used locally) so `rebuildSystemPrompt` can append a
-        // fresh <available_skills> section on hot reload without re-deriving
-        // or re-ordering the rest of the contributor list.
-        this.baseSystemPromptContributors = baseContributors;
-        // The model identity snapshot is fixed at workspace construction — mid-session
-        // `setSessionModel` switches the runtime model but does not rebuild the
-        // prompt. Documented in `<model_identity>` so the model has a stable
-        // self-reference for cost / context-window reasoning within the session.
-        this.modelIdentitySnapshot = this.defaultModel
-            ? `${this.defaultModel.provider}/${this.defaultModel.id}`
-            : undefined;
-        // Read .gitignore at construction time. Synchronous: only runs once
-        // per workspace, file is bounded by the per-line truncation in
-        // `projectContextForPrompt`. ENOENT returns ""; any other read
-        // failure (permissions, symlink loop, transient fs) is logged and the
-        // workspace still comes up — an unreadable .gitignore should never
-        // block startup.
-        // For IM/third-party channels we hide the absolute workspace path from
-        // the block while keeping the denylist, so the remote platform does not
-        // see the local filesystem location.
-        let projectContext = "";
-        try {
-            projectContext = projectContextForPrompt({
-                cwd: this.executionCwd,
-                hideCwd: isIm,
-            });
-        } catch (e) {
-            log.warn(
-                `failed to read .gitignore for system prompt: ${e instanceof Error ? e.message : String(e)}`,
-            );
-        }
-        this.projectContextSnapshot = projectContext;
-        // Resolve project-context instructions (CLAUDE.md / AGENTS.md / DESIGN.md)
-        // once at construction. The context hook re-resolves lazily on every
-        // LLM call (so a settings.write patch takes effect without restart),
-        // and updateInstructionsConfig() recomputes this snapshot too — the
-        // subagent system-prompt rebuild path is driven from this string.
-        // Resolution is sync (readFileSync) and bounded by the small-file
-        // assumption documented in instructions.ts.
-        const instructionsConfig = options.instructionsConfig;
-        this.parentInstructionsBlock = renderParentInstructionsBlock(
-            this.executionCwd,
-            instructionsConfig,
-        );
-        this.instructionsConfig = instructionsConfig;
+        const promptSnapshots = this.assemblePromptSnapshots(options, isIm);
+        this.baseSystemPromptContributors = promptSnapshots.baseContributors;
+        this.modelIdentitySnapshot = promptSnapshots.modelIdentity;
+        this.projectContextSnapshot = promptSnapshots.projectContext;
+        this.parentInstructionsBlock = promptSnapshots.parentInstructionsBlock;
+        this.instructionsConfig = options.instructionsConfig;
         this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
         this.streamOptions = options.streamOptions ?? {};
         this.defaultThinkingLevel = options.defaultThinkingLevel;
@@ -733,7 +563,10 @@ export class WorkspaceRuntime extends EventEmitter {
             defaultModel: this.defaultModel,
             projectContext: this.projectContextSnapshot,
             hideWorkspacePath: isIm,
-            parentInstructionsBlock: this.parentInstructionsBlock,
+            // Thunk, not a value: `updateInstructionsConfig()` re-renders the
+            // block on settings.write, and a captured string would pin every
+            // subagent to the startup config while the parent moved on.
+            getParentInstructionsBlock: () => this.parentInstructionsBlock,
         });
 
         this.modelRegistry = new ModelRegistry({
@@ -821,6 +654,202 @@ export class WorkspaceRuntime extends EventEmitter {
                 log.warn(`skill watcher error: ${e instanceof Error ? e.message : String(e)}`);
             });
         }
+    }
+
+    /**
+     * Resolve the construction-time default model — never throws on a bad id.
+     *
+     * If `defaultModel` is missing or invalid we log and return undefined. A
+     * throw here would lock the user out of the UI (no way to fix a stale model
+     * id in taco.json); `session.create` surfaces the explicit invalid_state
+     * error instead. Requires `this.models` to be populated.
+     */
+    private resolveDefaultModel(options: WorkspaceRuntimeOptions): Model<Api> | undefined {
+        if (!options.defaultModel) {
+            const all = this.models.getModels();
+            return all.length > 0 ? all[0] : undefined;
+        }
+        if (typeof options.defaultModel !== "string") return options.defaultModel;
+        // Prefer lookup under defaultProvider to avoid colliding with a
+        // same-named model id from another provider.
+        const found = options.defaultProvider
+            ? this.models.getModel(options.defaultProvider, options.defaultModel)
+            : findModelById(this.models, options.defaultModel);
+        if (!found) {
+            const label = options.defaultProvider
+                ? `${options.defaultProvider}/${options.defaultModel}`
+                : options.defaultModel;
+            log.error(
+                `default model "${label}" not found in catalog — starting without a default model. Configure a provider and model in Settings.`,
+            );
+        }
+        return found;
+    }
+
+    /**
+     * Build the per-turn tool context thunk (workspace routing key, self-RPC
+     * entry, actor identity).
+     *
+     * `ctx.workspace` is the routing key (im:// URL for IM sessions, fs cwd for
+     * IDE), NOT `sessionCwd` — which for IM is the scratch root. jobs.* RPC
+     * needs the routing key on `job.args.workspace` so server-side scope
+     * derivation matches the actor.
+     *
+     * Returning a thunk rather than a fixed object lets future wiring (e.g. a
+     * re-keyed actor after `setImChannel`) hot-update without reattaching
+     * sessions; nothing it captures changes after construction today.
+     */
+    private buildToolContextThunk(options: WorkspaceRuntimeOptions): () => TacoToolContext {
+        // Both memory.upsert and jobs.* close over this in their
+        // constructor-free factory; tools read it from the harness's
+        // `toolContext` instead of taking deps. id uses `self-${random}` so log
+        // lines can spot in-process tool calls; the handler ignores it except to
+        // echo back into `RpcResponse.id`.
+        const dispatchRpc = options.dispatchRpc;
+        const selfRpc: SelfRpcCall | undefined = dispatchRpc
+            ? async <P, R>(method: string, _ws: WorkspaceId, params: P): Promise<R> => {
+                  const req: RpcRequest = {
+                      id: `self-${crypto.randomUUID().toLowerCase()}`,
+                      method,
+                      params,
+                  };
+                  const resp = await dispatchRpc(req);
+                  if (resp.ok) return resp.result as R;
+                  throw new Error(`${resp.error.code}: ${resp.error.message}`);
+              }
+            : undefined;
+        const imRouting = this.imRouting;
+        const actor = imRouting
+            ? ({
+                  kind: "im",
+                  channelId: imRouting.channelId,
+                  peerId: imRouting.peerId,
+                  chatId: imRouting.chatId,
+              } as const)
+            : dispatchRpc
+              ? ({ kind: "ide", workspace: this.sessionCwd } as const)
+              : undefined;
+        return () => ({
+            env: this.env,
+            workspace: this.workspaceKey,
+            ...(selfRpc ? { call: selfRpc } : {}),
+            ...(actor ? { actor } : {}),
+        });
+    }
+
+    /**
+     * Assemble the workspace toolset plus the per-session factory that rebuilds
+     * it at attach time.
+     *
+     * The workspace-level set is built against ephemeral task state — it exists
+     * for the system prompt and for subagent tool filtering, never to execute
+     * task mutations. `toolsBuilder` is what produces the real per-session set,
+     * bound to that session's hydrated `taskState` so pushes route to the right
+     * session and each session owns an independent store / planState.
+     *
+     * Requires `permissionBroker`, `taskAdapter`, `planAdapter` and `extensions`
+     * to be assigned already.
+     */
+    private assembleTools(
+        options: WorkspaceRuntimeOptions,
+        imPolicy: ImWorkspacePolicy | undefined,
+    ): {
+        tools: TacoTool[];
+        toolsBuilder: (sessionId: SessionId, taskState: SessionTaskState) => TacoTool[];
+    } {
+        // Extension tools are resolved once and shared by both paths, so a
+        // per-session rebuild cannot diverge from the workspace-level set.
+        const extTools = this.extensions?.toolsWithSource() ?? [];
+        const build = (sessionId: SessionId, taskState: SessionTaskState): TacoTool[] => {
+            const base =
+                options.tools ??
+                defaultToolsWithTasks(
+                    taskState.taskStore,
+                    taskState.tasksDir,
+                    taskState.planState,
+                    this.executionCwd,
+                    this.taskAdapter,
+                    this.planAdapter,
+                    sessionId,
+                    this.permissionBroker,
+                    undefined,
+                );
+            const merged = extTools.length > 0 ? dedupOverride(base, extTools) : base;
+            return imPolicy ? filterToolsForImPolicy(merged, imPolicy) : merged;
+        };
+        const ephemeralTaskState: SessionTaskState = {
+            taskStore: { currentListId: null, lists: new Map() },
+            planState: { active: false, currentSlug: null },
+            tasksDir: "",
+        };
+        return { tools: build("" as SessionId, ephemeralTaskState), toolsBuilder: build };
+    }
+
+    /**
+     * Resolve the prompt inputs that are frozen at construction: base
+     * contributors, model identity, `<project_context>`, and the parent
+     * instruction blocks.
+     *
+     * These are snapshots by contract, not by accident — `<model_identity>`
+     * documents that a mid-session `setSessionModel` switches the runtime model
+     * without rebuilding the prompt, so the model keeps a stable self-reference
+     * for cost / context-window reasoning. `parentInstructionsBlock` is the one
+     * exception: `updateInstructionsConfig()` recomputes it, so a
+     * `settings.write` takes effect on the next subagent spawn.
+     */
+    private assemblePromptSnapshots(
+        options: WorkspaceRuntimeOptions,
+        isIm: boolean,
+    ): {
+        baseContributors: SystemPromptContributor[];
+        modelIdentity: string | undefined;
+        projectContext: string;
+        parentInstructionsBlock: string;
+    } {
+        // The system prompt always uses the built-in template (assembled from
+        // the current toolset + platform) and can no longer be overridden by
+        // config. A configured systemPrompt is appended after it — not silently
+        // dropped, but unable to replace or override the system base.
+        const baseContributors: SystemPromptContributor[] = [];
+        if (options.systemPrompt) baseContributors.push({ append: options.systemPrompt });
+        // git-context guidance (if cwd is a git repo) comes through
+        // activateExtensions → WorkspaceExtensionSet.systemPromptContributors(),
+        // which runs before external contributors — this ordering is preserved.
+        baseContributors.push(...(this.extensions?.systemPromptContributors() ?? []));
+
+        // Read .gitignore synchronously: runs once per workspace and the file is
+        // bounded by the per-line truncation in `projectContextForPrompt`.
+        // ENOENT returns ""; any other read failure (permissions, symlink loop,
+        // transient fs) is logged and the workspace still comes up — an
+        // unreadable .gitignore should never block startup.
+        // For IM/third-party channels the absolute workspace path is hidden from
+        // the block while the denylist is kept, so the remote platform does not
+        // see the local filesystem location.
+        let projectContext = "";
+        try {
+            projectContext = projectContextForPrompt({ cwd: this.executionCwd, hideCwd: isIm });
+        } catch (e) {
+            log.warn(
+                `failed to read .gitignore for system prompt: ${e instanceof Error ? e.message : String(e)}`,
+            );
+        }
+
+        return {
+            baseContributors,
+            modelIdentity: this.defaultModel
+                ? `${this.defaultModel.provider}/${this.defaultModel.id}`
+                : undefined,
+            projectContext,
+            // The context hook re-resolves instructions lazily on every LLM call
+            // (so a settings.write patch takes effect without restart); this
+            // snapshot drives the subagent system-prompt rebuild path.
+            // Resolution is sync (readFileSync) and bounded by the small-file
+            // assumption documented in instructions.ts.
+            parentInstructionsBlock: renderParentInstructionsBlock(
+                this.executionCwd,
+                options.instructionsConfig,
+            ),
+        };
     }
 
     /**

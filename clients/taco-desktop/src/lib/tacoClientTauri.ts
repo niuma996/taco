@@ -117,7 +117,7 @@ export class TacoClient extends TacoClientBase {
         // Tauri side stays silent on bad frames; only the Node client surfaces them.
         super();
         this.sidecar = opts.sidecar ?? defaultSidecarClient();
-        this.rpcTimeoutMs = opts.rpcTimeoutMs ?? 300_000;
+        this.rpcTimeoutMs = opts.rpcTimeoutMs ?? 1_000_000;
     }
 
     protected makeDispatch() {

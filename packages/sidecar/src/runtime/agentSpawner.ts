@@ -23,6 +23,7 @@ import type { TacoTool } from "../tools/index.ts";
 import { createShellTool } from "../tools/shellTool.ts";
 import type { AttachedSession } from "./attachedSession.ts";
 import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
+import type { SessionTaskState } from "./sessionTaskState.ts";
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
@@ -61,14 +62,18 @@ export interface AgentSpawnerOptions {
      */
     readonly hideWorkspacePath?: boolean;
     /**
-     * Pre-rendered parent instruction blocks (CLAUDE.md / AGENTS.md / DESIGN.md).
-     * Inherited by subagents as an appended `<instructions>` section in their
-     * rebuilt system prompt so the parent's project rules apply in the
-     * child session too. Empty string when inheritance is disabled or no
-     * files resolved. Snapshot is taken at workspace construction — the
-     * child's system prompt is rebuilt from this string, not re-resolved.
+     * Reads the parent's rendered instruction blocks (CLAUDE.md / AGENTS.md /
+     * DESIGN.md), appended as an `<instructions>` section to every child's
+     * rebuilt system prompt so the parent's project rules apply in the child
+     * session too. Returns "" when inheritance is disabled or no files resolved.
+     *
+     * A thunk, not a string: `WorkspaceRuntime.updateInstructionsConfig()`
+     * re-renders the block on `settings.write`, and a value captured at
+     * construction would pin children to the startup config for the process's
+     * lifetime while the parent picked up the change. Same reason
+     * `SessionRegistry` takes `getInstructionsConfig`.
      */
-    readonly parentInstructionsBlock?: string;
+    readonly getParentInstructionsBlock?: () => string;
 }
 
 /**
@@ -157,7 +162,7 @@ export class AgentSpawner extends EventEmitter {
             : undefined;
         this.projectContext = options.projectContext ?? "";
         this.hideWorkspacePath = options.hideWorkspacePath;
-        this.parentInstructionsBlock = options.parentInstructionsBlock ?? "";
+        this.getParentInstructionsBlock = options.getParentInstructionsBlock ?? (() => "");
         // In-flight resume promises keyed by subSessionId. Concurrent calls
         // share one promise instead of racing to re-attach the same session —
         // a second caller would otherwise see `attachChild` return the existing
@@ -175,11 +180,12 @@ export class AgentSpawner extends EventEmitter {
     /** Parent's IM/third-party channel flag, inherited by every rebuilt subagent prompt. */
     private readonly hideWorkspacePath: boolean | undefined;
     /**
-     * Pre-rendered parent instruction blocks (CLAUDE.md / AGENTS.md / DESIGN.md)
-     * to inherit into subagent system prompts. Empty when nothing resolved or
-     * inheritance is disabled via `InstructionsConfig.inheritToSubagents=false`.
+     * Reads the parent instruction blocks (CLAUDE.md / AGENTS.md / DESIGN.md)
+     * to inherit into subagent system prompts. Returns "" when nothing resolved
+     * or inheritance is disabled via `InstructionsConfig.inheritToSubagents=false`.
+     * Called per spawn/resume so a `settings.write` reaches the next child.
      */
-    private readonly parentInstructionsBlock: string;
+    private readonly getParentInstructionsBlock: () => string;
 
     /** In-flight resume promises, keyed by subSessionId. */
     private readonly resumeInFlight: Map<
@@ -240,6 +246,106 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /**
+     * Build the (tools, taskState, systemPrompt) triple a child harness attaches
+     * with. Shared by a fresh spawn and a resume so the contributor order —
+     * forked context, then few-shots, then role body, then inherited parent
+     * instructions — has exactly one definition. A resume that assembled this
+     * order independently could drift from spawn and silently change what the
+     * child sees mid-conversation.
+     *
+     * `allowedTools` is the already-narrowed toolset (whitelist + depth); this
+     * only intersects it with the session-scoped rebuild, so a caller cannot
+     * widen a child's capabilities by routing through here.
+     */
+    private async prepareChildAttach(args: {
+        sessionId: SessionId;
+        agentType: string | undefined;
+        childDepth: number;
+        allowedTools: readonly TacoTool[];
+        rolePrompt?: string;
+        fewShots?: ReadonlyArray<AgentFewShot>;
+        forkedContext?: string;
+        modelIdentity: string | undefined;
+    }): Promise<{ tools: TacoTool[]; taskState: SessionTaskState; systemPrompt: string }> {
+        // Rebuild session-scoped tools so shell commands receive the child
+        // session id and therefore use the same permission broker as main
+        // sessions. Both halves of the (tools, taskState) pair come from ONE
+        // toolsForChildSession call — mixing a taskState from one call with
+        // tools built elsewhere diverges the two TaskStore instances (see the
+        // note in sessionRegistry.ts).
+        const allowedNames = new Set(args.allowedTools.map((tool) => tool.name));
+        const { tools: rawTools, taskState } = await this.sessionRegistry.toolsForChildSession(
+            args.sessionId,
+        );
+        const tools = rawTools.filter((tool) => allowedNames.has(tool.name));
+
+        // Read-only profiles get an isolated-broker shell so the user's
+        // root-session allowlist cannot leak in. Membership in
+        // READ_ONLY_SHELL_AGENT_TYPES is a permission boundary, not a hint.
+        const shellIdx =
+            args.agentType !== undefined && READ_ONLY_SHELL_AGENT_TYPES.has(args.agentType)
+                ? tools.findIndex((t) => t.name === "shell")
+                : -1;
+        if (shellIdx !== -1) {
+            const readonlyBroker = new PermissionBroker(
+                () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
+                { readOnly: true },
+            );
+            // Replace in place so the toolset keeps its original ordering.
+            tools[shellIdx] = createShellTool({
+                permissionBroker: readonlyBroker,
+                sessionId: args.sessionId,
+            });
+        }
+
+        // Rebuild the system prompt from the child's actual toolset so read-only
+        // agents (e.g. explorer) don't inherit shell instructions they cannot
+        // act on. Contributors tagged with capability requirements (e.g.
+        // `<available_skills>` requires the `skill` tool) are filtered against
+        // that same toolset — otherwise the listing describes a tool the
+        // subagent cannot call.
+        const filteredContributors = filterContributorsForTools(
+            this.systemPromptContributors,
+            new Set(tools.map((tool) => tool.name)),
+        );
+        const profileContributors: SystemPromptContributor[] = [];
+        // Fork transcript first: it is background for the task, not the task.
+        if (args.forkedContext) profileContributors.push({ append: args.forkedContext });
+        // Few-shots before the role body so they establish the contract the
+        // profile expects (citation shape, stop condition) before it takes over.
+        const fewShotsBlock = formatFewShots(args.fewShots);
+        if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
+        // Role body after the generic guidance so it wins on conflict — a
+        // read-only explorer must not inherit the main agent's "act, then
+        // verify" framing.
+        const role = args.rolePrompt?.trim();
+        if (role) profileContributors.push({ append: role });
+        // Parent's resolved instruction blocks (CLAUDE.md / AGENTS.md /
+        // DESIGN.md) last, so the agent's role body can override them. Read
+        // through the thunk so a `settings.write` since the parent attached
+        // reaches this child.
+        const parentInstructions = this.getParentInstructionsBlock();
+        if (parentInstructions) profileContributors.push({ append: parentInstructions });
+
+        const systemPrompt = buildSystemPrompt({
+            tools,
+            modelIdentity: args.modelIdentity,
+            // `<project_context>` is workspace-level state — every child sees
+            // the same denylist. Read once at workspace construction and passed
+            // in, so a rebuild never re-reads disk.
+            projectContext: this.projectContext,
+            hideWorkspacePath: this.hideWorkspacePath,
+            contributors:
+                profileContributors.length > 0
+                    ? [...filteredContributors, ...profileContributors]
+                    : filteredContributors,
+            sessionKind: { role: "subagent", depth: args.childDepth },
+        });
+
+        return { tools, taskState, systemPrompt };
+    }
+
+    /**
      * Core subagent execution: create session → emit spawned → attach harness →
      * run prompt → extract result. Used by both spawnSubagent (agent tool) and
      * runSkillSubagent (Skill tool subagent mode).
@@ -290,92 +396,28 @@ export class AgentSpawner extends EventEmitter {
             agentType: args.agentType,
         });
 
-        // 3. Rebuild session-scoped tools so shell commands receive the child
-        // session id and therefore use the same permission broker as main sessions.
-        // toolsForChildSession also returns the taskState the tools were built from —
-        // hand it to attachChild so the tools' closures and attached.taskStore
-        // share one TaskStore instead of two diverging instances.
-        const allowedNames = new Set(args.tools.map((tool) => tool.name));
-        const { tools: childToolsRaw, taskState: childTaskState } =
-            await this.sessionRegistry.toolsForChildSession(childSessionId);
-        const childTools = childToolsRaw.filter((tool) => allowedNames.has(tool.name));
-
-        // ─── Read-only shell for read-only profiles ───────────────────────
-        // After filtering, replace the shell tool with an isolated-broker
-        // version so that a user's root-session allowlist cannot leak in.
-        const isReadOnlyShell =
-            READ_ONLY_SHELL_AGENT_TYPES.has(args.agentType) &&
-            childTools.some((t) => t.name === "shell");
-        if (isReadOnlyShell) {
-            const readonlyBroker = new PermissionBroker(
-                () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
-                { readOnly: true },
-            );
-            const readonlyShell = createShellTool({
-                permissionBroker: readonlyBroker,
-                sessionId: childSessionId,
-            });
-            // Replace shell tool in place (maintain array position)
-            const shellIdx = childTools.findIndex((t) => t.name === "shell");
-            if (shellIdx !== -1) childTools[shellIdx] = readonlyShell;
-        }
-        // ─────────────────────────────────────────────────────────────────
-
-        // 4. Rebuild the system prompt from the child's actual toolset so
-        // read-only agents (e.g. explorer) don't inherit shell instructions
-        // they cannot act on, while preserving workspace contributors.
-        // The profile body is appended last so it wins on any conflict with the
-        // generic workflow guidance — a read-only explorer must not inherit the
-        // main agent's "act, then verify" framing.
-        // Contributors tagged with capability requirements (e.g. `<available_skills>`
-        // requires the `skill` tool) are filtered against the child's actual
-        // toolset — otherwise the listing would describe a tool the subagent
-        // cannot call.
-        // Few-shot examples are appended *before* the role body so they
-        // establish the contract the profile expects (citation shape, stop
-        // condition) before the role takes over.
-        const role = args.rolePrompt?.trim();
-        const fewShotsBlock = formatFewShots(args.fewShots);
-        const childToolNameSet = new Set(childTools.map((tool) => tool.name));
-        const filteredContributors = filterContributorsForTools(
-            this.systemPromptContributors,
-            childToolNameSet,
-        );
-        const profileContributors: SystemPromptContributor[] = [];
-        // Fork transcript goes first so it precedes the role body — it is
-        // background for the task, not the task itself.
-        if (args.forkedContext) profileContributors.push({ append: args.forkedContext });
-        if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
-        if (role) profileContributors.push({ append: role });
-        // Inherit parent's resolved instruction blocks (CLAUDE.md / AGENTS.md /
-        // DESIGN.md) so the subagent sees the same project rules the parent
-        // sees. Appended last so the agent's role body can override the
-        // instructions if needed (rare, but consistent with fewShots ordering).
-        if (this.parentInstructionsBlock) {
-            profileContributors.push({ append: this.parentInstructionsBlock });
-        }
-        // Per-spawn model override wins over the parent default. Without an
-        // override we keep the parent's identity string so the subagent's
-        // `<model_identity>` section reflects what actually runs.
-        const childModelIdentity = args.model
-            ? `${args.model.provider}/${args.model.id}`
-            : this.defaultModelIdentity;
-        // `<project_context>` is workspace-level state — every child sees the
-        // same denylist. Read once at workspace construction; passed in by
-        // the workspace so subagent rebuild doesn't re-read disk.
-        const childSystemPrompt = buildSystemPrompt({
+        // 3. Build the child's toolset + system prompt.
+        const {
             tools: childTools,
-            modelIdentity: childModelIdentity,
-            projectContext: this.projectContext,
-            hideWorkspacePath: this.hideWorkspacePath,
-            contributors:
-                profileContributors.length > 0
-                    ? [...filteredContributors, ...profileContributors]
-                    : filteredContributors,
-            sessionKind: { role: "subagent", depth: childDepth },
+            taskState: childTaskState,
+            systemPrompt: childSystemPrompt,
+        } = await this.prepareChildAttach({
+            sessionId: childSessionId,
+            agentType: args.agentType,
+            childDepth,
+            allowedTools: args.tools,
+            rolePrompt: args.rolePrompt,
+            fewShots: args.fewShots,
+            forkedContext: args.forkedContext,
+            // Per-spawn model override wins over the parent default. Without an
+            // override we keep the parent's identity string so the subagent's
+            // `<model_identity>` section reflects what actually runs.
+            modelIdentity: args.model
+                ? `${args.model.provider}/${args.model.id}`
+                : this.defaultModelIdentity,
         });
 
-        // 5. Attach child harness
+        // 4. Attach child harness
         let attached: AttachedSession;
         try {
             attached = await this.sessionRegistry.attachChild(
@@ -686,78 +728,22 @@ export class AgentSpawner extends EventEmitter {
         //    + few-shots, filtered through the same toolset the spawn used.
         //    def is guaranteed non-undefined by the early return above.
         const childDepth = typeof md.depth === "number" ? md.depth : Number(md.depth ?? 0);
-        const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
-
-        // Mirror executeSubagentSession: filterToolsForAgent narrows the
-        // workspace toolset by whitelist + depth, then toolsForChildSession
-        // rebuilds session-scoped tools (closures binding childSessionId)
-        // together with the taskState they were built from — both halves of
-        // the (tools, taskState) pair come from ONE call, so attachChild sees
-        // tools whose task-store closures match attached.taskStore. The
-        // sessionRegistry.ts:418-420 comment calls out the failure mode this
-        // avoids: mixing a taskState from one toolsForChildSession call with
-        // tools built elsewhere diverges the two TaskStore instances.
-        const allowedNames = new Set(childTools.map((t) => t.name));
-        const { tools: childToolsRaw, taskState: childTaskState } =
-            await this.sessionRegistry.toolsForChildSession(args.subSessionId);
-        const attachedChildTools = childToolsRaw.filter((tool) => allowedNames.has(tool.name));
-
-        // ─── Read-only shell for read-only profiles ───────────────────────
-        // After filtering, replace the shell tool with an isolated-broker
-        // version so that a user's root-session allowlist cannot leak in.
-        const isReadOnlyShell =
-            agentType !== undefined &&
-            READ_ONLY_SHELL_AGENT_TYPES.has(agentType) &&
-            attachedChildTools.some((t) => t.name === "shell");
-        if (isReadOnlyShell) {
-            const readonlyBroker = new PermissionBroker(
-                () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
-                { readOnly: true },
-            );
-            const readonlyShell = createShellTool({
-                permissionBroker: readonlyBroker,
-                sessionId: args.subSessionId,
-            });
-            // Replace shell tool in place (maintain array position)
-            const shellIdx = attachedChildTools.findIndex((t) => t.name === "shell");
-            if (shellIdx !== -1) attachedChildTools[shellIdx] = readonlyShell;
-        }
-        // ─────────────────────────────────────────────────────────────────
-
-        const role = def?.systemPrompt?.trim();
-        const fewShotsBlock = formatFewShots(def?.fewShots);
-        const childToolNameSet = new Set(attachedChildTools.map((tool) => tool.name));
-        const filteredContributors = filterContributorsForTools(
-            this.systemPromptContributors,
-            childToolNameSet,
-        );
-        // Re-inject the fork transcript from the spawn-time snapshot so a resume
-        // sees the same context the child started with, even if the parent has
-        // since compacted or continued.
-        const forkedContext =
-            md !== undefined && typeof md.forkedContext === "string" ? md.forkedContext : undefined;
-        const profileContributors: SystemPromptContributor[] = [];
-        if (forkedContext) profileContributors.push({ append: forkedContext });
-        if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
-        if (role) profileContributors.push({ append: role });
-        // Inherit parent's resolved instruction blocks (CLAUDE.md / AGENTS.md /
-        // DESIGN.md) so the subagent sees the same project rules the parent
-        // sees. Appended last so the agent's role body can override the
-        // instructions if needed (rare, but consistent with fewShots ordering).
-        if (this.parentInstructionsBlock) {
-            profileContributors.push({ append: this.parentInstructionsBlock });
-        }
-
-        const childSystemPrompt = buildSystemPrompt({
+        const {
             tools: attachedChildTools,
+            taskState: childTaskState,
+            systemPrompt: childSystemPrompt,
+        } = await this.prepareChildAttach({
+            sessionId: args.subSessionId,
+            agentType,
+            childDepth,
+            allowedTools: filterToolsForAgent(this.tools, def.tools, childDepth),
+            rolePrompt: def.systemPrompt,
+            fewShots: def.fewShots,
+            // Re-inject the fork transcript from the spawn-time snapshot so a
+            // resume sees the same context the child started with, even if the
+            // parent has since compacted or continued.
+            forkedContext: typeof md.forkedContext === "string" ? md.forkedContext : undefined,
             modelIdentity: this.defaultModelIdentity,
-            projectContext: this.projectContext,
-            hideWorkspacePath: this.hideWorkspacePath,
-            contributors:
-                profileContributors.length > 0
-                    ? [...filteredContributors, ...profileContributors]
-                    : filteredContributors,
-            sessionKind: { role: "subagent", depth: childDepth },
         });
 
         // 4. Attach (returns the existing AttachedSession if still attached).
