@@ -1,6 +1,6 @@
 {
   "name": "taco",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Taco — a desktop-first agent harness built on top of Pi, with a sidecar process and a NDJSON JSON-RPC protocol for embedded agent runtimes",
   "type": "module",

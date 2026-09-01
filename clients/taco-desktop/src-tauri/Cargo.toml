@@ -1,6 +1,6 @@
 [package]
 name = "taco-desktop"
-version = "0.1.0"
+version = "0.1.2"
 description = "Taco 桌面客户端 — 通过 NDJSON sidecar 调用 taco runtime"
 authors = ["taco team"]
 edition = "2021"

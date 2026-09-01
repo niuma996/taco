@@ -1,6 +1,6 @@
 {
   "name": "@taco-ai/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "Taco CLI — launcher + daemon supervisor for the sidecar. Wraps @taco-ai/sidecar with user-facing subcommands (start, status, install, upgrade).",
   "type": "module",
