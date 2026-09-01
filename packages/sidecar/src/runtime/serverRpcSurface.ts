@@ -203,4 +203,13 @@ export interface ServerRpcSurface {
      * Authoritative server capability advertisement, returned by `initialize`.
      */
     getServerCapabilities(): SidecarCapabilities;
+    /**
+     * Dispose + clear every workspace so the next `ensureWorkspace` rebuilds
+     * against the latest disk config. Called by the `mcp.*` mutation handlers
+     * after persisting a change so newly enabled / removed MCP servers are
+     * discovered on demand instead of requiring a sidecar restart. Active
+     * chat sessions in those workspaces are interrupted — acceptable for a
+     * rare config mutation.
+     */
+    reloadMcpServers?(): Promise<void>;
 }

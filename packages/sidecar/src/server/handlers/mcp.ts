@@ -159,7 +159,10 @@ export function registerMcpHandlers(): void {
     registerMethod(
         RPC.mcpCreateConfig,
         false,
-        async ({ params }: MethodCtx<McpCreateConfigParams>): Promise<McpMutateConfigResult> => {
+        async ({
+            params,
+            server,
+        }: MethodCtx<McpCreateConfigParams>): Promise<McpMutateConfigResult> => {
             if (!params?.config)
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "config is required");
             // validateMcpServers throws a plain Error on malformed input
@@ -171,6 +174,10 @@ export function registerMcpHandlers(): void {
                     "mcp.createConfig",
                 );
                 saveGlobalConfig({ mcpServers: next });
+                // Invalidate every workspace so the next ensureWorkspace
+                // discovers the new server's candidates. reloadMcpServers is
+                // optional on the surface (test stubs may omit it).
+                await server?.reloadMcpServers?.();
                 return { server: mcpServerToView(params.config), requiresRestart: true };
             } catch (e) {
                 throw new RpcHandlerError(
@@ -185,7 +192,10 @@ export function registerMcpHandlers(): void {
     registerMethod(
         RPC.mcpUpdateConfig,
         false,
-        async ({ params }: MethodCtx<McpUpdateConfigParams>): Promise<McpMutateConfigResult> => {
+        async ({
+            params,
+            server,
+        }: MethodCtx<McpUpdateConfigParams>): Promise<McpMutateConfigResult> => {
             if (typeof params?.id !== "string" || params.id.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
             }
@@ -204,6 +214,7 @@ export function registerMcpHandlers(): void {
                     "mcp.updateConfig",
                 );
                 saveGlobalConfig({ mcpServers: next });
+                await server?.reloadMcpServers?.();
                 return { server: mcpServerToView(merged), requiresRestart: true };
             } catch (e) {
                 throw new RpcHandlerError(
@@ -218,13 +229,17 @@ export function registerMcpHandlers(): void {
     registerMethod(
         RPC.mcpDeleteConfig,
         false,
-        async ({ params }: MethodCtx<McpDeleteConfigParams>): Promise<McpDeleteConfigResult> => {
+        async ({
+            params,
+            server,
+        }: MethodCtx<McpDeleteConfigParams>): Promise<McpDeleteConfigResult> => {
             if (typeof params?.id !== "string" || params.id.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
             }
             const servers = readMcpServers();
             requireServerConfig(servers, params.id);
             saveGlobalConfig({ mcpServers: servers.filter((s) => s.id !== params.id) });
+            await server?.reloadMcpServers?.();
             return { deleted: params.id, requiresRestart: true };
         },
         { schema: mcpDeleteConfigSchema },

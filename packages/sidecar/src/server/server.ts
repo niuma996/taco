@@ -1431,6 +1431,27 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /**
+     * Dispose + clear every workspace so the next `ensureWorkspace` rebuilds
+     * against the latest disk config. Called by the `mcp.*` mutation handlers
+     * after persisting a change so newly enabled / removed MCP servers are
+     * discovered on demand instead of requiring a sidecar restart. Active
+     * chat sessions in those workspaces are interrupted — acceptable for a
+     * rare config mutation.
+     */
+    async reloadMcpServers(): Promise<void> {
+        // Refresh the cached snapshot so the next ensureWorkspace discovers
+        // newly enabled / removed servers. Mirrors setCustomProviders /
+        // setDefaultModel: invalidate-then-propagate, so the disk read happens
+        // once per mcp mutation rather than on every ensureWorkspace. The three
+        // mcp.* mutation handlers are the only callers.
+        this.mcpServers = readGlobalConfig().mcpServers ?? [];
+        for (const ws of this.workspaceMap.values()) {
+            await ws.dispose();
+        }
+        this.workspaceMap.clear();
+    }
+
+    /**
      * Hot-reload the `InstructionsConfig` for every workspace. Each
      * workspace's sessionRegistry re-reads via a lazy thunk on the next LLM
      * call — no per-session invalidation needed. Called from the
