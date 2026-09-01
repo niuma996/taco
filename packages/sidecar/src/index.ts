@@ -685,7 +685,7 @@ async function main(): Promise<void> {
                 // holds an fd open across process replacement, and a
                 // captured-stderr parent sees Node's "process.stderr was
                 // mutated" warning with no way to attribute it.
-                process.on("exit", () => handle.dispose());
+                process.once("exit", () => handle.dispose());
             }
         } catch (err) {
             log.warn("failed to set up stderr tee: " + String(err));

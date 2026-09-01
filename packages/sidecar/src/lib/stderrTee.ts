@@ -28,8 +28,14 @@ type StderrWrite = (
 ) => boolean;
 
 export interface StderrTeeHandle {
-    /** Synchronous best-effort flush + restore. Safe to call multiple times. */
-    dispose(): void;
+    /**
+     * Detach the tee and finalize the mirror stream. Safe to call more than
+     * once. Returns a promise that settles when the stream has flushed —
+     * `process.on("exit")` callers can ignore it (exit cannot await, so the
+     * flush is best-effort there), but a caller that needs the bytes on disk
+     * can await it.
+     */
+    dispose(): Promise<void>;
     /** Path the mirror stream was opened against (for diagnostics). */
     readonly targetPath: string;
 }
@@ -44,12 +50,19 @@ export function installStderrTee(logPath: string): StderrTeeHandle | undefined {
     const teeStream: WriteStream = createWriteStream(logPath, { flags: "a" });
     let teeBroken = false;
     let origBroken = false;
-    teeStream.on("error", () => {
+    // Named so `dispose()` can remove them again. Anonymous listeners would
+    // accumulate across an install/dispose cycle: ten rounds trips Node's
+    // MaxListenersExceededWarning, and a stale listener from a previous
+    // install can still flip this closure's `origBroken` after it was
+    // disposed.
+    const onTeeError = (): void => {
         teeBroken = true;
-    });
-    process.stderr.on("error", () => {
+    };
+    const onStderrError = (): void => {
         origBroken = true;
-    });
+    };
+    teeStream.on("error", onTeeError);
+    process.stderr.on("error", onStderrError);
     const origWrite = process.stderr.write.bind(process.stderr);
     const tee: StderrWrite = (chunk, encodingOrCallback, callback) => {
         if (origBroken) {
@@ -77,19 +90,32 @@ export function installStderrTee(logPath: string): StderrTeeHandle | undefined {
     let disposed = false;
     return {
         targetPath: logPath,
-        dispose(): void {
-            if (disposed) return;
+        dispose(): Promise<void> {
+            if (disposed) return Promise.resolve();
             disposed = true;
             process.stderr.write = origWrite;
-            // close() queues a graceful flush; end() finalizes. Both run
-            // synchronously here but the actual fs write completes after
-            // this returns — that's fine because we only need the fd
-            // released before the process image is replaced.
-            try {
-                teeStream.end();
-            } catch {
-                // best-effort: stream may already be in a terminal state.
-            }
+            process.stderr.removeListener("error", onStderrError);
+            teeStream.removeListener("error", onTeeError);
+            // The stream is abandoned from here on, but `createWriteStream`
+            // opens lazily: a stream disposed before its open() landed still
+            // emits ENOENT/EACCES a tick later. With our own listener gone
+            // that would reach the process as an uncaughtException, so leave
+            // a swallowing listener in its place — attached to the abandoned
+            // stream, not to `process.stderr`, so nothing accumulates
+            // globally.
+            teeStream.on("error", () => {});
+            // end() finalizes; the actual fs write lands after this returns,
+            // which is fine for the exit path because we only need the fd
+            // released before the process image is replaced. Callers that
+            // need the bytes readable can await the returned promise.
+            return new Promise<void>((resolve) => {
+                try {
+                    teeStream.end(() => resolve());
+                } catch {
+                    // best-effort: stream may already be in a terminal state.
+                    resolve();
+                }
+            });
         },
     };
 }

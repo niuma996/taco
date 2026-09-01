@@ -39,6 +39,7 @@
     "test:agents": "tsx --test tests/server/handlers/agents.content.test.ts",
     "test:extensionsStatus": "tsx --test tests/server/handlers/extensions.status.test.ts",
     "test:logger": "tsx --test tests/lib/logger.test.ts",
+    "test:stderrTee": "tsx --test tests/lib/stderrTee.test.ts",
     "test:tools": "tsx --test tests/tools/edit.test.ts",
     "test:extensions": "tsx --test tests/extensions/registry.test.ts tests/extensions/extensionApi.test.ts tests/extensions/loader.test.ts tests/extensions/loader.tacoHome.test.ts tests/extensions/loader.extensionRoot.test.ts tests/extensions/integration.test.ts tests/extensions/activation.test.ts tests/extensions/builtin/gitContext.test.ts tests/runtime/workspace.test.ts",
     "test:config": "tsx --test tests/config/config.extensions.test.ts tests/config/config.roundTrip.test.ts tests/config/config.tacoHome.test.ts tests/config/agentDirs.test.ts",
