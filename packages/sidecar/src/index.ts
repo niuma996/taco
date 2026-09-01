@@ -291,7 +291,6 @@ async function runDaemon(
         });
         socket.on("error", (err) => log.warn(`control socket error: ${err.message}`));
     });
-    controlServer.on("error", (err) => log.error(`control server error: ${err.message}`));
     const controlState = IS_UNIX ? await probeControlSocket(controlSocketPath) : "absent";
     if (controlState === "ready") {
         log.info(`another daemon already owns ${controlSocketPath}; exiting`);
@@ -312,6 +311,12 @@ async function runDaemon(
         controlServer.once("error", onError);
         controlServer.once("listening", () => {
             controlServer.removeListener("error", onError);
+            // Attach the generic error listener only after the bind has
+            // succeeded. Registering it before the bind would also catch the
+            // expected EADDRINUSE single-instance race below and surface it as
+            // a red "control server error" banner in the desktop UI, even
+            // though that path deliberately exits 0 to reuse the live daemon.
+            controlServer.on("error", (err) => log.error(`control server error: ${err.message}`));
             resolve();
         });
         controlServer.listen(controlSocketPath);
