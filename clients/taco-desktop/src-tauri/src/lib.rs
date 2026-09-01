@@ -956,6 +956,7 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
             // after a debug-mode restart). Wait until the control socket stops
             // accepting connections before returning so the next ensure spawns
             // a fresh process.
+            #[cfg(unix)]
             let _ =
                 tokio::time::timeout(Duration::from_secs(3), wait_for_control_socket_gone(control))
                     .await;
@@ -1470,6 +1471,7 @@ pub fn run() {
                 // grace overlap with build_main_window + webview load
                 // (≈600ms each), which is what the UI is doing anyway.
                 let _p = boot_trace::Phase::new("setup.preemptive_reap");
+                #[cfg(unix)]
                 if let Ok(runtime_dir) = resolve_taco_runtime_dir(app.handle()) {
                     reap_stale_at(&runtime_dir, app.handle());
                 }
