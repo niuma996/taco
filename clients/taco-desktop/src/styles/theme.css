@@ -15,6 +15,10 @@
     --system: #b48ead;
     --tool: #ebcb8b;
     --border: #2e3440;
+    /* Higher-contrast border for cards/buttons that need to read clearly against
+       the surface — use when --border (#2e3440 in dark, only ~4% above --bg)
+       gets lost. Pairs with --fg-dim so it stays inside the Nord palette. */
+    --border-strong: #7a8390;
     --input-bg: #1a1d23;
 
     /* Semantic tokens — consolidates scattered hardcoded colors, overridden per theme. */
@@ -159,6 +163,7 @@
     --system: #8a5aa8;
     --tool: #a8760a;
     --border: #dedbd5;
+    --border-strong: #8a8177;
     --input-bg: var(--warm-gray-4);
 
     --error: #c0392b;

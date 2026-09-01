@@ -8,12 +8,24 @@
     padding: 0;
     border: none;
     border-radius: var(--radius-pill);
-    background: var(--input-bg);
+    background: var(--border);
+    /* Track + thumb both used to sit at --input-bg / --bg — only ~4% brighter
+       than the card surface in dark mode, so the switch rendered as a
+       near-invisible gray smear. Three layers of contrast now:
+         track      = --border (RGB 46,52,64 vs card --bg 15,17,21)
+         thumb      = --bg
+         border     = --fg-dim (RGB 122,131,144) on both, via inset shadow
+       Inset shadows keep the 38×22 box intact — a real border would clip the
+       thumb's 3px vertical margin (16+3+3=22 > 22-2=20). */
+    box-shadow: inset 0 0 0 1px var(--fg-dim);
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition:
+        background 0.15s ease,
+        box-shadow 0.15s ease;
 }
 .ui-switch[data-state="checked"] {
     background: var(--brand-orange);
+    box-shadow: inset 0 0 0 1px var(--brand-orange);
 }
 .ui-switch:disabled {
     opacity: 0.5;
@@ -30,6 +42,7 @@
     margin: 3px;
     border-radius: 50%;
     background: var(--bg);
+    box-shadow: inset 0 0 0 1px var(--fg-dim);
     transition: transform 0.15s ease;
 }
 .ui-switch[data-state="checked"] .ui-switch-thumb {

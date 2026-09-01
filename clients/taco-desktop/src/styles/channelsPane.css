@@ -8,6 +8,21 @@
     overflow-y: auto;
     padding: 16px 20px;
     gap: 12px;
+    /* Mirror SettingsPane's .settings-pane-content-inner pattern (settings.css
+       caps content at 720px so wide windows don't stretch paragraphs/forms
+       off the side). 760 = 720 content + 20px left/right padding. Falls back
+       to parent width on narrow viewports.
+
+       `width: 760px` (not just max-width) is required: as a flex item inside
+       .layout (flex row), channels-pane would otherwise default to
+       width: auto and stretch to the inner row/card max-content (~1056px in
+       wide windows), with max-width silently ignored. Pinning width makes the
+       760 cap actually apply; the calc() fallback keeps it responsive when
+       the parent is narrower than 800px. */
+    width: 760px;
+    max-width: calc(100% - 40px);
+    min-width: 0;
+    margin: 0 auto;
 }
 .channels-card-added {
     font-size: 12px;
@@ -128,7 +143,10 @@
     align-items: center;
     gap: 10px;
     width: 100%;
-    padding: 10px 12px;
+    /* 14px horizontal padding matches .pane-card (paneShared.css:259) so the
+       row's content boundary aligns with the bindings card across tab
+       switches — without it, the trailing button shifts ~4px to the left. */
+    padding: 10px 14px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface-tint);
