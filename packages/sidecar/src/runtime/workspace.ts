@@ -10,7 +10,7 @@
 
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { basename, resolve as resolvePath } from "node:path";
 import type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
@@ -632,7 +632,20 @@ export class WorkspaceRuntime extends EventEmitter {
                     );
                 }
             }
-            const watcher = watchFs([...options.skillDirs], { ignoreInitial: true });
+            // Only SKILL.md matters for hot reload: skill metadata/instructions
+            // live there, while every other file under a skill dir (helper
+            // scripts, templates, images, node_modules…) is read lazily at
+            // invocation time. The bundled sidecar has no fsevents, so chokidar
+            // falls back to per-file fs.watch — watching whole dirs holds one fd
+            // per file (measured: +778 fds for ~450 skill files). Filtering
+            // non-SKILL.md files out of the watch drops that to ~148 (the
+            // SKILL.md files plus the directories chokidar must keep watching to
+            // discover newly added skills). Directories are never ignored here:
+            // pruning one would hide a SKILL.md created inside it later.
+            const watcher = watchFs([...options.skillDirs], {
+                ignoreInitial: true,
+                ignored: (path, stats) => Boolean(stats?.isFile()) && basename(path) !== "SKILL.md",
+            });
             this.skillWatcher = watcher;
             this.skillWatcherReady = new Promise((resolve) => {
                 watcher.once("ready", resolve);

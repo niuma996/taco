@@ -5,10 +5,16 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ToastProvider";
 import { bootstrapI18n, default as i18n } from "./i18n/index.ts";
+import { bootMark } from "./lib/bootTrace";
 import { getGlobalConfig, loadClientConfig } from "./lib/globalConfig.ts";
 import { resolveTheme } from "./lib/theme";
 import "./components/toolViews"; // side-effect: register tool views before App renders
 import "./styles.css";
+
+// Earliest point the webview runs our code. Brackets the gap between Rust's
+// `setup.done` and React mounting — in dev that span also covers Vite's module
+// graph transform, which is invisible from both the Rust and React sides.
+bootMark("ui.main.module_eval");
 
 // Initialize i18next synchronously BEFORE render so the first paint uses the
 // persisted UI language (no English flash on a Chinese user).
@@ -40,6 +46,7 @@ const osDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 const initialTheme = resolveTheme(getGlobalConfig().client.theme, osDark);
 document.documentElement.dataset.theme = initialTheme;
 
+bootMark("ui.main.react_render_call");
 ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
         <I18nextProvider i18n={i18n}>

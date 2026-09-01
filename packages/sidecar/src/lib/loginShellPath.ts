@@ -1,6 +1,6 @@
 /**
- * loginShellPath.ts — recover the user's interactive PATH for a daemon that
- * was launched with a minimal one.
+ * loginShellPath.ts — recover the user's interactive PATH for a daemon
+ * launched with a minimal one.
  *
  * launchd (and Tauri-spawned GUI processes on macOS) start with
  * `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. Anything the user installed into a
@@ -38,6 +38,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve as resolvePath } from "node:path";
 import { tacoHome } from "../config/tacoHome.ts";
+import { scrubbedProcessEnv } from "../runtime/providerKeyStore.ts";
 
 /** Marker that separates our echo from any MOTD / profile chatter the shell
  *  prints before running the command. We search for the last occurrence so a
@@ -124,6 +125,7 @@ export function resolveLoginShellPath(
             // Discard the shell's stderr — interactive shells without a TTY
             // emit job-control / no-tty warnings that are noise here.
             stdio: ["ignore", "pipe", "ignore"],
+            env: scrubbedProcessEnv(),
         });
     } catch {
         return undefined;

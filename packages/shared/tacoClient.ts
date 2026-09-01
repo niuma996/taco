@@ -8,6 +8,11 @@
  */
 
 export { FrameDispatcher, NdjsonLineBuffer, RpcRemoteError } from "./dispatcher.js";
-export { RPC, type RpcMethodName } from "./rpcMethods.js";
+export {
+    FAST_RPC_METHODS,
+    FAST_RPC_TIMEOUT_MS,
+    RPC,
+    type RpcMethodName,
+} from "./rpcMethods.js";
 export { TacoClientBase } from "./tacoClientBase.js";
 export { createTypedRpc, type RpcDispatch, type TypedRpc } from "./typedRpc.js";

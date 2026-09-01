@@ -1,13 +1,13 @@
 /*!
- * Tauri 2 entry — spawn sidecar + 暴露给 React 端的 invoke commands
+ * Tauri 2 entry — spawn sidecar + expose invoke commands to the React side.
  *
- * 关键设计:
- *  - 全进程共享**一个** sidecar 子进程,Rust 只负责进程生死 + stdio 字节管道
- *  - sidecar 自身按 `params.workspace` 路由并懒建 WorkspaceRuntime(见 server.ts
- *    的 workspaceMap),所以多 workspace 无需多进程
- *  - Rust 不解析协议帧:stdout 每行原样转发为 Tauri event `sidecar-event {line}`,
- *    「这帧属于哪个 workspace」由前端 dispatcher 从帧内字段判定
- *  - 客户端 (React) 调 invoke('workspace_send', { cwd, line: JSON.stringify(req) })
+ * One sidecar subprocess per process. Rust only owns the process lifecycle
+ * and the stdio byte pipes; the sidecar itself routes by `params.workspace`
+ * and lazy-builds WorkspaceRuntime, so multiple workspaces don't need
+ * multiple processes. Rust does NOT parse protocol frames — stdout lines
+ * are forwarded verbatim as the Tauri event `sidecar-event {line}`, and the
+ * frontend dispatcher decides which workspace the frame belongs to from
+ * its fields.
  */
 
 use std::process::Stdio;
@@ -25,6 +25,7 @@ use tokio::sync::{mpsc, Mutex};
 pub mod log_file;
 pub use log_file::LogFiles;
 
+pub mod boot_trace;
 mod daemon_reap;
 mod paths;
 mod sidecar_launcher;
@@ -41,6 +42,8 @@ pub mod upgrade_commands;
 use crate::paths::{
     control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home, resolve_taco_runtime_dir,
 };
+#[cfg(debug_assertions)]
+use crate::sidecar_launcher::DEBUG_ONLY_PASSTHROUGH_ENV;
 use crate::sidecar_launcher::{resolve_install_launcher, resolve_sidecar, PASSTHROUGH_ENV};
 
 /// Gate that lets a programmatic `AppHandle::exit` pass through without
@@ -52,12 +55,13 @@ use crate::sidecar_launcher::{resolve_install_launcher, resolve_sidecar, PASSTHR
 /// terminates.
 static EXIT_GATE: AtomicBool = AtomicBool::new(false);
 
-/// 默认 workspace 的绝对路径,并保证目录存在。
+/// Absolute path of the default workspace, with the directory guaranteed to exist.
 ///
-/// 曾经硬编码为 `/tmp/taco-demo`,但 macOS 会定期清理 `/tmp`,而且这个目录
-/// 从来没人创建过 —— 首次启动就指向一个不存在的路径。sidecar 把它当
-/// stdio MCP server 的默认 cwd,spawn 便以「command ENOENT」的名义失败,
-/// 报错完全指不到真因。放到 TACO_HOME 下并在这里 mkdir,两个问题一起消失。
+/// Previously hardcoded to `/tmp/taco-demo`, but macOS periodically cleans `/tmp` and that
+/// path was never created — a fresh install pointed at a non-existent directory. The sidecar
+/// uses it as the stdio MCP server's default cwd, so spawn would fail with "command ENOENT"
+/// and the error pointed nowhere useful. Putting it under TACO_HOME and mkdir'ing here fixes
+/// both problems at once.
 #[tauri::command]
 async fn default_workspace_dir(app: AppHandle) -> Result<String, String> {
     let dir = resolve_taco_home(&app)?.join("workspace");
@@ -68,16 +72,16 @@ async fn default_workspace_dir(app: AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().into_owned())
 }
 
-/// 批量判断路径是否为存在的目录,顺序与入参一一对应。
+/// Batch-check whether each path is an existing directory, returning results in input order.
 ///
-/// 前端据此剔除已失效的历史 workspace(目录被移动 / 删除 / `/tmp` 被清理)。
-/// 走 Rust 而不是前端 fs plugin:待检查的路径不在 fs scope 里,plugin 会直接
-/// 拒绝,而这里只读元数据、不读内容。
+/// The frontend uses this to prune stale workspace entries (moved / deleted dirs, `/tmp`
+/// cleanups). Done in Rust rather than the frontend fs plugin because the checked paths
+/// are outside the fs scope — the plugin would reject them, and we only read metadata.
 ///
-/// macOS TCC:授权未决时 `~/Documents` 下的 stat 返回 EPERM 而非成功——
-/// `is_dir()` 会把它当成"目录不存在",导致真实 workspace 被 prune 掉。
-/// PermissionDenied 因此视为"存在":宁可保留一个 stale 条目,也不能把
-/// 只是还没授权的 workspace 从列表里删掉。
+/// macOS TCC: when permission is undecided, stat under `~/Documents` returns EPERM rather
+/// than success — `is_dir()` would treat that as "directory does not exist" and prune a
+/// real workspace. PermissionDenied is therefore treated as "exists": keeping one stale
+/// entry is better than dropping a workspace whose TCC prompt hasn't been answered yet.
 #[tauri::command]
 async fn paths_are_dirs(paths: Vec<String>) -> Result<Vec<bool>, String> {
     Ok(paths
@@ -144,29 +148,24 @@ async fn desktop_config_write(app: AppHandle, contents: String) -> Result<(), St
 ///  layer stays focused on the workspace_* handlers.)
 
 pub struct AppState {
-    /// 唯一共享 sidecar 进程。锁仅在 install / dispose 路径持;spawn 在锁外执行
-    /// —— 这样 dispose 期间可以 acquire 锁、设 shutdown flag,ensure 在 install
-    /// 前能看到这个 flag,杀掉孤儿进程而非被 dispose race-kill 后留个 zombie。
+    /// The single shared sidecar process. Lock is held only across install / dispose;
+    /// spawn runs outside the lock so dispose can acquire it, set the shutdown flag, and
+    /// have the ensure pre-check see the flag before install — killing the orphan instead
+    /// of leaving a zombie after a dispose race-kill.
     pub sidecar: Mutex<Option<SharedSidecar>>,
     next_process_generation: AtomicU64,
-    /// dispose 期间为 true —— ensure 在 spawn 前后都会检查,避免在 dispose 之后
-    /// install 一个马上被杀的进程(orphan)。
+    /// True while a dispose is in flight — ensure checks this before AND after spawn so it
+    /// never installs a process that will be killed moments later (orphan).
     shutdown_initiated: AtomicBool,
     /// Per-process log file family, set when a sidecar is installed. None
     /// before the first install; recreated on each new sidecar process so the
-    /// file's lifetime matches the process lifetime — simpler reasoning, and
-    /// a restart produces a fresh file rather than appending to one from a
-    /// now-dead process.
-    ///
-    /// The reader task gets a clone of the inner `Arc` at install time (see
-    /// `workspace_ensure`), so it can outlive the slot install without
-    /// holding the Tauri State — and so a parallel aborting ensure never
-    /// shares a handle with the winning one.
-    ///
-    /// The double-Arc is load-bearing: the outer one is the install-publish
-    /// point (one writer at a time, behind a synchronous mutex since
-    /// Tauri `State<T>` only `Deref`s to `T`); the inner one is the handle
-    /// each reader owns, so its lifetime isn't tied to the publish point.
+    /// file's lifetime matches the process lifetime. The reader task gets a
+    /// clone of the inner `Arc` at install time (see `workspace_ensure`), so
+    /// it can outlive the slot install without holding the Tauri State — and
+    /// so a parallel aborting ensure never shares a handle with the winning
+    /// one. The double-Arc is load-bearing: outer is the install-publish
+    /// point (one writer at a time, behind a sync mutex since Tauri `State<T>`
+    /// only `Deref`s to `T`); inner is the handle each reader owns.
     pub log_files: Arc<StdMutex<Option<Arc<StdMutex<LogFiles>>>>>,
     /// JoinHandle of the running stderr reader task. A restart joins the prior
     /// generation's reader before opening the log files: the reader's final
@@ -282,23 +281,93 @@ async fn clear_stale_socket(_path: &std::path::Path) -> bool {
     false
 }
 
-/// Poll the daemon socket (with backoff) until a connection attempt succeeds
-/// or the deadline expires. Mirrors packages/cli/lib/start.ts `waitForSocket`
+/// Ceiling for the NDJSON liveness probe's reply. The daemon answers an
+/// unknown method from its handler registry without touching disk, a model,
+/// or a subprocess, so a healthy one replies in single-digit milliseconds even
+/// mid-boot. 2s is generous enough to absorb a loaded machine while still
+/// failing fast against a daemon whose event loop is starved.
+const NDJSON_PROBE_TIMEOUT: Duration = Duration::from_millis(2_000);
+
+/// Confirm the listener on `path` is actually serving NDJSON, not merely
+/// bound. `connect()` succeeds as long as the kernel's listen queue exists,
+/// which stays true while the owning process is alive but no longer turning
+/// its event loop — a daemon in a GC death spiral accepts connections and
+/// answers nothing. Treating connect-success as readiness is what let
+/// `ensure` install such a daemon and leave the sidebar empty for ~50s:
+/// five `session.list` calls burned the full 15s `FAST_RPC_TIMEOUT_MS`
+/// before EOF surfaced the truth.
+///
+/// The probe sends one frame and requires *any* reply. `initialize` is
+/// NOT used: it is a stateful handshake the frontend owns, and completing
+/// it here would leave the daemon believing this throwaway connection is
+/// the initialized client. A dummy method trips the pre-handshake guard
+/// and returns `not_initialized` — a good pong, since producing it means
+/// read loop, JSON parse, and writer are all still scheduled.
+async fn probe_daemon_ndjson(conn: &mut DaemonStream) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    // `id` must be a string: the daemon drops frames whose id is not one
+    // (see SidecarServer.handleLine) and we would wait out the timeout.
+    let frame = "{\"id\":\"__desktop_liveness_probe\",\"method\":\"__liveness__\",\"params\":{}}\n";
+    let io = async {
+        conn.write_all(frame.as_bytes())
+            .await
+            .map_err(|e| format!("probe write failed: {e}"))?;
+        let mut line = String::new();
+        let n = BufReader::new(conn)
+            .read_line(&mut line)
+            .await
+            .map_err(|e| format!("probe read failed: {e}"))?;
+        if n == 0 {
+            return Err("probe saw EOF (daemon closed the connection)".to_string());
+        }
+        Ok(())
+    };
+    match tokio::time::timeout(NDJSON_PROBE_TIMEOUT, io).await {
+        Ok(r) => r,
+        Err(_) => Err(format!(
+            "daemon accepted the connection but did not answer within {}ms",
+            NDJSON_PROBE_TIMEOUT.as_millis()
+        )),
+    }
+}
+
+/// Poll the daemon socket (with backoff) until it answers an NDJSON probe or
+/// the deadline expires. Mirrors packages/cli/lib/start.ts `waitForSocket`
 /// so the launcher and the desktop agree on the "ready" heuristic.
 ///
-/// On the first failure we proactively clear any stale socket file the same
-/// way the sidecar's own startup probe does (see packages/sidecar/src/index.ts
-/// `probeNdjsonSocket`). Without this, a previously-crashed daemon's socket
-/// file would let `connect()` succeed against a ghost listener — the very next
-/// NDJSON read sees EOF and the UI stalls silently. Once the stale file is
-/// removed the launcher can rebind.
+/// Readiness requires a round-trip, not just a successful `connect()` — see
+/// `probe_daemon_ndjson` for why the weaker check silently installed wedged
+/// daemons. On first failure we proactively clear any stale socket file (the
+/// sidecar's own startup probe does the same in `probeNdjsonSocket`): a
+/// crashed daemon's socket would let `connect()` succeed against a ghost
+/// listener, the next NDJSON read sees EOF, and the UI stalls silently.
 async fn wait_for_daemon_socket(path: &std::path::Path, timeout: Duration) -> Result<(), String> {
     let probe_interval = Duration::from_millis(50);
     let deadline = tokio::time::Instant::now() + timeout;
     let mut stale_checked = false;
     loop {
         match connect_daemon_socket(path).await {
-            Ok(_conn) => return Ok(()),
+            Ok(mut conn) => match probe_daemon_ndjson(&mut conn).await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    // Bound but not serving. Retrying is still worthwhile: a
+                    // daemon mid-boot can accept before its handler registry
+                    // is reachable, and the caller's deadline decides when to
+                    // give up. Do NOT unlink here — the socket has a live
+                    // owner, so removing the file would strand it while the
+                    // next bind races the same inode. `reap_previous_daemon`
+                    // owns killing a wedged daemon.
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(format!(
+                            "daemon socket {} bound but not serving within {}ms ({e})",
+                            path.display(),
+                            timeout.as_millis()
+                        ));
+                    }
+                    tokio::time::sleep(probe_interval).await;
+                }
+            },
             Err(e) => {
                 if !stale_checked {
                     if clear_stale_socket(path).await {
@@ -339,17 +408,13 @@ fn prewarm_workspace_access(cwd: &str) {
 }
 
 /// Give `tauri dev` the same rounded dock icon the installed app gets.
-///
-/// The bundled icon.icns is deliberately full-bleed with opaque corners: macOS 26
-/// draws icons carrying transparent margins shrunken inside a gray tray, and the
-/// system applies its own squircle mask to whatever the bundle ships. In dev
-/// there is no bundle, so Tauri passes icon.icns to setApplicationIconImage
-/// unmasked and the art reads as a hard-edged square.
-///
-/// icon-dev-dock.png is that same art pre-masked with the system squircle. Tauri
-/// sets the dev dock icon on RunEvent::Ready, so this has to run after that or it
-/// gets overwritten. Release builds never reach here — the bundle icon is already
-/// correct.
+/// The bundled icon.icns is full-bleed with opaque corners; macOS 26 shrinks
+/// icons with transparent margins inside a gray tray, and applies its own
+/// squircle mask to whatever the bundle ships. In dev there is no bundle, so
+/// Tauri passes icon.icns unmasked and the art reads as a hard-edged square.
+/// icon-dev-dock.png is that same art pre-masked with the system squircle.
+/// Tauri sets the dev dock icon on RunEvent::Ready, so this has to run
+/// after that or it gets overwritten. Release builds never reach here.
 #[cfg(all(target_os = "macos", debug_assertions))]
 fn apply_dev_dock_icon() {
     use objc2::{AllocAnyThread, MainThreadMarker};
@@ -371,60 +436,69 @@ fn apply_dev_dock_icon() {
     unsafe { app.setApplicationIconImage(Some(&image)) };
 }
 
-/// 确保共享 sidecar 进程存在。首次调用 spawn,后续任意 cwd 直接返回 —— sidecar
-/// 会在收到带 `params.workspace` 的 RPC 时自行懒建 WorkspaceRuntime,Rust 无需
-/// 为新 workspace 做任何事。
+/// Ensure the shared sidecar process exists. First call spawns; subsequent calls with any cwd
+/// return immediately — the sidecar itself lazy-builds WorkspaceRuntime when it receives an
+/// RPC with `params.workspace`, so Rust does nothing for new workspaces.
 ///
-/// `cwd` 仅在首次 spawn 时用于决定 repo-source 模式的工作目录。
+/// `cwd` is only used on the first spawn to decide the working directory in repo-source mode.
 ///
 /// Sidecar spawn-time env (e.g. `TACO_DEBUG_LLM_PAYLOAD` from the Debug
 /// tab's `debugMode` toggle) is read from `~/.taco/desktop.json` at every
 /// spawn so prewarm, reconnect, and Apply & Restart all see the same
 /// value — localStorage alone is unreachable from this Tauri command.
 ///
-/// Rust 是纯字节管道:所有 NDJSON 行(包括 initialize 的响应)都通过
-/// `sidecar-event` 原样转发给前端,由前端驱动握手。晚接入的 client 重发
-/// initialize 即可,无需任何重放机制。
+/// Rust is a pure byte pipe: every NDJSON line (including initialize responses) is forwarded
+/// to the frontend verbatim as `sidecar-event`, and the frontend drives the handshake. A
+/// late-attaching client just resends initialize — no replay mechanism is needed.
 #[tauri::command]
 async fn workspace_ensure(
     app: AppHandle,
     state: State<'_, AppState>,
     cwd: String,
 ) -> Result<(), String> {
+    boot_trace::mark_rust_detail("ensure.enter", &cwd);
+    // The TCC suspect: a synchronous read_dir on a protected ancestor (e.g.
+    // ~/Documents) can stall here waiting on a consent decision, before the
+    // ensure_lock is even taken. Timed separately so a stall here is
+    // unambiguous rather than being attributed to the spawn below.
     #[cfg(target_os = "macos")]
-    prewarm_workspace_access(&cwd);
+    {
+        let _p = boot_trace::Phase::new("ensure.prewarm_workspace_access");
+        prewarm_workspace_access(&cwd);
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = cwd;
 
-    // Single-flight: serialize the whole ensure so concurrent first-starts
-    // can't race the slot window (see ensure_lock on AppState).
-    let _ensure_guard = state.ensure_lock.lock().await;
-
-    // 第一道关:已存在共享连接或 dispose 已发起 → 不 spawn。
+    // Phase 1 (lock-free): fast-path slot check + idempotent reap. The reap
+    // runs without the ensure_lock because it does not race with anything
+    // (unlink is idempotent, SIGTERM is idempotent). Moving it out of the
+    // lock window is what removes the 4s+ reap from the cold-start critical
+    // path: a stale daemon killed by an earlier ensure no longer blocks the
+    // next caller's spawn, and a hung daemon's SIGTERM grace overlaps with
+    // the webview's own load instead of stalling it.
     {
         let slot = state.sidecar.lock().await;
         if slot.as_ref().is_some() {
+            boot_trace::mark_rust("ensure.slot_already_present");
             return Ok(());
         }
         if state.shutdown_initiated.load(Ordering::Acquire) {
+            boot_trace::mark_rust("ensure.shutdown_initiated");
             return Err("sidecar shutting down".into());
         }
     }
-
-    // 第二道关（PR-C）:进 spawn 之前先 reap 磁盘上的残留 daemon。
-    //   - 没有 pid 文件 → 无事可做
-    //   - pid 文件的 install_id 不匹配 → 别的安装的 daemon，**不能**碰
-    //   - pid 文件的进程还活着但 ping 不通（PID 回收 / 进程 hang）→ 杀
-    //   - pid 文件的进程死了（stale）→ unlink，让 spawn 重新 bind
-    // 在 ensure_lock 内做，避免 reap 与并发 ensure 互相打架。
     #[cfg(unix)]
     {
+        let _p = boot_trace::Phase::new("ensure.reap_stale");
         if let Ok(runtime_dir) = resolve_taco_runtime_dir(&app) {
             reap_stale_at(&runtime_dir, &app);
         }
     }
 
-    let resolution = resolve_sidecar(&app)?;
+    let resolution = {
+        let _p = boot_trace::Phase::new("ensure.resolve_sidecar");
+        resolve_sidecar(&app)?
+    };
     let socket_path = resolution.socket_path.clone();
 
     let mut cmd = Command::new(&resolution.program);
@@ -458,6 +532,16 @@ async fn workspace_ensure(
             cmd.env(key, v);
         }
     }
+    // Debug builds additionally forward NODE_OPTIONS so V8 diagnostic flags
+    // reach the daemon. Compiled out of release entirely — see
+    // DEBUG_ONLY_PASSTHROUGH_ENV for why this is not unconditional.
+    #[cfg(debug_assertions)]
+    for key in DEBUG_ONLY_PASSTHROUGH_ENV {
+        if let Ok(v) = std::env::var(key) {
+            boot_trace::mark_rust_detail("ensure.debug_env_forwarded", &format!("{key}={v}"));
+            cmd.env(key, v);
+        }
+    }
     let resolved_home = resolve_taco_home(&app)?;
     cmd.env("TACO_HOME", &resolved_home);
 
@@ -488,31 +572,51 @@ async fn workspace_ensure(
     let stderr_log_path = resolved_home.join("logs").join("daemon.err.log");
     cmd.env("TACO_STDERR_LOG", &stderr_log_path);
 
+    // Phase 2 (ensure_lock): serialize the spawn window only. The lock is
+    // dropped as soon as the launcher is forked and the stderr reader is
+    // attached, so a second ensure() that arrives mid-wait (or mid-bind)
+    // sees the slot populated by the first one and returns Ok(())
+    // immediately. Without this narrowing, a 4s reap inside the lock
+    // blocked every other ensure behind it for 4s+ and forced the UI
+    // through a doomed attempt0 → attempt1 retry chain (~6s wasted).
+    let _ensure_guard = {
+        let _p = boot_trace::Phase::new("ensure.acquire_ensure_lock");
+        state.ensure_lock.lock().await
+    };
+    {
+        let slot = state.sidecar.lock().await;
+        if slot.as_ref().is_some() {
+            boot_trace::mark_rust("ensure.slot_already_present_late");
+            return Ok(());
+        }
+        if state.shutdown_initiated.load(Ordering::Acquire) {
+            boot_trace::mark_rust("ensure.shutdown_initiated_pre_spawn");
+            return Err("sidecar shutting down".into());
+        }
+    }
+
+    boot_trace::mark_rust("ensure.launcher_spawn");
     let mut launcher = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar launcher: {e}"))?;
+    boot_trace::mark_rust_detail("ensure.launcher_spawned", &format!("pid={:?}", launcher.id()));
     let generation = state
         .next_process_generation
         .fetch_add(1, Ordering::Relaxed);
 
-    // Drain the launcher's stderr two ways at once:
-    //   1. Forward lines to the frontend as `sidecar-log` Tauri events so
-    //      the Debug tab's LLM Dump panel (`[taco:llm]` filtered by
-    //      useSidecarStream) and the warning/error banner (parseLogLine)
-    //      can react in real time. This channel was dead in the daemon-mode
-    //      refactor — the old inline sidecar had a 1:1 stdout pipe Rust
-    //      forwarded; the new launcher→daemon chain only read stderr to
-    //      capture a launch-failure tail buffer and never emitted.
+    // Drain the launcher's stderr two ways: (1) forward lines to the frontend
+    // as `sidecar-log` Tauri events for the Debug tab's LLM Dump panel and
+    // the warning/error banner (parseLogLine); (2) keep the last 4 KiB in
+    // stderr_buf for error reporting on a non-zero launcher exit.
     //
-    //      Lines are **batched** (one event carries `{lines: string[]}`,
-    //      not one event per line) because a single LLM call dumps hundreds
-    //      of folded `[taco:llm]` lines and one-event-per-line overwhelmed
-    //      Tauri IPC — the header line of a payload could be queued behind
-    //      its own body lines, making the LLM Dump chip sit on "(waiting)"
-    //      for seconds. A 50ms / 64-line flush keeps end-to-end latency
-    //      under ~100ms while dropping IPC traffic by an order of magnitude.
-    //   2. Keep the last 4 KiB in stderr_buf for error reporting on a
-    //      non-zero launcher exit.
+    // (1) was dead in the daemon-mode refactor — the old inline sidecar had
+    // a 1:1 stdout pipe Rust forwarded; the new launcher→daemon chain only
+    // read stderr to capture a launch-failure tail buffer. Lines are
+    // **batched** ({lines: string[]}, not one-event-per-line) because a
+    // single LLM call dumps hundreds of folded `[taco:llm]` lines that
+    // queued header behind body and overwhelmed Tauri IPC. A 50ms / 64-line
+    // flush keeps end-to-end latency under ~100ms while dropping IPC
+    // traffic by an order of magnitude.
     let stderr_buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(4096)));
     if let Some(stderr) = launcher.stderr.take() {
@@ -587,6 +691,14 @@ async fn workspace_ensure(
         });
     }
 
+    // Spawn window closed — drop the ensure_lock so concurrent ensure()
+    // callers can race into their own slot check (and most of them will
+    // see the slot Some installed by the first finisher, returning
+    // immediately). The wait + connect + install below all run with only
+    // the state.sidecar mutex, not the ensure_lock.
+    drop(_ensure_guard);
+    boot_trace::mark_rust("ensure.spawn_window_closed");
+
     // Wait for the daemon to bind the socket, then connect. The bundle (in
     // daemon mode) prints nothing on stdout, so we poll the socket path
     // instead. 15s mirrors the CLI's waitForSocket and covers a cold dev
@@ -602,6 +714,7 @@ async fn workspace_ensure(
     // window in that case (the fast path — `taco start` probes control then
     // exits 0 — can otherwise lose the race and produce a misleading
     // "launcher exited" error on slow machines).
+    let _wait_phase = boot_trace::Phase::new("ensure.wait_for_daemon_socket");
     let wait_result = tokio::select! {
         r = wait_for_daemon_socket(&socket_path, Duration::from_secs(15)) => r,
         exit = launcher.wait() => {
@@ -638,7 +751,19 @@ async fn workspace_ensure(
     };
     wait_result?;
 
-    let conn = connect_daemon_socket(&socket_path).await?;
+    drop(_wait_phase);
+    // Belt-and-suspenders: the select! above either returned a successful
+    // wait or surfaced the launcher's exit code. Anything else (a stray
+    // connect() error after the launcher exited cleanly, a transient
+    // race) would otherwise leave this process holding a launcher that
+    // never publishes its slot — a quiet orphan that leaks until the
+    // parent exits. Kill it so the next ensure() starts from a clean
+    // baseline. Inside `?` propagation we know the launcher is the sole
+    // owner of the fd by this point.
+    let conn = {
+        let _p = boot_trace::Phase::new("ensure.connect_daemon_socket");
+        connect_daemon_socket(&socket_path).await?
+    };
     let (mut read_half, mut write_half) = tokio::io::split(conn);
 
     // Writer task: `workspace_send` queues NDJSON frames on stdin_tx; we
@@ -702,8 +827,13 @@ async fn workspace_ensure(
     // for the install_publish test, but are left as None for daemon installs.
     *state.log_files.lock().unwrap() = None;
 
-    // 第三道关:install 前再查 shutdown flag 与 slot —— 若 dispose 在 spawn 期间
-    // 被触发、或另一个并发 ensure 已经 install,杀掉刚 spawn 的孤儿 launcher。
+    // Third check: re-check shutdown flag and slot before install — if dispose was
+    // triggered during spawn, or a concurrent ensure already installed, kill the orphan
+    // launcher we just spawned.
+    // Lock-free ensure_guard above means this race is the new normal rather
+    // than a corner case: every second ensure() that enters after the first
+    // has released its spawn-window guard ends up here, sees Some(_), and
+    // dies fast instead of re-running the whole 6s spawn chain.
     let mut slot = state.sidecar.lock().await;
     if state.shutdown_initiated.load(Ordering::Acquire) {
         drop(tx);
@@ -713,6 +843,7 @@ async fn workspace_ensure(
         return Err("sidecar shutting down".into());
     }
     if slot.as_ref().is_some() {
+        boot_trace::mark_rust("ensure.slot_install_lost_race");
         drop(tx);
         launcher.kill().await.ok();
         launcher.wait().await.ok();
@@ -725,11 +856,28 @@ async fn workspace_ensure(
         launcher: Some(launcher),
         generation,
     });
+    boot_trace::mark_rust("ensure.slot_installed");
     Ok(())
 }
 
-/// 所有 workspace 共用一条 stdin —— `cwd` 保留仅为 API 兼容,不参与路由。
-/// 请求体自带 `params.workspace`,由 sidecar 侧路由。
+/// Frontend → boot trace bridge. The webview's own console never reaches disk,
+/// so the UI's boot phases would otherwise be invisible in post-hoc diagnosis
+/// while the Rust phases are fully traced. Routing them into the same file puts
+/// both sides on one timeline with one clock.
+///
+/// Offsets are stamped Rust-side on arrival rather than passed in by the
+/// caller, so UI marks share the process-start origin with the Rust marks
+/// instead of being measured against a separate JS epoch. That does fold IPC
+/// latency into each UI mark, which is the right trade here: we care about
+/// which phase is slow, and an inflated-by-milliseconds offset cannot disguise
+/// a multi-second stall.
+#[tauri::command]
+fn boot_mark(label: String, detail: Option<String>) {
+    boot_trace::mark("ui", &label, detail.as_deref().unwrap_or(""));
+}
+
+/// All workspaces share one stdin — `cwd` is kept only for API compatibility, not for
+/// routing. The request body carries `params.workspace`; the sidecar routes it.
 #[tauri::command]
 async fn workspace_send(
     state: State<'_, AppState>,
@@ -746,7 +894,8 @@ async fn workspace_send(
     tx.send(line).await.map_err(|e| format!("send failed: {e}"))
 }
 
-/// 杀掉共享 sidecar 进程 —— 前端 `client.dispose()` / restartSidecar 的落点。
+/// Kill the shared sidecar process — the landing point for the frontend's `client.dispose()`
+/// / restartSidecar.
 #[tauri::command]
 async fn workspace_dispose_all(app: AppHandle) -> Result<(), String> {
     shutdown_sidecar(&app).await;
@@ -770,10 +919,10 @@ async fn workspace_dispose_all(app: AppHandle) -> Result<(), String> {
 ///   5. As a final fallback, kill the launcher handle directly.
 ///   6. Reset the shutdown flag.
 async fn shutdown_sidecar(app: &tauri::AppHandle) {
-    // 在 acquire 锁之前先 set flag —— 让任何正在进行的 ensure(第一道关内已过、
-    // 第二段 spawn 中的)在 install 前能看到 flag,从而杀掉孤儿 launcher 而非被
-    // race-kill 留个 zombie。Reset 在锁外:典型路径是 dispose → 重新 ensure
-    // (restartSidecar),reset 后下一次 ensure 能正常 spawn。
+    // Set the flag BEFORE acquiring the lock — any in-flight ensure (already past the first
+    // check, mid-spawn) sees it before install, so it kills the orphan launcher instead of
+    // being race-killed and leaving a zombie. Reset is outside the lock: the typical path
+    // is dispose → re-ensure (restartSidecar), and after reset the next ensure can spawn.
     let state = app.state::<AppState>();
     state.shutdown_initiated.store(true, Ordering::Release);
     let dead = {
@@ -948,6 +1097,46 @@ fn reap_stale_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
     eprintln!("taco-desktop: reap outcome = {:?}", outcome);
 }
 
+/// Force-reap variant for the install path. Same shape as `reap_stale_at`
+/// but invokes `force_reap`, which additionally SIGTERMs an alive own
+/// daemon. Install is about to bounce launchd / schtasks, so any live
+/// instance — even one whose control socket still answers — must die
+/// pre-emptively to avoid racing the launcher respawn into a double-bind
+/// on the same socket inode.
+#[cfg(unix)]
+fn reap_force_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
+    use crate::daemon_reap::{compute_install_id, daemon_runtime_paths, force_reap, ReapInputs};
+    let (pid_file, socket_path, control_socket_path) = daemon_runtime_paths(runtime_dir);
+    let resources_root = if cfg!(debug_assertions) {
+        let root = find_repo_root();
+        root.join("packages")
+            .join("sidecar")
+            .join("src")
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        app.path()
+            .resource_dir()
+            .ok()
+            .map(|p| p.join("sidecar").to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let taco_home = match resolve_taco_home(app) {
+        Ok(home) => home,
+        Err(_) => return,
+    };
+    let own_install_id = compute_install_id(&resources_root, &taco_home.to_string_lossy());
+    let inputs = ReapInputs {
+        pid_file,
+        socket_path,
+        control_socket_path,
+        own_install_id: &own_install_id,
+        resources_root: std::path::PathBuf::from(&resources_root),
+    };
+    let outcome = force_reap(&inputs);
+    eprintln!("taco-desktop: force_reap outcome = {:?}", outcome);
+}
+
 /// Auto-register the sidecar as an OS-level service on first run.
 /// Registration is best-effort so startup remains available when a platform
 /// launcher or optional service manager is unavailable.
@@ -972,17 +1161,79 @@ fn should_auto_install_daemon_service(debug: bool) -> bool {
 fn prewarm_daemon(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let cwd = match default_workspace_dir(handle.clone()).await {
-            Ok(dir) => dir,
-            Err(_) => return,
+        boot_trace::mark_rust("prewarm.task_start");
+        let cwd = {
+            let _p = boot_trace::Phase::new("prewarm.target_cwd");
+            prewarm_target_cwd(&handle).await
         };
+        if cwd.is_empty() {
+            boot_trace::mark_rust("prewarm.cwd_unresolved");
+            return;
+        }
+        boot_trace::mark_rust_detail("prewarm.cwd", &cwd);
         let state = handle.state::<AppState>();
+        let _p = boot_trace::Phase::new("prewarm.workspace_ensure");
         if let Err(e) = workspace_ensure(handle.clone(), state, cwd).await {
             // Best-effort: the frontend's first ensure surfaces the real
             // error to the UI; this log is for `tauri:dev` users.
             eprintln!("taco-desktop: daemon prewarm failed: {e}");
         }
     });
+}
+
+/// Resolve the cwd the prewarm should service. The previous version
+/// unconditionally targeted `$TACO_HOME/workspace`, which had two costs:
+///   1. The daemon ended up with a workspace runtime for a directory the
+///      user is never going to open (sidebar never shows it, first
+///      `session.list` on the active cwd still paid the cold-start price).
+///   2. macOS TCC pre-warm on that directory was wasted work; the real
+///      active workspace's first access still had to stall for consent.
+///
+/// Reading `~/.taco/desktop.json` directly is safe here — the file is the
+/// authoritative store for `workspaces.active` (the Debug tab and
+/// `setActiveCwd` flow mirror to disk synchronously), so a few hundred ms
+/// staleness across cold start is acceptable. If the file is missing,
+/// malformed, or the active cwd no longer exists, we silently fall back to
+/// the historical `$TACO_HOME/workspace` default so prewarm remains a
+/// best-effort optimization, not a hard requirement.
+async fn prewarm_target_cwd(app: &tauri::AppHandle) -> String {
+    #[cfg(unix)]
+    {
+        if let Some(cwd) = read_active_cwd_from_desktop_json(app) {
+            boot_trace::mark_rust_detail("prewarm.cwd_source", "desktop.json.active");
+            return cwd;
+        }
+    }
+    match default_workspace_dir(app.clone()).await {
+        Ok(dir) => {
+            boot_trace::mark_rust_detail("prewarm.cwd_source", "default_workspace_dir");
+            dir
+        }
+        Err(_) => {
+            boot_trace::mark_rust("prewarm.cwd_source_failed");
+            String::new()
+        }
+    }
+}
+
+/// Read `workspaces.active` from `~/.taco/desktop.json`. Returns None on any
+/// failure (missing file, malformed JSON, missing key, directory gone) so
+/// the caller can fall back without surfacing an error to the user.
+#[cfg(unix)]
+fn read_active_cwd_from_desktop_json(app: &tauri::AppHandle) -> Option<String> {
+    let home = resolve_taco_home(app).ok()?;
+    let path = home.join("desktop.json");
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let cwd = value
+        .get("workspaces")
+        .and_then(|w| w.get("active"))
+        .and_then(|a| a.as_str())?
+        .to_string();
+    if cwd.is_empty() || !std::path::Path::new(&cwd).exists() {
+        return None;
+    }
+    Some(cwd)
 }
 
 fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
@@ -998,12 +1249,17 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
         Ok(dir) => dir,
         Err(_) => return Ok(()),
     };
-    // Remove only stale or unresponsive daemon state before checking
-    // control_socket_present. A healthy daemon is reused; installing a second
-    // service is unnecessary and would create a bind race.
+    // Force reap BEFORE install: the install flow is about to bounce
+    // launchd / schtasks, so any daemon currently holding our runtime
+    // dir — even our own, even if its control socket still pings — must
+    // die pre-emptively. `reap_previous_daemon` alone preserves an alive
+    // own daemon; that would race the launchd respawn and leave two
+    // instances bound to the same socket. `force_reap` is the same path
+    // plus an unconditional second-pass SIGTERM/SIGKILL on the Alive
+    // outcome.
     #[cfg(unix)]
     {
-        reap_stale_at(&runtime_dir, app.handle());
+        let _ = reap_force_at(&runtime_dir, app.handle());
     }
     let control = control_socket_path(&runtime_dir);
     if control_socket_present(&control) {
@@ -1171,6 +1427,10 @@ fn focus_main(app: &tauri::AppHandle) {
 }
 
 pub fn run() {
+    // First statement: fixes the zero point for every boot offset and opens
+    // <TACO_HOME>/logs/boot.log before any phase can stall.
+    boot_trace::init();
+    boot_trace::mark_rust("run.enter");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch of the UI: surface the existing window instead of
@@ -1184,10 +1444,41 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .setup(|app| {
-            build_main_window(app)?;
-            build_tray(app)?;
-            ensure_daemon_installed(app)?;
-            prewarm_daemon(app.handle());
+            // These run SEQUENTIALLY on the setup thread, and
+            // prewarm_daemon (which starts the daemon) is last — so anything
+            // that blocks in an earlier phase delays the daemon spawn while
+            // the window is already visible. Timing each phase separately is
+            // what makes that visible.
+            boot_trace::mark_rust("setup.enter");
+            {
+                let _p = boot_trace::Phase::new("setup.build_main_window");
+                build_main_window(app)?;
+            }
+            {
+                let _p = boot_trace::Phase::new("setup.build_tray");
+                build_tray(app)?;
+            }
+            {
+                let _p = boot_trace::Phase::new("setup.ensure_daemon_installed");
+                ensure_daemon_installed(app)?;
+            }
+            {
+                // Reap BEFORE the prewarm dispatch, not in the spawn path
+                // it shares with the UI. A stale daemon's SIGTERM grace
+                // (≤3s) plus the unlink race used to land on the critical
+                // path of the first workspace_ensure; doing it here lets the
+                // grace overlap with build_main_window + webview load
+                // (≈600ms each), which is what the UI is doing anyway.
+                let _p = boot_trace::Phase::new("setup.preemptive_reap");
+                if let Ok(runtime_dir) = resolve_taco_runtime_dir(app.handle()) {
+                    reap_stale_at(&runtime_dir, app.handle());
+                }
+            }
+            {
+                let _p = boot_trace::Phase::new("setup.prewarm_daemon_dispatch");
+                prewarm_daemon(app.handle());
+            }
+            boot_trace::mark_rust("setup.done");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1199,6 +1490,7 @@ pub fn run() {
             desktop_config_write,
             default_workspace_dir,
             paths_are_dirs,
+            boot_mark,
             crate::upgrade_commands::upgrade_marker_present,
             crate::upgrade_commands::upgrade_apply,
         ])
@@ -1265,5 +1557,131 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// NODE_OPTIONS must never reach the sidecar from a release build: it
+    /// accepts `--require`, so forwarding it turns the desktop's environment
+    /// into an arbitrary-code-injection channel against the daemon. The
+    /// unconditional list is the one compiled into release, so the guarantee is
+    /// exactly "NODE_OPTIONS is absent from PASSTHROUGH_ENV" — asserted here so
+    /// a future edit cannot quietly promote it out of the debug-only list.
+    #[test]
+    fn node_options_is_never_unconditionally_forwarded() {
+        assert!(
+            !PASSTHROUGH_ENV.contains(&"NODE_OPTIONS"),
+            "NODE_OPTIONS must stay in DEBUG_ONLY_PASSTHROUGH_ENV; forwarding it \
+             unconditionally would let the parent environment inject code into \
+             the sidecar in release builds"
+        );
+    }
+
+    /// Counterpart to the above: in debug builds the var *is* expected to be
+    /// forwarded, because that is the only route a V8 diagnostic flag has to the
+    /// process that actually crashes.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn node_options_is_forwarded_in_debug_builds() {
+        assert!(
+            super::DEBUG_ONLY_PASSTHROUGH_ENV.contains(&"NODE_OPTIONS"),
+            "debug builds must forward NODE_OPTIONS so heap-diagnostic flags reach the daemon"
+        );
+    }
+
+    /// A listener that accepts and then answers one line per connection, i.e.
+    /// a healthy daemon as far as the liveness probe can tell.
+    #[cfg(unix)]
+    fn spawn_replying_listener(path: std::path::PathBuf) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                    let mut line = String::new();
+                    let (r, mut w) = sock.split();
+                    if BufReader::new(r).read_line(&mut line).await.is_ok() {
+                        let _ = w.write_all(b"{\"id\":\"x\",\"ok\":false}\n").await;
+                    }
+                });
+            }
+        })
+    }
+
+    /// The regression this probe exists for: a listener that accepts the
+    /// connection and then never answers. `connect()` succeeds against it, so
+    /// the old connect-only check reported "ready" and the caller installed a
+    /// daemon that could not serve a single RPC.
+    #[cfg(unix)]
+    fn spawn_silent_listener(path: std::path::PathBuf) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            let mut held = Vec::new();
+            loop {
+                let Ok((sock, _)) = listener.accept().await else {
+                    return;
+                };
+                // Hold the socket open: dropping it would send EOF, which the
+                // probe correctly reports as a failure for a different reason.
+                held.push(sock);
+            }
+        })
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wait_for_daemon_socket_accepts_a_daemon_that_answers() {
+        let dir = std::env::temp_dir().join(format!("taco-probe-ok-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("sidecar.sock");
+        let listener = spawn_replying_listener(sock.clone());
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = super::wait_for_daemon_socket(&sock, std::time::Duration::from_secs(2)).await;
+        assert!(result.is_ok(), "a replying daemon must be seen as ready: {result:?}");
+
+        listener.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wait_for_daemon_socket_rejects_a_bound_but_silent_daemon() {
+        let dir = std::env::temp_dir().join(format!("taco-probe-silent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("sidecar.sock");
+        let listener = spawn_silent_listener(sock.clone());
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Deadline below NDJSON_PROBE_TIMEOUT so the outer loop, not the
+        // per-probe timeout, is what gives up — this is the cold-start shape.
+        let result = super::wait_for_daemon_socket(&sock, std::time::Duration::from_millis(300))
+            .await;
+        assert!(
+            result.is_err(),
+            "a daemon that accepts but never answers must NOT be reported ready"
+        );
+        assert!(
+            sock.exists(),
+            "the socket has a live owner; the probe must not unlink it"
+        );
+
+        listener.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wait_for_daemon_socket_reports_an_absent_socket() {
+        let dir = std::env::temp_dir().join(format!("taco-probe-absent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("sidecar.sock");
+
+        let result = super::wait_for_daemon_socket(&sock, std::time::Duration::from_millis(200))
+            .await;
+        assert!(result.is_err(), "no listener at all must fail");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

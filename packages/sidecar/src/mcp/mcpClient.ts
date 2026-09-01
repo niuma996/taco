@@ -10,6 +10,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "@taco-ai/protocol";
 import type { Logger } from "../lib/logger.ts";
+import { scrubbedProcessEnv } from "../runtime/providerKeyStore.ts";
 
 export interface McpToolInfo {
     name: string;
@@ -191,10 +192,7 @@ export async function createMcpClient(cfg: McpServerConfig, log: Logger): Promis
             // spawned without this merge gets an empty environment and fails
             // with ENOENT the moment it needs PATH (which `command: "node"`,
             // nvm shims, and most launcher scripts all do).
-            const env: Record<string, string> = {};
-            for (const [k, v] of Object.entries(process.env)) {
-                if (v !== undefined) env[k] = v;
-            }
+            const env = scrubbedProcessEnv();
             const stdio = new StdioClientTransport({
                 command: cfg.command,
                 args: cfg.args,

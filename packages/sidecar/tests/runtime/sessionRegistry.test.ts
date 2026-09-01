@@ -139,6 +139,31 @@ describe("SessionRegistry", () => {
         assert.equal(name, "my-session");
     });
 
+    // The round-trip above is answered from _nameCache (renameSession populates
+    // it), so it never exercises the disk read. getSessionName streams the
+    // JSONL instead of building a full JsonlSessionStorage, and a rename
+    // appends a second session_info rather than rewriting the first — so
+    // "last one wins" has to hold against the file, not the cache.
+    it("getSessionName reads the newest session_info from disk on a cold cache", async () => {
+        const sr = makeRegistry();
+        const id = createSessionId();
+        await sr.repo.create({ id, cwd });
+        sr.invalidateListCache();
+        await sr.renameSession(id, "first-title");
+        await sr.renameSession(id, "second-title");
+        // Drop _nameCache so the answer must come from the file.
+        sr.invalidateListCache();
+        assert.equal(await sr.getSessionName(id), "second-title");
+    });
+
+    it("getSessionName returns undefined for a session that was never titled", async () => {
+        const sr = makeRegistry();
+        const id = createSessionId();
+        await sr.repo.create({ id, cwd });
+        sr.invalidateListCache();
+        assert.equal(await sr.getSessionName(id), undefined);
+    });
+
     it("rename updates _nameCache precisely without invalidating list cache", async () => {
         const sr = makeRegistry();
         const id = createSessionId();

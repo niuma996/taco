@@ -4,18 +4,17 @@
  * Everything here is "get a workspace or session into the right state on the
  * sidecar, then mirror that into the reducer". The prompt/turn path
  * (sendPrompt / abortPrompt) stays in useWorkspaces: it owns the composer's
- * pending semantics and the lazy-create race guard, which have nothing to do
- * with lifecycle.
- *
- * State this hook does not own — the workspaces reducer, activeCwd, and the
- * error banner — is passed in, so useWorkspaces remains the single place those
- * are declared.
+ * pending semantics and the lazy-create race guard, which have nothing to
+ * do with lifecycle. State this hook does not own — the workspaces
+ * reducer, activeCwd, error banner — is passed in, so useWorkspaces
+ * remains the single place those are declared.
  */
 
 import type { SessionListResult } from "@taco-ai/protocol";
 import { SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { type MutableRefObject, useCallback, useEffect, useRef } from "react";
+import { bootMark, bootPhase } from "../lib/bootTrace";
 import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
 import {
     createEmptyWorkspace,
@@ -176,7 +175,28 @@ export function useWorkspaceLifecycle({
                 dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
                 return;
             }
-            const hist = await client.sessionHistory(cwd, sessionId);
+            let hist: Awaited<ReturnType<typeof client.sessionHistory>>;
+            try {
+                hist = await client.sessionHistory(cwd, sessionId);
+            } catch (err) {
+                // sessionAttach succeeded — the session is valid on the sidecar.
+                // Only the history pull failed; dispatch an empty ATTACH so the
+                // chat panel renders in a known empty state and the user can
+                // still send a new turn. Surface the error so the failure isn't
+                // silent (Unahandled Promise Rejection escape route from F1).
+                const msg = `Cannot load session history: ${(err as Error).message}`;
+                console.error("[taco] sessionHistory failed", cwd, sessionId, err);
+                setErrorBanner(msg);
+                showToast(msg, "error");
+                dispatchWs({
+                    type: "ATTACH",
+                    cwd,
+                    sid: sessionId,
+                    messages: [],
+                    pendingAskUserIds: [],
+                });
+                return;
+            }
             const msgs = historyToUiMessages(
                 hist.entries as Parameters<typeof historyToUiMessages>[0],
                 { inFlightAgentToolCallIds },
@@ -188,17 +208,15 @@ export function useWorkspaceLifecycle({
                 messages: msgs,
                 pendingAskUserIds: findPendingAskUserIds(msgs),
             });
-            // tasks / planState fallback — sidecar also pushes on session.attached, but we proactively
-            // pull once here to cover push-channel drops. RPC reads sidecar memory directly,
-            // independent of the push channel.
+            // tasks / planState fallback — sidecar pushes on session.attached, but we proactively
+            // pull once to cover push-channel drops. RPC reads sidecar memory directly.
             //
-            // These two single-shot reads look redundant next to session.snapshot.get (which returns
-            // history + tasks + planState in one call, and is what restoreSessionSnapshot below uses).
-            // Attach deliberately does NOT use it: snapshot.get carries a snapshotSeq that exists to
-            // reset the push cursor, and session.attached's own sequenced tasks/plan pushes land right
-            // after this attach. Swapping these reads for snapshot.get without also reconciling the
-            // cursor would let those pushes be discarded as duplicates. Keep the split until someone
-            // is deliberately changing push-recovery semantics.
+            // These reads look redundant next to session.snapshot.get (returns history + tasks +
+            // planState in one call). Attach deliberately does NOT use snapshot.get: it carries a
+            // snapshotSeq that exists to reset the push cursor, and session.attached's sequenced
+            // tasks/plan pushes land right after this attach — swapping without reconciling the
+            // cursor would discard those pushes as duplicates. Keep the split until push-recovery
+            // semantics change deliberately.
             try {
                 const r = await client.sessionTasksGet(cwd, sessionId);
                 dispatchWs({
@@ -238,17 +256,37 @@ export function useWorkspaceLifecycle({
     // error in the deps array).
     const reloadAllWorkspacesRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
+    /** Set when cold start gave up on every retry; consumed by the epoch
+     *  handler below once a replacement daemon is actually serving. */
+    const pendingSessionReloadRef = useRef(false);
+
     const switchWorkspace = useCallback(
         async (cwd: string): Promise<void> => {
             setActiveCwd(cwd);
             persistActiveCwd(cwd);
             dispatchWs({ type: "SET_ACTIVE", cwd });
-            const ws = workspacesRef.current[cwd];
+            // Cold start only fetches the active workspace, so switching is
+            // where every other workspace gets its first list. `listTotal` is
+            // the "never fetched" marker: it stays undefined until a
+            // LOAD_SESSIONS lands, which distinguishes an unfetched workspace
+            // from one that was fetched and is genuinely empty (total 0). Refetching
+            // on every switch would put a `session.list` on a hot UI path.
+            let ws = workspacesRef.current[cwd];
+            if (ws && ws.listTotal === undefined) {
+                try {
+                    await loadWorkspaceSessions(cwd);
+                    ws = workspacesRef.current[cwd];
+                } catch (e) {
+                    // Leave the sidebar empty rather than blocking the switch —
+                    // the user is already looking at this workspace.
+                    console.error("[taco] sessionList failed on switch", cwd, e);
+                }
+            }
             if (ws && ws.messages.length === 0 && !ws.activeSession && ws.sessions[0]) {
                 await attachSession(cwd, ws.sessions[0].id);
             }
         },
-        [attachSession, dispatchWs, setActiveCwd, workspacesRef],
+        [attachSession, dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions],
     );
 
     const initFromStorage = useCallback(async () => {
@@ -258,22 +296,28 @@ export function useWorkspaceLifecycle({
         // The in-flight ref guarantees a single run.
         if (initStartedRef.current) return;
         initStartedRef.current = true;
+        bootMark("ui.initFromStorage.enter");
         // Block until the stderr listener is up — otherwise startup lines
         // emitted by the sidecar between cmd.spawn and the listener's
         // `await listen(...)` returning are lost. Tauri's event bus is
         // fire-and-forget; there is no replay for late subscribers.
-        await sidecarLogListenerReady;
+        await bootPhase("ui.sidecarLogListenerReady", () => sidecarLogListenerReady);
         // Resolve the real default cwd ($TACO_HOME/workspace, created on demand)
         // before reading storage — loadOpenedCwds / resolveActiveCwd fall back to
         // it, and the sync placeholder value points at a path that may not exist.
-        await initDefaultCwd();
+        await bootPhase("ui.initDefaultCwd", () => initDefaultCwd());
         // Read opened + active from desktop.json (via the Rust host). The read
         // also runs the one-shot migration from the legacy localStorage keys,
         // so an upgrade-in-place user lands in the same workspaces as before.
-        const opened = await pruneMissingCwds(await loadOpenedCwds());
+        // pruneMissingCwds stats every opened path — on macOS a path under a
+        // TCC-protected ancestor (~/Documents, ~/Desktop) is a candidate stall
+        // point, so it is timed apart from the read that feeds it.
+        const openedRaw = await bootPhase("ui.loadOpenedCwds", () => loadOpenedCwds());
+        const opened = await bootPhase("ui.pruneMissingCwds", () => pruneMissingCwds(openedRaw));
+        bootMark("ui.opened", `count=${opened.length} list=${opened.join(",")}`);
         // loadActiveCwd reads the same desktop.json block (separate IPC call so
         // callers that only need active don't pay for the full opened list).
-        const storedActive = await loadActiveCwd();
+        const storedActive = await bootPhase("ui.loadActiveCwd", () => loadActiveCwd());
         // resolveActiveCwd is a pure function: prefers the stored active, then
         // opened[0], then the default cwd. We still validate storedActive
         // against opened because the desktop.json active can outlive a workspace
@@ -302,38 +346,37 @@ export function useWorkspaceLifecycle({
         // still useful for the other client fields (theme, uiLanguage) that
         // drive synchronous UI before the sidecar answers.
         const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
-        // Cold-start barrier: a single `client.start(activeCwd)` first to give
-        // prewarm's spawn a beat to finish before any sessionList fires.
-        // Without it the per-cwd `Promise.all` below races prewarm — prewarm's
-        // reap+respawn of a stale daemon takes a few seconds (previous app's
-        // daemon detected Alive, dies mid-reap, reaps Stale, then a fresh
-        // daemon binds sockets + answers initialize). Every per-cwd start then
-        // burns its retry budget on the same daemon, and the sidebar sits
-        // empty for 30+ seconds. After the leader succeeds the daemon is hot,
-        // per-cwd ensureWorkspace hits a populated slot in ms.
+        // Cold-start barrier: a single `client.start(activeCwd)` first to give prewarm's spawn
+        // a beat to finish before any sessionList fires. Without it the per-cwd `Promise.all`
+        // races prewarm — prewarm's reap+respawn of a stale daemon takes seconds (Alive → dies
+        // mid-reap → Stale → fresh daemon binds), every per-cwd start burns its retry budget
+        // on the same daemon, sidebar sits empty for 30+s. After the leader succeeds the daemon
+        // is hot and per-cwd ensureWorkspace hits a populated slot in ms.
         //
-        // The budget is deliberately SHORT (3 attempts ≈ 4s) — the common
-        // cold start resolves in 1-3s, and we don't want to hold the UI
-        // hostage for the rare case where the daemon is genuinely broken. If
-        // the leader can't get the daemon ready in that window, we DON'T keep
-        // retrying inline: we fall back to a single deferred background retry
-        // (below), so the sidebar renders immediately (empty) and self-fills
-        // ~5s later if the daemon eventually comes up.
+        // Budget is deliberately SHORT (3 attempts ≈ 4s) — common cold start resolves in 1-3s.
+        // If the leader can't get the daemon ready, fall back to a single deferred background
+        // retry so the sidebar renders immediately (empty) and self-fills ~5s later.
         const leaderDelays = [0, 1000, 3000];
         let leaderOk = false;
         let leaderLastErr: unknown;
-        for (const delay of leaderDelays) {
+        bootMark("ui.leader.barrier_enter", `cwd=${activeTarget}`);
+        for (const [i, delay] of leaderDelays.entries()) {
             if (delay > 0) {
                 await new Promise((r) => setTimeout(r, delay));
             }
             try {
-                await client.start(activeTarget);
+                // Each attempt is timed separately: client.start carries its own
+                // 10s awaitHandshake ceiling, so 3 attempts can legitimately
+                // consume ~34s. Per-attempt marks distinguish "one slow attempt"
+                // from "the budget was walked to exhaustion".
+                await bootPhase(`ui.leader.start.attempt${i}`, () => client.start(activeTarget));
                 leaderOk = true;
                 break;
             } catch (err) {
                 leaderLastErr = err;
             }
         }
+        bootMark("ui.leader.barrier_exit", `ok=${leaderOk}`);
         if (!leaderOk) {
             console.error(
                 "[taco] leader start failed (daemon not ready in budget); scheduling background retry",
@@ -350,50 +393,82 @@ export function useWorkspaceLifecycle({
                 });
             }, 5000);
         }
-        // Pull each workspace's session list directly (bypassing loadWorkspaceSessions's dispatch)
-        // so Promise.all gives us the real sessions[0] for default attach.
-        // workspacesRef depends on a useEffect sync, so reading after await may still see stale.
+        // Pull the active workspace's session list directly so Promise.all gives us the real
+        // sessions[0] for default attach; workspacesRef depends on a useEffect sync, so reading
+        // after await may still see stale.
         //
-        // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is read
-        // from ~/.taco/desktop.json by the Rust host at spawn time, so
-        // client.start no longer takes options. Local pre-spawn LS reads are
-        // still useful for the other client fields (theme, uiLanguage) that
-        // drive synchronous UI before the sidecar answers.
+        // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is read from
+        // ~/.taco/desktop.json by the Rust host, so client.start no longer takes options.
         //
-        // Per-cwd retries are now a safety net only: with the leader barrier
-        // the daemon is already serving, so ensureWorkspace hits a populated
-        // slot and the first attempt usually succeeds.
+        // Only the active workspace is fetched here. Fetching all of `opened` made cold start
+        // pay for workspaces the user cannot see: five concurrent session.list calls, each
+        // walking that workspace's whole session store on the daemon — that both delayed the
+        // one list the sidebar renders and drove daemon memory up, pushing calls past their
+        // 15s ceiling. The rest load on demand (see switchWorkspace). Per-cwd retries are now
+        // a safety net only — leader barrier usually succeeds on first attempt.
         const delays = [0, 1000, 2000];
-        await Promise.all(
-            opened.map(async (cwd) => {
-                let lastErr: unknown;
-                for (const delay of delays) {
-                    if (delay > 0) {
-                        console.warn(`[taco] retrying start+sessionList for ${cwd} in ${delay}ms`);
-                        await new Promise((r) => setTimeout(r, delay));
-                    }
-                    try {
-                        await client.start(cwd);
-                        const list = await client.sessionList(cwd);
-                        dispatchListResult(cwd, list, false);
-                        firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
-                        return;
-                    } catch (err) {
-                        lastErr = err;
-                    }
+        let anyExhausted = false;
+        {
+            const cwd = activeTarget;
+            let lastErr: unknown;
+            for (const delay of delays) {
+                if (delay > 0) {
+                    console.warn(`[taco] retrying start+sessionList for ${cwd} in ${delay}ms`);
+                    await new Promise((r) => setTimeout(r, delay));
                 }
+                try {
+                    await bootPhase(`ui.percwd.start[${cwd}]`, () => client.start(cwd));
+                    // sessionList is bounded only by rpcTimeoutMs, which
+                    // defaults to 1,000,000ms. If the daemon accepts the
+                    // connection and completes the handshake but never
+                    // answers this call, the await parks here for ~17min
+                    // with no error to catch — the mark is how we tell that
+                    // apart from a slow-but-answering daemon.
+                    const list = await bootPhase(`ui.percwd.sessionList[${cwd}]`, () =>
+                        client.sessionList(cwd),
+                    );
+                    dispatchListResult(cwd, list, false);
+                    firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
+                    lastErr = undefined;
+                    break;
+                } catch (err) {
+                    lastErr = err;
+                }
+            }
+            if (lastErr !== undefined) {
                 console.error("[taco] loadWorkspaceSessions failed after retries", cwd, lastErr);
-            }),
-        );
+                bootMark(`ui.percwd.exhausted[${cwd}]`);
+                anyExhausted = true;
+            }
+        }
+        // Exhausting the per-cwd retries is otherwise terminal: nothing else refetches, so
+        // the sidebar stays empty. `leaderOk` fallback above does not cover this — a daemon
+        // that was serving when the leader barrier passed and died moments later leaves
+        // `leaderOk === true` with every list still unfetched.
+        //
+        // Arming a timer does not work: retries burn ~45s of FAST_RPC_TIMEOUT_MS and the
+        // replacement daemon binds on its own schedule (measured: exhaustion +49.4s,
+        // replacement serving +54.1s — a 3s timer fired into the gap and failed twice).
+        // Latch the failure instead and let the epoch handler fire the reload when the
+        // new daemon has actually answered `initialize`.
+        if (anyExhausted) {
+            pendingSessionReloadRef.current = true;
+        }
+        // Sidebar is populated at this point — everything after is the active
+        // workspace's chat panel, not the session list the user is waiting on.
+        bootMark("ui.sessionlists_done");
         try {
-            await loadGlobalConfig(client);
+            await bootPhase("ui.loadGlobalConfig", () => loadGlobalConfig(client));
         } catch (e) {
             console.error("[taco] loadGlobalConfig failed", e);
         }
         const firstSession = firstSessionByCwd[activeTarget];
         if (firstSession) {
-            await attachSession(activeTarget, firstSession.id);
+            await bootPhase("ui.attachFirstSession", () =>
+                attachSession(activeTarget, firstSession.id),
+            );
         }
+        bootMark("ui.initFromStorage.done");
     }, [client, attachSession, dispatchListResult, dispatchWs, setActiveCwd]);
 
     /** Called after sidecar restart — the sidecar process is replaced, so all attached session
@@ -409,12 +484,20 @@ export function useWorkspaceLifecycle({
         const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
         await Promise.all(
             openedCwds.map(async (cwd) => {
-                try {
-                    const list = await client.sessionList(cwd);
-                    dispatchListResult(cwd, list, false);
-                    firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
-                } catch (err) {
-                    console.error("[taco] sessionList failed (restart)", cwd, err);
+                // Two attempts, because this reload is itself the recovery path:
+                // in dev the daemon is replaced often enough that a single call
+                // can land in the window between one dying and its replacement
+                // binding, and a failure here has nothing behind it.
+                for (const delay of [0, 2000]) {
+                    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+                    try {
+                        const list = await client.sessionList(cwd);
+                        dispatchListResult(cwd, list, false);
+                        firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
+                        return;
+                    } catch (err) {
+                        console.error("[taco] sessionList failed (restart)", cwd, err);
+                    }
                 }
             }),
         );
@@ -427,6 +510,22 @@ export function useWorkspaceLifecycle({
     useEffect(() => {
         reloadAllWorkspacesRef.current = reloadAllWorkspaces;
     }, [reloadAllWorkspaces]);
+
+    // Recovery for a cold start that exhausted its retries (see initFromStorage).
+    // The epoch fires only after the replacement daemon answered `initialize`,
+    // which is the one moment we know an RPC will reach a serving process — a
+    // timer cannot know that. Latch-and-clear so the reload runs once per
+    // failed cold start, not on every subsequent daemon replacement.
+    useEffect(() => {
+        return client.onWorkspaceEpochChanged(() => {
+            if (!pendingSessionReloadRef.current) return;
+            pendingSessionReloadRef.current = false;
+            bootMark("ui.percwd.reload_after_epoch");
+            void reloadAllWorkspacesRef.current().catch((e) => {
+                console.error("[taco] post-exhaustion session reload failed", e);
+            });
+        });
+    }, [client]);
 
     const openWorkspace = useCallback(
         async (rawCwd: string): Promise<boolean> => {

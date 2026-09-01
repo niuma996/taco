@@ -10,6 +10,8 @@
  */
 
 import { EventEmitter } from "node:events";
+import { createReadStream } from "node:fs";
+import * as readline from "node:readline";
 import type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
@@ -388,8 +390,7 @@ export class SessionRegistry extends EventEmitter {
             return this._nameCache.get(sessionId);
         }
         const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta);
-        const name = await session.getSessionName();
+        const name = await readSessionNameFromDisk(meta.path);
         this._nameCache.set(sessionId, name);
         return name;
     }
@@ -622,4 +623,66 @@ export class SessionRegistry extends EventEmitter {
         }
         this.removeAllListeners();
     }
+}
+
+/**
+ * Read a session's title by streaming its JSONL, keeping only the last
+ * `session_info` name.
+ *
+ * `repo.open()` would give the same answer via `getSessionName()`, but it
+ * builds a whole `JsonlSessionStorage` first: every line parsed into an entry,
+ * plus `byId` and `labelsById` maps over all of them. For a title lookup that
+ * is pure waste, and `session.list` pays it once per session — measured at
+ * ~5MB of garbage per call over a 258-file store (32MB on disk), which is what
+ * drove the daemon into a GC spiral where `session.list` stopped answering
+ * inside its 15s budget.
+ *
+ * Scanning cannot be short-circuited: a rename appends another `session_info`,
+ * and in this store 41/120 files have more than one, often with the newest near
+ * EOF. So we must reach the end — but only `session_info` lines are parsed, and
+ * nothing but the winning name is retained.
+ */
+async function readSessionNameFromDisk(path: string): Promise<string | undefined> {
+    // createReadStream + readline.createInterface is the standard streaming
+    // pattern, but readline does NOT close the input stream on rl.close().
+    // The file descriptor stays open and the underlying FSReqCallback never
+    // fires its oncomplete — every cold start session.list that exercises
+    // this path leaves one stranded FDRequest, and after a few dozen calls
+    // the libuv thread pool is saturated by pending FSReqPromise objects
+    // (measured: 35k+ on a 258-file store, event loop effectively wedged).
+    // Destroy the input stream explicitly to release the fd.
+    const stream = createReadStream(path, { encoding: "utf8" });
+    const rl = readline.createInterface({
+        input: stream,
+        crlfDelay: Number.POSITIVE_INFINITY,
+    });
+    let name: string | undefined;
+    try {
+        for await (const line of rl) {
+            // Substring test before JSON.parse: the overwhelming majority of
+            // lines are messages, and parsing them is exactly the cost this
+            // function exists to avoid.
+            if (!line.includes('"session_info"')) continue;
+            try {
+                const entry = JSON.parse(line) as { type?: string; name?: unknown };
+                if (entry.type !== "session_info") continue;
+                if (typeof entry.name === "string") {
+                    const trimmed = entry.name.trim();
+                    name = trimmed || undefined;
+                }
+            } catch {
+                // A torn last line (crash mid-append) must not fail the list.
+                // Keep whatever earlier session_info we already found.
+            }
+        }
+    } finally {
+        rl.close();
+        // Force the underlying file handle closed so libuv's request queue
+        // does not accumulate stranded FSReqPromise objects. Without this,
+        // session.list paths that scan many .jsonl files drive the daemon
+        // heap up to multiple GB and the event loop stops accepting new
+        // RPCs — see commit message for the wedge-detector measurements.
+        if (!stream.destroyed) stream.destroy();
+    }
+    return name;
 }

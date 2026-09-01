@@ -39,6 +39,24 @@ interface DiscoveredServer {
 
 export async function discoverMcpTools(args: DiscoverMcpToolsArgs): Promise<McpToolProvider> {
     const enabled = args.servers.filter((s) => s.enabled !== false);
+    // Process-wide kill-switch for MCP discovery. Some stdio MCP servers
+    // (notably @dbx-app/mcp-server + its native child) consume the
+    // daemon's libuv thread pool while they handshake, which leaves the
+    // event loop unable to answer pending RPCs. The desktop + CLI both
+    // forward TACO_DISABLE_MCP=1 when the user disables MCPs via the
+    // tray / Debug tab so a stuck discovery never blocks the session
+    // list the user is actively waiting on.
+    if (process.env.TACO_DISABLE_MCP === "1") {
+        args.log.warn(
+            "MCP discovery disabled by TACO_DISABLE_MCP=1; session will run without MCP tools",
+        );
+        return {
+            candidates: () => [],
+            async dispose() {
+                /* no-op — nothing to release */
+            },
+        };
+    }
     const clients = args.clientFactory;
 
     // Connect + listTools per server in parallel: a slow or failing server

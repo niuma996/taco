@@ -1,21 +1,15 @@
 //! Reap an unusable sidecar daemon before the desktop starts a replacement.
 //!
-//! A daemon is a singleton for its runtime directory. A matching install id
-//! plus a successful control ping and an existing NDJSON socket means the
-//! daemon is healthy and must be reused, even when it was started by another
-//! Tauri process or by a short-lived CLI launcher. This is important in debug
-//! mode because `tsx taco.cjs start` exits after detaching the real daemon, so
-//! the launcher pid is not the daemon pid.
+//! A daemon is a singleton for its runtime directory. A matching install id +
+//! a successful control ping + an existing NDJSON socket means the daemon is
+//! healthy and must be reused, even when it was started by another Tauri
+//! process or by a short-lived CLI launcher. (Debug mode: `tsx taco.cjs start`
+//! exits after detaching the real daemon, so the launcher pid ≠ daemon pid.)
 //!
-//! Only daemons that fail the health probe are reaped. A foreign install id is
-//! always left untouched, because another Taco installation may actively use
-//! the shared `$TACO_HOME`.
-//!
-//! # The ghost-socket case
-//!
-//! macOS Unix domain sockets can leave a live process with no usable socket
-//! entry after an unclean shutdown. An alive pid with no NDJSON socket entry
-//! is treated as stale and reaped.
+//! Foreign install ids are always left untouched — another Taco installation
+//! may actively use the shared `$TACO_HOME`. macOS Unix domain sockets can
+//! also leave a live process with no usable socket entry after an unclean
+//! shutdown; that case is treated as stale and reaped.
 
 #[cfg(unix)]
 use std::io::Read;
@@ -196,31 +190,35 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
             return ReapOutcome::ForeignInstall;
         }
     }
-    // A healthy daemon is the singleton for this runtime, even if it was
-    // started by a previous desktop process or by a detached CLI launcher.
-    // Reusing it is both safe and required for debug mode, where the launcher
-    // pid is not the daemon pid.
+    // A healthy daemon is the singleton for this runtime, even if started by a
+    // previous desktop process or a detached CLI launcher — required in debug
+    // mode where launcher pid ≠ daemon pid. The pid file is written only after
+    // both sockets are bound, so require the NDJSON entry as well as a
+    // successful control ping before declaring the daemon healthy (a
+    // control-only half-start must not be mistaken for a reusable connection).
     //
-    // The pid file is written only after both sockets are bound, so require the
-    // NDJSON entry as well as a successful control ping before declaring the
-    // daemon healthy. This prevents a control-only half-start from being
-    // mistaken for a reusable desktop connection.
-    //
-    // A daemon mid-initialization (channel stack, router load) or serving a
-    // burst of connections can miss a single 500ms ping — its control replies
-    // are scheduled on the same event loop. A false "unhealthy" here SIGKILLs
-    // a healthy daemon and turns a slow boot into a kill/restart loop, so
-    // retry the ping before declaring the daemon wedged.
+    // A daemon mid-init or serving a burst can miss a single 500ms ping —
+    // SIGKILL on a false "unhealthy" turns a slow boot into a kill/restart
+    // loop, so retry the ping. Skip the retry budget when `pid_alive` says the
+    // pid is already dead (signal-0, microseconds): the common case after a
+    // desktop restart is exactly that, and the budget exists to ride out a
+    // *live* daemon's GC pause — spending it on a dead pid is pure cold-start
+    // latency. Schedule is escalating 120/240/480ms with 80ms gaps (≤1.0s
+    // total) — a healthy daemon answers in single-digit ms.
+    const PING_TIMEOUTS_MS: [u64; 3] = [120, 240, 480];
     let mut pong = None;
-    for attempt in 0..3 {
-        if let Some(p) =
-            ping_control_socket(inputs.control_socket_path.as_path(), Duration::from_millis(500))
-        {
-            pong = Some(p);
-            break;
-        }
-        if attempt < 2 {
-            std::thread::sleep(Duration::from_millis(300));
+    if pid_alive(parsed.pid) {
+        for (attempt, timeout_ms) in PING_TIMEOUTS_MS.iter().enumerate() {
+            if let Some(p) = ping_control_socket(
+                inputs.control_socket_path.as_path(),
+                Duration::from_millis(*timeout_ms),
+            ) {
+                pong = Some(p);
+                break;
+            }
+            if attempt + 1 < PING_TIMEOUTS_MS.len() {
+                std::thread::sleep(Duration::from_millis(80));
+            }
         }
     }
     if let Some(p) = pong {
@@ -234,23 +232,44 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
     // Detect ghost socket: pid alive but fs entry missing. macOS lets
     // the inode survive via fd after unlink, so a connect() from a new
     // process fails with ENOENT even though pid_alive returns true. We
-    // treat this as stale: kill the daemon, unlink, let the next spawn
-    // re-bind.
+    // treat this as stale: kill the daemon (SIGTERM → grace → SIGKILL),
+    // unlink pid + sockets, let the next spawn re-bind. Without the
+    // kill, the live process still owns the inode and the next spawn's
+    // bind() fails with EADDRINUSE — the original ghost-socket symptom
+    // we set out to fix. Killing closes the fd so the kernel reaps the
+    // inode and the follow-up unlink + new bind succeed.
     let pid_is_alive = pid_alive(parsed.pid);
     let ghost = pid_is_alive && !inputs.socket_path.exists();
     if !pid_is_alive || ghost {
-        if ghost {
+        let last_signal = if pid_is_alive {
             eprintln!(
                 "taco-desktop: ghost socket for pid={} (alive but {} has no fs entry); killing",
                 parsed.pid,
                 inputs.socket_path.display()
             );
-        }
-        // Stale pid file (or ghost): unlink everything, no SIGTERM needed.
+            let _ = Command::new("kill")
+                .args(["-TERM", &parsed.pid.to_string()])
+                .status();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline && pid_alive(parsed.pid) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if pid_alive(parsed.pid) {
+                let _ = Command::new("kill")
+                    .args(["-KILL", &parsed.pid.to_string()])
+                    .status();
+                std::thread::sleep(Duration::from_millis(100));
+                "SIGKILL"
+            } else {
+                "SIGTERM"
+            }
+        } else {
+            "stale-pidfile"
+        };
         unlink_pid_and_sockets(inputs);
         return ReapOutcome::Stale {
             pid: parsed.pid,
-            last_signal: if ghost { "ghost-socket" } else { "stale-pidfile" },
+            last_signal,
         };
     }
     // Pid alive + matches install, but the daemon did not pass the health
@@ -279,12 +298,15 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
     }
 }
 
-/// Force reap variant used by `ensure_daemon_installed`. Same as
-/// `reap_previous_daemon` but with `owned_pid = None` forced, AND with a
-/// second pass that runs even after a "preserve alive own daemon" outcome:
-/// the install flow is about to overwrite the wrapper script and reload
-/// launchd, so any daemon (even ours) would be terminated by launchd's
-/// reload anyway. Killing it pre-emptively gives a clean baseline.
+/// Force-reap variant for the install path (`ensure_daemon_installed`).
+/// Same as `reap_previous_daemon` but with `owned_pid = None` forced, AND
+/// with a second pass that runs even after a "preserve alive own daemon"
+/// outcome: install is about to overwrite the wrapper script and reload
+/// launchd / schtasks, so any daemon — even our own, even one whose
+/// control socket still answers — would be terminated by the service
+/// reload anyway. Killing it pre-emptively gives a clean baseline and
+/// avoids racing the launcher respawn into a double-bind on the same
+/// socket inode.
 #[cfg(unix)]
 pub fn force_reap(inputs: &ReapInputs<'_>) -> ReapOutcome {
     let outcome = reap_previous_daemon(inputs, None);

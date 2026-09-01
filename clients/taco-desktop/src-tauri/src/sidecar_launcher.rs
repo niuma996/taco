@@ -1,16 +1,16 @@
 //! Sidecar launcher resolution — what to spawn, how to connect to it.
 //!
 //! Two related-but-distinct concerns live here:
-//!   * `resolve_sidecar` decides the program / args / env to spawn the daemon
-//!     with, based on debug-vs-release and a few override env vars.
-//!   * `resolve_install_launcher` and `resolve_install_launcher_via_handle`
-//!     decide which CLI binary the desktop uses to run `taco install` /
-//!     `taco upgrade --apply` — i.e. the first-run service registration and
-//!     the apply step on a pending upgrade marker.
+//!   * `resolve_sidecar` decides the program / args / env to spawn the
+//!     daemon with, based on debug-vs-release and a few override env vars.
+//!   * `resolve_install_launcher` (+ `_via_handle`) decide which CLI binary
+//!     the desktop uses for `taco install` / `taco upgrade --apply` — i.e.
+//!     the first-run service registration and the apply step on a pending
+//!     upgrade marker.
 //!
 //! Both depend on `paths.rs` for socket-path computation and TACO_HOME
-//! resolution, but otherwise don't share state with the workspace_* Tauri
-//! commands in `lib.rs`.
+//! resolution, but otherwise don't share state with the workspace_*
+//! Tauri commands in `lib.rs`.
 
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -53,44 +53,51 @@ pub(crate) const PASSTHROUGH_ENV: &[&str] = &[
     "LOCALAPPDATA",
 ];
 
-/// externalBin 的 basename — Tauri 把 `externalBin` 放在 main binary 同目录,
-/// 用 `current_exe()` 的父目录定位(`BaseDirectory::Executable` 在 Windows/macOS
-/// 不受支持,不可用)。Windows 上文件名带 `.exe`,其余平台不带。
-/// (resources 根不走这里,由 `resource_dir()` 直接取。)
+/// Env vars forwarded ONLY from debug builds, on top of `PASSTHROUGH_ENV`.
+///
+/// `NODE_OPTIONS` is deliberately not in the unconditional list. It accepts
+/// `--require`, so forwarding it hands whoever controls the desktop's
+/// environment a way to load arbitrary code into the sidecar — a
+/// categorically different exposure from the path/locale vars above, whose
+/// comment promises they carry no secrets. A release build must not
+/// widen that surface just so a developer can pass a diagnostic flag.
+///
+/// In debug builds it is what makes V8 flags reachable: the desktop is
+/// the only thing that spawns the daemon (a pre-started one is killed and
+/// replaced the moment reap judges it unhealthy, and the replacement comes
+/// from this spawn path), so without this there is no way to get
+/// `--heapsnapshot-near-heap-limit=1` onto the process that actually crashes.
+#[cfg(debug_assertions)]
+pub(crate) const DEBUG_ONLY_PASSTHROUGH_ENV: &[&str] = &["NODE_OPTIONS", "TACO_DISABLE_MCP"];
+
+/// externalBin basename — Tauri places `externalBin` next to the main binary; locate it via
+/// `current_exe()`'s parent dir (`BaseDirectory::Executable` is unsupported on Windows/macOS,
+/// so it can't be used here). Filename has `.exe` on Windows, none elsewhere. The resources
+/// root does not go through here; it is taken directly from `resource_dir()`.
 pub(crate) const SIDECAR_NODE_RESOURCE: &str = "taco-sidecar-node";
 
-/// 决定 release 与 debug 的 sidecar 程序+参数+运行时资源根。
+/// Resolve the sidecar program + args + runtime resources root for the current build mode.
 ///
-/// 优先级:
-///   1. 显式覆盖 `TACO_SIDECAR_CMD` / `TACO_SIDECAR_ARGS` — e2e / 集成测试 / 调试
-///   2. debug 构建 (cfg!(debug_assertions)):仓库根 + tsx + 源码
-///   3. release:调用 `app.path().resolve_resource()` 定位 bundled node + JS bundle,
-///      注入 `TACO_SIDECAR_RESOURCES` 让 sidecar 内 runtimeResources 找 agents/skills。
-///   4. release 但 runtime 缺失:报错 — 禁止偷回退到系统 tsx,避免 release 在用户机器
-///      静默失败。
-/// How to spawn + connect to the sidecar / daemon.
+/// Priority: (1) `TACO_SIDECAR_CMD` / `TACO_SIDECAR_ARGS` overrides for e2e / integration
+/// tests; (2) debug build → repo root + tsx + source tree; (3) release → bundle via
+/// `app.path().resolve_resource()` for bundled node + bundle, with `TACO_SIDECAR_RESOURCES`
+/// injected so the sidecar finds agents/skills; (4) release but runtime missing → ERROR
+/// (never fall back to system tsx; silent failure on a release install is worse than loud).
 ///
-/// PR2 reverses the spawn model: instead of forking a tokio subprocess
-/// that inherits stdio, the desktop asks the @taco-ai/cli launcher (dev)
-/// or the bundled `taco-sidecar-node` (prod) to bring the daemon up,
-/// then connects to the NDJSON socket it exposes. The two processes
-/// share the same socket paths under the resolved daemon runtime directory so
-/// the launcher's "ready" signal is the same path Rust connects to.
-///
-/// `extra_env` carries variables PR2 needs in addition to PASSTHROUGH_ENV:
-/// `TACO_DAEMON_MODE=1` flips the bundle into socket-listening mode;
-/// `TACO_SOCKET` / `TACO_CONTROL_SOCKET` name the two IPC channels. The
-/// launcher writes them itself when it acts as an intermediate; the prod
+/// `extra_env` carries variables PR2 needs beyond PASSTHROUGH_ENV: `TACO_DAEMON_MODE=1`
+/// triggers socket-listening mode; `TACO_SOCKET` / `TACO_CONTROL_SOCKET` name the two IPC
+/// channels. The launcher writes those itself when it acts as an intermediate; the prod
 /// path needs them because the desktop sets the paths before spawning.
 #[allow(clippy::doc_lazy_continuation)]
 pub(crate) struct SidecarResolution {
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
-    /// 注入到 child 的 `TACO_SIDECAR_RESOURCES` env,None 表示不覆盖(由 sidecar
-    /// 当前进程的 import.meta.dirname 兜底)。
+    /// `TACO_SIDECAR_RESOURCES` env injected into the child. None means "do not override"
+    /// (the sidecar's own process falls back to import.meta.dirname).
     pub(crate) resources_root: Option<PathBuf>,
-    /// 是否运行仓库源码形态(tsx + repo_root cwd)。区别于 `workspace_ensure`
-    /// 入参 `debug_mode`(那是"是否打印 LLM 报文"的客户端开关,两者含义不同)。
+    /// Whether to run from repo source (tsx + repo_root cwd). Distinct from the
+    /// `workspace_ensure` `debug_mode` arg (the client toggle for "print LLM payloads");
+    /// the two are unrelated.
     pub(crate) use_repo_source: bool,
     /// NDJSON socket path the bundle should bind. `workspace_ensure`
     /// forwards this to the child as `TACO_SOCKET` and uses it as the
@@ -149,7 +156,7 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
         &control_socket_path,
     );
 
-    // ① 显式覆盖 —— 测试 / e2e 可以直接指定 launcher 程序
+    // (1) Explicit override — tests / e2e can specify the launcher program directly.
     if let (Ok(program), Ok(args_str)) = (
         std::env::var("TACO_SIDECAR_CMD"),
         std::env::var("TACO_SIDECAR_ARGS"),
@@ -158,7 +165,8 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
             program,
             args: args_str.split_whitespace().map(String::from).collect(),
             resources_root: None,
-            // 显式覆盖多用于本地/e2e 指向 tsx 源码,按源码形态给 cwd。
+            // Explicit overrides typically point at tsx source for local / e2e, so give
+            // it the repo-source cwd.
             use_repo_source: true,
             socket_path,
             extra_env: daemon_env,
@@ -166,10 +174,10 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
     }
 
     if cfg!(debug_assertions) {
-        // ② debug 走 @taco-ai/cli 的 `start` 子命令 —— 它会 spawn tsx +
-        //    sidecar/src/index.ts 并设置好 TACO_DAEMON_MODE / socket 路径。
-        //    launch_sidecar() 会等 socket ready 后退出,stdin/stdout 上
-        //    透传 socket path。
+        // (2) Debug goes through the @taco-ai/cli `start` subcommand. That command spawns
+        //     tsx + sidecar/src/index.ts and sets TACO_DAEMON_MODE / socket paths itself.
+        //     `launch_sidecar()` waits for the socket to be ready then exits, forwarding
+        //     socket paths over stdin/stdout.
         let repo_root = find_repo_root();
         let tsx = resolve_repo_source_program(&repo_root);
         let cli_bin = repo_root
@@ -189,11 +197,11 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
         });
     }
 
-    // ③ release —— 直连 bundled node binary + ESM bundle,跳过 CLI 这一层。
-    //    externalBin 不再需要一个独立的 launcher 二进制,因为 bundle 自己
-    //    在 TACO_DAEMON_MODE=1 下已经会 listen NDJSON + control sockets。
-    //    剥掉 `\\?` verbatim 前缀 —— 这条链上的路径都会作为 argv 传给
-    //    Node,带前缀会崩(见 strip_win_verbatim)。
+    // (3) Release — connect directly to the bundled node binary + ESM bundle, skipping
+    //     the CLI layer. externalBin no longer needs a separate launcher binary because
+    //     the bundle itself, under TACO_DAEMON_MODE=1, already listens on NDJSON + control
+    //     sockets. Strip the `\\?` verbatim prefix — paths on this chain are passed as argv
+    //     to Node, and the prefix would crash it (see strip_win_verbatim).
     let resources_root = strip_win_verbatim(
         &app.path()
             .resource_dir()

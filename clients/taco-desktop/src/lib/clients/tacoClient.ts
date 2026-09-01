@@ -9,13 +9,20 @@
 
 import {
     CURRENT_SESSION_FORMAT_VERSION,
+    ErrorCodes,
     isCompatibleSidecarProtocol,
     PushMethods,
     type RpcRequest,
     SIDECAR_PROTOCOL_VERSION,
     type WorkspaceId,
 } from "@taco-ai/protocol";
-import { RPC, TacoClientBase } from "@taco-ai/shared";
+import {
+    FAST_RPC_METHODS,
+    FAST_RPC_TIMEOUT_MS,
+    RPC,
+    RpcRemoteError,
+    TacoClientBase,
+} from "@taco-ai/shared";
 import { type EpochTransition, SessionEpochs } from "../sessionEpoch";
 import {
     defaultSidecarClient,
@@ -48,12 +55,47 @@ interface Readiness {
     reject: (reason: Error) => void;
 }
 
+/**
+ * One in-flight or settled handshake. Every concurrent `start()` caller observes the
+ * same settlement — success resolves `processInitialized` and unblocks every awaiter;
+ * failure rejects every awaiter (no timeout past the initial handshake). Late responses
+ * from a previous generation (daemon replacement / death) are dropped: they'd otherwise
+ * set `processInitialized` against a stale connection and lock out reconnect — the bug
+ * that produced 30-60s stalls on every cold start.
+ */
+interface Handshake extends Readiness {
+    /** Monotonic id — bumped on every new handshake. */
+    generation: number;
+}
+
+/**
+ * Singleton sentinel returned by `createHandshake` when the process is
+ * already initialized. Its promise is pre-resolved so `awaitHandshake`
+ * exits in microseconds without touching the timeout. Generation is `0`
+ * so it never matches a real handshake (preventing accidental merging).
+ */
+const ALREADY_INITIALIZED: Handshake = (() => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+        resolve = r;
+    });
+    promise.catch(() => {});
+    resolve();
+    return { generation: 0, promise, resolve, reject: () => {} };
+})();
+
 // The 20 typed methods are injected at construction by the base class's
 // createTypedRpc via Object.assign; the TS type is visible through interface
 // merging. See TacoClientBase for details.
+//
+// TODO(remove-suppression): drop this declaration-merging pattern once
+// TacoClient declares its methods directly. The current Object.assign
+// indirection exists to avoid re-implementing each typed RPC method on
+// every concrete client — revisit when the RPC surface stabilizes or
+// when a future codegen step produces the per-method shims.
 export interface TacoClient extends TacoClientBase {}
 
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: see interface comment above
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: see interface comment above; suppress until TacoClient declares methods directly (see TODO above).
 export class TacoClient extends TacoClientBase {
     private rpcSeq = 0;
     private unlisten?: () => void;
@@ -64,6 +106,10 @@ export class TacoClient extends TacoClientBase {
     private readonly ensuredCwds = new Set<WorkspaceId>();
     private readonly sidecar: SidecarClient;
     private readonly rpcTimeoutMs: number;
+    /** True when the caller passed `rpcTimeoutMs` explicitly. Suppresses the
+     *  FAST_RPC_METHODS tier so an explicit bound is honoured verbatim — tests
+     *  set small values and expect them to apply to every method. */
+    private readonly rpcTimeoutMsExplicit: boolean;
     /**
      * Workspaces owned by a daemon that has since exited. Snapshotted in
      * handleExit (before ensuredCwds is cleared) and consumed by the next
@@ -73,20 +119,21 @@ export class TacoClient extends TacoClientBase {
      */
     private replacedCwds = new Set<WorkspaceId>();
     /**
-     * Tracks whether the sidecar's `initialize` handshake has completed in this
-     * process. Reset whenever the underlying sidecar exits (handleExit /
-     * dispose). Server-side `not_initialized` guard rejects every RPC except
-     * `initialize` while this is false, so `start(cwd)` awaits it before
-     * returning. The initialize response is also the process identity source:
-     * `instanceId` change ⇒ daemon replaced ⇒ epoch reset.
+     * Process-level handshake state. `processInitialized` flips true after a successful
+     * `initialize` response; `handshake` is the single in-flight or settled handshake
+     * promise every concurrent `start()` caller awaits. The previous design kept
+     * `processInitialization` (a single promise) but its success path could mark
+     * `processInitialized=true` without resolving the awaiters — late responses from a
+     * dead daemon poisoned reconnect, so every cold start paid 10s × N timeout cascades.
+     * The new monotonic handshake checks `generation` and drops mismatches.
      */
-    private processInitialization?: Readiness;
+    private handshake: Handshake | null = null;
+    private handshakeGeneration = 0;
     private processInitialized = false;
-    /** The Readiness instance for which initialize has already been sent.
-     * Concurrent start(cwd) callers can both see `processInitialized === false`
-     * before the response lands; only one initialize request may be in flight
-     * for a process handshake. */
-    private initializeAttempt?: Readiness;
+    /** The handshake whose `initialize` request is currently in flight.
+     *  Guards against duplicate `initialize` requests when runInitialize
+     *  is called concurrently (start() + call()-driven ensureInitialized). */
+    private initializeAttempt: Handshake | undefined;
     /**
      * Cwd the most recent `ensureWorkspace` was called with. Used as a fallback
      * channel for the `initialize` handshake before the first workspace is
@@ -116,6 +163,7 @@ export class TacoClient extends TacoClientBase {
         // Tauri side stays silent on bad frames; only the Node client surfaces them.
         super();
         this.sidecar = opts.sidecar ?? defaultSidecarClient();
+        this.rpcTimeoutMsExplicit = opts.rpcTimeoutMs !== undefined;
         this.rpcTimeoutMs = opts.rpcTimeoutMs ?? 1_000_000;
     }
 
@@ -145,24 +193,28 @@ export class TacoClient extends TacoClientBase {
         this.pendingProcessCwd = cwd;
         // PR4: remember the cwd so a sidecar-exited event can reconnect.
         this.reconnectCwd = cwd;
-        const initialization = this.createProcessInitialization();
+        const handshake = this.createHandshake();
         try {
             await this.sidecar.ensureWorkspace(cwd);
-            // The initialize handshake doubles as the readiness wait: the
-            // response proves the daemon is serving, carries its protocol
-            // version, and identifies the process (instanceId).
-            if (!this.processInitialized) void this.runInitialize();
-            await this.awaitInitialization(initialization);
+            // Drive the handshake (fire-and-forget). awaitHandshake below is
+            // the actual readiness barrier — every concurrent start() awaits
+            // the same handshake so the response settles them all at once.
+            if (!this.processInitialized && this.handshake === handshake) {
+                void this.runInitialize();
+            }
+            await this.awaitHandshake(handshake);
             this.ensuredCwds.add(cwd);
             this.pendingProcessCwd = undefined;
         } catch (error) {
-            // Settle explicitly so a concurrent start() awaiting the shared
-            // handshake fails now instead of on its own 10s timeout.
-            this.processInitialization?.reject(
-                error instanceof Error ? error : new Error(String(error)),
-            );
-            this.processInitialization = undefined;
-            this.initializeAttempt = undefined;
+            // Settle the handshake so concurrent start() callers fail fast
+            // instead of waiting on the dispatcher's 1000s timeout. Only the
+            // still-current handshake can be settled — a newer one is the
+            // reconnect's responsibility.
+            if (this.handshake === handshake) {
+                this.handshake = null;
+                this.initializeAttempt = undefined;
+                handshake.reject(error instanceof Error ? error : new Error(String(error)));
+            }
             this.pendingProcessCwd = undefined;
             throw error;
         }
@@ -176,10 +228,12 @@ export class TacoClient extends TacoClientBase {
         this.rejectAllPending(new Error("client disposed"));
         // Symmetric with handleExit: an in-flight handshake gets no response
         // after dispose, so settle it rather than leaving awaiters on their
-        // timeout. createProcessInitialization attaches a no-op catch, so this
-        // is safe even when nobody is awaiting.
-        this.processInitialization?.reject(new Error("client disposed"));
-        this.processInitialization = undefined;
+        // timeout. The no-op catch on the handshake promise keeps the
+        // rejection from surfacing as an unhandledRejection.
+        if (this.handshake) {
+            this.handshake.reject(new Error("client disposed"));
+            this.handshake = null;
+        }
         this.initializeAttempt = undefined;
         this.processInitialized = false;
         this.pendingProcessCwd = undefined;
@@ -196,8 +250,58 @@ export class TacoClient extends TacoClientBase {
         return () => this.epochChangeHandlers.delete(handler);
     }
 
-    /** Pull — registers pending via the dispatcher. */
+    /** Pull — registers pending via the dispatcher and sends the frame.
+     *
+     * Self-healing on the slot-replacement race: if the Rust slot is replaced between the
+     * handshake completing and this call's frame landing on the wire, the daemon
+     * (per-connection `isInitialized=false` for the new connection) returns `not_initialized`.
+     * The old code let that rejection escape as an Unhandled Promise Rejection (notably in
+     * `attachSession`'s unguarded `sessionHistory` call). The new code treats `not_initialized`
+     * as a transient: it awaits the in-flight reconnect handshake and retries the call
+     * exactly once. After that, the call either succeeds or surfaces a real error.
+     */
     async call<TParams = unknown, TResult = unknown>(
+        workspace: WorkspaceId,
+        method: string,
+        params: TParams,
+    ): Promise<TResult> {
+        // Skip the gate for `initialize` itself — runInitialize sends it
+        // via this.sidecar.send directly to avoid a circular wait.
+        // Awaited (not fire-and-forget) so a follow-up RPC fired in the same
+        // tick doesn't reach the daemon before its initialize handler has
+        // run — the cold-start race that caused 15s session.list timeouts
+        // when initialize + session.list arrived in one socket batch.
+        if (method !== RPC.initialize) {
+            await this.ensureInitialized(workspace);
+        }
+        try {
+            return await this.sendOnce<TParams, TResult>(workspace, method, params);
+        } catch (err) {
+            if (
+                err instanceof RpcRemoteError &&
+                err.code === ErrorCodes.NotInitialized &&
+                method !== RPC.initialize
+            ) {
+                // Slot-replacement race window: the frame landed on the new
+                // connection before its handshake finished. Wait for that
+                // handshake (handleExit's runReconnect drove it; if not yet
+                // scheduled, fall back to triggering one ourselves) and retry.
+                await this.ensureInitialized(workspace);
+                if (this.handshake) {
+                    try {
+                        await this.awaitHandshake(this.handshake);
+                    } catch {
+                        // Handshake failed; the retry will surface the error.
+                    }
+                }
+                return await this.sendOnce<TParams, TResult>(workspace, method, params);
+            }
+            throw err;
+        }
+    }
+
+    /** One-shot send — registers pending, sends the frame, awaits the response. */
+    private async sendOnce<TParams, TResult>(
         workspace: WorkspaceId,
         method: string,
         params: TParams,
@@ -209,14 +313,53 @@ export class TacoClient extends TacoClientBase {
         // unknownFrame. Push frames don't clear pending; this order only guards
         // the response-vs-register race.
         const promise = this.dispatcher.registerPending(id, workspace) as Promise<TResult>;
+        // Tiered ceiling. Pure reads (FAST_RPC_METHODS) get seconds; anything
+        // model-bound or mutating keeps the long default. Without the split, a
+        // daemon that completes the handshake and then stops answering parks
+        // every metadata read for rpcTimeoutMs (default ~16.7min) with no error
+        // to catch — the cold-start path awaits session.list, so the sidebar
+        // stays empty for as long as the daemon stays wedged.
+        //
+        // An explicit `rpcTimeoutMs` option always wins: tests pass small
+        // values expecting them to apply uniformly, and a caller that asks for
+        // a tighter bound should not be silently given a looser one.
+        const effectiveTimeoutMs =
+            this.rpcTimeoutMsExplicit || !FAST_RPC_METHODS.has(method)
+                ? this.rpcTimeoutMs
+                : Math.min(FAST_RPC_TIMEOUT_MS, this.rpcTimeoutMs);
         const timeout = setTimeout(() => {
             this.dispatcher.rejectPending(
                 id,
-                new Error(`RPC timeout after ${this.rpcTimeoutMs}ms: ${method}`),
+                new Error(`RPC timeout after ${effectiveTimeoutMs}ms: ${method}`),
             );
-        }, this.rpcTimeoutMs);
+        }, effectiveTimeoutMs);
         try {
-            await this.sidecar.send(workspace, req as unknown as object);
+            // The Tauri IPC layer has its own backpressure (mpsc::channel(64) +
+            // tokio writer task on the Rust side). A wedged socket means
+            // sidecar.send hangs forever even though our own timer rejects the
+            // pending promise — without a matching bound here the microtask
+            // stays parked forever, and every subsequent RPC that goes
+            // through the same path queues behind it. Bound the send to the
+            // same ceiling: once the timer fires we know the round-trip
+            // can't possibly complete, so the send itself is doomed.
+            const sendRace = this.sidecar.send(workspace, req as unknown as object);
+            const sendResult = await Promise.race([
+                sendRace.then(() => "__ok__" as const).catch((e) => ({ err: String(e) })),
+                new Promise<"__timeout__">((resolve) =>
+                    setTimeout(() => resolve("__timeout__"), effectiveTimeoutMs),
+                ),
+            ]);
+            if (sendResult === "__timeout__") {
+                // Best-effort cleanup — the IPC call may still resolve later
+                // but we no longer care. We can't cancel a Tauri invoke from
+                // JS, so just let it complete in the background.
+                sendRace.catch(() => {});
+            } else if (typeof sendResult === "object" && "err" in sendResult) {
+                // Sidecar.send itself rejected — propagate to the pending
+                // promise so the caller sees the real transport failure
+                // instead of waiting on the RPC timeout.
+                this.dispatcher.rejectPending(id, new Error((sendResult as { err: string }).err));
+            }
         } catch (error) {
             this.dispatcher.rejectPending(
                 id,
@@ -224,6 +367,54 @@ export class TacoClient extends TacoClientBase {
             );
         }
         return (await promise.finally(() => clearTimeout(timeout))) as TResult;
+    }
+
+    /**
+     * Block until the process handshake has completed (success or failure). Called by
+     * `call()` only — `runInitialize` sends the handshake frame itself. Happy path is
+     * `processInitialized === true` (no await). A mid-handshake call awaits the in-flight
+     * handshake; a call after a daemon death that hasn't yet triggered `handleExit`'s
+     * reconnect triggers one itself, so `call()` is self-healing on the slot-replacement
+     * race window.
+     *
+     * IMPORTANT: the `processInitialized` fast path must NOT `await` — even
+     * `await Promise.resolve()` introduces a microtask boundary that lets synchronous
+     * `emitExit()` race ahead of `sendOnce`'s pending registration, leaving the RPC
+     * stranded until its 50ms timer fires. The "desktop client waits for initialize" test
+     * exercises this race. Keep the check synchronous.
+     */
+    /**
+     * Trigger the initialize handshake and await its settlement. Synchronous on the happy
+     * path; on the cold-start path it kicks runInitialize (fire-and-forget for the init
+     * frame) and waits for the handshake promise so the caller only resumes after the
+     * daemon has answered initialize. The await closes the cold-start race where a
+     * follow-up RPC in the same tick reaches the daemon with workspaceMap unbuilt.
+     *
+     * Returns once the handshake resolves (or rejects). The caller — `call()` — catches
+     * the rejection if the RPC should fail fast; the common shape is "let the send retry
+     * on not_initialized" so this method swallows await failures.
+     */
+    private async ensureInitialized(workspace: WorkspaceId): Promise<void> {
+        if (this.processInitialized) return;
+        if (!this.handshake) {
+            this.pendingProcessCwd = workspace;
+            void this.runInitialize();
+        }
+        // Read after the runInitialize kick above so we capture whichever
+        // handshake the kick attached. If the kick didn't create one (e.g.
+        // another concurrent caller already did and is awaiting the same one),
+        // this field is set; the only path that leaves it null is the
+        // synchronous check on line 1 above which already returned.
+        const handshake = this.handshake;
+        if (!handshake) return;
+        try {
+            await this.awaitHandshake(handshake);
+        } catch {
+            // Handshake failed; the call() retry path will surface the error
+            // on its next attempt. Don't propagate here — call() must always
+            // proceed to sendOnce so the retry has a chance to either land on
+            // a now-initialized connection or hit not_initialized and retry.
+        }
     }
 
     /**
@@ -265,37 +456,50 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * Mirror of the old hello-wait for the `initialize` handshake. Concurrent
-     * starts share one promise; failed handshakes (server returning
-     * `incompatible_protocol`) reject it so subsequent starts do not silently
-     * succeed.
+     * Return the current handshake — a singleton resolved handshake if the
+     * process is already initialized, the in-flight handshake if one exists,
+     * or a freshly created one otherwise. Concurrent start() callers all
+     * receive the same reference and observe the same settlement.
      */
-    private createProcessInitialization(): Readiness {
-        if (this.processInitialized) {
-            return { promise: Promise.resolve(), resolve: () => {}, reject: () => {} };
-        }
-        if (this.processInitialization) return this.processInitialization;
-        let resolve!: () => void;
-        let reject!: (reason: Error) => void;
-        const promise = new Promise<void>((resolvePromise, rejectPromise) => {
-            resolve = resolvePromise;
-            reject = rejectPromise;
-        });
-        // Several paths reject this promise (handleExit, runInitialize,
-        // dispose) and any of them can fire when no
-        // start() is awaiting — e.g. a process death after start() resolved.
-        // A no-op catch keeps those rejections from surfacing as
-        // unhandledRejection; real awaiters still observe the error.
-        promise.catch(() => {});
-        this.processInitialization = { promise, resolve, reject };
-        return this.processInitialization;
+    private createHandshake(): Handshake {
+        if (this.processInitialized) return ALREADY_INITIALIZED;
+        if (this.handshake) return this.handshake;
+        return this.newHandshake();
     }
 
-    private async awaitInitialization(initialization: Readiness): Promise<void> {
+    private newHandshake(): Handshake {
+        let resolve!: () => void;
+        let reject!: (reason: Error) => void;
+        const promise = new Promise<void>((r, j) => {
+            resolve = r;
+            reject = j;
+        });
+        // Several paths reject this promise (handleExit, runInitialize,
+        // dispose, start's catch) and any of them can fire when no
+        // start() is awaiting — e.g. a process death after start() resolved.
+        // A no-op catch keeps those rejections from surfacing as
+        // unhandledRejection; real awaiters observe the error.
+        promise.catch(() => {});
+        const handshake: Handshake = {
+            generation: ++this.handshakeGeneration,
+            promise,
+            resolve,
+            reject,
+        };
+        this.handshake = handshake;
+        return handshake;
+    }
+
+    private async awaitHandshake(handshake: Handshake): Promise<void> {
+        // The ALREADY_INITIALIZED sentinel resolves immediately, so post-init
+        // starts exit in microseconds. Real handshakes wait on the response
+        // or on the 10s safety net (kept as a backstop in case the daemon
+        // is alive but never answers — surface a clear error rather than
+        // hanging the UI forever).
         let timeout: ReturnType<typeof setTimeout> | undefined;
         try {
             await Promise.race([
-                initialization.promise,
+                handshake.promise,
                 new Promise<never>((_, reject) => {
                     timeout = setTimeout(
                         () => reject(new Error("sidecar initialize timeout")),
@@ -309,19 +513,17 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * Parse a push frame for session-lifecycle events and update the
-     * SessionEpochs tracker. Called from the onPush listener, so the parse
-     * cost is paid once per frame.
+     * Parse a push frame for session-lifecycle events and update the SessionEpochs tracker.
+     * Called from the onPush listener, so the parse cost is paid once per frame.
      *
      * Events we care about:
-     *   - session.attached   -> observe (workspace, sessionId, currentInstanceId)
-     *   - session.detached   -> forget (session is no longer live on this daemon)
-     *   - session.deleted    -> forget (same as detached -- the session is gone)
-     *
-     * All other push methods are ignored: tool_call_start, session.event,
-     * etc. carry sessionId but their lifecycle is owned by SessionCursor /
-     * the reducer, not by SessionEpochs. The latter only cares about
-     * "is this session still attached on this daemon instance?" */
+     *   - session.attached → observe (workspace, sessionId, currentInstanceId)
+     *   - session.detached → forget (session no longer live on this daemon)
+     *   - session.deleted  → forget (same as detached)
+     * All other push methods are ignored: tool_call_start, session.event, etc. carry
+     * sessionId but their lifecycle is owned by SessionCursor / the reducer. SessionEpochs
+     * only cares about "is this session still attached on this daemon instance?"
+     */
     private observeSessionLifecycle(frame: SidecarFrame): void {
         if (this.currentInstanceId === undefined) return;
         let parsed: { method?: unknown; workspace?: unknown; session?: unknown };
@@ -373,32 +575,37 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * Sends a single `initialize` request for the current sidecar process.
-     * On success, flips `processInitialized` and resolves the shared
-     * initialization promise. On failure (incompatible protocol / timeout),
-     * rejects the shared promise so concurrent `start(cwd)` callers fail too.
+     * Send a single `initialize` request for the current sidecar process. On success, flip
+     * `processInitialized` and resolve the in-flight handshake. On failure (incompatible
+     * protocol / timeout / transport send failure), reject the handshake so concurrent
+     * `start(cwd)` callers fail too — and crucially, the send-failure path settles the
+     * handshake immediately rather than waiting for the dispatcher's 1000s timeout (which
+     * is what made the previous design burn 10s per stall).
+     *
+     * The late-response guard (generation mismatch) is the actual fix for the 30-60s
+     * cold-start stall: a response from the dead daemon's connection that arrives after
+     * `handleExit` started a new handshake must NOT mutate `processInitialized`, or
+     * reconnect's runInitialize would early-return on the stale flag and leave the new
+     * handshake unresolvable.
      */
     private async runInitialize(): Promise<void> {
-        // If the handshake already succeeded for this process, there is no work
-        // to do — even if a new workspace's start() called us. The epoch
-        // replacement path resets `processInitialized` to false explicitly.
-        if (this.processInitialized) {
-            return;
-        }
-        const initialization = this.createProcessInitialization();
-        // Concurrent start(cwd) callers can all reach this point before the
-        // response lands; guard the actual request separately from the shared
-        // promise so only one initialize is in flight.
-        if (this.initializeAttempt === initialization) {
-            return;
-        }
+        // If the handshake already succeeded for this process, there is no
+        // work to do — even if a new workspace's start() called us. The
+        // epoch replacement path resets `processInitialized` to false
+        // explicitly, so a reconnect still re-handshakes.
+        if (this.processInitialized) return;
+        const handshake = this.createHandshake();
+        // Concurrent runInitialize callers (start() + call()-driven
+        // ensureInitialized) can all reach this point before the response
+        // lands; the in-flight guard lets only one actually send.
+        if (this.initializeAttempt === handshake) return;
         const fallback = this.pendingProcessCwd ?? this.ensuredCwds.values().next().value;
         if (!fallback) {
-            // No transport channel yet — start() will surface the failure via
-            // its own awaitInitialization timeout.
+            // No transport channel yet — start() will surface the failure
+            // via its own awaitHandshake timeout / catch.
             return;
         }
-        this.initializeAttempt = initialization;
+        this.initializeAttempt = handshake;
         // Send the `initialize` request directly via the dispatcher so this
         // file owns the pending-promise chain end-to-end. Using the typed
         // `client.initialize` wrapper would hand the promise to two consumers
@@ -429,13 +636,25 @@ export class TacoClient extends TacoClientBase {
         // Attach the catch immediately so a dispose-time rejection never
         // escapes as unhandledRejection. The await below observes the result.
         promise.catch(() => {
-            /* swallowed — start() owns the awaitInitialization promise */
+            /* swallowed — start() owns the awaitHandshake promise */
         });
         try {
             await this.sidecar.send(fallback, req as unknown as object);
-        } catch {
-            // Transport-level failure — the dispatcher's timeout (or a later
-            // reject) will resolve the await below; do not crash runInitialize.
+        } catch (sendErr) {
+            // Transport-level failure (slot torn down mid-handshake). Settle
+            // the handshake NOW so awaiters don't hang on the dispatcher's
+            // 1000s timeout. Without this, a connect-cleared-mid-send stalls
+            // every concurrent start() for 10s.
+            if (this.handshake === handshake) {
+                this.handshake = null;
+                this.initializeAttempt = undefined;
+                handshake.reject(
+                    sendErr instanceof Error
+                        ? sendErr
+                        : new Error("sidecar send failed during initialize"),
+                );
+            }
+            return;
         }
         try {
             const result = await promise;
@@ -502,22 +721,26 @@ export class TacoClient extends TacoClientBase {
             // A missing instanceId means a pre-P1 sidecar (version skew during
             // a rolling upgrade): epoch tracking stays dormant until the
             // daemon is upgraded. Not fatal — attaches still drive the UI.
-            if (this.processInitialization === initialization) {
-                this.processInitialized = true;
-                initialization.resolve();
-                this.processInitialization = undefined;
-                this.initializeAttempt = undefined;
-            } else {
-                this.processInitialized = true;
+            if (this.handshake !== handshake) {
+                // Late response from a previous generation. The current
+                // handshake (if any) is the reconnect's responsibility; we
+                // must not touch `processInitialized`, or the new handshake
+                // would early-return on the stale flag and never settle.
+                return;
             }
+            // Settle exactly once. Concurrent start() awaiters all observe
+            // the same resolution.
+            this.processInitialized = true;
+            this.handshake = null;
+            this.initializeAttempt = undefined;
+            handshake.resolve();
         } catch (error) {
-            // If start() / handleExit / dispose have not already settled the
-            // shared promise, settle it here — otherwise the rejection becomes
-            // an unhandledRejection (no other consumer awaits it).
-            if (this.processInitialization === initialization) {
-                initialization.reject(error instanceof Error ? error : new Error(String(error)));
-                this.processInitialization = undefined;
+            // Only settle the handshake if it is still current. A newer
+            // generation's handshake is the reconnect's responsibility.
+            if (this.handshake === handshake) {
+                this.handshake = null;
                 this.initializeAttempt = undefined;
+                handshake.reject(error instanceof Error ? error : new Error(String(error)));
             }
         }
     }
@@ -527,12 +750,15 @@ export class TacoClient extends TacoClientBase {
         const reason = new Error(
             `sidecar exited${exit.code === undefined ? "" : ` (code ${exit.code})`}${exit.reason ? `: ${exit.reason}` : ""}`,
         );
-        // Reject rather than drop: an in-flight `initialize` has no response
-        // coming once the process is gone, so awaitInitialization would sit on
-        // its own 10s timeout. runInitialize's catch tolerates the promise
-        // already being settled here (it re-checks identity before settling).
-        this.processInitialization?.reject(reason);
-        this.processInitialization = undefined;
+        // Reject rather than drop: an in-flight handshake has no response
+        // coming once the process is gone, so awaiters would otherwise sit
+        // on the 10s safety net. The new handshake (if any) starts fresh
+        // from a cleared state — a late response from the dead daemon
+        // arriving after this point is ignored by the generation check.
+        if (this.handshake) {
+            this.handshake.reject(reason);
+            this.handshake = null;
+        }
         this.initializeAttempt = undefined;
         this.processInitialized = false;
         this.pendingProcessCwd = undefined;
@@ -563,23 +789,16 @@ export class TacoClient extends TacoClientBase {
 
     /** PR4: reconnect with backoff + upgrade-marker detection.
      *
-     *  Flow per the plan's `ensureDaemon` pseudocode:
-     *    1. Wait `backoffMs` (500 → 1s → 2s → 5s).
-     *    2. Probe `upgradeMarkerPresent`. If true, run `upgradeApply`
-     *       (which atomically swaps staging → live and clears the marker).
-     *    3. Re-call `start(cwd)` — same path the user-facing mount flow
-     *       uses, so a successful reconnect goes through the same
-     *       initialize handshake and emits the same epoch transitions as a
-     *       normal mount.
-     *    4. On failure, repeat with the next backoff. After the last entry
-     *       the loop gives up; the user can retry via the UI's reconnect
-     *       control (or a hard refresh) at that point.
+     * Flow per the plan's `ensureDaemon` pseudocode: (1) wait `backoffMs` (500 → 1s → 2s → 5s);
+     * (2) probe `upgradeMarkerPresent`; if true, run `upgradeApply` (atomic staging → live
+     * swap, clear marker); (3) re-call `start(cwd)` — same path as mount, so a successful
+     * reconnect goes through the same initialize handshake and emits the same epoch
+     * transitions; (4) on failure, repeat with the next backoff. After the last entry the
+     * loop gives up; the user can retry via the UI's reconnect control (or hard refresh).
      *
-     *  Why we don't restart ourselves in Rust: the swap needs to happen
-     *  BEFORE the new spawn so the new binary is the one the launcher picks
-     *  up. Rust would have to do `upgrade_apply` + `wait_for_daemon_socket`
-     *  anyway, so the JS side keeping the loop is a simpler integration
-     *  with the existing `start()` flow.
+     * Why not restart in Rust: the swap must happen BEFORE the new spawn so the launcher
+     * picks up the new binary. Rust would do `upgrade_apply` + `wait_for_daemon_socket`
+     * anyway, so keeping the loop on the JS side is a simpler integration with `start()`.
      */
     private async runReconnect(cwd: WorkspaceId): Promise<void> {
         this.reconnectInFlight = true;

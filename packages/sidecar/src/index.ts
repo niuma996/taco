@@ -413,8 +413,8 @@ async function runDaemon(
         // window — the controller never fires jobs of its own, so
         // construction before scheduler.start() has no risk of recursion.
         const jobsController = new JobsController(jobStore, scheduler, jobsDir);
-        imHost.setJobsControl?.(jobsController);
-        schedulerSidecar.setJobsControl?.(jobsController);
+        imHost.setJobsControl(jobsController);
+        schedulerSidecar.setJobsControl(jobsController);
         await scheduler.start().catch((err: unknown) => {
             log.error(`scheduler failed to start: ${String(err)}`);
         });
@@ -501,10 +501,20 @@ async function runDaemon(
             liveDir: process.env.TACO_SIDECAR_RESOURCES,
             requestShutdown: async (reason) => {
                 log.info(`upgrade orchestrator: ${reason}; shutting down daemon`);
+                // Retire from the runtime dir before exiting. The pid file is
+                // how the next desktop decides whether a previous daemon
+                // exists; leaving it in place across this fast path makes a
+                // restarting desktop discover a daemon that stopped serving
+                // the moment this handler ran, fail three control pings
+                // against it, then SIGTERM it and wait out the grace period —
+                // up to 5.3s of cold-start latency caused entirely by the
+                // *previous* exit. See the matching rationale in the
+                // SIGINT/SIGTERM path below.
                 await closeServer(ndjsonServer);
                 await closeServer(controlServer);
                 unlinkSocketSync(socketPath);
                 unlinkSocketSync(controlSocketPath);
+                unlinkSocketSync(pidPath);
                 process.exit(0);
             },
         });
@@ -514,9 +524,33 @@ async function runDaemon(
             log.info(`caught ${sig}, shutting down daemon...`);
             scheduler.stop();
             upgradeOrchestrator.stop();
-            // Stop the resident first so its channels cancel before we tear down
-            // the socket listeners — long-poll / webhook handlers otherwise keep
-            // the event loop alive across process.exit.
+            // Retire from the runtime dir FIRST, before the slow teardown below.
+            // The pid file is how the next desktop decides whether a previous
+            // daemon exists; leaving it in place across a multi-second shutdown
+            // makes a restarting desktop discover a daemon that stopped serving
+            // the moment this handler ran, fail three control pings against it,
+            // then SIGTERM it and wait out the grace period — up to 5.3s of
+            // cold-start latency caused entirely by the *previous* exit. Closing
+            // the listeners and unlinking here means the next desktop sees no
+            // pid file (NoPidFile, the fast path) and spawns immediately, while
+            // this process finishes draining in the background.
+            //
+            // Ordering within this block matters: close the listeners before
+            // unlinking, so no connection is accepted against a path that is
+            // already gone. Unlinking early is also what makes it safe for the
+            // next daemon to bind a fresh inode while this one is still exiting
+            // — the unlinks below cannot then delete the *new* daemon's socket,
+            // because they have already run.
+            await closeServer(ndjsonServer);
+            await closeServer(controlServer);
+            unlinkSocketSync(socketPath);
+            unlinkSocketSync(controlSocketPath);
+            unlinkSocketSync(pidPath);
+            // Now the slow part, with no client able to reach us any more. The
+            // resident goes first so its channels cancel — long-poll / webhook
+            // handlers otherwise keep the event loop alive across process.exit.
+            // These awaits are why the teardown above must not be last: this
+            // stop() alone takes ~3s when a WeChat long-poll is in flight.
             await imHost.stop().catch((err: unknown) => {
                 log.error(`IM host stop failed: ${String(err)}`);
             });
@@ -527,11 +561,6 @@ async function runDaemon(
             await schedulerSidecar.stop().catch((err: unknown) => {
                 log.error(`scheduler runtime stop failed: ${String(err)}`);
             });
-            await closeServer(ndjsonServer);
-            await closeServer(controlServer);
-            unlinkSocketSync(socketPath);
-            unlinkSocketSync(controlSocketPath);
-            unlinkSocketSync(pidPath);
             process.exit(0);
         };
         const stopDaemon = shutdown;
@@ -635,21 +664,29 @@ async function main(): Promise<void> {
                 logPath,
                 `\n--- sidecar started pid=${process.pid} cwd=${process.cwd()} ${new Date().toISOString()} ---\n`,
             );
-            const origWrite = process.stderr.write.bind(process.stderr);
-            // Mirror the overloads of WriteStream.write so the tee is type-safe
-            // without `any`: a string/bytes chunk, an optional encoding or
-            // callback, and a trailing callback.
-            type StderrWrite = (
-                chunk: string | Uint8Array,
-                encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
-                callback?: (err?: Error | null) => void,
-            ) => boolean;
-            const tee: StderrWrite = (chunk, encodingOrCallback, callback) => {
-                fs.appendFile(logPath, chunk.toString()).catch(() => {});
-                return (origWrite as StderrWrite)(chunk, encodingOrCallback, callback);
-            };
-            process.stderr.write = tee;
-            log.info("stderr tee active -> " + logPath);
+            // One long-lived append stream, NOT fs.appendFile per line.
+            // appendFile does open+write+close per call and is fire-and-forget
+            // here, so a burst of stderr (skill diagnostics alone emit dozens of
+            // lines in one tick) puts thousands of concurrent opens in flight.
+            // Each holds an fd, so the daemon hit the macOS per-process limit
+            // (61440) within seconds — measured 61406 fds all pointing at this
+            // one log file — while the pending promises and retained chunks grew
+            // the heap past 2GB. The event loop wedged, every RPC timed out, and
+            // V8 aborted at the heap limit. Worse, it self-amplified: more log
+            // volume meant more fds meant more errors to log. A single stream
+            // holds exactly one fd and serializes writes internally.
+            const { installStderrTee } = await import("./lib/stderrTee.ts");
+            const handle = installStderrTee(logPath);
+            if (handle) {
+                log.info("stderr tee active -> " + handle.targetPath);
+                // process.on('exit') runs synchronously after the event loop
+                // drains — last chance to flush the mirror and restore
+                // process.stderr.write. Without this, the mirror stream
+                // holds an fd open across process replacement, and a
+                // captured-stderr parent sees Node's "process.stderr was
+                // mutated" warning with no way to attribute it.
+                process.on("exit", () => handle.dispose());
+            }
         } catch (err) {
             log.warn("failed to set up stderr tee: " + String(err));
         }

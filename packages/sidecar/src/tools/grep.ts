@@ -16,6 +16,7 @@ import fg from "fast-glob";
 import ignore from "ignore";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { scrubbedProcessEnv } from "../runtime/providerKeyStore.ts";
 import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";
 
 export type GrepTool = AgentHarnessTool<ExecutionToolContext>;
@@ -47,7 +48,7 @@ let rgAvailable: boolean | null = null;
 function hasRipgrep(): boolean {
     if (rgAvailable !== null) return rgAvailable;
     try {
-        const r = spawnSync("rg", ["--version"], { stdio: "ignore" });
+        const r = spawnSync("rg", ["--version"], { stdio: "ignore", env: scrubbedProcessEnv() });
         rgAvailable = r.status === 0;
     } catch {
         rgAvailable = false;
@@ -121,6 +122,7 @@ async function runRipgrep(
         encoding: "utf-8",
         maxBuffer: 8 * 1024 * 1024,
         input: ignoreContent,
+        env: scrubbedProcessEnv(),
     });
     if (r.status !== null && r.status > 1) throw new Error(r.stderr || "ripgrep failed");
     return (r.stdout ?? "").split("\n").filter((l) => l.length > 0);

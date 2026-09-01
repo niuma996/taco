@@ -5,7 +5,7 @@
  * metadata; they do not interact with the harness turn loop.
  */
 
-import { statSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
 import { createSessionId } from "@earendil-works/pi-agent-core";
 import type {
@@ -211,7 +211,7 @@ async function buildSessionEntry(
     // clients fall back to createdAt, and never take down the whole list.
     let updatedAt: string | undefined;
     try {
-        updatedAt = statSync(m.path).mtime.toISOString();
+        updatedAt = (await stat(m.path)).mtime.toISOString();
     } catch {
         updatedAt = undefined;
     }

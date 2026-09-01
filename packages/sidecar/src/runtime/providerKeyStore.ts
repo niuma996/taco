@@ -25,6 +25,24 @@ export function isInjectedEnvKey(key: string): boolean {
     return injectedEnvKeys.has(key);
 }
 
+/**
+ * Subprocess env that drops every `*_API_KEY` ProviderKeyStore mirrored into
+ * process.env. Use this for any child process spawned from the sidecar — even
+ * well-known CLIs (rg, rg-like ripgrep, git, login shells) inherit process.env
+ * by default, so a leaked key shows up in the child's `ps e`, `.bashrc`, or
+ * debug logs without this filter. Only keys ProviderKeyStore wrote are removed;
+ * the user's own shell-set keys (e.g. `GOOGLE_API_KEY` they exported manually)
+ * stay put, matching the `tools/shell.ts` policy.
+ */
+export function scrubbedProcessEnv(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+        if (v === undefined || isInjectedEnvKey(k)) continue;
+        out[k] = v;
+    }
+    return out;
+}
+
 export class ProviderKeyStore implements CredentialStore {
     private apiKeys: Record<string, string>;
     /** Per-provider promise chain, satisfying CredentialStore.modify's serialization contract. */

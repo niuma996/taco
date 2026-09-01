@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CURRENT_SESSION_FORMAT_VERSION, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
+import { FAST_RPC_METHODS, FAST_RPC_TIMEOUT_MS } from "@taco-ai/shared";
 import { TacoClient } from "../../src/lib/clients/tacoClient.ts";
 import type { SidecarClient, SidecarExit, SidecarFrame } from "../../src/lib/sidecar.ts";
 
@@ -94,7 +95,33 @@ class FakeSidecarClient implements SidecarClient {
     emitExit(exit: SidecarExit): void {
         this.exitHandler?.(exit);
     }
+
+    /** Push a synthetic response frame as if the server sent it. Tests use this
+     *  to inject not_initialized errors or success results for non-initialize
+     *  RPCs (which the fake otherwise leaves unanswered). */
+    emitResponse(id: string, ok: boolean, payload: Record<string, unknown>): void {
+        this.pushHandler?.({
+            line: JSON.stringify({ id, ok, ...payload }),
+        });
+    }
+
+    /** Look up the most recent non-initialize frame's id. */
+    lastNonInitializeId(): string | undefined {
+        for (let i = this.sent.length - 1; i >= 0; i--) {
+            const frame = this.sent[i].frame as { method?: string; id?: string };
+            if (frame.method !== "initialize" && typeof frame.id === "string") {
+                return frame.id;
+            }
+        }
+        return undefined;
+    }
 }
+
+/** Real-timer sleep. The suite deliberately avoids `mock.timers`: it is
+ *  global mutable state, and six existing tests depend on real 10s / 800ms
+ *  timings that a leaked reset would silently break. The fast-tier tests
+ *  below therefore wait for real time, matching the suite's existing style. */
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 test("desktop client waits for initialize and rejects pending RPC when its sidecar exits", async () => {
     const sidecar = new FakeSidecarClient();
@@ -530,5 +557,159 @@ test("PR4: multiple sidecar exits during one reconnect only schedule one loop", 
     // (A second loop would call apply again before clearing the marker.)
     assert.strictEqual(sidecar.upgradeApplyCalls, 1);
 
+    await client.dispose();
+});
+
+test("call() self-heals a not_initialized error from a stale connection", async () => {
+    // The daemon rejects non-initialize RPCs with not_initialized when the
+    // per-connection handshake state isn't current (e.g. the desktop reconnected
+    // after a daemon restart and its first call lands before the new handshake
+    // settles). Without the retry, the user sees a 1000s dispatcher timeout;
+    // with it, call() awaits the new handshake and succeeds.
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+
+    const first = client.call<unknown, { ok: boolean }>("/workspace/a", "session.list", {
+        workspace: "/workspace/a",
+    });
+    // Wait one tick so sendOnce registers the pending before we push a response.
+    await Promise.resolve();
+    const firstId = sidecar.lastNonInitializeId();
+    assert.ok(firstId, "expected a sent frame for session.list");
+    // Server-side response: not_initialized. The call() retry path catches
+    // this and re-sends once the new handshake resolves.
+    sidecar.emitResponse(firstId, false, {
+        error: { code: "not_initialized", message: "stale connection" },
+    });
+
+    // After the retry, the dispatcher must re-send the same RPC and get a
+    // success response. Wait for the new send to land, then respond with ok.
+    await new Promise((resolve) => setImmediate(resolve));
+    const secondId = sidecar.lastNonInitializeId();
+    assert.ok(secondId, "expected a re-sent frame after not_initialized");
+    assert.notEqual(
+        secondId,
+        firstId,
+        "retry must use a fresh RPC id (the dispatcher rotates ids per send)",
+    );
+    sidecar.emitResponse(secondId, true, { result: { ok: true } });
+
+    const result = await first;
+    assert.deepEqual(result, { ok: true });
+    await client.dispose();
+});
+
+test("call() does not retry not_initialized when the handshake itself fails", async () => {
+    // The retry path re-runs ensureInitialized + awaitHandshake. If the
+    // reconnect handshake fails (daemon gone, no initialize ack), the retry's
+    // pending RPC must surface a real error rather than silently looping or
+    // masking it as the original not_initialized. We use a short
+    // rpcTimeoutMs so the unreplied retry deterministically rejects instead of
+    // sitting on the dispatcher's 1,000,000ms default.
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar, rpcTimeoutMs: 80 });
+    await client.start("/workspace/a");
+
+    const first = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
+    await Promise.resolve();
+    const firstId = sidecar.lastNonInitializeId();
+    assert.ok(firstId);
+    sidecar.emitResponse(firstId, false, {
+        error: { code: "not_initialized", message: "stale connection" },
+    });
+    // Daemon dies AND will not ack the retry's reconnect handshake. Without
+    // ackInitialize, the retry's ensureInitialized handshake hangs on the
+    // dispatcher timeout — but the retry's own sendOnce also times out,
+    // surfacing the error rather than blocking forever.
+    sidecar.ackInitialize = false;
+    sidecar.emitExit({ code: 1 });
+
+    await assert.rejects(first);
+    await client.dispose();
+});
+
+test("fast-tier RPCs are bounded when the daemon handshakes then goes silent", async () => {
+    // Regression guard for the empty-sidebar cold start. The daemon accepts the
+    // connection and completes `initialize`, then never answers anything else
+    // (measured in the field: an OOM-dying daemon behaves exactly like this).
+    // Before the tiered ceiling, `session.list` inherited the 1,000,000ms
+    // default, so initFromStorage's await never settled and the sidebar stayed
+    // empty with no error to catch. Uses fake timers so the test does not sit
+    // for the real 15s.
+    const sidecar = new FakeSidecarClient();
+    // No rpcTimeoutMs: exercise the production default, which is what the
+    // desktop constructs in App.tsx.
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+    // The fake never answers non-initialize RPCs, which is exactly the wedged
+    // daemon we need: handshake fine, everything after it silent.
+
+    const pending = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
+    let settled: "pending" | "rejected" = "pending";
+    const watched = pending.then(
+        () => {
+            settled = "pending";
+        },
+        () => {
+            settled = "rejected";
+        },
+    );
+
+    // Just before the fast ceiling: still in flight.
+    await sleep(FAST_RPC_TIMEOUT_MS - 1000);
+    assert.strictEqual(settled, "pending", "must not bail before the fast ceiling");
+
+    // Crossing it must reject rather than hang until the long default.
+    await sleep(2000);
+    await watched;
+    assert.strictEqual(settled, "rejected", "fast-tier RPC must be bounded");
+    await assert.rejects(pending, /RPC timeout after 15000ms: session\.list/);
+    await client.dispose();
+});
+
+test("model-bound RPCs keep the long ceiling and are not truncated", async () => {
+    // The other half of the contract: a `session.prompt` can legitimately
+    // stream for minutes, so it must NOT inherit the fast ceiling. If this
+    // regresses, long agent turns would abort at 15s.
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+    await client.start("/workspace/a");
+
+    const pending = client.call("/workspace/a", "session.prompt", { workspace: "/workspace/a" });
+    let rejected = false;
+    void pending.catch(() => {
+        rejected = true;
+    });
+
+    // Past the fast ceiling — a prompt must still be in flight. We only need
+    // to clear 15s to prove it was not truncated there; waiting out the real
+    // ~16.7min default would be absurd, and membership is asserted below.
+    await sleep(FAST_RPC_TIMEOUT_MS + 2000);
+    assert.strictEqual(rejected, false, "prompt must not be cut off at the fast ceiling");
+    // Belt and braces: the classification itself is the contract.
+    assert.ok(!FAST_RPC_METHODS.has("session.prompt"), "prompt must not be fast-tier");
+    assert.ok(FAST_RPC_METHODS.has("session.list"), "session.list must be fast-tier");
+
+    await client.dispose();
+    await pending.catch(() => {});
+});
+
+test("an explicit rpcTimeoutMs overrides the fast tier in both directions", async () => {
+    // Callers that pass an explicit bound get exactly that bound. The existing
+    // suite relies on this (several tests pass 50ms and expect it to apply to
+    // session.list, which is fast-tier), and a caller asking for a tighter
+    // bound must not be handed the looser 15s one.
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar, rpcTimeoutMs: 50 });
+    await client.start("/workspace/a");
+
+    // assert.rejects awaits the promise itself — attaching the handler up front
+    // matters here: the rejection fires at 50ms, so any intervening `sleep`
+    // would leave it briefly unhandled and the test runner fails the file.
+    await assert.rejects(
+        client.call("/workspace/a", "session.list", { workspace: "/workspace/a" }),
+        /RPC timeout after 50ms: session\.list/,
+    );
     await client.dispose();
 });

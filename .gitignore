@@ -27,6 +27,10 @@ docs/superpowers/
 .release-staging/
 .taco/
 
+# V8 heap snapshots — emitted by --heapsnapshot-near-heap-limit=1 in debug
+# builds. Debug-only artifacts that should never be committed.
+Heap.*.heapsnapshot
+
 # Test / coverage output
 coverage/
 

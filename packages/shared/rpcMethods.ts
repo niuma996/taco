@@ -83,3 +83,62 @@ export const RPC = {
 } as const;
 
 export type RpcMethodName = (typeof RPC)[keyof typeof RPC];
+
+/**
+ * Methods that must answer promptly or not at all.
+ *
+ * These are pure reads: the server answers from disk or memory without waiting
+ * on a model, a subprocess, or the network. A daemon that has accepted the
+ * connection and finished the handshake but cannot answer one of these within
+ * seconds is not "busy", it is broken — and the caller is better served by an
+ * error it can retry or surface than by a promise that never settles.
+ *
+ * The distinction matters because the default RPC ceiling is deliberately huge
+ * (a `session.prompt` can legitimately stream for many minutes). Applying that
+ * ceiling to a metadata read is what let a wedged daemon leave the desktop's
+ * sidebar empty with nothing to catch: the await simply never returned.
+ *
+ * Deliberately NOT in this set:
+ *   - session.prompt / steer / compact / submitAnswers — model-bound, unbounded
+ *     by nature.
+ *   - provider.listModels — reaches out to a user-configured HTTP endpoint.
+ *   - channels.* bind/verify — waits on a human completing a flow.
+ *   - checkpoints.restore, memory.write, *.create/update/delete — mutations,
+ *     where a spurious timeout could leave the caller unsure whether the write
+ *     landed. A slow mutation is a lesser evil than an ambiguous one.
+ */
+export const FAST_RPC_METHODS: ReadonlySet<string> = new Set<string>([
+    RPC.workspaceList,
+    RPC.sessionList,
+    RPC.sessionHistory,
+    RPC.sessionEventsGet,
+    RPC.sessionSnapshotGet,
+    RPC.sessionTasksGet,
+    RPC.sessionTaskHistoryGet,
+    RPC.sessionPlanStateGet,
+    RPC.sessionListModels,
+    RPC.sessionContextInfo,
+    RPC.providersList,
+    RPC.settingsGet,
+    RPC.extensionsStatus,
+    RPC.channelsList,
+    RPC.channelsListConversations,
+    RPC.imPolicyGet,
+    RPC.toolsList,
+    RPC.agentsList,
+    RPC.agentsContent,
+    RPC.skillsList,
+    RPC.skillContent,
+    RPC.checkpointsList,
+    RPC.memoryList,
+    RPC.mcpListServers,
+    RPC.mcpGetConfig,
+]);
+
+/**
+ * Ceiling for `FAST_RPC_METHODS`. 15s is far above any healthy local read
+ * (measured: a 31MB / 262-file session store answers `session.list` in
+ * milliseconds) while still leaving room for a loaded machine mid-cold-start,
+ * where the daemon may be competing with the app's own startup for CPU.
+ */
+export const FAST_RPC_TIMEOUT_MS = 15_000;

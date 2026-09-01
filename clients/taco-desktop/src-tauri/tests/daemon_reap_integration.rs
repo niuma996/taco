@@ -510,3 +510,80 @@ fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
     responder.join().expect("control responder panicked");
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
+    // Ghost-socket case: an alive daemon whose NDJSON socket fs entry has
+    // disappeared (the original 47407 incident). The reap path MUST kill the
+    // daemon, not just unlink the missing socket — otherwise the live inode
+    // stays held via fd, the next spawn's bind() fails with EADDRINUSE, and
+    // ghost daemons accumulate on every desktop restart.
+    let dir = std::path::PathBuf::from("/tmp").join(format!(
+        "taco-ghost-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("run")).unwrap();
+
+    let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
+
+    // Spawn a long-lived helper that the reap will kill. We deliberately do
+    // NOT create the NDJSON socket file — that's the ghost condition.
+    // Note: we do NOT detach via setsid — see the assertion comment below
+    // for why a child-process kill can't be observed via `kill -0`.
+    let mut helper = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 30")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to spawn helper");
+    let ghost_pid = helper.id();
+
+    fs::write(
+        dir.join("run").join("sidecar.pid"),
+        format!(
+            r#"{{"version":1,"pid":{},"install_id":"{}","started_at":"2026-08-19T10:00:00.000Z"}}"#,
+            ghost_pid, own_id
+        ),
+    )
+    .unwrap();
+
+    let inputs = ReapInputs {
+        pid_file: dir.join("run").join("sidecar.pid"),
+        socket_path: dir.join("run").join("sidecar.sock"),
+        control_socket_path: dir.join("run").join("sidecar-ctl.sock"),
+        own_install_id: &own_id,
+        resources_root: PathBuf::from("/fake/install"),
+    };
+
+    let outcome = reap_previous_daemon(&inputs, None);
+    match &outcome {
+        ReapOutcome::Stale { pid, last_signal } => {
+            assert_eq!(*pid, ghost_pid, "Stale.pid must equal ghost_pid");
+            // The reap must have escalated to SIGTERM or SIGKILL — anything
+            // else (e.g. "stale-pidfile") means it took the dead-pid branch
+            // and skipped the kill entirely.
+            assert!(
+                *last_signal == "SIGTERM" || *last_signal == "SIGKILL",
+                "ghost daemon must be killed (got last_signal={})",
+                last_signal
+            );
+        }
+        other => panic!("expected Stale outcome, got {:?}", other),
+    }
+
+    assert!(!dir.join("run").join("sidecar.pid").exists());
+    // We intentionally do NOT assert `kill -0 ghost_pid` here. The reap's
+    // pid_alive helper is satisfied by zombies — the helper becomes a zombie
+    // owned by this test process until `helper.wait()` is called below, and
+    // the reap has no way to distinguish a running process from a zombie.
+    // Real-world daemons are reparented to launchd on setsid, which reaps
+    // them immediately; the test helper is not detached. The last_signal
+    // assertion above is the load-bearing check — it proves the reap walked
+    // the kill branch, which is the regression we're guarding against.
+    let _ = force_kill(ghost_pid);
+    let _ = helper.wait();
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+import { scrubbedProcessEnv } from "../../../runtime/providerKeyStore.ts";
 import { tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
@@ -96,6 +97,7 @@ async function probeGit(cwd: string): Promise<GitProbeResult> {
     try {
         await execFileAsync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {
             timeout: 2000,
+            env: scrubbedProcessEnv(),
         });
         setProbeCache(cwd, { ok: true, at: Date.now() });
         return { ok: true };
@@ -127,7 +129,7 @@ async function readRecentCommits(cwd: string, n: number): Promise<Commit[]> {
             "--shortstat",
             `--stat=${STAT_FILE_LIMIT}`,
         ],
-        { timeout: 5000, maxBuffer: 256 * 1024 },
+        { timeout: 5000, maxBuffer: 256 * 1024, env: scrubbedProcessEnv() },
     );
     const stdout = out.stdout.trim();
     if (!stdout) return [];
@@ -187,7 +189,11 @@ interface UncommittedFiles {
  */
 export async function readUncommittedFiles(cwd: string): Promise<UncommittedFiles> {
     const run = (args: string[]): Promise<{ code: number; stdout: string }> =>
-        execFileAsync("git", ["-C", cwd, ...args], { timeout: 3000, maxBuffer: 64 * 1024 })
+        execFileAsync("git", ["-C", cwd, ...args], {
+            timeout: 3000,
+            maxBuffer: 64 * 1024,
+            env: scrubbedProcessEnv(),
+        })
             .then((out) => ({ code: 0, stdout: out.stdout }))
             .catch((e: unknown) => {
                 const err = e as { code?: number; stdout?: string };
