@@ -234,10 +234,7 @@ describe("CheckpointStore", () => {
         writeFileSync(ctx.file("a.ts"), "x");
         await ctx.store.create({ sessionId: "s1", label: "t1", paths: [ctx.file("a.ts")] });
         const indexPath = readdirSync(join(ctx.home, "checkpoints"))[0];
-        writeFileSync(
-            join(ctx.home, "checkpoints", indexPath, "index.json"),
-            "{ not json",
-        );
+        writeFileSync(join(ctx.home, "checkpoints", indexPath, "index.json"), "{ not json");
 
         assert.deepEqual(await ctx.store.list(), []);
     });
@@ -246,10 +243,9 @@ describe("CheckpointStore", () => {
         writeFileSync(ctx.file("a.ts"), "x");
         await ctx.store.create({ sessionId: "s1", label: "t1", paths: [ctx.file("a.ts")] });
 
-        const other = new CheckpointStore(
-            join(ctx.workspace, "..", "other-ws"),
-            { home: ctx.home },
-        );
+        const other = new CheckpointStore(join(ctx.workspace, "..", "other-ws"), {
+            home: ctx.home,
+        });
         assert.deepEqual(await other.list(), []);
     });
 });

@@ -868,26 +868,12 @@ export class SidecarServer implements ServerRpcSurface {
 
     /**
      * Scan skill directories and return the deduped, frontmatter-stamped
-     * skill list. Extracted from `loadWorkspaceAssets` so hot reload
-     * (WorkspaceRuntime's `reloadSkills` callback) can re-run exactly this
-     * path instead of a second, drifting copy.
+     * skill list (sources tagged for `skills.list` RPC and SkillsPane).
+     * Extracted from `loadWorkspaceAssets` so hot reload can re-run this
+     * exact path instead of a second, drifting copy.
      *
-     * Aggregate skills from multiple sources (<cwd>/.taco/skills +
-     * $TACO_HOME/skills + ~/.claude/skills + ~/.pi/skills + builtin
-     * skills/builtin, see defaultSkillDirs). loadSourcedSkills tags each
-     * entry with its source, and mapSkill stamps the source onto TacoSkill
-     * so skills.list RPC and the SkillsPane UI can distinguish builtin vs
-     * user skills.
-     *
-     * SlashNormalizedExecutionEnv wraps NodeExecutionEnv so listDir /
-     * fileInfo / canonicalPath return forward-slash paths even on
-     * Windows. pi-agent-core's `relativeEnvPath` compares paths with
-     * `path.startsWith(root + "/")` and falls back to returning the
-     * absolute path unchanged when separators don't match — on Windows
-     * that makes the `ignore` package throw "path should be a
-     * path.relative()'d string". Combined with `defaultSkillDirs`
-     * (also forward-slash normalized) both sides of the comparison are
-     * in `/` form and the scan succeeds.
+     * Sources come from `defaultSkillDirs` in priority order (.taco/skills
+     * → $TACO_HOME/skills → ~/.claude/skills → ~/.pi/skills → builtin).
      */
     private async loadSkills(
         fsCwd: string,
@@ -898,6 +884,15 @@ export class SidecarServer implements ServerRpcSurface {
         // map (the cold-start case) is a no-op, so cold start and reload
         // run the identical sequence rather than diverging.
         clearSkillFrontmatterCache();
+
+        // SlashNormalizedExecutionEnv wraps NodeExecutionEnv so listDir /
+        // fileInfo / canonicalPath return forward-slash paths even on
+        // Windows. pi-agent-core's `relativeEnvPath` compares with
+        // `path.startsWith(root + "/")` and falls back to the unchanged
+        // absolute path when separators don't match — on Windows that
+        // makes `ignore` throw "path should be a path.relative()'d
+        // string". Combined with `defaultSkillDirs` (also forward-slash
+        // normalized) both sides of the comparison agree.
         const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
         const loaded = await loadSourcedSkills(
             skillEnv,

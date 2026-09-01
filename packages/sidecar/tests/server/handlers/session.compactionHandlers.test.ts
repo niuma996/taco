@@ -32,9 +32,7 @@ function makeNotAttachedCtx(): Parameters<
         cwd: "/tmp/ws",
         server: {},
         params: { workspace: "/tmp/ws", sessionId: "sid" },
-    } as unknown as Parameters<
-        NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-    >[0];
+    } as unknown as Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0];
 }
 
 /** Drive a handler that should reject with RpcHandlerError("invalid_state"). */

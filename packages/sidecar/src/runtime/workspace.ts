@@ -894,25 +894,20 @@ export class WorkspaceRuntime extends EventEmitter {
 
     /**
      * Re-scan skill directories and apply the result: `resources.skills`,
-     * the workspace's baked `systemPrompt` (used by every subsequent
-     * `attach`), every attached session's live `skill`-tool lookup
-     * (`SessionRegistry.updateSkills`), and `skillDiagnostics` all pick up the
-     * new scan. Diagnostics are replaced, not merged — they describe the
-     * current on-disk state, so a fixed file must stop being reported.
-     *
-     * Does NOT retroactively edit an already-attached session's own baked
-     * system prompt — same limitation `updateInstructionsConfig` /
-     * `parentInstructionsBlock` accept today. A session that was open before
-     * this call won't spontaneously learn a brand-new skill exists until
-     * it's re-attached, but it CAN still invoke one by name (the `skill`
-     * tool's lookup is live), and it sees frontmatter changes to skills it
-     * already knew about immediately.
-     *
-     * Concurrent calls (multiple fs-change bursts, or an explicit call
-     * racing a debounced one) collapse into a single in-flight scan via
-     * `skillReloadFlight` — same SingleFlight pattern SidecarServer uses for
-     * cold-start workspace builds.
+     * the workspace's baked `systemPrompt`, every attached session's live
+     * `skill`-tool lookup (`SessionRegistry.updateSkills`), and
+     * `skillDiagnostics` all pick up the new scan. Diagnostics are
+     * replaced, not merged — they describe the current on-disk state.
      */
+    // Caveat: does NOT retroactively edit an already-attached session's
+    // own baked system prompt — same limitation `updateInstructionsConfig`
+    // accepts today. A session that was open before this call won't learn
+    // a brand-new skill exists until it's re-attached, but it CAN still
+    // invoke one by name and sees frontmatter changes immediately.
+    // Concurrent calls (multiple fs-change bursts, or an explicit call
+    // racing a debounced one) collapse into a single in-flight scan via
+    // `skillReloadFlight` — same SingleFlight pattern SidecarServer uses
+    // for cold-start workspace builds.
     async reloadSkillsNow(): Promise<void> {
         if (!this.reloadSkillsCallback) return;
         const { skills, diagnostics } = await this.skillReloadFlight.run("skills");
