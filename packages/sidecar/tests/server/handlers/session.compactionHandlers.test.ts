@@ -19,31 +19,40 @@ before(() => {
     registerBuiltinMethods();
 });
 
+/** Build a MethodCtx whose workspace.getAttached returns undefined, so the
+ *  handler must short-circuit with invalid_state before any AttachedSession
+ *  method runs. */
+function makeNotAttachedCtx(): Parameters<
+    NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+>[0] {
+    const workspace = { getAttached: () => undefined };
+    return {
+        id: "test-id",
+        workspace,
+        cwd: "/tmp/ws",
+        server: {},
+        params: { workspace: "/tmp/ws", sessionId: "sid" },
+    } as unknown as Parameters<
+        NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+    >[0];
+}
+
+/** Drive a handler that should reject with RpcHandlerError("invalid_state"). */
+async function expectInvalidStateNotAttached(method: string): Promise<void> {
+    const handler = getRegisteredMethod(method);
+    assert.ok(handler, `${method} handler must be registered`);
+    await assert.rejects(handler.handler(makeNotAttachedCtx()), (e: unknown) => {
+        return (
+            e instanceof RpcHandlerError &&
+            e.code === "invalid_state" &&
+            /not attached/i.test(e.message)
+        );
+    });
+}
+
 describe("session.compact handler", () => {
     it("returns invalid_state when session is not attached", async () => {
-        const workspace = {
-            getAttached() {
-                return undefined;
-            },
-        };
-        const ctx = {
-            id: "test-id",
-            workspace,
-            cwd: "/tmp/ws",
-            server: {},
-            params: { workspace: "/tmp/ws", sessionId: "sid" },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-        const handler = getRegisteredMethod("session.compact");
-        assert.ok(handler);
-        await assert.rejects(handler.handler(ctx), (e: unknown) => {
-            return (
-                e instanceof RpcHandlerError &&
-                e.code === "invalid_state" &&
-                /not attached/i.test(e.message)
-            );
-        });
+        await expectInvalidStateNotAttached("session.compact");
     });
 
     it("forwards to AttachedSession.compact when attached", async () => {
@@ -117,29 +126,7 @@ describe("session.compact handler", () => {
 
 describe("session.contextInfo handler", () => {
     it("returns invalid_state when session is not attached", async () => {
-        const workspace = {
-            getAttached() {
-                return undefined;
-            },
-        };
-        const ctx = {
-            id: "test-id",
-            workspace,
-            cwd: "/tmp/ws",
-            server: {},
-            params: { workspace: "/tmp/ws", sessionId: "sid" },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-        const handler = getRegisteredMethod("session.contextInfo");
-        assert.ok(handler);
-        await assert.rejects(handler.handler(ctx), (e: unknown) => {
-            return (
-                e instanceof RpcHandlerError &&
-                e.code === "invalid_state" &&
-                /not attached/i.test(e.message)
-            );
-        });
+        await expectInvalidStateNotAttached("session.contextInfo");
     });
 
     it("forwards to AttachedSession.getContextInfo and returns its shape", async () => {

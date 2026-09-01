@@ -35,25 +35,17 @@ describe("evaluateCommand", () => {
         assert.equal(result.source, "rule");
     });
 
-    it("matches a wildcard pattern rule", () => {
-        const result = evaluateCommand("mmx search query --q hi", {
-            ...askConfig,
-            rules: ["mmx *"],
+    for (const { cmd, rule } of [
+        { cmd: "mmx search query --q hi", rule: "mmx *" },
+        { cmd: "npm install", rule: "npm *" },
+    ]) {
+        it(`matches ${cmd} via wildcard rule ${rule}`, () => {
+            const result = evaluateCommand(cmd, { ...askConfig, rules: [rule] });
+
+            assert.equal(result.behavior, "allow");
+            assert.equal(result.source, "rule");
         });
-
-        assert.equal(result.behavior, "allow");
-        assert.equal(result.source, "rule");
-    });
-
-    it("matches a command via wildcard rule (legacy `X:*` prefix is now `X *`)", () => {
-        const result = evaluateCommand("npm install", {
-            ...askConfig,
-            rules: ["npm *"],
-        });
-
-        assert.equal(result.behavior, "allow");
-        assert.equal(result.source, "rule");
-    });
+    }
 
     it("does not match a wildcard pattern with different base command", () => {
         const result = evaluateCommand("mmxly foo", {
