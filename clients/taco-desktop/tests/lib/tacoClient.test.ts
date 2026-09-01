@@ -130,6 +130,10 @@ test("desktop client waits for initialize and rejects pending RPC when its sidec
 
     const pending = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
     // initialize + the session.list RPC = 2 frames sent.
+    // `await Promise.resolve()` flushes the microtask that `ensureInitialized`
+    // schedules inside `call()` (added by the cold-start hardening pass to close
+    // the race where initialize + session.list arrived in one socket batch).
+    await Promise.resolve();
     assert.equal(sidecar.sent.length, 2);
     // Process-level exit — no workspace field.
     sidecar.emitExit({ code: 1 });
