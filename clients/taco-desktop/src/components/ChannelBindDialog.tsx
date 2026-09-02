@@ -6,9 +6,10 @@
  * dialog holds no polling of its own.
  */
 import * as Dialog from "@radix-ui/react-dialog";
-import type { ChannelStatusEntry } from "@taco-ai/protocol";
+import type { ChannelStatusEntry, ChannelsBindCreds } from "@taco-ai/protocol";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
+import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane";
 import { useT } from "../i18n/useI18n";
 import { Button } from "./ui/Button.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
@@ -20,15 +21,22 @@ export interface ChannelBindDialogProps {
      *  the dialog stuck on "connecting" with the reason only in the log. */
     error?: string | null;
     onSubmitVerifyCode: (requestId: string, code: string) => Promise<boolean>;
+    /** Bind with pasted credentials; only invoked for channels without a QR
+     *  flow (weCom today). The dialog decides when this fires — the App
+     *  layer only opens the dialog, never the RPC. */
+    onBindCreds: (creds: ChannelsBindCreds) => void;
     onCancel: () => void;
 }
 
 export function ChannelBindDialog(props: ChannelBindDialogProps) {
-    const { open, channel, error, onSubmitVerifyCode, onCancel } = props;
+    const { open, channel, error, onSubmitVerifyCode, onBindCreds, onCancel } = props;
     const { t } = useT();
     const inputRef = useRef<HTMLInputElement>(null);
     const [code, setCode] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [wecomBotId, setWecomBotId] = useState("");
+    const [wecomSecret, setWecomSecret] = useState("");
+    const [wecomSubmitted, setWecomSubmitted] = useState(false);
 
     const state = channel?.state;
     const requestId = channel?.requestId;
@@ -43,17 +51,34 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
         setCode("");
     }
 
+    // Reset wecom creds form whenever the dialog switches channels.
+    const [lastChannelId, setLastChannelId] = useState(channel?.channelId);
+    if (channel?.channelId !== lastChannelId) {
+        setLastChannelId(channel?.channelId);
+        setWecomSubmitted(false);
+        setWecomBotId("");
+        setWecomSecret("");
+    }
+
     const trimmed = code.trim();
     const canSubmit = trimmed.length > 0 && !submitting && requestId !== undefined;
+
+    const isWeCom = channel?.name === CHANNEL_NAME_WECOM;
+    // Show the credential form for wecom until the user submits it. This
+    // covers both first-time Bind (unbound) and Rebind (already connected) —
+    // for the latter the user is here to change creds, and the boundHint
+    // auto-close below would otherwise yank the dialog shut.
+    const wecomCredsMode = isWeCom && !wecomSubmitted;
 
     // Bound → show a success line, then close. Without the branch the dialog
     // re-renders as just a title + Close on the transition to connected.
     const isConnected = state === "connected";
     useEffect(() => {
         if (!isConnected) return;
+        if (wecomCredsMode) return;
         const timer = window.setTimeout(onCancel, 900);
         return () => window.clearTimeout(timer);
-    }, [isConnected, onCancel]);
+    }, [isConnected, wecomCredsMode, onCancel]);
 
     const submit = async () => {
         if (!canSubmit || requestId === undefined) return;
@@ -63,6 +88,14 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
         } finally {
             setSubmitting(false);
         }
+    };
+
+    const submitWecomCreds = () => {
+        const botId = wecomBotId.trim();
+        const secret = wecomSecret.trim();
+        if (!botId || !secret) return;
+        setWecomSubmitted(true);
+        onBindCreds({ botId, secret });
     };
 
     return (
@@ -103,6 +136,45 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
 
                     {state === "scanned" && (
                         <p className="channel-bind-hint">{t("channels.scannedHint")}</p>
+                    )}
+
+                    {wecomCredsMode && (
+                        <form
+                            className="channel-bind-form"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                submitWecomCreds();
+                            }}
+                        >
+                            <p className="channel-bind-hint">{t("channels.wecomHint")}</p>
+                            <TextInput
+                                ref={inputRef}
+                                type="text"
+                                value={wecomBotId}
+                                placeholder={t("channels.wecomBotIdPlaceholder")}
+                                aria-label={t("channels.wecomBotId")}
+                                onChange={(e) => setWecomBotId(e.target.value)}
+                            />
+                            <TextInput
+                                type="password"
+                                value={wecomSecret}
+                                placeholder={t("channels.wecomSecretPlaceholder")}
+                                aria-label={t("channels.wecomSecret")}
+                                onChange={(e) => setWecomSecret(e.target.value)}
+                            />
+                            <div className="modal-actions">
+                                <Button variant="ghost" onClick={onCancel}>
+                                    {t("channels.cancel")}
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    variant="primary"
+                                    disabled={!wecomBotId.trim() || !wecomSecret.trim()}
+                                >
+                                    {t("channels.connect")}
+                                </Button>
+                            </div>
+                        </form>
                     )}
 
                     {state === "awaiting_verify_code" && (

@@ -15,7 +15,8 @@
     "node": ">=22"
   },
   "optionalDependencies": {
-    "@wechatbot/wechatbot": "2.2.0"
+    "@wechatbot/wechatbot": "2.2.0",
+    "@wecom/aibot-node-sdk": "1.0.7"
   },
   "license": "MIT",
   "repository": "github:niuma996/taco",

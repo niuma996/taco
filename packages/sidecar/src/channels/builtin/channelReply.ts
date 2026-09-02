@@ -1,7 +1,7 @@
 /**
- * Turns the sidecar push stream into WeChat-bound text.
+ * Turns the sidecar push stream into channel-bound text.
  *
- * A channel receives every frame for its im:// workspaces, but a WeChat peer
+ * A channel receives every frame for its im:// workspaces, but a channel peer
  * should only see the agent's final answer — thinking blocks, tool calls and
  * tool results are noise in a chat window. Pure functions so this is testable
  * without the SDK or a live socket.

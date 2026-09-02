@@ -430,7 +430,13 @@
     "emptyConversations": "暂无 IM 对话。给已绑定的渠道发一条消息即可建立。",
     "unreadAria": "{{count}} 条未读",
     "boundHint": "渠道已绑定,可关闭此弹窗。",
-    "imBanner": "实时回复 — 此处发送会直接送达 {{peer}} 的微信。"
+    "imBanner": "实时回复 — 此处发送会直接送达 {{peer}} 的微信。",
+    "wecomHint": "请填入企业微信智能机器人后台的 botId 与 secret。",
+    "wecomBotId": "企业微信 botId",
+    "wecomSecret": "企业微信 secret",
+    "wecomBotIdPlaceholder": "机器人 ID",
+    "wecomSecretPlaceholder": "密钥",
+    "connect": "连接"
   },
   "modelMenu": {
     "command": "命令",

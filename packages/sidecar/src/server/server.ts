@@ -215,7 +215,7 @@ export interface SidecarServerOptions {
      */
     imHost?: ServerRpcSurface;
     /**
-     * Process-level fan-out registry for desktop transports (Phase 2). The
+     * Process-level fan-out registry for desktop transports. The
      * resident uses it to deliver IM push frames to every connected
      * desktop's NDJSON transport so an already-open IM session view stays
      * live (new peer messages, mid-turn updates). Constructed once by
@@ -492,8 +492,12 @@ export class SidecarServer implements ServerRpcSurface {
             // peer's first message has created the session. On both owner
             // and non-owner, `this.conversationRouter` is the (injected or
             // loaded) shared router, so route lookups stay consistent.
-            resolvePeer: (sessionId) =>
-                this.conversationRouter?.findRouteBySessionId(sessionId)?.peerId,
+            //
+            // findRouteBySessionId already returns the full (channelId,
+            // peerId, chatId) triple; channels consume the slice they need
+            // (wechat → peerId, wecom → chatId). Keeping one resolver avoids
+            // the two overlapping seams a separate resolvePeer would create.
+            resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
             // Broadcast a workspace-dimensioned notice (e.g. the policy
             // interrupt notice) to every peer routed through a channel.
             listPeers: (channelId) =>
@@ -1563,7 +1567,7 @@ export class SidecarServer implements ServerRpcSurface {
             // new instance is not bindable until the sidecar restarts.
             return { channelId: id, requiresRestart: true };
         },
-        bind: async (channelId, force): Promise<ChannelsBindResult> => {
+        bind: async (channelId, force, creds): Promise<ChannelsBindResult> => {
             const cfg = this.channelConfigs.find((c) => c.channelId === channelId);
             if (!cfg) throw new Error(`unknown channelId: ${channelId}`);
             if (!this.channelRegistry.has(channelId)) {
@@ -1571,8 +1575,10 @@ export class SidecarServer implements ServerRpcSurface {
             }
             // Login is deliberately not awaited: the QR flow needs many
             // seconds of human interaction, and progress is reported through
-            // `channel.status_changed` pushes instead.
-            void this.channelRegistry.login(channelId, force).catch((e: unknown) => {
+            // `channel.status_changed` pushes instead. The wecom channel uses
+            // the same fire-and-forget path; the awaited surface just kicks
+            // a (creds → store → connect) sequence in the background.
+            void this.channelRegistry.login(channelId, force, creds).catch((e: unknown) => {
                 const message = e instanceof Error ? e.message : String(e);
                 log.error(`channel ${channelId} bind failed: ${message}`);
                 this.channelBindBroker.setState(channelId, "error", { message });

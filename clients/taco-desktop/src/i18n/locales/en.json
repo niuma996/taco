@@ -431,7 +431,13 @@
     "emptyConversations": "No IM conversations yet. Send a message to your bound channel to start one.",
     "unreadAria": "{{count}} unread",
     "boundHint": "Channel bound — you can close this dialog.",
-    "imBanner": "Live reply — sending here delivers directly to {{peer}} on WeChat."
+    "imBanner": "Live reply — sending here delivers directly to {{peer}} on WeChat.",
+    "wecomHint": "Paste the botId and secret from the WeCom admin console (智能机器人).",
+    "wecomBotId": "WeCom botId",
+    "wecomSecret": "WeCom secret",
+    "wecomBotIdPlaceholder": "bot id",
+    "wecomSecretPlaceholder": "secret",
+    "connect": "Connect"
   },
   "modelMenu": {
     "command": "Command",

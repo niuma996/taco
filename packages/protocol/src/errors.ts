@@ -29,6 +29,8 @@ export const ErrorCodes = {
     CheckpointRestoreFailed: "checkpoint_restore_failed",
     /** WeChat SDK binary missing on this host. */
     WechatSdkMissing: "wechat_sdk_missing",
+    /** WeCom aibot SDK missing on this host. */
+    WecomSdkMissing: "wecom_sdk_missing",
     /** RPC called before `initialize` completed. */
     NotInitialized: "not_initialized",
     /** Unknown method name. */

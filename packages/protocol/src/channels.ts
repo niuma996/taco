@@ -135,10 +135,24 @@ export interface ChannelsCreateResult {
     requiresRestart: boolean;
 }
 
+/**
+ * Optional credential payload carried by `channels.bind`. Only the WeCom
+ * channel consumes it today (static botId + secret from the admin console —
+ * no QR flow). Defined at the wire boundary so any future channel needing a
+ * non-QR bind can extend the shape.
+ */
+export interface ChannelsBindCreds {
+    botId?: string;
+    secret?: string;
+}
+
 export interface ChannelsBindParams {
     channelId: string;
     /** Discard stored credentials and re-run the full QR flow. */
     force?: boolean;
+    /** Static credentials to persist + connect; ignored by channels without a
+     *  non-QR bind flow. */
+    creds?: ChannelsBindCreds;
 }
 
 export interface ChannelsBindResult {

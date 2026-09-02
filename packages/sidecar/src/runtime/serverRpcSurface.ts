@@ -7,6 +7,7 @@
  * Relationship: `class SidecarServer implements ServerRpcSurface`.
  */
 import type {
+    ChannelsBindCreds,
     ChannelsBindResult,
     ChannelsCreateResult,
     ChannelsListConversationsResult,
@@ -38,7 +39,11 @@ export interface ChannelControl {
     list(): ChannelsListResult;
     listConversations(channelId?: string): ChannelsListConversationsResult;
     create(name: string, channelId?: string): ChannelsCreateResult;
-    bind(channelId: string, force?: boolean): Promise<ChannelsBindResult>;
+    bind(
+        channelId: string,
+        force?: boolean,
+        creds?: ChannelsBindCreds,
+    ): Promise<ChannelsBindResult>;
     submitVerifyCode(requestId: string, code: string): boolean;
     unbind(channelId: string): Promise<void>;
 }

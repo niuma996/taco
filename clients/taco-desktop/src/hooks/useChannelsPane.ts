@@ -1,7 +1,14 @@
-import type { ChannelStatusEntry, ChannelsListResult } from "@taco-ai/protocol";
+import type { ChannelStatusEntry, ChannelsBindCreds, ChannelsListResult } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
+
+/** Manifest name for the WeCom channel. Mirror of the sidecar
+ *  `CHANNEL_NAME_WECOM` constant — channels.* RPCs are addressed by
+ *  manifest name in BUILTIN_CHANNEL_MANIFESTS, but there is no shared
+ *  channels-name mirror (jobsRpc doesn't include channels.*). Kept local
+ *  to the desktop until a second non-QR channel needs the same branch. */
+export const CHANNEL_NAME_WECOM = "wecom";
 
 export interface UseChannelsPaneResult {
     channelsStatus: ChannelsListResult | null;
@@ -9,7 +16,7 @@ export interface UseChannelsPaneResult {
     channelsError: string | null;
     /** channelId currently mid-request, so its row can disable its controls. */
     channelsSavingId: string | null;
-    bindChannel: (channelId: string, force?: boolean) => Promise<void>;
+    bindChannel: (channelId: string, force?: boolean, creds?: ChannelsBindCreds) => Promise<void>;
     unbindChannel: (channelId: string) => Promise<void>;
     submitVerifyCode: (requestId: string, code: string) => Promise<boolean>;
     createChannel: (name: string) => Promise<void>;
@@ -71,7 +78,7 @@ export function useChannelsPane(
     }, []);
 
     const bindChannel = useCallback(
-        async (channelId: string, force?: boolean): Promise<void> => {
+        async (channelId: string, force?: boolean, creds?: ChannelsBindCreds): Promise<void> => {
             setChannelsSavingId(channelId);
             clearError();
             try {
@@ -80,7 +87,7 @@ export function useChannelsPane(
                 // returned state is deliberately discarded — an awaiting_scan
                 // push can land before this resolves, and writing the stale
                 // `connecting` back would drop the QR code that just arrived.
-                await client.channelsBind({ channelId, force });
+                await client.channelsBind({ channelId, force, creds });
             } catch (e) {
                 failWith(e);
             } finally {

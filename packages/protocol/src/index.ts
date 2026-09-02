@@ -16,6 +16,7 @@ export type {
     ChannelState,
     ChannelStatusChangedParams,
     ChannelStatusEntry,
+    ChannelsBindCreds,
     ChannelsBindParams,
     ChannelsBindResult,
     ChannelsCreateParams,

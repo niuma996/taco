@@ -14,19 +14,24 @@ import { WeChatBot } from "@wechatbot/wechatbot";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
-import type { Channel, ChannelContext, ChannelHandle, Logger } from "../types.ts";
+import type {
+    Channel,
+    ChannelContext,
+    ChannelHandle,
+    ChannelRouteResolver,
+    Logger,
+} from "../types.ts";
+import { chunkText, extractReplyText, interruptNoticeText } from "./channelReply.ts";
 import { wechatChannelManifest } from "./wechatManifest.ts";
-import { chunkText, extractReplyText, interruptNoticeText } from "./wechatReply.ts";
 
 /** iLink caps a text message well below this; chunking keeps a safety margin. */
 const WECHAT_MAX_MESSAGE_LENGTH = wechatChannelManifest.capabilities.maxMessageLength;
 
-/** Resolves the peer's WeChat userId for a session, so a push can be addressed. */
-export type PeerResolver = (sessionId: string) => string | undefined;
-
 export interface WeChatChannelOptions {
     broker: ChannelBindBroker;
-    resolvePeer: PeerResolver;
+    /** Resolves the IM route triple for a session; wechat only needs the
+     *  peerId (single-chat send), so it takes `.peerId`. */
+    resolveRoute: ChannelRouteResolver;
     /** Injectable for tests; defaults to the real SDK client. */
     createBot?: (opts: WeChatBotFactoryOptions) => WeChatBotLike;
     /** Optional: returns the platform user IDs routed through this channel, so
@@ -134,7 +139,7 @@ export class WeChatChannel implements Channel {
     constructor(private readonly options: WeChatChannelOptions) {}
 
     async start(ctx: ChannelContext): Promise<ChannelHandle> {
-        const { broker, resolvePeer, listPeers } = this.options;
+        const { broker, resolveRoute, listPeers } = this.options;
         const log = ctx.logger;
         const storage = createStorageAdapter(ctx);
 
@@ -223,7 +228,7 @@ export class WeChatChannel implements Channel {
         return new WeChatChannelHandle(
             bot,
             ctx,
-            resolvePeer,
+            resolveRoute,
             broker,
             callbacks,
             listPeers ? () => listPeers(ctx.channelId) : undefined,
@@ -235,7 +240,7 @@ class WeChatChannelHandle implements ChannelHandle {
     constructor(
         private readonly bot: WeChatBotLike,
         private readonly ctx: ChannelContext,
-        private readonly resolvePeer: PeerResolver,
+        private readonly resolveRoute: ChannelRouteResolver,
         private readonly broker: ChannelBindBroker,
         private readonly callbacks: SdkLoginCallbacks,
         readonly listPeers?: () => string[],
@@ -257,11 +262,12 @@ class WeChatChannelHandle implements ChannelHandle {
         if (!text) return;
         const sessionId = frame.session;
         if (!sessionId) return;
-        const userId = this.resolvePeer(sessionId);
-        if (!userId) {
+        const route = this.resolveRoute(sessionId);
+        if (!route) {
             this.ctx.logger.child({ sid: sessionId }).warn("no peer for session, reply dropped");
             return;
         }
+        const userId = route.peerId;
         for (const chunk of chunkText(text, WECHAT_MAX_MESSAGE_LENGTH)) {
             await this.bot.send(userId, chunk);
         }

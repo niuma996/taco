@@ -1,4 +1,4 @@
-import type { ServerPush } from "@taco-ai/protocol";
+import type { ChannelsBindCreds, ServerPush } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
 import { isValidChannelId } from "./configValidator.ts";
 import type { Channel, ChannelContext, ChannelHandle, ChannelManifest } from "./types.ts";
@@ -76,13 +76,14 @@ export class ChannelRegistry {
         return [...this.loaded.keys()];
     }
 
-    /** Runs a channel's interactive bind flow.
-     *  @throws if the channel is unknown or does not support binding. */
-    async login(channelId: string, force?: boolean): Promise<void> {
+    /** Runs a channel's interactive bind flow (or persists `creds` for
+     *  channels without a QR flow). @throws if the channel is unknown or
+     *  does not support binding. */
+    async login(channelId: string, force?: boolean, creds?: ChannelsBindCreds): Promise<void> {
         const entry = this.loaded.get(channelId);
         if (!entry) throw new Error(`channel not running: ${channelId}`);
         if (!entry.handle.login) throw new Error(`channel does not support binding: ${channelId}`);
-        await entry.handle.login(force);
+        await entry.handle.login(force, creds);
     }
 
     /** Discards a channel's credentials. No-op when unbindable. */

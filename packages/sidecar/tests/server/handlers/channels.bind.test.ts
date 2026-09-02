@@ -1,17 +1,21 @@
 /**
- * channels.bind WechatSdkMissingError regression test.
+ * channels.bind SDK-missing error regression test.
  *
- * Verifies that when ChannelFactory.create throws WechatSdkMissingError (SDK
- * missing for wechat channel), channels.bind surfaces the error as
- * code = "wechat_sdk_missing" — not "invalid_params" — through the real
- * dispatchRpc path where normalizeError operates.
+ * Verifies that when ChannelFactory.create throws WechatSdkMissingError or
+ * WecomSdkMissingError (SDK missing for the corresponding channel),
+ * channels.bind surfaces the error as the coded error code
+ * ("wechat_sdk_missing" / "wecom_sdk_missing") — not "invalid_params" —
+ * through the real dispatchRpc path where normalizeError operates.
  *
  * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/channels.bind.test.ts
  */
 
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
-import { WechatSdkMissingError } from "../../../src/channels/channelFactory.ts";
+import {
+    WechatSdkMissingError,
+    WecomSdkMissingError,
+} from "../../../src/channels/channelFactory.ts";
 import { ProviderKeyStore } from "../../../src/runtime/providerKeyStore.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { SidecarServer } from "../../../src/server/server.ts";
@@ -49,6 +53,25 @@ describe("channels.bind error codes through dispatchRpc", () => {
         assert.equal(resp.error?.code, "wechat_sdk_missing");
         assert.ok(
             resp.error?.message?.includes("@wechatbot/wechatbot"),
+            "message should include the SDK install hint",
+        );
+    });
+
+    it("WecomSdkMissingError → code wecom_sdk_missing", async () => {
+        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+        // @ts-expect-error — see above
+        server.channels = {
+            bind: async () => {
+                throw new WecomSdkMissingError(null);
+            },
+        } as never;
+
+        const resp = await dispatch(server, "channels.bind", { channelId: "wecom" });
+
+        assert.equal(resp.ok, false);
+        assert.equal(resp.error?.code, "wecom_sdk_missing");
+        assert.ok(
+            resp.error?.message?.includes("@wecom/aibot-node-sdk"),
             "message should include the SDK install hint",
         );
     });

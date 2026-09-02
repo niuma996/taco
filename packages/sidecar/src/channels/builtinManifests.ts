@@ -15,6 +15,10 @@
  */
 
 import { wechatChannelManifest } from "./builtin/wechatManifest.ts";
+import { wecomChannelManifest } from "./builtin/wecomManifest.ts";
 import type { ChannelManifest } from "./types.ts";
 
-export const BUILTIN_CHANNEL_MANIFESTS: readonly ChannelManifest[] = [wechatChannelManifest];
+export const BUILTIN_CHANNEL_MANIFESTS: readonly ChannelManifest[] = [
+    wechatChannelManifest,
+    wecomChannelManifest,
+];

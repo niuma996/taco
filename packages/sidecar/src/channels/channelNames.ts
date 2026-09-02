@@ -13,4 +13,9 @@
  */
 export const CHANNEL_NAME_MOCK = "mock";
 export const CHANNEL_NAME_WECHAT = "wechat";
-export const BUILTIN_CHANNEL_NAMES: readonly string[] = [CHANNEL_NAME_MOCK, CHANNEL_NAME_WECHAT];
+export const CHANNEL_NAME_WECOM = "wecom";
+export const BUILTIN_CHANNEL_NAMES: readonly string[] = [
+    CHANNEL_NAME_MOCK,
+    CHANNEL_NAME_WECHAT,
+    CHANNEL_NAME_WECOM,
+];

@@ -1,4 +1,4 @@
-import type { ServerPush } from "@taco-ai/protocol";
+import type { ChannelsBindCreds, ImRoute, ServerPush } from "@taco-ai/protocol";
 
 export interface ChannelManifest {
     readonly name: string;
@@ -46,10 +46,14 @@ export interface ChannelConfigStore {
 export interface ChannelHandle {
     push(frame: ServerPush): Promise<void>;
     close(): Promise<void>;
-    /** Runs the platform's interactive bind flow (e.g. QR login). Progress is
-     *  reported out-of-band via ChannelBindBroker, not by resolving this.
-     *  Absent on channels that need no binding (mock). */
-    login?(force?: boolean): Promise<void>;
+    /**
+     * Runs the platform's interactive bind flow (QR scan for wechat) or — for
+     * channels without a QR flow — persists `creds` to the channel's store
+     * and triggers a reconnect. Progress is reported out-of-band via
+     * ChannelBindBroker, not by resolving this. Absent on channels that need
+     * no binding (mock).
+     */
+    login?(force?: boolean, creds?: ChannelsBindCreds): Promise<void>;
     /** Discards stored credentials and disconnects. Absent when unbindable. */
     logout?(): Promise<void>;
     /**
@@ -60,6 +64,11 @@ export interface ChannelHandle {
      */
     listPeers?(): string[];
 }
+
+/** (channelId, peerId, chatId) — output of ConversationRouter.findRouteBySessionId.
+ *  Imported via protocol's ImRoute type so the seam name matches across
+ *  sidecar consumers (imPolicy, channelFactory). */
+export type ChannelRouteResolver = (sessionId: string) => ImRoute | undefined;
 
 /** Unified inbound message model. kind discriminates the union: P1 platform callbacks / menu clicks use "event". */
 export interface ChannelInboundMessage {

@@ -6,7 +6,7 @@ import {
     chunkText,
     extractReplyText,
     interruptNoticeText,
-} from "../../src/channels/builtin/wechatReply.ts";
+} from "../../src/channels/builtin/channelReply.ts";
 
 function eventFrame(message: unknown, type = "message_end"): ServerPush {
     return {

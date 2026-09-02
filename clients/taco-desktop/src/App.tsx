@@ -31,7 +31,7 @@ import { useToast } from "./hooks/primitives/useToast";
 import { useAgentsPane } from "./hooks/useAgentsPane";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
-import { useChannelsPane } from "./hooks/useChannelsPane";
+import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { useFilesDrawer } from "./hooks/useFilesDrawer";
@@ -390,6 +390,9 @@ export default function App() {
     onConversationsChangedRef.current = onConversationsChanged;
     /** channelId whose bind dialog is open; null closes it. */
     const [bindingChannelId, setBindingChannelId] = useState<string | null>(null);
+    const isWeComChannel = (channelId: string): boolean =>
+        channelsStatus?.configured.find((c) => c.channelId === channelId)?.name ===
+        CHANNEL_NAME_WECOM;
     const {
         memoryData,
         memoryLoading,
@@ -685,11 +688,15 @@ export default function App() {
                             onRestart={() => void restartForChannels()}
                             onBind={(channelId) => {
                                 setBindingChannelId(channelId);
-                                void bindChannel(channelId);
+                                if (!isWeComChannel(channelId)) {
+                                    void bindChannel(channelId);
+                                }
                             }}
                             onRebind={(channelId) => {
                                 setBindingChannelId(channelId);
-                                void bindChannel(channelId, true);
+                                if (!isWeComChannel(channelId)) {
+                                    void bindChannel(channelId, true);
+                                }
                             }}
                             onUnbind={(channelId) => void unbindChannel(channelId)}
                             conversations={conversations}
@@ -828,6 +835,16 @@ export default function App() {
                 }
                 error={channelsError}
                 onSubmitVerifyCode={submitVerifyCode}
+                onBindCreds={(creds) => {
+                    const id = bindingChannelId;
+                    if (id === null) return;
+                    // force=true if already connected, so Rebind rewrites creds
+                    // and reconnects rather than reusing the stale token.
+                    const force =
+                        channelsStatus?.configured.find((c) => c.channelId === id)?.state ===
+                        "connected";
+                    void bindChannel(id, force, creds);
+                }}
                 onCancel={() => setBindingChannelId(null)}
             />
             <FilesDrawer

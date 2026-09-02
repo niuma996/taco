@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ServerPush } from "@taco-ai/protocol";
 import { PushMethods } from "@taco-ai/protocol";
+import { interruptNoticeText } from "../../src/channels/builtin/channelReply.ts";
 import type {
     IncomingLike,
     SdkLoginCallbacks,
@@ -9,7 +10,6 @@ import type {
     WeChatBotLike,
 } from "../../src/channels/builtin/wechatChannel.ts";
 import { WeChatChannel } from "../../src/channels/builtin/wechatChannel.ts";
-import { interruptNoticeText } from "../../src/channels/builtin/wechatReply.ts";
 import { ChannelBindBroker } from "../../src/channels/channelBindBroker.ts";
 import type {
     ChannelConfigStore,
@@ -103,7 +103,10 @@ function harness(
     const submitted: ChannelInboundMessage[] = [];
     const channel = new WeChatChannel({
         broker,
-        resolvePeer: () => opts.peer,
+        resolveRoute: () =>
+            opts.peer === undefined
+                ? undefined
+                : { channelId: "wechat", peerId: opts.peer, chatId: opts.peer },
         createBot: (_o: WeChatBotFactoryOptions) => bot,
         listPeers: (_channelId: string) => opts.listPeers ?? [],
     });

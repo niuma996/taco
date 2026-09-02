@@ -29,7 +29,7 @@ import {
     ErrorCodes,
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
-import { WechatSdkMissingError } from "../../channels/channelFactory.ts";
+import { WechatSdkMissingError, WecomSdkMissingError } from "../../channels/channelFactory.ts";
 import type { ChannelControl, ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -106,10 +106,17 @@ export function registerChannelsHandlers(): void {
             const channels = requireChannels(server);
             const channelId = requireChannelId(params?.channelId);
             try {
-                return (await channels.bind(channelId, params?.force)) satisfies ChannelsBindResult;
+                return (await channels.bind(
+                    channelId,
+                    params?.force,
+                    params?.creds,
+                )) satisfies ChannelsBindResult;
             } catch (e) {
                 if (e instanceof WechatSdkMissingError) {
                     throw new RpcHandlerError(ErrorCodes.WechatSdkMissing, e.message);
+                }
+                if (e instanceof WecomSdkMissingError) {
+                    throw new RpcHandlerError(ErrorCodes.WecomSdkMissing, e.message);
                 }
                 // Unknown / not-running are caller mistakes, not server faults;
                 // normalizeError would otherwise flatten them to `internal`.
