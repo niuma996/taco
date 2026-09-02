@@ -37,8 +37,14 @@ interface BundlePaths {
 }
 
 /** Detect dev mode by walking up from this file looking for pnpm-workspace.yaml.
- *  Returns the repo root (parent of `packages/`) when found, else null. */
-function findRepoRoot(): string | null {
+ *  Returns the repo root (parent of `packages/`) when found, else null.
+ *
+ *  Exported because three call sites need the same dev/prod discrimination
+ *  (`launchSidecar` here, `resolveDaemonResourcesRoot` in start.ts, and
+ *  `findPlatformPkg` in installHelpers.ts). Two of them had inlined copies
+ *  of this walk, which is how the platform-package assumption drifted apart
+ *  after the per-platform optionalDependencies were dropped. */
+export function findRepoRoot(): string | null {
     let dir = dirname(fileURLToPath(import.meta.url));
     for (let i = 0; i < 8; i++) {
         if (existsSync(join(dir, "pnpm-workspace.yaml"))) {

@@ -91,12 +91,17 @@ function main() {
     try {
         const pkgJsonPath = require.resolve(`@taco-ai/sidecar-${pkgSuffix}/package.json`);
         pkgDir = dirname(pkgJsonPath);
-    } catch (err) {
-        console.error(
+    } catch {
+        // No platform package in a dev checkout — they were dropped from the
+        // sidecar's optionalDependencies, so `pnpm install` does not create one.
+        // `findPlatformPkg` falls back to dist/runtime/<triple> and `taco install`
+        // points the wrapper straight at it, so there is no staging tree to sync
+        // into and nothing to do. Skip rather than fail the beforeDevCommand.
+        console.warn(
             `[syncPnpmStaging] @taco-ai/sidecar-${pkgSuffix} not installed; ` +
-                `run \`pnpm install\` and retry (${String(err)})`,
+                `skipping sync (the daemon wrapper reads dist/runtime/${triple} directly)`,
         );
-        process.exit(1);
+        return;
     }
 
     for (const name of SYNC_ENTRIES) {

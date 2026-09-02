@@ -4,19 +4,32 @@
  * schtasks invocation) lives in `install.ts` / `uninstall.ts` so each file
  * stays under the 1000-line cap.
  *
- * The platform pkg is found the same way `sidecarLauncher.ts`'s prod path
- * does: walk the optional deps via `createRequire` and look for one whose
- * `manifest.json` declares the right Node binary. We do NOT copy the pkg to
- * $TACO_HOME — launchd / schtasks invoke a wrapper that points at the
- * pkg's existing install location, so a `pnpm update` of the platform pkg
- * propagates without re-running `taco install`.
+ * Resolution order, first match wins:
+ *   1. TACO_SIDECAR_NODE / _BUNDLE / _RESOURCES env triple — explicit override.
+ *   2. An installed `@taco-ai/sidecar-<platform>` package, located via
+ *      `createRequire` and validated against its `manifest.json`. This is the
+ *      released path.
+ *   3. Dev checkout: `packages/sidecar/dist/runtime/<triple>/`, which
+ *      `buildRuntime.mjs` emits with the same layout as the platform package
+ *      (`lib/index.mjs`, `bin/taco-sidecar-node`, `agents/`, `skills/`,
+ *      `manifest.json`). Needed because the per-platform optionalDependencies
+ *      were dropped from the sidecar manifest, so a dev checkout has no
+ *      platform package to resolve at (2).
+ *
+ * We do NOT copy the resolved tree to $TACO_HOME — launchd / schtasks invoke a
+ * wrapper pointing at its existing location. For (2) that means a `pnpm update`
+ * propagates without re-running `taco install`; for (3) a `package:runtime`
+ * rebuild propagates the same way. The tradeoff is that deleting the resolved
+ * tree (`rm -rf node_modules`, wiping `dist/`) leaves the wrapper dangling until
+ * `taco install` re-runs.
  */
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { PLATFORM_KEYS } from "./upgradePlatform.ts";
+import { findRepoRoot } from "./sidecarLauncher.ts";
+import { currentTriple, PLATFORM_KEYS } from "./upgradePlatform.ts";
 
 export interface PlatformPkgPaths {
     /** Absolute path to the @taco-ai/sidecar-<platform>/ package directory. */
@@ -61,34 +74,57 @@ export function findPlatformPkg(): PlatformPkgPaths | null {
 
     const req = createRequire(import.meta.url);
     for (const key of PLATFORM_KEYS) {
+        let pkgDir: string;
         try {
-            const pkgJsonPath = req.resolve(`@taco-ai/sidecar-${key}/package.json`);
-            const pkgDir = dirname(pkgJsonPath);
-            const manifestPath = join(pkgDir, "manifest.json");
-            if (!existsSync(manifestPath)) continue;
-            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-                target?: string;
-                daemonMode?: boolean;
-            };
-            const nodeBin = join(
-                pkgDir,
-                "bin",
-                manifest.target?.endsWith("-pc-windows-msvc")
-                    ? "taco-sidecar-node.exe"
-                    : "taco-sidecar-node",
-            );
-            if (!existsSync(nodeBin)) continue;
-            const bundle = join(pkgDir, "lib", "index.mjs");
-            if (!existsSync(bundle)) continue;
-            // Trust the manifest's flag when present; fall back to a bundle
-            // grep for older packages that predate the field.
-            const daemonMode = manifest.daemonMode === true ? true : bundleHasDaemonMode(bundle);
-            return { pkgDir, nodeBin, bundle, resources: pkgDir, daemonMode };
+            pkgDir = dirname(req.resolve(`@taco-ai/sidecar-${key}/package.json`));
         } catch {
-            // not installed / wrong platform — try next
+            continue; // not installed / wrong platform — try next
         }
+        const probed = probePkgDir(pkgDir);
+        if (probed) return probed;
+    }
+
+    // Dev checkout fallback. `buildRuntime.mjs` emits dist/runtime/<triple>/ with
+    // the same layout the platform package ships, so the wrapper can point
+    // straight at it and skip the staging copy entirely.
+    const repoRoot = findRepoRoot();
+    if (repoRoot !== null) {
+        const distDir = join(repoRoot, "packages", "sidecar", "dist", "runtime", currentTriple());
+        const probed = probePkgDir(distDir);
+        if (probed) return probed;
     }
     return null;
+}
+
+/** Validate a directory that claims to hold a sidecar runtime and lift it into
+ *  `PlatformPkgPaths`. Returns null when any required artifact is missing, so
+ *  callers can fall through to the next resolution strategy. Shared by the
+ *  platform-package and dev-checkout branches — they differ only in how the
+ *  directory is located, not in what makes it valid.
+ *
+ *  Exported for unit tests; production callers should reach for
+ *  `findPlatformPkg`, which applies the three resolution strategies in order. */
+export function probePkgDir(pkgDir: string): PlatformPkgPaths | null {
+    const manifestPath = join(pkgDir, "manifest.json");
+    if (!existsSync(manifestPath)) return null;
+    let manifest: { target?: string; daemonMode?: boolean };
+    try {
+        manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as typeof manifest;
+    } catch {
+        return null;
+    }
+    const nodeBin = join(
+        pkgDir,
+        "bin",
+        manifest.target?.endsWith("-pc-windows-msvc")
+            ? "taco-sidecar-node.exe"
+            : "taco-sidecar-node",
+    );
+    if (!existsSync(nodeBin)) return null;
+    const bundle = join(pkgDir, "lib", "index.mjs");
+    if (!existsSync(bundle)) return null;
+    const daemonMode = manifest.daemonMode === true ? true : bundleHasDaemonMode(bundle);
+    return { pkgDir, nodeBin, bundle, resources: pkgDir, daemonMode };
 }
 
 /** Cheap daemon-mode probe: read the bundle and look for the env var the

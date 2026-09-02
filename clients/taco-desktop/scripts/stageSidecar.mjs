@@ -78,11 +78,10 @@ function main() {
     // `--rebuild` makes sync re-run package:runtime whenever the sidecar
     // src is newer than the staged bundle, so developers editing sidecar
     // code don't have to remember to rebuild before `tauri dev`.
-    // CI skips the sync: the launchd daemon is a dev-machine concept, and
-    // the source manifest no longer lists per-platform optionalDeps (Plan B),
-    // so sync:staging's require.resolve would fail on the runner. The release
-    // bundle stages the runtime into generated/ below and never reads the
-    // launchd path.
+    // CI skips the sync: the launchd daemon is a dev-machine concept, and the
+    // release bundle stages the runtime into generated/ below without reading
+    // the launchd path. (sync:staging is a no-op when no platform package is
+    // installed, so the CI guard is belt-and-braces rather than load-bearing.)
     if (!process.env.CI && (!explicitTarget || explicitTarget === currentTriple())) {
         const sync = spawnSync(
             "pnpm",
@@ -93,9 +92,10 @@ function main() {
             },
         );
         if (sync.status !== 0) {
-            // Sync failure is a hard error: continuing here would let
-            // `tauri dev` come up against a stale daemon and the developer
-            // would only find out via a 5s hello timeout in the client.
+            // A missing platform package is no longer a failure (sync skips and
+            // exits 0). Reaching here means the copy itself broke — a genuinely
+            // stale daemon, which the developer would otherwise only discover
+            // via a 5s hello timeout in the client. Keep failing hard.
             process.exit(sync.status ?? 1);
         }
     }
