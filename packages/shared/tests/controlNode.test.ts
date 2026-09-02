@@ -138,7 +138,11 @@ describe("controlRequest — happy path", () => {
         endpoint = s.endpoint;
         closeServer = s.close;
     });
-    after(closeServer);
+    // Must wrap: `after(closeServer)` would capture the initial no-op, since
+    // the hook argument is evaluated at registration time — before `before`
+    // reassigns it. That leaked a listening server per suite and kept the
+    // event loop alive until the runner's timeout.
+    after(() => closeServer());
 
     it("resolves with the server's result", async () => {
         const result = await controlRequest(endpoint, "control.ping", { timeoutMs: 1000 });
@@ -176,7 +180,7 @@ describe("controlRequest — error reply", () => {
         endpoint = s.endpoint;
         closeServer = s.close;
     });
-    after(closeServer);
+    after(() => closeServer());
 
     it("rejects with method-labelled error", async () => {
         await assert.rejects(
@@ -232,7 +236,7 @@ describe("controlRequest — malformed reply", () => {
         endpoint = s.endpoint;
         closeServer = s.close;
     });
-    after(closeServer);
+    after(() => closeServer());
 
     it("rejects with 'malformed reply'", async () => {
         await assert.rejects(
@@ -254,7 +258,7 @@ describe("controlRequest — socket closes before reply", () => {
         endpoint = s.endpoint;
         closeServer = s.close;
     });
-    after(closeServer);
+    after(() => closeServer());
 
     it("rejects with 'socket closed before reply'", async () => {
         await assert.rejects(
