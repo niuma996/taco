@@ -9,74 +9,17 @@
  * packages/sidecar/src/index.ts). If it lingers past the deadline, we
  * report that the daemon accepted shutdown but the cleanup is taking longer
  * than expected — operator-visible rather than silently broken.
+ *
+ * Wire format + retry behaviour live in `@taco-ai/shared/controlNode` so
+ * `taco status` and any future control-socket client share a single impl.
  */
 
-import { connect, type Socket } from "node:net";
+import { existsSync } from "node:fs";
+import { controlRequest } from "@taco-ai/shared/controlNode";
 import { controlSocketPath } from "./paths.ts";
 
 const SHUTDOWN_ACK_TIMEOUT_MS = 3_000;
 const SOCKET_GONE_TIMEOUT_MS = 3_000;
-
-interface ControlReplyOk {
-    result: unknown;
-    id: number;
-}
-interface ControlReplyErr {
-    error: { code: string; message: string };
-    id: number;
-}
-
-function sendControlRequest(socketPath: string, method: string): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-        const sock: Socket = connect(socketPath);
-        let buf = "";
-        let done = false;
-        const finish = (fn: () => void) => {
-            if (done) return;
-            done = true;
-            sock.destroy();
-            fn();
-        };
-        const timer = setTimeout(() => {
-            finish(() =>
-                reject(new Error(`${method} timed out after ${SHUTDOWN_ACK_TIMEOUT_MS}ms`)),
-            );
-        }, SHUTDOWN_ACK_TIMEOUT_MS);
-
-        sock.once("error", (err) => {
-            clearTimeout(timer);
-            finish(() => reject(new Error(`${method}: ${err.message}`)));
-        });
-        sock.once("connect", () => {
-            sock.write(`${JSON.stringify({ method, id: 1 })}\n`);
-        });
-        sock.on("data", (chunk) => {
-            buf += chunk.toString("utf8");
-            const nl = buf.indexOf("\n");
-            if (nl < 0) return;
-            const line = buf.slice(0, nl);
-            clearTimeout(timer);
-            try {
-                const reply = JSON.parse(line) as ControlReplyOk | ControlReplyErr;
-                if ("error" in reply) {
-                    finish(() =>
-                        reject(new Error(`${method}: ${reply.error.code} ${reply.error.message}`)),
-                    );
-                } else {
-                    finish(() => resolve(reply.result));
-                }
-            } catch (err) {
-                finish(() => reject(new Error(`${method}: malformed reply: ${String(err)}`)));
-            }
-        });
-        sock.on("close", () => {
-            clearTimeout(timer);
-            if (!done) {
-                finish(() => reject(new Error(`${method}: socket closed before reply`)));
-            }
-        });
-    });
-}
 
 async function waitForSocketGone(path: string): Promise<void> {
     const start = Date.now();
@@ -88,7 +31,7 @@ async function waitForSocketGone(path: string): Promise<void> {
         // the listener has shut down so subsequent connect attempts will fail.
         let exists = true;
         try {
-            exists = (await import("node:fs")).existsSync(path);
+            exists = existsSync(path);
         } catch {
             exists = false;
         }
@@ -100,7 +43,9 @@ async function waitForSocketGone(path: string): Promise<void> {
 
 export async function stopCommand(): Promise<void> {
     const control = controlSocketPath();
-    const result = await sendControlRequest(control, "control.shutdown");
+    const result = await controlRequest(control, "control.shutdown", {
+        timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS,
+    });
     // Daemon flushes the reply, then unlinks + exits. Give it a moment to
     // actually disappear from the filesystem before declaring success.
     await waitForSocketGone(control);

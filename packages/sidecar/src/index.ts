@@ -36,6 +36,7 @@ import { ClientSinkRegistry } from "./server/clientSinkRegistry.ts";
 import { handleControlChannel } from "./server/controlChannel.ts";
 import { NullTransport } from "./server/nullTransport.ts";
 import { type SharedSidecarDeps, SidecarServer, startServer } from "./server/server.ts";
+import { ServerRegistry } from "./server/serverRegistry.ts";
 import { StdioTransport } from "./server/stdioTransport.ts";
 import { DEFAULT_MARKER_PATH, UpgradeOrchestrator } from "./upgrader/orchestrator.ts";
 
@@ -114,6 +115,7 @@ function toSharedSidecarDeps(deps: ResolvedDeps): SharedSidecarDeps {
         defaultThinkingLevel: deps.cfg.defaultThinkingLevel,
         compaction: deps.cfg.compaction,
         memoryEnabled: deps.cfg.memoryEnabled,
+        instructionsConfig: deps.cfg.instructions,
         extensionRegistry: deps.extensionRegistry,
         providerKeyStore: deps.providerKeyStore,
         customProviders: deps.cfg.customProviders,
@@ -352,6 +354,13 @@ async function runDaemon(
         // Phase 1's regression — already-open IM views going stale — would
         // remain. Each SidecarServer adds its own transport on start().
         const clientSinkRegistry = new ClientSinkRegistry();
+        // Settings-setter fan-out: settings.write invoked from any
+        // NDJSON connection must reach BOTH residents (imHost +
+        // schedulerSidecar). The desktop's per-RPC server is a third
+        // non-resident; without this registry, schedulerSidecar would
+        // keep boot-time defaultModel/customProviders for the life of
+        // the daemon. See ServerRegistry JSDoc for the daemon layout.
+        const serverRegistry = new ServerRegistry();
 
         // Two runtimes, one process:
         //  - `imHost` owns IM workspaces + the channel stack; im:// cwd sessions
@@ -369,8 +378,12 @@ async function runDaemon(
             ...toSharedSidecarDeps(deps),
             ...sharedChannelStack,
             clientSinkRegistry,
+            serverRegistry,
         });
-        const schedulerSidecar = new SidecarServer({ ...toSharedSidecarDeps(deps) });
+        const schedulerSidecar = new SidecarServer({
+            ...toSharedSidecarDeps(deps),
+            serverRegistry,
+        });
         await imHost.start(new NullTransport(), deps.cfg.channels ?? []).catch((err: unknown) => {
             log.error(`IM host failed to start: ${String(err)}`);
         });
@@ -430,6 +443,7 @@ async function runDaemon(
             jobs: jobsController,
             imHost,
             clientSinkRegistry,
+            serverRegistry,
         };
 
         // Stale-socket cleanup before we try to bind. A previous daemon that

@@ -27,6 +27,7 @@
     "test": "tsx --test 'tests/**/*.test.ts'"
   },
   "dependencies": {
+    "@taco-ai/shared": "workspace:*",
     "@taco-ai/sidecar": "workspace:*",
     "tar": "^7.4.3"
   },

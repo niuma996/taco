@@ -8,7 +8,8 @@
   "exports": {
     ".": "./dist/tacoClient.js",
     "./node": "./dist/tacoClientNode.js",
-    "./spawn": "./dist/spawn.js"
+    "./spawn": "./dist/spawn.js",
+    "./controlNode": "./dist/controlNode.js"
   },
   "files": [
     "dist"
@@ -23,7 +24,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsx --test 'tests/**/*.test.ts'"
+    "test": "tsx --test 'tests/**/*.test.ts'",
+    "test:controlNode": "tsx --test --test-force-exit tests/controlNode.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

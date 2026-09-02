@@ -117,6 +117,7 @@ import {
     toCommandOutcome,
     withRequestId,
 } from "./rpcResponse.ts";
+import type { ServerRegistry } from "./serverRegistry.ts";
 import { SessionEventLog } from "./sessionEventLog.ts";
 import { StdioTransport } from "./stdioTransport.ts";
 import type { Transport } from "./transport.ts";
@@ -145,6 +146,19 @@ export interface SidecarServerOptions {
     compaction?: ResolvedCompaction;
     /** Enable user-level memory. `undefined` = default (enabled). Passed to WorkspaceRuntime. */
     memoryEnabled?: boolean;
+    /**
+     * Project-context instructions injection (CLAUDE.md / AGENTS.md /
+     * DESIGN.md). Threaded into every `WorkspaceRuntime` constructed
+     * by `buildWorkspace`. Hot-reloadable via `settings.write` →
+     * `refreshInstructions` (which iterates `serverRegistry` if present).
+     *
+     * Without this being passed at construction, every workspace falls
+     * back to `mergeWithDefaults()` and the user's `taco.json
+     * instructions` block is silently ignored (pre-fix bug; the
+     * WorkspaceRuntime `instructionsConfig` field stayed `undefined`
+     * for the entire process lifetime).
+     */
+    instructionsConfig?: InstructionsConfig;
     /** Process-wide extension registry — shared across all workspaces */
     extensionRegistry?: ExtensionRegistry;
     /**
@@ -210,6 +224,16 @@ export interface SidecarServerOptions {
      * the only sink, so fanout is unnecessary.
      */
     clientSinkRegistry?: ClientSinkRegistry;
+    /**
+     * Process-level fan-out registry for settings setters. The
+     * `settings.write` handler iterates `serverRegistry.all() ?? [server]`
+     * so a desktop-initiated patch reaches every SidecarServer in the
+     * process — including `schedulerSidecar`, which never sees the
+     * desktop's RPC. Constructed once by `runDaemon` and shared via
+     * SharedSidecarDeps. Omit on stdio / tests — the handler falls back
+     * to `[server]` and behaviour matches the pre-fix single-server path.
+     */
+    serverRegistry?: ServerRegistry;
 }
 
 interface CommandRecord {
@@ -298,6 +322,12 @@ export class SidecarServer implements ServerRpcSurface {
      * latest value in ensureWorkspace.
      */
     private customProviders: readonly CustomProviderConfig[] = [];
+    /**
+     * `instructionsConfig` captured at construction. Hot updates go
+     * through `refreshInstructions()` on each SidecarServer; this field
+     * is read by `buildWorkspace()` when a new workspace is built.
+     */
+    private instructionsConfig?: InstructionsConfig;
     /** Currently active MCP server set — see customProviders for lifecycle notes. */
     private mcpServers: readonly McpServerConfig[] = [];
     readonly providerKeyStore: ProviderKeyStore;
@@ -341,6 +371,8 @@ export class SidecarServer implements ServerRpcSurface {
     /** Process-level fan-out registry. The owner uses it to deliver im://
      *  push frames to every connected desktop's NDJSON transport. */
     private readonly clientSinkRegistry?: ClientSinkRegistry;
+    /** Settings-setter fan-out — see SidecarServerOptions.serverRegistry. */
+    private readonly serverRegistry?: ServerRegistry;
     /** taco.json channel instances, kept so channels.list can report the
      *  configured set independently of which ones actually started. */
     private channelConfigs: readonly ChannelConfig[] = [];
@@ -431,6 +463,12 @@ export class SidecarServer implements ServerRpcSurface {
         this.providerKeyStore = options.providerKeyStore;
         this._jobs = options.jobs;
         this.customProviders = options.customProviders ?? [];
+        // instructionsConfig is captured at construction so every
+        // workspace built by buildWorkspace() sees the same value. The
+        // existing refreshInstructions() hot-reload path stays
+        // unchanged — it pushes updates to already-built workspaces via
+        // the serverRegistry fan-out.
+        this.instructionsConfig = options.instructionsConfig;
         this.mcpServers = options.mcpServers ?? [];
         this.imPolicyStore = new ImWorkspacePolicyStore();
         // Daemon-resident ownership: when `imHost` is injected, this server
@@ -441,6 +479,7 @@ export class SidecarServer implements ServerRpcSurface {
         this.ownsChannels = options.imHost === undefined;
         this.imHost = options.imHost;
         this.clientSinkRegistry = options.clientSinkRegistry;
+        this.serverRegistry = options.serverRegistry;
         this.channelRegistry = options.channelRegistry ?? new ChannelRegistry();
         this.channelBindBroker = options.channelBindBroker ?? new ChannelBindBroker();
         // `conversationRouter` is normally loaded in start() from disk, but
@@ -498,6 +537,7 @@ export class SidecarServer implements ServerRpcSurface {
         // NullTransport here (no-op fanout), so the registry can be a single
         // uniform Set<Transport> rather than special-casing the host.
         this.clientSinkRegistry?.add(transport);
+        this.serverRegistry?.add(this);
 
         // Router is normally loaded per-instance from disk. Daemon mode
         // injects a shared router so all instances see the same routes and
@@ -574,9 +614,13 @@ export class SidecarServer implements ServerRpcSurface {
         // Phase 2: drop our transport from the fan-out set BEFORE closing it,
         // so any frames already enqueued by an in-flight emitPush don't
         // race the close and crash the sink. Matched in start().
+        // Drop ourselves from both registries BEFORE closing the transport,
+        // so any settings.write that lands mid-shutdown cannot target a
+        // half-disposed server. Mirrors clientSinkRegistry ordering below.
         if (this.transport) {
             this.clientSinkRegistry?.remove(this.transport);
         }
+        this.serverRegistry?.remove(this);
         await this.transport?.close();
         // Channels own long-lived loops (long-poll / sockets). Only the owner
         // tears them down; a non-owner stopping (e.g. one desktop disconnecting)
@@ -803,6 +847,7 @@ export class SidecarServer implements ServerRpcSurface {
                 workspace: workspace as WorkspaceRuntime,
                 cwd,
                 server: this,
+                serverRegistry: this.serverRegistry,
                 params: req.params,
             };
             const result = await reg.handler(ctx);
@@ -1039,6 +1084,7 @@ export class SidecarServer implements ServerRpcSurface {
                 defaultThinkingLevel: this.options.defaultThinkingLevel,
                 compaction: this.options.compaction,
                 memoryEnabled: this.options.memoryEnabled,
+                instructionsConfig: this.instructionsConfig,
                 extensions,
                 providerKeyStore: this.providerKeyStore,
                 customProviders: this.customProviders,
@@ -1451,8 +1497,15 @@ export class SidecarServer implements ServerRpcSurface {
      * workspace's sessionRegistry re-reads via a lazy thunk on the next LLM
      * call — no per-session invalidation needed. Called from the
      * `settings.write` handler after writing the `instructions` field.
+     *
+     * The instance field write mirrors `setCustomProviders` / `setDefaultModel`:
+     * without it, a server with zero built workspaces (e.g. `schedulerSidecar`
+     * before any job has fired) would silently drop the patch — the next
+     * `ensureWorkspace` would read the stale boot-time value from
+     * `buildWorkspace`.
      */
     refreshInstructions(next: InstructionsConfig | undefined): void {
+        this.instructionsConfig = next;
         for (const ws of this.workspaceMap.values()) {
             ws.updateInstructionsConfig(next);
         }
@@ -1736,6 +1789,12 @@ export interface SharedSidecarDeps {
     defaultThinkingLevel?: ThinkingLevel;
     compaction?: ResolvedCompaction;
     memoryEnabled?: boolean;
+    /**
+     * Project-context instructions injection (CLAUDE.md / AGENTS.md /
+     * DESIGN.md). Mirrors `SidecarServerOptions.instructionsConfig` —
+     * plumbed from `cfg.instructions` in `index.ts → toSharedSidecarDeps`.
+     */
+    instructionsConfig?: InstructionsConfig;
     extensionRegistry?: ExtensionRegistry;
     providerKeyStore: ProviderKeyStore;
     customProviders?: readonly CustomProviderConfig[];
@@ -1763,6 +1822,11 @@ export interface SharedSidecarDeps {
      * and the resident can push IM frames to every connected desktop.
      */
     clientSinkRegistry?: ClientSinkRegistry;
+    /**
+     * Process-level server-side fan-out registry for `settings.write`
+     * setters. Populated by `runDaemon`; omitted on stdio / tests.
+     */
+    serverRegistry?: ServerRegistry;
 }
 
 /**
@@ -1793,6 +1857,7 @@ export function startServer(deps: SharedSidecarDeps, transport: Transport): Star
         defaultThinkingLevel: deps.defaultThinkingLevel,
         compaction: deps.compaction,
         memoryEnabled: deps.memoryEnabled,
+        instructionsConfig: deps.instructionsConfig,
         extensionRegistry: deps.extensionRegistry,
         providerKeyStore: deps.providerKeyStore,
         customProviders: deps.customProviders,
@@ -1804,6 +1869,7 @@ export function startServer(deps: SharedSidecarDeps, transport: Transport): Star
         conversationRouter: deps.conversationRouter,
         imHost: deps.imHost,
         clientSinkRegistry: deps.clientSinkRegistry,
+        serverRegistry: deps.serverRegistry,
     });
     const ready = server.start(transport);
     return {

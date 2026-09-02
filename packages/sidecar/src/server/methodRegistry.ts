@@ -28,12 +28,22 @@ import type { WorkspaceId } from "@taco-ai/protocol";
 import type { TSchema } from "typebox";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { WorkspaceRuntime } from "../runtime/workspace.ts";
+import type { ServerRegistry } from "./serverRegistry.ts";
 
 export interface MethodCtx<P> {
     readonly id: string;
     readonly workspace: WorkspaceRuntime;
     readonly cwd: WorkspaceId;
     readonly server: ServerRpcSurface;
+    /**
+     * Process-level fan-out registry of every SidecarServer in the
+     * current process (daemon mode). Handlers that touch process-wide
+     * state (settings.write calling one of its five setters) iterate
+     * `serverRegistry?.all() ?? [server]` instead of calling on the
+     * per-RPC server alone. Undefined in stdio / test sidecars, which
+     * have a single server.
+     */
+    readonly serverRegistry?: ServerRegistry;
     readonly params: P;
 }
 

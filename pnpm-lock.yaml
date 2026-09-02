@@ -154,6 +154,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@taco-ai/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@taco-ai/sidecar':
         specifier: workspace:*
         version: link:../sidecar
