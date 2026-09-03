@@ -34,6 +34,10 @@ interface BundlePaths {
     nodeBin: string;
     bundle: string;
     resources: string;
+    /** `sidecarVersion` from the bundle's manifest.json — the code version a
+     *  freshly spawned daemon would report. null when the manifest predates
+     *  the field. */
+    sidecarVersion: string | null;
 }
 
 /** Detect dev mode by walking up from this file looking for pnpm-workspace.yaml.
@@ -55,6 +59,14 @@ export function findRepoRoot(): string | null {
         dir = parent;
     }
     return null;
+}
+
+/** Single source of truth for "this CLI runs from a dev checkout".
+ *  `launchSidecar` and `start.ts`'s stale-daemon gate must agree on this —
+ *  when they drifted, a dev `taco start` could decide to reuse a daemon the
+ *  spawn path was about to replace with tsx source (or vice versa). */
+export function isDevCheckout(repoRoot: string | null = findRepoRoot()): boolean {
+    return repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0";
 }
 
 /** When the CLI is launched from a development checkout (sibling of `packages/`),
@@ -84,7 +96,10 @@ function prodBundlePaths(): BundlePaths | null {
             const pkgDir = dirname(pkgJsonPath);
             const manifestPath = join(pkgDir, "manifest.json");
             if (!existsSync(manifestPath)) continue;
-            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { target?: string };
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+                target?: string;
+                sidecarVersion?: string;
+            };
             const nodeBin = join(
                 pkgDir,
                 "bin",
@@ -95,12 +110,27 @@ function prodBundlePaths(): BundlePaths | null {
             if (!existsSync(nodeBin)) continue;
             const bundle = join(pkgDir, "lib", "index.mjs");
             if (!existsSync(bundle)) continue;
-            return { nodeBin, bundle, resources: pkgDir };
+            return {
+                nodeBin,
+                bundle,
+                resources: pkgDir,
+                sidecarVersion:
+                    typeof manifest.sidecarVersion === "string" ? manifest.sidecarVersion : null,
+            };
         } catch {
             // not installed / wrong platform — try next
         }
     }
     return null;
+}
+
+/** The sidecar code version a prod spawn would run, per the platform
+ *  bundle's manifest.json. `start.ts` compares this against a serving
+ *  daemon's pid-record version and reaps on mismatch. null in dev checkouts
+ *  (no platform pkg) — dev mode reaps unconditionally instead, since the
+ *  version string cannot see source edits. */
+export function prodSidecarVersion(): string | null {
+    return prodBundlePaths()?.sidecarVersion ?? null;
 }
 
 export interface LaunchOptions {
@@ -132,8 +162,7 @@ export interface LaunchResult {
  *  the daemon in a service anyway). */
 export function launchSidecar(opts: LaunchOptions): LaunchResult {
     const repoRoot = findRepoRoot();
-    const useDev =
-        opts.forceDev === true || (repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0");
+    const useDev = opts.forceDev === true || isDevCheckout(repoRoot);
 
     let bundle: LaunchedBundle;
     let resourcesRoot: string | undefined;

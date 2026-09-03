@@ -69,6 +69,9 @@ impl TmpHome {
             socket_path: sock,
             control_socket_path: ctl,
             own_install_id: own_id,
+            // No expectation: these cases exercise liveness/ownership, not
+            // the version freshness gate.
+            expected_sidecar_version: None,
             resources_root: PathBuf::from("/fake/install"),
         }
     }
@@ -235,6 +238,7 @@ fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
         socket_path: dir.join("run").join("sidecar.sock"),
         control_socket_path: ctl_path.clone(),
         own_install_id: &own_id,
+        expected_sidecar_version: None,
         resources_root: PathBuf::from("/fake/install"),
     };
 
@@ -331,6 +335,7 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
         socket_path: dir.join("run").join("sidecar.sock"),
         control_socket_path: ctl_path.clone(),
         own_install_id: &own_id,
+        expected_sidecar_version: None,
         resources_root: PathBuf::from("/fake/install"),
     };
 
@@ -397,6 +402,7 @@ fn force_reap_kills_alive_own_daemon() {
         socket_path: dir.join("run").join("sidecar.sock"),
         control_socket_path: ctl_path.clone(),
         own_install_id: &own_id,
+        expected_sidecar_version: None,
         resources_root: PathBuf::from("/fake/install"),
     };
 
@@ -489,6 +495,8 @@ fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
         socket_path: socket_path.clone(),
         control_socket_path: control_path.clone(),
         own_install_id: &own_id,
+        // No expectation → liveness-only reuse, the pre-gate behavior.
+        expected_sidecar_version: None,
         resources_root: PathBuf::from("/fake/install"),
     };
     let outcome = reap_previous_daemon(&inputs, Some(launcher_pid));
@@ -555,6 +563,7 @@ fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
         socket_path: dir.join("run").join("sidecar.sock"),
         control_socket_path: dir.join("run").join("sidecar-ctl.sock"),
         own_install_id: &own_id,
+        expected_sidecar_version: None,
         resources_root: PathBuf::from("/fake/install"),
     };
 
@@ -585,5 +594,170 @@ fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
     // the kill branch, which is the regression we're guarding against.
     let _ = force_kill(ghost_pid);
     let _ = helper.wait();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Shared fixture for the version-gate tests: a live helper process posing
+/// as the daemon, a pid file that owns it, a present NDJSON socket entry,
+/// and a control listener that answers pings with a configurable version.
+/// Returns None when the control socket can't be bound (sandboxed runs).
+fn version_gate_fixture(
+    tag: &str,
+    pong_version: Option<&str>,
+) -> Option<(PathBuf, std::process::Child, ReapInputs<'static>, std::thread::JoinHandle<()>)> {
+    let dir = std::path::PathBuf::from("/tmp").join(format!("taco-{tag}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("run")).unwrap();
+
+    let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
+    let ctl_path = dir.join("run").join("sidecar-ctl.sock");
+    let listener = match UnixListener::bind(&ctl_path) {
+        Ok(l) => l,
+        Err(_) => {
+            let _ = fs::remove_dir_all(&dir);
+            eprintln!("taco reap test: skipping {tag} case (bind denied)");
+            return None;
+        }
+    };
+
+    let helper = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 30")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to spawn helper");
+    let daemon_pid = helper.id();
+
+    fs::write(
+        dir.join("run").join("sidecar.pid"),
+        format!(
+            r#"{{"version":1,"pid":{daemon_pid},"install_id":"{own_id}","started_at":"2026-08-19T10:00:00.000Z"}}"#
+        ),
+    )
+    .unwrap();
+    // Socket entry present: an alive pid without it is the ghost-socket
+    // branch, not the version-gate branch.
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(dir.join("run").join("sidecar.sock"))
+        .unwrap();
+
+    let version_field = pong_version
+        .map(|v| format!(r#","version":"{v}""#))
+        .unwrap_or_default();
+    let responder = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("ping connection");
+        let mut request = [0u8; 256];
+        let _ = std::io::Read::read(&mut stream, &mut request);
+        std::io::Write::write_all(
+            &mut stream,
+            format!(
+                r#"{{"id":1,"result":{{"pid":{daemon_pid},"uptime_s":7{version_field}}}}}"#
+            )
+            .as_bytes(),
+        )
+        .expect("write ping response");
+    });
+
+    let inputs = ReapInputs {
+        pid_file: dir.join("run").join("sidecar.pid"),
+        socket_path: dir.join("run").join("sidecar.sock"),
+        control_socket_path: ctl_path,
+        // Leak the install id: ReapInputs borrows it, and the fixture's
+        // lifetime would otherwise have to thread through every caller.
+        // Tests are short-lived; a few leaked bytes are fine.
+        own_install_id: Box::leak(own_id.into_boxed_str()),
+        expected_sidecar_version: Some("0.1.2"),
+        resources_root: PathBuf::from("/fake/install"),
+    };
+    Some((dir, helper, inputs, responder))
+}
+
+#[test]
+fn reap_kills_daemon_running_a_stale_sidecar_version() {
+    // The upgraded-desktop case: daemon is healthy (answers ping, socket
+    // serving, install id ours) but reports the previous release's version.
+    // Reusing it would attach the new desktop to old code forever.
+    let Some((dir, mut helper, inputs, responder)) =
+        version_gate_fixture("verstale", Some("0.1.0"))
+    else {
+        return;
+    };
+    let daemon_pid = helper.id();
+
+    let outcome = reap_previous_daemon(&inputs, None);
+    match &outcome {
+        ReapOutcome::VersionMismatch {
+            pid,
+            expected,
+            found,
+        } => {
+            assert_eq!(*pid, daemon_pid);
+            assert_eq!(expected, "0.1.2");
+            assert_eq!(found.as_deref(), Some("0.1.0"));
+        }
+        other => panic!("expected VersionMismatch, got {:?}", other),
+    }
+    assert!(!dir.join("run").join("sidecar.pid").exists());
+    assert!(!dir.join("run").join("sidecar.sock").exists());
+
+    force_kill(daemon_pid);
+    let _ = helper.wait();
+    responder.join().expect("control responder panicked");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reap_preserves_daemon_running_the_expected_version() {
+    let Some((dir, mut helper, inputs, responder)) =
+        version_gate_fixture("vercurrent", Some("0.1.2"))
+    else {
+        return;
+    };
+    let daemon_pid = helper.id();
+
+    let outcome = reap_previous_daemon(&inputs, None);
+    assert_eq!(
+        outcome,
+        ReapOutcome::Alive {
+            pid: daemon_pid,
+            uptime_s: 7,
+        }
+    );
+    assert!(dir.join("run").join("sidecar.pid").exists());
+    assert!(is_alive(daemon_pid), "current daemon must not be signaled");
+
+    force_kill(daemon_pid);
+    let _ = helper.wait();
+    responder.join().expect("control responder panicked");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn reap_treats_versionless_pong_as_stale_when_expecting_a_version() {
+    // Pre-gate daemons answer control.ping without a version field (or a
+    // bundle that resolved "0.0.0"); with an expectation set, that must reap
+    // — otherwise the gate never applies to the daemons it exists to replace.
+    let Some((dir, mut helper, inputs, responder)) = version_gate_fixture("vernone", None)
+    else {
+        return;
+    };
+    let daemon_pid = helper.id();
+
+    let outcome = reap_previous_daemon(&inputs, None);
+    match &outcome {
+        ReapOutcome::VersionMismatch { pid, found, .. } => {
+            assert_eq!(*pid, daemon_pid);
+            assert_eq!(*found, None);
+        }
+        other => panic!("expected VersionMismatch, got {:?}", other),
+    }
+
+    force_kill(daemon_pid);
+    let _ = helper.wait();
+    responder.join().expect("control responder panicked");
     let _ = fs::remove_dir_all(&dir);
 }

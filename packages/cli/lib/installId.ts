@@ -38,6 +38,9 @@ export interface ParsedPidFile {
     startedAt: string | null;
     /** Schema version, when the on-disk format is JSON. null for legacy. */
     version: number | null;
+    /** `sidecar_version` from the JSON record; null for legacy files and for
+     *  records written by daemons that predate the field. */
+    sidecarVersion: string | null;
 }
 
 export function parsePidFile(contents: string): ParsedPidFile | null {
@@ -59,8 +62,10 @@ export function parsePidFile(contents: string): ParsedPidFile | null {
             const pid = typeof parsed.pid === "number" ? parsed.pid : Number.NaN;
             const installId = typeof parsed.install_id === "string" ? parsed.install_id : null;
             const startedAt = typeof parsed.started_at === "string" ? parsed.started_at : null;
+            const sidecarVersion =
+                typeof parsed.sidecar_version === "string" ? parsed.sidecar_version : null;
             if (!Number.isFinite(pid) || pid <= 0) return null;
-            return { pid, installId, startedAt, version: 1 };
+            return { pid, installId, startedAt, version: 1, sidecarVersion };
         } catch {
             return null;
         }
@@ -71,5 +76,25 @@ export function parsePidFile(contents: string): ParsedPidFile | null {
     // sanity-check with isFinite + positive.
     const pid = Number.parseInt(trimmed, 10);
     if (!Number.isFinite(pid) || pid <= 0) return null;
-    return { pid, installId: null, startedAt: null, version: null };
+    return { pid, installId: null, startedAt: null, version: null, sidecarVersion: null };
+}
+
+/** Decide whether a serving daemon should be reaped for running stale code.
+ *
+ *  Ownership comes first: a record whose install_id names a DIFFERENT
+ *  install is never ours to kill (sibling installs share $TACO_HOME by
+ *  design), and an absent/unparseable record gives no ownership claim at
+ *  all — killing on that basis could hit a daemon we don't own. Only when
+ *  the record is ours (install_id match, or legacy bare-int which only our
+ *  predecessors could have written) does the version comparison apply, and
+ *  a missing sidecar_version counts as stale: pre-field daemons are older
+ *  than any launcher that knows to compare. */
+export function pidRecordIsStale(
+    parsed: ParsedPidFile | null,
+    ownInstallId: string,
+    expectedVersion: string,
+): boolean {
+    if (parsed === null) return false;
+    if (parsed.installId !== null && parsed.installId !== ownInstallId) return false;
+    return parsed.sidecarVersion !== expectedVersion;
 }

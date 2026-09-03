@@ -28,6 +28,7 @@ import { buildSidecarPidRecord, computeInstallId } from "./lib/installId.ts";
 import { createLogger } from "./lib/logger.ts";
 import { augmentProcessPath, resolveLoginShellPathCached } from "./lib/loginShellPath.ts";
 import { ProviderKeyStore } from "./runtime/providerKeyStore.ts";
+import { sidecarVersion } from "./runtime/runtimeResources.ts";
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";
 import { JobsController } from "./scheduler/jobsController.ts";
 import { Scheduler } from "./scheduler/runner.ts";
@@ -488,25 +489,30 @@ async function runDaemon(
         );
 
         // Pid file — single source of truth for "which daemon owns this
-        // $TACO_HOME/run/". The CLI's wedged-daemon reaper reads it on
+        // runtime directory". The CLI's wedged-daemon reaper reads it on
         // every `taco start`; the desktop's reap path reads it before
         // spawning a replacement; both check `install_id` to avoid
         // killing a sibling taco install that happens to share the home.
         // Written only after both sockets are bound so a half-booted
         // process never advertises itself; removed on the shutdown/exit
         // paths below.
-        const pidPath = join(dirname(socketPath), "sidecar.pid");
-        if (IS_UNIX) {
-            try {
-                const installId = computeInstallId(
-                    process.env.TACO_SIDECAR_RESOURCES ?? "",
-                    tacoHome(),
-                );
-                const record = buildSidecarPidRecord(process.pid, installId);
-                writeFileSync(pidPath, JSON.stringify(record), "utf8");
-            } catch (err) {
-                log.warn(`failed to write pid file ${pidPath}: ${String(err)}`);
-            }
+        //
+        // The directory comes from TACO_RUNTIME_DIR, not the socket path:
+        // on Windows the socket is a named pipe (`\\.\pipe\...`), whose
+        // dirname is not a filesystem location. Both launchers always set
+        // the env; dirname(socketPath) is the unix fallback for direct
+        // invocations. `sidecar_version` lets launchers reap a stale-code
+        // daemon instead of reusing it (see killWedgedDaemon / daemon_reap).
+        const pidPath = join(process.env.TACO_RUNTIME_DIR ?? dirname(socketPath), "sidecar.pid");
+        try {
+            const installId = computeInstallId(
+                process.env.TACO_SIDECAR_RESOURCES ?? "",
+                tacoHome(),
+            );
+            const record = buildSidecarPidRecord(process.pid, installId, sidecarVersion());
+            writeFileSync(pidPath, JSON.stringify(record), "utf8");
+        } catch (err) {
+            log.warn(`failed to write pid file ${pidPath}: ${String(err)}`);
         }
 
         // PR4 upgrade orchestrator: read the marker on boot + every 6h; when a

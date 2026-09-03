@@ -1,28 +1,37 @@
 //! Reap an unusable sidecar daemon before the desktop starts a replacement.
 //!
 //! A daemon is a singleton for its runtime directory. A matching install id +
-//! a successful control ping + an existing NDJSON socket means the daemon is
-//! healthy and must be reused, even when it was started by another Tauri
-//! process or by a short-lived CLI launcher. (Debug mode: `tsx taco.cjs start`
-//! exits after detaching the real daemon, so the launcher pid ≠ daemon pid.)
+//! a successful control ping + a serving NDJSON socket + the sidecar version
+//! this desktop would spawn means the daemon is healthy AND current — it must
+//! be reused, even when it was started by another Tauri process or by a
+//! short-lived CLI launcher. (Debug mode: `tsx taco.cjs start` exits after
+//! detaching the real daemon, so the launcher pid ≠ daemon pid.)
+//!
+//! The version gate is what makes upgrades take effect: `control.ping`
+//! reports the running daemon's `sidecar_version`, the caller passes the
+//! version it would spawn (`expected_sidecar_version`), and a mismatch reaps
+//! the old daemon instead of attaching to it forever. `None` opts the caller
+//! out (liveness only) for environments where no expectation is resolvable.
 //!
 //! Foreign install ids are always left untouched — another Taco installation
 //! may actively use the shared `$TACO_HOME`. macOS Unix domain sockets can
 //! also leave a live process with no usable socket entry after an unclean
 //! shutdown; that case is treated as stale and reaped.
+//!
+//! Policy (what to reap and when) is platform-neutral; only the primitives
+//! are per-platform: `pid_alive`, `socket_entry_present`,
+//! `ping_control_socket`, and `terminate_daemon` (SIGTERM/SIGKILL on unix,
+//! control.shutdown + taskkill on Windows).
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
-#[cfg(unix)]
-use std::path::{Path, PathBuf};
-#[cfg(unix)]
-use std::process::Command;
-#[cfg(unix)]
-use std::time::{Duration, Instant};
 
-#[cfg(unix)]
 use sha2::{Digest, Sha256};
 
 /// Compute the install id — MUST match `packages/sidecar/src/lib/installId.ts::computeInstallId`
@@ -30,7 +39,6 @@ use sha2::{Digest, Sha256};
 /// test in `tests/daemon_reap.rs` enforces a fixed golden vector; if this
 /// drifts from the TypeScript implementation, the desktop reap path will
 /// silently skip its own daemon (or kill a sibling's).
-#[cfg(unix)]
 pub fn compute_install_id(resources_root: &str, taco_home: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(resources_root.as_bytes());
@@ -42,20 +50,22 @@ pub fn compute_install_id(resources_root: &str, taco_home: &str) -> String {
 }
 
 /// Pid file shape — see `SidecarPidRecord` in
-/// `packages/sidecar/src/lib/installId.ts`. Only Unix builds parse this;
-/// Windows builds are gated by `#[cfg(unix)]` and never look at the file.
-#[cfg(unix)]
+/// `packages/sidecar/src/lib/installId.ts`. Written by the daemon on every
+/// platform (Windows included — the reap path below is its consumer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PidRecord {
     pub pid: u32,
     pub install_id: Option<String>,
     pub started_at: Option<String>,
+    /// `sidecar_version` field; `None` for legacy bare-int files and records
+    /// written by daemons that predate the field. A missing version never
+    /// satisfies a `Some(_)` expectation, so pre-field daemons reap as stale.
+    pub sidecar_version: Option<String>,
 }
 
 /// Parse the pid file. Accepts the JSON record first, falls back to bare-int
 /// for pre-PR-A daemons. Returns `None` for absent/malformed/unknown-schema
 /// content so callers can treat the file as "no claim" and move on.
-#[cfg(unix)]
 pub fn parse_pid_file(contents: &str) -> Option<PidRecord> {
     let trimmed = contents.trim();
     if trimmed.is_empty() {
@@ -68,6 +78,7 @@ pub fn parse_pid_file(contents: &str) -> Option<PidRecord> {
         }
         let install_id = json_field_str(trimmed, "install_id");
         let started_at = json_field_str(trimmed, "started_at");
+        let sidecar_version = json_field_str(trimmed, "sidecar_version");
         match json_field_u64(trimmed, "version") {
             Some(1) => {}
             _ => return None,
@@ -76,6 +87,7 @@ pub fn parse_pid_file(contents: &str) -> Option<PidRecord> {
             pid,
             install_id,
             started_at,
+            sidecar_version,
         });
     }
     let pid: u32 = trimmed.parse().ok()?;
@@ -86,11 +98,11 @@ pub fn parse_pid_file(contents: &str) -> Option<PidRecord> {
         pid,
         install_id: None,
         started_at: None,
+        sidecar_version: None,
     })
 }
 
-#[cfg(unix)]
-fn json_field_str<'a>(raw: &'a str, key: &str) -> Option<String> {
+fn json_field_str(raw: &str, key: &str) -> Option<String> {
     let needle = format!("\"{}\":\"", key);
     let start = raw.find(&needle)? + needle.len();
     let rest = &raw[start..];
@@ -98,7 +110,6 @@ fn json_field_str<'a>(raw: &'a str, key: &str) -> Option<String> {
     Some(rest[..end].to_owned())
 }
 
-#[cfg(unix)]
 fn json_field_u32(raw: &str, key: &str) -> Option<u32> {
     let needle = format!("\"{}\":", key);
     let start = raw.find(&needle)? + needle.len();
@@ -109,7 +120,6 @@ fn json_field_u32(raw: &str, key: &str) -> Option<u32> {
     rest[..end].parse().ok()
 }
 
-#[cfg(unix)]
 fn json_field_u64(raw: &str, key: &str) -> Option<u64> {
     let needle = format!("\"{}\":", key);
     let start = raw.find(&needle)? + needle.len();
@@ -123,7 +133,6 @@ fn json_field_u64(raw: &str, key: &str) -> Option<u64> {
 /// Outcome of a single reap attempt. The variants give the caller enough
 /// information to log meaningfully (e.g. "reaped foreign daemon" vs
 /// "no pid file" vs "preserved own daemon").
-#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReapOutcome {
     /// No pid file existed. Nothing to do.
@@ -132,36 +141,65 @@ pub enum ReapOutcome {
     Unparseable,
     /// Pid file's install_id didn't match ours. Foreign daemon — leave it alone.
     ForeignInstall,
-    /// `control.ping` answered with the expected pid + matching install_id.
-    /// The daemon is alive and serving this runtime — no reap needed. The
+    /// `control.ping` answered with the expected pid + matching install_id +
+    /// the sidecar version this caller would spawn. The daemon is alive,
+    /// serving this runtime, and running current code — no reap needed. The
     /// desktop may have spawned a short-lived launcher (for example `tsx
     /// taco.cjs start`) whose pid is intentionally different from the daemon.
     Alive { pid: u32, uptime_s: u64 },
+    /// Daemon answered the health probe but reported a sidecar version other
+    /// than the one this caller would spawn — the classic "upgraded but still
+    /// attached to the old build" case. We killed it (graceful → forced) and
+    /// unlinked pid + sockets so the fresh spawn binds.
+    VersionMismatch {
+        pid: u32,
+        expected: String,
+        /// Version the daemon reported; `None` when the pong carried no
+        /// version field at all (pre-gate daemon).
+        found: Option<String>,
+    },
     /// Daemon was alive but did not answer the health probe. We killed it
-    /// (SIGTERM → grace → SIGKILL) and unlinked pid + sockets so a fresh bind
+    /// (graceful → forced) and unlinked pid + sockets so a fresh bind
     /// succeeds.
     Reaped { pid: u32, last_signal: &'static str, preserved_own: bool },
     /// Pid file pointed at a process that was already dead, OR alive but
-    /// ghost-socket (no fs entry). We unlinked pid + sockets so a fresh
+    /// ghost-socket (no server). We unlinked pid + sockets so a fresh
     /// bind succeeds.
     Stale { pid: u32, last_signal: &'static str },
 }
 
 /// Inputs the desktop knows about that the reap function needs.
-#[cfg(unix)]
 pub struct ReapInputs<'a> {
     /// Path to the pid file (typically `$TACO_HOME/run/sidecar.pid`).
     pub pid_file: PathBuf,
-    /// NDJSON socket path -- unlinked after a successful reap.
+    /// NDJSON socket path (unix) or named pipe (Windows) — unlinked /
+    /// proven-absent after a successful reap.
     pub socket_path: PathBuf,
-    /// Control socket path -- unlinked after a successful reap.
+    /// Control socket path (unix) or named pipe (Windows) — ping target and
+    /// graceful-shutdown channel.
     pub control_socket_path: PathBuf,
     /// Computed install id for THIS desktop install.
     pub own_install_id: &'a str,
+    /// Sidecar version this desktop would spawn (bundle manifest in release,
+    /// repo package.json in debug). `Some` enables the freshness gate: a
+    /// healthy daemon reporting anything else is reaped. `None` keeps the
+    /// pre-gate liveness-only behavior for callers that can't resolve an
+    /// expectation.
+    pub expected_sidecar_version: Option<&'a str>,
     /// Resources root shipped with THIS desktop install (used only as a
     /// diagnostic breadcrumb in error messages; the id comparison is the
     /// source of truth).
     pub resources_root: PathBuf,
+}
+
+/// The freshness gate, isolated for unit tests. `expected = None` means the
+/// caller couldn't resolve what it would spawn — keep the historical
+/// liveness-only behavior rather than reaping blindly on every launch.
+pub fn pong_version_current(found: Option<&str>, expected: Option<&str>) -> bool {
+    match expected {
+        Some(exp) => found == Some(exp),
+        None => true,
+    }
 }
 
 /// Reap the previous daemon if one is stale.
@@ -172,7 +210,6 @@ pub struct ReapInputs<'a> {
 /// daemon, so its pid is different from the pid in `sidecar.pid`. A healthy
 /// daemon matching this runtime's install id is safe to reuse regardless of
 /// which process launched it.
-#[cfg(unix)]
 pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) -> ReapOutcome {
     let raw = match std::fs::read_to_string(inputs.pid_file.as_path()) {
         Ok(s) => s,
@@ -197,8 +234,8 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
     // successful control ping before declaring the daemon healthy (a
     // control-only half-start must not be mistaken for a reusable connection).
     //
-    // A daemon mid-init or serving a burst can miss a single 500ms ping —
-    // SIGKILL on a false "unhealthy" turns a slow boot into a kill/restart
+    // A daemon mid-init or serving a burst can miss a single 120ms ping —
+    // killing on a false "unhealthy" turns a slow boot into a kill/restart
     // loop, so retry the ping. Skip the retry budget when `pid_alive` says the
     // pid is already dead (signal-0, microseconds): the common case after a
     // desktop restart is exactly that, and the budget exists to ride out a
@@ -222,47 +259,43 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
         }
     }
     if let Some(p) = pong {
-        if p.pid == parsed.pid && inputs.socket_path.exists() {
-            return ReapOutcome::Alive {
+        if p.pid == parsed.pid && socket_entry_present(inputs.socket_path.as_path()) {
+            if pong_version_current(p.version.as_deref(), inputs.expected_sidecar_version) {
+                return ReapOutcome::Alive {
+                    pid: parsed.pid,
+                    uptime_s: p.uptime_s,
+                };
+            }
+            // Healthy but stale code. Reap it so the caller's spawn binds
+            // the version it actually shipped.
+            let _last = terminate_daemon(parsed.pid, inputs.control_socket_path.as_path());
+            unlink_pid_and_sockets(inputs);
+            return ReapOutcome::VersionMismatch {
                 pid: parsed.pid,
-                uptime_s: p.uptime_s,
+                expected: inputs.expected_sidecar_version.unwrap_or("").to_owned(),
+                found: p.version,
             };
         }
     }
-    // Detect ghost socket: pid alive but fs entry missing. macOS lets
-    // the inode survive via fd after unlink, so a connect() from a new
-    // process fails with ENOENT even though pid_alive returns true. We
-    // treat this as stale: kill the daemon (SIGTERM → grace → SIGKILL),
-    // unlink pid + sockets, let the next spawn re-bind. Without the
-    // kill, the live process still owns the inode and the next spawn's
-    // bind() fails with EADDRINUSE — the original ghost-socket symptom
-    // we set out to fix. Killing closes the fd so the kernel reaps the
-    // inode and the follow-up unlink + new bind succeed.
+    // Detect ghost socket: pid alive but no server behind the socket entry.
+    // macOS lets the inode survive via fd after unlink, so a connect() from a
+    // new process fails with ENOENT even though pid_alive returns true. We
+    // treat this as stale: kill the daemon (graceful → forced), unlink pid +
+    // sockets, let the next spawn re-bind. Without the kill, the live process
+    // still owns the inode and the next spawn's bind() fails with EADDRINUSE —
+    // the original ghost-socket symptom we set out to fix. Killing closes the
+    // fd so the kernel reaps the inode and the follow-up unlink + new bind
+    // succeed.
     let pid_is_alive = pid_alive(parsed.pid);
-    let ghost = pid_is_alive && !inputs.socket_path.exists();
+    let ghost = pid_is_alive && !socket_entry_present(inputs.socket_path.as_path());
     if !pid_is_alive || ghost {
         let last_signal = if pid_is_alive {
             eprintln!(
-                "taco-desktop: ghost socket for pid={} (alive but {} has no fs entry); killing",
+                "taco-desktop: ghost socket for pid={} (alive but {} has no listener); killing",
                 parsed.pid,
                 inputs.socket_path.display()
             );
-            let _ = Command::new("kill")
-                .args(["-TERM", &parsed.pid.to_string()])
-                .status();
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline && pid_alive(parsed.pid) {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            if pid_alive(parsed.pid) {
-                let _ = Command::new("kill")
-                    .args(["-KILL", &parsed.pid.to_string()])
-                    .status();
-                std::thread::sleep(Duration::from_millis(100));
-                "SIGKILL"
-            } else {
-                "SIGTERM"
-            }
+            terminate_daemon(parsed.pid, inputs.control_socket_path.as_path())
         } else {
             "stale-pidfile"
         };
@@ -274,22 +307,7 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
     }
     // Pid alive + matches install, but the daemon did not pass the health
     // probe. Kill it so the next spawn can bind.
-    let _ = Command::new("kill")
-        .args(["-TERM", &parsed.pid.to_string()])
-        .status();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && pid_alive(parsed.pid) {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    let last_signal = if pid_alive(parsed.pid) {
-        let _ = Command::new("kill")
-            .args(["-KILL", &parsed.pid.to_string()])
-            .status();
-        std::thread::sleep(Duration::from_millis(100));
-        "SIGKILL"
-    } else {
-        "SIGTERM"
-    };
+    let last_signal = terminate_daemon(parsed.pid, inputs.control_socket_path.as_path());
     unlink_pid_and_sockets(inputs);
     ReapOutcome::Reaped {
         pid: parsed.pid,
@@ -307,41 +325,48 @@ pub fn reap_previous_daemon(inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) ->
 /// reload anyway. Killing it pre-emptively gives a clean baseline and
 /// avoids racing the launcher respawn into a double-bind on the same
 /// socket inode.
-#[cfg(unix)]
 pub fn force_reap(inputs: &ReapInputs<'_>) -> ReapOutcome {
     let outcome = reap_previous_daemon(inputs, None);
     // If reap returned Alive (we'd preserved our own), kill it anyway --
-    // install is about to bounce launchd. The daemon's parent plist will
-    // respawn it; killing the current one means no double-instance during
-    // the install handoff.
+    // install is about to bounce the service. The service's parent config
+    // will respawn it; killing the current one means no double-instance
+    // during the install handoff. VersionMismatch/Reaped/Stale already
+    // killed their daemon, so they pass straight through.
     if let ReapOutcome::Alive { pid, .. } = outcome {
-        let _ = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while Instant::now() < deadline && pid_alive(pid) {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        if pid_alive(pid) {
-            let _ = Command::new("kill")
-                .args(["-KILL", &pid.to_string()])
-                .status();
-        }
+        // Report the signal that actually landed, not a "force" literal:
+        // last_signal is read by operators comparing reap logs across
+        // platforms, and a vocabulary only this path emits made a forced
+        // install-time reap indistinguishable from a graceful one.
+        let last_signal = terminate_daemon(pid, inputs.control_socket_path.as_path());
         unlink_pid_and_sockets(inputs);
         return ReapOutcome::Reaped {
             pid,
-            last_signal: "force",
+            last_signal,
             preserved_own: false,
         };
     }
     outcome
 }
 
-#[cfg(unix)]
 fn unlink_pid_and_sockets(inputs: &ReapInputs<'_>) {
     let _ = std::fs::remove_file(inputs.pid_file.as_path());
+    // Named pipes leave no filesystem entry; remove_file just fails and is
+    // ignored, so this stays correct on Windows without a cfg branch.
     let _ = std::fs::remove_file(inputs.socket_path.as_path());
     let _ = std::fs::remove_file(inputs.control_socket_path.as_path());
+}
+
+/// Whether anything serves the NDJSON socket/pipe. Unix checks the fs entry
+/// (ghost-socket detection); Windows named pipes have no fs entry, so we
+/// attempt a connect — success proves a bound server.
+#[cfg(unix)]
+fn socket_entry_present(path: &Path) -> bool {
+    path.exists()
+}
+
+#[cfg(windows)]
+fn socket_entry_present(path: &Path) -> bool {
+    std::fs::OpenOptions::new().read(true).open(path).is_ok()
 }
 
 #[cfg(unix)]
@@ -353,13 +378,100 @@ fn pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Tiny TCP/Unix-socket ping of the daemon's control channel. We don't
-/// speak the full JSON-RPC protocol here -- a successful "connect + write
-/// newline + read a non-empty byte" is enough to know the daemon is up.
+#[cfg(windows)]
+fn pid_alive(pid: u32) -> bool {
+    // tasklist is present on every supported Windows and needs no extra
+    // crate. CSV output quotes every field, so `"4242"` is an unambiguous
+    // match (no false positive on pids that merely contain the digits).
+    let out = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+        .output();
+    match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")),
+        Err(_) => false,
+    }
+}
+
+/// Graceful-then-forced termination. Returns a short tag naming the signal
+/// that landed, for the outcome's `last_signal` breadcrumb.
+///
+/// Unix: SIGTERM (the daemon's handler closes servers + unlinks) → 3s grace
+/// → SIGKILL, which skips exit handlers so the caller unlinks instead.
+///
+/// Windows has no SIGTERM a console-less Node process can catch, so the
+/// graceful step is the daemon's own `control.shutdown` RPC over the named
+/// pipe — same exit path the CLI's `taco stop` exercises. `taskkill /F` is
+/// the forced fallback.
 #[cfg(unix)]
+fn terminate_daemon(pid: u32, _control_socket_path: &Path) -> &'static str {
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && pid_alive(pid) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if pid_alive(pid) {
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        std::thread::sleep(Duration::from_millis(100));
+        "SIGKILL"
+    } else {
+        "SIGTERM"
+    }
+}
+
+#[cfg(windows)]
+fn terminate_daemon(pid: u32, control_socket_path: &Path) -> &'static str {
+    use std::io::Write;
+    // Best-effort graceful shutdown. A wedged daemon never reads the pipe;
+    // the write just lands in the pipe buffer and we fall through to
+    // taskkill after the grace window.
+    if let Ok(mut pipe) = std::fs::OpenOptions::new()
+        .write(true)
+        .open(control_socket_path)
+    {
+        let _ = pipe.write_all(b"{\"method\":\"control.shutdown\",\"id\":1}\n");
+        let _ = pipe.flush();
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && pid_alive(pid) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if pid_alive(pid) {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status();
+        std::thread::sleep(Duration::from_millis(100));
+        "taskkill"
+    } else {
+        "control.shutdown"
+    }
+}
+
+/// Tiny ping of the daemon's control channel. We don't speak the full
+/// JSON-RPC protocol here -- a parseable reply carrying pid + uptime (and,
+/// post-gate, the daemon's sidecar version) is enough to judge health.
+/// Fields are pub for the `daemon_reap_test` surface; nothing outside reap
+/// and its tests consumes them.
 pub struct Pong {
-    pid: u32,
-    uptime_s: u64,
+    pub pid: u32,
+    pub uptime_s: u64,
+    pub version: Option<String>,
+}
+
+/// Parse one control-channel reply line into a Pong. Pub for the
+/// `daemon_reap_test` surface; reap itself is the only real consumer.
+pub fn parse_pong(text: &str) -> Option<Pong> {
+    let pid = json_field_u32(text, "pid")?;
+    let uptime_s = json_field_u64(text, "uptime_s").unwrap_or(0);
+    let version = json_field_str(text, "version");
+    Some(Pong {
+        pid,
+        uptime_s,
+        version,
+    })
 }
 
 #[cfg(unix)]
@@ -379,12 +491,43 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
         _ => return None,
     };
     let text = std::str::from_utf8(&buf[..n]).ok()?;
-    let pid = json_field_u32(text, "pid")?;
-    let uptime_s = json_field_u64(text, "uptime_s").unwrap_or(0);
-    Some(Pong { pid, uptime_s })
+    parse_pong(text)
 }
 
-/// Resolve the canonical pid/socket paths inside an explicit daemon runtime directory.
+#[cfg(windows)]
+pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
+    use std::io::{Read as _, Write};
+    // std File reads have no timeout, so read on a worker thread and bound
+    // the wait with a channel.
+    //
+    // On timeout the worker stays blocked in `read` — Rust cannot cancel a
+    // thread, and the block is in `read`, not in `send`, so neither a
+    // JoinHandle nor `send_timeout` can shorten it. It unblocks when the
+    // pipe closes: either the daemon answers late, or the caller's
+    // `terminate_daemon` kills it moments later (every timeout path here
+    // leads to a terminate). Lifetime is therefore the daemon's, not the
+    // reap's, and the count is bounded by the retry schedule (≤3 per reap).
+    // Truly cancelling the read needs overlapped IO + `CancelIoEx` from
+    // `windows-sys`; not worth a platform dependency for three threads that
+    // exit on their own.
+    let mut pipe = std::fs::OpenOptions::new().read(true).write(true).open(path).ok()?;
+    pipe.write_all(b"{\"method\":\"control.ping\",\"id\":1}\n").ok()?;
+    pipe.flush().ok()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 512];
+        if let Ok(n) = pipe.read(&mut buf) {
+            let _ = tx.send(buf[..n].to_vec());
+        }
+    });
+    let data = rx.recv_timeout(timeout).ok()?;
+    let text = std::str::from_utf8(&data).ok()?;
+    parse_pong(text)
+}
+
+/// Resolve the canonical pid/socket paths inside an explicit daemon runtime
+/// directory. On Windows the sockets are named pipes — `paths.rs` owns their
+/// names, so this delegates rather than duplicating them.
 #[cfg(unix)]
 pub fn daemon_runtime_paths(runtime_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     (
@@ -394,41 +537,24 @@ pub fn daemon_runtime_paths(runtime_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     )
 }
 
-// On Windows, the pid-file reap path doesn't exist. Keep API stubs.
-#[cfg(not(unix))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReapOutcome {
-    NoPidFile,
-}
-
-// Mirror of the unix `ReapInputs` so the windows stub functions below
-// have a concrete type to reference. Carries no real state — the windows
-// stubs ignore the input and return `NoPidFile`.
-#[cfg(not(unix))]
-pub struct ReapInputs<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-#[cfg(not(unix))]
-pub fn reap_previous_daemon(_inputs: &ReapInputs<'_>, _owned_pid: Option<u32>) -> ReapOutcome {
-    ReapOutcome::NoPidFile
-}
-
-#[cfg(not(unix))]
-pub fn force_reap(_inputs: &ReapInputs<'_>) -> ReapOutcome {
-    ReapOutcome::NoPidFile
+#[cfg(windows)]
+pub fn daemon_runtime_paths(runtime_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    (
+        runtime_dir.join("sidecar.pid"),
+        crate::paths::ndjson_socket_path(runtime_dir),
+        crate::paths::control_socket_path(runtime_dir),
+    )
 }
 
 /// Test-only re-exports. The integration test under `tests/daemon_reap.rs`
 /// and `tests/daemon_reap_integration.rs` links against these via
 /// `taco_desktop_lib::daemon_reap_test::*`. None of these symbols are
 /// reachable from the public command surface.
-#[cfg(unix)]
 #[doc(hidden)]
 pub mod __test_only {
     pub use super::{
-        compute_install_id, daemon_runtime_paths, force_reap, parse_pid_file,
-        reap_previous_daemon, PidRecord, Pong, ReapInputs, ReapOutcome,
-        ping_control_socket,
+        compute_install_id, daemon_runtime_paths, force_reap, parse_pid_file, parse_pong,
+        ping_control_socket, pong_version_current, reap_previous_daemon, PidRecord, Pong,
+        ReapInputs, ReapOutcome,
     };
 }

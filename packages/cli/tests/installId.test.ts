@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { computeInstallId, parsePidFile } from "../lib/installId.ts";
+import { computeInstallId, parsePidFile, pidRecordIsStale } from "../lib/installId.ts";
 
 test("computeInstallId is deterministic and bounded to 16 hex chars", () => {
     const a = computeInstallId("/usr/local/share/taco/sidecar", "/Users/x/.taco");
@@ -87,4 +87,60 @@ test("parsePidFile returns null when JSON has missing/invalid pid", () => {
         started_at: "2026-08-19T10:00:00.000Z",
     });
     strictEqual(parsePidFile(rawBadPid), null);
+});
+
+test("parsePidFile surfaces sidecar_version, null when absent or legacy", () => {
+    const withVersion = parsePidFile(
+        JSON.stringify({
+            version: 1,
+            pid: 4242,
+            install_id: "abcd1234ef567890",
+            started_at: "2026-08-19T10:00:00.000Z",
+            sidecar_version: "0.1.2",
+        }),
+    );
+    ok(withVersion);
+    strictEqual(withVersion.sidecarVersion, "0.1.2");
+
+    const preFieldRecord = parsePidFile(
+        JSON.stringify({
+            version: 1,
+            pid: 4242,
+            install_id: "abcd1234ef567890",
+            started_at: "2026-08-19T10:00:00.000Z",
+        }),
+    );
+    ok(preFieldRecord);
+    strictEqual(preFieldRecord.sidecarVersion, null);
+
+    const legacy = parsePidFile("4242\n");
+    ok(legacy);
+    strictEqual(legacy.sidecarVersion, null);
+});
+
+test("pidRecordIsStale: version gate only ever applies to our own daemon", () => {
+    const own = computeInstallId("/this/install", "/this/home");
+    const record = (
+        installId: string | null,
+        sidecarVersion: string | null,
+    ): ReturnType<typeof parsePidFile> => ({
+        pid: 4242,
+        installId,
+        startedAt: null,
+        version: 1,
+        sidecarVersion,
+    });
+
+    // Ours, same version → reuse.
+    strictEqual(pidRecordIsStale(record(own, "0.1.2"), own, "0.1.2"), false);
+    // Ours, older version → stale (the upgrade case this gate exists for).
+    strictEqual(pidRecordIsStale(record(own, "0.1.0"), own, "0.1.2"), true);
+    // Ours, pre-field record (no version) → stale: older than any comparing launcher.
+    strictEqual(pidRecordIsStale(record(own, null), own, "0.1.2"), true);
+    // Legacy bare-int (null install_id) → owned by migration rule, and stale.
+    strictEqual(pidRecordIsStale(record(null, null), own, "0.1.2"), true);
+    // Foreign install → never stale FOR US; the sibling install owns its daemon.
+    strictEqual(pidRecordIsStale(record("ffff000000000000", "0.0.1"), own, "0.1.2"), false);
+    // No parseable record → no ownership claim → no kill.
+    strictEqual(pidRecordIsStale(null, own, "0.1.2"), false);
 });

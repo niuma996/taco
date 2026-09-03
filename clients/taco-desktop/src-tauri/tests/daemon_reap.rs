@@ -42,6 +42,42 @@ fn parse_pid_file_accepts_json_record() {
         parsed.started_at.as_deref(),
         Some("2026-08-19T10:00:00.000Z")
     );
+    assert_eq!(parsed.sidecar_version, None);
+}
+
+#[test]
+fn parse_pid_file_surfaces_sidecar_version() {
+    let raw = r#"{"version":1,"pid":4242,"install_id":"abcd1234ef567890","started_at":"2026-08-19T10:00:00.000Z","sidecar_version":"0.1.2"}"#;
+    let parsed = parse_pid_file(raw).expect("must parse");
+    assert_eq!(parsed.sidecar_version.as_deref(), Some("0.1.2"));
+}
+
+#[test]
+fn pong_version_current_gate_semantics() {
+    // No expectation → liveness only (pre-gate behavior).
+    assert!(pong_version_current(Some("0.1.0"), None));
+    assert!(pong_version_current(None, None));
+    // Expectation set → exact match required.
+    assert!(pong_version_current(Some("0.1.2"), Some("0.1.2")));
+    assert!(!pong_version_current(Some("0.1.0"), Some("0.1.2")));
+    // Pre-gate daemons (no version on the wire) never satisfy an expectation.
+    assert!(!pong_version_current(None, Some("0.1.2")));
+}
+
+#[test]
+fn parse_pong_extracts_pid_uptime_and_version() {
+    let pong = parse_pong(r#"{"id":1,"result":{"version":"0.1.2","protocol":1,"uptime_s":42,"pid":4242}}"#)
+        .expect("must parse");
+    assert_eq!(pong.pid, 4242);
+    assert_eq!(pong.uptime_s, 42);
+    assert_eq!(pong.version.as_deref(), Some("0.1.2"));
+
+    let legacy = parse_pong(r#"{"id":1,"result":{"pid":4242}}"#).expect("must parse");
+    assert_eq!(legacy.uptime_s, 0);
+    assert_eq!(legacy.version, None);
+
+    assert!(parse_pong(r#"{"id":1,"result":{}}"#).is_none());
+    assert!(parse_pong("not json").is_none());
 }
 
 #[test]

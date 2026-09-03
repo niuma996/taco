@@ -41,6 +41,7 @@ pub mod upgrade_commands;
 
 use crate::paths::{
     control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home, resolve_taco_runtime_dir,
+    strip_win_verbatim,
 };
 #[cfg(debug_assertions)]
 use crate::sidecar_launcher::DEBUG_ONLY_PASSTHROUGH_ENV;
@@ -487,7 +488,6 @@ async fn workspace_ensure(
             return Err("sidecar shutting down".into());
         }
     }
-    #[cfg(unix)]
     {
         let _p = boot_trace::Phase::new("ensure.reap_stale");
         if let Ok(runtime_dir) = resolve_taco_runtime_dir(&app) {
@@ -1049,7 +1049,35 @@ async fn set_fs_scope(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(unix)]
+/// The sidecar version this desktop would spawn — the expectation for the
+/// reap freshness gate. Debug reads the repo's `packages/sidecar/package.json`;
+/// release reads the staged bundle's `manifest.json` (`sidecarVersion`,
+/// written by buildRuntime.mjs and staged by stageSidecar.mjs). Unreadable
+/// → `None`, which disables the gate: reaping on every launch because a
+/// metadata file went missing is worse than occasionally reusing an old
+/// daemon.
+fn expected_sidecar_version(app: &tauri::AppHandle) -> Option<String> {
+    let raw = if cfg!(debug_assertions) {
+        std::fs::read_to_string(
+            find_repo_root()
+                .join("packages")
+                .join("sidecar")
+                .join("package.json"),
+        )
+        .ok()?
+    } else {
+        let manifest = app.path().resource_dir().ok()?.join("sidecar").join("manifest.json");
+        std::fs::read_to_string(strip_win_verbatim(&manifest)).ok()?
+    };
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let key = if cfg!(debug_assertions) {
+        "version"
+    } else {
+        "sidecarVersion"
+    };
+    value.get(key)?.as_str().map(String::from)
+}
+
 fn reap_stale_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
     use crate::daemon_reap::{
         compute_install_id, daemon_runtime_paths, reap_previous_daemon, ReapInputs,
@@ -1085,11 +1113,13 @@ fn reap_stale_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
         Err(_) => return,
     };
     let own_install_id = compute_install_id(&resources_root, &taco_home.to_string_lossy());
+    let expected_version = expected_sidecar_version(app);
     let inputs = ReapInputs {
         pid_file,
         socket_path,
         control_socket_path,
         own_install_id: &own_install_id,
+        expected_sidecar_version: expected_version.as_deref(),
         resources_root: std::path::PathBuf::from(&resources_root),
     };
     let outcome = reap_previous_daemon(&inputs, None);
@@ -1099,12 +1129,11 @@ fn reap_stale_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
 }
 
 /// Force-reap variant for the install path. Same shape as `reap_stale_at`
-/// but invokes `force_reap`, which additionally SIGTERMs an alive own
+/// but invokes `force_reap`, which additionally terminates an alive own
 /// daemon. Install is about to bounce launchd / schtasks, so any live
 /// instance — even one whose control socket still answers — must die
 /// pre-emptively to avoid racing the launcher respawn into a double-bind
 /// on the same socket inode.
-#[cfg(unix)]
 fn reap_force_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
     use crate::daemon_reap::{compute_install_id, daemon_runtime_paths, force_reap, ReapInputs};
     let (pid_file, socket_path, control_socket_path) = daemon_runtime_paths(runtime_dir);
@@ -1127,11 +1156,13 @@ fn reap_force_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
         Err(_) => return,
     };
     let own_install_id = compute_install_id(&resources_root, &taco_home.to_string_lossy());
+    let expected_version = expected_sidecar_version(app);
     let inputs = ReapInputs {
         pid_file,
         socket_path,
         control_socket_path,
         own_install_id: &own_install_id,
+        expected_sidecar_version: expected_version.as_deref(),
         resources_root: std::path::PathBuf::from(&resources_root),
     };
     let outcome = force_reap(&inputs);
@@ -1254,14 +1285,10 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
     // launchd / schtasks, so any daemon currently holding our runtime
     // dir — even our own, even if its control socket still pings — must
     // die pre-emptively. `reap_previous_daemon` alone preserves an alive
-    // own daemon; that would race the launchd respawn and leave two
+    // own daemon; that would race the service respawn and leave two
     // instances bound to the same socket. `force_reap` is the same path
-    // plus an unconditional second-pass SIGTERM/SIGKILL on the Alive
-    // outcome.
-    #[cfg(unix)]
-    {
-        let _ = reap_force_at(&runtime_dir, app.handle());
-    }
+    // plus an unconditional second-pass terminate on the Alive outcome.
+    reap_force_at(&runtime_dir, app.handle());
     let control = control_socket_path(&runtime_dir);
     if control_socket_present(&control) {
         return Ok(());
@@ -1471,7 +1498,6 @@ pub fn run() {
                 // grace overlap with build_main_window + webview load
                 // (≈600ms each), which is what the UI is doing anyway.
                 let _p = boot_trace::Phase::new("setup.preemptive_reap");
-                #[cfg(unix)]
                 if let Ok(runtime_dir) = resolve_taco_runtime_dir(app.handle()) {
                     reap_stale_at(&runtime_dir, app.handle());
                 }

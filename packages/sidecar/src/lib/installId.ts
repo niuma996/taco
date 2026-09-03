@@ -45,6 +45,12 @@ export interface SidecarPidRecord {
     install_id: string;
     /** ISO-8601 timestamp of when the daemon bound both sockets. */
     started_at: string;
+    /** Sidecar code version the daemon is running (`sidecarVersion()`).
+     *  Optional: additive within schema v1. Launchers compare it against the
+     *  version they would spawn and reap on mismatch, so a stale daemon is
+     *  never reused after an upgrade. Absent on records written by daemons
+     *  that predate the field — those always compare stale. */
+    sidecar_version?: string;
 }
 
 /** Build the pid-file payload. Caller serialises — kept as a pure function
@@ -52,6 +58,7 @@ export interface SidecarPidRecord {
 export function buildSidecarPidRecord(
     pid: number,
     installId: string,
+    sidecarVersion?: string,
     now: () => Date = () => new Date(),
 ): SidecarPidRecord {
     return {
@@ -59,5 +66,6 @@ export function buildSidecarPidRecord(
         pid,
         install_id: installId,
         started_at: now().toISOString(),
+        ...(sidecarVersion !== undefined ? { sidecar_version: sidecarVersion } : {}),
     };
 }

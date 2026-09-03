@@ -12,15 +12,20 @@
  * a stuck / half-closed UI socket can't block liveness pings.
  */
 
-import { createRequire } from "node:module";
 import type { Socket } from "node:net";
 import * as readline from "node:readline";
 import { createLogger } from "../lib/logger.ts";
+import { sidecarVersion } from "../runtime/runtimeResources.ts";
 
 const log = createLogger("sidecar.control");
 
-/** Sidecar protocol version + git sha; returned by control.ping. */
+/** Sidecar protocol version + code version; returned by control.ping. */
 interface PingResult {
+    /** Running sidecar's code version. Launchers compare it against the
+     *  version they would spawn and reap on mismatch — the value must be
+     *  real in bundles too, so it comes from `runtimeResources.sidecarVersion`
+     *  (esbuild define) rather than a node_modules lookup, which resolves
+     *  nowhere in a bundled runtime and used to answer "0.0.0". */
     version: string;
     protocol: number;
     uptime_s: number;
@@ -31,19 +36,6 @@ export interface ControlRequest {
     method: string;
     params?: unknown;
     id?: number;
-}
-
-/** Pull the sidecar package version straight from package.json — same source
- *  the NDJSON hello frame uses, so the two never drift. */
-function sidecarVersion(): string {
-    try {
-        const req = createRequire(import.meta.url);
-        const pkgPath = req.resolve("@taco-ai/sidecar/package.json");
-        const pkg = JSON.parse(req("fs").readFileSync(pkgPath, "utf8")) as { version?: string };
-        return pkg.version ?? "0.0.0";
-    } catch {
-        return "0.0.0";
-    }
 }
 
 const SIDECAR_PROTOCOL = 1;

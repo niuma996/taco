@@ -9,8 +9,11 @@
  *
  * Flow:
  *   1. Resolve shared $TACO_HOME and the daemon runtime directory; create both if missing.
- *   2. If a daemon already answers on the control socket, print the NDJSON
- *      path and return — no spawn.
+ *   2. If a daemon already answers on the NDJSON socket AND runs the code
+ *      this launch would spawn (pid-record version match; dev checkouts
+ *      never match), print the socket path and return — no spawn. A healthy
+ *      but stale daemon is reaped first, via the same kill path as a wedged
+ *      one.
  *   3. Otherwise elect a spawner via `start.lock`. The winner spawns and waits
  *      for readiness; losers skip the spawn and wait on the same socket.
  *   4. Print the NDJSON socket path to stdout (single line) so callers
@@ -20,14 +23,13 @@
  * alive would tie the daemon's lifetime to whoever ran `taco start`.
  */
 
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { connect, type Socket } from "node:net";
 import * as path from "node:path";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { findPlatformPkg } from "./installHelpers.ts";
-import { computeInstallId, parsePidFile } from "./installId.ts";
+import { computeInstallId, parsePidFile, pidRecordIsStale } from "./installId.ts";
 import {
     controlSocketPath,
     ensureDirs,
@@ -35,7 +37,12 @@ import {
     resolveTacoRuntimeDir,
     TACO_HOME,
 } from "./paths.ts";
-import { launchSidecar } from "./sidecarLauncher.ts";
+import {
+    findRepoRoot,
+    isDevCheckout,
+    launchSidecar,
+    prodSidecarVersion,
+} from "./sidecarLauncher.ts";
 import { acquireStartLock, readStartLock } from "./startLock.ts";
 import { upgradeApplyCommand } from "./upgradeApply.ts";
 import { markerTargetsInstall, readUpgradeMarker } from "./upgradeMarker.ts";
@@ -231,32 +238,17 @@ export interface StartOptions {
  *  daemon from starting on the old bundle — the marker-clearing policy
  *  lives in upgradeApplyCommand. */
 /** Resolve the resources root the daemon would use when started by this CLI.
- *  Mirrors `sidecarLauncher.ts::launchSidecar`'s dev/prod branch so the
- *  install_id we stamp on the reap check matches the id the daemon will
- *  stamp on its own pid file (sidecar/index.ts computes its id from
- *  TACO_SIDECAR_RESOURCES). Without this symmetry, standalone \`taco start\`
- *  (npm global) — whose own process doesn't see TACO_SIDECAR_RESOURCES —
- *  computed hash("") and skipped every wedged reap as ForeignInstall,
- *  leaving the wedged daemon alive until the next start. */
+ *  Uses `sidecarLauncher.ts::findRepoRoot`/`isDevCheckout` so the dev/prod
+ *  discrimination matches `launchSidecar` exactly — the install_id we stamp
+ *  on the reap check must match the id the daemon stamps on its own pid file
+ *  (sidecar/index.ts computes its id from TACO_SIDECAR_RESOURCES). Without
+ *  this symmetry, standalone \`taco start\` (npm global) — whose own process
+ *  doesn't see TACO_SIDECAR_RESOURCES — computed hash("") and skipped every
+ *  wedged reap as ForeignInstall, leaving the wedged daemon alive until the
+ *  next start. */
 function resolveDaemonResourcesRoot(): string | undefined {
-    const repoRoot = (() => {
-        try {
-            // Replicate sidecarLauncher.ts:findRepoRoot's pnpm-workspace.yaml walk.
-            const url = new URL(import.meta.url);
-            let dir = path.dirname(fileURLToPath(url));
-            for (let i = 0; i < 8; i++) {
-                if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
-                const parent = path.dirname(dir);
-                if (parent === dir) break;
-                dir = parent;
-            }
-            return null;
-        } catch {
-            return null;
-        }
-    })();
-    const useDev = repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0";
-    if (useDev && repoRoot) {
+    const repoRoot = findRepoRoot();
+    if (isDevCheckout(repoRoot) && repoRoot) {
         return join(repoRoot, "packages", "sidecar", "src");
     }
     // Prod: walk @taco-ai/sidecar-<platform>/ optional deps.
@@ -281,6 +273,27 @@ function resolveDaemonResourcesRoot(): string | undefined {
         /* no platform pkg installed */
     }
     return undefined;
+}
+
+/** Why a serving daemon fails the freshness gate, or null when it may be
+ *  reused. Dev checkouts always fail: the version string cannot see source
+ *  edits, so "same version" says nothing about the code on disk (plan A).
+ *  Prod compares the pid record's sidecar_version against the platform
+ *  bundle's manifest version; a record we don't own (or can't parse) never
+ *  justifies a kill — see pidRecordIsStale. */
+function staleDaemonReason(
+    runtimeDir: string,
+    ownInstallId: string,
+    expectedVersion: string,
+): string | null {
+    let parsed: ReturnType<typeof parsePidFile> | null = null;
+    try {
+        parsed = parsePidFile(readFileSync(join(runtimeDir, "sidecar.pid"), "utf8"));
+    } catch {
+        parsed = null;
+    }
+    if (!pidRecordIsStale(parsed, ownInstallId, expectedVersion)) return null;
+    return `pid ${parsed?.pid ?? "?"} runs sidecar ${parsed?.sidecarVersion ?? "unknown"}, expected ${expectedVersion}`;
 }
 
 async function applyOwnedPendingUpgrade(tacoHome: string): Promise<void> {
@@ -318,10 +331,44 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
         await new Promise((r) => setTimeout(r, 500));
         probe = await probeDaemonInitialize(socket);
     }
+
+    const daemonResourcesRoot = resolveDaemonResourcesRoot();
+    const ownInstallId = computeInstallId(daemonResourcesRoot ?? "", tacoHome);
+
     if (probe === "ready") {
-        process.stdout.write(`${socket}\n`);
-        process.stderr.write(`[taco] sidecar daemon already running (socket=${socket})\n`);
-        return;
+        // Healthy is not enough — the daemon must also run the code THIS
+        // launch would spawn, or every upgrade/source edit would keep
+        // attaching to the previous build forever. Dev checkouts reap
+        // unconditionally (the version string can't see source edits); prod
+        // compares the pid record's sidecar_version against the platform
+        // bundle's manifest. Both reuse killWedgedDaemon — its install_id
+        // ownership check still applies, so a foreign install's daemon is
+        // never touched (pidRecordIsStale likewise refuses foreign records).
+        const devMode = isDevCheckout();
+        const expectedVersion = devMode ? null : prodSidecarVersion();
+        let staleReason: string | null;
+        if (devMode) {
+            staleReason = "dev checkout always respawns";
+        } else if (expectedVersion !== null) {
+            staleReason = staleDaemonReason(runtimeDir, ownInstallId, expectedVersion);
+        } else {
+            // No manifest version to compare against — reuse rather than reap
+            // on every launch, but say so: a silently disabled gate looks
+            // exactly like a working one until someone debugs why an upgrade
+            // never took effect.
+            staleReason = null;
+            process.stderr.write(
+                "[taco] freshness gate disabled: no bundle manifest version; reused daemon may be stale\n",
+            );
+        }
+        if (staleReason === null) {
+            process.stdout.write(`${socket}\n`);
+            process.stderr.write(`[taco] sidecar daemon already running (socket=${socket})\n`);
+            return;
+        }
+        process.stderr.write(`[taco] sidecar daemon stale (${staleReason}); restarting\n`);
+        await killWedgedDaemon(runtimeDir, socket, control, ownInstallId);
+        probe = "absent";
     }
     if (probe === "wedged") {
         // The socket answers connects but no RPC response arrives across two
@@ -332,21 +379,14 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
         process.stderr.write(
             "[taco] sidecar daemon accepts connections but does not serve; killing it\n",
         );
-        const daemonResourcesRoot = resolveDaemonResourcesRoot();
-        const ownInstallId = computeInstallId(daemonResourcesRoot ?? "", tacoHome);
         await killWedgedDaemon(runtimeDir, socket, control, ownInstallId);
     }
 
-    // Belt-and-braces: reap any leftover pid file even when probe was
-    // "absent". A pid file pointing at a dead pid doesn't show up as
-    // "wedged" (no listener) but it does mean our subsequent spawn
-    // could race with cleanup. Force-reap for a deterministic baseline.
     // Belt-and-braces: at this point probe is narrowed to "absent".
     // A pid file pointing at a dead pid doesn't show up as "wedged" (no
     // listener) but it does mean our subsequent spawn could race with
-    // cleanup. Force-reap for a deterministic baseline.
-    const daemonResourcesRoot = resolveDaemonResourcesRoot();
-    const ownInstallId = computeInstallId(daemonResourcesRoot ?? "", tacoHome);
+    // cleanup. Force-reap for a deterministic baseline. Idempotent after the
+    // stale/wedged kills above — their unlink leaves nothing to parse.
     await killWedgedDaemon(runtimeDir, socket, control, ownInstallId);
 
     const lock = await acquireStartLock(runtimeDir);
