@@ -57,6 +57,14 @@ export interface ChannelHandle {
     /** Discards stored credentials and disconnects. Absent when unbindable. */
     logout?(): Promise<void>;
     /**
+     * Optional: reconnect using the channel's already-stored credentials,
+     * without forcing the user to retype them. For platforms where the SDK
+     * caches credentials in its long-poll client and refuses to retry past
+     * its reconnect budget (notably WeCom's 10-attempt ceiling), this is the
+     * only way back from error without clearing the binding. Absent when
+     * the channel has no stored-credential retry use case. */
+    retryWithStoredCreds?(): Promise<void>;
+    /**
      * Optional: returns the platform user IDs currently routed through this
      * channel. Lets a workspace-dimensioned frame (no session) broadcast to
      * every peer — e.g. the policy-change interrupt notice. Absent on channels

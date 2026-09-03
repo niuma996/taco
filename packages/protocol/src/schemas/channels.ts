@@ -24,3 +24,5 @@ export const channelsBindSchema = Type.Any();
 export const channelsSubmitVerifyCodeSchema = Type.Any();
 
 export const channelsUnbindSchema = Type.Any();
+
+export const channelsRetrySchema = Type.Any();

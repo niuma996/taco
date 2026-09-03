@@ -54,6 +54,7 @@ export const RPC = {
     channelsBind: "channels.bind",
     channelsSubmitVerifyCode: "channels.submitVerifyCode",
     channelsUnbind: "channels.unbind",
+    channelsRetry: "channels.retry",
     // imPolicy.* — IM workspace policy admin (process-level).
     imPolicyGet: "imPolicy.get",
     imPolicySetChannelDefault: "imPolicy.setChannelDefault",

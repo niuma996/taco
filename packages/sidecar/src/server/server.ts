@@ -18,6 +18,7 @@ import {
     type ChannelsBindResult,
     type ChannelsCreateResult,
     type ChannelsListResult,
+    type ChannelsRetryResult,
     type ClientCapabilities,
     type CustomProviderConfig,
     ErrorCodes,
@@ -1593,6 +1594,27 @@ export class SidecarServer implements ServerRpcSurface {
             }
             await this.channelRegistry.logout(channelId);
             this.channelBindBroker.reset(channelId);
+        },
+        retry: async (channelId): Promise<ChannelsRetryResult> => {
+            const cfg = this.channelConfigs.find((c) => c.channelId === channelId);
+            if (!cfg) throw new Error(`unknown channelId: ${channelId}`);
+            if (!this.channelRegistry.has(channelId)) {
+                throw new Error(`channel ${channelId} is not running`);
+            }
+            // Fire-and-forget for the same reason as `bind`: reconnect kicks
+            // the SDK's WS retry cycle, and progress arrives through
+            // channel.status_changed pushes. Errors land in the broker's error
+            // state for the UI to surface.
+            void this.channelRegistry.retryWithStoredCreds(channelId).catch((e: unknown) => {
+                const message = e instanceof Error ? e.message : String(e);
+                log.error(`channel ${channelId} retry failed: ${message}`);
+                this.channelBindBroker.setState(channelId, "error", { message });
+            });
+            // For wecom, reconnect() sets "connecting" synchronously before the
+            // void promise is scheduled, so this status is already the new one;
+            // for no-op channels it reports the current state. Either way the
+            // caller should not treat it as authoritative — follow the push.
+            return { channelId, state: this.channelBindBroker.status(channelId).state };
         },
     };
 

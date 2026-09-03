@@ -33,6 +33,11 @@ class FakeClient extends EventEmitter implements WeComClientLike {
     connectCalls = 0;
     disconnectCalls = 0;
     readonly sent: SentMessage[] = [];
+    /** Credentials this instance was constructed with — mirrors the real
+     *  WSClient, which copies them once in its constructor. */
+    constructor(readonly opts: WeComClientFactoryOptions) {
+        super();
+    }
     connect(): unknown {
         this.connectCalls += 1;
         return this;
@@ -58,16 +63,17 @@ class FakeClient extends EventEmitter implements WeComClientLike {
     markDisconnected(reason: string): void {
         this.emit("disconnected", reason);
     }
-    markError(err: Error): void {
-        this.emit("error", err);
-    }
 }
 
 interface Harness {
     channel: WeComChannel;
     ctx: ChannelContext;
     broker: ChannelBindBroker;
-    client: FakeClient;
+    /** Every client the channel built, in creation order — the fix under test
+     *  is that a reconnect builds a new one carrying the new credentials. */
+    clients: FakeClient[];
+    /** The current (last-built) client; throws when none exists yet. */
+    readonly client: FakeClient;
     submitted: ChannelInboundMessage[];
     store: Map<string, unknown>;
 }
@@ -78,7 +84,7 @@ function harness(
         route?: { channelId: string; peerId: string; chatId: string };
     } = {},
 ): Harness {
-    const client = new FakeClient();
+    const clients: FakeClient[] = [];
     const broker = new ChannelBindBroker();
     const submitted: ChannelInboundMessage[] = [];
     const store = new Map<string, unknown>(
@@ -87,7 +93,11 @@ function harness(
     const channel = new WeComChannel({
         broker,
         resolveRoute: () => opts.route,
-        createClient: (_o: WeComClientFactoryOptions) => client,
+        createClient: (o: WeComClientFactoryOptions) => {
+            const c = new FakeClient(o);
+            clients.push(c);
+            return c;
+        },
     });
     const ctx: ChannelContext = {
         channelId: "wecom",
@@ -107,7 +117,19 @@ function harness(
             },
         },
     };
-    return { channel, ctx, broker, client, submitted, store };
+    return {
+        channel,
+        ctx,
+        broker,
+        clients,
+        get client() {
+            const c = clients.at(-1);
+            if (!c) throw new Error("no client built yet");
+            return c;
+        },
+        submitted,
+        store,
+    };
 }
 
 function replyFrame(text: string, session = "s1"): ServerPush {
@@ -125,12 +147,11 @@ function replyFrame(text: string, session = "s1"): ServerPush {
 }
 
 describe("WeComChannel", () => {
-    it("starts unbound when no stored credentials", async () => {
+    it("starts unbound and builds no client when no stored credentials", async () => {
         const h = harness();
-        await h.channel.start(h.ctx);
-        assert.equal(h.broker.status("wecom").state, "unbound");
-        assert.equal(h.client.connectCalls, 0);
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+        assert.equal(h.broker.status("wecom").state, "unbound");
+        assert.equal(h.clients.length, 0);
         await handle.close();
     });
 
@@ -139,6 +160,8 @@ describe("WeComChannel", () => {
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         assert.equal(h.broker.status("wecom").state, "connecting");
         assert.equal(h.client.connectCalls, 1);
+        assert.equal(h.client.opts.botId, "b1");
+        assert.equal(h.client.opts.secret, "s1");
         h.client.markAuthenticated();
         assert.equal(h.broker.status("wecom").state, "connected");
         await handle.close();
@@ -146,6 +169,7 @@ describe("WeComChannel", () => {
 
     it("routes an inbound text message into the conversation router with msgid as platformMessageId", async () => {
         const h = harness({
+            credentials: { botId: "b", secret: "s" },
             route: { channelId: "wecom", peerId: "u1", chatId: "u1" },
         });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
@@ -172,7 +196,10 @@ describe("WeComChannel", () => {
     });
 
     it("falls back chatId to the peer userid for 1:1 chats when chatid is empty", async () => {
-        const h = harness({ route: { channelId: "wecom", peerId: "u1", chatId: "u1" } });
+        const h = harness({
+            credentials: { botId: "b", secret: "s" },
+            route: { channelId: "wecom", peerId: "u1", chatId: "u1" },
+        });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         h.client.deliverText({
             body: {
@@ -191,6 +218,7 @@ describe("WeComChannel", () => {
 
     it("uses the SDK-provided chatid for group chats", async () => {
         const h = harness({
+            credentials: { botId: "b", secret: "s" },
             route: { channelId: "wecom", peerId: "u2", chatId: "g-77" },
         });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
@@ -210,7 +238,10 @@ describe("WeComChannel", () => {
     });
 
     it("ignores inbound frames missing required fields without throwing", async () => {
-        const h = harness({ route: { channelId: "wecom", peerId: "u1", chatId: "u1" } });
+        const h = harness({
+            credentials: { botId: "b", secret: "s" },
+            route: { channelId: "wecom", peerId: "u1", chatId: "u1" },
+        });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         h.client.deliverText({ body: { from: { userid: "" }, text: { content: "x" } } });
         h.client.deliverText({ body: { msgid: "ok", from: { userid: "u1" } } });
@@ -221,6 +252,7 @@ describe("WeComChannel", () => {
 
     it("pushes replies via sendMessage to the route chatId using markdown chunks", async () => {
         const h = harness({
+            credentials: { botId: "b", secret: "s" },
             route: { channelId: "wecom", peerId: "u2", chatId: "g-77" },
         });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
@@ -233,10 +265,18 @@ describe("WeComChannel", () => {
     });
 
     it("drops push frames when the session cannot be resolved to a route", async () => {
-        const h = harness();
+        const h = harness({ credentials: { botId: "b", secret: "s" } });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         await handle.push(replyFrame("the answer"));
         assert.equal(h.client.sent.length, 0);
+        await handle.close();
+    });
+
+    it("drops push frames before any bind, when no client exists", async () => {
+        const h = harness({ route: { channelId: "wecom", peerId: "u1", chatId: "u1" } });
+        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+        await handle.push(replyFrame("the answer"));
+        assert.equal(h.clients.length, 0);
         await handle.close();
     });
 
@@ -252,10 +292,99 @@ describe("WeComChannel", () => {
         await handle.close();
     });
 
+    it("login builds a fresh client carrying the new credentials rather than reusing the old one", async () => {
+        // Regression: WSClient copies botId/secret in its constructor, so a
+        // reconnect on the same instance re-sends the credentials it was born
+        // with — a first bind would authenticate with the empty pair.
+        const h = harness();
+        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+        assert.equal(h.clients.length, 0);
+
+        await handle.login(false, { botId: "B1", secret: "S1" });
+        assert.equal(h.clients.length, 1);
+        assert.deepEqual(
+            { botId: h.clients[0].opts.botId, secret: h.clients[0].opts.secret },
+            { botId: "B1", secret: "S1" },
+        );
+
+        await handle.login(false, { botId: "B2", secret: "S2" });
+        assert.equal(h.clients.length, 2);
+        assert.deepEqual(
+            { botId: h.clients[1].opts.botId, secret: h.clients[1].opts.secret },
+            { botId: "B2", secret: "S2" },
+        );
+        // Old client torn down, new one connected exactly once.
+        assert.equal(h.clients[0].disconnectCalls, 1);
+        assert.equal(h.clients[1].connectCalls, 1);
+
+        h.clients[1].markAuthenticated();
+        assert.equal(h.broker.status("wecom").state, "connected");
+        await handle.close();
+    });
+
+    it("rebinding severs the superseded client's handlers so its teardown cannot clobber the new state", async () => {
+        const h = harness({ credentials: { botId: "b1", secret: "s1" } });
+        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+        h.client.markAuthenticated();
+        const old = h.clients[0];
+
+        await handle.login(false, { botId: "b2", secret: "s2" });
+        h.clients[1].markAuthenticated();
+        assert.equal(h.broker.status("wecom").state, "connected");
+
+        // closeClient() disconnects the old client AND severs its handlers.
+        // (The stale() guard in each handler is the second line of defence; a
+        // discard that forgot to removeAllListeners would still be neutralised
+        // by it. Here we assert the first line: nothing is left attached.)
+        assert.equal(old.disconnectCalls, 1);
+        assert.equal(old.listenerCount("authenticated"), 0);
+        assert.equal(old.listenerCount("error"), 0);
+        assert.equal(old.listenerCount("disconnected"), 0);
+        assert.equal(old.listenerCount("message.text"), 0);
+        // A late inbound frame on the old client is dropped — no handler is
+        // attached to route it, and the stale guard would refuse it anyway.
+        old.deliverText({
+            body: { msgid: "m-stale", from: { userid: "u1" }, text: { content: "late" } },
+        });
+        await new Promise((r) => setImmediate(r));
+        assert.equal(h.submitted.length, 0);
+        await handle.close();
+    });
+
     it("login throws when called with no creds and no stored creds", async () => {
         const h = harness();
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         await assert.rejects(() => handle.login(false), /requires botId and secret/);
+        await handle.close();
+    });
+
+    it("retryWithStoredCreds rebuilds the client with the on-disk credentials", async () => {
+        // After the SDK's reconnect budget is exhausted, a passive UI is
+        // stuck on error because the cached WSClient refuses to retry.
+        // retryWithStoredCreds is the manual escape hatch: it rebuilds
+        // from scratch using the same botId/secret so the SDK's counter
+        // starts over.
+        const h = harness({ credentials: { botId: "b0", secret: "s0" } });
+        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+        h.client.markAuthenticated();
+        assert.equal(h.broker.status("wecom").state, "connected");
+
+        await handle.retryWithStoredCreds();
+        assert.equal(h.clients.length, 2);
+        assert.deepEqual(
+            { botId: h.clients[1].opts.botId, secret: h.clients[1].opts.secret },
+            { botId: "b0", secret: "s0" },
+        );
+        assert.equal(h.clients[1].connectCalls, 1);
+        h.clients[1].markAuthenticated();
+        assert.equal(h.broker.status("wecom").state, "connected");
+        await handle.close();
+    });
+
+    it("retryWithStoredCreds throws when no credentials are on disk", async () => {
+        const h = harness();
+        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+        await assert.rejects(() => handle.retryWithStoredCreds(), /bind first/);
         await handle.close();
     });
 
@@ -266,6 +395,9 @@ describe("WeComChannel", () => {
         await handle.logout();
         assert.equal(h.client.disconnectCalls >= 1, true);
         assert.equal(h.store.has("credentials"), false);
+        // Without an explicit unbound transition, the broker keeps the prior
+        // state (connected/error) and the UI offers Rebind where Bind is correct.
+        assert.equal(h.broker.status("wecom").state, "unbound");
         await handle.close();
     });
 

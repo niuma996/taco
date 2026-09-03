@@ -93,6 +93,17 @@ export class ChannelRegistry {
         await entry.handle.logout?.();
     }
 
+    /** Reconnect using the channel's already-stored credentials. No-op when
+     *  the channel has no such hook (wechat reconnects on its own; mock has
+     *  no connection) — a stray retry must not overwrite a channel's real
+     *  error state with "does not support retry". Throws only when the
+     *  channel is unknown. */
+    async retryWithStoredCreds(channelId: string): Promise<void> {
+        const entry = this.loaded.get(channelId);
+        if (!entry) throw new Error(`channel not running: ${channelId}`);
+        await entry.handle.retryWithStoredCreds?.();
+    }
+
     /** Stop and remove a single channel (close handle + clean up its workspace index). */
     async stop(channelId: string): Promise<void> {
         const entry = this.loaded.get(channelId);

@@ -371,6 +371,7 @@ export default function App() {
         channelsSavingId,
         bindChannel,
         unbindChannel,
+        retryChannel,
         submitVerifyCode,
         createChannel,
         channelsPendingRestart,
@@ -698,6 +699,7 @@ export default function App() {
                                     void bindChannel(channelId, true);
                                 }
                             }}
+                            onRetry={(channelId) => void retryChannel(channelId)}
                             onUnbind={(channelId) => void unbindChannel(channelId)}
                             conversations={conversations}
                             conversationsLoading={conversationsLoading}

@@ -107,6 +107,61 @@ describe("ChannelBindBroker", () => {
         );
     });
 
+    it("flips connecting to error when the platform never answers", async () => {
+        // A platform can decline in ways the SDK doesn't classify, firing
+        // neither `authenticated` nor `error` — the UI would spin forever.
+        const broker = new ChannelBindBroker(1000, 10);
+        broker.setState("wecom", "connecting");
+        await new Promise((r) => setTimeout(r, 30));
+        const status = broker.status("wecom");
+        assert.equal(status.state, "error");
+        assert.match(status.message ?? "", /timed out/);
+    });
+
+    it("a successful connect disarms the connecting watchdog", async () => {
+        const broker = new ChannelBindBroker(1000, 10);
+        broker.setState("wecom", "connecting");
+        broker.setState("wecom", "connected");
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(broker.status("wecom").state, "connected");
+    });
+
+    it("re-entering connecting restarts the watchdog clock", async () => {
+        const broker = new ChannelBindBroker(1000, 40);
+        broker.setState("wecom", "connecting");
+        await new Promise((r) => setTimeout(r, 25));
+        broker.setState("wecom", "connecting");
+        // Past the first attempt's deadline, inside the second's.
+        await new Promise((r) => setTimeout(r, 25));
+        assert.equal(broker.status("wecom").state, "connecting");
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(broker.status("wecom").state, "error");
+    });
+
+    it("cancel disarms the watchdog so a closed channel is not resurrected as error", async () => {
+        const broker = new ChannelBindBroker(1000, 10);
+        broker.setState("wecom", "connecting");
+        broker.cancel("wecom", "channel closing");
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(broker.status("wecom").state, "connecting");
+    });
+
+    it("reset leaves a mid-connect channel unbound rather than error", async () => {
+        const broker = new ChannelBindBroker(1000, 10);
+        broker.setState("wecom", "connecting");
+        broker.reset("wecom");
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(broker.status("wecom").state, "unbound");
+    });
+
+    it("cancelAll disarms watchdogs even with no pending verify requests", async () => {
+        const broker = new ChannelBindBroker(1000, 10);
+        broker.setState("wecom", "connecting");
+        broker.cancelAll();
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(broker.status("wecom").state, "connecting");
+    });
+
     it("a second requestVerifyCode supersedes the prior pending entry", async () => {
         // The SDK re-fires onVerifyCode(isRetry=true) after the user enters a
         // wrong code. Without cancellation the prior timer would fire

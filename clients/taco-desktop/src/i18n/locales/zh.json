@@ -403,6 +403,7 @@
     "noDescription": "暂无描述。",
     "bind": "绑定",
     "rebind": "重新绑定",
+    "retry": "重新连接",
     "unbind": "解绑",
     "cancel": "取消",
     "close": "关闭",

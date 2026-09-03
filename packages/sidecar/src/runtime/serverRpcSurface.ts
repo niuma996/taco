@@ -12,6 +12,7 @@ import type {
     ChannelsCreateResult,
     ChannelsListConversationsResult,
     ChannelsListResult,
+    ChannelsRetryResult,
     ClientCapabilities,
     CustomProviderConfig,
     ImPolicyGetParams,
@@ -46,6 +47,11 @@ export interface ChannelControl {
     ): Promise<ChannelsBindResult>;
     submitVerifyCode(requestId: string, code: string): boolean;
     unbind(channelId: string): Promise<void>;
+    /** Reconnect using the channel's already-stored credentials. For
+     *  platforms whose SDK caches credentials in its long-poll client and
+     *  refuses to retry past its reconnect budget — the only path back from
+     *  error without retyping the secret. */
+    retry(channelId: string): Promise<ChannelsRetryResult>;
 }
 
 /**

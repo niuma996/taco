@@ -18,6 +18,10 @@ export interface UseChannelsPaneResult {
     channelsSavingId: string | null;
     bindChannel: (channelId: string, force?: boolean, creds?: ChannelsBindCreds) => Promise<void>;
     unbindChannel: (channelId: string) => Promise<void>;
+    /** Reconnect using already-stored credentials. The only path back from a
+     *  SDK-exhausted error (e.g. WeCom's "Max reconnect attempts exceeded")
+     *  without forcing the user to retype the secret. */
+    retryChannel: (channelId: string) => Promise<void>;
     submitVerifyCode: (requestId: string, code: string) => Promise<boolean>;
     createChannel: (name: string) => Promise<void>;
     /** True once an instance was created; channels load statically at startup. */
@@ -113,6 +117,21 @@ export function useChannelsPane(
         [client, clearError, refreshChannels, failWith],
     );
 
+    const retryChannel = useCallback(
+        async (channelId: string): Promise<void> => {
+            setChannelsSavingId(channelId);
+            clearError();
+            try {
+                await client.channelsRetry({ channelId });
+            } catch (e) {
+                failWith(e);
+            } finally {
+                setChannelsSavingId(null);
+            }
+        },
+        [client, clearError, failWith],
+    );
+
     const createChannel = useCallback(
         async (name: string): Promise<void> => {
             setChannelsSavingId(name);
@@ -164,6 +183,7 @@ export function useChannelsPane(
         channelsSavingId,
         bindChannel,
         unbindChannel,
+        retryChannel,
         submitVerifyCode,
         createChannel,
         channelsPendingRestart,

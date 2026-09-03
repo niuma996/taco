@@ -178,6 +178,22 @@ export interface ChannelsUnbindResult {
     channelId: string;
 }
 
+/**
+ * Reconnect using the channel's already-stored credentials, without forcing the
+ * user to retype them. For platforms like WeCom where the SDK caches the
+ * credential in its WebSocket client and refuses to retry after its internal
+ * reconnect budget is exhausted, this is the only way to get another attempt
+ * without clearing the binding. Absent (or a no-op) on channels that don't
+ * have this problem — the desktop shows a Retry button only where it's wired. */
+export interface ChannelsRetryParams {
+    channelId: string;
+}
+
+export interface ChannelsRetryResult {
+    channelId: string;
+    state: ChannelState;
+}
+
 /** `channel.status_changed` push params. Workspace-dimensioned (no session). */
 export interface ChannelStatusChangedParams {
     channel: ChannelStatusEntry;

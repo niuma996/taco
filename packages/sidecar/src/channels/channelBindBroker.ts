@@ -15,6 +15,19 @@ import { EventEmitter } from "node:events";
 /** Verification-code prompts expire well before the QR itself does. */
 const DEFAULT_VERIFY_TIMEOUT_MS = 3 * 60 * 1000;
 
+/**
+ * How long `connecting` may last before it is reported as an error.
+ *
+ * `connecting` is the one state no local event is guaranteed to leave: it ends
+ * when the platform answers our auth, and a platform can decline in ways the
+ * SDK doesn't classify (a WeCom rejection frame that omits `req_id` reaches
+ * neither the `authenticated` nor the `error` handler). Without this the UI
+ * spins forever with the reason only in the log. Generous enough to cover the
+ * SDK's own reconnect back-off, which retries with exponential delay capped at
+ * 30s.
+ */
+const DEFAULT_CONNECT_TIMEOUT_MS = 90 * 1000;
+
 export type ChannelBindState =
     | "unbound"
     | "awaiting_scan"
@@ -51,8 +64,13 @@ interface PendingVerify {
 export class ChannelBindBroker extends EventEmitter {
     private readonly pending = new Map<string, PendingVerify>();
     private readonly statuses = new Map<string, ChannelBindStatus>();
+    /** Per-channel `connecting` watchdogs, keyed by channelId. */
+    private readonly connectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-    constructor(private readonly verifyTimeoutMs: number = DEFAULT_VERIFY_TIMEOUT_MS) {
+    constructor(
+        private readonly verifyTimeoutMs: number = DEFAULT_VERIFY_TIMEOUT_MS,
+        private readonly connectTimeoutMs: number = DEFAULT_CONNECT_TIMEOUT_MS,
+    ) {
         super();
     }
 
@@ -64,7 +82,8 @@ export class ChannelBindBroker extends EventEmitter {
         return [...this.statuses.values()];
     }
 
-    /** Records a state transition and notifies subscribers. */
+    /** Records a state transition and notifies subscribers. Entering
+     *  `connecting` arms a watchdog; any other transition disarms it. */
     setState(
         channelId: string,
         state: ChannelBindState,
@@ -72,7 +91,30 @@ export class ChannelBindBroker extends EventEmitter {
     ): void {
         const next: ChannelBindStatus = { channelId, state, ...extra };
         this.statuses.set(channelId, next);
+        this.armConnectWatchdog(channelId, state);
         this.emit("status", next);
+    }
+
+    /** Re-arms on every `connecting` entry: a reconnect restarts the clock
+     *  rather than inheriting the previous attempt's remaining budget. */
+    private armConnectWatchdog(channelId: string, state: ChannelBindState): void {
+        const existing = this.connectTimers.get(channelId);
+        if (existing) {
+            clearTimeout(existing);
+            this.connectTimers.delete(channelId);
+        }
+        if (state !== "connecting") return;
+        const timer = setTimeout(() => {
+            this.connectTimers.delete(channelId);
+            // Guard against a transition that raced the timer's firing.
+            if (this.statuses.get(channelId)?.state !== "connecting") return;
+            this.setState(channelId, "error", {
+                message: `connection timed out after ${Math.round(this.connectTimeoutMs / 1000)}s — check the channel credentials`,
+            });
+        }, this.connectTimeoutMs);
+        // The sidecar daemon must be able to exit with a bind in flight.
+        timer.unref?.();
+        this.connectTimers.set(channelId, timer);
     }
 
     /** Publishes a QR payload for the client to render. */
@@ -128,8 +170,16 @@ export class ChannelBindBroker extends EventEmitter {
         return true;
     }
 
-    /** Rejects every pending request for one channel — used by unbind / stop. */
+    /** Rejects every pending request for one channel and disarms its
+     *  `connecting` watchdog — used by unbind / stop. Without disarming, a
+     *  channel closed mid-connect would be flipped to `error` after the
+     *  timeout, resurrecting a status for a channel that no longer runs. */
     cancel(channelId: string, reason = "binding cancelled"): void {
+        const timer = this.connectTimers.get(channelId);
+        if (timer) {
+            clearTimeout(timer);
+            this.connectTimers.delete(channelId);
+        }
         for (const [requestId, entry] of [...this.pending]) {
             if (entry.channelId === channelId) {
                 this.pending.delete(requestId);
@@ -141,7 +191,11 @@ export class ChannelBindBroker extends EventEmitter {
 
     /** Rejects all pending requests across all channels — used on shutdown. */
     cancelAll(reason = "sidecar shutting down"): void {
-        for (const channelId of new Set([...this.pending.values()].map((e) => e.channelId))) {
+        const channelIds = new Set([
+            ...[...this.pending.values()].map((e) => e.channelId),
+            ...this.connectTimers.keys(),
+        ]);
+        for (const channelId of channelIds) {
             this.cancel(channelId, reason);
         }
     }

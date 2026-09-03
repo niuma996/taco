@@ -22,6 +22,8 @@ import type {
     ChannelsListConversationsParams,
     ChannelsListConversationsResult,
     ChannelsListResult,
+    ChannelsRetryParams,
+    ChannelsRetryResult,
     ChannelsSubmitVerifyCodeParams,
     ChannelsSubmitVerifyCodeResult,
     ChannelsUnbindParams,
@@ -280,6 +282,11 @@ export interface TypedRpc {
     ): Promise<ChannelsSubmitVerifyCodeResult>;
     /** Drops stored credentials and stops the channel. */
     channelsUnbind(params: ChannelsUnbindParams): Promise<ChannelsUnbindResult>;
+    /** Reconnect using the channel's already-stored credentials. For platforms
+     *  where the SDK caches the credential in its long-poll client and refuses
+     *  to retry past its reconnect budget — the only way back from error
+     *  without retyping the secret. */
+    channelsRetry(params: ChannelsRetryParams): Promise<ChannelsRetryResult>;
 
     // ── imPolicy (process-level) ──
     /** Fetch the channel's raw default + the resolved policy for the requested scope,
@@ -594,6 +601,10 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
         channelsUnbind: process1<ChannelsUnbindParams, ChannelsUnbindResult>(
             callProcess,
             RPC.channelsUnbind,
+        ),
+        channelsRetry: process1<ChannelsRetryParams, ChannelsRetryResult>(
+            callProcess,
+            RPC.channelsRetry,
         ),
 
         // ── imPolicy (process-level) ──

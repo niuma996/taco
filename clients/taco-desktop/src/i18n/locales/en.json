@@ -404,6 +404,7 @@
     "noDescription": "No description provided.",
     "bind": "Bind",
     "rebind": "Re-bind",
+    "retry": "Reconnect",
     "unbind": "Unbind",
     "cancel": "Cancel",
     "close": "Close",

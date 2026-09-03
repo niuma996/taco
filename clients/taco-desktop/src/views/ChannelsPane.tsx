@@ -20,6 +20,7 @@ import { makeImCwd } from "@taco-ai/protocol";
 import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
 import { ImPolicyDialog } from "../components/ImPolicyDialog.tsx";
 import { Button } from "../components/ui/Button.tsx";
+import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane.ts";
 import i18n from "../i18n/index.ts";
 import { useT } from "../i18n/useI18n";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -64,6 +65,11 @@ export interface ChannelsPaneProps {
     onRestart: () => void;
     onBind: (channelId: string) => void;
     onRebind: (channelId: string) => void;
+    /** Reconnect using the channel's already-stored credentials. Surfaced in
+     *  the error state for platforms where the SDK refuses to retry past its
+     *  reconnect budget — typing the secret again would work, but offering
+     *  one click is the obvious affordance. */
+    onRetry: (channelId: string) => void;
     onUnbind: (channelId: string) => void;
 
     // ── conversations tab ──
@@ -92,6 +98,7 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
         onRestart,
         onBind,
         onRebind,
+        onRetry,
         onUnbind,
         conversations,
         conversationsLoading,
@@ -177,6 +184,7 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
                     onRestart={onRestart}
                     onBind={onBind}
                     onRebind={onRebind}
+                    onRetry={onRetry}
                     onUnbind={onUnbind}
                     configuredNames={configuredNames}
                     onOpenPolicy={(channelId) => setPolicyScope({ channelId })}
@@ -221,6 +229,7 @@ function BindingsTab(props: {
     onRestart: () => void;
     onBind: (channelId: string) => void;
     onRebind: (channelId: string) => void;
+    onRetry: (channelId: string) => void;
     onUnbind: (channelId: string) => void;
     onOpenPolicy: (channelId: string) => void;
     configuredNames: Set<string>;
@@ -237,6 +246,7 @@ function BindingsTab(props: {
         onRestart,
         onBind,
         onRebind,
+        onRetry,
         onUnbind,
         onOpenPolicy,
         configuredNames,
@@ -272,6 +282,7 @@ function BindingsTab(props: {
                                 saving={savingId === entry.channelId}
                                 onBind={() => onBind(entry.channelId)}
                                 onRebind={() => onRebind(entry.channelId)}
+                                onRetry={() => onRetry(entry.channelId)}
                                 onUnbind={() => onUnbind(entry.channelId)}
                                 onOpenPolicy={() => onOpenPolicy(entry.channelId)}
                                 t={t}
@@ -387,13 +398,19 @@ function ConfiguredCard(props: {
     saving: boolean;
     onBind: () => void;
     onRebind: () => void;
+    onRetry: () => void;
     onUnbind: () => void;
     onOpenPolicy: () => void;
     t: (k: string) => string;
 }): ReactElement {
-    const { entry, saving, onBind, onRebind, onUnbind, onOpenPolicy, t } = props;
+    const { entry, saving, onBind, onRebind, onRetry, onUnbind, onOpenPolicy, t } = props;
     const tone = STATE_TONE[entry.state];
     const isConnected = entry.state === "connected";
+    // Only WeCom's SDK caches credentials in its long-poll client and refuses
+    // to retry past 10 attempts, so this affordance is meaningless for wechat
+    // (iLink retries on its own). Surfaced only in the error state where the
+    // alternative is "open Bind dialog and retype the secret".
+    const showRetry = entry.state === "error" && entry.name === CHANNEL_NAME_WECOM;
 
     return (
         <div className="pane-card">
@@ -431,9 +448,26 @@ function ConfiguredCard(props: {
                             </Button>
                         </>
                     ) : (
-                        <Button size="sm" variant="primary" disabled={saving} onClick={onBind}>
-                            {t("channels.bind")}
-                        </Button>
+                        <>
+                            {showRetry && (
+                                <Button
+                                    size="sm"
+                                    variant="primary"
+                                    disabled={saving}
+                                    onClick={onRetry}
+                                >
+                                    {t("channels.retry")}
+                                </Button>
+                            )}
+                            <Button
+                                size="sm"
+                                variant={showRetry ? "ghost" : "primary"}
+                                disabled={saving}
+                                onClick={onBind}
+                            >
+                                {t("channels.bind")}
+                            </Button>
+                        </>
                     )}
                 </div>
             </div>

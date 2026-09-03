@@ -25,6 +25,8 @@ export type {
     ChannelsListConversationsResult,
     ChannelsListParams,
     ChannelsListResult,
+    ChannelsRetryParams,
+    ChannelsRetryResult,
     ChannelsSubmitVerifyCodeParams,
     ChannelsSubmitVerifyCodeResult,
     ChannelsUnbindParams,

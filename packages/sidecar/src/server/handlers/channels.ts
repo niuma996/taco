@@ -14,6 +14,7 @@ import type {
     ChannelsListConversationsResult,
     ChannelsListParams,
     ChannelsListResult,
+    ChannelsRetryParams,
     ChannelsSubmitVerifyCodeParams,
     ChannelsSubmitVerifyCodeResult,
     ChannelsUnbindParams,
@@ -24,6 +25,7 @@ import {
     channelsCreateSchema,
     channelsListConversationsSchema,
     channelsListSchema,
+    channelsRetrySchema,
     channelsSubmitVerifyCodeSchema,
     channelsUnbindSchema,
     ErrorCodes,
@@ -164,5 +166,23 @@ export function registerChannelsHandlers(): void {
             return { channelId } satisfies ChannelsUnbindResult;
         },
         { command: true, schema: channelsUnbindSchema },
+    );
+
+    registerMethod(
+        RPC.channelsRetry,
+        false,
+        async ({ server, params }: MethodCtx<ChannelsRetryParams>) => {
+            const channels = requireChannels(server);
+            const channelId = requireChannelId(params?.channelId);
+            try {
+                return await channels.retry(channelId);
+            } catch (e) {
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidParams,
+                    e instanceof Error ? e.message : String(e),
+                );
+            }
+        },
+        { command: true, schema: channelsRetrySchema },
     );
 }

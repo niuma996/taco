@@ -15,6 +15,7 @@ interface CallLog {
     verify: { requestId: string; code: string }[];
     create: { name: string; channelId?: string }[];
     listConversations: (string | undefined)[];
+    retry: string[];
 }
 
 function fakeChannels(overrides: Partial<ChannelControl> = {}): {
@@ -27,6 +28,7 @@ function fakeChannels(overrides: Partial<ChannelControl> = {}): {
         verify: [],
         create: [],
         listConversations: [],
+        retry: [],
     };
     const control: ChannelControl = {
         create: (name, channelId) => {
@@ -62,6 +64,10 @@ function fakeChannels(overrides: Partial<ChannelControl> = {}): {
         },
         unbind: async (channelId) => {
             calls.unbind.push(channelId);
+        },
+        retry: async (channelId) => {
+            calls.retry.push(channelId);
+            return { channelId, state: "connecting" };
         },
         ...overrides,
     };
@@ -221,6 +227,32 @@ describe("channels.unbind", () => {
     it("rejects a missing channelId", async () => {
         const { control } = fakeChannels();
         await assert.rejects(call("channels.unbind", hook(control), {}), /channelId is required/);
+    });
+});
+
+describe("channels.retry", () => {
+    it("forwards channelId to the control surface and returns the new state", async () => {
+        const { control, calls } = fakeChannels();
+        const result = await call("channels.retry", hook(control), { channelId: "wecom" });
+        assert.deepEqual(calls.retry, ["wecom"]);
+        assert.deepEqual(result, { channelId: "wecom", state: "connecting" });
+    });
+
+    it("rejects a missing channelId", async () => {
+        const { control } = fakeChannels();
+        await assert.rejects(call("channels.retry", hook(control), {}), /channelId is required/);
+    });
+
+    it("surfaces a control-side error as invalid_params", async () => {
+        const { control } = fakeChannels({
+            retry: async () => {
+                throw new Error("wecom retry requires stored botId and secret — bind first");
+            },
+        });
+        await assert.rejects(
+            call("channels.retry", hook(control), { channelId: "wecom" }),
+            /requires stored botId and secret/,
+        );
     });
 });
 
