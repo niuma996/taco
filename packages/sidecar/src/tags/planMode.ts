@@ -33,6 +33,7 @@ const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any 
    - Step-by-step implementation strategy
    - Dependencies and sequencing
    - Risks / open questions
+   - For complex architecture or multi-step flows, a \`\`\`mermaid fenced block diagramming it (the plan viewer renders these) — \`flowchart\` for architecture/data flow, \`sequenceDiagram\` for request/response or ordering between components
    - ### Critical Files for Implementation (3-5 files)
 
 5. **Exit**: Call planExit to present the plan for user approval.

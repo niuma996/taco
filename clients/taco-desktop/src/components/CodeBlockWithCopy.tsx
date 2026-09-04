@@ -14,7 +14,7 @@
  * hast's `dataLanguage` property arrives here as the `data-language` prop.
  */
 
-import { Check, Copy, X } from "lucide-react";
+import { Check, Code, Copy, Workflow, X } from "lucide-react";
 import {
     Children,
     type ComponentProps,
@@ -24,6 +24,8 @@ import {
     useRef,
     useState,
 } from "react";
+
+import { MermaidDiagram } from "./MermaidDiagram";
 
 type PreProps = ComponentProps<"pre"> & {
     /** Destructured so it is not spread onto the DOM (React 19 warns otherwise). */
@@ -133,16 +135,44 @@ export function CodeBlockWithCopy(props: PreProps) {
     } = props;
     const codeText = collectText(children);
     const label = language && language.length > 0 ? language : "code";
+    const isMermaid = label.toLowerCase() === "mermaid";
+    // Mermaid blocks default to the rendered diagram; the header toggle flips to source.
+    const [showCode, setShowCode] = useState(false);
+
+    const preElement = (
+        <pre className={className} {...rest}>
+            {children}
+        </pre>
+    );
 
     return (
         <div className="md-code-block">
             <div className="md-code-header">
                 <span className="md-code-lang">{label}</span>
-                <CodeCopyButton value={codeText} />
+                <div className="md-code-actions">
+                    {isMermaid && (
+                        <button
+                            type="button"
+                            className="md-copy-btn"
+                            onClick={() => setShowCode((v) => !v)}
+                            aria-label={showCode ? "View diagram" : "View code"}
+                            title={showCode ? "View diagram" : "View code"}
+                        >
+                            {showCode ? (
+                                <Workflow size={13} aria-hidden="true" />
+                            ) : (
+                                <Code size={13} aria-hidden="true" />
+                            )}
+                        </button>
+                    )}
+                    <CodeCopyButton value={codeText} />
+                </div>
             </div>
-            <pre className={className} {...rest}>
-                {children}
-            </pre>
+            {isMermaid && !showCode ? (
+                <MermaidDiagram code={codeText} fallback={preElement} />
+            ) : (
+                preElement
+            )}
         </div>
     );
 }

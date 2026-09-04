@@ -295,3 +295,26 @@
     color: var(--error);
     border-color: var(--error);
 }
+
+/* Header right-side button group (view toggle + copy). */
+.md-code-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+}
+
+/* Rendered mermaid diagram. Sits on the same always-dark surface as the code
+   pre; mermaid is initialized with its dark theme so nodes/edges stay legible.
+   Mirrors the pre's padding and horizontal-scroll behavior. */
+.md-mermaid {
+    padding: 0.7em 0.9em;
+    overflow-x: auto;
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+}
+
+.md-mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
