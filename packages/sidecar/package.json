@@ -1,6 +1,6 @@
 {
   "name": "@taco-ai/sidecar",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": false,
   "description": "Taco sidecar — Pi harness-driven JSON-RPC protocol layer. WeChat IM channel support requires the optional @wechatbot/wechatbot dependency (not bundled by default; see README IM Channels).",
   "type": "module",
