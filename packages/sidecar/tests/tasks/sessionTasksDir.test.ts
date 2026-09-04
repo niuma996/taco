@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { sessionTasksDir } from "../../src/tasks/sessionTasksDir.ts";
-import { addTask, createTaskList } from "../../src/tasks/taskManager.ts";
+import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { loadAllTaskLists, saveTaskListToDisk } from "../../src/tasks/taskPersistence.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
 
 describe("sessionTasksDir", () => {
     it("is scoped under the caller-supplied sessionsRoot", () => {

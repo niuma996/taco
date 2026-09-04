@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
 import { createPlanExitTool, type PlanExitToolDetails } from "../../src/tools/planExit.ts";
-import { createPlanModeState, enterPlanMode } from "../../src/tools/planModeState.ts";
 
 describe("planExit tool", () => {
     let testDir: string;

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createMutationGateHook } from "../../src/permissions/mutationGate.ts";
-import { createPlanModeState, enterPlanMode } from "../../src/tools/planModeState.ts";
+import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
 
 describe("mutation gate", () => {
     let root: string;

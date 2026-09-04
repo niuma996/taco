@@ -7,7 +7,7 @@
  */
 
 import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
-import type { PlanModeState } from "../tools/planModeState.ts";
+import type { PlanModeState } from "../plan/planModeState.ts";
 import { createUserMessage, tagWrap } from "./builder.ts";
 
 const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any project files. Your only outputs are:

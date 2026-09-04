@@ -4,7 +4,7 @@ import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { findActiveListId } from "../tasks/activeList.ts";
-import { updateTask } from "../tasks/taskManager.ts";
+import { updateTask } from "../tasks/taskMutations.ts";
 import { saveTaskListToDisk } from "../tasks/taskPersistence.ts";
 import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 

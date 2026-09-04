@@ -9,8 +9,8 @@ import { describe, it } from "node:test";
 
 import type { AgentMessage, ContextEvent } from "@earendil-works/pi-agent-core";
 
-import { addTask, createTaskList } from "../../src/tasks/taskManager.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
+import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { buildTodoWriteReminderContextHook } from "../../src/tasks/todoWriteReminder.ts";
 
 function userMsg(text: string): AgentMessage {

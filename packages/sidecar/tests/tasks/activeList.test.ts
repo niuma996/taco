@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { findActiveListId, isListActive } from "../../src/tasks/activeList.ts";
-import { addTask, createTaskList } from "../../src/tasks/taskManager.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
+import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 
 describe("isListActive / findActiveListId", () => {
     it("list with a pending task is active", () => {

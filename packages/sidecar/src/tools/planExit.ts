@@ -4,10 +4,10 @@ import type { TextContent } from "@earendil-works/pi-ai";
 import type { AskUserQuestion, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { exitPlanMode, isPlanModeActive, type PlanModeState } from "../plan/planModeState.ts";
+import { getPlanPath, getPlansDir } from "../plan/planPersistence.ts";
 import type { PlanSnapshotPublisher } from "../plan/planPushAdapter.ts";
 import { askUserAnswersSchema } from "./askUser.ts";
-import { exitPlanMode, isPlanModeActive, type PlanModeState } from "./planModeState.ts";
-import { getPlanPath, getPlansDir } from "./planPersistence.ts";
 
 /**
  * planExit parameter schema:

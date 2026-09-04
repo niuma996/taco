@@ -11,8 +11,8 @@
  * returning any non-undefined result would discard a `block` decided here.
  */
 
-import type { PlanModeState } from "../tools/planModeState.ts";
-import { getPlansDir } from "../tools/planPersistence.ts";
+import type { PlanModeState } from "../plan/planModeState.ts";
+import { getPlansDir } from "../plan/planPersistence.ts";
 import { evaluateCommand } from "./commandPolicy.ts";
 import { resolveWithinRoot } from "./workspaceBoundary.ts";
 

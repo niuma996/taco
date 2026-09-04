@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { createPlanModeState } from "../../src/plan/planModeState.ts";
 import { NoopPlanPushAdapter } from "../../src/plan/planPushAdapter.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { defaultTools, defaultToolsWithTasks } from "../../src/tools/index.ts";
-import { createPlanModeState } from "../../src/tools/planModeState.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
 
 describe("defaultTools", () => {

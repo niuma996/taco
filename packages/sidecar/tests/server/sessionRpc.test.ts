@@ -7,8 +7,8 @@ import {
     buildTasksGetResult,
 } from "../../src/server/handlers/sessionTasksGet.ts";
 import { findActiveListId } from "../../src/tasks/activeList.ts";
-import { addTask, createTaskList } from "../../src/tasks/taskManager.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
+import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 
 describe("session.tasks.get result shape", () => {
     it("returns active list + history meta", () => {

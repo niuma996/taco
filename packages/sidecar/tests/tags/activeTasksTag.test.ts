@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { createPlanModeState } from "../../src/plan/planModeState.ts";
 import { buildActiveTasksContextHook } from "../../src/tasks/activeTasksTag.ts";
-import { addTask, createTaskList } from "../../src/tasks/taskManager.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
-import { createPlanModeState } from "../../src/tools/planModeState.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
+import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 
 function makeState(store: ReturnType<typeof createTaskStore>, planActive: boolean) {
     return { store, planActive, planState: createPlanModeState() };

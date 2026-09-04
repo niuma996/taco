@@ -37,6 +37,7 @@ import type {
 } from "../extensions/index.ts";
 import { createLogger } from "../lib/logger.ts";
 import { MemoryExtractorImpl, type MemoryStore, sliceForExtraction } from "../memory/index.ts";
+import type { PlanModeState } from "../plan/planModeState.ts";
 import type { SkillReinjectorHandle } from "../skills/skillReinjector.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";
@@ -44,7 +45,6 @@ import type { TaskStore } from "../tasks/taskTypes.ts";
 import { createAddToolsTool } from "../tools/addTools.ts";
 import type { TacoToolContext } from "../tools/context.ts";
 import type { TacoTool } from "../tools/index.ts";
-import type { PlanModeState } from "../tools/planModeState.ts";
 import {
     COMPACTION_END_EVENT,
     COMPACTION_START_EVENT,

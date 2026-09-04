@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { addTask, createTaskList } from "../../src/tasks/taskManager.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
+import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { createTaskCreateTool } from "../../src/tools/taskCreate.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
 

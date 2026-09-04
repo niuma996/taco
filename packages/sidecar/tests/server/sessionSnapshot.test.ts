@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
-import { createTaskStore } from "../../src/tasks/taskStore.ts";
+import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 
 describe("session.snapshot.get", () => {
     it("retries until the history and main-session state share a stable sequence watermark", async () => {

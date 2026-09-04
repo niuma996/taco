@@ -17,6 +17,7 @@ import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
+import { createPlanModeState } from "../../src/plan/planModeState.ts";
 import { AttachedSession, type AttachedSessionOptions } from "../../src/runtime/attachedSession.ts";
 import {
     DefaultDeferredToolRegistry,
@@ -24,7 +25,6 @@ import {
 } from "../../src/runtime/deferredToolRegistry.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
-import { createPlanModeState } from "../../src/tools/planModeState.ts";
 
 const fakeTool = (name: string): AgentTool =>
     ({
