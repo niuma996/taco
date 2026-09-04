@@ -1,8 +1,9 @@
 use std::fs;
+use std::io::Cursor;
 use std::io::Read;
 use std::path::PathBuf;
 
-use taco_desktop_lib::log_file::LogFile;
+use taco_desktop_lib::log_file::{tee_llm_dump_lines, LogFile};
 
 fn tmp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -113,4 +114,49 @@ fn open_tightens_a_preexisting_permissive_file() {
     fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
     let _files = taco_desktop_lib::log_file::LogFiles::open(&dir).unwrap();
     assert_eq!(fs::metadata(&log).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn tee_writes_only_lines_with_prefix() {
+    // The sidecar stderr reader uses this filter to decide which lines
+    // belong in llm-dump.log. Rotation / permissions / capacity are
+    // inherited from LogFile and covered by the dedicated tests above.
+    let taco_home = tmp("tee");
+    let mut files = taco_desktop_lib::log_file::LogFiles::open(&taco_home).unwrap();
+    let payload = "[taco:llm] request\n\
+                   random daemon stderr line\n\
+                   [taco:llm] response.fold line 1\n\
+                   [taco:llm] response.fold line 2\n\
+                   another daemon line\n";
+    let cursor = Cursor::new(payload.as_bytes());
+
+    let written = tee_llm_dump_lines(cursor, &mut files.llm).unwrap();
+    files.llm.flush().unwrap();
+
+    assert_eq!(written, 3);
+    let body = fs::read_to_string(taco_home.join("logs").join("llm-dump.log")).unwrap();
+    assert_eq!(
+        body,
+        "[taco:llm] request\n\
+         [taco:llm] response.fold line 1\n\
+         [taco:llm] response.fold line 2\n"
+    );
+}
+
+#[test]
+fn tee_handles_eof_without_trailing_newline() {
+    // `BufRead::lines()` strips a trailing newline but yields the last
+    // fragment as-is when the source ends mid-line. The filter must still
+    // pick up a final `[taco:llm]` line in that shape.
+    let taco_home = tmp("tee-eof");
+    let mut files = taco_desktop_lib::log_file::LogFiles::open(&taco_home).unwrap();
+    let payload = "[taco:llm] no-newline-at-eof";
+    let cursor = Cursor::new(payload.as_bytes());
+
+    let written = tee_llm_dump_lines(cursor, &mut files.llm).unwrap();
+    files.llm.flush().unwrap();
+
+    assert_eq!(written, 1);
+    let body = fs::read_to_string(taco_home.join("logs").join("llm-dump.log")).unwrap();
+    assert_eq!(body, "[taco:llm] no-newline-at-eof\n");
 }

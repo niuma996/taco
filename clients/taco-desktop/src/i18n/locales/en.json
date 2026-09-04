@@ -493,10 +493,6 @@
     "loading": "Loading…"
   },
   "copy": {
-    "codeCopied": "Copy code to clipboard",
-    "label": "Copy",
-    "copied": "Copied",
-    "failed": "Failed",
     "clickToDismiss": "click to dismiss"
   },
   "drawer": {

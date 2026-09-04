@@ -79,6 +79,26 @@ export function useAppLifecycle(
         })();
     }, []);
 
+    // ── mirror client.llmDumpToFile from webview localStorage → ~/.taco/desktop.json ─
+    // Same race as the debugMode mirror above: the Rust stderr reader reads
+    // this at spawn time, so a cold start with the toggle on must see the
+    // user's choice before the first stderr line arrives. Separate useEffect
+    // (rather than a shared helper) because the field count is small and the
+    // two paths share nothing else — future toggles can copy this shape.
+    useEffect(() => {
+        const localValue = getGlobalConfig().client.llmDumpToFile;
+        void (async () => {
+            try {
+                const onDisk = (await readDesktopConfig()).llmDumpToFile ?? false;
+                if (Boolean(localValue) !== onDisk) {
+                    await writeDesktopConfig({ llmDumpToFile: Boolean(localValue) });
+                }
+            } catch {
+                // Best-effort; DebugTab also writes disk on every toggle.
+            }
+        })();
+    }, []);
+
     // ── global config: keep Settings drawer changes reactive ───────────────────────
     const [globalConfigState, setGlobalConfigState] = useState(() => getGlobalConfig());
     useEffect(() => subscribeGlobalConfig(setGlobalConfigState), []);

@@ -343,12 +343,19 @@ export class TacoClient extends TacoClientBase {
             // same ceiling: once the timer fires we know the round-trip
             // can't possibly complete, so the send itself is doomed.
             const sendRace = this.sidecar.send(workspace, req as unknown as object);
+            // The loser of this race must be cleared: an un-cleared timer keeps
+            // the event loop alive for the full ceiling (up to ~16.7min on the
+            // long tier), which hangs `node --test` long after every assertion
+            // has passed.
+            let sendTimeout: ReturnType<typeof setTimeout> | undefined;
             const sendResult = await Promise.race([
                 sendRace.then(() => "__ok__" as const).catch((e) => ({ err: String(e) })),
-                new Promise<"__timeout__">((resolve) =>
-                    setTimeout(() => resolve("__timeout__"), effectiveTimeoutMs),
-                ),
-            ]);
+                new Promise<"__timeout__">((resolve) => {
+                    sendTimeout = setTimeout(() => resolve("__timeout__"), effectiveTimeoutMs);
+                }),
+            ]).finally(() => {
+                if (sendTimeout) clearTimeout(sendTimeout);
+            });
             if (sendResult === "__timeout__") {
                 // Best-effort cleanup — the IPC call may still resolve later
                 // but we no longer care. We can't cancel a Tauri invoke from

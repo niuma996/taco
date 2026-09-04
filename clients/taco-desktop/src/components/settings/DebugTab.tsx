@@ -1,13 +1,16 @@
 /**
- * DebugTab — Settings drawer Debug tab. One toggle:
+ * DebugTab — Settings drawer Debug tab. Two toggles:
  *  - debugMode: drives the in-memory LLM Dump panel via TACO_DEBUG_LLM_PAYLOAD=1.
  *    The toggle takes effect only after "Apply & Restart" (dispose + re-ensure).
+ *  - llmDumpToFile: second opt-in that also appends the same `[taco:llm]`
+ *    lines to `~/.taco/logs/llm-dump.log` (owner-only, 10 MiB rotation × 3
+ *    retained). Hidden unless `debugMode` is on — without debugMode there
+ *    are no `[taco:llm]` lines to tee. Same restart gate as debugMode.
  *
- *  A previous `llmDumpToFile` toggle (would-have-written `[taco:llm]` to
- *  `~/.taco/logs/llm-dump.log`) was removed: it had no consumer. The
- *  in-memory panel is the only dump surface; if a disk dump becomes
- *  desired later, wire it in the same pattern as debugMode (mirror to
- *  desktop.json, read at spawn, tee `[taco:llm]` lines to the file).
+ * The on-disk `[taco:llm]` mirror lives in `~/.taco/desktop.json` so the
+ * Rust host can read it at spawn time without crossing the WebView
+ * boundary. Rust applies the filter in its stderr reader — the sidecar
+ * is unaware of this toggle.
  */
 
 import { useEffect, useState } from "react";
@@ -41,7 +44,8 @@ export function DebugTab(props: DebugTabProps) {
 
     useEffect(() => subscribeGlobalConfig(setState), []);
 
-    const diskValue = state.client.debugMode ?? false;
+    const diskDebug = state.client.debugMode ?? false;
+    const diskLlmDump = state.client.llmDumpToFile ?? false;
     // "Restarted" flag — reset to false after a toggle writes client settings;
     // set back to true after a successful restart. Restart is rare, so the
     // simplified rule is: any disk-value change implies "restart pending";
@@ -59,6 +63,22 @@ export function DebugTab(props: DebugTabProps) {
             // Awaiting here means `restarted` only flips after disk is durable,
             // so the user's subsequent Apply & Restart always sees the new value.
             await writeDesktopConfig({ debugMode: next });
+            setRestarted(false);
+        } catch (e) {
+            fail(e);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const setLlmDump = async (next: boolean) => {
+        setSaving(true);
+        clearError();
+        try {
+            await writeClientSettings({ llmDumpToFile: next });
+            // Mirror to desktop.json — same reason as debugMode: the Rust
+            // stderr reader needs the on-disk value at spawn time.
+            await writeDesktopConfig({ llmDumpToFile: next });
             setRestarted(false);
         } catch (e) {
             fail(e);
@@ -94,12 +114,30 @@ export function DebugTab(props: DebugTabProps) {
                     </span>
                 </div>
                 <Switch
-                    checked={diskValue}
+                    checked={diskDebug}
                     disabled={saving}
                     onChange={(next) => void setDebug(next)}
                     label={t("settings.debugModeEnabled")}
                 />
             </div>
+            {diskDebug && (
+                <div className="settings-row compaction-toggle-row">
+                    <div className="compaction-toggle-text">
+                        <span className="compaction-toggle-label">
+                            {t("settings.llmDumpToFileEnabled")}
+                        </span>
+                        <span className="compaction-toggle-desc">
+                            {t("settings.llmDumpToFileDesc")}
+                        </span>
+                    </div>
+                    <Switch
+                        checked={diskLlmDump}
+                        disabled={saving}
+                        onChange={(next) => void setLlmDump(next)}
+                        label={t("settings.llmDumpToFileEnabled")}
+                    />
+                </div>
+            )}
             {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
             <p className="settings-tab-desc debug-restart-hint">{t("settings.restartHint")}</p>
             {!restarted && (

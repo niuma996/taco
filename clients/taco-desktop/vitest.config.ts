@@ -12,6 +12,7 @@ export default defineConfig({
             "tests/hooks/useFilePreview.test.tsx",
             "tests/hooks/useImPolicy.test.tsx",
             "tests/hooks/useSaveConfigPatch.test.tsx",
+            "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",
             "tests/components/MemoryPane.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",

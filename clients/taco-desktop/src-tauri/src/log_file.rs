@@ -13,7 +13,7 @@
 //! no umask; the per-user profile ACL already restricts these paths.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 const MAX_BYTES: u64 = 10 * 1024 * 1024;
@@ -121,17 +121,47 @@ impl LogFiles {
     /// `taco_home` is the absolute path already resolved by
     /// `resolve_taco_home`; this function only creates the `logs/` subdir.
     pub fn open(taco_home: &Path) -> std::io::Result<Self> {
-        let dir = taco_home.join("logs");
-        fs::create_dir_all(&dir)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
-        }
+        let dir = ensure_logs_dir(taco_home)?;
         Ok(Self {
             main: LogFile::open(dir.join("taco-desktop.log"))?,
             llm: LogFile::open(dir.join("llm-dump.log"))?,
             dir,
         })
     }
+}
+
+/// Create `$TACO_HOME/logs/` with owner-only permissions and return it.
+/// Standalone from `LogFiles::open` because the daemon's own stderr tee
+/// (`TACO_STDERR_LOG` → `daemon.err.log`) needs the directory even when the
+/// llmDumpToFile toggle is off, and it does not create its parent itself.
+pub fn ensure_logs_dir(taco_home: &Path) -> std::io::Result<PathBuf> {
+    let dir = taco_home.join("logs");
+    fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(dir)
+}
+
+/// Copy `[taco:llm]`-prefixed lines from `reader` into `llm`. Returns the
+/// number of lines written. The sidecar stderr reader uses this to fold the
+/// same payloads that feed the in-memory Dump panel into
+/// `$TACO_HOME/logs/llm-dump.log`. Lines without the marker are skipped
+/// without touching the file; rotation / permissions / capacity are
+/// inherited from `LogFile` and covered by the dedicated tests above.
+pub fn tee_llm_dump_lines<R: BufRead>(
+    reader: R,
+    llm: &mut LogFile,
+) -> std::io::Result<usize> {
+    let mut written = 0usize;
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with("[taco:llm]") {
+            llm.write_line(&line)?;
+            written += 1;
+        }
+    }
+    Ok(written)
 }

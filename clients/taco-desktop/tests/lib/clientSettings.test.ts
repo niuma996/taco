@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
     isValidUiLanguage,
     LS_DEBUG_MODE,
+    LS_LLM_DUMP_TO_FILE,
     LS_THEME,
     LS_UI_LANGUAGE,
     readClientSettings,
@@ -195,6 +196,41 @@ describe("clientSettings", () => {
             assert.deepEqual(readClientSettings(), { theme: "dark", debugMode: true });
             saveClientSettings({ theme: undefined });
             assert.deepEqual(readClientSettings(), { debugMode: true });
+        });
+    });
+
+    describe("llmDumpToFile", () => {
+        it("absent by default", () => {
+            assert.equal(readClientSettings().llmDumpToFile, undefined);
+        });
+
+        it("persists true / false independently", () => {
+            saveClientSettings({ llmDumpToFile: true });
+            assert.equal(readClientSettings().llmDumpToFile, true);
+            assert.equal(localStorage.getItem(LS_LLM_DUMP_TO_FILE), "true");
+            saveClientSettings({ llmDumpToFile: false });
+            assert.equal(readClientSettings().llmDumpToFile, false);
+            assert.equal(localStorage.getItem(LS_LLM_DUMP_TO_FILE), "false");
+        });
+
+        it("undefined clears the key", () => {
+            saveClientSettings({ llmDumpToFile: true });
+            assert.ok(localStorage.getItem(LS_LLM_DUMP_TO_FILE));
+            saveClientSettings({ llmDumpToFile: undefined });
+            assert.equal(localStorage.getItem(LS_LLM_DUMP_TO_FILE), null);
+            assert.equal(readClientSettings().llmDumpToFile, undefined);
+        });
+
+        it("ignores malformed values in storage", () => {
+            localStorage.setItem(LS_LLM_DUMP_TO_FILE, JSON.stringify("nope"));
+            assert.equal(readClientSettings().llmDumpToFile, undefined);
+        });
+
+        it("debugMode and llmDumpToFile are independent fields", () => {
+            saveClientSettings({ debugMode: true, llmDumpToFile: true });
+            assert.deepEqual(readClientSettings(), { debugMode: true, llmDumpToFile: true });
+            saveClientSettings({ debugMode: undefined });
+            assert.deepEqual(readClientSettings(), { llmDumpToFile: true });
         });
     });
 

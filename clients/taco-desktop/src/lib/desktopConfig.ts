@@ -42,6 +42,15 @@ export interface DesktopConfig {
      * the in-memory LLM Dump panel.
      */
     debugMode?: boolean;
+    /**
+     * Second opt-in that lets the Rust stderr reader also append the same
+     * `[taco:llm]` lines to `$TACO_HOME/logs/llm-dump.log` (owner-only,
+     * 10 MiB rotation × 3 retained). Separate from `debugMode` because
+     * the disk write puts plaintext conversation in the user's home dir;
+     * the Debug tab hides the row unless `debugMode` is on. No sidecar
+     * env is required — the sidecar keeps writing to stderr either way.
+     */
+    llmDumpToFile?: boolean;
 }
 
 async function readRaw(): Promise<string> {

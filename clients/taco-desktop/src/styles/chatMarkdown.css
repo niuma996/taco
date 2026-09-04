@@ -271,8 +271,10 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     color: var(--fg-dim);
-    padding: 0.1em 0.55em;
-    font-size: 0.85em;
+    padding: 0.15em 0.4em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     transition:
         color 0.15s,

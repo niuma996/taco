@@ -121,6 +121,28 @@ fn read_desktop_config_debug_mode(app: &tauri::AppHandle) -> bool {
     parsed.get("debugMode").and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
+/// Read `llmDumpToFile` from `~/.taco/desktop.json`. Same failure-path
+/// contract as `read_desktop_config_debug_mode`. Drives the stderr
+/// reader's disk-tee filter; not injected as sidecar env because the
+/// sidecar is unaware of the toggle — it keeps writing `[taco:llm]`
+/// lines whenever `debugMode` is on, and Rust decides whether to mirror
+/// them to `$TACO_HOME/logs/llm-dump.log`.
+fn read_desktop_config_llm_dump_to_file(app: &tauri::AppHandle) -> bool {
+    let path = match resolve_taco_home(app) {
+        Ok(p) => p.join("desktop.json"),
+        Err(_) => return false,
+    };
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    parsed.get("llmDumpToFile").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
 #[tauri::command]
 async fn desktop_config_read(app: AppHandle) -> Result<String, String> {
     let path = resolve_taco_home(&app)?.join("desktop.json");
@@ -565,6 +587,40 @@ async fn workspace_ensure(
     if read_desktop_config_debug_mode(&app) {
         cmd.env("TACO_DEBUG_LLM_PAYLOAD", "1");
     }
+    // LLM dump-to-disk toggle (Debug tab → `llmDumpToFile` switch, mirrored
+    // to `~/.taco/desktop.json` by DebugTab + useAppLifecycle). The sidecar
+    // is unaware of this: it keeps writing `[taco:llm]` lines whenever
+    // debugMode is on, and the Rust stderr reader (spawned below) decides
+    // whether to mirror them into `$TACO_HOME/logs/llm-dump.log`. Default
+    // off — the disk file holds plaintext conversation in the user's home
+    // dir, so this stays a separate opt-in.
+    let llm_dump_to_file = read_desktop_config_llm_dump_to_file(&app);
+    // The logs dir must exist regardless of the toggle: the daemon's own
+    // stderr tee (`TACO_STDERR_LOG` → daemon.err.log, set below) does not
+    // create its parent directory. Best-effort — `LogFiles::open` retries
+    // this when the toggle is on.
+    if let Err(e) = log_file::ensure_logs_dir(&resolved_home) {
+        eprintln!("taco-desktop: failed to create logs dir: {e}");
+    }
+    // Per-process log files. Owned by the stderr reader (which clones the
+    // Arc into its task below) and *only* published to `state.log_files`
+    // on the winning-install path — aborting ensures must leave the field
+    // untouched (see install_publish test). Opened only when the toggle is
+    // on: `LogFiles::open` eagerly creates `llm-dump.log`, and an opted-out
+    // user should not find the plaintext-target file in their home dir.
+    // Open failure is best-effort: the reader falls back to a no-op tee.
+    let log_files: Option<std::sync::Arc<std::sync::Mutex<LogFiles>>> = if llm_dump_to_file {
+        match LogFiles::open(&resolved_home) {
+            Ok(files) => Some(std::sync::Arc::new(std::sync::Mutex::new(files))),
+            Err(e) => {
+                eprintln!("taco-desktop: failed to open log files: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let log_files_for_reader = log_files.clone();
     // Tee daemon stderr to the same file launchd uses (best-effort).
     // The desktop spawn path does not go through launchd, so without
     // this the daemon's logs would only survive in the parent's captured
@@ -622,6 +678,7 @@ async fn workspace_ensure(
     if let Some(stderr) = launcher.stderr.take() {
         let buf = std::sync::Arc::clone(&stderr_buf);
         let app_for_stderr = app.clone();
+        let log_files = log_files_for_reader;
         tokio::spawn(async move {
             use std::time::Duration;
             use tokio::io::{AsyncBufReadExt, BufReader};
@@ -663,6 +720,23 @@ async fn workspace_ensure(
                                     line_buf.strip_suffix(b"\n").unwrap_or(&line_buf);
                                 let line = String::from_utf8_lossy(trimmed).into_owned();
                                 if !line.is_empty() {
+                                    // Tee to llm-dump.log when the toggle is on
+                                    // (log_files is only opened then) and the line
+                                    // is a sidecar-emitted `[taco:llm]` payload.
+                                    // Best-effort: a write error here only prints
+                                    // to stderr, never aborts the reader task
+                                    // (losing the in-memory panel would be a
+                                    // worse failure than losing the disk file).
+                                    if line.starts_with("[taco:llm]") {
+                                        if let Some(lf) = log_files.as_ref() {
+                                            let mut g = lf.lock().unwrap();
+                                            if let Err(e) = g.llm.write_line(&line) {
+                                                eprintln!(
+                                                    "taco-desktop: llm-dump write failed: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
                                     batch.push(line);
                                     if batch.len() >= 64 {
                                         let _ = app_for_stderr.emit(
@@ -822,11 +896,6 @@ async fn workspace_ensure(
         }
     });
 
-    // PR2 does NOT publish state.log_files — the daemon writes its own logs
-    // (PR3 wires LogFiles inside the bundle). The fields stay on AppState
-    // for the install_publish test, but are left as None for daemon installs.
-    *state.log_files.lock().unwrap() = None;
-
     // Third check: re-check shutdown flag and slot before install — if dispose was
     // triggered during spawn, or a concurrent ensure already installed, kill the orphan
     // launcher we just spawned.
@@ -851,11 +920,21 @@ async fn workspace_ensure(
         return Ok(());
     }
 
+    // Winning install. PR2 deliberately left `state.log_files` as None on
+    // the daemon path; with llmDumpToFile support we publish the Arc here
+    // only on the winning path so aborting ensures leave the field
+    // untouched (matches the install_publish invariant). The stderr reader
+    // already holds its own Arc clone (captured at spawn time) and writes
+    // to its own file regardless of publish state — the publish is purely
+    // for future readers of `state.log_files`.
     *slot = Some(SharedSidecar {
         stdin_tx: tx,
         launcher: Some(launcher),
         generation,
     });
+    if let Some(lf) = log_files {
+        *state.log_files.lock().unwrap() = Some(lf);
+    }
     boot_trace::mark_rust("ensure.slot_installed");
     Ok(())
 }
@@ -1185,11 +1264,13 @@ fn should_auto_install_daemon_service(debug: bool) -> bool {
 /// `workspace_ensure`, so the command either finds the installed slot or
 /// waits for (rather than racing) this spawn.
 ///
-/// Spawn-time env (debug_mode / llm_dump_to_file) defaults to off here:
-/// those settings live in the webview's localStorage, unreadable from
-/// Rust. A debug-mode user's cold start therefore boots a default daemon;
-/// the settings toggle's restart-sidecar flow restores the env, exactly
-/// as with a launchd-resident daemon.
+/// Spawn-time toggles (`debugMode` / `llmDumpToFile`) are read from
+/// `~/.taco/desktop.json` by `workspace_ensure` itself, not from the
+/// webview's localStorage — that file is unreadable from Rust. The Debug
+/// tab's `useAppLifecycle` mirror copies localStorage → desktop.json on
+/// mount so a cold-start prewarm still sees the user's choice. The
+/// default off path therefore doesn't lose the setting; it just defers
+/// the env injection to disk instead of in-memory state.
 fn prewarm_daemon(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
