@@ -4,6 +4,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { PermissionBroker } from "../../src/permissions/permissionBroker.ts";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { createShellTool } from "../../src/tools/shellTool.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 const ASK_CONFIG = { mode: "ask" as const, rules: [] };
 
@@ -34,12 +35,11 @@ describe("shellTool permission results", () => {
         const requestId = new Promise<string>((resolve) => {
             broker.once("requested", (request) => resolve(request.requestId));
         });
-        const pending = tool.execute(
-            "tool-call-1",
+        const pending = invokeTool(
+            tool,
             { command: "echo approved-only-after-user-action" },
-            undefined,
-            undefined,
             context("/tmp"),
+            { toolCallId: "tool-call-1" },
         );
         broker.resolve(await requestId, false, "once");
         const result = (await pending) as ShellToolResult;
@@ -54,12 +54,11 @@ describe("shellTool permission results", () => {
     it("returns a timeout-specific failed result when approval expires", async () => {
         const broker = new PermissionBroker(() => ASK_CONFIG, { requestTimeoutMs: 5 });
         const tool = createShellTool({ permissionBroker: broker, sessionId: "session-1" });
-        const result = (await tool.execute(
-            "tool-call-1",
+        const result = (await invokeTool(
+            tool,
             { command: "echo should-not-run" },
-            undefined,
-            undefined,
             context("/tmp"),
+            { toolCallId: "tool-call-1" },
         )) as ShellToolResult;
 
         assert.equal(result.isError, true);
@@ -72,13 +71,10 @@ describe("shellTool permission results", () => {
         const broker = new PermissionBroker(() => ASK_CONFIG);
         const tool = createShellTool({ permissionBroker: broker, sessionId: "session-1" });
         const controller = new AbortController();
-        const pending = tool.execute(
-            "tool-call-1",
-            { command: "echo should-not-run" },
-            controller.signal,
-            undefined,
-            context("/tmp"),
-        );
+        const pending = invokeTool(tool, { command: "echo should-not-run" }, context("/tmp"), {
+            toolCallId: "tool-call-1",
+            signal: controller.signal,
+        });
         controller.abort();
         const result = (await pending) as ShellToolResult;
 
@@ -94,13 +90,9 @@ describe("shellTool permission results", () => {
         // known path, not an unrecognised one — see deniedResult.
         const broker = new PermissionBroker(() => ASK_CONFIG, { readOnly: true });
         const tool = createShellTool({ permissionBroker: broker, sessionId: "session-1" });
-        const result = (await tool.execute(
-            "tool-call-1",
-            { command: "rm -rf /tmp/nope" },
-            undefined,
-            undefined,
-            context("/tmp"),
-        )) as ShellToolResult;
+        const result = (await invokeTool(tool, { command: "rm -rf /tmp/nope" }, context("/tmp"), {
+            toolCallId: "tool-call-1",
+        })) as ShellToolResult;
 
         assert.equal(result.isError, true);
         assert.equal(result.details.reason, "permission_denied");
@@ -109,13 +101,9 @@ describe("shellTool permission results", () => {
 
     it("propagates isError from shell execution failures", async () => {
         const tool = createShellTool();
-        const result = (await tool.execute(
-            "tool-call-1",
-            { command: "exit 7" },
-            undefined,
-            undefined,
-            context("/tmp"),
-        )) as ShellToolResult;
+        const result = (await invokeTool(tool, { command: "exit 7" }, context("/tmp"), {
+            toolCallId: "tool-call-1",
+        })) as ShellToolResult;
 
         assert.equal(result.isError, true);
         assert.equal(result.details.exitCode, 7);
@@ -140,13 +128,9 @@ describe("shell tool env scrubbing", () => {
         assert.equal(process.env.ANTHROPIC_API_KEY, "sk-ant-secret-1234567890");
 
         const tool = createShellTool();
-        const result = (await tool.execute(
-            "tool-call-1",
-            { command: "env" },
-            undefined,
-            undefined,
-            context("/tmp"),
-        )) as ShellToolResult;
+        const result = (await invokeTool(tool, { command: "env" }, context("/tmp"), {
+            toolCallId: "tool-call-1",
+        })) as ShellToolResult;
 
         assert.equal(textOf(result).includes("sk-ant-secret-1234567890"), false);
     });

@@ -7,6 +7,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { createTaskUpdateTool } from "../../src/tools/taskUpdate.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
 
 describe("taskUpdate tool", () => {
@@ -30,8 +31,8 @@ describe("taskUpdate tool", () => {
 
     it("should update task status", async () => {
         const tool = createTaskUpdateTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
-        const _result = await tool.execute(
-            "tc-1",
+        const _result = await invokeTool(
+            tool,
             {
                 listId: "test-list",
                 taskId: "task-1",
@@ -39,8 +40,6 @@ describe("taskUpdate tool", () => {
                     status: "completed",
                 },
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 
@@ -67,12 +66,11 @@ describe("taskUpdate — clears currentListId when the active list runs out of u
         store.currentListId = "l1";
 
         const tool = createTaskUpdateTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
-        await tool.execute(
-            "tu",
+        await invokeTool(
+            tool,
             { taskId: "task-1", updates: { status: "completed" } },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tu" },
         );
 
         assert.equal(store.currentListId, null);

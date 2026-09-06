@@ -8,6 +8,7 @@ import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import type { TaskList } from "../../src/tasks/taskTypes.ts";
 import { createTodoWriteTool } from "../../src/tools/todoWrite.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
 
 describe("todoWrite tool", () => {
@@ -25,8 +26,8 @@ describe("todoWrite tool", () => {
 
     it("should create a new list when no active list exists", async () => {
         const tool = createTodoWriteTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 todos: [
                     {
@@ -41,8 +42,6 @@ describe("todoWrite tool", () => {
                     },
                 ],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 
@@ -64,13 +63,11 @@ describe("todoWrite tool", () => {
         const tool = createTodoWriteTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
 
         // First call creates active list
-        await tool.execute(
-            "tc-1",
+        await invokeTool(
+            tool,
             {
                 todos: [{ content: "Task 1", status: "pending", activeForm: "Working on task 1" }],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 
@@ -78,14 +75,13 @@ describe("todoWrite tool", () => {
         assert.ok(firstListId);
 
         // Second call replaces the same active list
-        await tool.execute(
-            "tc-2",
+        await invokeTool(
+            tool,
             {
                 todos: [{ content: "Task 2", status: "pending", activeForm: "Working on task 2" }],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc-2" },
         );
 
         assert.equal(store.currentListId, firstListId);
@@ -106,13 +102,11 @@ describe("todoWrite tool", () => {
             testTaskPublisher(),
             TEST_SESSION_ID,
         );
-        await tool.execute(
-            "tc-1",
+        await invokeTool(
+            tool,
             {
                 todos: [{ content: "new", status: "in_progress", activeForm: "new" }],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 

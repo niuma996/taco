@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createGlobTool } from "../../src/tools/glob.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 describe("glob tool", () => {
     let dir: string;
@@ -35,9 +36,12 @@ describe("glob tool", () => {
 
     it("matches by pattern and returns relative paths", async () => {
         const tool = createGlobTool();
-        const res = await tool.execute("tc", { pattern: "src/**/*.ts" }, undefined, undefined, {
-            env,
-        });
+        const res = await invokeTool(
+            tool,
+            { pattern: "src/**/*.ts" },
+            { env },
+            { toolCallId: "tc" },
+        );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(text.includes("src/a.ts"));
         assert.ok(text.includes("src/b.ts"));
@@ -46,14 +50,14 @@ describe("glob tool", () => {
 
     it("respects safe defaults even without .gitignore mention", async () => {
         const tool = createGlobTool();
-        const res = await tool.execute("tc", { pattern: "**/*.ts" }, undefined, undefined, { env });
+        const res = await invokeTool(tool, { pattern: "**/*.ts" }, { env }, { toolCallId: "tc" });
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(!text.includes("node_modules"), "should exclude node_modules via safe defaults");
     });
 
     it("respects .gitignore user-ignored paths", async () => {
         const tool = createGlobTool();
-        const res = await tool.execute("tc", { pattern: "**/*.ts" }, undefined, undefined, { env });
+        const res = await invokeTool(tool, { pattern: "**/*.ts" }, { env }, { toolCallId: "tc" });
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(!text.includes("secrets"), "should respect .gitignore 'secrets/' entry");
     });

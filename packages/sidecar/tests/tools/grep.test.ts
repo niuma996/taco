@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createGrepTool } from "../../src/tools/grep.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 describe("grep tool", () => {
     let dir: string;
@@ -33,7 +34,7 @@ describe("grep tool", () => {
 
     it("finds a literal pattern and reports file:line", async () => {
         const tool = createGrepTool();
-        const res = await tool.execute("tc", { pattern: "foo" }, undefined, undefined, { env });
+        const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(text.includes("src/a.ts:1:"));
         assert.ok(text.includes("src/b.ts:1:"));
@@ -42,12 +43,11 @@ describe("grep tool", () => {
 
     it("filters by glob", async () => {
         const tool = createGrepTool();
-        const res = await tool.execute(
-            "tc",
+        const res = await invokeTool(
+            tool,
             { pattern: "foo", glob: "*.ts" },
-            undefined,
-            undefined,
             { env },
+            { toolCallId: "tc" },
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         // `.glob filter means we'd only check files that match
@@ -59,14 +59,14 @@ describe("grep tool", () => {
 
     it("respects safe defaults (excludes node_modules)", async () => {
         const tool = createGrepTool();
-        const res = await tool.execute("tc", { pattern: "foo" }, undefined, undefined, { env });
+        const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(!text.includes("node_modules"));
     });
 
     it("respects .gitignore (excludes secrets/)", async () => {
         const tool = createGrepTool();
-        const res = await tool.execute("tc", { pattern: "foo" }, undefined, undefined, { env });
+        const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(!text.includes("secrets"));
     });
@@ -74,12 +74,11 @@ describe("grep tool", () => {
     it("case-insensitive flag works", async () => {
         writeFileSync(join(dir, "src", "c.ts"), "const FOO = 3;\n");
         const tool = createGrepTool();
-        const res = await tool.execute(
-            "tc",
+        const res = await invokeTool(
+            tool,
             { pattern: "FOO", ignoreCase: true },
-            undefined,
-            undefined,
             { env },
+            { toolCallId: "tc" },
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(text.includes("src/c.ts:1:"));

@@ -13,6 +13,7 @@ import type { McpServerConfig } from "@taco-ai/protocol";
 import type { Logger } from "../../src/lib/logger.ts";
 import { createMcpClient } from "../../src/mcp/mcpClient.ts";
 import { discoverMcpTools } from "../../src/mcp/mcpToolProvider.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 const silentLogger = {
     info: () => {},
@@ -125,13 +126,9 @@ describe("MCP stdio e2e", () => {
         assert.equal(candidates[0].loading, "deferred");
 
         const tool = await candidates[0].load();
-        const result = await tool.execute(
-            "t1",
-            { message: "via-provider" },
-            undefined,
-            undefined,
-            {} as never,
-        );
+        const result = await invokeTool(tool, { message: "via-provider" }, {} as never, {
+            toolCallId: "t1",
+        });
         assert.equal((result.details as { isError: boolean }).isError, false);
         assert.equal((result.content[0] as { text: string }).text, "echo:via-provider");
 

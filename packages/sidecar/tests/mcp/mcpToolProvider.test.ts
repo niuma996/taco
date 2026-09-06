@@ -9,6 +9,7 @@ import type { Logger } from "../../src/lib/logger.ts";
 import type { McpClientFactory, McpClientHandle } from "../../src/mcp/mcpClient.ts";
 import { discoverMcpTools } from "../../src/mcp/mcpToolProvider.ts";
 import { FakeMcpClient } from "../_helpers/fakeMcpClient.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 const silentLogger = {
     info: () => {},
@@ -247,7 +248,7 @@ describe("discoverMcpTools", () => {
         });
         const [candidate] = provider.candidates();
         const tool = await candidate.load();
-        const result = await tool.execute("t1", {}, undefined, undefined, {} as never);
+        const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
         assert.equal((result.content[0] as { text: string }).text, "issue #1");
         assert.equal((result.details as { isError: boolean }).isError, false);
         assert.deepEqual(

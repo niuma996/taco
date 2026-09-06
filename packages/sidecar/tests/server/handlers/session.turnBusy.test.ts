@@ -4,16 +4,21 @@
  * Two ways a turn can be refused, both of which used to reach the client as an
  * unactionable `internal` error:
  *   - an in-flight compaction never settles → the handler must not call prompt()
- *     at all (pi would throw its own busy from the `compaction` phase)
- *   - pi throws AgentHarnessError("busy") → must be translated, since
+ *     at all (pi would refuse the run from its compaction operation)
+ *   - the lane is already running something → must be translated, since
  *     normalizeError only preserves the code of an RpcHandlerError
+ *
+ * The busy signal is pi 0.85's `LaneBusy`, a tagged error. It is deliberately
+ * constructed here rather than faked with a message, because `LaneBusy` is NOT
+ * a `HarnessFault` subclass — `instanceof HarnessFault` is false for it — and
+ * an `instanceof`-based translation would silently stop detecting busy.
  *
  * Stub workspace / attached, same pattern as session.compactionHandlers.test.ts.
  */
 
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
-import { AgentHarnessError } from "@earendil-works/pi-agent-core";
+import { LaneBusy } from "@earendil-works/pi-agent-core";
 
 import { getRegisteredMethod, RpcHandlerError } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
@@ -84,11 +89,16 @@ describe("session.prompt busy paths", () => {
         assert.equal(promptCalls(), 0, "must not start a turn while compacting");
     });
 
-    it("translates pi's AgentHarnessError(busy) into session_busy", async () => {
+    it("translates pi's LaneBusy into session_busy", async () => {
         const { ctx } = makeCtx({
             settled: true,
             prompt: async () => {
-                throw new AgentHarnessError("busy", "AgentHarness is busy");
+                throw new LaneBusy({
+                    lane: "main",
+                    operationId: "op-0",
+                    operationKind: "run",
+                    message: "lane is busy",
+                });
             },
         });
         const method = getRegisteredMethod("session.prompt");
@@ -98,10 +108,11 @@ describe("session.prompt busy paths", () => {
     });
 
     it("leaves non-busy harness errors alone", async () => {
+        const authError = new Error("no credentials");
         const { ctx } = makeCtx({
             settled: true,
             prompt: async () => {
-                throw new AgentHarnessError("auth", "no credentials");
+                throw authError;
             },
         });
         const method = getRegisteredMethod("session.prompt");
@@ -109,9 +120,7 @@ describe("session.prompt busy paths", () => {
 
         // Must NOT be laundered into session_busy — a client that retries an
         // auth failure loops forever.
-        await assert.rejects(method.handler(ctx), (e: unknown) => {
-            return e instanceof AgentHarnessError && e.code === "auth";
-        });
+        await assert.rejects(method.handler(ctx), (e: unknown) => e === authError);
     });
 
     it("proceeds normally once compaction has settled", async () => {

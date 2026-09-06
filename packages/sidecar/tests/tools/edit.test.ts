@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createEditTool } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 async function runEdit(
     cwd: string,
@@ -23,7 +24,7 @@ async function runEdit(
 ): Promise<void> {
     const env = new NodeExecutionEnv({ cwd });
     const tool = createEditTool();
-    await tool.execute("tc", { path, edits }, undefined, undefined, { env });
+    await invokeTool(tool, { path, edits }, { env }, { toolCallId: "tc" });
 }
 
 let cwd: string;

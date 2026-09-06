@@ -27,6 +27,7 @@ import {
     type JobsGetInput,
     type JobsRunNowInput,
 } from "../../src/tools/jobs.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 interface CallRecord {
     method: string;
@@ -72,7 +73,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         const records: CallRecord[] = [];
         const tool = createJobsListTool();
         const ctx = makeImCtx(records);
-        await tool.execute("tc-1", {}, undefined, undefined, ctx);
+        await invokeTool(tool, {}, ctx);
         assert.equal(records.length, 1);
         assert.equal(records[0].method, JOBS_RPC.list);
         assert.equal(records[0].workspace, "im://ch1/u1/c1");
@@ -85,7 +86,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         const records: CallRecord[] = [];
         const tool = createJobsGetTool();
         const input: JobsGetInput = { id: "nightly" };
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         assert.equal(records.length, 1);
         assert.equal(records[0].method, JOBS_RPC.get);
         assert.deepEqual(records[0].params, {
@@ -109,7 +110,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "reuse",
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
+        await invokeTool(tool, input, makeImCtx(records));
         assert.equal(records[0].method, JOBS_RPC.create);
         const params = records[0].params as { job: Job; actor: unknown };
         assert.equal(params.job.id, "morning-brief");
@@ -145,7 +146,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 run_on_startup: false,
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
+        await invokeTool(tool, input, makeImCtx(records));
         const params = records[0].params as { job: Job };
         assert.equal(params.job.args.workspace, "im://ch1/u1/c1");
     });
@@ -164,7 +165,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 run_on_startup: false,
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         const params = records[0].params as { job: Job };
         assert.equal(params.job.args.workspace, "/tmp/ws");
     });
@@ -183,7 +184,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 run_on_startup: false,
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
+        await invokeTool(tool, input, makeImCtx(records));
         const params = records[0].params as { job: Job };
         assert.equal(params.job.sessionStrategy, "reuse");
     });
@@ -202,7 +203,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 run_on_startup: false,
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         const params = records[0].params as { job: Job };
         assert.equal(params.job.sessionStrategy, "pin");
     });
@@ -222,7 +223,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "reuse",
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
+        await invokeTool(tool, input, makeImCtx(records));
         assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "reuse");
     });
 
@@ -242,7 +243,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
             },
         } as unknown as JobsCreateInput;
         await assert.rejects(
-            () => tool.execute("tc-1", input, undefined, undefined, makeImCtx(records)),
+            () => invokeTool(tool, input, makeImCtx(records)),
             /channel jobs only support sessionStrategy="reuse"/,
         );
         assert.equal(records.length, 0);
@@ -263,7 +264,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "pin",
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "pin");
     });
 
@@ -282,7 +283,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 sessionStrategy: "new",
             },
         } as unknown as JobsCreateInput;
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "new");
     });
 
@@ -301,21 +302,19 @@ describe("jobs tools — execute dispatches + closes actor", () => {
             },
         } as unknown as JobsCreateInput;
         // IM: defaults to reuse
-        await tool.execute("tc-1", input, undefined, undefined, makeImCtx(records));
+        await invokeTool(tool, input, makeImCtx(records));
         const params = records[0].params as { job: Job };
         assert.equal(params.job.sessionStrategy, "reuse");
 
         // IDE: defaults to pin, rejects explicit reuse
         await assert.rejects(
             () =>
-                tool.execute(
-                    "tc-1",
+                invokeTool(
+                    tool,
                     {
                         ...input,
                         job: { ...input.job, sessionStrategy: "reuse" },
                     } as unknown as JobsCreateInput,
-                    undefined,
-                    undefined,
                     makeCtx(records),
                 ),
             /reuse strategy requires a channel workspace/,
@@ -336,7 +335,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 run_on_startup: false,
             },
         };
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         assert.equal(records[0].method, JOBS_RPC.update);
     });
 
@@ -344,7 +343,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         const records: CallRecord[] = [];
         const tool = createJobsDeleteTool();
         const input: JobsDeleteInput = { id: "stale" };
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         assert.equal(records[0].method, JOBS_RPC.delete);
         assert.deepEqual(records[0].params, {
             id: "stale",
@@ -356,7 +355,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         const records: CallRecord[] = [];
         const tool = createJobsRunNowTool();
         const input: JobsRunNowInput = { id: "fire-now" };
-        await tool.execute("tc-1", input, undefined, undefined, makeCtx(records));
+        await invokeTool(tool, input, makeCtx(records));
         assert.equal(records[0].method, JOBS_RPC.runNow);
     });
 
@@ -372,7 +371,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         const tool = createJobsListTool();
         await assert.rejects(
             () =>
-                tool.execute("tc-1", {}, undefined, undefined, {
+                invokeTool(tool, {}, {
                     env: undefined as never,
                     workspace: "/tmp/ws",
                 } as TacoToolContext),
@@ -385,7 +384,7 @@ describe("jobs tools — list rendering", () => {
     it("renders an empty list as 'no jobs'", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsListTool();
-        const result = await tool.execute("tc-1", {}, undefined, undefined, makeCtx(records));
+        const result = await invokeTool(tool, {}, makeCtx(records));
         assert.equal((result.content[0] as { text: string }).text, "no jobs");
     });
 
@@ -414,7 +413,7 @@ describe("jobs tools — list rendering", () => {
             actor: { kind: "ide", workspace: "/tmp/ws" },
         };
         const tool = createJobsListTool();
-        const result = await tool.execute("tc-1", {}, undefined, undefined, ctx);
+        const result = await invokeTool(tool, {}, ctx);
         const text = (result.content[0] as { text: string }).text;
         assert.ok(text.includes("a (enabled"), `expected enabled marker in ${text}`);
         assert.ok(text.includes("every 60000ms"), `expected schedule in ${text}`);
@@ -445,18 +444,14 @@ describe("jobs tools — list rendering", () => {
             actor,
         });
         const tool = createJobsListTool();
-        const imResult = await tool.execute(
-            "tc-1",
+        const imResult = await invokeTool(
+            tool,
             {},
-            undefined,
-            undefined,
             makeCtxWithActor({ kind: "im", channelId: "ch1", peerId: "u1", chatId: "c1" }),
         );
-        const ideResult = await tool.execute(
-            "tc-1",
+        const ideResult = await invokeTool(
+            tool,
             {},
-            undefined,
-            undefined,
             makeCtxWithActor({ kind: "ide", workspace: "/tmp/ws" }),
         );
         assert.ok(

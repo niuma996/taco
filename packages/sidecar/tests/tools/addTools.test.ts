@@ -17,6 +17,7 @@ import { type AddToolsToolInput, createAddToolsTool } from "../../src/tools/addT
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 import { FakeToolCollection } from "../_helpers/fakeToolCollection.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 const fakeTool = (name: string): TacoTool =>
     ({
@@ -103,65 +104,49 @@ describe("addTools execute", () => {
 
     it("adds tools and reports the result", async () => {
         const { tool, controller } = makeTool(["git-status"]);
-        const result = await tool.execute(
-            "tc1",
-            { toolNames: "git-status" },
-            undefined,
-            undefined,
-            ctx,
-        );
+        const result = await invokeTool(tool, { toolNames: "git-status" }, ctx, {
+            toolCallId: "tc1",
+        });
         assert.deepEqual(details(result).added, ["git-status"]);
         assert.deepEqual(controller.loadedToolNames(), ["git-status"]);
     });
 
     it("returns addedToolNames on success (pi deferred-tool protocol)", async () => {
         const { tool } = makeTool(["git-status", "pg-query"]);
-        const result = await tool.execute(
-            "tc1",
-            { toolNames: "git-status" },
-            undefined,
-            undefined,
-            ctx,
-        );
+        const result = await invokeTool(tool, { toolNames: "git-status" }, ctx, {
+            toolCallId: "tc1",
+        });
         assert.deepEqual(addedNames(result), ["git-status"]);
     });
 
     it("omits addedToolNames when nothing was added", async () => {
         const { tool } = makeTool(["git-status"]);
-        const result = await tool.execute("tc1", { toolNames: "nope" }, undefined, undefined, ctx);
+        const result = await invokeTool(tool, { toolNames: "nope" }, ctx, { toolCallId: "tc1" });
         assert.deepEqual(addedNames(result), undefined);
     });
 
     it("reports unknown tools in the result", async () => {
         const { tool } = makeTool(["git-status"]);
-        const result = await tool.execute("tc1", { toolNames: "nope" }, undefined, undefined, ctx);
+        const result = await invokeTool(tool, { toolNames: "nope" }, ctx, { toolCallId: "tc1" });
         assert.deepEqual(details(result).unknown, ["nope"]);
         assert.deepEqual(details(result).added, []);
     });
 
     it("reports already-loaded tools as skipped (idempotent)", async () => {
         const { tool } = makeTool(["git-status"]);
-        await tool.execute("tc1", { toolNames: "git-status" }, undefined, undefined, ctx);
-        const second = await tool.execute(
-            "tc2",
-            { toolNames: "git-status" },
-            undefined,
-            undefined,
-            ctx,
-        );
+        await invokeTool(tool, { toolNames: "git-status" }, ctx, { toolCallId: "tc1" });
+        const second = await invokeTool(tool, { toolNames: "git-status" }, ctx, {
+            toolCallId: "tc2",
+        });
         assert.deepEqual(details(second).skipped, ["git-status"]);
         assert.deepEqual(details(second).added, []);
     });
 
     it("deduplicates repeated names within a single request", async () => {
         const { tool, controller } = makeTool(["git-status"]);
-        const result = await tool.execute(
-            "tc1",
-            { toolNames: "git-status, git-status" },
-            undefined,
-            undefined,
-            ctx,
-        );
+        const result = await invokeTool(tool, { toolNames: "git-status, git-status" }, ctx, {
+            toolCallId: "tc1",
+        });
         assert.deepEqual(details(result).added, ["git-status"]);
         assert.deepEqual(details(result).skipped, ["git-status"]);
         assert.equal(controller.loadedToolNames().filter((n) => n === "git-status").length, 1);

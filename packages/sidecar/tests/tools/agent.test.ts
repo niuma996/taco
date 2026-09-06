@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { SubagentSpawnContext } from "../../src/agents/types.ts";
 import { createAgentTool } from "../../src/tools/agent.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 describe("agent tool", () => {
     const mockEnv = new NodeExecutionEnv({ cwd: "/" });
@@ -30,16 +31,15 @@ describe("agent tool", () => {
             },
         };
         const tool = createAgentTool(ctx, [{ agentType: "explorer" }, { agentType: "coder" }]);
-        const res = await tool.execute(
-            "tc-parent",
+        const res = await invokeTool(
+            tool,
             {
                 subagent_type: "explorer",
                 description: "find X",
                 prompt: "locate the config loader",
             },
-            undefined,
-            undefined,
             { env: mockEnv },
+            { toolCallId: "tc-parent" },
         );
         assert.deepEqual(captured, {
             parentToolCallId: "tc-parent",
@@ -66,17 +66,16 @@ describe("agent tool", () => {
             },
         };
         const tool = createAgentTool(ctx, [{ agentType: "reviewer" }]);
-        await tool.execute(
-            "tc-parent",
+        await invokeTool(
+            tool,
             {
                 subagent_type: "reviewer",
                 description: "review",
                 prompt: "review the change",
                 context: "fork",
             },
-            undefined,
-            undefined,
             { env: mockEnv },
+            { toolCallId: "tc-parent" },
         );
         assert.deepEqual(captured, {
             parentToolCallId: "tc-parent",
@@ -189,16 +188,15 @@ describe("agent tool", () => {
             },
             [{ agentType: "explorer" }],
         );
-        const res = await tool.execute(
-            "tc",
+        const res = await invokeTool(
+            tool,
             {
                 subagent_type: "bogus",
                 description: "x",
                 prompt: "y",
             },
-            undefined,
-            undefined,
             { env: mockEnv },
+            { toolCallId: "tc" },
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("subagent error:"));
@@ -247,12 +245,11 @@ describe("agent tool", () => {
         const start = Date.now();
         const results = await Promise.all(
             Array.from({ length: N }, (_, i) =>
-                tool.execute(
-                    `tc-${i}`,
+                invokeTool(
+                    tool,
                     { subagent_type: "explorer", description: "x", prompt: "y" },
-                    undefined,
-                    undefined,
                     { env: mockEnv },
+                    { toolCallId: `tc-${i}` },
                 ),
             ),
         );

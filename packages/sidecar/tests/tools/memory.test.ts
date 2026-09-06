@@ -13,6 +13,7 @@ import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import { createMemoryTool, type MemoryToolInput } from "../../src/tools/memory.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 const VALID: MemoryToolInput = {
     action: "add",
@@ -142,7 +143,7 @@ describe("memory tool execute", () => {
             },
         };
 
-        const result = await tool.execute("tc-1", VALID, undefined, undefined, ctx);
+        const result = await invokeTool(tool, VALID, ctx);
 
         // Critical: the params handed to memory.upsert must be flat, with
         // `action` as a string — not nested under another `action` envelope.
@@ -166,7 +167,7 @@ describe("memory tool execute", () => {
         const tool = createMemoryTool();
         await assert.rejects(
             () =>
-                tool.execute("tc-1", VALID, undefined, undefined, {
+                invokeTool(tool, VALID, {
                     env: undefined as never,
                     workspace: "/tmp/ws",
                 } as TacoToolContext),

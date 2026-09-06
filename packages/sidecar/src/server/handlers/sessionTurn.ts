@@ -5,7 +5,7 @@
  * auto-attach / compaction-wait pattern. All require ensureWorkspace.
  */
 
-import { HarnessFault } from "@earendil-works/pi-agent-core";
+
 import type {
     AbortParams,
     PromptParams,
@@ -23,6 +23,7 @@ import {
 import { RPC } from "@taco-ai/shared";
 
 import { harnessContext } from "../../lib/harnessContext.ts";
+import { isBusyError } from "../../runtime/harnessErrors.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
@@ -76,16 +77,13 @@ async function requireCompactionSettled(
  * `normalizeError` only preserves the code of an `RpcHandlerError`; anything
  * else is flattened to `internal` with a redacted message, which would hide a
  * transient, retryable condition behind a generic server error.
+ *
+ * Detection lives in `isBusyError` because pi 0.85's `LaneBusy` is a tagged
+ * error, not a `HarnessFault` subclass — an `instanceof HarnessFault` test
+ * returns false for it and would silently stop classifying busy.
  */
 function rethrowBusyAsSessionBusy(e: unknown): never {
-    if (
-        e instanceof HarnessFault &&
-        // pi 0.84 dropped the `code` field — LaneBusy is the specific
-        // "busy" subclass and the legacy mocks use `message === "busy"`.
-        ((e as { constructor?: { name?: string } }).constructor?.name === "LaneBusy" ||
-            (e as { name?: string }).name === "LaneBusy" ||
-            (e as { message?: string }).message === "busy")
-    ) {
+    if (isBusyError(e)) {
         throw new RpcHandlerError(
             ErrorCodes.SessionBusy,
             "a turn is already active for this session; retry shortly",

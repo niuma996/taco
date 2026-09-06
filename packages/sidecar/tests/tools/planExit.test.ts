@@ -6,6 +6,7 @@ import { beforeEach, describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
 import { createPlanExitTool, type PlanExitToolDetails } from "../../src/tools/planExit.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 describe("planExit tool", () => {
     let testDir: string;
@@ -23,9 +24,13 @@ describe("planExit tool", () => {
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.\n\nMore details.");
 
         const tool = createPlanExitTool(state, testDir, undefined, "");
-        const result = await tool.execute("tc-1", { planSlug: "test-plan" }, undefined, undefined, {
-            env: new NodeExecutionEnv({ cwd: "/" }),
-        });
+        const result = await invokeTool(
+            tool,
+            { planSlug: "test-plan" },
+            {
+                env: new NodeExecutionEnv({ cwd: "/" }),
+            },
+        );
 
         assert.equal(result.terminate, true);
         assert.equal(result.content[0].type, "text");
@@ -42,9 +47,13 @@ describe("planExit tool", () => {
     it("rejects if not in plan mode", async () => {
         const tool = createPlanExitTool(state, testDir, undefined, "");
         try {
-            await tool.execute("tc-1", { planSlug: "test-plan" }, undefined, undefined, {
-                env: new NodeExecutionEnv({ cwd: "/" }),
-            });
+            await invokeTool(
+                tool,
+                { planSlug: "test-plan" },
+                {
+                    env: new NodeExecutionEnv({ cwd: "/" }),
+                },
+            );
             assert.fail("Should have thrown");
         } catch (error) {
             assert.match((error as Error).message, /Not in plan mode/);
@@ -60,12 +69,11 @@ describe("planExit tool", () => {
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.");
 
         const tool = createPlanExitTool(state, testDir, undefined, "");
-        const result = await tool.execute(
-            "tc-2",
+        const result = await invokeTool(
+            tool,
             { planSlug: "test-plan", answers: { "Approve this plan?": "Approve" } },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc-2" },
         );
 
         assert.equal(state.active, false);
@@ -83,12 +91,11 @@ describe("planExit tool", () => {
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.");
 
         const tool = createPlanExitTool(state, testDir, undefined, "");
-        const result = await tool.execute(
-            "tc-2",
+        const result = await invokeTool(
+            tool,
             { planSlug: "test-plan", answers: { "Approve this plan?": "Reject" } },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc-2" },
         );
 
         assert.equal(state.active, true);
@@ -116,9 +123,12 @@ describe("planExit tool — schema robustness", () => {
 
         const tool = createPlanExitTool(state, testDir, undefined, "");
         // No planSlug passed — relies entirely on state.currentSlug
-        const result = await tool.execute("tc", {}, undefined, undefined, {
-            env: new NodeExecutionEnv({ cwd: "/" }),
-        });
+        const result = await invokeTool(
+            tool,
+            {},
+            { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc" },
+        );
 
         assert.equal(result.terminate, true);
         const details = result.details as PlanExitToolDetails;
@@ -139,12 +149,11 @@ describe("planExit tool — schema robustness", () => {
         rmSync(mdPath, { force: true });
 
         // Second call, with answers — must not throw "Plan document not found"
-        const result = await tool.execute(
-            "tc",
+        const result = await invokeTool(
+            tool,
             { planSlug: "ephemeral", answers: { "Approve this plan?": "Approve" } },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc" },
         );
 
         assert.equal(state.active, false, "Approve should still exit plan mode");
@@ -164,12 +173,11 @@ describe("planExit tool — schema robustness", () => {
         // Delete .md — but because this is a second call (with answers), it still doesn't read the file
         rmSync(join(plansDir, "no-slug-2nd.md"), { force: true });
 
-        const result = await tool.execute(
-            "tc",
+        const result = await invokeTool(
+            tool,
             { answers: { "Approve this plan?": "Reject" } },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc" },
         );
 
         assert.equal(state.active, true, "Reject should keep plan mode active");

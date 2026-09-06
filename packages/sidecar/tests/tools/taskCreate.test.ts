@@ -7,6 +7,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { createTaskCreateTool } from "../../src/tools/taskCreate.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
 
 describe("taskCreate tool", () => {
@@ -29,8 +30,8 @@ describe("taskCreate tool", () => {
 
     it("should create a new task list", async () => {
         const tool = createTaskCreateTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 listName: "Sprint 1",
                 tasks: [
@@ -41,8 +42,6 @@ describe("taskCreate tool", () => {
                     },
                 ],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 
@@ -62,15 +61,14 @@ describe("taskCreate tool", () => {
         addTask(store, "sprint-1", { content: "Task 1", status: "pending", activeForm: "Working" });
         store.currentListId = "sprint-1";
 
-        const result = await tool.execute(
-            "tc-2",
+        const result = await invokeTool(
+            tool,
             {
                 listName: "Sprint 2",
                 tasks: [{ content: "Task 2", status: "pending", activeForm: "Working on task 2" }],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc-2" },
         );
 
         assert.equal(store.lists.size, 1);
@@ -83,8 +81,8 @@ describe("taskCreate tool", () => {
 
     it("returns taskIds in details and content text so LLM can read them", async () => {
         const tool = createTaskCreateTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 listName: "Sprint 3",
                 tasks: [
@@ -92,8 +90,6 @@ describe("taskCreate tool", () => {
                     { content: "Second", status: "in_progress", activeForm: "Doing second" },
                 ],
             },
-            undefined,
-            undefined,
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 

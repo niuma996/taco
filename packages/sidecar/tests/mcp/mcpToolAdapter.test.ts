@@ -8,6 +8,7 @@ import { Value } from "typebox/value";
 import type { McpClientHandle, McpToolInfo } from "../../src/mcp/mcpClient.ts";
 import { createMcpToolAdapter } from "../../src/mcp/mcpToolAdapter.ts";
 import { FakeMcpClient } from "../_helpers/fakeMcpClient.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 const info = (overrides: Partial<McpToolInfo> = {}): McpToolInfo => ({
     name: "raw_tool",
@@ -52,7 +53,7 @@ describe("createMcpToolAdapter", () => {
             content: [{ type: "text", text: "hello" }],
         }));
         const tool = makeTool({ handle });
-        const result = await tool.execute("t1", { q: "hi" }, undefined, undefined, {} as never);
+        const result = await invokeTool(tool, { q: "hi" }, {} as never, { toolCallId: "t1" });
         assert.deepEqual(result.content, [{ type: "text", text: "hello" }]);
         assert.equal(result.details.isError, false);
         assert.deepEqual(
@@ -71,7 +72,7 @@ describe("createMcpToolAdapter", () => {
             ],
         }));
         const tool = makeTool({ handle });
-        const result = await tool.execute("t1", {}, undefined, undefined, {} as never);
+        const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
         assert.equal(result.content.length, 4);
         for (const c of result.content) assert.equal(c.type, "text");
         assert.ok(textOf(result.content[0]).includes("image"));
@@ -84,7 +85,7 @@ describe("createMcpToolAdapter", () => {
             isError: true,
         }));
         const tool = makeTool({ handle });
-        const result = await tool.execute("t1", {}, undefined, undefined, {} as never);
+        const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
         assert.equal(result.details.isError, true);
     });
 
@@ -93,7 +94,7 @@ describe("createMcpToolAdapter", () => {
             throw new Error("connection lost");
         });
         const tool = makeTool({ handle });
-        const result = await tool.execute("t1", {}, undefined, undefined, {} as never);
+        const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
         assert.equal(result.details.isError, true);
         assert.ok(textOf(result.content[0]).includes("connection lost"));
     });
@@ -106,7 +107,7 @@ describe("createMcpToolAdapter", () => {
         }));
         const tool = makeTool({ handle });
         await assert.rejects(
-            () => tool.execute("t1", {}, ac.signal, undefined, {} as never),
+            () => invokeTool(tool, {}, {} as never, { toolCallId: "t1", signal: ac.signal }),
             /Operation aborted/,
         );
     });
@@ -121,7 +122,7 @@ describe("createMcpToolAdapter", () => {
         });
         const tool = makeTool({ handle });
         await assert.rejects(
-            () => tool.execute("t1", {}, ac.signal, undefined, {} as never),
+            () => invokeTool(tool, {}, {} as never, { toolCallId: "t1", signal: ac.signal }),
             /aborted mid-flight/,
         );
     });

@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { SubagentSpawnContext } from "../../src/agents/types.ts";
 import { createAgentContinueTool } from "../../src/tools/agentContinue.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 describe("agentContinue tool", () => {
     const mockEnv = new NodeExecutionEnv({ cwd: "/" });
@@ -24,12 +25,11 @@ describe("agentContinue tool", () => {
             },
         };
         const tool = createAgentContinueTool(ctx);
-        const res = await tool.execute(
-            "tc-parent",
+        const res = await invokeTool(
+            tool,
             { subSessionId: "sub-1", prompt: "follow up please" },
-            undefined,
-            undefined,
             { env: mockEnv },
+            { toolCallId: "tc-parent" },
         );
         assert.deepEqual(captured, {
             parentToolCallId: "tc-parent",
@@ -55,12 +55,11 @@ describe("agentContinue tool", () => {
                 };
             },
         });
-        const res = await tool.execute(
-            "tc",
+        const res = await invokeTool(
+            tool,
             { subSessionId: "sub-x", prompt: "x" },
-            undefined,
-            undefined,
             { env: mockEnv },
+            { toolCallId: "tc" },
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("subagent continue error:"));

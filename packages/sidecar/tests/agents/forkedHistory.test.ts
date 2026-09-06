@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { Entry } from "@earendil-works/pi-agent-core";
 import {
     buildForkedContext,
     estimateTokens,
@@ -15,14 +15,14 @@ import {
 /** Minimal message entries; cast once so the tests read as fixtures, not wire types. */
 function entries(
     msgs: Array<{ role: "user" | "assistant" | "toolResult"; text: string }>,
-): SessionTreeEntry[] {
+): Entry[] {
     return msgs.map((m, i) => ({
         type: "message",
         id: `id-${i}`,
         parentId: null,
         timestamp: "2026-01-01T00:00:00.000Z",
         message: { role: m.role, content: m.text },
-    })) as unknown as SessionTreeEntry[];
+    })) as unknown as Entry[];
 }
 
 describe("resolveContextMode", () => {

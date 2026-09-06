@@ -13,6 +13,7 @@ import { describe, it } from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { TextContent } from "@earendil-works/pi-ai";
 import { createAskUserTool } from "../../src/tools/askUser.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 function textOf(result: { content: Array<{ type?: string; text?: string }> }): string {
     const c = result.content[0];
@@ -26,8 +27,8 @@ describe("askUser tool — execute", () => {
 
     it("first call (no answers) → waiting=true + terminate=true", async () => {
         const tool = createAskUserTool();
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 questions: [
                     {
@@ -41,8 +42,6 @@ describe("askUser tool — execute", () => {
                     },
                 ],
             },
-            undefined,
-            undefined,
             mockContext,
         );
         assert.equal(result.terminate, true);
@@ -54,8 +53,8 @@ describe("askUser tool — execute", () => {
 
     it("second call (answers provided) → waiting=false, no terminate", async () => {
         const tool = createAskUserTool();
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 questions: [
                     {
@@ -70,8 +69,6 @@ describe("askUser tool — execute", () => {
                 ],
                 answers: { "Which color?": "Red" },
             },
-            undefined,
-            undefined,
             mockContext,
         );
         assert.equal(result.terminate, undefined);
@@ -84,8 +81,8 @@ describe("askUser tool — execute", () => {
 
     it("annotations.preview and notes appear in answers output", async () => {
         const tool = createAskUserTool();
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 questions: [
                     {
@@ -100,8 +97,6 @@ describe("askUser tool — execute", () => {
                     "Pick a config": { preview: "host: localhost\nport: 8080", notes: "tested" },
                 },
             },
-            undefined,
-            undefined,
             mockContext,
         );
         const text = textOf(result);
@@ -112,8 +107,8 @@ describe("askUser tool — execute", () => {
 
     it("multiSelect answers as string[] round-trip in details", async () => {
         const tool = createAskUserTool();
-        const result = await tool.execute(
-            "tc-1",
+        const result = await invokeTool(
+            tool,
             {
                 questions: [
                     {
@@ -128,8 +123,6 @@ describe("askUser tool — execute", () => {
                 ],
                 answers: { "Pick tags": ["fast", "cheap"] },
             },
-            undefined,
-            undefined,
             mockContext,
         );
         const details = result.details as { waiting?: boolean; answers?: unknown };
