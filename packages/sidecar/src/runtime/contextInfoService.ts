@@ -5,19 +5,21 @@
  * Denominator excludes `cacheWrite` (first-turn prefix is unavoidable) and
  * `output` (pi compaction uses `cacheRetention: "none"`; summary would dilute the
  * ratio). `getSessionStats()` only exposes merged `uncachedTokens = Σ(input +
- * cacheWrite)`, so we walk `session.getEntries()` ourselves for one-pass
+ * cacheWrite)`, so we walk `session.findEntries()` ourselves for one-pass
  * accumulation.
  */
 
 import {
-    type AgentHarness,
-    type ExecutionToolContext,
+    type AgentLane,
+    type Entry,
     estimateContextTokens,
     type Session,
-    type SessionTreeEntry,
 } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SessionContextInfoResult } from "@taco-ai/protocol";
+import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
+import { buildBranchContext, MAIN_BRANCH } from "./sessionBranch.ts";
 
 const log = createLogger("contextInfoService");
 
@@ -37,7 +39,7 @@ interface EntryUsage {
  * field must be present (an entry with a partial usage record is skipped).
  * Returns null when the entry has no valid usage.
  */
-function extractEntryUsage(entry: SessionTreeEntry): EntryUsage | null {
+function extractEntryUsage(entry: Entry): EntryUsage | null {
     const usage =
         entry.type === "message"
             ? entry.message.role === "assistant"
@@ -62,32 +64,35 @@ function extractEntryUsage(entry: SessionTreeEntry): EntryUsage | null {
 /** Shared context-usage snapshot consumed by both controller and service. */
 export interface ContextUsage {
     usedTokens: number;
-    model: ReturnType<AgentHarness<ExecutionToolContext>["getModel"]>;
+    model: { contextWindow?: number; id?: string; provider?: string } | Model<Api> | undefined;
 }
 
 export interface ContextInfoServiceOptions {
     session: Session;
-    harness: AgentHarness<ExecutionToolContext>;
+    lane: AgentLane;
 }
 
 export class ContextInfoService {
     private readonly session: Session;
-    private readonly harness: AgentHarness<ExecutionToolContext>;
+    private readonly lane: AgentLane;
 
     constructor(opts: ContextInfoServiceOptions) {
         this.session = opts.session;
-        this.harness = opts.harness;
+        this.lane = opts.lane;
     }
 
     /**
-     * Current-session context-usage snapshot. Calls `session.buildContext()`
-     * to get messages, then `estimateContextTokens` (anchors on the most
-     * recent assistant usage where possible, falls back to chars/4).
+     * Current-session context-usage snapshot: the branch's context messages
+     * run through `estimateContextTokens` (which anchors on the most recent
+     * assistant usage where available and falls back to chars/4).
+     *
+     * The model is read off the lane — in pi 0.85 model selection is
+     * per-lane configuration, not harness-wide.
      */
     async getContextUsage(): Promise<ContextUsage> {
-        const ctx = await this.session.buildContext();
-        const usedTokens = estimateContextTokens(ctx.messages).tokens;
-        const model = this.harness.getModel();
+        const messages = await buildBranchContext(this.session);
+        const usedTokens = estimateContextTokens(messages).tokens;
+        const model = await this.lane.getModel(harnessContext);
         return { usedTokens, model };
     }
 
@@ -117,7 +122,7 @@ export class ContextInfoService {
     }
 
     /**
-     * Read cache-hit metrics by walking `session.getEntries()`. Returns empty
+     * Read cache-hit metrics by walking `session.findEntries()`. Returns empty
      * object on a fresh session.
      * cacheRead = Σ usage.cacheRead; cacheHitRatio = Σ cacheRead / Σ (input + cacheRead).
      */
@@ -126,7 +131,9 @@ export class ContextInfoService {
         cacheHitRatio?: number;
     }> {
         try {
-            const entries = await this.session.getEntries();
+            // Whole-log scan, not a branch walk: the cache aggregate is
+            // authoritative over the full tree, including abandoned branches.
+            const entries = await this.session.findEntries(undefined, harnessContext);
             let cacheRead = 0;
             let input = 0;
             for (const entry of entries) {
@@ -149,16 +156,24 @@ export class ContextInfoService {
         }
     }
 
-    /** Walks the current branch from the leaf backward, returning the most recent compaction entry's timestamp. */
+    /**
+     * Timestamp of the most recent compaction entry on the current branch.
+     *
+     * Pushes the type filter and the "newest only" limit into the branch scan
+     * rather than walking every entry — `BranchScan` already traverses the
+     * parent chain newest-first, so pi stops at the first match.
+     */
     private async lastCompactionTimestamp(): Promise<string | undefined> {
         try {
-            const entries = await this.session.getBranch();
-            for (let i = entries.length - 1; i >= 0; i--) {
-                const e = entries[i] as SessionTreeEntry | undefined;
-                if (e?.type === "compaction") return e.timestamp;
-            }
+            const branch = await this.session.branch(MAIN_BRANCH, harnessContext);
+            if (branch === undefined) return undefined;
+            const entry = await branch.findEntry(
+                { type: "compaction", order: "newestFirst" },
+                harnessContext,
+            );
+            if (entry?.type === "compaction") return String(entry.timestamp);
         } catch (e) {
-            log.error("lastCompactionTimestamp: getBranch failed:", e);
+            log.error("lastCompactionTimestamp: branch scan failed:", e);
         }
         return undefined;
     }

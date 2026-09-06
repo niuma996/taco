@@ -49,8 +49,8 @@
     "test:memory": "tsx --test tests/memory/store.test.ts tests/server/handlers/memory.test.ts tests/memory/extractor.test.ts tests/runtime/attachedSession.rememberCoord.test.ts tests/tools/memory.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.83.0",
-    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@taco-ai/protocol": "workspace:*",
     "@taco-ai/shared": "workspace:*",

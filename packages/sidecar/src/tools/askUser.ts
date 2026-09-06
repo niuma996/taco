@@ -122,8 +122,7 @@ export function createAskUserTool(): AskUserTool {
         async execute(
             _toolCallId: string,
             params: AskUserToolInput,
-            _signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             _context: ExecutionToolContext,
         ): Promise<{ content: TextContent[]; details: AskUserToolDetails; terminate?: boolean }> {
             // User has answered: return answers directly without re-prompting.

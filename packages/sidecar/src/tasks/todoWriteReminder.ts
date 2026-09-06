@@ -9,11 +9,13 @@
  * calendar time), since that's what both the model and the tag system see.
  */
 
-import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+
 import { createUserMessage, tagWrap } from "../tags/builder.ts";
 import { findActiveListId } from "./activeList.ts";
 import type { TaskStore } from "./taskTypes.ts";
 import { isUnfinishedStatus } from "./taskTypes.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+
 
 /**
  * Number of assistant turns without a TodoWrite call before we remind.

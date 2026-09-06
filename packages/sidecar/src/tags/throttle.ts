@@ -6,7 +6,8 @@
  */
 
 import { createHash } from "node:crypto";
-import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+
 
 export interface ThrottleOptions {
     /**
@@ -25,8 +26,8 @@ export function throttleByContent(
     let lastContentHash: string | null = null;
     let consecutiveSkips = 0;
 
-    function hashMessages(messages: ContextResult["messages"]): string {
-        const text = messages
+    function hashMessages(messages: ContextResult["messages"] | undefined): string {
+        const text = (messages ?? [])
             .map((m) => {
                 const content = (m as { content?: unknown }).content;
                 if (typeof content === "string") return content;
@@ -40,12 +41,12 @@ export function throttleByContent(
 
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
         const result = await hook(event);
-        if (!result || result.messages.length === 0) {
+        if (!result || (result.messages ?? []).length === 0) {
             // Inner hook chose no-op — don't update state, just pass through.
             return undefined;
         }
 
-        const hash = hashMessages(result.messages);
+        const hash = hashMessages((result.messages ?? []));
         if (hash === lastContentHash && consecutiveSkips < maxSkips) {
             consecutiveSkips++;
             return undefined;

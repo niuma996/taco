@@ -7,7 +7,7 @@
 
 import { stat } from "node:fs/promises";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
-import { createSessionId } from "@earendil-works/pi-agent-core";
+import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type {
     AssistantMessage,
     AttachParams,
@@ -94,7 +94,7 @@ export function registerSessionLifecycleHandlers(): void {
                     "no model configured — select a provider and model in Settings",
                 );
             }
-            const sessionId = params.sessionId ?? createSessionId();
+            const sessionId = params.sessionId ?? uuidv7();
             const imRouting = params.imRouting ?? workspace.imRouting;
             const session = await workspace.repo.create({
                 id: sessionId,
@@ -118,9 +118,9 @@ export function registerSessionLifecycleHandlers(): void {
                         .trim();
                     if (title) {
                         try {
-                            await attached.session.appendSessionName(title);
+                            await attached.session.setName(title);
                         } catch (e) {
-                            log.error("appendSessionName failed:", e);
+                            log.error("setName failed:", e);
                         }
                     }
                     assistantMessage = await attached.prompt(
@@ -219,7 +219,7 @@ async function buildSessionEntry(
         id: m.id,
         cwd: m.cwd,
         filePath: m.path,
-        createdAt: m.createdAt,
+        createdAt: String(m.createdAt),
         updatedAt,
         kind: (md.kind as "main" | "subagent" | undefined) ?? "main",
         agentType: typeof md.agentType === "string" ? md.agentType : undefined,
@@ -228,8 +228,8 @@ async function buildSessionEntry(
         depth: typeof md.depth === "number" ? md.depth : undefined,
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
-        name: await workspace.getSessionName(m.id).catch((err) => {
-            log.error("getSessionName failed in session.list", m.id, err);
+        name: await workspace.getName(m.id).catch((err) => {
+            log.error("getName failed in session.list", m.id, err);
             return undefined;
         }),
     };

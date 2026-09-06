@@ -10,11 +10,13 @@
  */
 
 import { createHash } from "node:crypto";
-import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+
 import { createLogger } from "../lib/logger.ts";
 import type { PinOnceConsumer } from "../runtime/pinOnceConsumer.ts";
 import { createUserMessage, tagWrap } from "../tags/builder.ts";
 import type { MemoryStore } from "./types.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+
 
 const log = createLogger("memory:hook");
 

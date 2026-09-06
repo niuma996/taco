@@ -55,8 +55,7 @@ export function createTaskUpdateTool(
         async execute(
             _toolCallId: string,
             params: TaskUpdateInput,
-            _signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             context: ExecutionToolContext,
         ): Promise<{ content: TextContent[]; details: { taskId: string } }> {
             const listId = store.currentListId ?? findActiveListId(store);

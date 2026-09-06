@@ -29,7 +29,7 @@
  * variant in `buildSystemPrompt`, and does not filter free text.
  */
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { Entry } from "@earendil-works/pi-agent-core";
 import type { SubagentContextMode } from "./types.ts";
 
 /**
@@ -104,7 +104,7 @@ interface ForkedMessage {
  * so a fork sees the post-compaction history even if the compressed prefix is
  * summarized away.
  */
-function extractMessageText(entry: SessionTreeEntry): ForkedMessage | undefined {
+function extractMessageText(entry: Entry): ForkedMessage | undefined {
     if (entry.type !== "message") return undefined;
     const msg = (entry as { message?: { role?: string; content?: unknown } }).message;
     if (!msg) return undefined;
@@ -154,7 +154,7 @@ function truncateByTokens(text: string, maxTokens: number): string {
  * the budget allows, marking any gap between head and tail as omitted.
  */
 export function buildForkedContext(
-    entries: SessionTreeEntry[],
+    entries: Entry[],
     opts: { maxTokens?: number } = {},
 ): string | undefined {
     const messages = entries

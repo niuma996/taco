@@ -50,10 +50,14 @@ export function createGlobTool(): GlobTool {
         async execute(
             _toolCallId: string,
             params: GlobToolInput,
-            signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             { env }: ExecutionToolContext,
+            _invocation: unknown,
+            piContext: { abortSignal?: AbortSignal },
         ): Promise<{ content: TextContent[]; details: { count: number; truncated: boolean } }> {
+            // pi 0.85 carries cancellation on the Context rather than a
+            // dedicated parameter.
+            const signal = piContext.abortSignal;
             const cwdResult = await env.absolutePath(params.path ?? ".", signal);
             const root = getOrThrow(cwdResult);
 

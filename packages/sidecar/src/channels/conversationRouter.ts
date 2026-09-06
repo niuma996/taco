@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createSessionId } from "@earendil-works/pi-agent-core";
+import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type { ImConversationEntry } from "@taco-ai/protocol";
 import { makeImCwd, parseImCwd } from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
@@ -251,7 +251,7 @@ export class ConversationRouter extends EventEmitter {
 
         // Use the caller-supplied id when given so the conversation uses a stable UUID
         // rather than leaking a platform message id into the session identity.
-        const sid = sessionId ?? createSessionId();
+        const sid = sessionId ?? uuidv7();
         await hook.dispatchRpc?.({
             id: randomUUID(),
             method: "session.create",

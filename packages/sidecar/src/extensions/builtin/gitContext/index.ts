@@ -7,12 +7,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+
 import { scrubbedProcessEnv } from "../../../runtime/providerKeyStore.ts";
 import { tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
 import type { ContextHook, WorkspaceActivator } from "../../types.ts";
+import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
+
 
 const execFileAsync = promisify(execFile);
 

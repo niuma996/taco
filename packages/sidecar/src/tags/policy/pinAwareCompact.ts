@@ -6,15 +6,16 @@
 
 import {
     type AgentMessage,
+    compact,
     type CompactionPreparation,
     type CompactResult,
-    compact,
     DEFAULT_COMPACTION_SETTINGS,
+    type Entry,
+    type JsonValue,
     prepareCompaction,
-    type SessionBeforeCompactResult,
-    type SessionTreeEntry,
 } from "@earendil-works/pi-agent-core";
 import type { Model, Models } from "@earendil-works/pi-ai";
+import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { extractAndStripPinned } from "../extractors.ts";
 import { EMPTY_FACTS, extractFacts, type FactSet, mergeFacts } from "../factExtractor.ts";
@@ -146,9 +147,19 @@ function applyPinExtraction(prep: CompactionPreparation): PinExtraction {
 
 export interface PinAwareCompactHookOptions {
     readonly models: Models;
-    /** Lazy model lookup — mirrors `buildStripThinkingContextHook`'s pattern. */
-    // biome-ignore lint/suspicious/noExplicitAny: pi-agent-core AgentHarness.getModel() returns Model<any>.
-    readonly getModel: () => Model<any>;
+    /**
+     * Lazy model lookup. Async because pi 0.85 reads the model off the lane;
+     * resolves to `undefined` when the lane has no model configured, in which
+     * case the hook declines and pi's default compaction runs.
+     */
+    // biome-ignore lint/suspicious/noExplicitAny: pi's Model is generic over its Api.
+    readonly getModel: () => Promise<Model<any> | undefined>;
+    /**
+     * Branch entries for cut-point recomputation. pi 0.85's
+     * `before_compaction` event carries only the preparation, so the caller
+     * supplies the transcript.
+     */
+    readonly getBranchEntries: () => Promise<readonly Entry[]>;
     /**
      * Live read of the current compaction threshold (same source as
      * AttachedSession.effectiveCompaction). Used to recompute
@@ -165,7 +176,7 @@ export interface PinAwareCompactHookOptions {
  * failure so caller falls back to pi's preparation.
  */
 function recomputePreparation(
-    branchEntries: readonly SessionTreeEntry[],
+    branchEntries: readonly Entry[],
     contextWindow: number,
     threshold: number,
 ): CompactionPreparation | null {
@@ -181,27 +192,34 @@ function recomputePreparation(
     return result.value;
 }
 
-export function buildPinAwareCompactHook(
-    opts: PinAwareCompactHookOptions,
-): (event: {
+export function buildPinAwareCompactHook(opts: PinAwareCompactHookOptions): (event: {
     preparation: CompactionPreparation;
-    branchEntries?: SessionTreeEntry[];
-    signal: AbortSignal;
-}) => Promise<SessionBeforeCompactResult | undefined> {
+    customInstructions?: string;
+}) => Promise<{ compaction: CompactResult } | undefined> {
     return async (event) => {
         try {
-            const { branchEntries, signal } = event;
-            const model = opts.getModel();
+            const model = await opts.getModel();
+            if (model === undefined) {
+                // No model on the lane — decline and let pi's default path run.
+                return undefined;
+            }
 
             // 0. Recompute the cut-point: pi's preparation uses a hard-coded
             //    keepRecentTokens=20000, which barely compresses at low thresholds.
             //    Re-derive keepRecentTokens from the threshold and override.
-            //    Falls back to the original preparation if branchEntries is
-            //    missing (shouldn't happen) or recompute fails.
-            const contextWindow = model?.contextWindow ?? 0;
-            const recomputed = branchEntries
-                ? recomputePreparation(branchEntries, contextWindow, opts.getThreshold())
-                : null;
+            //    Falls back to pi's preparation if recompute fails.
+            const contextWindow = model.contextWindow ?? 0;
+            let recomputed: CompactionPreparation | null = null;
+            try {
+                const branchEntries = await opts.getBranchEntries();
+                recomputed = recomputePreparation(
+                    branchEntries,
+                    contextWindow,
+                    opts.getThreshold(),
+                );
+            } catch (e) {
+                log.error("could not recompute cut-point, using pi's preparation:", e);
+            }
             const preparation = recomputed ?? event.preparation;
 
             // 1+2. Extract pin content from both message pools; strip from text.
@@ -212,16 +230,18 @@ export function buildPinAwareCompactHook(
             const prepForCompact = directive ? withPrefaceDirective(stripped, directive) : stripped;
 
             // 4. Reuse pi's default compaction (seven-section summary + fileOps).
-            //    customInstructions / thinkingLevel left undefined — pin directive is
-            //    already injected via withPrefaceDirective above, so the default
-            //    summary path runs unchanged.
+            //    thinkingLevel left undefined — the pin directive is already
+            //    injected via withPrefaceDirective above, so the default summary
+            //    path runs unchanged. Cancellation rides on the context.
             const compactRes = await compact(
                 prepForCompact,
                 opts.models,
                 model,
+                event.customInstructions,
                 undefined,
-                signal,
                 undefined,
+                undefined,
+                harnessContext,
             );
             if (!compactRes.ok) {
                 log.error("pi compact() failed:", compactRes.error);
@@ -236,7 +256,7 @@ export function buildPinAwareCompactHook(
             // 4e. Record consumed pinOnce instanceIds so context hooks can skip re-injection.
             const textMessages = collectTextMessages(preparation);
             const extended = extractExtendedFileOps(textMessages);
-            const freshFacts = await extractFacts(textMessages, opts.models, model, { signal });
+            const freshFacts = await extractFacts(textMessages, opts.models, model, {});
             const priorFacts = factsFromDetails(base.details);
             const mergedFacts = mergeFacts(priorFacts, freshFacts);
             const tail = buildPinnedTail(pinned);
@@ -264,9 +284,16 @@ export function buildPinAwareCompactHook(
 
             const compaction: CompactResult = {
                 summary: base.summary + tail,
-                firstKeptEntryId: base.firstKeptEntryId,
                 tokensBefore: base.tokensBefore,
-                details,
+                // `details` is structurally JSON but declared with readonly
+                // arrays, which `JsonValue` does not accept. pi only persists
+                // it, so the cast is safe.
+                details: details as unknown as JsonValue,
+                // Carry pi's retained tail through unchanged. These are the
+                // recent messages kept verbatim after the cut point; dropping
+                // them would silently delete the tail of the conversation.
+                retainedTail: base.retainedTail,
+                ...(base.usage === undefined ? {} : { usage: base.usage }),
             };
             return { compaction };
         } catch (err) {

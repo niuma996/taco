@@ -142,10 +142,14 @@ export function createShellTool(opts?: {
         async execute(
             toolCallId: string,
             params: ShellToolInput,
-            signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             { env }: ExecutionToolContext,
+            _invocation: unknown,
+            piContext: { abortSignal?: AbortSignal },
         ): Promise<ShellToolResult> {
+            // pi 0.85 carries cancellation on the Context rather than a
+            // dedicated parameter.
+            const signal = piContext.abortSignal;
             if (opts?.permissionBroker && opts.sessionId) {
                 const decision = await opts.permissionBroker.evaluateAndRequest({
                     sessionId: opts.sessionId,

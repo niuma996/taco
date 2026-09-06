@@ -3,11 +3,10 @@
 import { performance } from "node:perf_hooks";
 import {
     type AgentHarness,
-    AgentHarnessError,
-    type AgentHarnessEvent,
+    type AgentLane,
     DEFAULT_COMPACTION_SETTINGS,
+    type Entry,
     type ExecutionToolContext,
-    type SessionTreeEntry,
     shouldCompact,
 } from "@earendil-works/pi-agent-core";
 import type { CompactionFailureReason, SessionCompactResult } from "@taco-ai/protocol";
@@ -18,8 +17,10 @@ import {
     validateCompactionConfig,
 } from "../config/config.ts";
 import { waitForEvent } from "../lib/async.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { ContextUsage } from "./contextInfoService.ts";
+import { isBusyError, toHarnessError } from "./harnessErrors.ts";
 import type { PinOnceConsumer } from "./pinOnceConsumer.ts";
 
 const log = createLogger("compactionController");
@@ -63,24 +64,27 @@ export type CompactionLifecycleSignal =
     | { phase: "end"; reason?: CompactionFailureReason };
 
 /**
- * Map a `harness.compact()` throw onto the wire-visible failure reason.
+ * Map a compaction failure onto the wire-visible failure reason.
  *
- * pi signals both "not idle" and "a hook cancelled" through `AgentHarnessError`,
- * distinguished only by `code` — `busy` and `compaction` respectively. Anything
- * unrecognised is reported as `harness_error` rather than guessed at.
+ * pi 0.85 returns these as tagged errors rather than throwing a coded
+ * `AgentHarnessError`, so classification reads `_tag` instead of `code`:
  *
- * pi 0.83 throws English message strings only; bump these matchers if pi's text
- * changes.
+ *   - `LaneBusy`         → busy (an operation is already running)
+ *   - `NothingToCompact` → nothing (below the cut point)
+ *   - a declining hook   → cancelled (no dedicated tag; see below)
+ *
+ * A `before_compaction` hook returning `{decline: true}` is not an error in
+ * 0.85 — `compact()` succeeds with `declined` status, handled at the call site.
+ * The `cancelled` reason survives here for pre-0.85 sessions and test doubles
+ * that still surface a cancelling hook as a rejection.
  */
 function classifyCompactFailure(e: unknown): CompactionFailureReason {
-    if (e instanceof AgentHarnessError) {
-        if (e.code === "busy") return "busy";
-        // pi throws code "compaction" for a cancelling hook, "nothing to compact",
-        // and possibly other compaction-phase skips. The message is the only
-        // discriminator, so we sniff for the two cases worth surfacing distinctly.
-        if (e.code === "compaction" && /cancel/i.test(e.message)) return "cancelled";
-        if (e.code === "compaction" && /nothing/i.test(e.message)) return "nothing";
-    }
+    if (isBusyError(e)) return "busy";
+    const tag = (e as { _tag?: unknown } | null)?._tag;
+    if (tag === "NothingToCompact") return "nothing";
+    const message = e instanceof Error ? e.message : String(e);
+    if (/nothing to compact/i.test(message)) return "nothing";
+    if (/cancel/i.test(message)) return "cancelled";
     return "harness_error";
 }
 
@@ -94,7 +98,10 @@ export const COMPACTION_START_EVENT = "taco_compaction_start";
 export const COMPACTION_END_EVENT = "taco_compaction_end";
 
 export interface CompactionControllerOptions {
+    /** Owns the event bus the controller subscribes to. */
     harness: AgentHarness<ExecutionToolContext>;
+    /** Owns `compact()` and the idle signal. */
+    lane: AgentLane;
     /** Injected compaction policy (undefined falls back to enabled=true/threshold=0.7). */
     compaction?: ResolvedCompaction;
     /** Shared context-usage read path — supplied by ContextInfoService to avoid duplicated buildContext. */
@@ -102,7 +109,13 @@ export interface CompactionControllerOptions {
     /** PinOnceConsumer — updates its consumed set when a compaction completes. */
     pinOnceConsumer?: PinOnceConsumer;
     /** Get current session's branch entries — used to update PinOnceConsumer. */
-    getSessionEntries: () => Promise<SessionTreeEntry[]>;
+    getSessionEntries: () => Promise<Entry[]>;
+    /**
+     * Read one entry by id. Used to recover the committed compaction entry's
+     * `tokensBefore` / `fromHook`, which pi 0.85's `compaction_end` event no
+     * longer carries inline.
+     */
+    getEntry: (id: string) => Promise<Entry | undefined>;
     /**
      * Injected global-config reader — primarily for tests; production uses the default
      * `readGlobalConfig`. Lets `effectiveCompaction()` be tested without mocking `node:fs`.
@@ -141,10 +154,12 @@ const EFFECTIVE_TTL_MS = 1_000;
 
 export class CompactionController {
     private readonly harness: AgentHarness<ExecutionToolContext>;
+    private readonly lane: AgentLane;
     private readonly compaction: ResolvedCompaction | undefined;
     private readonly getContextUsage: () => Promise<ContextUsage>;
     private readonly pinOnceConsumer?: PinOnceConsumer;
-    private readonly getSessionEntries: () => Promise<SessionTreeEntry[]>;
+    private readonly getSessionEntries: () => Promise<Entry[]>;
+    private readonly getEntry: (id: string) => Promise<Entry | undefined>;
     private readonly readGlobalConfig: ReadGlobalConfig;
     private readonly effectiveTtlMs: number;
     private readonly now: Now;
@@ -165,10 +180,12 @@ export class CompactionController {
 
     constructor(opts: CompactionControllerOptions) {
         this.harness = opts.harness;
+        this.lane = opts.lane;
         this.compaction = opts.compaction;
         this.getContextUsage = opts.getContextUsage;
         this.pinOnceConsumer = opts.pinOnceConsumer;
         this.getSessionEntries = opts.getSessionEntries;
+        this.getEntry = opts.getEntry;
         this.readGlobalConfig = opts.readGlobalConfig ?? readGlobalConfig;
         this.effectiveTtlMs = opts.effectiveTtlMs ?? EFFECTIVE_TTL_MS;
         this.now = opts.now ?? (() => performance.now());
@@ -193,7 +210,18 @@ export class CompactionController {
         }
         let reason: CompactionFailureReason | undefined;
         try {
-            await this.harness.compact(customInstructions);
+            const result = await this.lane.compact(
+                customInstructions === undefined ? undefined : { customInstructions },
+                harnessContext,
+            );
+            if (!result.ok) throw toHarnessError("compact", result.error);
+            const status = result.value.compaction.status;
+            if (status !== "completed") {
+                // `declined` means a `before_compaction` hook refused; `aborted`
+                // and `failed` speak for themselves. None of them throw in 0.85,
+                // so the reason has to be derived from the operation record.
+                reason = status === "declined" ? "cancelled" : "harness_error";
+            }
         } catch (e) {
             // Classify before rethrowing so the `end` signal can carry a
             // machine-readable reason; callers still see the original error.
@@ -261,40 +289,63 @@ export class CompactionController {
     }
 
     /**
-     * Invoked from AttachedSession's harness event callback. Handles:
-     *  - `settled` (nextTurnCount===0): queue an auto-compaction check
-     *  - `session_compact`: update PinOnceConsumer
+     * Subscribe to the harness events this controller reacts to. Returns one
+     * disposer per subscription for the caller to release on detach.
+     *
+     * Two triggers:
+     *  - `run_end` → schedule an auto-compaction check
+     *  - `compaction_end` → refresh PinOnceConsumer
+     *
+     * pi 0.85 removed the `settled` event that previously drove auto-compaction
+     * (it carried `nextTurnCount`, letting us skip the check while steer or
+     * follow-up turns were queued). The replacement is `run_end` plus
+     * `lane.runWhenIdle`, which defers the callback until the lane has no
+     * operation in flight — a stronger guarantee than the old queue-length
+     * check, since it also covers compaction and navigation operations.
      */
-    onHarnessEvent(event: AgentHarnessEvent): void {
-        // Auto-compaction trigger point: harness has set phase=idle and cleared
-        // pending writes after `agent_end` before emitting `settled`. Only check
-        // when nextTurnCount===0 — steer / follow-up queued turns must not race
-        // the compaction decision.
-        if (event.type === "settled" && event.nextTurnCount === 0) {
-            this.scheduleCompactionCheck();
-            return;
-        }
-        if (event.type === "session_compact") {
-            // Update PinOnceConsumer consumed set so context hooks skip re-injection.
-            if (this.pinOnceConsumer) {
+    subscribe(): Array<() => void> {
+        const disposers: Array<() => void> = [];
+
+        disposers.push(
+            this.harness.events.on("run_end", () => {
+                this.scheduleCompactionCheck();
+            }),
+        );
+
+        disposers.push(
+            this.harness.events.on("compaction_end", () => {
+                // Update PinOnceConsumer consumed set so context hooks skip re-injection.
+                if (!this.pinOnceConsumer) return;
                 const consumer = this.pinOnceConsumer;
-                const getEntries = this.getSessionEntries;
-                getEntries()
+                this.getSessionEntries()
                     .then((entries) => {
                         consumer.mergeConsumed(entries);
                     })
                     .catch(() => undefined);
-            }
-        }
+            }),
+        );
+
+        return disposers;
     }
 
     /**
-     * Serialized auto-compaction check. Multiple `settled` events queue in
-     * order; one `harness.compact()` throw does not interrupt later checks.
+     * Serialized auto-compaction check. Multiple `run_end` events queue in
+     * order; one failed compaction does not interrupt later checks.
      * Internal fire-and-forget — does not block `prompt()`.
+     *
+     * The check runs via `lane.runWhenIdle` so it cannot race a queued steer /
+     * follow-up turn: pi holds the callback until the lane is genuinely idle,
+     * which is also what makes `compact()` safe to call from here.
      */
     private scheduleCompactionCheck(): void {
-        const next = this.compactionCheck.then(() => this.maybeCompact());
+        const next = this.compactionCheck.then(() =>
+            this.lane
+                .runWhenIdle(() => this.maybeCompact(), harnessContext)
+                .catch((e: unknown) => {
+                    // A closed lane (session detached mid-turn) is expected here.
+                    log.debug("runWhenIdle for auto-compaction did not run:", e);
+                }),
+        );
         this.compactionCheck = next.catch(() => undefined);
     }
 
@@ -360,18 +411,20 @@ export class CompactionController {
         signal?: AbortSignal,
     ): Promise<SessionCompactResult> {
         const COMPACT_TIMEOUT_MS = 30_000;
-        let lastCompactEvent: Extract<AgentHarnessEvent, { type: "session_compact" }> | undefined;
+        let lastCompaction: { tokensBefore: number; fromHook: boolean } | undefined;
         const wait = waitForEvent({
             timeoutMs: COMPACT_TIMEOUT_MS,
-            subscribe: (onEvent) => {
-                const unsub = this.harness.subscribe((event) => {
-                    if (event.type === "session_compact") {
-                        lastCompactEvent = event;
+            subscribe: (onEvent) =>
+                this.harness.events.on("compaction_end", (event) => {
+                    if (event.status !== "completed") return;
+                    // `compaction_end` reports the entry id, not its contents.
+                    // Read the entry for tokensBefore / fromHook, which the
+                    // desktop shows in the compaction toast.
+                    void this.readCompactionEntry(event.entryId).then((entry) => {
+                        lastCompaction = entry;
                         onEvent();
-                    }
-                });
-                return unsub;
-            },
+                    });
+                }),
         });
         const onAbort = (): void => wait.cancel();
         if (signal) {
@@ -391,11 +444,11 @@ export class CompactionController {
         });
         const received = await wait.promise;
         signal?.removeEventListener("abort", onAbort);
-        // `received` only reports how the wait ended. A `session_compact` that
-        // landed in the same tick as a cancel still populated `lastCompactEvent`,
+        // `received` only reports how the wait ended. A `compaction_end` that
+        // landed in the same tick as a cancel still populated `lastCompaction`,
         // and the compaction it describes is committed to the session — report
         // it rather than throwing away a compaction that actually happened.
-        if (!received && !lastCompactEvent) {
+        if (!received && !lastCompaction) {
             const reason: NonNullable<SessionCompactResult["reason"]> = harnessError
                 ? "harness_error"
                 : signal?.aborted
@@ -410,8 +463,27 @@ export class CompactionController {
         }
         return {
             ok: true,
-            tokensBefore: lastCompactEvent?.compactionEntry.tokensBefore ?? 0,
-            fromHook: lastCompactEvent?.compactionEntry.fromHook ?? false,
+            tokensBefore: lastCompaction?.tokensBefore ?? 0,
+            fromHook: lastCompaction?.fromHook ?? false,
         };
+    }
+
+    /**
+     * Read a committed compaction entry's reportable fields.
+     *
+     * Never throws — a missing or mistyped entry degrades the toast's numbers,
+     * which must not turn a successful compaction into a reported failure.
+     */
+    private async readCompactionEntry(
+        entryId: string,
+    ): Promise<{ tokensBefore: number; fromHook: boolean } | undefined> {
+        try {
+            const entry = await this.getEntry(entryId);
+            if (entry?.type !== "compaction") return undefined;
+            return { tokensBefore: entry.tokensBefore, fromHook: entry.fromHook };
+        } catch (e) {
+            log.debug("could not read compaction entry:", e);
+            return undefined;
+        }
     }
 }

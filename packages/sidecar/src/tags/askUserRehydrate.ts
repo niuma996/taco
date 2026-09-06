@@ -84,7 +84,7 @@ export function parseAskUserContext(text: string): ParsedAskUserContext | null {
 }
 
 /** Minimal structure for reading fields — not tightly coupled to AgentMessage
- *  so it accepts SessionTreeEntry too. */
+ *  so it accepts Entry too. */
 interface RehydrateMsgLike {
     role?: string;
     content?: string | unknown[];
@@ -93,7 +93,7 @@ interface RehydrateMsgLike {
     details?: unknown;
 }
 
-/** Entry shape — no index signature to avoid colliding with SessionTreeEntry / AgentMessage. */
+/** Entry shape — no index signature to avoid colliding with Entry / AgentMessage. */
 export interface AskUserRehydrateEntry {
     type: string;
     message?: RehydrateMsgLike;

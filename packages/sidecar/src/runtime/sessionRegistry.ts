@@ -18,7 +18,7 @@ import type {
     JsonlSessionMetadata,
     JsonlSessionRepo,
     PromptTemplate,
-    SessionTreeEntry,
+    Entry,
     ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -380,7 +380,7 @@ export class SessionRegistry extends EventEmitter {
     async renameSession(sessionId: SessionId, name: string): Promise<void> {
         const meta = await this.openSession(sessionId);
         const session = await this.repo.open(meta);
-        await session.appendSessionName(name);
+        await session.setName(name);
         this._nameCache.set(sessionId, name);
     }
 
@@ -398,11 +398,11 @@ export class SessionRegistry extends EventEmitter {
     /** Get the full chat tree history (from session leaf up to root). */
     async getHistory(
         sessionId: SessionId,
-    ): Promise<{ leafEntryId: string | null; entries: SessionTreeEntry[] }> {
+    ): Promise<{ leafEntryId: string | null; entries: Entry[] }> {
         const meta = await this.openSession(sessionId);
         const session = await this.repo.open(meta);
         const leafId = await session.getLeafId();
-        const entries = await session.getEntries();
+        const entries = await session.findEntries();
         return { leafEntryId: leafId, entries };
     }
 
@@ -662,10 +662,10 @@ async function readSessionNameFromDisk(path: string): Promise<string | undefined
             // Substring test before JSON.parse: the overwhelming majority of
             // lines are messages, and parsing them is exactly the cost this
             // function exists to avoid.
-            if (!line.includes('"session_info"')) continue;
+            if (!line.includes('"name"') || !line.includes('"fact":"name"')) continue;
             try {
-                const entry = JSON.parse(line) as { type?: string; name?: unknown };
-                if (entry.type !== "session_info") continue;
+                const entry = JSON.parse(line) as { kind?: string; fact?: string; name?: unknown };
+                if (entry.kind !== "fact" || entry.fact !== "name") continue;
                 if (typeof entry.name === "string") {
                     const trimmed = entry.name.trim();
                     name = trimmed || undefined;

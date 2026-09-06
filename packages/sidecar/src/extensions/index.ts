@@ -18,7 +18,9 @@ export type {
 } from "./registry.ts";
 export { EXTERNAL_SOURCE, ExtensionRegistry } from "./registry.ts";
 export type {
+    ContextEvent,
     ContextHook,
+    ContextResult,
     ExtensionApi,
     ExtensionApiVersion,
     ExtensionLogger,
@@ -26,7 +28,11 @@ export type {
     ExtensionModule,
     ExtensionPermission,
     ExtensionSource,
+    ToolCallEvent,
     ToolCallHook,
+    ToolCallResult,
+    ToolResultEvent,
     ToolResultHook,
+    ToolResultPatch,
     WorkspaceActivator,
 } from "./types.ts";

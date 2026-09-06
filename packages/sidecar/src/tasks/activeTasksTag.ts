@@ -1,9 +1,11 @@
-import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
-import type { PlanModeState } from "../plan/planModeState.ts";
+
 import { createUserMessage, tagWrap } from "../tags/builder.ts";
+import type { PlanModeState } from "../tools/planModeState.ts";
 import { findActiveListId } from "./activeList.ts";
 import type { TaskStore } from "./taskTypes.ts";
 import { isUnfinishedStatus } from "./taskTypes.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+
 
 export interface ActiveTasksState {
     store: TaskStore;

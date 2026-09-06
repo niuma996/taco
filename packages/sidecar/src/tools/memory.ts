@@ -113,8 +113,7 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
         async execute(
             _toolCallId: string,
             params: MemoryToolInput,
-            _signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             ctx: TacoToolContext,
         ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
             const { workspace, call } = ctx;

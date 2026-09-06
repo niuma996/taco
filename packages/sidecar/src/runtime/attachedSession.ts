@@ -9,10 +9,12 @@
 import { EventEmitter } from "node:events";
 import {
     AgentHarness,
-    type AgentHarnessEvent,
     type AgentHarnessResources,
     type AgentHarnessStreamOptions,
+    type AgentLane,
     type AgentMessage,
+    type HarnessEvent,
+    laneConfig,
     type PromptTemplate,
     type Session,
     type ThinkingLevel,
@@ -35,6 +37,7 @@ import type {
     ToolCallHook,
     ToolResultHookBuckets,
 } from "../extensions/index.ts";
+import { contextFor, harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { MemoryExtractorImpl, type MemoryStore, sliceForExtraction } from "../memory/index.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
@@ -54,13 +57,52 @@ import { ContextInfoService } from "./contextInfoService.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
 import { PinOnceConsumer } from "./pinOnceConsumer.ts";
+import { toHarnessError } from "./harnessErrors.ts";
 import { sidecarVersion } from "./runtimeResources.ts";
+import { buildBranchContext, findBranchEntries, MAIN_BRANCH } from "./sessionBranch.ts";
 import {
     DefaultSessionToolController,
     type SessionToolController,
 } from "./sessionToolController.ts";
 
 const log = createLogger("attachedSession");
+
+/**
+ * Harness event types republished onto the session's "event" stream.
+ *
+ * pi 0.85 replaced the catch-all `harness.subscribe(cb)` with a typed
+ * per-event bus, so the set of forwarded events is now explicit. These are the
+ * types the desktop renders: streaming assistant output, tool-call lifecycle,
+ * turn/run boundaries, queue depth, retry status and usage.
+ *
+ * Deliberately omitted: `handler_error` and `fault` (internal diagnostics that
+ * are logged, not surfaced), `entry_added` (redundant with `message_*`),
+ * `lane_created` / `value_update` / `config_update` (no UI), and the
+ * `compaction_*` pair, which CompactionController republishes with its own
+ * paired lifecycle signal so the push adapter's interlock stays intact.
+ */
+const REPUBLISHED_EVENTS = [
+    "run_start",
+    "run_end",
+    "run_suspend",
+    "run_resume",
+    "turn_start",
+    "turn_end",
+    "message_start",
+    "message_update",
+    "message_end",
+    "tool_start",
+    "tool_update",
+    "tool_end",
+    "queue_update",
+    "retry_scheduled",
+    "retry_start",
+    "retry_end",
+    "operation_abort",
+    "navigation_start",
+    "navigation_end",
+    "usage",
+] as const satisfies readonly HarnessEvent["type"][];
 
 export interface AbortResult {
     clearedSteer: AgentMessage[];
@@ -220,9 +262,25 @@ export interface AttachedSessionOptions {
 
 export class AttachedSession extends EventEmitter {
     readonly session: Session;
+    /**
+     * Session-wide configuration and the hook/event registries.
+     *
+     * pi 0.85 splits the old AgentHarness in two: the harness owns tools,
+     * resources, stream options and the hook/event buses; a lane owns the
+     * conversation (prompt / steer / abort / compact / model / thinking).
+     * Both are needed, so both are held.
+     */
     private readonly harness: AgentHarness<TacoToolContext>;
+    /** The conversation lane. One per session — the harness's default "main". */
+    private readonly lane: AgentLane;
     private uiLocale: SupportedLocale | undefined;
     private readonly defaultUiLocale: SupportedLocale | undefined;
+    /**
+     * Cached thinking level. Mirrors the lane's configuration so the
+     * strip-thinking context hook can read it synchronously — pi 0.85's lane
+     * getter is async. Only `setThinkingLevel` mutates it.
+     */
+    private thinkingLevel: ThinkingLevel;
     private unsubscribe?: () => void;
     /** Per-session handle to push state into the skill reinjector; undefined if no skills. */
     skillReinjector: SkillReinjectorHandle | undefined;
@@ -257,6 +315,8 @@ export class AttachedSession extends EventEmitter {
     private constructor(
         session: Session,
         harness: AgentHarness<TacoToolContext>,
+        lane: AgentLane,
+        thinkingLevel: ThinkingLevel,
         defaultUiLocale: SupportedLocale | undefined,
         compactionController: CompactionController,
         contextInfo: ContextInfoService,
@@ -266,6 +326,8 @@ export class AttachedSession extends EventEmitter {
         super();
         this.session = session;
         this.harness = harness;
+        this.lane = lane;
+        this.thinkingLevel = thinkingLevel;
         this.defaultUiLocale = defaultUiLocale;
         this.compactionController = compactionController;
         this.contextInfo = contextInfo;
@@ -308,7 +370,17 @@ export class AttachedSession extends EventEmitter {
         let initialTools = args.tools;
         if (args.toolRegistry) {
             const controller = new DefaultSessionToolController(args.toolRegistry);
-            const restored = await controller.restoreTools(args.session);
+            // The active-tool list lives in the lane's persisted configuration.
+            // Read it straight off the session: the lane itself does not exist
+            // until the harness is built, and the harness needs these tools in
+            // its initial set.
+            const storedConfig = await args.session.getValue(
+                laneConfig(MAIN_BRANCH),
+                harnessContext,
+            );
+            const restored = await controller.restoreTools(
+                storedConfig?.value.activeToolNames ?? [],
+            );
 
             // Always candidates are part of the session-start contract: failure is fatal.
             const alwaysCandidates = args.toolRegistry.listAlways();
@@ -322,41 +394,70 @@ export class AttachedSession extends EventEmitter {
             toolController = controller;
         }
 
-        const harness = new AgentHarness<TacoToolContext>({
-            session: args.session,
-            models: args.models,
-            model: args.model,
-            thinkingLevel: args.thinkingLevel ?? "off",
-            systemPrompt: args.systemPrompt,
-            tools: initialTools,
-            resources: args.resources,
-            streamOptions: await withTacoUserAgent(
-                args.streamOptions,
-                args.models,
-                args.model.provider,
-            ),
-            toolContext: args.getToolContext,
+        // `AgentHarness.create` restores suspended operations off the session,
+        // so it is async and may report work that was interrupted mid-run by a
+        // previous daemon exit.
+        const { harness, open } = await AgentHarness.create<TacoToolContext>(
+            {
+                session: args.session,
+                models: args.models,
+                model: args.model,
+                thinkingLevel: args.thinkingLevel ?? "off",
+                systemPrompt: args.systemPrompt,
+                tools: initialTools,
+                resources: args.resources,
+                streamOptions: await withTacoUserAgent(
+                    args.streamOptions,
+                    args.models,
+                    args.model.provider,
+                ),
+                toolContext: args.getToolContext,
+            },
+            harnessContext,
+        );
+
+        if (open.length > 0) {
+            // A run was in flight when the previous process died. pi leaves it
+            // resumable rather than rolling it back; surfacing it to the user is
+            // desktop work, so for now it is logged and left alone.
+            log.warn("session has interrupted operations from a previous run", {
+                sessionId: args.session.metadata.id,
+                count: open.length,
+            });
+        }
+
+        // One lane per session. `createAt: null` roots a fresh branch when the
+        // session has no history; an existing branch is adopted as-is.
+        const lane = await harness.lane(MAIN_BRANCH, { createAt: null }, harnessContext);
+
+        // Bind the tool surface — controller constructed first, bound after:
+        // breaks the cycle. Tool definitions live on the harness, the active
+        // set on the lane, so the controller gets a facade over both.
+        toolController?.bindHarness({
+            getTools: () => harness.getTools(harnessContext),
+            setTools: (tools) => harness.setTools([...tools], harnessContext),
+            getActiveToolNames: () => lane.getActiveTools(harnessContext),
+            setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
         });
 
-        // Bind harness reference — controller constructed first, bound after: breaks the cycle.
-        toolController?.bindHarness(harness);
-
-        const branchEntries = await args.session.getBranch();
+        const branchEntries = await findBranchEntries(args.session);
         const pinOnceConsumer = new PinOnceConsumer(branchEntries);
 
         // ContextInfoService must be constructed first — CompactionController reuses
-        // its getContextUsage path so the two do not each buildContext + estimateTokens.
-        const contextInfo = new ContextInfoService({ session: args.session, harness });
+        // its getContextUsage path so the two do not each build context + estimateTokens.
+        const contextInfo = new ContextInfoService({ session: args.session, lane });
         // Deferred reference — the controller is constructed before `attached`,
         // but its lifecycle sink must publish onto `attached`'s event stream.
         // Same deferred-evaluation pattern as the skill reinjector cell below.
         const attachedCell: { current: AttachedSession | undefined } = { current: undefined };
         const compactionController = new CompactionController({
             harness,
+            lane,
             compaction: args.compaction,
             getContextUsage: () => contextInfo.getContextUsage(),
             pinOnceConsumer,
-            getSessionEntries: () => args.session.getBranch(),
+            getSessionEntries: () => findBranchEntries(args.session),
+            getEntry: (id) => args.session.getEntry(id, harnessContext),
             // Publish the paired compaction lifecycle onto the same "event"
             // stream the harness feeds, so the push adapter's interlock sees a
             // guaranteed start/end pair. pi's own session_before_compact never
@@ -375,6 +476,8 @@ export class AttachedSession extends EventEmitter {
         const attached = new AttachedSession(
             args.session,
             harness,
+            lane,
+            args.thinkingLevel ?? "off",
             args.defaultUiLocale,
             compactionController,
             contextInfo,
@@ -392,17 +495,18 @@ export class AttachedSession extends EventEmitter {
         // Per-session manager over the workspace-shared store, so snapshots
         // carry the session that produced them. Must be assigned before
         // wireHarnessHooks — the mutation gate closes over it.
-        const sessionMeta = await args.session.getMetadata();
         attached.checkpoints = args.checkpointStore
             ? new CheckpointManager({
                   store: args.checkpointStore,
-                  sessionId: sessionMeta.id,
+                  sessionId: args.session.metadata.id,
               })
             : undefined;
 
         // Register all hooks (protocol context + extension + debug) — see hookWiring.ts
-        const { unsubscribe: unwireHooks, skillReinjector } = await wireHarnessHooks(harness, {
+        const { unsubscribe: unwireHooks, skillReinjector } = await wireHarnessHooks(harness, lane, {
             cwd: args.env.cwd,
+            models: args.models,
+            getThinkingLevel: () => attached.getThinkingLevel(),
             getUiLocale: () => attached.uiLocale,
             // Same source as maybeCompact: read the threshold from disk live so the
             // pin-aware hook can recompute keepRecentTokens.
@@ -433,20 +537,21 @@ export class AttachedSession extends EventEmitter {
         attached.skillReinjector = skillReinjector;
 
         // Build memory extractor: needs the session id (used as workspaceId for
-        // project-scoped topic files). `sessionMeta` was already fetched above
-        // for the checkpoint manager.
+        // project-scoped topic files).
         attached.memoryExtractor =
             args.memoryStore?.enabled && args.model && !args.isIm
                 ? new MemoryExtractorImpl(
-                      harness.models,
+                      args.models,
                       args.model,
                       args.memoryStore,
-                      sessionMeta.id,
+                      args.session.metadata.id,
                   )
                 : undefined;
 
-        // harness AgentEvent → AttachedSession "event"
-        const unsubEvent = harness.subscribe((event: AgentHarnessEvent) => {
+        // pi 0.85 replaced the single `harness.subscribe(cb)` firehose with a
+        // per-type bus. Republish every type the desktop consumes onto the
+        // "event" stream, then attach the turn-boundary bookkeeping.
+        const republish = (event: HarnessEvent): void => {
             try {
                 attached.emit("event", event);
             } catch (error) {
@@ -459,53 +564,56 @@ export class AttachedSession extends EventEmitter {
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
+        };
 
-            // Memory extraction — coordinator: same callback handles
-            //   tool_execution_end ("memory") → pushes a Promise<number>
-            //     resolving to ctx.messages.length right after the commit.
-            //   turn_end → takes ownership of all pending Promises (resets
-            //     array synchronously), then awaits their min offset. This
-            //     handles multiple memory calls in the same turn — instead of
-            //     overwriting, we take the earliest offset so only messages
-            //     BEFORE all memory calls are sent to the extractor.
-            if (
-                event.type === "tool_execution_end" &&
-                event.toolName === "memory" &&
-                !event.isError
-            ) {
+        const disposers: Array<() => void> = [];
+        for (const type of REPUBLISHED_EVENTS) {
+            disposers.push(harness.events.on(type, republish));
+        }
+
+        // Memory extraction — coordinator across two events:
+        //   tool_end ("memory") → pushes a Promise<number> resolving to the
+        //     context message count right after the commit.
+        //   turn_end → takes ownership of all pending Promises (resets the
+        //     array synchronously), then awaits their min offset. This handles
+        //     multiple memory calls in the same turn — instead of overwriting,
+        //     we take the earliest offset so only messages BEFORE all memory
+        //     calls are sent to the extractor.
+        disposers.push(
+            harness.events.on("tool_end", (event) => {
+                if (event.toolName !== "memory" || event.isError) return;
                 // Push synchronously so turn_end's Promise.all sees it regardless of
                 // microtask timing; the rejection is absorbed here (Infinity never wins
-                // Math.min), so a buildContext failure can't become an unhandled
+                // Math.min), so a context-build failure can't become an unhandled
                 // rejection nor poison the offset computation.
                 attached.lastRememberMessageCountPromises.push(
-                    attached.session
-                        .buildContext()
-                        .then((ctx) => ctx.messages.length)
+                    buildBranchContext(attached.session)
+                        .then((messages) => messages.length)
                         .catch((error) => {
                             log.warn(
-                                "buildContext failed during memory offset snapshot, skipping:",
+                                "context build failed during memory offset snapshot, skipping:",
                                 error instanceof Error ? error.message : String(error),
                             );
                             return Number.POSITIVE_INFINITY;
                         }),
                 );
-            }
+            }),
+        );
 
-            // Close the checkpoint window so the next turn's first write opens a
-            // fresh restore point instead of folding into this turn's.
-            if (event.type === "turn_end") {
+        disposers.push(
+            harness.events.on("turn_end", () => {
+                // Close the checkpoint window so the next turn's first write opens
+                // a fresh restore point instead of folding into this turn's.
                 attached.checkpoints?.endTurn();
-            }
 
-            if (event.type === "turn_end" && attached.memoryExtractor) {
                 const extractor = attached.memoryExtractor;
+                if (extractor === undefined) return;
                 // Synchronous take + reset — after this line, no other code
                 // path writes to lastRememberMessageCountPromises.
                 const promises = attached.lastRememberMessageCountPromises;
                 attached.lastRememberMessageCountPromises = [];
-                attached.session
-                    .buildContext()
-                    .then(async (ctx) => {
+                buildBranchContext(attached.session)
+                    .then(async (contextMessages) => {
                         let sinceCount: number | undefined;
                         if (promises.length > 0) {
                             try {
@@ -517,28 +625,27 @@ export class AttachedSession extends EventEmitter {
                                 sinceCount = undefined;
                             }
                         }
-                        const messages = sliceForExtraction(ctx.messages, sinceCount);
+                        const messages = sliceForExtraction(contextMessages, sinceCount);
                         if (messages.length > 0) {
                             await extractor.onTurnEnd(messages);
                         }
                     })
                     .catch((error) => {
-                        // buildContext() or the extractor rejecting must never
+                        // The context build or the extractor rejecting must never
                         // surface as an unhandled rejection on this fire-and-forget chain.
                         log.warn(
                             "memory extraction after turn_end failed:",
                             error instanceof Error ? error.message : String(error),
                         );
                     });
-            }
+            }),
+        );
 
-            // Delegate to compactionController: auto-compaction scheduling +
-            // PinOnceConsumer updates.
-            compactionController.onHarnessEvent(event);
-        });
+        // Auto-compaction scheduling + PinOnceConsumer updates.
+        disposers.push(...compactionController.subscribe());
 
         attached.unsubscribe = () => {
-            unsubEvent();
+            for (const dispose of disposers) dispose();
             unwireHooks();
         };
 
@@ -550,6 +657,10 @@ export class AttachedSession extends EventEmitter {
      * assistant reply by construction (pi runs until stop/aborted/error), so we
      * narrow pi's wider AgentMessage union to the protocol AssistantMessage
      * here rather than pushing an unsafe cast onto every consumer.
+     *
+     * pi 0.85 returns a `Result` carrying the operation record rather than the
+     * reply itself, so the assistant message is read back from the branch tip
+     * the run landed on.
      */
     async prompt(
         text: string,
@@ -559,14 +670,31 @@ export class AttachedSession extends EventEmitter {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
         }
-        const reply = await this.harness.prompt(text, images ? { images } : undefined);
+        const result = await this.lane.prompt(text, images, harnessContext);
+        if (!result.ok) throw toHarnessError("session.prompt", result.error);
+
+        if (result.value.status === "suspended") {
+            // The run yielded without producing a terminal message (a deferred
+            // provider call, or an abort landing between turns). There is no
+            // reply to hand back.
+            throw new Error(
+                `session.prompt suspended without a reply (operationId=${result.value.operationId})`,
+            );
+        }
+
+        const tipId = result.value.tipId;
+        const entry = tipId === null ? undefined : await this.session.getEntry(tipId, harnessContext);
+        const reply = entry?.type === "message" ? entry.message : undefined;
+
         // pi's AgentMessage union is wider than the protocol AssistantMessage.
         // The turn's terminal message is the assistant reply by construction,
         // but an abort/early-error path could surface a non-assistant shape —
         // fail loud here so a shape change never silently corrupts consumers.
-        if (reply.role !== "assistant") {
+        if (reply === undefined || reply.role !== "assistant") {
             throw new Error(
-                `session.prompt expected an assistant reply, got role=${String((reply as { role?: unknown }).role)}`,
+                `session.prompt expected an assistant reply, got role=${String(
+                    (reply as { role?: unknown } | undefined)?.role,
+                )}`,
             );
         }
         return reply as ProtocolAssistantMessage;
@@ -577,7 +705,8 @@ export class AttachedSession extends EventEmitter {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
         }
-        await this.harness.steer(text);
+        const result = await this.lane.steer(text, undefined, harnessContext);
+        if (!result.ok) throw toHarnessError("session.steer", result.error);
     }
 
     /** Effective UI locale — read by the reply_language hook on every context build. */
@@ -587,22 +716,43 @@ export class AttachedSession extends EventEmitter {
 
     /** Switch model (persisted to the session). */
     async setModel(model: Model<Api>): Promise<void> {
-        await this.harness.setModel(model);
+        // pi 0.85 takes a ModelIdentity (provider + id) rather than the full
+        // model record, and resolves it against the harness's Models registry.
+        await this.lane.setModel(
+            { provider: model.provider, modelId: model.id },
+            harnessContext,
+        );
     }
 
-    /** Switch thinking level at runtime; the harness emits ThinkingLevelUpdateEvent, which flows back to clients via session.event. */
+    /**
+     * Switch thinking level at runtime. Emits a `config_update` event, which
+     * flows back to clients via session.event.
+     */
     async setThinkingLevel(level: ThinkingLevel): Promise<void> {
-        await this.harness.setThinkingLevel(level);
+        await this.lane.setThinkingLevel(level, harnessContext);
+        this.thinkingLevel = level;
     }
 
-    /** Current harness thinking level. */
+    /**
+     * Current thinking level.
+     *
+     * Served from a cached copy rather than the lane: pi 0.85 made the lane
+     * getter async, but the strip-thinking context hook runs synchronously on
+     * every LLM call. The cache is seeded at attach and updated by
+     * `setThinkingLevel`, which is the only way it changes.
+     */
     getThinkingLevel(): ThinkingLevel {
-        return this.harness.getThinkingLevel();
+        return this.thinkingLevel;
     }
 
     /** Abort the current turn. */
     async abort(): Promise<AbortResult> {
-        return await this.harness.abort();
+        const result = await this.lane.abort(harnessContext);
+        if (!result.ok) throw toHarnessError("session.abort", result.error);
+        return {
+            clearedSteer: result.value.steer,
+            clearedFollowUp: result.value.followUp,
+        };
     }
 
     // ─────────── compaction / context queries (delegated) ───────────
@@ -622,11 +772,26 @@ export class AttachedSession extends EventEmitter {
 
     async dispose(): Promise<void> {
         try {
-            await this.harness.abort();
-        } catch {
-            // may already be idle — ignore
+            // Returns Result.err(NoActiveOperation) when already idle, which is
+            // the common case on a clean detach — not worth branching on.
+            await this.lane.abort(harnessContext);
+        } catch (error) {
+            log.debug(
+                "abort during dispose failed:",
+                error instanceof Error ? error.message : String(error),
+            );
         }
         if (this.unsubscribe) this.unsubscribe();
+        try {
+            // Releases the hook/event registries and seals the lane so late
+            // callbacks reject instead of touching a torn-down session.
+            await this.harness.close(harnessContext);
+        } catch (error) {
+            log.debug(
+                "harness close during dispose failed:",
+                error instanceof Error ? error.message : String(error),
+            );
+        }
         this.removeAllListeners();
     }
 }

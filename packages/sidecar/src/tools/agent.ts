@@ -109,10 +109,14 @@ export function createAgentTool(
         async execute(
             toolCallId: string,
             params: AgentToolInput,
-            signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             _context: ExecutionToolContext,
+            _invocation: unknown,
+            piContext: { abortSignal?: AbortSignal },
         ): Promise<{ content: TextContent[]; details: AgentToolDetails }> {
+            // pi 0.85 carries cancellation on the Context rather than a
+            // dedicated parameter.
+            const signal = piContext.abortSignal;
             const { subSessionId, resultText, isError } = await ctx.spawn({
                 parentToolCallId: toolCallId,
                 agentType: params.subagent_type,

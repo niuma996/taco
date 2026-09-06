@@ -11,20 +11,29 @@
 
 import type {
     AgentHarness,
-    AgentHarnessEventResultMap,
-    ContextEvent,
-    ContextResult,
+    AgentLane,
+    AgentMessage,
+    AgentToolResult,
     ExecutionToolContext,
+    JsonValue,
     Skill,
 } from "@earendil-works/pi-agent-core";
+import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
 import type { CheckpointManager } from "../checkpoints/manager.ts";
 import { redactString } from "../extensions/builtin/outputRedaction/index.ts";
 import type {
+    ContextEvent,
     ContextHookBuckets,
+    ContextResult,
+    ToolCallEvent,
     ToolCallHook,
+    ToolCallResult,
+    ToolResultEvent,
     ToolResultHookBuckets,
+    ToolResultPatch,
 } from "../extensions/index.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import { buildMemoryContextHook } from "../memory/memoryTag.ts";
@@ -100,6 +109,18 @@ export interface HookWiringOptions {
      */
     getCompactionThreshold?: () => number;
     /**
+     * Thunk reading the current thinking level. Supplied by AttachedSession,
+     * which caches it — pi 0.85's `lane.getThinkingLevel()` is async but this
+     * hook has to decide synchronously on every context build.
+     */
+    getThinkingLevel: () => ThinkingLevel;
+    /**
+     * Model registry, used by the pin-aware compaction hook to resolve the
+     * summarisation model. Was `harness.models` pre-0.85; the harness no longer
+     * exposes it, so the caller passes it through.
+     */
+    models: Models;
+    /**
      * Thunk returning the current `InstructionsConfig` (resolved from
      * `taco.json` / CLI). Lazy so a `settings.write` patch takes effect on
      * the next LLM call without a sidecar restart. Falls back to "all
@@ -134,7 +155,16 @@ export interface HookWiringOptions {
     pinOnceConsumer?: PinOnceConsumer;
 }
 
-type ContextHookResult = AgentHarnessEventResultMap["context"];
+/**
+ * What a `transform_context` handler may return.
+ *
+ * pi 0.85 chains these handlers: each one receives the previous handler's
+ * `messages`, and `undefined` means "no change". The pre-0.85 bus was
+ * last-writer-wins over the ORIGINAL messages, which is why the old wiring
+ * needed a trailing safety-net hook to re-assert in-place mutations. Chaining
+ * makes that unnecessary.
+ */
+type ContextHookResult = { messages?: AgentMessage[] } | undefined;
 
 /**
  * Wraps a user-supplied context hook so a throwing / rejecting extension
@@ -204,22 +234,93 @@ export interface WireHarnessResult {
 
 export async function wireHarnessHooks(
     harness: AgentHarness<ExecutionToolContext>,
+    lane: AgentLane,
     opts: HookWiringOptions,
 ): Promise<WireHarnessResult> {
     const disposers: Array<() => void> = [];
     let skillReinjector: SkillReinjectorHandle | undefined;
 
+    /**
+     * Adapt a sidecar context hook to pi's `transform_context` contract.
+     *
+     * The two differ in one way that matters: pi's event also carries
+     * `systemPrompt`, and its handlers chain. Our hooks only ever rewrite
+     * `messages`, so returning just that field leaves the system prompt to
+     * whichever hook (if any) owns it.
+     */
+    const onContext = (
+        hook: (event: ContextEvent) => ContextHookResult | Promise<ContextHookResult>,
+    ): (() => void) =>
+        harness.hooks.on("transform_context", async (event) => {
+            const result = await hook({ messages: event.messages });
+            return result?.messages === undefined ? undefined : { messages: result.messages };
+        });
+
+    /**
+     * Adapt a sidecar tool-call hook to pi's `before_tool` contract.
+     *
+     * Two shape differences: the extension API names the arguments `input`
+     * (pi: `args`) and reports refusal as a flat `{block, reason}` (pi: a
+     * nested `{block: {reason}}`, whose presence alone is the refusal).
+     */
+    const onToolCall = (
+        hook: (event: ToolCallEvent) => ToolCallResult | undefined | Promise<ToolCallResult | undefined>,
+    ): (() => void) =>
+        harness.hooks.on("before_tool", async (event) => {
+            const result = await hook({
+                type: "tool_call",
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                input: event.args,
+            });
+            if (result?.block !== true) return undefined;
+            return { block: { reason: result.reason ?? "blocked" } };
+        });
+
+    /**
+     * Adapt a sidecar tool-result hook to pi's `after_tool` contract.
+     *
+     * `details` is `unknown` on our side but must be `JsonValue` for pi, which
+     * persists it on the entry. The cast is safe in practice — hooks only ever
+     * put JSON-serialisable data there — and pi validates on commit.
+     */
+    const onToolResult = (
+        hook: (
+            event: ToolResultEvent,
+        ) => ToolResultPatch | undefined | Promise<ToolResultPatch | undefined>,
+    ): (() => void) =>
+        harness.hooks.on("after_tool", async (event) => {
+            const result = await hook({
+                type: "tool_result",
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                input: event.args,
+                content: event.content as ToolResultEvent["content"],
+                details: event.details,
+                isError: event.isError,
+                ...(event.usage === undefined ? {} : { usage: event.usage }),
+            });
+            if (result === undefined) return undefined;
+            return {
+                ...(result.content === undefined
+                    ? {}
+                    : { content: result.content as AgentToolResult<unknown>["content"] }),
+                ...(result.details === undefined ? {} : { details: result.details as JsonValue }),
+                ...(result.isError === undefined ? {} : { isError: result.isError }),
+                ...(result.usage === undefined ? {} : { usage: result.usage }),
+                ...(result.terminate === undefined ? {} : { terminate: result.terminate }),
+            };
+        });
+
     // ── protocol context hooks (trusted, not wrapped) ──
     // 1. strip `drop` policy tags before LLM conversion
-    disposers.push(harness.on("context", buildDropPolicyContextHook()));
+    disposers.push(onContext(buildDropPolicyContextHook()));
     // 2. prepend `<instructions>` (CLAUDE.md), throttled so unchanged content
     //    is only re-injected every 20 turns at most. After compaction the old
     //    copy is gone (instructions is a `drop` tag), so the skip cap ensures
     //    the model periodically re-receives CLAUDE.md.
     disposers.push(
-        harness.on(
-            "context",
-            throttleByContent(
+        onContext(throttleByContent(
                 buildInstructionsContextHook({
                     cwd: opts.cwd,
                     // Fall back to "no config" (= defaults) when the caller did
@@ -232,20 +333,18 @@ export async function wireHarnessHooks(
         ),
     );
     // 3. append `<env>` (current local time) to every LLM context.
-    disposers.push(harness.on("context", buildEnvContextHook()));
+    disposers.push(onContext(buildEnvContextHook()));
     // 3b. append `<im_channel>` (channel type + id) for IM sessions only. The
     //     getter yields undefined for non-IM workspaces so this is a no-op there.
     if (opts.getImChannelContext) {
-        disposers.push(harness.on("context", buildImChannelContextHook(opts.getImChannelContext)));
+        disposers.push(onContext(buildImChannelContextHook(opts.getImChannelContext)));
     }
     // 4. prepend `<reply_language>` whenever getUiLocale() returns a value —
     //    content is stable across turns unless the user switches UI language
     //    (rare), so wrap in throttleByContent to skip redundant re-injection.
     if (opts.getUiLocale) {
         disposers.push(
-            harness.on(
-                "context",
-                throttleByContent(buildReplyLanguageContextHook(opts.getUiLocale), {
+            onContext(throttleByContent(buildReplyLanguageContextHook(opts.getUiLocale), {
                     maxConsecutiveSkips: 50,
                 }),
             ),
@@ -257,9 +356,7 @@ export async function wireHarnessHooks(
     //    `setThinkingLevel` takes effect on the next LLM call; session storage
     //    is untouched and history remains visible.
     disposers.push(
-        harness.on(
-            "context",
-            buildStripThinkingContextHook(() => harness.getThinkingLevel()),
+        onContext(buildStripThinkingContextHook(opts.getThinkingLevel),
         ),
     );
     // 6. plan mode directive: while plan mode is active, inject a read-only
@@ -267,16 +364,14 @@ export async function wireHarnessHooks(
     const getActiveTasksState = opts.getActiveTasksState;
     if (getActiveTasksState) {
         disposers.push(
-            harness.on(
-                "context",
-                buildPlanModeContextHook(() => getActiveTasksState().planState),
+            onContext(buildPlanModeContextHook(() => getActiveTasksState().planState),
             ),
         );
     }
     // 7. skill body reinjection: drain pending queue + restore compacted-away skill bodies
     if (opts.skills && opts.skills.length > 0) {
         const { hook, handle } = buildSkillReinjector({ skills: opts.skills });
-        disposers.push(harness.on("context", hook));
+        disposers.push(onContext(hook));
         skillReinjector = handle;
     }
 
@@ -292,12 +387,13 @@ export async function wireHarnessHooks(
     //    a single sidecar multiplexes.
     const compactionReminder = buildCompactionReminderHook();
     const pinAwareCompact = buildPinAwareCompactHook({
-        models: harness.models,
-        getModel: () => harness.getModel(),
+        models: opts.models,
+        getModel: () => lane.getModel(harnessContext),
+        getBranchEntries: () => lane.findEntries({ order: "oldestFirst" }, harnessContext),
         getThreshold: opts.getCompactionThreshold ?? (() => 0.7),
     });
     disposers.push(
-        harness.on("session_before_compact", async (event) => {
+        harness.hooks.on("before_compaction", async (event) => {
             const result = await pinAwareCompact(event);
             if (result?.compaction) compactionReminder.notify();
             return result;
@@ -311,9 +407,7 @@ export async function wireHarnessHooks(
     // resulting messages and skips when content is unchanged.
     if (opts.memoryStore) {
         disposers.push(
-            harness.on(
-                "context",
-                throttleByContent(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)),
+            onContext(throttleByContent(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)),
             ),
         );
     }
@@ -323,11 +417,9 @@ export async function wireHarnessHooks(
     //  - todo_reminder: nags when TodoWrite unused 10+ assistant turns
     if (opts.getActiveTasksState) {
         const getState = opts.getActiveTasksState;
-        disposers.push(harness.on("context", buildActiveTasksContextHook(getState)));
+        disposers.push(onContext(buildActiveTasksContextHook(getState)));
         disposers.push(
-            harness.on(
-                "context",
-                buildTodoWriteReminderContextHook(() => getState().store),
+            onContext(buildTodoWriteReminderContextHook(() => getState().store),
             ),
         );
     }
@@ -336,7 +428,7 @@ export async function wireHarnessHooks(
     //    last-writer-wins semantics pick up all in-place mutations applied
     //    by preceding hooks. Without it, if every hook returns undefined
     //    the transformContext fallback reverts to the unmodified clone.
-    disposers.push(harness.on("context", (event) => ({ messages: event.messages })));
+    disposers.push(onContext((event) => ({ messages: event.messages })));
 
     // ── extension context hooks (wrapped, errors → undefined) ──
     const extCtxHooks = opts.extensionContextHooks ?? { builtins: [], external: [] };
@@ -345,24 +437,23 @@ export async function wireHarnessHooks(
         ...extCtxHooks.external.map((h) => wrapContextHook(h, "ext-external")),
     ];
     for (const wrapped of allExtCtxHooks) {
-        disposers.push(harness.on("context", wrapped));
+        disposers.push(onContext(wrapped));
     }
 
     // ── compaction_reminder context hook — fires once after each compaction.
-    //    Registered LAST so it is the final non-undefined return value: any
-    //    extension hook that returns a fresh `{ messages: [] }` (legal per
-    //    last-writer-wins) cannot clobber the unshift we do here.
-    disposers.push(harness.on("context", compactionReminder.hook));
+    //    Registered LAST so its unshift lands on top of every other hook's
+    //    output: `transform_context` chains, so the last handler sees the fully
+    //    transformed message list.
+    disposers.push(onContext(compactionReminder.hook));
 
     // ── extension tool_call / tool_result hooks (wrapped) ──
-    // tool_call fails CLOSED: `undefined` means "allow", so a gatekeeper hook
+    // before_tool fails CLOSED: `undefined` means "allow", so a gatekeeper hook
     // that hangs or throws would silently permit the very call it exists to
-    // block. Timing out into `{ block: true }` is the safe direction — the
-    // tool call is refused with a reason instead of slipping through.
+    // block. Timing out into a `block` is the safe direction — the tool call is
+    // refused with a reason instead of slipping through.
     for (const hook of opts.extensionToolCallHooks ?? []) {
         disposers.push(
-            harness.on(
-                "tool_call",
+            onToolCall(
                 wrapHook(hook, "tool_call", () => ({
                     block: true,
                     reason: "tool_call hook failed or timed out; blocking to fail closed",
@@ -371,10 +462,11 @@ export async function wireHarnessHooks(
         );
     }
     // ── mutation gate (trusted) ──
-    // Registered AFTER the extension tool_call hooks on purpose: emitHook is
-    // last-writer-wins, so a gate registered earlier could have its `block`
-    // silently replaced by any extension that returns a non-undefined result.
-    // Being last makes the containment / plan-mode refusal final.
+    // Registration order is no longer a correctness requirement for blocking:
+    // pi 0.85's `before_tool` short-circuits on the first hook that returns a
+    // `block`, so an extension can no longer overwrite the gate's refusal (the
+    // pre-0.85 bus was last-writer-wins, which is why the gate had to be last).
+    // It stays last so arg rewrites from extensions are visible to the gate.
     if (opts.mutationGateRoot && getActiveTasksState) {
         const checkpoints = opts.checkpointManager;
         const gate = createMutationGateHook({
@@ -388,8 +480,7 @@ export async function wireHarnessHooks(
             },
         });
         disposers.push(
-            harness.on(
-                "tool_call",
+            onToolCall(
                 wrapHook(gate, "mutation-gate", () => ({
                     block: true,
                     reason: "mutation gate failed or timed out; blocking to fail closed",
@@ -400,10 +491,10 @@ export async function wireHarnessHooks(
 
     const extToolResultHooks = opts.extensionToolResultHooks ?? { builtins: [], external: [] };
     for (const hook of extToolResultHooks.builtins) {
-        disposers.push(harness.on("tool_result", wrapHook(hook, "tool_result:builtin")));
+        disposers.push(onToolResult(wrapHook(hook, "tool_result:builtin")));
     }
     for (const hook of extToolResultHooks.external) {
-        disposers.push(harness.on("tool_result", wrapHook(hook, "tool_result:external")));
+        disposers.push(onToolResult(wrapHook(hook, "tool_result:external")));
     }
 
     // ── debug hook (gated by TACO_DEBUG_LLM_PAYLOAD=1) ──
@@ -424,7 +515,7 @@ export async function wireHarnessHooks(
     // `outputRedaction.redactString` to scrub before fold.
     if (process.env.TACO_DEBUG_LLM_PAYLOAD) {
         disposers.push(
-            harness.on("before_provider_payload", (event) => {
+            harness.hooks.on("before_payload", (event) => {
                 const payload = event.payload as {
                     system?: string | unknown[];
                     messages?: Array<{ role: string; content: string | unknown[] }>;

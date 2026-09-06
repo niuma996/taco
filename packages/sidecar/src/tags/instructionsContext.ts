@@ -18,7 +18,7 @@
  * session's context window.
  */
 
-import type { AgentMessage, ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { InstructionsConfig } from "@taco-ai/protocol";
 import {
     type InstructionBlock,
@@ -28,6 +28,8 @@ import {
 } from "../config/instructions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createUserMessage } from "./builder.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+
 
 const log = createLogger("tags/instructionsContext");
 

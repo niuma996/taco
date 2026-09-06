@@ -2,12 +2,11 @@
 
 import { EventEmitter } from "node:events";
 import type {
-    AgentHarnessEvent,
     JsonlSessionMetadata,
     JsonlSessionRepo,
-    SessionTreeEntry,
+    Entry,
 } from "@earendil-works/pi-agent-core";
-import { createSessionId } from "@earendil-works/pi-agent-core";
+import type { HarnessEvent } from "./harnessEvents.ts";
 import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
@@ -24,6 +23,7 @@ import { createShellTool } from "../tools/shellTool.ts";
 import type { AttachedSession } from "./attachedSession.ts";
 import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
 import type { SessionTaskState } from "./sessionTaskState.ts";
+import { uuidv7 } from "@earendil-works/pi-agent-core";
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
@@ -373,7 +373,7 @@ export class AgentSpawner extends EventEmitter {
             })();
 
         // 1. Create child session
-        const childSessionId = createSessionId();
+        const childSessionId = uuidv7();
         await this.repo.create({
             id: childSessionId,
             cwd: this.sessionCwd,
@@ -468,7 +468,7 @@ export class AgentSpawner extends EventEmitter {
         const cap = args.maxTurns !== undefined && args.maxTurns > 0 ? args.maxTurns : undefined;
         let turnsUsed = 0;
         let hitCap = false;
-        const onTurnEnd = (event: AgentHarnessEvent): void => {
+        const onTurnEnd = (event: HarnessEvent): void => {
             if (event.type !== "turn_end" || cap === undefined) return;
             turnsUsed++;
             if (turnsUsed >= cap && !hitCap) {
@@ -557,7 +557,7 @@ export class AgentSpawner extends EventEmitter {
         let forkedContext: string | undefined;
         if (contextMode === "fork") {
             const parentSession = await this.repo.open(parentMeta);
-            forkedContext = buildForkedContext(await parentSession.getBranch());
+            forkedContext = buildForkedContext(await parentSession.findEntriesOnBranch());
         }
         return this.executeSubagentSession({
             parentSessionId: args.parentSessionId,
@@ -580,7 +580,7 @@ export class AgentSpawner extends EventEmitter {
      * empty reply is distinguishable from a reply that happens to contain the
      * word "(empty response)".
      *
-     * getBranch() (not getEntries()) anchors to the current leaf — getEntries
+     * findEntriesOnBranch() (not findEntries()) anchors to the current leaf — findEntries
      * returns the whole append log, which would surface text from a forked-off
      * branch if the session ever gets one.
      */
@@ -589,7 +589,7 @@ export class AgentSpawner extends EventEmitter {
     ): Promise<{ text: string; isEmpty: boolean }> {
         const meta = await this.sessionRegistry.openSession(sessionId);
         const session = await this.repo.open(meta);
-        const entries = (await session.getBranch()) as SessionTreeEntry[];
+        const entries = (await session.findEntriesOnBranch()) as Entry[];
         let latestAssistantText = "";
         for (const entry of entries) {
             if (entry.type !== "message") continue;
@@ -776,14 +776,14 @@ export class AgentSpawner extends EventEmitter {
     /**
      * Count completed assistant turns on a session's current branch. Used to
      * subtract already-consumed turns from `maxTurns` so the cap survives
-     * across resumes. Reads `getBranch()` (current leaf, not full append log)
+     * across resumes. Reads `findEntriesOnBranch()` (current leaf, not full append log)
      * so a forked-off branch cannot inflate the count.
      */
     private async countAssistantTurns(sessionId: SessionId): Promise<number> {
         try {
             const meta = await this.sessionRegistry.openSession(sessionId);
             const session = await this.repo.open(meta);
-            const entries = (await session.getBranch()) as SessionTreeEntry[];
+            const entries = (await session.findEntriesOnBranch()) as Entry[];
             let n = 0;
             for (const entry of entries) {
                 if (entry.type !== "message") continue;

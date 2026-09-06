@@ -60,8 +60,7 @@ export function createTodoWriteTool(
         async execute(
             _toolCallId: string,
             params: TodoWriteInput,
-            _signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             context: ExecutionToolContext,
         ): Promise<{ content: TextContent[]; details: { taskCount: number } }> {
             let listId = store.currentListId ?? findActiveListId(store);

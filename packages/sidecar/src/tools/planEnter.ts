@@ -40,8 +40,7 @@ export function createPlanEnterTool(
         async execute(
             _toolCallId: string,
             _params: PlanEnterInput,
-            _signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             context: ExecutionToolContext,
         ): Promise<{ content: TextContent[]; details: { slug: string; planPath: string } }> {
             if (isPlanModeActive(state)) {

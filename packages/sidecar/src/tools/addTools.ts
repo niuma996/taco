@@ -84,7 +84,6 @@ export function createAddToolsTool(controller: SessionToolController): TacoTool 
         async execute(
             _toolCallId: string,
             params: AddToolsToolInput,
-            _signal: AbortSignal | undefined,
             _onUpdate: unknown,
             _context: ExecutionToolContext,
         ): Promise<{ content: TextContent[]; details: AddToolsResult; addedToolNames?: string[] }> {

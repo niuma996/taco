@@ -80,9 +80,13 @@ export function makePushFrame<TParams = unknown>(opts: PushEventOptions): Server
 export const SIDECAR_INSTANCE_ID = randomUUID();
 
 /**
- * Splits the three `tool_execution_*` AgentHarnessEvent variants from the
- * harness into named push frames. Non-tool events return undefined — the
- * caller falls back to the generic session.event path.
+ * Splits the three tool-execution HarnessEvent variants from the harness into
+ * named push frames. Non-tool events return undefined — the caller falls back
+ * to the generic session.event path.
+ *
+ * Event names are pi 0.85's `tool_start` / `tool_update` / `tool_end` (renamed
+ * from the pre-0.85 `tool_execution_*`). Those events carry no timestamp, so
+ * the frame is stamped on arrival.
  *
  * Returned id is the toolCallId so the client-side dispatcher can dedupe.
  */
@@ -95,15 +99,11 @@ export function toToolCallPush(event: unknown):
     | undefined {
     if (!event || typeof event !== "object") return undefined;
     const e = event as { type?: unknown };
-    if (
-        e.type !== "tool_execution_start" &&
-        e.type !== "tool_execution_update" &&
-        e.type !== "tool_execution_end"
-    ) {
+    if (e.type !== "tool_start" && e.type !== "tool_update" && e.type !== "tool_end") {
         return undefined;
     }
     const ee = event as {
-        type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end";
+        type: "tool_start" | "tool_update" | "tool_end";
         toolCallId: string;
         ts?: number;
         toolName?: string;
@@ -114,7 +114,7 @@ export function toToolCallPush(event: unknown):
     };
     if (typeof ee.toolCallId !== "string") return undefined;
     const ts = typeof ee.ts === "number" ? ee.ts : Date.now();
-    if (ee.type === "tool_execution_start") {
+    if (ee.type === "tool_start") {
         const [redactedArgs] = redactToolArgs(ee.args);
         return {
             method: PushMethods.ToolCallStart,
@@ -127,7 +127,7 @@ export function toToolCallPush(event: unknown):
             id: ee.toolCallId,
         };
     }
-    if (ee.type === "tool_execution_update") {
+    if (ee.type === "tool_update") {
         return {
             method: PushMethods.ToolCallUpdate,
             params: {

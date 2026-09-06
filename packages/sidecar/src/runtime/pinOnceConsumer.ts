@@ -7,7 +7,7 @@
  * means the consumer is accurate even after an AttachedSession restart.
  */
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { Entry } from "@earendil-works/pi-agent-core";
 
 /** Persisted shape stored in `CompactionEntry.details`. */
 export interface PinOnceConsumedDetails {
@@ -15,7 +15,7 @@ export interface PinOnceConsumedDetails {
 }
 
 /** Read `consumedPinOnceInstances` from a CompactionEntry's details. */
-function readConsumed(entry: SessionTreeEntry): readonly string[] {
+function readConsumed(entry: Entry): readonly string[] {
     if (entry.type !== "compaction") return [];
     const details = (entry as { details?: unknown }).details as PinOnceConsumedDetails | undefined;
     return details?.consumedPinOnceInstances ?? [];
@@ -25,7 +25,7 @@ function readConsumed(entry: SessionTreeEntry): readonly string[] {
  * Rebuild the full consumed set from session history.
  * Called once at AttachedSession construction time.
  */
-function rebuildConsumedSet(entries: SessionTreeEntry[]): Set<string> {
+function rebuildConsumedSet(entries: Entry[]): Set<string> {
     const consumed = new Set<string>();
     for (const entry of entries) {
         for (const id of readConsumed(entry)) {
@@ -38,7 +38,7 @@ function rebuildConsumedSet(entries: SessionTreeEntry[]): Set<string> {
 export class PinOnceConsumer {
     private readonly consumed: Set<string>;
 
-    constructor(entries: SessionTreeEntry[] = []) {
+    constructor(entries: Entry[] = []) {
         this.consumed = rebuildConsumedSet(entries);
     }
 
@@ -51,7 +51,7 @@ export class PinOnceConsumer {
      * Merge consumed instanceIds from a CompactionEntry into the set.
      * Called when a compaction completes (e.g. via session_compact event).
      */
-    mergeConsumed(entries: SessionTreeEntry[]): void {
+    mergeConsumed(entries: Entry[]): void {
         for (const entry of entries) {
             for (const id of readConsumed(entry)) {
                 this.consumed.add(id);

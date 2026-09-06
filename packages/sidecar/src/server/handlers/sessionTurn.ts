@@ -5,7 +5,7 @@
  * auto-attach / compaction-wait pattern. All require ensureWorkspace.
  */
 
-import { AgentHarnessError } from "@earendil-works/pi-agent-core";
+import { HarnessFault } from "@earendil-works/pi-agent-core";
 import type {
     AbortParams,
     PromptParams,
@@ -48,7 +48,7 @@ const COMPACTION_WAIT_MS = 35_000;
  *
  * Proceeding regardless (the previous behaviour) means calling `harness.prompt()`
  * while the harness is in its `compaction` phase, which throws
- * `AgentHarnessError("busy")` — an error the client cannot act on. Returning
+ * `HarnessFault("busy")` — an error the client cannot act on. Returning
  * `session_busy` instead gives callers a retryable, documented code.
  *
  * The desktop freezes its composer for the duration of a compaction, so callers
@@ -77,7 +77,14 @@ async function requireCompactionSettled(
  * transient, retryable condition behind a generic server error.
  */
 function rethrowBusyAsSessionBusy(e: unknown): never {
-    if (e instanceof AgentHarnessError && e.code === "busy") {
+    if (
+        e instanceof HarnessFault &&
+        // pi 0.84 dropped the `code` field — LaneBusy is the specific
+        // "busy" subclass and the legacy mocks use `message === "busy"`.
+        ((e as { constructor?: { name?: string } }).constructor?.name === "LaneBusy" ||
+            (e as { name?: string }).name === "LaneBusy" ||
+            (e as { message?: string }).message === "busy")
+    ) {
         throw new RpcHandlerError(
             ErrorCodes.SessionBusy,
             "a turn is already active for this session; retry shortly",
@@ -106,9 +113,9 @@ export function registerSessionTurnHandlers(): void {
             const title = params.text.slice(0, 60).replace(/\n+/g, " ").trim();
             if (title) {
                 try {
-                    await attached.session.appendSessionName(title);
+                    await attached.session.setName(title);
                 } catch (e) {
-                    log.error("appendSessionName failed:", e);
+                    log.error("setName failed:", e);
                 }
             }
             const assistantMessage = await attached

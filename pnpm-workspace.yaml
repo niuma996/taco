@@ -20,6 +20,10 @@ minimumReleaseAgeExclude:
   - '@earendil-works/pi-ai@0.82.1'
   - '@taco-ai/sidecar-darwin-arm64@0.1.0'
   - '@taco-ai/sidecar-win32-x64@0.1.0'
+  - '@earendil-works/chord@0.85.1'
+  - '@earendil-works/pi-agent-core@0.85.1'
+  - '@earendil-works/pi-ai@0.85.1'
+  - '@earendil-works/pi-telemetry@0.85.1'
 peerDependencyRules:
   ignoreMissing:
     - "@earendil-works/*"

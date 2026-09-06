@@ -15,20 +15,23 @@
  * concurrent calls never merge on a stale harness snapshot.
  */
 
-import type {
-    AgentHarnessTool,
-    ExecutionToolContext,
-    Session,
-} from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 
-/** Minimal harness surface required by the controller — allows a fake for unit tests. */
+/**
+ * Minimal harness/lane surface required by the controller — allows a fake for
+ * unit tests.
+ *
+ * pi 0.85 splits tool state across the two objects: the harness owns the tool
+ * *definitions* (`getTools`/`setTools`) while the lane owns which of them are
+ * *active* (`getActiveTools`/`setActiveTools`, persisted in the lane's
+ * configuration). Both halves are needed to merge a dynamic tool in.
+ */
 export interface ToolCollection {
-    getTools(): readonly AgentHarnessTool<ExecutionToolContext>[];
-    setTools(
-        tools: readonly AgentHarnessTool<ExecutionToolContext>[],
-        activeToolNames?: readonly string[],
-    ): Promise<void>;
-    getActiveTools(): readonly AgentHarnessTool<ExecutionToolContext>[];
+    getTools(): Promise<readonly AgentHarnessTool<ExecutionToolContext>[]>;
+    setTools(tools: readonly AgentHarnessTool<ExecutionToolContext>[]): Promise<void>;
+    /** Active tool NAMES — pi 0.85 returns names, not tool objects. */
+    getActiveToolNames(): Promise<readonly string[]>;
+    setActiveToolNames(names: readonly string[]): Promise<void>;
 }
 
 import type { TacoTool } from "../tools/index.ts";
@@ -50,18 +53,18 @@ export interface SessionToolController {
     /** Called by AttachedSession.create after the harness is constructed. */
     bindHarness(harness: ToolCollection): void;
     /**
-     * Restores tools persisted in the session branch and returns the loaded tool objects.
-     * MUST be called before the harness is constructed; the caller merges the returned
-     * tools into the initial tools array — this avoids a spurious active_tools_change
-     * write on attach.
+     * Restores tools recorded in the lane's persisted active-tool list and
+     * returns the loaded tool objects. MUST be called before the harness is
+     * constructed; the caller merges the returned tools into the initial tools
+     * array, which avoids a redundant config write on attach.
      */
-    restoreTools(session: Session): Promise<TacoTool[]>;
+    restoreTools(activeToolNames: readonly string[]): Promise<TacoTool[]>;
     /** Merges tools into the harness and persists the active-name list. */
     addTools(names: readonly string[]): Promise<AddToolsResult>;
     /** Names of dynamic tools loaded in this session (excludes built-ins). */
     loadedToolNames(): readonly string[];
-    /** Current active tool names (built-ins + dynamic, mirrors harness state). */
-    activeToolNames(): readonly string[];
+    /** Current active tool names (built-ins + dynamic, mirrors lane state). */
+    activeToolNames(): Promise<readonly string[]>;
     /** The registry for this session — used by AddTools.description to list candidates. */
     readonly registry: DeferredToolRegistry;
 }
@@ -85,9 +88,9 @@ export class DefaultSessionToolController implements SessionToolController {
         return [...this.loadedNames];
     }
 
-    activeToolNames(): readonly string[] {
+    async activeToolNames(): Promise<readonly string[]> {
         if (!this.harness) return [];
-        return this.harness.getActiveTools().map((t) => t.name);
+        return [...(await this.harness.getActiveToolNames())];
     }
 
     /**
@@ -103,9 +106,8 @@ export class DefaultSessionToolController implements SessionToolController {
      * always tools because setTools records the full active set, so the
      * filter has to happen here rather than relying on the harness to drop them.
      */
-    async restoreTools(session: Session): Promise<TacoTool[]> {
-        const context = await session.buildContext();
-        const persistedNames = context.activeToolNames ?? [];
+    async restoreTools(activeToolNames: readonly string[]): Promise<TacoTool[]> {
+        const persistedNames = activeToolNames;
         const alwaysNames = new Set(this.registry.listAlways().map((c) => c.name));
         const loaded = new Map<string, TacoTool>();
         for (const name of persistedNames) {
@@ -143,8 +145,8 @@ export class DefaultSessionToolController implements SessionToolController {
         if (!harness) {
             throw new Error("session tool controller not bound to a harness yet");
         }
-        const currentTools = new Map(harness.getTools().map((t) => [t.name, t]));
-        const activeNames = new Set(harness.getActiveTools().map((t) => t.name));
+        const currentTools = new Map((await harness.getTools()).map((t) => [t.name, t]));
+        const activeNames = new Set(await harness.getActiveToolNames());
 
         const added: string[] = [];
         const skipped: string[] = [];
@@ -183,7 +185,11 @@ export class DefaultSessionToolController implements SessionToolController {
         if (failed.length > 0) return { added: [], skipped, unknown, failed };
 
         if (added.length > 0) {
-            await harness.setTools([...currentTools.values()], [...activeNames, ...added]);
+            // Definitions first, then the active set: pi validates that every
+            // active name resolves to a registered tool, so widening the active
+            // list before the definitions land would be rejected.
+            await harness.setTools([...currentTools.values()]);
+            await harness.setActiveToolNames([...activeNames, ...added]);
             for (const name of added) {
                 if (!this.loadedNames.includes(name)) this.loadedNames.push(name);
             }

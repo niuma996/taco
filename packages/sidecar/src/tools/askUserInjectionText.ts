@@ -8,6 +8,7 @@
 
 import type { AskUserQuestion, AskUserToolDetails } from "@taco-ai/protocol";
 import type { AttachedSession } from "../runtime/attachedSession.ts";
+import { findBranchEntries } from "../runtime/sessionBranch.ts";
 
 export function formatAskUserContextBody(
     toolName: string,
@@ -41,7 +42,7 @@ export async function resolveAskUserQuestions(
     toolCallId: string,
     expectedToolName: string,
 ): Promise<AskUserQuestion[] | null> {
-    const entries = await attached.session.getBranch();
+    const entries = await findBranchEntries(attached.session);
     for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i];
         if (entry?.type !== "message") continue;

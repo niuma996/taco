@@ -54,10 +54,14 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
         async execute(
             toolCallId: string,
             params: AgentContinueInput,
-            signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
+            _onUpdate: unknown,
             _context: ExecutionToolContext,
+            _invocation: unknown,
+            piContext: { abortSignal?: AbortSignal },
         ): Promise<{ content: TextContent[]; details: AgentContinueToolDetails }> {
+            // pi 0.85 carries cancellation on the Context rather than a
+            // dedicated parameter.
+            const signal = piContext.abortSignal;
             const { subSessionId, resultText, isError } = await ctx.continue({
                 parentToolCallId: toolCallId,
                 subSessionId: params.subSessionId,

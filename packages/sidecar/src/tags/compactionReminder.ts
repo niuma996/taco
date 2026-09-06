@@ -9,8 +9,10 @@
  * multiplexes many harnesses. A shared module flag would leak across sessions.
  */
 
-import type { ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+
 import { createUserMessage, tagWrap } from "./builder.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+
 
 const REMINDER_TEXT =
     "The conversation was just compacted. Older messages have been summarized. " +

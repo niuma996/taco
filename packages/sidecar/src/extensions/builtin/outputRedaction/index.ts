@@ -8,11 +8,13 @@
  * Zero-overhead on miss: returns `undefined` when nothing was redacted.
  */
 
-import type { ToolResultEvent, ToolResultPatch } from "@earendil-works/pi-agent-core";
+
 import type { TextContent } from "@earendil-works/pi-ai";
 import { createLogger } from "../../../lib/logger.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
 import type { ToolResultHook } from "../../types.ts";
+import type { ToolResultEvent, ToolResultPatch } from "../../../extensions/types.ts";
+
 
 const log = createLogger("output-redaction");
 
