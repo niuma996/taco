@@ -71,6 +71,7 @@ import { tacoHome } from "../config/tacoHome.ts";
 import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
 import { SingleFlight } from "../lib/async.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
@@ -944,10 +945,11 @@ export class SidecarServer implements ServerRpcSurface {
         // string". Combined with `defaultSkillDirs` (also forward-slash
         // normalized) both sides of the comparison agree.
         const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
-        const loaded = await loadSourcedSkills(
+        const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
             skillEnv,
             defaultSkillDirs(fsCwd),
             (skill, source): TacoSkill => ({ ...skill, source }),
+            harnessContext,
         );
         // pi's loadSourcedSkills does not dedupe internally; defaultSkillDirs
         // places .taco/skills first and builtin last, so dedupeSkillsByName

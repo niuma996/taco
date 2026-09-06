@@ -17,6 +17,7 @@ import type {
     SessionListCursor,
     SessionListEntry,
     SessionListParams,
+    SessionId,
 } from "@taco-ai/protocol";
 import {
     ErrorCodes,
@@ -30,7 +31,9 @@ import {
     sessionRenameSchema,
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
+import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
+import type { SessionFacts } from "../../runtime/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -42,16 +45,25 @@ export function registerSessionLifecycleHandlers(): void {
         true,
         async ({ workspace, cwd, params }: MethodCtx<SessionListParams>) => {
             const list = await workspace.listSessions();
+            // Subagent sessions are hidden from the main list. The kind is a
+            // taco fact in the session's value store (pi 0.85 removed the
+            // free-form metadata bag), so it has to be read per session rather
+            // than filtered off the cheap repo.list() metadata.
+            const entries = await Promise.all(
+                list.map(async (m) => ({
+                    meta: m,
+                    facts: await workspace
+                        .getSessionFacts(m.id as SessionId)
+                        // A session whose facts cannot be read (deleted mid-list,
+                        // or written before this scheme existed) is treated as
+                        // "main" so it stays visible rather than vanishing.
+                        .catch(() => ({}) as Awaited<ReturnType<typeof workspace.getSessionFacts>>),
+                })),
+            );
             const all = await Promise.all(
-                list
-                    // Hide subagent sessions: the main list shows main sessions plus
-                    // legacy data (no metadata => treated as main).
-                    .filter((m) => {
-                        const md = m.metadata as Record<string, unknown> | undefined;
-                        const kind = md?.kind;
-                        return kind === undefined || kind === "main";
-                    })
-                    .map((m) => buildSessionEntry(workspace, m)),
+                entries
+                    .filter(({ facts }) => facts.kind === undefined || facts.kind === "main")
+                    .map(({ facts, meta }) => buildSessionEntry(workspace, meta, facts)),
             );
             // Sort by updatedAt desc with createdAt fallback, id desc tiebreaker.
             const sorted = sortSessionsDesc(all);
@@ -95,14 +107,19 @@ export function registerSessionLifecycleHandlers(): void {
                 );
             }
             const sessionId = params.sessionId ?? uuidv7();
-            const imRouting = params.imRouting ?? workspace.imRouting;
-            const session = await workspace.repo.create({
-                id: sessionId,
-                cwd: workspace.sessionCwd,
-                ...(imRouting ? { metadata: { imRouting } } : {}),
-            });
+            // `imRouting` used to be stashed in the session's metadata bag, which
+            // pi 0.85 removed. Nothing ever read it back — IM routing is derived
+            // from the workspace (`workspace.imRouting`) on every use — so it is
+            // simply not persisted any more.
+            const session = await workspace.repo.create(
+                {
+                    id: sessionId,
+                    cwd: workspace.sessionCwd,
+                },
+                harnessContext,
+            );
             workspace.invalidateListCache();
-            const meta = await session.getMetadata();
+            const meta = session.metadata;
 
             let assistantMessage: AssistantMessage | null = null;
             const hasInitialImages =
@@ -118,7 +135,7 @@ export function registerSessionLifecycleHandlers(): void {
                         .trim();
                     if (title) {
                         try {
-                            await attached.session.setName(title);
+                            await attached.session.setName(title, harnessContext);
                         } catch (e) {
                             log.error("setName failed:", e);
                         }
@@ -132,7 +149,7 @@ export function registerSessionLifecycleHandlers(): void {
                 } catch (e) {
                     try {
                         await workspace.detach(meta.id);
-                        await workspace.repo.delete(meta);
+                        await workspace.repo.delete(meta, harnessContext);
                         workspace.invalidateListCache();
                     } catch {
                         // Cleanup is best-effort; swallow.
@@ -203,8 +220,8 @@ export function registerSessionLifecycleHandlers(): void {
 async function buildSessionEntry(
     workspace: WorkspaceRuntime,
     m: JsonlSessionMetadata,
+    md: SessionFacts,
 ): Promise<SessionListEntry> {
-    const md = (m.metadata ?? {}) as Record<string, unknown>;
     // File mtime approximates "last activity" — the .jsonl is appended on every
     // turn (prompt writes a session_info entry too). Tolerate a stat failure
     // (file deleted/renamed between repo.list and here): leave undefined so
@@ -221,11 +238,13 @@ async function buildSessionEntry(
         filePath: m.path,
         createdAt: String(m.createdAt),
         updatedAt,
-        kind: (md.kind as "main" | "subagent" | undefined) ?? "main",
-        agentType: typeof md.agentType === "string" ? md.agentType : undefined,
-        parentSessionId: typeof md.parentSessionId === "string" ? md.parentSessionId : undefined,
-        parentToolCallId: typeof md.parentToolCallId === "string" ? md.parentToolCallId : undefined,
-        depth: typeof md.depth === "number" ? md.depth : undefined,
+        kind: md.kind ?? "main",
+        agentType: md.agentType,
+        // `parentSessionId` is standard 0.85 metadata; the fact is the fallback
+        // for sessions written before it moved.
+        parentSessionId: m.parentSessionId ?? md.parentSessionId,
+        parentToolCallId: md.parentToolCallId,
+        depth: md.depth,
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
         name: await workspace.getName(m.id).catch((err) => {

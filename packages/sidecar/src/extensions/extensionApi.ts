@@ -7,7 +7,7 @@
  * `registry.addToolResultInterceptor` in `registerBuiltinExtensions`.
  */
 
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { ExtensionRegistry } from "./registry.ts";
@@ -69,7 +69,7 @@ export function createExtensionApi(
             if (!check("toolResult")) return;
             registry.addToolResultInterceptor(source, hook);
         },
-        registerTool(tool: AgentTool): void {
+        registerTool(tool: AgentHarnessTool<ExecutionToolContext>): void {
             if (!check("tools")) return;
             const existing = registry.toolsWithSource().find((e) => e.tool.name === tool.name);
             if (existing) {

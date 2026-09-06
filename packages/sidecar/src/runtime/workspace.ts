@@ -84,6 +84,7 @@ import { DefaultDeferredToolRegistry } from "./deferredToolRegistry.ts";
 import type { ModelInfo, ProviderInfo } from "./modelRegistry.ts";
 import { applyBuiltinProviders, ModelRegistry } from "./modelRegistry.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
+import type { SessionFacts } from "./sessionFacts.ts";
 import { type AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
 import type { SessionTaskState } from "./sessionTaskState.ts";
 import { dedupOverride, filterToolsForImPolicy } from "./toolAssembly.ts";
@@ -413,7 +414,7 @@ export class WorkspaceRuntime extends EventEmitter {
         // Two envs so storage identity and execution location cannot drift.
         this.sessionEnv = new NodeExecutionEnv({ cwd: this.sessionCwd });
         this.env = new NodeExecutionEnv({ cwd: this.executionCwd });
-        this.repo = new JsonlSessionRepo({ fs: this.sessionEnv, sessionsRoot: this.sessionsRoot });
+        this.repo = new JsonlSessionRepo({ fileSystem: this.sessionEnv, sessionsRoot: this.sessionsRoot });
 
         // Model catalog: use the caller's if given, otherwise build an empty one and
         // let applyBuiltinProviders register into it. Credentials come from
@@ -956,6 +957,14 @@ export class WorkspaceRuntime extends EventEmitter {
         sessionId: SessionId,
     ): Promise<{ leafEntryId: string | null; entries: Entry[] }> {
         return await this.sessionRegistry.getHistory(sessionId);
+    }
+
+    /**
+     * Durable sidecar facts for a session (kind / agentType / depth / parent
+     * linkage). Replaces the free-form session metadata that pi 0.85 removed.
+     */
+    async getSessionFacts(sessionId: SessionId): Promise<SessionFacts> {
+        return await this.sessionRegistry.getSessionFacts(sessionId);
     }
 
     // ─────────── attach / detach (delegates to SessionRegistry) ───────────

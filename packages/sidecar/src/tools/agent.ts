@@ -5,7 +5,11 @@
  * { subSessionId, agentType } as `details`.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+} from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { AgentToolDetails } from "@taco-ai/protocol";
 import type { Static } from "typebox";
@@ -112,7 +116,7 @@ export function createAgentTool(
             _onUpdate: unknown,
             _context: ExecutionToolContext,
             _invocation: unknown,
-            piContext: { abortSignal?: AbortSignal },
+            piContext: Context,
         ): Promise<{ content: TextContent[]; details: AgentToolDetails }> {
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.

@@ -6,7 +6,11 @@
  */
 
 import { isAbsolute, relative } from "node:path";
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+} from "@earendil-works/pi-agent-core";
 import { getOrThrow } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import fg from "fast-glob";
@@ -53,12 +57,12 @@ export function createGlobTool(): GlobTool {
             _onUpdate: unknown,
             { env }: ExecutionToolContext,
             _invocation: unknown,
-            piContext: { abortSignal?: AbortSignal },
+            piContext: Context,
         ): Promise<{ content: TextContent[]; details: { count: number; truncated: boolean } }> {
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.
             const signal = piContext.abortSignal;
-            const cwdResult = await env.absolutePath(params.path ?? ".", signal);
+            const cwdResult = await env.absolutePath(params.path ?? ".", piContext);
             const root = getOrThrow(cwdResult);
 
             let matches = await fg(params.pattern, {
@@ -71,7 +75,7 @@ export function createGlobTool(): GlobTool {
             });
 
             // fast-glob does not parse .gitignore — fill the gap with the `ignore` package.
-            const gitignoreResult = await env.readTextFile(`${root}/.gitignore`, signal);
+            const gitignoreResult = await env.readTextFile(`${root}/.gitignore`, piContext);
             if (gitignoreResult.ok) {
                 const ig = ignore().add(gitignoreResult.value);
                 matches = matches.filter((m) => {

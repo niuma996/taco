@@ -1,6 +1,6 @@
 
 import { createUserMessage, tagWrap } from "../tags/builder.ts";
-import type { PlanModeState } from "../tools/planModeState.ts";
+import type { PlanModeState } from "../plan/planModeState.ts";
 import { findActiveListId } from "./activeList.ts";
 import type { TaskStore } from "./taskTypes.ts";
 import { isUnfinishedStatus } from "./taskTypes.ts";

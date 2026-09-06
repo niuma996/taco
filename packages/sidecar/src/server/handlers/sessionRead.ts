@@ -9,6 +9,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type {
     AttachParams,
     SessionEventsGetParams,
+    SessionId,
     SessionHistory,
     SessionSnapshot,
     SessionSnapshotGetParams,
@@ -54,7 +55,8 @@ function toSessionHistory(
                     parentId: e.parentId,
                     type: e.type,
                     payload: { ...msg, content } as Payload,
-                    timestamp: e.timestamp,
+                    // pi 0.85 stores epoch millis; the wire contract is an ISO string.
+                    timestamp: new Date(e.timestamp).toISOString(),
                 },
             ];
         }
@@ -64,7 +66,8 @@ function toSessionHistory(
                 parentId: e.parentId,
                 type: e.type,
                 payload,
-                timestamp: e.timestamp,
+                // pi 0.85 stores epoch millis; the wire contract is an ISO string.
+                timestamp: new Date(e.timestamp).toISOString(),
             },
         ];
     });
@@ -87,8 +90,12 @@ async function getPersistedSessionKind(
         );
     }
     const session = matches[0];
-    const metadata = session?.metadata as Record<string, unknown> | undefined;
-    return metadata?.kind === "subagent" ? "subagent" : "main";
+    if (!session) return "main";
+    // The kind is a taco fact in the session's value store; pi 0.85 removed the
+    // free-form metadata bag that used to carry it. An unreadable session is
+    // treated as "main" rather than failing the request.
+    const facts = await workspace.getSessionFacts(session.id as SessionId).catch(() => undefined);
+    return facts?.kind === "subagent" ? "subagent" : "main";
 }
 
 export function registerSessionReadHandlers(): void {

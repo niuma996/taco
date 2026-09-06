@@ -9,7 +9,11 @@
 
 import { spawnSync } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+} from "@earendil-works/pi-agent-core";
 import { getOrThrow } from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import fg from "fast-glob";
@@ -62,9 +66,9 @@ function hasRipgrep(): boolean {
 async function loadIgnoreFilter(
     env: ExecutionToolContext["env"],
     root: string,
-    signal: AbortSignal | undefined,
+    piContext: Context,
 ): Promise<((rel: string) => boolean) | null> {
-    const result = await env.readTextFile(`${root}/.gitignore`, signal);
+    const result = await env.readTextFile(`${root}/.gitignore`, piContext);
     if (!result.ok) return null;
     const ig = ignore().add(result.value);
     // Coerce any absolute fast-glob result back to root-relative before
@@ -89,10 +93,10 @@ async function loadIgnoreFilter(
 async function buildRipgrepIgnoreContent(
     env: ExecutionToolContext["env"],
     root: string,
-    signal?: AbortSignal,
+    piContext: Context,
 ): Promise<string> {
     const lines = [...SAFE_DEFAULT_IGNORES];
-    const result = await env.readTextFile(`${root}/.gitignore`, signal);
+    const result = await env.readTextFile(`${root}/.gitignore`, piContext);
     if (result.ok) {
         lines.push(result.value);
     }
@@ -132,9 +136,9 @@ async function runFallback(
     env: ExecutionToolContext["env"],
     root: string,
     params: GrepToolInput,
-    signal: AbortSignal | undefined,
+    piContext: Context,
 ): Promise<string[]> {
-    const ig = await loadIgnoreFilter(env, root, signal);
+    const ig = await loadIgnoreFilter(env, root, piContext);
     const re = new RegExp(params.pattern, params.ignoreCase ? "i" : "");
 
     let files = fg.sync(params.glob ?? "**/*", {
@@ -149,9 +153,9 @@ async function runFallback(
     const out: string[] = [];
     for (const rel of files) {
         const absPath = resolve(root, rel);
-        const textResult = await env.readTextFile(absPath, signal);
+        const textResult = await env.readTextFile(absPath, piContext);
         if (!textResult.ok) continue; // binary / unreadable — skip
-        if (signal?.aborted) throw new Error("Operation aborted");
+        if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
         const lines = textResult.value.split("\n");
         for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i])) out.push(`${rel}:${i + 1}:${lines[i]}`);
@@ -179,18 +183,18 @@ export function createGrepTool(): GrepTool {
             _onUpdate: unknown,
             { env }: ExecutionToolContext,
             _invocation: unknown,
-            piContext: { abortSignal?: AbortSignal },
+            piContext: Context,
         ): Promise<{ content: TextContent[]; details: { count: number; truncated: boolean } }> {
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.
             const signal = piContext.abortSignal;
-            const cwdResult = await env.absolutePath(params.path ?? ".", signal);
+            const cwdResult = await env.absolutePath(params.path ?? ".", piContext);
             const root = getOrThrow(cwdResult);
-            const ignoreContent = await buildRipgrepIgnoreContent(env, root, signal);
+            const ignoreContent = await buildRipgrepIgnoreContent(env, root, piContext);
 
             const rawLines = hasRipgrep()
                 ? await runRipgrep(root, params, ignoreContent)
-                : await runFallback(env, root, params, signal);
+                : await runFallback(env, root, params, piContext);
 
             if (signal?.aborted) throw new Error("Operation aborted");
             const truncated = rawLines.length > MAX_LINES;

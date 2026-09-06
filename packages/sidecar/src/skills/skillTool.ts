@@ -8,7 +8,13 @@
  *  - subagent skills: calls spawnSkillSubagent to run in a sandboxed session.
  */
 
-import type { AgentTool, AgentToolResult, Skill } from "@earendil-works/pi-agent-core";
+import type {
+    Context,
+    AgentHarnessTool,
+    AgentToolResult,
+    ExecutionToolContext,
+    Skill,
+} from "@earendil-works/pi-agent-core";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 
@@ -75,7 +81,7 @@ export function createSkillTool(
          */
         skillAuthoringGuidance?: string;
     },
-): AgentTool<typeof skillSchema> {
+): AgentHarnessTool<ExecutionToolContext, typeof skillSchema, SkillToolDetails> {
     const { parentSessionId, getReinjector, spawnSkillSubagent, skillAuthoringGuidance } = options;
     const baseDescription =
         "Invoke a skill — a specialized playbook or workflow loaded from the skill library. " +
@@ -92,8 +98,14 @@ export function createSkillTool(
         async execute(
             toolCallId: string,
             params: SkillToolInput,
-            signal?: AbortSignal,
+            _onUpdate: unknown,
+            _toolContext: unknown,
+            _invocation: unknown,
+            piContext: Context,
         ): Promise<AgentToolResult<SkillToolDetails>> {
+            // pi 0.85 carries cancellation on the Context rather than a
+            // dedicated parameter.
+            const signal = piContext.abortSignal;
             const skills = getSkills();
             const skill = skills.find((s) => s.name === params.skill);
             if (!skill) {

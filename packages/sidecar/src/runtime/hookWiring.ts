@@ -17,8 +17,9 @@ import type {
     ExecutionToolContext,
     JsonValue,
     Skill,
+    ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Models } from "@earendil-works/pi-ai";
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
 import type { CheckpointManager } from "../checkpoints/manager.ts";
 import { redactString } from "../extensions/builtin/outputRedaction/index.ts";

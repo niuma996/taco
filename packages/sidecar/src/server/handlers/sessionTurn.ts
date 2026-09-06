@@ -22,6 +22,7 @@ import {
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 
+import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
@@ -113,7 +114,7 @@ export function registerSessionTurnHandlers(): void {
             const title = params.text.slice(0, 60).replace(/\n+/g, " ").trim();
             if (title) {
                 try {
-                    await attached.session.setName(title);
+                    await attached.session.setName(title, harnessContext);
                 } catch (e) {
                     log.error("setName failed:", e);
                 }

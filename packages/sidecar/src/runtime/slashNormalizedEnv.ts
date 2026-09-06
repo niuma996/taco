@@ -17,6 +17,7 @@
  * inside loadSkillsFromDirInternal.
  */
 
+import type { Context } from "@earendil-works/pi-agent-core";
 import type { FileError, FileInfo, Result } from "@earendil-works/pi-agent-core/node";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
@@ -36,21 +37,27 @@ function normalizeFileInfo(info: FileInfo): FileInfo {
 export class SlashNormalizedExecutionEnv extends NodeExecutionEnv {
     override async listDir(
         path: string,
-        abortSignal?: AbortSignal,
+        context: Context,
     ): Promise<Result<FileInfo[], FileError>> {
-        const result = await super.listDir(path, abortSignal);
+        const result = await super.listDir(path, context);
         if (!result.ok) return result;
         return { ok: true, value: result.value.map(normalizeFileInfo) };
     }
 
-    override async fileInfo(path: string): Promise<Result<FileInfo, FileError>> {
-        const result = await super.fileInfo(path);
+    override async fileInfo(
+        path: string,
+        context: Context,
+    ): Promise<Result<FileInfo, FileError>> {
+        const result = await super.fileInfo(path, context);
         if (!result.ok) return result;
         return { ok: true, value: normalizeFileInfo(result.value) };
     }
 
-    override async canonicalPath(path: string): Promise<Result<string, FileError>> {
-        const result = await super.canonicalPath(path);
+    override async canonicalPath(
+        path: string,
+        context: Context,
+    ): Promise<Result<string, FileError>> {
+        const result = await super.canonicalPath(path, context);
         if (!result.ok) return result;
         return { ok: true, value: result.value.replace(/\\/g, "/") };
     }

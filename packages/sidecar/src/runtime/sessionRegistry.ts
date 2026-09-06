@@ -33,6 +33,7 @@ import type { SubagentContextMode, SubagentSpawnContext } from "../agents/types.
 import type { CheckpointStore } from "../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../config/config.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import type { SkillReinjectorHandle } from "../skills/skillReinjector.ts";
 import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
@@ -44,6 +45,8 @@ import { createAgentContinueTool } from "../tools/agentContinue.ts";
 import type { TacoToolContext } from "../tools/context.ts";
 import type { TacoTool } from "../tools/index.ts";
 import { AttachedSession } from "./attachedSession.ts";
+import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
+import { readSessionFacts, type SessionFacts } from "./sessionFacts.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
 
@@ -301,7 +304,7 @@ export class SessionRegistry extends EventEmitter {
     async listSessions(): Promise<JsonlSessionMetadata[]> {
         if (!this._metadataCache) {
             try {
-                const list = await this.repo.list({ cwd: this.sessionCwd });
+                const list = await this.repo.list({ cwd: this.sessionCwd }, harnessContext);
                 // Empty result is not cached: repo.list silently skips unparseable .jsonl files (invalid_session),
                 // and sidecar restart / fs-not-ready transient jitter may return an empty batch.
                 // If an empty array were cached, _metadataCache would become truthy and never refetch,
@@ -358,14 +361,16 @@ export class SessionRegistry extends EventEmitter {
             } catch {
                 break;
             }
-            const md = meta.metadata as Record<string, unknown> | undefined;
-            const parent =
-                typeof md?.parentSessionId === "string"
-                    ? (md.parentSessionId as SessionId)
-                    : undefined;
+            // `parentSessionId` is standard 0.85 metadata; `parentToolCallId`
+            // is a taco fact, so it comes from the values store.
+            const facts = await readSessionFacts(
+                await this.repo.open(meta, harnessContext),
+            );
+            const parent = (meta.parentSessionId ?? facts.parentSessionId) as
+                | SessionId
+                | undefined;
             if (!parent) break;
-            const tcid = typeof md?.parentToolCallId === "string" ? md.parentToolCallId : undefined;
-            if (tcid) rootToolCallId = tcid;
+            if (facts.parentToolCallId) rootToolCallId = facts.parentToolCallId;
             current = parent;
         }
         return { displaySessionId: current, displayToolCallId: rootToolCallId };
@@ -379,8 +384,8 @@ export class SessionRegistry extends EventEmitter {
      */
     async renameSession(sessionId: SessionId, name: string): Promise<void> {
         const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta);
-        await session.setName(name);
+        const session = await this.repo.open(meta, harnessContext);
+        await session.setName(name, harnessContext);
         this._nameCache.set(sessionId, name);
     }
 
@@ -395,14 +400,32 @@ export class SessionRegistry extends EventEmitter {
         return name;
     }
 
+    /**
+     * Read the sidecar's durable facts for a session (kind / agentType / depth /
+     * parent linkage).
+     *
+     * pi 0.85 fixed the session metadata shape, so these live in the session's
+     * value store and require opening the session. Callers that need them for
+     * every session in a list should expect one open per session.
+     */
+    async getSessionFacts(sessionId: SessionId): Promise<SessionFacts> {
+        const meta = await this.openSession(sessionId);
+        const session = await this.repo.open(meta, harnessContext);
+        return readSessionFacts(session);
+    }
+
     /** Get the full chat tree history (from session leaf up to root). */
     async getHistory(
         sessionId: SessionId,
     ): Promise<{ leafEntryId: string | null; entries: Entry[] }> {
         const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta);
-        const leafId = await session.getLeafId();
-        const entries = await session.findEntries();
+        const session = await this.repo.open(meta, harnessContext);
+        // Branch walk, not a whole-log scan: history is the conversation as it
+        // currently stands, so entries on abandoned branches must stay out.
+        const [leafId, entries] = await Promise.all([
+            findBranchTipId(session),
+            findBranchEntries(session),
+        ]);
         return { leafEntryId: leafId, entries };
     }
 
@@ -514,9 +537,9 @@ export class SessionRegistry extends EventEmitter {
             taskState ?? (await buildSessionTaskState(sessionId, this.sessionsRoot));
 
         const meta = await this.openSession(sessionId);
-        const md = meta.metadata as Record<string, unknown> | undefined;
-        this.sessionKinds.set(sessionId, md?.kind === "subagent" ? "subagent" : "main");
-        const session = await this.repo.open(meta);
+        const session = await this.repo.open(meta, harnessContext);
+        const facts = await readSessionFacts(session);
+        this.sessionKinds.set(sessionId, facts.kind === "subagent" ? "subagent" : "main");
         const attached = await AttachedSession.create({
             session,
             models: this.models,
@@ -570,7 +593,7 @@ export class SessionRegistry extends EventEmitter {
     async deleteSession(sessionId: SessionId): Promise<void> {
         await this.detach(sessionId);
         const meta = await this.openSession(sessionId);
-        await this.repo.delete(meta);
+        await this.repo.delete(meta, harnessContext);
         this.sessionKinds.delete(sessionId);
         this.invalidateListCache();
         this.emit("session.deleted", { sessionId });

@@ -6,7 +6,11 @@
  * returned, not thrown, so the model can decide how to respond.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+} from "@earendil-works/pi-agent-core";
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { Type } from "typebox";
@@ -145,7 +149,7 @@ export function createShellTool(opts?: {
             _onUpdate: unknown,
             { env }: ExecutionToolContext,
             _invocation: unknown,
-            piContext: { abortSignal?: AbortSignal },
+            piContext: Context,
         ): Promise<ShellToolResult> {
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.

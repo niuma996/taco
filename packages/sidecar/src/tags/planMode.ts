@@ -7,7 +7,7 @@
  */
 
 
-import type { PlanModeState } from "../tools/planModeState.ts";
+import type { PlanModeState } from "../plan/planModeState.ts";
 import { createUserMessage, tagWrap } from "./builder.ts";
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 

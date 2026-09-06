@@ -6,7 +6,7 @@ import type {
     JsonlSessionRepo,
     Entry,
 } from "@earendil-works/pi-agent-core";
-import type { HarnessEvent } from "./harnessEvents.ts";
+import type { HarnessEvent } from "@earendil-works/pi-agent-core";
 import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
@@ -20,7 +20,10 @@ import { interpolateArgs } from "../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
 import type { TacoTool } from "../tools/index.ts";
 import { createShellTool } from "../tools/shellTool.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import type { AttachedSession } from "./attachedSession.ts";
+import { findBranchEntries } from "./sessionBranch.ts";
+import { readSessionFacts, type SessionFacts, writeSessionFacts } from "./sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
 import type { SessionTaskState } from "./sessionTaskState.ts";
 import { uuidv7 } from "@earendil-works/pi-agent-core";
@@ -372,23 +375,29 @@ export class AgentSpawner extends EventEmitter {
                 throw new Error("executeSubagentSession: childDepth must be provided by caller");
             })();
 
-        // 1. Create child session
+        // 1. Create child session. pi 0.85 fixed the metadata shape, so the
+        //    sidecar's own attributes are written as session values straight
+        //    after creation rather than passed to create().
         const childSessionId = uuidv7();
-        await this.repo.create({
-            id: childSessionId,
-            cwd: this.sessionCwd,
-            metadata: {
-                kind: "subagent",
-                agentType: args.agentType,
+        const childSession = await this.repo.create(
+            {
+                id: childSessionId,
+                cwd: this.sessionCwd,
                 parentSessionId: args.parentSessionId,
-                parentToolCallId: args.parentToolCallId,
-                depth: childDepth,
-                ...(args.forkedContext !== undefined ? { forkedContext: args.forkedContext } : {}),
             },
+            harnessContext,
+        );
+        await writeSessionFacts(childSession, {
+            kind: "subagent",
+            agentType: args.agentType,
+            parentSessionId: args.parentSessionId,
+            parentToolCallId: args.parentToolCallId,
+            depth: childDepth,
+            ...(args.forkedContext !== undefined ? { forkedContext: args.forkedContext } : {}),
         });
         this.sessionRegistry.invalidateListCache();
 
-        // 2. Emit spawned (same agentType as metadata)
+        // 2. Emit spawned (same agentType as the persisted facts)
         this.emit("subagent.spawned", {
             parentSessionId: args.parentSessionId,
             parentToolCallId: args.parentToolCallId,
@@ -546,7 +555,7 @@ export class AgentSpawner extends EventEmitter {
         // Compute parent depth to feed filterToolsForAgent before delegating.
         const parentMeta = await this.sessionRegistry.openSession(args.parentSessionId);
         const parentDepth = Number(
-            (parentMeta.metadata as Record<string, unknown> | undefined)?.depth ?? 0,
+            (parentMeta as unknown as Record<string, unknown> | undefined)?.depth ?? 0,
         );
         const childDepth = parentDepth + 1;
         const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
@@ -556,8 +565,8 @@ export class AgentSpawner extends EventEmitter {
         // later resume re-injects byte-identically.
         let forkedContext: string | undefined;
         if (contextMode === "fork") {
-            const parentSession = await this.repo.open(parentMeta);
-            forkedContext = buildForkedContext(await parentSession.findEntriesOnBranch());
+            const parentSession = await this.repo.open(parentMeta, harnessContext);
+            forkedContext = buildForkedContext(await findBranchEntries(parentSession));
         }
         return this.executeSubagentSession({
             parentSessionId: args.parentSessionId,
@@ -588,8 +597,8 @@ export class AgentSpawner extends EventEmitter {
         sessionId: SessionId,
     ): Promise<{ text: string; isEmpty: boolean }> {
         const meta = await this.sessionRegistry.openSession(sessionId);
-        const session = await this.repo.open(meta);
-        const entries = (await session.findEntriesOnBranch()) as Entry[];
+        const session = await this.repo.open(meta, harnessContext);
+        const entries = await findBranchEntries(session);
         let latestAssistantText = "";
         for (const entry of entries) {
             if (entry.type !== "message") continue;
@@ -659,11 +668,16 @@ export class AgentSpawner extends EventEmitter {
         prompt: string;
         signal?: AbortSignal;
     }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
-        // 1. Open the child metadata. Verify it exists, is a subagent, and
-        //    was spawned by the same parent that's now trying to resume.
+        // 1. Open the child session and read its facts. Verify it exists, is a
+        //    subagent, and was spawned by the same parent that's now trying to
+        //    resume. This is a trust boundary, so the checks below must run
+        //    against persisted state, never a caller-supplied value.
         let meta: JsonlSessionMetadata;
+        let md: SessionFacts;
         try {
             meta = await this.sessionRegistry.openSession(args.subSessionId);
+            const session = await this.repo.open(meta, harnessContext);
+            md = await readSessionFacts(session);
         } catch (e) {
             return {
                 subSessionId: args.subSessionId,
@@ -671,7 +685,6 @@ export class AgentSpawner extends EventEmitter {
                 isError: true,
             };
         }
-        const md = meta.metadata as Record<string, unknown> | undefined;
         if (md?.kind !== "subagent") {
             return {
                 subSessionId: args.subSessionId,
@@ -782,8 +795,8 @@ export class AgentSpawner extends EventEmitter {
     private async countAssistantTurns(sessionId: SessionId): Promise<number> {
         try {
             const meta = await this.sessionRegistry.openSession(sessionId);
-            const session = await this.repo.open(meta);
-            const entries = (await session.findEntriesOnBranch()) as Entry[];
+            const session = await this.repo.open(meta, harnessContext);
+            const entries = await findBranchEntries(session);
             let n = 0;
             for (const entry of entries) {
                 if (entry.type !== "message") continue;
@@ -880,7 +893,7 @@ export class AgentSpawner extends EventEmitter {
         // call inside executeSubagentSession.
         const parentMeta = await this.sessionRegistry.openSession(pid);
         const parentDepth = Number(
-            (parentMeta.metadata as Record<string, unknown> | undefined)?.depth ?? 0,
+            (parentMeta as unknown as Record<string, unknown> | undefined)?.depth ?? 0,
         );
         const childDepth = parentDepth + 1;
 

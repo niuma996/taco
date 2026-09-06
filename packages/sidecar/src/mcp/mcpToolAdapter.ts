@@ -13,6 +13,7 @@
  */
 
 import type {
+    Context,
     AgentHarnessTool,
     AgentToolResult,
     ExecutionToolContext,
@@ -96,10 +97,14 @@ export function createMcpToolAdapter(
         async execute(
             _toolCallId: string,
             params: unknown,
-            signal: AbortSignal | undefined,
-            _onUpdate: unknown | undefined,
-            _context: ExecutionToolContext,
+            _onUpdate: unknown,
+            _toolContext: ExecutionToolContext,
+            _invocation: unknown,
+            piContext: Context,
         ): Promise<AgentToolResult<McpToolExecDetails>> {
+            // pi 0.85 carries cancellation on the Context rather than a
+            // dedicated parameter.
+            const signal = piContext.abortSignal;
             if (signal?.aborted) throw new Error("Operation aborted");
             let result: McpCallResult;
             try {
