@@ -80,6 +80,28 @@ export function makePushFrame<TParams = unknown>(opts: PushEventOptions): Server
 export const SIDECAR_INSTANCE_ID = randomUUID();
 
 /**
+ * Restore the `assistantMessageEvent` field on a `message_update`.
+ *
+ * pi 0.85's type declaration says the streamed sub-event arrives as
+ * `assistantMessageEvent`, but the runtime emits it as `event`. Clients read
+ * the declared name, so without this the field is `undefined`, every streaming
+ * delta is dropped, and only the final `message_end` renders — the whole reply
+ * appears at once with no visible streaming. Type-checking cannot catch it:
+ * the shipped `.d.ts` disagrees with the shipped JS.
+ *
+ * Both names are emitted so the frame keeps working whichever one a client
+ * reads, and so a future pi release that honours its own declaration is a no-op
+ * here. Non-`message_update` events pass through untouched.
+ */
+export function normalizeMessageUpdate(event: unknown): unknown {
+    if (!event || typeof event !== "object") return event;
+    const e = event as { type?: unknown; event?: unknown; assistantMessageEvent?: unknown };
+    if (e.type !== "message_update") return event;
+    if (e.assistantMessageEvent !== undefined || e.event === undefined) return event;
+    return { ...e, assistantMessageEvent: e.event };
+}
+
+/**
  * Splits the three tool-execution HarnessEvent variants from the harness into
  * named push frames. Non-tool events return undefined — the caller falls back
  * to the generic session.event path.

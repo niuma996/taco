@@ -109,7 +109,12 @@ import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
 import { getRegisteredMethod, listRegisteredMethods, type MethodCtx } from "./methodRegistry.ts";
 import { registerBuiltinMethods } from "./methods.ts";
-import { makePushFrame, redactCommandPermissionRequest, toToolCallPush } from "./push.ts";
+import {
+    makePushFrame,
+    normalizeMessageUpdate,
+    redactCommandPermissionRequest,
+    toToolCallPush,
+} from "./push.ts";
 import {
     type CommandOutcome,
     err,
@@ -1249,7 +1254,9 @@ export class SidecarServer implements ServerRpcSurface {
                 });
                 return;
             }
-            this.emitPush(PushMethods.Event, workspaceKey, e.sessionId, { event: e.event });
+            this.emitPush(PushMethods.Event, workspaceKey, e.sessionId, {
+                event: normalizeMessageUpdate(e.event),
+            });
         });
         ws.permissionBroker.on("requested", (request) => {
             const [redacted] = redactCommandPermissionRequest(request);
