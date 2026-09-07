@@ -1,12 +1,14 @@
 /**
- * AttachedSession streaming — a real harness streaming a faux provider.
+ * AttachedSession turn behaviour, driven by a real harness over a faux provider.
  *
- * This is the test that catches "the whole reply appears at once with no
- * visible streaming". Unit tests over hand-written event literals cannot: the
- * bug was that pi 0.85 emits the streamed sub-event under a different name than
- * its own .d.ts declares, so any fixture written from the declaration is wrong
- * in exactly the way the product was wrong. The only guard is asserting on
- * events a real harness really emits.
+ * Both cases here need a real harness rather than event fixtures:
+ *
+ *  - Streaming: pi 0.85 emits the streamed sub-event under a different name than
+ *    its own .d.ts declares, so a fixture written from the declaration is wrong
+ *    in exactly the way the product was wrong — it passes while the UI shows the
+ *    whole reply at once. (The pre-existing applyEventToMessages test did.)
+ *  - A run that fails without a reply: the interesting value is the operation
+ *    record pi writes, which only exists when a real run terminates.
  */
 
 import { strict as assert } from "node:assert";
@@ -40,8 +42,10 @@ after(() => {
     rmSync(tmp, { recursive: true, force: true });
 });
 
-/** Stream `reply` through a real harness; return every republished event. */
-async function runStreamingTurn(reply: string): Promise<Array<Record<string, unknown>>> {
+/** Build an AttachedSession over a faux provider. `register: false` leaves the
+ *  provider out of the model registry, which makes the run fail with
+ *  `model_unavailable` — the cheapest way to reach a terminal non-success run. */
+async function makeAttached(reply: string, register = true) {
     const env = new NodeExecutionEnv({ cwd: tmp });
     const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(tmp, "sessions") });
     // tokensPerSecond: 0 removes the pacing delay — the deltas still arrive as
@@ -49,7 +53,7 @@ async function runStreamingTurn(reply: string): Promise<Array<Record<string, unk
     const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
     faux.setResponses([fauxAssistantMessage([fauxText(reply)])] as never);
     const models = createModels();
-    models.setProvider(faux.provider);
+    if (register) models.setProvider(faux.provider);
 
     const session = await repo.create({ cwd: tmp }, harnessContext);
     const attached = await AttachedSession.create({
@@ -72,6 +76,12 @@ async function runStreamingTurn(reply: string): Promise<Array<Record<string, unk
         getToolContext: () => ({ env, workspace: tmp as never }) as never,
     } as never);
 
+    return attached;
+}
+
+/** Stream `reply` through a real harness; return every republished event. */
+async function runStreamingTurn(reply: string): Promise<Array<Record<string, unknown>>> {
+    const attached = await makeAttached(reply);
     const events: Array<Record<string, unknown>> = [];
     attached.on("event", (ev: Record<string, unknown>) => events.push(ev));
     try {
@@ -113,5 +123,37 @@ describe("AttachedSession — streaming a turn", () => {
             .map((s) => s?.delta ?? "")
             .join("");
         assert.equal(streamed, "hello streaming world");
+    });
+});
+
+describe("AttachedSession.prompt — a run that fails without a reply", () => {
+    it("reports the operation's own error, not the missing-reply symptom", async () => {
+        // The run resolves ok:true (reaching a terminal state is not a call
+        // failure) with status "failed" and the reason in record.error. Reading
+        // the branch tip first finds the user message still there and reports
+        // "expected an assistant reply, got role=user" — the symptom, with the
+        // actual cause discarded.
+        const attached = await makeAttached("unused", false);
+        try {
+            await assert.rejects(
+                () => attached.prompt("hi", undefined, undefined),
+                (error: Error & { code?: string }) => {
+                    assert.match(error.message, /model_unavailable/);
+                    assert.equal(
+                        error.code,
+                        "model_unavailable",
+                        "code is carried for RPC mapping",
+                    );
+                    assert.doesNotMatch(
+                        error.message,
+                        /expected an assistant reply/,
+                        "the symptom must not mask the cause",
+                    );
+                    return true;
+                },
+            );
+        } finally {
+            await attached.dispose();
+        }
     });
 });

@@ -56,7 +56,7 @@ import {
 } from "./compactionController.ts";
 import { ContextInfoService } from "./contextInfoService.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
-import { toHarnessError } from "./harnessErrors.ts";
+import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
 import { PinOnceConsumer } from "./pinOnceConsumer.ts";
 import { sidecarVersion } from "./runtimeResources.ts";
@@ -685,6 +685,15 @@ export class AttachedSession extends EventEmitter {
             throw new Error(
                 `session.prompt suspended without a reply (operationId=${result.value.operationId})`,
             );
+        }
+
+        // A run that reaches a terminal state resolves `ok: true` — reaching one
+        // is not a call failure — so `status` has to be checked separately.
+        // `record.error` is the only place the reason lives; without this the
+        // failure surfaces as the "no assistant reply" error below, which
+        // reports the symptom and discards the cause (e.g. model_unavailable).
+        if (result.value.status !== "completed") {
+            throw toTerminalError("session.prompt", result.value);
         }
 
         const tipId = result.value.tipId;
