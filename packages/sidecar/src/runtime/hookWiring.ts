@@ -421,12 +421,6 @@ export async function wireHarnessHooks(
         disposers.push(onContext(buildTodoWriteReminderContextHook(() => getState().store)));
     }
 
-    // ── safety-net context hook — always returns event.messages so emitHook's
-    //    last-writer-wins semantics pick up all in-place mutations applied
-    //    by preceding hooks. Without it, if every hook returns undefined
-    //    the transformContext fallback reverts to the unmodified clone.
-    disposers.push(onContext((event) => ({ messages: event.messages })));
-
     // ── extension context hooks (wrapped, errors → undefined) ──
     const extCtxHooks = opts.extensionContextHooks ?? { builtins: [], external: [] };
     const allExtCtxHooks = [

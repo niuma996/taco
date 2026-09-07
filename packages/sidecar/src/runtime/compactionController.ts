@@ -144,7 +144,7 @@ export interface CompactionControllerOptions {
 /**
  * TTL cache duration (ms) for `effectiveCompaction()`. Each call reads
  * `~/.taco/taco.json` from disk, and the function is hot — invoked by
- * `maybeCompact()` on every `settled` and by `getCompactionThreshold` on every
+ * `maybeCompact()` on every `run_end` and by `getCompactionThreshold` on every
  * context build / `session_before_compact`. 1s covers 99% of "user changed
  * the threshold and immediately starts the next turn" scenarios; explicit
  * `invalidate()` (triggered by `settings.write`) makes user edits visible
@@ -165,7 +165,7 @@ export class CompactionController {
     private readonly now: Now;
     private readonly onLifecycle?: (signal: CompactionLifecycleSignal) => void;
     /**
-     * Serialized auto-compaction-check promise. Each `settled` event chains onto
+     * Serialized auto-compaction-check promise. Each `run_end` event chains onto
      * the current run; does not block the caller, and an error in one run never
      * propagates to the UI.
      */
@@ -293,15 +293,10 @@ export class CompactionController {
      * disposer per subscription for the caller to release on detach.
      *
      * Two triggers:
-     *  - `run_end` → schedule an auto-compaction check
+     *  - `run_end` → schedule an auto-compaction check (deferred via
+     *    `lane.runWhenIdle` so it cannot race a queued steer / follow-up
+     *    turn, and also covers compaction and navigation operations)
      *  - `compaction_end` → refresh PinOnceConsumer
-     *
-     * pi 0.85 removed the `settled` event that previously drove auto-compaction
-     * (it carried `nextTurnCount`, letting us skip the check while steer or
-     * follow-up turns were queued). The replacement is `run_end` plus
-     * `lane.runWhenIdle`, which defers the callback until the lane has no
-     * operation in flight — a stronger guarantee than the old queue-length
-     * check, since it also covers compaction and navigation operations.
      */
     subscribe(): Array<() => void> {
         const disposers: Array<() => void> = [];
@@ -385,7 +380,7 @@ export class CompactionController {
         try {
             await this.runCompact();
         } catch (e) {
-            // Busy / another settled already triggered it — swallow and retry on next settled.
+            // Busy / another run_end already triggered it — swallow and retry on next run_end.
             log.error("maybeCompact: harness.compact() failed:", e);
         }
     }

@@ -35,10 +35,9 @@ export const MAIN_BRANCH = "main";
 /**
  * All entries on the session's main branch, oldest-first.
  *
- * `Branch.findEntries` defaults to `newestFirst`; pre-0.85 `getBranch()`
- * returned oldest-first and every caller (context assembly, compaction
- * cut-points, fork history) depends on that order, so ask for it explicitly
- * rather than reversing afterwards.
+ * `Branch.findEntries` defaults to `newestFirst`; every caller (context
+ * assembly, compaction cut-points, fork history) depends on oldest-first,
+ * so ask for it explicitly rather than reversing afterwards.
  *
  * Returns `[]` when the branch does not exist yet — a session that has been
  * created but never written to has no tip.
@@ -54,8 +53,6 @@ export async function findBranchEntries(
 
 /**
  * The main branch's tip entry id, or `null` when the branch has no entries.
- *
- * Replaces pre-0.85 `session.getLeafId()`.
  */
 export async function findBranchTipId(
     session: Session,
@@ -111,9 +108,9 @@ function entryToContextMessages(entry: Entry): AgentMessage[] {
 /**
  * The message list the model would see for the current branch.
  *
- * Replaces pre-0.85 `session.buildContext().messages`. Entries before the most
- * recent compaction are dropped in favour of that compaction's summary, which
- * is what makes this a context view rather than a full transcript.
+ * Entries before the most recent compaction are dropped in favour of that
+ * compaction's summary, which is what makes this a context view rather than
+ * a full transcript.
  */
 export async function buildBranchContext(
     session: Session,

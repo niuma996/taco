@@ -1125,7 +1125,7 @@ export class SidecarServer implements ServerRpcSurface {
                 dispatchRpc: (req) => this.handleRpcRequest(req),
                 // Pushes tasks.updated to the desktop TaskPanel — shares
                 // emitPush with CompactionPushAdapter; sessionKind routing is
-                // handled by emitPush's lookup of sessionKinds.
+                // handled by emitPush's lookup of AttachedSession.sessionKind.
                 taskPushAdapter: new TaskPushAdapter((method, workspace, session, params) =>
                     this.emitPush(method, workspace, session, params),
                 ),
@@ -1772,9 +1772,9 @@ export class SidecarServer implements ServerRpcSurface {
         // Structural routing metadata: the client uses sessionKind to decide
         // whether a frame belongs to the main session or a subagent session,
         // without depending on the "known child session set" arrival timing
-        // (see ServerPush.sessionKind). Look up the runtime's sessionKinds
-        // map synchronously; frames without a session dimension leave it
-        // empty.
+        // (see ServerPush.sessionKind). Look up the AttachedSession's
+        // sessionKind synchronously via the attached map; frames without
+        // a session dimension leave it empty.
         const sessionKind =
             session !== undefined
                 ? this.workspaceMap.get(workspace)?.getSessionKind(session)

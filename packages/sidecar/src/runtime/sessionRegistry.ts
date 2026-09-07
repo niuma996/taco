@@ -1,7 +1,7 @@
 /**
  * SessionRegistry — owns session lifecycle and state within a workspace.
  *
- * Responsibilities: holds repo / attached map / sessionKinds / metadata cache;
+ * Responsibilities: holds repo / attached map / session facts cache;
  * session CRUD: list / open / rename / getHistory / delete;
  * attach / detach / attachChild (used by AgentSpawner);
  * forwards AttachedSession events as workspace-level `session.*` events.
@@ -220,14 +220,6 @@ export class SessionRegistry extends EventEmitter {
 
     /** Currently attached session map. */
     private readonly attached = new Map<SessionId, AttachedSession>();
-
-    /**
-     * sessionId → "main" | "subagent".
-     * Written by attachWithTools; read synchronously by server.emitPush to
-     * tag every frame with sessionKind. Must be a sync-readable Map — cannot
-     * await openSession.
-     */
-    private readonly sessionKinds = new Map<SessionId, "main" | "subagent">();
 
     private readonly spawnSubagent: SessionRegistryOptions["spawnSubagent"];
     private readonly resumeSubagent: SessionRegistryOptions["resumeSubagent"];
@@ -554,7 +546,7 @@ export class SessionRegistry extends EventEmitter {
         const meta = await this.openSession(sessionId);
         const session = await this.repo.open(meta, harnessContext);
         const facts = await readSessionFacts(session);
-        this.sessionKinds.set(sessionId, facts.kind === "subagent" ? "subagent" : "main");
+        const sessionKind: "main" | "subagent" = facts.kind === "subagent" ? "subagent" : "main";
         const attached = await AttachedSession.create({
             session,
             models: this.models,
@@ -582,6 +574,7 @@ export class SessionRegistry extends EventEmitter {
             getImChannelContext: this.getImChannelContext,
             getToolContext: this.getToolContext,
             sessionCwd: this.sessionCwd,
+            sessionKind,
         });
 
         this.attached.set(sessionId, attached);
@@ -609,7 +602,6 @@ export class SessionRegistry extends EventEmitter {
         await this.detach(sessionId);
         const meta = await this.openSession(sessionId);
         await this.repo.delete(meta, harnessContext);
-        this.sessionKinds.delete(sessionId);
         this.invalidateListCache();
         this.emit("session.deleted", { sessionId });
     }
@@ -647,12 +639,15 @@ export class SessionRegistry extends EventEmitter {
     }
 
     /**
-     * Synchronously return a session's kind — server.emitPush uses this to
-     * tag every frame with sessionKind. Sessions that have never been attached
-     * (no push should occur) default to "main".
+     * Synchronously classify a session for server.emitPush's frame stamping.
+     * Reads the attached map (populated by attachChild from `facts.kind`), so
+     * it is only accurate while the session is attached: the `session.detached`
+     * and `session.deleted` frames are emitted after the map entry is gone and
+     * therefore report "main" for a subagent. Harmless today — no client path
+     * branches on sessionKind for those two methods.
      */
     getSessionKind(sessionId: SessionId): "main" | "subagent" {
-        return this.sessionKinds.get(sessionId) ?? "main";
+        return this.attached.get(sessionId)?.sessionKind ?? "main";
     }
 
     async dispose(): Promise<void> {

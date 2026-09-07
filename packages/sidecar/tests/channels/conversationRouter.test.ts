@@ -122,24 +122,29 @@ describe("ConversationRouter", () => {
         assert.equal(router.findRouteBySessionId("stale-1"), undefined);
     });
 
-    it("rebuilds routes from jsonl metadata when routing.json is missing", async () => {
+    /**
+     * routing.json is the only place peerId/chatId are persisted, so a missing
+     * file means an empty table rather than a reconstruction from session
+     * files. Pinned because an earlier version scanned sessions/im/ for an
+     * `imRouting` metadata triple that pi 0.85 no longer stores.
+     */
+    it("starts with an empty table when routing.json is absent", async () => {
         const home = mkdtempSync(path.join(tmpdir(), "router-"));
-        // pre-seed a jsonl with imRouting metadata (routing.json absent)
         const dir = path.join(home, "sessions", "im", "ch1");
         mkdirSync(dir, { recursive: true });
         writeFileSync(
             path.join(dir, "_sess-xyz.jsonl"),
-            JSON.stringify({
-                type: "session",
-                version: 3,
+            `${JSON.stringify({
+                type: "session_info",
                 id: "sess-xyz",
-                timestamp: new Date().toISOString(),
-                cwd: "im://ch1/u9/c9",
-                metadata: { imRouting: { channelId: "ch1", peerId: "u9", chatId: "c9" } },
-            }) + "\n",
+                cwd: home,
+            })}\n`,
         );
-        const reloaded = await ConversationRouter.load(home);
-        assert.equal(reloaded.lookup("ch1", "u9", "c9")?.sessionId, "sess-xyz");
+
+        const router = await ConversationRouter.load(home);
+
+        assert.equal(router.lookup("ch1", "u9", "c9"), undefined);
+        assert.deepEqual(router.listAll(), []);
     });
 
     describe("listAll", () => {

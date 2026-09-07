@@ -12,16 +12,15 @@
  *       handler (the historical bug — `args.workspace` and
  *       `initialPrompt` were dropped for one release because the
  *       handler signature wasn't exercised).
- *     - a handler expecting `imRouting` that the dispatcher forgets
- *       to forward, so the resulting session has no jsonl metadata
- *       and rebuildFromJsonl never picks it up.
+ *     - a handler that drops a field the on-disk jsonl needs (the
+ *       historical bug class — pre-0.85 that was the IM routing triple).
  *     - typebox schema validation rejecting a param the handler would
  *       have accepted (or accepting one it would have rejected).
  *
  * This test wires the real handler and asserts (a) the dispatcher
  * produced the params the handler needs, (b) the handler ran without
- * throwing, (c) the on-disk jsonl carries the metadata the
- * ConversationRouter relies on for reverse lookup.
+ * throwing, (c) the on-disk jsonl carries the header fields
+ * session.list reads back.
  */
 
 import { strict as assert } from "node:assert";
@@ -111,10 +110,10 @@ function makeWorkspaceStub(): WorkspaceStub {
             async create(opts) {
                 meta.id = opts.id;
                 meta.path = `/tmp/test-ws/.pi/agent/sessions/${opts.id}.jsonl`;
-                // Write a header line that mimics what JsonlSessionRepo
-                // writes on disk so ConversationRouter.rebuildFromJsonl
-                // can discover the route. The metadata field carries the
-                // IM routing triple when present.
+                // Mimic what JsonlSessionRepo writes on disk: header line only.
+                // pi 0.85 fixed the metadata shape, so sidecar-owned facts
+                // (kind / depth) go to the session value store instead;
+                // session.list reads this header on the next list call.
                 const header: Record<string, unknown> = {
                     type: "session_info",
                     id: opts.id,
@@ -232,13 +231,12 @@ describe("createJobDispatcher → session.create handler integration", () => {
         assert.equal(params.initialPrompt, "hello", "initialPrompt must round-trip");
     });
 
-    it("handler writes the session jsonl to disk so ConversationRouter can rebuild the route", async () => {
-        // The handler calls workspace.repo.create with the sessionId.
-        // rebuildFromJsonl then walks sessions/ and reads the metadata.
-        // For an fs workspace there is no IM metadata; this test pins
-        // the fs behaviour. An IM workspace test would inject
-        // `imRouting` via the workspace stub and assert the jsonl
-        // carries it (covered below).
+    it("handler writes the session jsonl header so listSessions can read it back", async () => {
+        // The handler calls workspace.repo.create, which writes a header
+        // line with id + cwd. listSessions reads the same line on the next
+        // session.list call. The IM routing triple is not persisted at all —
+        // it is derived from `workspace.imRouting` on every use — so its
+        // absence from the header is expected, not a gap.
         const workspace = makeWorkspaceStub();
         const server = makeRealServer({ workspaces: { "/tmp/repo": workspace } });
         const dispatcher = createJobDispatcher(() => server);

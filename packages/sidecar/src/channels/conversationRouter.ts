@@ -16,10 +16,10 @@ interface RouteEntry {
     lastUsedAt: number;
 }
 
-/** routing.json is a cache, not the source of truth. The authoritative source is the
- *  imRouting triple in each session's jsonl metadata; when routing.json is
- *  missing/corrupt, scan sessions/im/<channelId>/ to rebuild without losing
- *  any user history. */
+/** routing.json is the source of truth for IM routing — peerId and chatId
+ *  are not persisted anywhere else. If routing.json is missing/corrupt the
+ *  routes are lost; the next inbound message will create a fresh session for
+ *  that peer. */
 export class ConversationRouter extends EventEmitter {
     private readonly routes = new Map<string, RouteEntry>(); // key = imCwd
     private readonly inflight = new Map<
@@ -39,12 +39,12 @@ export class ConversationRouter extends EventEmitter {
         this.persistPath = path.join(tacoHome, "sessions", "im", "routing.json");
     }
 
-    /** Loads routing.json on startup; rebuilds from jsonl metadata when missing/corrupt.
-     *  Does not receive a ServerRpcSurface — load only reads files; the surface
-     *  is passed to route() / sessionExists() at call time. */
+    /** Loads routing.json on startup. Does not receive a ServerRpcSurface —
+     *  load only reads files; the surface is passed to route() /
+     *  sessionExists() at call time. */
     static async load(tacoHome: string): Promise<ConversationRouter> {
         const router = new ConversationRouter(tacoHome);
-        let loadedFromCache = false;
+        let fileRead = false;
         try {
             const raw = await fs.promises.readFile(router.persistPath, "utf8");
             const data = JSON.parse(raw) as Record<string, RouteEntry>;
@@ -61,80 +61,20 @@ export class ConversationRouter extends EventEmitter {
                 }
                 router.routes.set(k, v);
             }
-            loadedFromCache = router.routes.size > 0;
+            fileRead = true;
         } catch (e) {
-            // Absent cache is the normal first-run path; corrupt content is not.
+            // Absent file is the normal first-run path; corrupt content is not.
             if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-                log.warn(`routing.json unreadable, rebuilding from jsonl: ${e}`);
+                log.warn(`routing.json unreadable: ${e}`);
             }
         }
-        if (!loadedFromCache) {
-            await router.rebuildFromJsonl(tacoHome);
+        if (fileRead && router.routes.size === 0) {
+            // The file parsed but yielded nothing usable, which means every key
+            // was dropped above. Nothing else persists peerId/chatId, so those
+            // conversations are unreachable until their peer messages in again.
+            log.warn("routing.json carried no usable routes — peers will re-route on next message");
         }
         return router;
-    }
-
-    /** Scans sessions/im/<channelId>/*.jsonl, reads metadata.imRouting, restores routes. */
-    private async rebuildFromJsonl(tacoHome: string): Promise<void> {
-        const imRoot = path.join(tacoHome, "sessions", "im");
-        let channelDirs: fs.Dirent[];
-        try {
-            channelDirs = await fs.promises.readdir(imRoot, { withFileTypes: true });
-        } catch (e) {
-            // No im directory — empty routing table is correct, not a fault.
-            if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-                log.warn(`cannot scan ${imRoot}: ${e}`);
-            }
-            return;
-        }
-        for (const dir of channelDirs) {
-            if (!dir.isDirectory()) continue;
-            const dirPath = path.join(imRoot, dir.name);
-            let files: string[];
-            try {
-                files = await fs.promises.readdir(dirPath);
-            } catch (e) {
-                log.warn(`cannot read channel dir ${dirPath}, routes may be lost: ${e}`);
-                continue;
-            }
-            for (const file of files) {
-                if (!file.endsWith(".jsonl")) continue;
-                try {
-                    const firstLine = (
-                        await fs.promises.readFile(path.join(dirPath, file), "utf8")
-                    ).split("\n", 1)[0];
-                    const header = JSON.parse(firstLine) as {
-                        id?: string;
-                        metadata?: {
-                            imRouting?: {
-                                channelId: string;
-                                peerId: string;
-                                chatId: string;
-                            };
-                        };
-                    };
-                    const im = header.metadata?.imRouting;
-                    if (im && header.id) {
-                        // lastUsedAt has no persisted source after a rebuild —
-                        // the jsonl file's mtime is the best available proxy for
-                        // "when this peer was last active". 0 would render every
-                        // row as 1970-01-01 and collapse the sort order.
-                        let lastUsedAt = 0;
-                        try {
-                            lastUsedAt = (await fs.promises.stat(path.join(dirPath, file))).mtimeMs;
-                        } catch {
-                            /* stat failed — fall back to 0 rather than dropping the route */
-                        }
-                        const workspace = makeImCwd(im.channelId, im.peerId, im.chatId);
-                        this.routes.set(workspace, { sessionId: header.id, lastUsedAt });
-                    }
-                } catch (e) {
-                    // Skip corrupt files without affecting other routes — but say
-                    // so: a silently dropped file means that peer loses history.
-                    log.warn(`corrupt session file ${file}, route not restored: ${e}`);
-                }
-            }
-        }
     }
 
     /** Reverse lookup for outbound replies: a push frame carries only a

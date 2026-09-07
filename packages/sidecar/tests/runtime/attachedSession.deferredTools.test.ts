@@ -98,6 +98,7 @@ async function makeAttachedSession(
         // Dynamic-tool tests don't exercise the tool context path; tools that
         // need `call`/`actor` are tested in their own files.
         getToolContext: () => ({ env, workspace: tmpDir as never }) as TacoToolContext,
+        sessionKind: "main",
     };
     return AttachedSession.create(opts);
 }
@@ -249,6 +250,7 @@ describe("AttachedSession — dynamic tools", () => {
                 env,
                 workspace: tmpDir as never,
             }),
+            sessionKind: "main",
         };
 
         // First attach: load runs once for the always candidate. Then trigger

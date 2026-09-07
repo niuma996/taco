@@ -2,25 +2,18 @@
  * Extension contract types — the public surface an extension author
  * imports and the loader / registry speak.
  *
+ * The hook event types (ContextEvent / ToolCallEvent / ToolResultEvent
+ * and their result counterparts) are owned here rather than re-exported
+ * from pi: pi's Hooks class handler signature is `unknown => unknown`,
+ * which would leak pi internals to extension authors. The contract here
+ * is stable across pi versions; the wiring boundary in hookWiring.ts is
+ * the only place that adapts when pi reshapes Hooks.
+ *
  * Reuse from existing modules — do not re-define:
  *   - TacoTool (from this package) — replacement for AgentTool in extensions
  *   - AgentMessage / TextContent / ImageContent / Usage (from
- *     @earendil-works/pi-agent-core) — these remain stable across the
- *     0.83 → 0.84 jump.
+ *     @earendil-works/pi-agent-core)
  *   - SystemPromptContributor (from ../prompts/buildSystemPrompt.ts)
- *
- * Why the hook event types (ContextEvent / ToolCallEvent / ToolResultEvent
- * and their result counterparts) are owned here rather than re-imported
- * from pi: in 0.84 pi removed the emitHook-style event bus that hosted
- * these types and replaced it with a new Hooks class whose handler
- * signature is `unknown => unknown`. We don't surface that internal
- * shape to extension authors — instead we present a stable internal
- * contract and adapt at the wiring boundary in hookWiring.ts. If a
- * future pi release reshapes Hooks again, only one file changes.
- *
- * The wire shape is byte-compatible with the 0.83 emitHook types, so
- * extension authors keep their handlers verbatim; only the import path
- * moves from `@earendil-works/pi-agent-core` to this module.
  */
 
 import type {
@@ -59,11 +52,7 @@ export interface ExtensionManifest {
 /**
  * Context hook event — the messages about to be sent to the LLM. The hook
  * may return a `ContextResult` to replace the messages, or `undefined`
- * to pass them through unchanged.
- *
- * Wire-compatible with pi 0.83's emitHook ContextEvent shape (sans the
- * `type: "context"` discriminator — our bus is single-purpose so the
- * discriminator is implicit).
+ * to pass them through unchanged. Single-purpose: no event-type discriminator.
  */
 export interface ContextEvent {
     messages: AgentMessage[];
@@ -127,8 +116,7 @@ export interface ToolResultPatch {
 }
 
 /**
- * Context hook handler. Same shape as the previous (pi 0.83) emitHook
- * ContextHook contract.
+ * Context hook handler.
  *   - Return `undefined` (or void) → messages pass through unchanged
  *   - Return `{ messages }` → replace the messages array sent to the LLM
  */

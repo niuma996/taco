@@ -260,6 +260,13 @@ export interface AttachedSessionOptions {
     getToolContext: () => TacoToolContext;
     /** Workspace cwd the tool context should be anchored to. */
     sessionCwd: WorkspaceId;
+    /**
+     * Subagent vs main-session classification, read from session facts by
+     * `attachChild` and stamped onto every push frame by server.emitPush.
+     * Carried on the AttachedSession rather than a parallel SessionRegistry
+     * map so the runtime cache has a single writer.
+     */
+    sessionKind: "main" | "subagent";
 }
 
 export class AttachedSession extends EventEmitter {
@@ -272,6 +279,7 @@ export class AttachedSession extends EventEmitter {
      * onto the wire or the desktop UI.
      */
     resumableOperations: ReadonlyArray<OpenOperation>;
+    readonly sessionKind: "main" | "subagent";
     /**
      * Session-wide configuration and the hook/event registries.
      *
@@ -306,7 +314,7 @@ export class AttachedSession extends EventEmitter {
     tasksDir!: string;
     /**
      * Coordinator state for the "remember → extract incremental" protocol.
-     * `tool_execution_end("memory")` stores a Promise; `turn_end` chains off
+     * `tool_end("memory")` stores a Promise; `turn_end` chains off
      * it via the microtask queue so it never double-extracts or skips an offset.
      * If no remember tool fired, the field is `undefined` and extraction covers
      * the full conversation.
@@ -333,6 +341,7 @@ export class AttachedSession extends EventEmitter {
         toolController: SessionToolController | undefined,
         getInstructionsConfig: () => InstructionsConfig | undefined,
         resumableOperations: ReadonlyArray<OpenOperation>,
+        sessionKind: "main" | "subagent",
     ) {
         super();
         this.session = session;
@@ -345,6 +354,7 @@ export class AttachedSession extends EventEmitter {
         this.toolController = toolController;
         this.getInstructionsConfig_ = getInstructionsConfig;
         this.resumableOperations = resumableOperations;
+        this.sessionKind = sessionKind;
     }
 
     /** Delegates to compactionController.effectiveCompaction() — the pin-aware hook in hookWiring uses the same threshold. */
@@ -500,6 +510,7 @@ export class AttachedSession extends EventEmitter {
             toolController,
             args.getInstructionsConfig ?? (() => undefined),
             open,
+            args.sessionKind,
         );
         attachedCell.current = attached;
 

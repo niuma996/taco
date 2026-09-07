@@ -32,9 +32,8 @@ export function extractReplyText(frame: ServerPush): string | undefined {
     if (event?.type !== "message_end" || event.message?.role !== "assistant") return undefined;
 
     const content = event.message.content;
-    // pi-ai 0.83+ always emits AssistantMessage.content as ProtocolContentBlock[];
-    // a string content is never produced by the current contract, so a non-array
-    // here is just an unknown shape we cannot render.
+    // The push envelope types `event` as `unknown`, so a non-array content is
+    // a wire-shape we cannot narrow safely.
     if (!Array.isArray(content)) return undefined;
 
     // Only `text` blocks: thinking is internal, toolCall/toolResult are noise.
