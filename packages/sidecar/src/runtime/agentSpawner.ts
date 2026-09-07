@@ -551,10 +551,15 @@ export class AgentSpawner extends EventEmitter {
         // a caller error — see resolveContextMode for the precedence rationale.
         const contextMode = resolveContextMode(args.context, def.context);
         // Compute parent depth to feed filterToolsForAgent before delegating.
-        const parentMeta = await this.sessionRegistry.openSession(args.parentSessionId);
-        const parentDepth = Number(
-            (parentMeta as unknown as Record<string, unknown> | undefined)?.depth ?? 0,
+        // Depth lives in the session's value store (pi 0.85 removed the free-form
+        // metadata bag); reading it off JsonlSessionMetadata returned undefined,
+        // which silently zeroed parentDepth and broke the recursion guard —
+        // depth-1 subagents could spawn depth-1 grandchildren.
+        const parentFacts = await this.sessionRegistry.withSession(
+            args.parentSessionId,
+            (session) => readSessionFacts(session),
         );
+        const parentDepth = parentFacts.depth ?? 0;
         const childDepth = parentDepth + 1;
         const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
         // Fork: render the parent transcript once, up front. Reading the branch
@@ -890,10 +895,12 @@ export class AgentSpawner extends EventEmitter {
         // recursively spawn grandchildren (which would let it call Skill again and
         // explode tokens / loop). Computing here also avoids a second openSession()
         // call inside executeSubagentSession.
-        const parentMeta = await this.sessionRegistry.openSession(pid);
-        const parentDepth = Number(
-            (parentMeta as unknown as Record<string, unknown> | undefined)?.depth ?? 0,
+        //
+        // Depth comes from facts, not metadata — see the comment in `spawnSubagent`.
+        const parentFacts = await this.sessionRegistry.withSession(pid, (session) =>
+            readSessionFacts(session),
         );
+        const parentDepth = parentFacts.depth ?? 0;
         const childDepth = parentDepth + 1;
 
         const allowedSet = args.allowedTools ? new Set(args.allowedTools) : undefined;

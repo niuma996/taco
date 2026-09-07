@@ -65,7 +65,15 @@ describe("AgentSpawner parent-instructions inheritance", () => {
             captured.push(systemPrompt ?? "");
             return Promise.reject(new Error("attach stubbed"));
         };
-        await ws.repo.create({ id: "parent-1", cwd }, harnessContext);
+        // Release pi's open-session slot before returning. `repo.create()` returns a
+        // session whose handle owns that slot until `close()` is called; if we
+        // let it leak, the first `spawnSubagent` call would re-open `parent-1`
+        // and throw "Session is already open" because two handles would race
+        // for the same id. The release must happen here, not in `after`, so
+        // the slot is free during every test body.
+        await ws.repo
+            .create({ id: "parent-1", cwd }, harnessContext)
+            .then((s) => s.close(harnessContext));
     });
 
     after(async () => {
