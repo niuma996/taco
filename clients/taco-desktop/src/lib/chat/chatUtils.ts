@@ -240,6 +240,27 @@ export interface HistoryEntryLike {
     timestamp?: string | number;
 }
 
+/**
+ * Parse an entry timestamp into epoch millis, falling back to `whenMissing`.
+ *
+ * Both wire shapes are accepted: `session.history` sends an ISO string, but the
+ * harness stores epoch millis and the type has always allowed either. Handling
+ * only one silently substitutes the current time for the other, which stamps
+ * every history row with "now" — ordering and the rendered clock both go wrong,
+ * and nothing errors.
+ */
+export function parseEntryTimestamp(
+    value: string | number | undefined,
+    whenMissing: number,
+): number {
+    if (typeof value === "number") return Number.isFinite(value) ? value : whenMissing;
+    if (typeof value === "string") {
+        const parsed = new Date(value).getTime();
+        if (!Number.isNaN(parsed)) return parsed;
+    }
+    return whenMissing;
+}
+
 /** Derive a one-line summary from `args` (for card headers). Prefer path/command/file_path; fall back to truncated JSON.stringify. */
 export function summarizeToolArgs(_name: string, args: unknown): string {
     if (!args || typeof args !== "object") return "";
@@ -300,7 +321,7 @@ export function historyToUiMessages(
         if (entryId && seenEntryIds.has(entryId)) continue;
         if (entryId) seenEntryIds.add(entryId);
 
-        const ts = new Date(typeof e.timestamp === "string" ? e.timestamp : Date.now()).getTime();
+        const ts = parseEntryTimestamp(e.timestamp, Date.now());
         // Pull role out of AgentMessage — AgentMessage is the union
         // Message | CustomAgentMessages[...]; we only need
         // user / assistant / toolResult here. Structural check, not a named

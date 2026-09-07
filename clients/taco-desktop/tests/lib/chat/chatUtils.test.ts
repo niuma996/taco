@@ -18,6 +18,7 @@ import {
     type HistoryEntryLike,
     historyToUiMessages,
     type MessageLike,
+    parseEntryTimestamp,
     stringifyResult,
     summarizeToolArgs,
     toolResultLine,
@@ -912,5 +913,51 @@ describe("toolResultLine", () => {
     it("leaves text at exactly the limit untruncated", () => {
         const line = toolResultLine("read", false, "x".repeat(240));
         assert.equal(line, `✓ read: ${"x".repeat(240)}`);
+    });
+});
+
+describe("parseEntryTimestamp", () => {
+    // Both shapes are live: session.history sends ISO strings, the harness
+    // stores epoch millis. Handling only one substitutes "now" for the other,
+    // so every history row gets stamped with the load time — wrong ordering and
+    // a wrong clock, with nothing raised.
+    it("accepts epoch millis", () => {
+        assert.equal(parseEntryTimestamp(1_700_000_000_000, 42), 1_700_000_000_000);
+    });
+
+    it("accepts an ISO string", () => {
+        assert.equal(
+            parseEntryTimestamp("2026-01-01T00:00:00.000Z", 42),
+            Date.parse("2026-01-01T00:00:00.000Z"),
+        );
+    });
+
+    it("keeps epoch 0 rather than treating it as absent", () => {
+        assert.equal(parseEntryTimestamp(0, 42), 0);
+    });
+
+    it("falls back when the value is missing or unparseable", () => {
+        assert.equal(parseEntryTimestamp(undefined, 42), 42);
+        assert.equal(parseEntryTimestamp("not-a-date", 42), 42);
+        assert.equal(parseEntryTimestamp(Number.NaN, 42), 42);
+    });
+});
+
+describe("historyToUiMessages — entry timestamps", () => {
+    const userEntry = (timestamp: string | number): HistoryEntryLike => ({
+        id: "e1",
+        type: "message",
+        timestamp,
+        payload: { role: "user", content: "hi" } as MessageLike,
+    });
+
+    it("preserves an epoch-millis timestamp instead of substituting now", () => {
+        const ui = historyToUiMessages([userEntry(1_700_000_000_000)]);
+        assert.equal(ui[0]?.ts, 1_700_000_000_000);
+    });
+
+    it("preserves an ISO timestamp", () => {
+        const ui = historyToUiMessages([userEntry("2026-01-01T00:00:00.000Z")]);
+        assert.equal(ui[0]?.ts, Date.parse("2026-01-01T00:00:00.000Z"));
     });
 });
