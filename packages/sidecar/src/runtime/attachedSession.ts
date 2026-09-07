@@ -16,6 +16,7 @@ import {
     type HarnessEvent,
     laneConfig,
     NoActiveOperation,
+    type OpenOperation,
     type PromptTemplate,
     type Session,
     type ThinkingLevel,
@@ -264,6 +265,14 @@ export interface AttachedSessionOptions {
 export class AttachedSession extends EventEmitter {
     readonly session: Session;
     /**
+     * Operations left in flight by a previous process, surfaced as `open[]`
+     * by pi's `AgentHarness.create()`. Empty when the session is fresh or
+     * already settled before attach. Kept internal for structured logging
+     * only — the pi 0.85.1 migration deliberately does not forward this data
+     * onto the wire or the desktop UI.
+     */
+    resumableOperations: ReadonlyArray<OpenOperation>;
+    /**
      * Session-wide configuration and the hook/event registries.
      *
      * pi 0.85 splits the old AgentHarness in two: the harness owns tools,
@@ -323,6 +332,7 @@ export class AttachedSession extends EventEmitter {
         contextInfo: ContextInfoService,
         toolController: SessionToolController | undefined,
         getInstructionsConfig: () => InstructionsConfig | undefined,
+        resumableOperations: ReadonlyArray<OpenOperation>,
     ) {
         super();
         this.session = session;
@@ -334,6 +344,7 @@ export class AttachedSession extends EventEmitter {
         this.contextInfo = contextInfo;
         this.toolController = toolController;
         this.getInstructionsConfig_ = getInstructionsConfig;
+        this.resumableOperations = resumableOperations;
     }
 
     /** Delegates to compactionController.effectiveCompaction() — the pin-aware hook in hookWiring uses the same threshold. */
@@ -419,11 +430,15 @@ export class AttachedSession extends EventEmitter {
 
         if (open.length > 0) {
             // A run was in flight when the previous process died. pi leaves it
-            // resumable rather than rolling it back; surfacing it to the user is
-            // desktop work, so for now it is logged and left alone.
+            // resumable rather than rolling it back. The wire/UI notice is
+            // intentionally out of scope for the pi 0.85.1 migration; stash the
+            // data here so operations teams can see it in structured sidecar
+            // logs without exposing pi's open-ended OpenOperation shape on the
+            // protocol wire.
             log.warn("session has interrupted operations from a previous run", {
                 sessionId: args.session.metadata.id,
                 count: open.length,
+                operations: open,
             });
         }
 
@@ -484,6 +499,7 @@ export class AttachedSession extends EventEmitter {
             contextInfo,
             toolController,
             args.getInstructionsConfig ?? (() => undefined),
+            open,
         );
         attachedCell.current = attached;
 

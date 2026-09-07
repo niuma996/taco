@@ -102,6 +102,21 @@ describe("AttachedSession — streaming a turn", () => {
         );
     });
 
+    it("starts with an empty resumableOperations array on a fresh session", async () => {
+        // pi's `AgentHarness.create()` returns the open[] array — durable
+        // operations left in flight by a previous process. A fresh session over
+        // a faux provider consumes its only response and settles, so the
+        // array must be empty. The field is kept internal for structured
+        // logging; a non-empty default would mean every attach logs a spurious
+        // "interrupted operations" warning.
+        const attached = await makeAttached("once");
+        try {
+            assert.deepEqual(attached.resumableOperations, []);
+        } finally {
+            await attached.dispose();
+        }
+    });
+
     it("carries the streamed deltas under the field clients read", async () => {
         const events = await runStreamingTurn("hello streaming world");
         const subs = events
