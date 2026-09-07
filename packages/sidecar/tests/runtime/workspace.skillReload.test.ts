@@ -24,6 +24,7 @@ import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 function mkSkill(name: string): TacoSkill {
     return {
@@ -105,19 +106,15 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
         // Live lookup: SessionRegistry.updateSkills should have been called
         // too, so a freshly-built skill tool resolves "beta" and not "alpha".
         const listing = ws.sessionRegistry.getListingTools();
-        const skillTool = listing.find((t) => t.name === "skill") as
-            | {
-                  execute: (
-                      id: string,
-                      params: { skill: string },
-                      signal?: AbortSignal,
-                  ) => Promise<{ details?: { found: boolean } }>;
-              }
-            | undefined;
+        const skillTool = listing.find((t) => t.name === "skill");
         assert.ok(skillTool, "expected a skill tool in getListingTools()");
-        const found = await skillTool.execute("tc-1", { skill: "beta" });
+        const found = (await invokeTool(skillTool, { skill: "beta" }, undefined, {
+            toolCallId: "tc-1",
+        })) as { details?: { found: boolean } };
         assert.equal(found.details?.found, true);
-        const stale = await skillTool.execute("tc-2", { skill: "alpha" });
+        const stale = (await invokeTool(skillTool, { skill: "alpha" }, undefined, {
+            toolCallId: "tc-2",
+        })) as { details?: { found: boolean } };
         assert.equal(stale.details?.found, false);
 
         await ws.dispose();

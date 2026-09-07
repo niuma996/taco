@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
+import { harnessContext } from "../../../src/lib/harnessContext.ts";
 import { SlashNormalizedExecutionEnv } from "../../../src/runtime/slashNormalizedEnv.ts";
 import type { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
@@ -46,10 +47,11 @@ async function reloadFromDisk(tmpCwd: string): Promise<{
     const { loadSourcedSkills } = await import("@earendil-works/pi-agent-core");
     const { defaultSkillDirs } = await import("../../../src/config/config.ts");
     const skillEnv = new SlashNormalizedExecutionEnv({ cwd: tmpCwd });
-    const loaded = await loadSourcedSkills(
+    const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
         skillEnv,
         defaultSkillDirs(tmpCwd),
-        (skill, source) => ({ ...skill, source }) as TacoSkill,
+        (skill, source): TacoSkill => ({ ...skill, source }),
+        harnessContext,
     );
     const deduped = dedupeSkillsByNameWithDuplicates(loaded.skills.map((e) => e.skill));
     preloadSkillFrontmatter(deduped.kept);

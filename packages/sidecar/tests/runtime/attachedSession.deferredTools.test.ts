@@ -12,11 +12,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
 import { AttachedSession, type AttachedSessionOptions } from "../../src/runtime/attachedSession.ts";
 import {
@@ -25,13 +25,18 @@ import {
 } from "../../src/runtime/deferredToolRegistry.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
+import type { TacoTool } from "../../src/tools/index.ts";
 
-const fakeTool = (name: string): AgentTool =>
+const fakeTool = (name: string): TacoTool =>
     ({
         name,
+        label: name,
         description: `summary:${name}`,
-        execute: async () => ({ text: "ok" }),
-    }) as unknown as AgentTool;
+        parameters: {},
+        async execute() {
+            return { content: [{ type: "text", text: "ok" }], details: {} };
+        },
+    }) as unknown as TacoTool;
 
 const stubModel: Model<Api> = {
     id: "test/claude-test",
@@ -39,7 +44,7 @@ const stubModel: Model<Api> = {
     contextWindow: 200_000,
 } as unknown as Model<Api>;
 
-const stubTools: AgentTool[] = [fakeTool("builtin-tool")];
+const stubTools: TacoTool[] = [fakeTool("builtin-tool")];
 
 function makeToolCandidate(name: string, loading: "deferred" | "always"): ToolCandidate {
     return {
@@ -61,7 +66,7 @@ before(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "taco-dt-int-"));
     sessionsRoot = join(tmpDir, "sessions");
     env = new NodeExecutionEnv({ cwd: tmpDir });
-    repo = new JsonlSessionRepo({ fs: env, sessionsRoot });
+    repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot });
     models = createModels();
 });
 
@@ -72,7 +77,7 @@ after(() => {
 async function makeAttachedSession(
     toolRegistry: DefaultDeferredToolRegistry,
 ): Promise<AttachedSession> {
-    const session = await repo.create({ cwd: tmpDir });
+    const session = await repo.create({ cwd: tmpDir }, harnessContext);
     const opts: AttachedSessionOptions = {
         session,
         models,
@@ -111,7 +116,7 @@ describe("AttachedSession — dynamic tools", () => {
             "toolController must be set when registry is provided",
         );
 
-        const activeNames = attached.toolController.activeToolNames();
+        const activeNames = await attached.toolController.activeToolNames();
         assert.ok(
             activeNames.includes("always-tool"),
             `always-tool must be in initial active set, got: ${activeNames.join(", ")}`,
@@ -130,7 +135,7 @@ describe("AttachedSession — dynamic tools", () => {
         const attached = await makeAttachedSession(registry);
         assert.ok(attached.toolController != null, "toolController must be set");
         assert.ok(
-            attached.toolController.activeToolNames().includes("addTools"),
+            (await attached.toolController.activeToolNames()).includes("addTools"),
             "addTools must be resident",
         );
 
@@ -138,7 +143,7 @@ describe("AttachedSession — dynamic tools", () => {
         assert.deepEqual(result.added, ["git-status"]);
 
         assert.ok(
-            attached.toolController.activeToolNames().includes("git-status"),
+            (await attached.toolController.activeToolNames()).includes("git-status"),
             "git-status must be active after addTools",
         );
         await attached.abort();
@@ -169,7 +174,7 @@ describe("AttachedSession — dynamic tools", () => {
         assert.deepEqual(result.added, ["git-status"]);
         assert.ok(result.skipped.includes("git-status"), "second occurrence must be skipped");
 
-        const activeNames = attached.toolController.activeToolNames();
+        const activeNames = await attached.toolController.activeToolNames();
         assert.equal(
             activeNames.filter((n) => n === "git-status").length,
             1,
@@ -222,7 +227,7 @@ describe("AttachedSession — dynamic tools", () => {
         };
         const registry = new DefaultDeferredToolRegistry({ candidates: [always, deferred] });
 
-        const session = await repo.create({ cwd: tmpDir });
+        const session = await repo.create({ cwd: tmpDir }, harnessContext);
         const attachedOpts: AttachedSessionOptions = {
             session,
             models,
@@ -258,7 +263,7 @@ describe("AttachedSession — dynamic tools", () => {
         // activeToolNames = [...,"always-tool",...]; without the fix, the
         // always block in attachedSession.ts would re-load it as well.
         const reloaded = await AttachedSession.create(attachedOpts);
-        const activeNames = reloaded.toolController?.activeToolNames() ?? [];
+        const activeNames = (await reloaded.toolController?.activeToolNames()) ?? [];
         assert.ok(
             activeNames.includes("always-tool"),
             `always-tool must remain active after re-attach, got: ${activeNames.join(", ")}`,

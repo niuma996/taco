@@ -14,10 +14,10 @@ import type {
     CreateSessionParams,
     DeleteSessionParams,
     RenameSessionParams,
+    SessionId,
     SessionListCursor,
     SessionListEntry,
     SessionListParams,
-    SessionId,
 } from "@taco-ai/protocol";
 import {
     ErrorCodes,
@@ -118,8 +118,11 @@ export function registerSessionLifecycleHandlers(): void {
                 },
                 harnessContext,
             );
-            workspace.invalidateListCache();
             const meta = session.metadata;
+            // create() holds pi's open-session slot, and attach() below opens
+            // the same id — which throws while this handle is still live.
+            await session.close(harnessContext);
+            workspace.invalidateListCache();
 
             let assistantMessage: AssistantMessage | null = null;
             const hasInitialImages =
@@ -223,7 +226,7 @@ async function buildSessionEntry(
     md: SessionFacts,
 ): Promise<SessionListEntry> {
     // File mtime approximates "last activity" — the .jsonl is appended on every
-    // turn (prompt writes a session_info entry too). Tolerate a stat failure
+    // turn (prompt writes a name value too). Tolerate a stat failure
     // (file deleted/renamed between repo.list and here): leave undefined so
     // clients fall back to createdAt, and never take down the whole list.
     let updatedAt: string | undefined;
@@ -236,7 +239,10 @@ async function buildSessionEntry(
         id: m.id,
         cwd: m.cwd,
         filePath: m.path,
-        createdAt: String(m.createdAt),
+        // pi 0.85 stores epoch millis; the wire contract is an ISO string, and
+        // sortSessionsDesc feeds this straight into `new Date(...)` — a
+        // stringified epoch parses as NaN and breaks the ordering.
+        createdAt: new Date(m.createdAt).toISOString(),
         updatedAt,
         kind: md.kind ?? "main",
         agentType: md.agentType,

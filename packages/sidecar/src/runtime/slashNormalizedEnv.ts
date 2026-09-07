@@ -35,19 +35,13 @@ function normalizeFileInfo(info: FileInfo): FileInfo {
 }
 
 export class SlashNormalizedExecutionEnv extends NodeExecutionEnv {
-    override async listDir(
-        path: string,
-        context: Context,
-    ): Promise<Result<FileInfo[], FileError>> {
+    override async listDir(path: string, context: Context): Promise<Result<FileInfo[], FileError>> {
         const result = await super.listDir(path, context);
         if (!result.ok) return result;
         return { ok: true, value: result.value.map(normalizeFileInfo) };
     }
 
-    override async fileInfo(
-        path: string,
-        context: Context,
-    ): Promise<Result<FileInfo, FileError>> {
+    override async fileInfo(path: string, context: Context): Promise<Result<FileInfo, FileError>> {
         const result = await super.fileInfo(path, context);
         if (!result.ok) return result;
         return { ok: true, value: normalizeFileInfo(result.value) };

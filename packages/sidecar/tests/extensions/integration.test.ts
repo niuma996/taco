@@ -12,11 +12,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { ContextEvent, ToolResultEvent } from "@earendil-works/pi-agent-core";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { loadExtensions } from "../../src/extensions/loader.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
-import type { ExtensionModule } from "../../src/extensions/types.ts";
+import type { ContextEvent, ExtensionModule, ToolResultEvent } from "../../src/extensions/types.ts";
 
 let tmpDir: string;
 

@@ -6,11 +6,9 @@
  * is suppressed once planExit clears `planState.active`.
  */
 
-
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import { createUserMessage, tagWrap } from "./builder.ts";
-import type { ContextEvent, ContextResult } from "../extensions/types.ts";
-
 
 const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any project files. Your only outputs are:
 - Reading files

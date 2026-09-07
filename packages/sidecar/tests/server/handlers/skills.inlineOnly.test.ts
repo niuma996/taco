@@ -11,9 +11,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { harnessContext } from "../../../src/lib/harnessContext.ts";
 import type { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import type { TacoSkill } from "../../../src/skills/tacoSkill.ts";
 
 before(() => {
     registerBuiltinMethods();
@@ -81,10 +83,11 @@ describe("skills.list surfaces inlineOnly", () => {
         // Uses the same SlashNormalizedExecutionEnv as server.ts so the Windows
         // path-separator fix is on the path under test.
         const skillEnv = new SlashNormalizedExecutionEnv({ cwd: tmpCwd });
-        const loaded = await loadSourcedSkills(
+        const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
             skillEnv,
             defaultSkillDirs(tmpCwd),
-            (skill, source) => ({ ...skill, source }),
+            (skill, source): TacoSkill => ({ ...skill, source }),
+            harnessContext,
         );
         const skills = dedupeSkillsByName(loaded.skills.map((entry) => entry.skill));
         preloadSkillFrontmatter(skills);

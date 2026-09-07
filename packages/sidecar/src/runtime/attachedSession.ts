@@ -15,6 +15,7 @@ import {
     type AgentMessage,
     type HarnessEvent,
     laneConfig,
+    NoActiveOperation,
     type PromptTemplate,
     type Session,
     type ThinkingLevel,
@@ -37,7 +38,7 @@ import type {
     ToolCallHook,
     ToolResultHookBuckets,
 } from "../extensions/index.ts";
-import { contextFor, harnessContext } from "../lib/harnessContext.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { MemoryExtractorImpl, type MemoryStore, sliceForExtraction } from "../memory/index.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
@@ -55,9 +56,9 @@ import {
 } from "./compactionController.ts";
 import { ContextInfoService } from "./contextInfoService.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
+import { toHarnessError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
 import { PinOnceConsumer } from "./pinOnceConsumer.ts";
-import { toHarnessError } from "./harnessErrors.ts";
 import { sidecarVersion } from "./runtimeResources.ts";
 import { buildBranchContext, findBranchEntries, MAIN_BRANCH } from "./sessionBranch.ts";
 import {
@@ -503,37 +504,41 @@ export class AttachedSession extends EventEmitter {
             : undefined;
 
         // Register all hooks (protocol context + extension + debug) — see hookWiring.ts
-        const { unsubscribe: unwireHooks, skillReinjector } = await wireHarnessHooks(harness, lane, {
-            cwd: args.env.cwd,
-            models: args.models,
-            getThinkingLevel: () => attached.getThinkingLevel(),
-            getUiLocale: () => attached.uiLocale,
-            // Same source as maybeCompact: read the threshold from disk live so the
-            // pin-aware hook can recompute keepRecentTokens.
-            getCompactionThreshold: () => attached.effectiveCompaction().threshold,
-            // Lazy accessor — the workspace holds the resolved InstructionsConfig
-            // and re-reads `taco.json` on every settings.write, so the hook
-            // picks up hot-reload without re-attaching the session.
-            getInstructionsConfig: () => attached.getInstructionsConfig(),
-            // Lazy accessor — yields undefined for non-IM workspaces; the
-            // im_channel hook injects nothing there.
-            getImChannelContext: args.getImChannelContext,
-            extensionContextHooks: args.extensionContextHooks,
-            extensionToolCallHooks: args.extensionToolCallHooks,
-            extensionToolResultHooks: args.extensionToolResultHooks,
-            skills: args.skills,
-            memoryStore: args.memoryStore,
-            getActiveTasksState: () => ({
-                store: attached.taskStore,
-                planActive: attached.planState.active,
-                planState: attached.planState,
-            }),
-            // Same root the tools resolve against — write/edit targets must stay
-            // inside it, and plan mode refuses mutations at dispatch.
-            mutationGateRoot: args.env.cwd,
-            checkpointManager: attached.checkpoints,
-            pinOnceConsumer,
-        });
+        const { unsubscribe: unwireHooks, skillReinjector } = await wireHarnessHooks(
+            harness,
+            lane,
+            {
+                cwd: args.env.cwd,
+                models: args.models,
+                getThinkingLevel: () => attached.getThinkingLevel(),
+                getUiLocale: () => attached.uiLocale,
+                // Same source as maybeCompact: read the threshold from disk live so the
+                // pin-aware hook can recompute keepRecentTokens.
+                getCompactionThreshold: () => attached.effectiveCompaction().threshold,
+                // Lazy accessor — the workspace holds the resolved InstructionsConfig
+                // and re-reads `taco.json` on every settings.write, so the hook
+                // picks up hot-reload without re-attaching the session.
+                getInstructionsConfig: () => attached.getInstructionsConfig(),
+                // Lazy accessor — yields undefined for non-IM workspaces; the
+                // im_channel hook injects nothing there.
+                getImChannelContext: args.getImChannelContext,
+                extensionContextHooks: args.extensionContextHooks,
+                extensionToolCallHooks: args.extensionToolCallHooks,
+                extensionToolResultHooks: args.extensionToolResultHooks,
+                skills: args.skills,
+                memoryStore: args.memoryStore,
+                getActiveTasksState: () => ({
+                    store: attached.taskStore,
+                    planActive: attached.planState.active,
+                    planState: attached.planState,
+                }),
+                // Same root the tools resolve against — write/edit targets must stay
+                // inside it, and plan mode refuses mutations at dispatch.
+                mutationGateRoot: args.env.cwd,
+                checkpointManager: attached.checkpoints,
+                pinOnceConsumer,
+            },
+        );
         attached.skillReinjector = skillReinjector;
 
         // Build memory extractor: needs the session id (used as workspaceId for
@@ -683,7 +688,8 @@ export class AttachedSession extends EventEmitter {
         }
 
         const tipId = result.value.tipId;
-        const entry = tipId === null ? undefined : await this.session.getEntry(tipId, harnessContext);
+        const entry =
+            tipId === null ? undefined : await this.session.getEntry(tipId, harnessContext);
         const reply = entry?.type === "message" ? entry.message : undefined;
 
         // pi's AgentMessage union is wider than the protocol AssistantMessage.
@@ -718,10 +724,7 @@ export class AttachedSession extends EventEmitter {
     async setModel(model: Model<Api>): Promise<void> {
         // pi 0.85 takes a ModelIdentity (provider + id) rather than the full
         // model record, and resolves it against the harness's Models registry.
-        await this.lane.setModel(
-            { provider: model.provider, modelId: model.id },
-            harnessContext,
-        );
+        await this.lane.setModel({ provider: model.provider, modelId: model.id }, harnessContext);
     }
 
     /**
@@ -745,10 +748,23 @@ export class AttachedSession extends EventEmitter {
         return this.thinkingLevel;
     }
 
-    /** Abort the current turn. */
+    /**
+     * Abort the current turn.
+     *
+     * "Nothing is running" is a normal outcome, not a failure: callers abort
+     * defensively (session.abort RPC, subagent teardown, dispose) without
+     * knowing whether a turn is in flight. pi 0.85 reports it as a
+     * `NoActiveOperation` result, so it maps to "nothing cleared" rather than
+     * a throw.
+     */
     async abort(): Promise<AbortResult> {
         const result = await this.lane.abort(harnessContext);
-        if (!result.ok) throw toHarnessError("session.abort", result.error);
+        if (!result.ok) {
+            if (NoActiveOperation.is(result.error)) {
+                return { clearedSteer: [], clearedFollowUp: [] };
+            }
+            throw toHarnessError("session.abort", result.error);
+        }
         return {
             clearedSteer: result.value.steer,
             clearedFollowUp: result.value.followUp,

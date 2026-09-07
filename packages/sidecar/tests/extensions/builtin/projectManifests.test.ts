@@ -17,13 +17,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-
-import type { ContextEvent } from "@earendil-works/pi-agent-core";
 import {
     buildProjectManifestsActivator,
     buildProjectManifestsHook,
     getProjectManifestsTagSpec,
 } from "../../../src/extensions/builtin/projectManifests/index.ts";
+import type { ContextEvent } from "../../../src/extensions/types.ts";
 
 function makeMessages() {
     return [{ role: "user" as const, content: "hello", timestamp: 0 }];

@@ -33,7 +33,10 @@ interface WorkspaceStub {
     attach(id: SessionId): Promise<AttachedLike>;
     detach(id: SessionId): Promise<void>;
     repo: {
-        create(opts: { id: SessionId; cwd: WorkspaceId }): Promise<unknown>;
+        create(opts: { id: SessionId; cwd: WorkspaceId }): Promise<{
+            metadata: JsonlSessionMetadata;
+            close(): Promise<void>;
+        }>;
         delete(meta: JsonlSessionMetadata): Promise<void>;
     };
     invalidateListCache(): void;
@@ -48,7 +51,9 @@ function makeStub(): WorkspaceStub {
     const attached = new Map<SessionId, AttachedLike>();
     const meta: JsonlSessionMetadata = {
         id: "sess-1",
-        createdAt: "2026-01-01T00:00:00Z",
+        createdAt: Date.UTC(2026, 0, 1),
+        modifiedAt: Date.UTC(2026, 0, 1),
+        storageVersion: 1,
         cwd: "/tmp/test-ws",
         path: "/tmp/test-ws/.pi/agent/sessions/sess-1.jsonl",
     };
@@ -94,7 +99,16 @@ function makeStub(): WorkspaceStub {
         repo: {
             async create(opts) {
                 calls.push(`repo.create(${opts.id})`);
-                return { getMetadata: async () => meta };
+                // pi 0.85 returns an *open* session with metadata as a plain
+                // property. The handler must close it before attaching, so the
+                // stub records that call — a missed close is what makes the
+                // real repo reject the subsequent open.
+                return {
+                    metadata: meta,
+                    close: async () => {
+                        calls.push(`session.close(${opts.id})`);
+                    },
+                };
             },
             async delete(m) {
                 calls.push(`repo.delete(${m.id})`);

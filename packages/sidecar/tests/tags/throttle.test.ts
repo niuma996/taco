@@ -7,7 +7,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import type { AgentMessage, ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ContextEvent, ContextResult } from "../../src/extensions/types.ts";
 
 import { throttleByContent } from "../../src/tags/throttle.ts";
 
@@ -26,7 +27,7 @@ describe("throttleByContent", () => {
         const ev = { messages: [userMsg("x")] } as ContextEvent;
 
         const first = await hook(ev);
-        assert.ok(first, "first call should inject");
+        assert.ok(first?.messages, "first call should inject");
         assert.equal(first.messages.length, 2);
 
         const second = await hook(ev);

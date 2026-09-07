@@ -7,7 +7,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import type { AgentMessage, ContextEvent } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ContextEvent } from "../../src/extensions/types.ts";
 
 import { buildCompactionReminderHook } from "../../src/tags/compactionReminder.ts";
 
@@ -33,7 +34,7 @@ describe("buildCompactionReminderHook", () => {
 
         notify();
         const injected = hook(ev);
-        assert.ok(injected, "fires after notify");
+        assert.ok(injected?.messages, "fires after notify");
         assert.equal(injected.messages.length, 2);
         assert.match(firstText(injected.messages[0] as AgentMessage), /^<compaction_reminder>/);
         assert.match(firstText(injected.messages[0] as AgentMessage), /just compacted/);

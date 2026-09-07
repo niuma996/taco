@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { loadSourcedSkills } from "@earendil-works/pi-agent-core";
 import { defaultSkillDirs } from "../../src/config/config.ts";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { SlashNormalizedExecutionEnv } from "../../src/runtime/slashNormalizedEnv.ts";
 import { dedupeSkillsByName } from "../../src/skills/dedupeSkills.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
@@ -35,10 +36,12 @@ async function loadDeduped(cwd: string): Promise<TacoSkill[]> {
     // the same env keeps this test on the production path (a raw NodeExecutionEnv
     // reproduces the "path.relative()'d string" throw that the wrapper fixes).
     const skillEnv = new SlashNormalizedExecutionEnv({ cwd });
-    const loaded = await loadSourcedSkills(skillEnv, defaultSkillDirs(cwd), (skill, source) => ({
-        ...skill,
-        source,
-    }));
+    const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
+        skillEnv,
+        defaultSkillDirs(cwd),
+        (skill, source): TacoSkill => ({ ...skill, source }),
+        harnessContext,
+    );
     return dedupeSkillsByName(loaded.skills.map((entry) => entry.skill));
 }
 

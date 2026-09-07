@@ -26,10 +26,9 @@ import {
     renderInstructionBlock,
     resolveInstructions,
 } from "../config/instructions.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createUserMessage } from "./builder.ts";
-import type { ContextEvent, ContextResult } from "../extensions/types.ts";
-
 
 const log = createLogger("tags/instructionsContext");
 

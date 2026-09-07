@@ -225,15 +225,16 @@ describe("compaction reminder", () => {
         const { hook: reminder, notify } = buildCompactionReminderHook();
 
         const original = [makeUserMessage("x")];
-        const r1 = reminder({ type: "context", messages: original });
+        const r1 = reminder({ messages: original });
         assert.equal(r1, undefined, "no notify → undefined");
 
         notify();
-        const r2 = reminder({ type: "context", messages: original });
+        const r2 = reminder({ messages: original });
         assert.ok(r2, "after notify → must inject");
+        assert.ok(r2?.messages, "reminder must return messages");
         assert.ok(allText(r2.messages).includes("<compaction_reminder>"), "must contain reminder");
 
-        const r3 = reminder({ type: "context", messages: original });
+        const r3 = reminder({ messages: original });
         assert.equal(r3, undefined, "after first fire → reset to undefined");
     });
 });

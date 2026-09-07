@@ -12,11 +12,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { createSessionId, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
+import { JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { type BuiltinProviderEntry, ModelRegistry } from "../../src/runtime/modelRegistry.ts";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { SessionRegistry } from "../../src/runtime/sessionRegistry.ts";
@@ -71,7 +72,7 @@ beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), "taco-mr-cwd-"));
     sessionsRoot = mkdtempSync(join(tmpdir(), "taco-mr-sessions-"));
     env = new NodeExecutionEnv({ cwd });
-    repo = new JsonlSessionRepo({ fs: env, sessionsRoot });
+    repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot });
     models = createModels();
 });
 
@@ -223,7 +224,7 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             providerKeyStore: store,
             builtinProviders: STUBS,
         });
-        const id = createSessionId();
+        const id = uuidv7();
         await assert.rejects(() => mr.setSessionModel(id, "stub-a", "model-a"), /not attached/);
     });
 
@@ -255,8 +256,10 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             providerKeyStore: store,
             builtinProviders: STUBS,
         });
-        const sessionId = createSessionId();
-        await repo.create({ id: sessionId, cwd });
+        const sessionId = uuidv7();
+        // Release the created handle before attaching: 0.85's repo rejects a
+        // second open of the same id while the first is still live.
+        await (await repo.create({ id: sessionId, cwd }, harnessContext)).close(harnessContext);
         sr.invalidateListCache();
         await sr.attach(sessionId);
         try {

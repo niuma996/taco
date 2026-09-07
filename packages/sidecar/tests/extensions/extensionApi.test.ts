@@ -4,10 +4,10 @@
 
 import { strict as assert } from "node:assert";
 import { afterEach, describe, it } from "node:test";
-import type { AgentTool, ContextEvent } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
-import type { ExtensionManifest } from "../../src/extensions/types.ts";
+import type { ContextEvent, ExtensionManifest } from "../../src/extensions/types.ts";
 import { tagRegistry } from "../../src/tags/registry.ts";
 import type { TagSpec } from "../../src/tags/types.ts";
 
@@ -25,8 +25,12 @@ const silentLogger = {
     debug: () => {},
 };
 
-const makeTool = (name: string): AgentTool =>
-    ({ name, description: "t", execute: async () => ({ text: "" }) }) as unknown as AgentTool;
+const makeTool = (name: string): AgentHarnessTool<ExecutionToolContext> =>
+    ({
+        name,
+        description: "t",
+        execute: async () => ({ content: [{ type: "text", text: "" }] }),
+    }) as unknown as AgentHarnessTool<ExecutionToolContext>;
 
 const makeTagSpec = (overrides: Partial<TagSpec> = {}): TagSpec => ({
     name: "ext_test",

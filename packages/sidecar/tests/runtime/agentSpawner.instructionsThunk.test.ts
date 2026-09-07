@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { AgentDefinition } from "../../src/agents/types.ts";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
@@ -64,7 +65,7 @@ describe("AgentSpawner parent-instructions inheritance", () => {
             captured.push(systemPrompt ?? "");
             return Promise.reject(new Error("attach stubbed"));
         };
-        await ws.repo.create({ id: "parent-1", cwd });
+        await ws.repo.create({ id: "parent-1", cwd }, harnessContext);
     });
 
     after(async () => {

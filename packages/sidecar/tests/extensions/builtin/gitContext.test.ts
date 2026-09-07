@@ -15,8 +15,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-
-import type { ContextEvent } from "@earendil-works/pi-agent-core";
 import {
     buildGitContextActivator,
     buildGitContextHook,
@@ -24,6 +22,7 @@ import {
     getWorkingTreeChangesTagSpec,
     readUncommittedFiles,
 } from "../../../src/extensions/builtin/gitContext/index.ts";
+import type { ContextEvent } from "../../../src/extensions/types.ts";
 
 let gitDir: string;
 let nonGitDir: string;
@@ -93,7 +92,7 @@ describe("builtin git-context extension — hook", () => {
     it("injects a <recent_git_commits> tag with inline guidance when cwd is a git repo", async () => {
         const hook = buildGitContextHook(gitDir);
         const result = await hook({ messages: makeMessages() } as ContextEvent);
-        assert.ok(result, "hook should return messages");
+        assert.ok(result?.messages, "hook should return messages");
         assert.ok(Array.isArray(result.messages));
         const first = result.messages[0];
         assert.ok(first);
@@ -118,7 +117,7 @@ describe("builtin git-context extension — hook", () => {
         // gitDir has: staged.txt (staged), modified README.md (unstaged), untracked.txt (untracked)
         const hook = buildGitContextHook(gitDir);
         const result = await hook({ messages: makeMessages() } as ContextEvent);
-        assert.ok(result, "hook should return messages");
+        assert.ok(result?.messages, "hook should return messages");
         // Two leading messages: <recent_git_commits> then <working_tree_changes>
         assert.equal(result.messages.length >= 2, true, "expected at least 2 leading messages");
         const first = result.messages[0];

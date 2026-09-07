@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { filterToolsForAgent } from "../../src/agents/filterTools.ts";
 import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 const DEFAULT_POLICY: ImWorkspacePolicy = {
@@ -38,7 +39,7 @@ describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
 
     it("repo.list scopes to the session cwd directory", async () => {
         const ws = makeRuntime();
-        const list = await ws.repo.list({ cwd: ws.sessionCwd });
+        const list = await ws.repo.list({ cwd: ws.sessionCwd }, harnessContext);
         assert.ok(Array.isArray(list));
     });
 

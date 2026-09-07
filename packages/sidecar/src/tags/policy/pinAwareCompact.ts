@@ -6,9 +6,9 @@
 
 import {
     type AgentMessage,
-    compact,
     type CompactionPreparation,
     type CompactResult,
+    compact,
     DEFAULT_COMPACTION_SETTINGS,
     type Entry,
     type JsonValue,
@@ -192,7 +192,9 @@ function recomputePreparation(
     return result.value;
 }
 
-export function buildPinAwareCompactHook(opts: PinAwareCompactHookOptions): (event: {
+export function buildPinAwareCompactHook(
+    opts: PinAwareCompactHookOptions,
+): (event: {
     preparation: CompactionPreparation;
     customInstructions?: string;
 }) => Promise<{ compaction: CompactResult } | undefined> {

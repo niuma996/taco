@@ -14,9 +14,9 @@ import { basename, resolve as resolvePath } from "node:path";
 import type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
+    Entry,
     JsonlSessionMetadata,
     PromptTemplate,
-    Entry,
     ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { JsonlSessionRepo, setDefaultStreamFn } from "@earendil-works/pi-agent-core";
@@ -414,7 +414,10 @@ export class WorkspaceRuntime extends EventEmitter {
         // Two envs so storage identity and execution location cannot drift.
         this.sessionEnv = new NodeExecutionEnv({ cwd: this.sessionCwd });
         this.env = new NodeExecutionEnv({ cwd: this.executionCwd });
-        this.repo = new JsonlSessionRepo({ fileSystem: this.sessionEnv, sessionsRoot: this.sessionsRoot });
+        this.repo = new JsonlSessionRepo({
+            fileSystem: this.sessionEnv,
+            sessionsRoot: this.sessionsRoot,
+        });
 
         // Model catalog: use the caller's if given, otherwise build an empty one and
         // let applyBuiltinProviders register into it. Credentials come from
@@ -935,14 +938,14 @@ export class WorkspaceRuntime extends EventEmitter {
     }
 
     /**
-     * Append a new title to the session (pi-agent-core `session_info`, append-only).
-     * Semantically a rename: reads take the last session_info. No attach required.
+     * Append a new title to the session (pi-agent-core name value, append-only).
+     * Semantically a rename: reads take the last name value. No attach required.
      */
     async renameSession(sessionId: SessionId, name: string): Promise<void> {
         await this.sessionRegistry.renameSession(sessionId, name);
     }
 
-    /** Current title of a session (last session_info), or undefined. */
+    /** Current title of a session (last name value), or undefined. */
     async getSessionName(sessionId: SessionId): Promise<string | undefined> {
         return await this.sessionRegistry.getSessionName(sessionId);
     }

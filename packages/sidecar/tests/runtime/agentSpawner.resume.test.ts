@@ -21,7 +21,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { AgentDefinition } from "../../src/agents/types.ts";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { MAIN_BRANCH } from "../../src/runtime/sessionBranch.ts";
+import { type SessionFacts, writeSessionFacts } from "../../src/runtime/sessionFacts.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 const defs: AgentDefinition[] = [
@@ -57,6 +60,23 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         rmSync(sessionsRoot, { recursive: true, force: true });
     });
 
+    /**
+     * Create a session on disk, optionally stamping the sidecar's facts on it.
+     *
+     * Two 0.85 constraints are baked in here. `repo.create()` no longer takes a
+     * free-form `metadata` bag — subagent attributes are session values written
+     * after creation — and the session it returns is *open*, so it must be
+     * closed or the later openSession/attach of the same id is rejected.
+     */
+    async function seedSession(id: string, facts?: SessionFacts): Promise<void> {
+        const session = await ws.repo.create({ id, cwd }, harnessContext);
+        try {
+            if (facts) await writeSessionFacts(session, facts);
+        } finally {
+            await session.close(harnessContext);
+        }
+    }
+
     it("returns isError when the subSessionId does not exist", async () => {
         const res = await ws.agentSpawner.resumeSubagent({
             parentSessionId: "does-not-matter",
@@ -70,7 +90,7 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
 
     it("returns isError when the target session is not a subagent", async () => {
         // Create a main session (kind not "subagent"), then try to resume it.
-        await ws.repo.create({ id: "main-session", cwd });
+        await seedSession("main-session");
         // `openSession` reads from SessionRegistry's metadata cache; direct
         // repo.create bypasses its invalidation, so flush explicitly.
         ws.sessionRegistry.invalidateListCache();
@@ -89,18 +109,14 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // be able to reach into it (the implicit same-conversation contract).
         const parentA = "parent-A";
         const parentB = "parent-B";
-        await ws.repo.create({ id: parentA, cwd });
-        await ws.repo.create({ id: parentB, cwd });
-        await ws.repo.create({
-            id: "child-of-A",
-            cwd,
-            metadata: {
-                kind: "subagent",
-                agentType: "explorer",
-                parentSessionId: parentA,
-                parentToolCallId: "tcA",
-                depth: 1,
-            },
+        await seedSession(parentA);
+        await seedSession(parentB);
+        await seedSession("child-of-A", {
+            kind: "subagent",
+            agentType: "explorer",
+            parentSessionId: parentA,
+            parentToolCallId: "tcA",
+            depth: 1,
         });
         ws.sessionRegistry.invalidateListCache();
         const res = await ws.agentSpawner.resumeSubagent({
@@ -171,17 +187,13 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // a read-only explorer becoming a write-capable agent is a privilege
         // escalation. Fail closed instead.
         const parent = "parent-defgone";
-        await ws.repo.create({ id: parent, cwd });
-        await ws.repo.create({
-            id: "child-defgone",
-            cwd,
-            metadata: {
-                kind: "subagent",
-                agentType: "ghost-agent",
-                parentSessionId: parent,
-                parentToolCallId: "tcD",
-                depth: 1,
-            },
+        await seedSession(parent);
+        await seedSession("child-defgone", {
+            kind: "subagent",
+            agentType: "ghost-agent",
+            parentSessionId: parent,
+            parentToolCallId: "tcD",
+            depth: 1,
         });
         ws.sessionRegistry.invalidateListCache();
         const res = await ws.agentSpawner.resumeSubagent({
@@ -200,17 +212,13 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // reads getBranch(), and the subtraction must clamp to fail-fast
         // rather than burn one more LLM round to discover the cap.
         const parent = "parent-exhausted";
-        await ws.repo.create({ id: parent, cwd });
-        await ws.repo.create({
-            id: "child-exhausted",
-            cwd,
-            metadata: {
-                kind: "subagent",
-                agentType: "explorer",
-                parentSessionId: parent,
-                parentToolCallId: "tcE",
-                depth: 1,
-            },
+        await seedSession(parent);
+        await seedSession("child-exhausted", {
+            kind: "subagent",
+            agentType: "explorer",
+            parentSessionId: parent,
+            parentToolCallId: "tcE",
+            depth: 1,
         });
         ws.sessionRegistry.invalidateListCache();
         // Append enough assistant messages to consume the 10-turn budget.
@@ -218,32 +226,43 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // AssistantMessage requires api/provider/model/usage/stopReason — the
         // counter only reads `role === "assistant"`, so the rest is stubbed.
         const meta = await ws.sessionRegistry.openSession("child-exhausted");
-        const session = await ws.repo.open(meta);
+        const session = await ws.repo.open(meta, harnessContext);
+        // 0.85 moved appendMessage from Session onto Branch, and a freshly
+        // created session has no branch yet.
+        const branch =
+            (await session.branch(MAIN_BRANCH, harnessContext)) ??
+            (await session.createBranch(MAIN_BRANCH, null, harnessContext));
         for (let i = 0; i < 12; i++) {
-            await session.appendMessage({
-                role: "assistant",
-                content: [{ type: "text", text: `turn ${i}` }],
-                api: "anthropic-messages",
-                provider: "anthropic",
-                model: "claude-opus-4-8",
-                usage: {
-                    input: 0,
-                    output: 0,
-                    cacheRead: 0,
-                    cacheWrite: 0,
-                    totalTokens: 0,
-                    cost: {
+            await branch.appendMessage(
+                {
+                    role: "assistant",
+                    content: [{ type: "text", text: `turn ${i}` }],
+                    api: "anthropic-messages",
+                    provider: "anthropic",
+                    model: "claude-opus-4-8",
+                    usage: {
                         input: 0,
                         output: 0,
                         cacheRead: 0,
                         cacheWrite: 0,
-                        total: 0,
+                        totalTokens: 0,
+                        cost: {
+                            input: 0,
+                            output: 0,
+                            cacheRead: 0,
+                            cacheWrite: 0,
+                            total: 0,
+                        },
                     },
+                    stopReason: "stop",
+                    timestamp: Date.now(),
                 },
-                stopReason: "stop",
-                timestamp: Date.now(),
-            });
+                harnessContext,
+            );
         }
+        // Release the handle: resumeSubagent opens the same session itself, and
+        // 0.85's repo rejects a second open while the first is live.
+        await session.close(harnessContext);
         const res = await ws.agentSpawner.resumeSubagent({
             parentSessionId: parent,
             parentToolCallId: "tcE",
@@ -264,7 +283,7 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
                 resumeInFlight: Map<string, unknown>;
             }
         ).resumeInFlight;
-        await ws.repo.create({ id: "main-cache-probe", cwd });
+        await seedSession("main-cache-probe");
         ws.sessionRegistry.invalidateListCache();
         const before = map.size;
         await ws.agentSpawner.resumeSubagent({

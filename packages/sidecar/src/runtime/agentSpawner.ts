@@ -1,18 +1,15 @@
 /** AgentSpawner — subagent creation and execution. */
 
 import { EventEmitter } from "node:events";
-import type {
-    JsonlSessionMetadata,
-    JsonlSessionRepo,
-    Entry,
-} from "@earendil-works/pi-agent-core";
-import type { HarnessEvent } from "@earendil-works/pi-agent-core";
+import type { HarnessEvent, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
+import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../agents/forkedHistory.ts";
 import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../agents/types.ts";
+import { harnessContext } from "../lib/harnessContext.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import { buildSystemPrompt, filterContributorsForTools } from "../prompts/buildSystemPrompt.ts";
@@ -20,13 +17,11 @@ import { interpolateArgs } from "../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
 import type { TacoTool } from "../tools/index.ts";
 import { createShellTool } from "../tools/shellTool.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
 import type { AttachedSession } from "./attachedSession.ts";
 import { findBranchEntries } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFacts } from "./sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
 import type { SessionTaskState } from "./sessionTaskState.ts";
-import { uuidv7 } from "@earendil-works/pi-agent-core";
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
@@ -395,6 +390,9 @@ export class AgentSpawner extends EventEmitter {
             depth: childDepth,
             ...(args.forkedContext !== undefined ? { forkedContext: args.forkedContext } : {}),
         });
+        // create() holds pi's open-session slot. attachChild() below opens the
+        // same id again, which throws unless this handle is released first.
+        await childSession.close(harnessContext);
         this.sessionRegistry.invalidateListCache();
 
         // 2. Emit spawned (same agentType as the persisted facts)
@@ -565,8 +563,10 @@ export class AgentSpawner extends EventEmitter {
         // later resume re-injects byte-identically.
         let forkedContext: string | undefined;
         if (contextMode === "fork") {
-            const parentSession = await this.repo.open(parentMeta, harnessContext);
-            forkedContext = buildForkedContext(await findBranchEntries(parentSession));
+            forkedContext = await this.sessionRegistry.withSession(
+                args.parentSessionId,
+                async (parentSession) => buildForkedContext(await findBranchEntries(parentSession)),
+            );
         }
         return this.executeSubagentSession({
             parentSessionId: args.parentSessionId,
@@ -596,9 +596,9 @@ export class AgentSpawner extends EventEmitter {
     private async extractLastAssistantText(
         sessionId: SessionId,
     ): Promise<{ text: string; isEmpty: boolean }> {
-        const meta = await this.sessionRegistry.openSession(sessionId);
-        const session = await this.repo.open(meta, harnessContext);
-        const entries = await findBranchEntries(session);
+        const entries = await this.sessionRegistry.withSession(sessionId, (session) =>
+            findBranchEntries(session),
+        );
         let latestAssistantText = "";
         for (const entry of entries) {
             if (entry.type !== "message") continue;
@@ -672,12 +672,11 @@ export class AgentSpawner extends EventEmitter {
         //    subagent, and was spawned by the same parent that's now trying to
         //    resume. This is a trust boundary, so the checks below must run
         //    against persisted state, never a caller-supplied value.
-        let meta: JsonlSessionMetadata;
         let md: SessionFacts;
         try {
-            meta = await this.sessionRegistry.openSession(args.subSessionId);
-            const session = await this.repo.open(meta, harnessContext);
-            md = await readSessionFacts(session);
+            md = await this.sessionRegistry.withSession(args.subSessionId, (session) =>
+                readSessionFacts(session),
+            );
         } catch (e) {
             return {
                 subSessionId: args.subSessionId,
@@ -794,9 +793,9 @@ export class AgentSpawner extends EventEmitter {
      */
     private async countAssistantTurns(sessionId: SessionId): Promise<number> {
         try {
-            const meta = await this.sessionRegistry.openSession(sessionId);
-            const session = await this.repo.open(meta, harnessContext);
-            const entries = await findBranchEntries(session);
+            const entries = await this.sessionRegistry.withSession(sessionId, (session) =>
+                findBranchEntries(session),
+            );
             let n = 0;
             for (const entry of entries) {
                 if (entry.type !== "message") continue;

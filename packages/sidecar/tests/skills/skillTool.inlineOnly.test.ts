@@ -20,6 +20,7 @@ import {
 } from "../../src/skills/skillFrontmatter.ts";
 import type { SkillReinjectorHandle } from "../../src/skills/skillReinjector.ts";
 import { createSkillTool } from "../../src/skills/skillTool.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 function writeSkill(dir: string, name: string, frontmatter: string, body: string): string {
     const skillDir = join(dir, name);
@@ -76,7 +77,7 @@ describe("SkillTool inlineOnly guard", () => {
                 },
             });
 
-            const res = await tool.execute("tc-1", { skill: "fan-out" }, undefined);
+            const res = await invokeTool(tool, { skill: "fan-out" }, undefined);
 
             assert.equal(
                 spawnCalled,
@@ -120,7 +121,7 @@ describe("SkillTool inlineOnly guard", () => {
                 // spawnSkillSubagent omitted on purpose
             });
 
-            const res = await tool.execute("tc-1", { skill: "fan-out" }, undefined);
+            const res = await invokeTool(tool, { skill: "fan-out" }, undefined);
             const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
             assert.ok(text.includes("inline-only"));
         } finally {
@@ -153,7 +154,7 @@ describe("SkillTool inlineOnly guard", () => {
                 getReinjector: () => handle,
             });
 
-            const res = await tool.execute("tc-1", { skill: "fan-out" }, undefined);
+            const res = await invokeTool(tool, { skill: "fan-out" }, undefined);
             const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
             assert.ok(text.includes("activated"), "inline path should report activation");
             assert.equal(enqueued.length, 1, "skill body must be enqueued for inline injection");

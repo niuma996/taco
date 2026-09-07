@@ -9,8 +9,8 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type {
     AttachParams,
     SessionEventsGetParams,
-    SessionId,
     SessionHistory,
+    SessionId,
     SessionSnapshot,
     SessionSnapshotGetParams,
 } from "@taco-ai/protocol";

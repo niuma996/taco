@@ -84,6 +84,9 @@ function makeWorkspaceStub(): WorkspaceStub {
                 async prompt(text: string) {
                     return { role: "assistant", text: `reply to ${text}` };
                 },
+                session: { setName: async () => {} },
+                abort: async () => {},
+                dispose: async () => {},
             };
             attached.set(id, stub);
             return stub;
@@ -123,7 +126,11 @@ function makeWorkspaceStub(): WorkspaceStub {
                 }
                 await mkdir("/tmp/test-ws/.pi/agent/sessions", { recursive: true });
                 await writeFile(meta.path, `${JSON.stringify(header)}\n`);
-                return { getMetadata: async () => ({ ...meta, metadata: opts.metadata }) };
+                // pi 0.85 exposes metadata as a property, not a getMetadata() call.
+                return {
+                    metadata: { ...meta },
+                    close: async () => {},
+                };
             },
             async delete(m) {
                 meta.id = m.id;

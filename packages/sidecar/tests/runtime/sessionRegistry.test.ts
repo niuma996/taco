@@ -13,16 +13,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { createSessionId, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
+import { JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
+import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
 import type { SessionTaskState } from "../../src/runtime/sessionTaskState.ts";
+import type { TacoTool } from "../../src/tools/index.ts";
 
-const fakeTool = (name: string): AgentTool =>
-    ({ name, description: "fake", execute: async () => ({ text: "" }) }) as unknown as AgentTool;
+const fakeTool = (name: string): TacoTool =>
+    ({
+        name,
+        label: name,
+        description: "fake",
+        parameters: {},
+        async execute() {
+            return { content: [{ type: "text", text: "" }], details: {} };
+        },
+    }) as unknown as TacoTool;
 
 let cwd: string;
 let sessionsRoot: string;
@@ -35,7 +44,7 @@ beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), "taco-sr-cwd-"));
     sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sr-sessions-"));
     env = new NodeExecutionEnv({ cwd });
-    repo = new JsonlSessionRepo({ fs: env, sessionsRoot });
+    repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot });
     models = createModels();
 });
 
@@ -80,6 +89,18 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
     });
 }
 
+/**
+ * Create a session on disk and release it.
+ *
+ * `repo.create()` returns an *open* session and pi 0.85 rejects a second open
+ * of the same id, so a fixture that only wants the file to exist must close
+ * its handle or every later read/attach in the test fails.
+ */
+async function seedSession(target: JsonlSessionRepo, id: string): Promise<void> {
+    const session = await target.create({ id, cwd }, harnessContext);
+    await session.close(harnessContext);
+}
+
 describe("SessionRegistry", () => {
     it("listSessions returns empty array on fresh workspace", async () => {
         const sr = makeRegistry();
@@ -89,12 +110,12 @@ describe("SessionRegistry", () => {
 
     it("listSessions caches — second call does not hit repo again", async () => {
         const sr = makeRegistry();
-        await sr.repo.create({ id: createSessionId(), cwd });
+        await seedSession(sr.repo, uuidv7());
         sr.invalidateListCache();
         const first = await sr.listSessions();
         assert.equal(first.length, 1);
         // Add another session directly to repo without invalidating cache.
-        await sr.repo.create({ id: createSessionId(), cwd });
+        await seedSession(sr.repo, uuidv7());
         const second = await sr.listSessions();
         // Cache hit — same length as first call.
         assert.equal(second.length, 1);
@@ -103,11 +124,11 @@ describe("SessionRegistry", () => {
 
     it("invalidateListCache forces next listSessions to re-read", async () => {
         const sr = makeRegistry();
-        await sr.repo.create({ id: createSessionId(), cwd });
+        await seedSession(sr.repo, uuidv7());
         sr.invalidateListCache();
         const first = await sr.listSessions();
         assert.equal(first.length, 1);
-        await sr.repo.create({ id: createSessionId(), cwd });
+        await seedSession(sr.repo, uuidv7());
         sr.invalidateListCache();
         const second = await sr.listSessions();
         assert.equal(second.length, 2);
@@ -120,8 +141,8 @@ describe("SessionRegistry", () => {
 
     it("openSession finds by exact id and by prefix", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         const exact = await sr.openSession(id);
         assert.equal(exact.id, id);
@@ -131,8 +152,8 @@ describe("SessionRegistry", () => {
 
     it("rename + getSessionName round-trip via cache", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         await sr.renameSession(id, "my-session");
         const name = await sr.getSessionName(id);
@@ -146,8 +167,8 @@ describe("SessionRegistry", () => {
     // "last one wins" has to hold against the file, not the cache.
     it("getSessionName reads the newest session_info from disk on a cold cache", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         await sr.renameSession(id, "first-title");
         await sr.renameSession(id, "second-title");
@@ -158,16 +179,16 @@ describe("SessionRegistry", () => {
 
     it("getSessionName returns undefined for a session that was never titled", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         assert.equal(await sr.getSessionName(id), undefined);
     });
 
     it("rename updates _nameCache precisely without invalidating list cache", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         const before = await sr.listSessions();
         await sr.renameSession(id, "renamed");
@@ -177,18 +198,40 @@ describe("SessionRegistry", () => {
 
     it("getHistory returns empty entries for fresh session", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         const { entries, leafEntryId } = await sr.getHistory(id);
         assert.equal(entries.length, 0);
         assert.equal(leafEntryId, null);
     });
 
+    // pi 0.85's JsonlSessionRepo tracks open sessions and rejects a second
+    // open of the same id with "Session is already open". A one-shot reader
+    // that never closes its handle therefore locks the session for the rest of
+    // the process: the desktop hit this as a read (snapshot / contextInfo)
+    // permanently breaking every subsequent session.attach.
+    it("repeated one-shot reads do not leak pi's open-session slot", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        const created = await sr.repo.create({ id, cwd }, harnessContext);
+        await created.close(harnessContext);
+        sr.invalidateListCache();
+
+        await sr.getHistory(id);
+        await sr.getHistory(id);
+        await sr.getSessionFacts(id);
+        await sr.renameSession(id, "renamed");
+
+        // The slot must still be free for a real consumer to take.
+        const reopened = await sr.repo.open(await sr.openSession(id), harnessContext);
+        await reopened.close(harnessContext);
+    });
+
     it("deleteSession removes from list and emits session.deleted", async () => {
         const sr = makeRegistry();
-        const id = createSessionId();
-        await sr.repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
         sr.invalidateListCache();
         let deleted: string | undefined;
         sr.on("session.deleted", (e: { sessionId: string }) => {
@@ -216,8 +259,8 @@ describe("SessionRegistry", () => {
     });
 
     it("toolsForChildSession returns the same taskState the tools were built from", async () => {
-        const id = createSessionId();
-        await repo.create({ id, cwd });
+        const id = uuidv7();
+        await seedSession(repo, id);
         let seenByBuilder: SessionTaskState | undefined;
         const sr = makeRegistry({
             toolsBuilder: (_sid, taskState) => {

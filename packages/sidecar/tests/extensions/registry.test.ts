@@ -6,11 +6,12 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { AgentTool, ContextEvent, ContextResult } from "@earendil-works/pi-agent-core";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
+import type { ContextEvent, ContextResult } from "../../src/extensions/types.ts";
+import type { TacoTool } from "../../src/tools/index.ts";
 
-const makeTool = (name: string): AgentTool =>
-    ({ name, description: "test", execute: async () => ({ text: "" }) }) as unknown as AgentTool;
+const makeTool = (name: string): TacoTool =>
+    ({ name, description: "test", execute: async () => ({ text: "" }) }) as unknown as TacoTool;
 
 describe("ExtensionRegistry", () => {
     it("starts empty with zero failed/unauthorized entries", () => {

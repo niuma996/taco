@@ -5,7 +5,6 @@
  * auto-attach / compaction-wait pattern. All require ensureWorkspace.
  */
 
-
 import type {
     AbortParams,
     PromptParams,
@@ -23,8 +22,8 @@ import {
 import { RPC } from "@taco-ai/shared";
 
 import { harnessContext } from "../../lib/harnessContext.ts";
-import { isBusyError } from "../../runtime/harnessErrors.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { isBusyError } from "../../runtime/harnessErrors.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
     formatAskUserContextBody,

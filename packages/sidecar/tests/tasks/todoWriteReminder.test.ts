@@ -7,7 +7,8 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import type { AgentMessage, ContextEvent } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ContextEvent } from "../../src/extensions/types.ts";
 
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";

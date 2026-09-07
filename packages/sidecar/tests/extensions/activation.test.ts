@@ -9,11 +9,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { activateExtensions } from "../../src/extensions/activation.ts";
 import { BUILTIN_EXTENSIONS } from "../../src/extensions/builtin/manifest.ts";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry, registerBuiltinExtensions } from "../../src/extensions/registry.ts";
+import type { TacoTool } from "../../src/tools/index.ts";
 
 let gitDir: string;
 let nonGitDir: string;
@@ -41,8 +41,16 @@ after(() => {
     rmSync(gitDir, { recursive: true, force: true });
 });
 
-const fakeTool = (name: string): AgentTool =>
-    ({ name, description: "fake", execute: async () => ({ text: "" }) }) as unknown as AgentTool;
+const fakeTool = (name: string): TacoTool =>
+    ({
+        name,
+        label: name,
+        description: "fake",
+        parameters: {},
+        async execute() {
+            return { content: [{ type: "text", text: "" }], details: {} };
+        },
+    }) as unknown as TacoTool;
 
 const silentLogger = {
     info: () => {},

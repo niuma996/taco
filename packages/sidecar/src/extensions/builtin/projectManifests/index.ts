@@ -24,13 +24,12 @@ import { isAbsolute, join, relative } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import fg from "fast-glob";
 import ignore from "ignore";
+import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
 import { createUserMessage, tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import { MANIFEST_SAFE_DEFAULT_IGNORES } from "../../../tools/safeDefaults.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
 import type { ContextHook, WorkspaceActivator } from "../../types.ts";
-import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
-
 
 const TAG_NAME = "project_manifests";
 const BUILTIN_NAME = "@taco/builtin-project-manifest";

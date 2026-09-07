@@ -8,7 +8,6 @@
 import { createHash } from "node:crypto";
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 
-
 export interface ThrottleOptions {
     /**
      * Maximum number of consecutive times we'll skip before forcing a re-inject,
@@ -46,7 +45,7 @@ export function throttleByContent(
             return undefined;
         }
 
-        const hash = hashMessages((result.messages ?? []));
+        const hash = hashMessages(result.messages ?? []);
         if (hash === lastContentHash && consecutiveSkips < maxSkips) {
             consecutiveSkips++;
             return undefined;

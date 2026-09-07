@@ -265,7 +265,9 @@ export async function wireHarnessHooks(
      * nested `{block: {reason}}`, whose presence alone is the refusal).
      */
     const onToolCall = (
-        hook: (event: ToolCallEvent) => ToolCallResult | undefined | Promise<ToolCallResult | undefined>,
+        hook: (
+            event: ToolCallEvent,
+        ) => ToolCallResult | undefined | Promise<ToolCallResult | undefined>,
     ): (() => void) =>
         harness.hooks.on("before_tool", async (event) => {
             const result = await hook({
@@ -321,7 +323,8 @@ export async function wireHarnessHooks(
     //    copy is gone (instructions is a `drop` tag), so the skip cap ensures
     //    the model periodically re-receives CLAUDE.md.
     disposers.push(
-        onContext(throttleByContent(
+        onContext(
+            throttleByContent(
                 buildInstructionsContextHook({
                     cwd: opts.cwd,
                     // Fall back to "no config" (= defaults) when the caller did
@@ -345,7 +348,8 @@ export async function wireHarnessHooks(
     //    (rare), so wrap in throttleByContent to skip redundant re-injection.
     if (opts.getUiLocale) {
         disposers.push(
-            onContext(throttleByContent(buildReplyLanguageContextHook(opts.getUiLocale), {
+            onContext(
+                throttleByContent(buildReplyLanguageContextHook(opts.getUiLocale), {
                     maxConsecutiveSkips: 50,
                 }),
             ),
@@ -356,18 +360,12 @@ export async function wireHarnessHooks(
     //    thinking={type:"disabled"}. The thunk reads harness state live so
     //    `setThinkingLevel` takes effect on the next LLM call; session storage
     //    is untouched and history remains visible.
-    disposers.push(
-        onContext(buildStripThinkingContextHook(opts.getThinkingLevel),
-        ),
-    );
+    disposers.push(onContext(buildStripThinkingContextHook(opts.getThinkingLevel)));
     // 6. plan mode directive: while plan mode is active, inject a read-only
     //    planning prompt that guides the model to use the explorer subagent.
     const getActiveTasksState = opts.getActiveTasksState;
     if (getActiveTasksState) {
-        disposers.push(
-            onContext(buildPlanModeContextHook(() => getActiveTasksState().planState),
-            ),
-        );
+        disposers.push(onContext(buildPlanModeContextHook(() => getActiveTasksState().planState)));
     }
     // 7. skill body reinjection: drain pending queue + restore compacted-away skill bodies
     if (opts.skills && opts.skills.length > 0) {
@@ -408,7 +406,8 @@ export async function wireHarnessHooks(
     // resulting messages and skips when content is unchanged.
     if (opts.memoryStore) {
         disposers.push(
-            onContext(throttleByContent(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)),
+            onContext(
+                throttleByContent(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)),
             ),
         );
     }
@@ -419,10 +418,7 @@ export async function wireHarnessHooks(
     if (opts.getActiveTasksState) {
         const getState = opts.getActiveTasksState;
         disposers.push(onContext(buildActiveTasksContextHook(getState)));
-        disposers.push(
-            onContext(buildTodoWriteReminderContextHook(() => getState().store),
-            ),
-        );
+        disposers.push(onContext(buildTodoWriteReminderContextHook(() => getState().store)));
     }
 
     // ── safety-net context hook — always returns event.messages so emitHook's

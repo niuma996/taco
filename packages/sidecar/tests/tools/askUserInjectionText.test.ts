@@ -114,8 +114,12 @@ describe("wrapAskUserContext", () => {
 
 describe("resolveAskUserQuestions", () => {
     function makeAttachedWith(entries: unknown[]) {
-        // biome-ignore lint/suspicious/noExplicitAny: test fixture only.
-        return { session: { getBranch: async () => entries } } as any;
+        return {
+            session: {
+                branch: async () => ({ findEntries: async () => entries }),
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: test fixture only.
+        } as any;
     }
 
     it("returns questions when a waiting toolResult matches", async () => {

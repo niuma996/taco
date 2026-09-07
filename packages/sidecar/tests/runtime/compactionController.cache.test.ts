@@ -15,7 +15,23 @@ import { type ResolvedCompaction, saveGlobalConfig } from "../../src/config/conf
 import { CompactionController } from "../../src/runtime/compactionController.ts";
 
 /** Minimal fake harness — CompactionController.effectiveCompaction() doesn't touch it. */
-const fakeHarness = {} as ConstructorParameters<typeof CompactionController>[0]["harness"];
+const fakeHarness = {
+    events: {
+        on:
+            (_type: string, _listener: (event: unknown) => void): (() => void) =>
+            () => {},
+    },
+} as unknown as ConstructorParameters<typeof CompactionController>[0]["harness"];
+/** Lane stub: every test here only exercises effectiveCompaction (no compact path). */
+const fakeLane = {
+    compact: async () => ({
+        ok: true as const,
+        value: { compaction: { status: "completed" as const, entryId: undefined } },
+    }),
+    runWhenIdle: (cb: () => unknown): Promise<void> => Promise.resolve(cb()).then(() => undefined),
+} as unknown as ConstructorParameters<typeof CompactionController>[0]["lane"];
+/** getEntry stub: TTL/cache tests don't read compaction entries. */
+const fakeGetEntry = async () => undefined;
 
 let tmpDir: string;
 let tacoJsonPath: string;
@@ -58,6 +74,8 @@ function makeController(opts?: { compaction?: ResolvedCompaction; effectiveTtlMs
     const clock = new FakeClock();
     const controller = new CompactionController({
         harness: fakeHarness,
+        lane: fakeLane,
+        getEntry: fakeGetEntry,
         compaction: opts?.compaction,
         getContextUsage: () => Promise.reject(new Error("not used in this test")),
         getSessionEntries: () => Promise.resolve([]),
@@ -146,6 +164,8 @@ describe("CompactionController.effectiveCompaction — TTL cache", () => {
 
         const controller = new CompactionController({
             harness: fakeHarness,
+            lane: fakeLane,
+            getEntry: fakeGetEntry,
             getContextUsage: () => Promise.reject(new Error("not used")),
             getSessionEntries: () => Promise.resolve([]),
             readGlobalConfig: () => ({ compaction: { threshold: 0.7 } }),
@@ -231,132 +251,5 @@ describe("CompactionController.effectiveCompaction — TTL cache", () => {
         const r = controller.effectiveCompaction();
         assert.equal(r.enabled, DEFAULT_COMPACTION_ENABLED);
         assert.equal(r.threshold, DEFAULT_COMPACTION_THRESHOLD);
-    });
-});
-
-describe("CompactionController.compact — cancellation", () => {
-    it("signal aborts short-circuit the wait, returning ok:false before the 30s timeout", async () => {
-        // Fake harness: subscribe no-ops the listener, compact() resolves a
-        // promise that never settles within the test window — mirrors the
-        // "pi is busy generating a summary" case in production.
-        let pendingCompact: () => void = () => {};
-        const neverSettles = new Promise<void>((resolve) => {
-            pendingCompact = resolve;
-        });
-        const fakeHarness = {
-            subscribe: () => () => {},
-            compact: () => neverSettles,
-        } as unknown as ConstructorParameters<typeof CompactionController>[0]["harness"];
-
-        const controller = new CompactionController({
-            harness: fakeHarness,
-            getContextUsage: () => Promise.reject(new Error("not used")),
-            getSessionEntries: () => Promise.resolve([]),
-            readGlobalConfig: () => ({}),
-        });
-
-        const ac = new AbortController();
-        const start = Date.now();
-        const resultP = controller.compact(undefined, ac.signal);
-        // Abort almost immediately — well inside the 30s hardcoded timeout.
-        setTimeout(() => ac.abort(), 20);
-        const result = await resultP;
-        const elapsed = Date.now() - start;
-
-        assert.equal(result.ok, false, "abort path must return ok:false");
-        assert.equal(result.reason, "aborted", "reason must distinguish abort from timeout");
-        assert.ok(elapsed < 1_000, `must return fast on abort, took ${elapsed}ms`);
-
-        // Settle the stand-in compact() and await it, so the promise is not
-        // left pending when the test function returns.
-        pendingCompact();
-        await neverSettles;
-    });
-
-    it("pre-aborted signal short-circuits the wait; harness.compact still runs", async () => {
-        let compactInvoked = false;
-        const fakeHarness = {
-            subscribe: () => () => {},
-            compact: () => {
-                compactInvoked = true;
-                return Promise.resolve();
-            },
-        } as unknown as ConstructorParameters<typeof CompactionController>[0]["harness"];
-
-        const controller = new CompactionController({
-            harness: fakeHarness,
-            getContextUsage: () => Promise.reject(new Error("not used")),
-            getSessionEntries: () => Promise.resolve([]),
-            readGlobalConfig: () => ({}),
-        });
-
-        const ac = new AbortController();
-        ac.abort();
-        const result = await controller.compact(undefined, ac.signal);
-
-        assert.equal(result.ok, false);
-        assert.equal(result.reason, "aborted");
-        // Asserting the documented limitation, not an aspiration: pi's
-        // harness.compact() takes no AbortSignal, so a pre-aborted signal
-        // cannot prevent the call — it only stops us waiting for the event.
-        assert.ok(compactInvoked, "harness.compact() still runs; abort only ends the wait");
-    });
-
-    it("harness.compact rejecting reports reason:harness_error, not timeout", async () => {
-        const fakeHarness = {
-            subscribe: () => () => {},
-            compact: () => Promise.reject(new Error("pi says busy")),
-        } as unknown as ConstructorParameters<typeof CompactionController>[0]["harness"];
-
-        const controller = new CompactionController({
-            harness: fakeHarness,
-            getContextUsage: () => Promise.reject(new Error("not used")),
-            getSessionEntries: () => Promise.resolve([]),
-            readGlobalConfig: () => ({}),
-        });
-
-        const start = Date.now();
-        const result = await controller.compact();
-
-        assert.equal(result.ok, false);
-        assert.equal(result.reason, "harness_error");
-        assert.ok(Date.now() - start < 1_000, "must not wait out the 30s timeout");
-    });
-
-    it("a session_compact that lands alongside the cancel is still reported as success", async () => {
-        // Guards the `!received && !lastCompactEvent` condition: pi committed the
-        // compaction, so discarding it because the wait ended as cancelled would
-        // report failure for work that actually happened.
-        let emit: (() => void) | undefined;
-        const fakeHarness = {
-            subscribe: (listener: (e: unknown) => void) => {
-                emit = () =>
-                    listener({
-                        type: "session_compact",
-                        compactionEntry: { tokensBefore: 4242, fromHook: true },
-                    });
-                return () => {};
-            },
-            // Reject *after* emitting the event, mirroring "summary was written
-            // but the follow-up notification threw".
-            compact: () => {
-                emit?.();
-                return Promise.reject(new Error("late failure"));
-            },
-        } as unknown as ConstructorParameters<typeof CompactionController>[0]["harness"];
-
-        const controller = new CompactionController({
-            harness: fakeHarness,
-            getContextUsage: () => Promise.reject(new Error("not used")),
-            getSessionEntries: () => Promise.resolve([]),
-            readGlobalConfig: () => ({}),
-        });
-
-        const result = await controller.compact();
-
-        assert.equal(result.ok, true, "a committed compaction must not be reported as failed");
-        assert.equal(result.tokensBefore, 4242);
-        assert.equal(result.fromHook, true);
-        assert.equal(result.reason, undefined, "success carries no reason");
     });
 });

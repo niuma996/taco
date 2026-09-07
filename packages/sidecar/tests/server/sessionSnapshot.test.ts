@@ -17,6 +17,7 @@ describe("session.snapshot.get", () => {
         server.ensureWorkspace = async () =>
             ({
                 listSessions: async () => [{ id: "main", metadata: { kind: "main" } }],
+                getSessionFacts: async (id: string) => (id === "main" ? { kind: "main" } : {}),
                 getHistory: async () => {
                     historyReads++;
                     return {
@@ -76,6 +77,7 @@ describe("session.snapshot.get", () => {
         server.ensureWorkspace = async () =>
             ({
                 listSessions: async () => [{ id: "child", metadata: { kind: "subagent" } }],
+                getSessionFacts: async (id: string) => (id === "child" ? { kind: "subagent" } : {}),
                 getHistory: async () => ({ leafEntryId: null, entries: [] }),
                 getAttached: () => undefined,
                 attach: async () => {
@@ -116,6 +118,11 @@ describe("session.snapshot.get", () => {
                     { id: "0199", metadata: { kind: "subagent" } },
                     { id: "0199abcd", metadata: { kind: "main" } },
                 ],
+                getSessionFacts: async (id: string) => {
+                    if (id === "0199") return { kind: "subagent" };
+                    if (id === "0199abcd") return { kind: "main" };
+                    return {};
+                },
                 getHistory: async () => ({ leafEntryId: null, entries: [] }),
                 getAttached: () => ({
                     taskStore: createTaskStore("/workspace"),
@@ -145,6 +152,8 @@ describe("session.snapshot.get", () => {
         server.ensureWorkspace = async () =>
             ({
                 listSessions: async () => [{ id: "child-full-id", metadata: { kind: "subagent" } }],
+                getSessionFacts: async (id: string) =>
+                    id === "child-full-id" ? { kind: "subagent" } : {},
                 getHistory: async () => ({ leafEntryId: null, entries: [] }),
                 getAttached: () => undefined,
                 attach: async () => {
@@ -176,6 +185,7 @@ describe("session.snapshot.get", () => {
                     { id: "child-a", metadata: { kind: "subagent" } },
                     { id: "child-b", metadata: { kind: "main" } },
                 ],
+                getSessionFacts: async () => assert.fail("ambiguous ids must not read facts"),
                 getHistory: async () => assert.fail("ambiguous ids must not read history"),
                 getAttached: () => assert.fail("ambiguous ids must not read attached state"),
                 attach: async () => assert.fail("ambiguous ids must not attach"),

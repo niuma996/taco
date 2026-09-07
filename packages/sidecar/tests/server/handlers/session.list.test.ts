@@ -71,8 +71,12 @@ describe("session.list kind filter", () => {
             async listSessions() {
                 return fakeList;
             },
-            async getSessionName() {
+            async getName() {
                 return undefined;
+            },
+            async getSessionFacts(id: string) {
+                const row = fakeList.find((r: { id: string }) => r.id === id);
+                return row?.metadata ?? {};
             },
         };
         const ctx = {
@@ -226,8 +230,12 @@ describe("session.list pagination", () => {
             async listSessions() {
                 return fakeList;
             },
-            async getSessionName() {
+            async getName() {
                 return undefined;
+            },
+            async getSessionFacts(id: string) {
+                const row = fakeList.find((r: { id: string }) => r.id === id);
+                return row?.metadata ?? {};
             },
         };
         return {

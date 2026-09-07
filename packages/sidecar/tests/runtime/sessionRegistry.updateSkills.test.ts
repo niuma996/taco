@@ -22,6 +22,7 @@ import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 function mkSkill(name: string): TacoSkill {
     return {
@@ -43,7 +44,7 @@ beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), "taco-sr-reload-cwd-"));
     sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sr-reload-sessions-"));
     env = new NodeExecutionEnv({ cwd });
-    repo = new JsonlSessionRepo({ fs: env, sessionsRoot });
+    repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot });
     models = createModels();
 });
 
@@ -91,7 +92,9 @@ describe("SessionRegistry.updateSkills", () => {
         const sr = makeRegistry();
 
         const before = await findSkillTool(sr);
-        const beforeResult = (await before.execute("tc-1", { skill: "beta" })) as {
+        const beforeResult = (await invokeTool(before, { skill: "beta" }, undefined, {
+            toolCallId: "tc-1",
+        })) as {
             details?: { found: boolean };
         };
         assert.equal(beforeResult.details?.found, false, "beta not loaded yet");
@@ -99,12 +102,16 @@ describe("SessionRegistry.updateSkills", () => {
         sr.updateSkills([mkSkill("beta")]);
 
         const after = await findSkillTool(sr);
-        const afterFound = (await after.execute("tc-2", { skill: "beta" })) as {
+        const afterFound = (await invokeTool(after, { skill: "beta" }, undefined, {
+            toolCallId: "tc-2",
+        })) as {
             details?: { found: boolean };
         };
         assert.equal(afterFound.details?.found, true, "beta should resolve after updateSkills");
 
-        const afterStale = (await after.execute("tc-3", { skill: "alpha" })) as {
+        const afterStale = (await invokeTool(after, { skill: "alpha" }, undefined, {
+            toolCallId: "tc-3",
+        })) as {
             details?: { found: boolean };
         };
         assert.equal(

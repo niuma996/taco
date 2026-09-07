@@ -10,12 +10,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { activateExtensions } from "../../src/extensions/activation.ts";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import type { TacoTool } from "../../src/tools/index.ts";
 
 let tmpDir: string;
 
@@ -27,8 +27,16 @@ after(() => {
     rmSync(tmpDir, { recursive: true, force: true });
 });
 
-const fakeTool = (name: string): AgentTool =>
-    ({ name, description: "fake", execute: async () => ({ text: "" }) }) as unknown as AgentTool;
+const fakeTool = (name: string): TacoTool =>
+    ({
+        name,
+        label: name,
+        description: "fake",
+        parameters: {},
+        async execute() {
+            return { content: [{ type: "text", text: "" }], details: {} };
+        },
+    }) as unknown as TacoTool;
 
 const silentLogger = {
     info: () => {},
@@ -37,10 +45,7 @@ const silentLogger = {
     debug: () => {},
 };
 
-const makeRegistry = (
-    tools: AgentTool[],
-    prompts: Array<{ prepend?: string; append?: string }>,
-) => {
+const makeRegistry = (tools: TacoTool[], prompts: Array<{ prepend?: string; append?: string }>) => {
     const r = new ExtensionRegistry();
     const api = createExtensionApi(
         {

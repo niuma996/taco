@@ -23,13 +23,16 @@
  * moves from `@earendil-works/pi-agent-core` to this module.
  */
 
-import type { AgentHarnessTool, AgentMessage, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type {
+    AgentHarnessTool,
+    AgentMessage,
+    ExecutionToolContext,
+} from "@earendil-works/pi-agent-core";
+import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import type { ExtensionPermission, ExtensionSource } from "@taco-ai/protocol";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { TacoTool } from "../tools/index.ts";
-import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
-
 
 // ExtensionPermission / ExtensionSource are owned by @taco-ai/protocol (single
 // source of truth, consumed by the extensions.status RPC). Re-export them here

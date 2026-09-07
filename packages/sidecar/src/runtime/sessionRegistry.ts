@@ -15,10 +15,11 @@ import * as readline from "node:readline";
 import type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
+    Entry,
     JsonlSessionMetadata,
     JsonlSessionRepo,
     PromptTemplate,
-    Entry,
+    Session,
     ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -45,9 +46,9 @@ import { createAgentContinueTool } from "../tools/agentContinue.ts";
 import type { TacoToolContext } from "../tools/context.ts";
 import type { TacoTool } from "../tools/index.ts";
 import { AttachedSession } from "./attachedSession.ts";
+import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts } from "./sessionFacts.ts";
-import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
 
 /** `attach()` per-call override parameters — same shape as WorkspaceRuntime.AttachOptions */
@@ -210,7 +211,7 @@ export class SessionRegistry extends EventEmitter {
     private _metadataCache: JsonlSessionMetadata[] | null = null;
 
     /**
-     * sessionId → user-defined title (last session_info event).
+     * sessionId → user-defined title (last name value written).
      * Same lifecycle as _metadataCache: create/delete go through
      * invalidateListCache; rename updates a single entry in place via
      * renameSession (avoids N repo.open calls on next list).
@@ -338,6 +339,28 @@ export class SessionRegistry extends EventEmitter {
     }
 
     /**
+     * Run a read against a session without leaking pi's open-session slot.
+     *
+     * `JsonlSessionRepo.open()` registers the session in an internal
+     * `openSessions` map and throws "Session is already open" on a second open
+     * of the same id. An attached session already holds that slot for its whole
+     * lifetime, so a one-shot reader must reuse the attached handle when there
+     * is one and close its own handle when there isn't — otherwise the first
+     * read permanently locks the id and the next `attach()` fails.
+     */
+    async withSession<T>(sessionId: SessionId, read: (session: Session) => Promise<T>): Promise<T> {
+        const attached = this.attached.get(sessionId);
+        if (attached) return read(attached.session);
+        const meta = await this.openSession(sessionId);
+        const session = await this.repo.open(meta, harnessContext);
+        try {
+            return await read(session);
+        } finally {
+            await session.close(harnessContext);
+        }
+    }
+
+    /**
      * Resolve the root display context for a session — the topmost ancestor
      * session and the toolCallId of the root's direct agent tool call.
      *
@@ -363,12 +386,8 @@ export class SessionRegistry extends EventEmitter {
             }
             // `parentSessionId` is standard 0.85 metadata; `parentToolCallId`
             // is a taco fact, so it comes from the values store.
-            const facts = await readSessionFacts(
-                await this.repo.open(meta, harnessContext),
-            );
-            const parent = (meta.parentSessionId ?? facts.parentSessionId) as
-                | SessionId
-                | undefined;
+            const facts = await this.withSession(current, (session) => readSessionFacts(session));
+            const parent = (meta.parentSessionId ?? facts.parentSessionId) as SessionId | undefined;
             if (!parent) break;
             if (facts.parentToolCallId) rootToolCallId = facts.parentToolCallId;
             current = parent;
@@ -377,19 +396,17 @@ export class SessionRegistry extends EventEmitter {
     }
 
     /**
-     * Append a new title to a session (pi-agent-core's session_info event,
+     * Append a new title to a session (pi-agent-core name value,
      * append-only). Semantically a "rename": readers take the last
-     * session_info. Does not require attach. Updates _nameCache in place
+     * name value. Does not require attach. Updates _nameCache in place
      * after write, so callers don't need invalidateListCache (metadata unchanged).
      */
     async renameSession(sessionId: SessionId, name: string): Promise<void> {
-        const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta, harnessContext);
-        await session.setName(name, harnessContext);
+        await this.withSession(sessionId, (session) => session.setName(name, harnessContext));
         this._nameCache.set(sessionId, name);
     }
 
-    /** Read the current title of a session (last session_info), or undefined. Cache-hit avoids disk I/O. */
+    /** Read the current title of a session (last name value), or undefined. Cache-hit avoids disk I/O. */
     async getSessionName(sessionId: SessionId): Promise<string | undefined> {
         if (this._nameCache.has(sessionId)) {
             return this._nameCache.get(sessionId);
@@ -409,24 +426,22 @@ export class SessionRegistry extends EventEmitter {
      * every session in a list should expect one open per session.
      */
     async getSessionFacts(sessionId: SessionId): Promise<SessionFacts> {
-        const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta, harnessContext);
-        return readSessionFacts(session);
+        return this.withSession(sessionId, (session) => readSessionFacts(session));
     }
 
     /** Get the full chat tree history (from session leaf up to root). */
     async getHistory(
         sessionId: SessionId,
     ): Promise<{ leafEntryId: string | null; entries: Entry[] }> {
-        const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta, harnessContext);
-        // Branch walk, not a whole-log scan: history is the conversation as it
-        // currently stands, so entries on abandoned branches must stay out.
-        const [leafId, entries] = await Promise.all([
-            findBranchTipId(session),
-            findBranchEntries(session),
-        ]);
-        return { leafEntryId: leafId, entries };
+        return this.withSession(sessionId, async (session) => {
+            // Branch walk, not a whole-log scan: history is the conversation as
+            // it currently stands, so entries on abandoned branches stay out.
+            const [leafId, entries] = await Promise.all([
+                findBranchTipId(session),
+                findBranchEntries(session),
+            ]);
+            return { leafEntryId: leafId, entries };
+        });
     }
 
     // ─────────── attach / detach (required before session use) ───────────
@@ -649,8 +664,15 @@ export class SessionRegistry extends EventEmitter {
 }
 
 /**
+ * Namespace pi 0.85 writes `session.setName()` into. Before 0.85 the title was
+ * a `{kind: "fact", fact: "name"}` entry; it is now a value record, so the
+ * scanner below must match this namespace or every session reads as untitled.
+ */
+const SESSION_NAME_NAMESPACE = "pi.session.name";
+
+/**
  * Read a session's title by streaming its JSONL, keeping only the last
- * `session_info` name.
+ * name value written.
  *
  * `repo.open()` would give the same answer via `getSessionName()`, but it
  * builds a whole `JsonlSessionStorage` first: every line parsed into an entry,
@@ -660,10 +682,10 @@ export class SessionRegistry extends EventEmitter {
  * drove the daemon into a GC spiral where `session.list` stopped answering
  * inside its 15s budget.
  *
- * Scanning cannot be short-circuited: a rename appends another `session_info`,
+ * Scanning cannot be short-circuited: a rename appends another name value,
  * and in this store 41/120 files have more than one, often with the newest near
- * EOF. So we must reach the end — but only `session_info` lines are parsed, and
- * nothing but the winning name is retained.
+ * EOF. So we must reach the end — but only name lines are parsed, and nothing
+ * but the winning name is retained.
  */
 async function readSessionNameFromDisk(path: string): Promise<string | undefined> {
     // createReadStream + readline.createInterface is the standard streaming
@@ -685,17 +707,25 @@ async function readSessionNameFromDisk(path: string): Promise<string | undefined
             // Substring test before JSON.parse: the overwhelming majority of
             // lines are messages, and parsing them is exactly the cost this
             // function exists to avoid.
-            if (!line.includes('"name"') || !line.includes('"fact":"name"')) continue;
+            if (!line.includes(SESSION_NAME_NAMESPACE)) continue;
             try {
-                const entry = JSON.parse(line) as { kind?: string; fact?: string; name?: unknown };
-                if (entry.kind !== "fact" || entry.fact !== "name") continue;
-                if (typeof entry.name === "string") {
-                    const trimmed = entry.name.trim();
-                    name = trimmed || undefined;
+                const entry = JSON.parse(line) as {
+                    kind?: string;
+                    op?: string;
+                    namespace?: string;
+                    value?: unknown;
+                };
+                if (entry.kind !== "value" || entry.namespace !== SESSION_NAME_NAMESPACE) continue;
+                // A cleared name is `op: "delete"` (or a non-string value), which
+                // must reset the winner rather than keep the previous title.
+                if (entry.op === "delete" || typeof entry.value !== "string") {
+                    name = undefined;
+                    continue;
                 }
+                name = entry.value.trim() || undefined;
             } catch {
                 // A torn last line (crash mid-append) must not fail the list.
-                // Keep whatever earlier session_info we already found.
+                // Keep whatever earlier name we already found.
             }
         }
     } finally {
