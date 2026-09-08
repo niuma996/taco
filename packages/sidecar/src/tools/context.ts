@@ -10,8 +10,8 @@
  * that need the fs shell share one context with tools that need self-RPC.
  */
 
-import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceId } from "@taco-ai/protocol";
+import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
 import type { Actor } from "../scheduler/types.ts";
 
 /**

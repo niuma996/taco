@@ -8,8 +8,7 @@
  * messages + skills compacted away before the last user message.
  */
 
-import type { AgentMessage, Skill } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
+import type { AgentMessage, Skill, TextContent } from "../runtime/pi/types.ts";
 
 import { createSkillBodyMessage } from "./skillMessages.ts";
 

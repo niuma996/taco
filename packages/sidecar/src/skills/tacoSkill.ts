@@ -6,8 +6,8 @@
  * SkillsPane UI) can distinguish builtin from user-provided skills.
  */
 
-import type { Skill } from "@earendil-works/pi-agent-core";
 import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
+import type { Skill } from "../runtime/pi/types.ts";
 
 export type SkillSource = "builtin" | "user";
 

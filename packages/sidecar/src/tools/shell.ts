@@ -5,7 +5,8 @@
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import type { TextContent } from "@earendil-works/pi-ai";
+import type { TextContent } from "../runtime/pi/types.ts";
+
 import { isInjectedEnvKey } from "../runtime/providerKeyStore.ts";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;

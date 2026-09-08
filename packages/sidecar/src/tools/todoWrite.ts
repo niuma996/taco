@@ -1,9 +1,8 @@
 import { randomBytes } from "node:crypto";
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { AgentHarnessTool, ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 import { findActiveListId } from "../tasks/activeList.ts";
 import { addTask, createTaskList } from "../tasks/taskMutations.ts";
 import { saveTaskListToDisk } from "../tasks/taskPersistence.ts";

@@ -6,16 +6,16 @@
  * returned, not thrown, so the model can decide how to respond.
  */
 
-import type {
-    AgentHarnessTool,
-    Context,
-    ExecutionToolContext,
-} from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { createLogger } from "../lib/logger.ts";
 import type { PermissionBroker } from "../permissions/permissionBroker.ts";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+    TextContent,
+} from "../runtime/pi/types.ts";
 import { DEFAULT_TIMEOUT_MS, runShell } from "./shell.ts";
 
 export type ShellTool = AgentHarnessTool<ExecutionToolContext>;

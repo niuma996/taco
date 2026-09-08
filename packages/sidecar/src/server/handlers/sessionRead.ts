@@ -5,7 +5,6 @@
  * interact with the harness turn loop.
  */
 
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type {
     AttachParams,
     SessionEventsGetParams,
@@ -24,6 +23,7 @@ import {
     sessionTasksGetSchema,
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
+import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
 
 import { resolveSessionByPrefix } from "../../runtime/sessionRegistry.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";

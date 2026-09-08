@@ -29,7 +29,8 @@
  * variant in `buildSystemPrompt`, and does not filter free text.
  */
 
-import type { Entry } from "@earendil-works/pi-agent-core";
+import type { Entry } from "../runtime/pi/types.ts";
+
 import type { SubagentContextMode } from "./types.ts";
 
 /**

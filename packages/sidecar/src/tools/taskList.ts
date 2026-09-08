@@ -1,6 +1,5 @@
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import type { AgentHarnessTool, ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 import { findActiveListId } from "../tasks/activeList.ts";
 import type { TaskStore } from "../tasks/taskTypes.ts";
 

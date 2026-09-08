@@ -16,14 +16,16 @@
  *   - SystemPromptContributor (from ../prompts/buildSystemPrompt.ts)
  */
 
+import type { ExtensionPermission, ExtensionSource } from "@taco-ai/protocol";
+import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import type {
     AgentHarnessTool,
     AgentMessage,
     ExecutionToolContext,
-} from "@earendil-works/pi-agent-core";
-import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
-import type { ExtensionPermission, ExtensionSource } from "@taco-ai/protocol";
-import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
+    ImageContent,
+    TextContent,
+    Usage,
+} from "../runtime/pi/types.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { TacoTool } from "../tools/index.ts";
 

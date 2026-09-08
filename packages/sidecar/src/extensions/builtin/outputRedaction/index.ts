@@ -8,9 +8,9 @@
  * Zero-overhead on miss: returns `undefined` when nothing was redacted.
  */
 
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { ToolResultEvent, ToolResultPatch } from "../../../extensions/types.ts";
 import { createLogger } from "../../../lib/logger.ts";
+import type { TextContent } from "../../../runtime/pi/types.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
 import type { ToolResultHook } from "../../types.ts";
 

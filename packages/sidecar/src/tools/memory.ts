@@ -9,11 +9,11 @@
  * `tools/context.ts`); the schema only carries business fields.
  */
 
-import type { AgentHarnessTool } from "@earendil-works/pi-agent-core";
 import type { MemoryUpsertParams, MemoryUpsertResult } from "@taco-ai/protocol";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { AgentHarnessTool } from "../runtime/pi/types.ts";
 import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────

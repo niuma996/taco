@@ -13,18 +13,6 @@ import { EventEmitter } from "node:events";
 import { createReadStream } from "node:fs";
 import * as readline from "node:readline";
 import type {
-    AgentHarnessResources,
-    AgentHarnessStreamOptions,
-    Entry,
-    JsonlSessionMetadata,
-    JsonlSessionRepo,
-    PromptTemplate,
-    Session,
-    ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import type {
     InstructionsConfig,
     SessionId,
     SupportedLocale,
@@ -37,6 +25,20 @@ import type { WorkspaceExtensionSet } from "../extensions/index.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
+import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
+import type {
+    AgentHarnessResources,
+    AgentHarnessStreamOptions,
+    Api,
+    Entry,
+    JsonlSessionMetadata,
+    JsonlSessionRepo,
+    Model,
+    Models,
+    PromptTemplate,
+    Session,
+    ThinkingLevel,
+} from "../runtime/pi/types.ts";
 import type { SkillReinjectorHandle } from "../skills/skillReinjector.ts";
 import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
 import { createSkillTool } from "../skills/skillTool.ts";

@@ -15,7 +15,7 @@
  * concurrent calls never merge on a stale harness snapshot.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionToolContext } from "../runtime/pi/types.ts";
 
 /**
  * Minimal harness/lane surface required by the controller — allows a fake for

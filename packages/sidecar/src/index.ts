@@ -16,7 +16,6 @@ import {
     type Socket,
 } from "node:net";
 import { dirname, join } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { ChannelBindBroker } from "./channels/channelBindBroker.ts";
 import { ConversationRouter } from "./channels/conversationRouter.ts";
@@ -27,6 +26,7 @@ import type { ExtensionRegistry } from "./extensions/registry.ts";
 import { buildSidecarPidRecord, computeInstallId } from "./lib/installId.ts";
 import { createLogger } from "./lib/logger.ts";
 import { augmentProcessPath, resolveLoginShellPathCached } from "./lib/loginShellPath.ts";
+import type { ThinkingLevel } from "./runtime/pi/types.ts";
 import { ProviderKeyStore } from "./runtime/providerKeyStore.ts";
 import { sidecarVersion } from "./runtime/runtimeResources.ts";
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";

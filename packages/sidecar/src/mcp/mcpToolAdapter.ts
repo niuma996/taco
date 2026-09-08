@@ -12,14 +12,14 @@
  * abort (signal aborted), which re-throws so the harness can stop the batch.
  */
 
+import type { TSchema } from "typebox";
 import type {
     AgentHarnessTool,
     AgentToolResult,
     Context,
     ExecutionToolContext,
-} from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
-import type { TSchema } from "typebox";
+    TextContent,
+} from "../runtime/pi/types.ts";
 import type { McpCallResult, McpClientHandle, McpToolInfo } from "./mcpClient.ts";
 
 export interface McpToolAdapterOptions {

@@ -6,8 +6,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { Skill } from "@earendil-works/pi-agent-core";
 import matter from "gray-matter";
+import type { Skill } from "../runtime/pi/types.ts";
 
 export interface SkillFrontmatter {
     runAs?: "inline" | "subagent";

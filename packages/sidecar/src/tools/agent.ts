@@ -5,16 +5,16 @@
  * { subSessionId, agentType } as `details`.
  */
 
-import type {
-    AgentHarnessTool,
-    Context,
-    ExecutionToolContext,
-} from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { AgentToolDetails } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { SubagentSpawnContext } from "../agents/types.ts";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+    TextContent,
+} from "../runtime/pi/types.ts";
 
 export type AgentTool = AgentHarnessTool<ExecutionToolContext>;
 

@@ -9,7 +9,7 @@
  * and `shell`; write new agent frontmatter with `shell`.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionToolContext } from "../runtime/pi/types.ts";
 
 type AgentTool = AgentHarnessTool<ExecutionToolContext>;
 

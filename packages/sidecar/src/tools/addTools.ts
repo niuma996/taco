@@ -9,10 +9,9 @@
  * next turn onward. Already-loaded tools are idempotent no-ops.
  */
 
-import type { ExecutionToolContext } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 import type { AddToolsResult, SessionToolController } from "../runtime/sessionToolController.ts";
 import type { TacoTool } from "./index.ts";
 

@@ -7,11 +7,10 @@
  *  - Second call: detects params.answers populated, returns answer text.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { AskUserParams, AskUserQuestion, AskUserToolDetails } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { AgentHarnessTool, ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 
 export type AskUserTool = AgentHarnessTool<ExecutionToolContext>;
 

@@ -9,7 +9,7 @@
  * remains compatible with any tooling that expects that structure.
  */
 
-import type { Skill } from "@earendil-works/pi-agent-core";
+import type { Skill } from "../runtime/pi/types.ts";
 
 function escapeXml(value: string): string {
     return value

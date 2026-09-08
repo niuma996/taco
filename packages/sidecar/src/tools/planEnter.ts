@@ -1,12 +1,11 @@
 import { randomBytes } from "node:crypto";
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { enterPlanMode, isPlanModeActive, type PlanModeState } from "../plan/planModeState.ts";
 import { getPlanPath, getPlansDir } from "../plan/planPersistence.ts";
 import type { PlanSnapshotPublisher } from "../plan/planPushAdapter.ts";
+import type { AgentHarnessTool, ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 
 const planEnterSchema = Type.Object({});
 

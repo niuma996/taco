@@ -6,9 +6,8 @@
  * receives `EMPTY_FACTS`; compression never blocks.
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Model, Models } from "@earendil-works/pi-ai";
 import { extractJsonSpan } from "../lib/jsonExtract.ts";
+import type { AgentMessage, Model, Models } from "../runtime/pi/types.ts";
 import { tacoRequestHeaders } from "../runtime/runtimeResources.ts";
 
 // ─── types ───────────────────────────────────────────────────────────────────

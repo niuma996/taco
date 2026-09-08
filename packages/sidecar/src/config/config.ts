@@ -10,7 +10,6 @@
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
     COMMAND_PERMISSION_MODES,
     COMPACTION_THRESHOLD_MAX,
@@ -34,6 +33,7 @@ import type { ChannelConfig } from "../channels/registry.ts";
 import { restrictOwnerSync } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { validatePermissionRule } from "../permissions/shellRuleMatching.ts";
+import type { ThinkingLevel } from "../runtime/pi/types.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
 import { tacoHome } from "./tacoHome.ts";
 

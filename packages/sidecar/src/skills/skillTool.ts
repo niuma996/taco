@@ -8,15 +8,15 @@
  *  - subagent skills: calls spawnSkillSubagent to run in a sandboxed session.
  */
 
+import type { Static } from "typebox";
+import { Type } from "typebox";
 import type {
     AgentHarnessTool,
     AgentToolResult,
     Context,
     ExecutionToolContext,
     Skill,
-} from "@earendil-works/pi-agent-core";
-import type { Static } from "typebox";
-import { Type } from "typebox";
+} from "../runtime/pi/types.ts";
 
 import { readSkillFrontmatter, type SkillFrontmatter } from "./skillFrontmatter.ts";
 import { createSkillBodyMessage } from "./skillMessages.ts";

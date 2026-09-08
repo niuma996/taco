@@ -7,11 +7,10 @@
  * Output: JSON → MemoryEntry[] → store.appendEntry()
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, Model, Models, TextContent } from "@earendil-works/pi-ai";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { extractJsonSpan } from "../../lib/jsonExtract.ts";
 import { createLogger } from "../../lib/logger.ts";
+import type { AgentMessage, Api, Model, Models, TextContent } from "../../runtime/pi/types.ts";
 import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
 import {

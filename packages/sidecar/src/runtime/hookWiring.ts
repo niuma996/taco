@@ -9,17 +9,6 @@
  * unit-testable.
  */
 
-import type {
-    AgentHarness,
-    AgentLane,
-    AgentMessage,
-    AgentToolResult,
-    ExecutionToolContext,
-    JsonValue,
-    Skill,
-    ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import type { Models } from "@earendil-works/pi-ai";
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
 import type { CheckpointManager } from "../checkpoints/manager.ts";
 import { redactString } from "../extensions/builtin/outputRedaction/index.ts";
@@ -39,6 +28,17 @@ import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import { buildMemoryContextHook } from "../memory/memoryTag.ts";
 import { createMutationGateHook } from "../permissions/mutationGate.ts";
+import type {
+    AgentHarness,
+    AgentLane,
+    AgentMessage,
+    AgentToolResult,
+    ExecutionToolContext,
+    JsonValue,
+    Models,
+    Skill,
+    ThinkingLevel,
+} from "../runtime/pi/types.ts";
 import { buildSkillReinjector, type SkillReinjectorHandle } from "../skills/skillReinjector.ts";
 import {
     buildCompactionReminderHook,

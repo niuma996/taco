@@ -4,8 +4,12 @@
  *   2. TUI layer — strips `hidden` tags; unwraps `ephemeral` so inner content shows.
  */
 
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type {
+    AgentMessage,
+    ImageContent,
+    TextContent,
+    ThinkingLevel,
+} from "../runtime/pi/types.ts";
 
 import { stripDropTagsFromMessages } from "./policy/dropPolicy.ts";
 import { stripThinkingFromAssistantMessages } from "./policy/stripThinking.ts";

@@ -9,7 +9,7 @@
  * Integration: `harness.on("context", buildEnvContextHook())`
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "../runtime/pi/types.ts";
 
 import { createUserMessage, tagWrap } from "./builder.ts";
 

@@ -4,8 +4,8 @@
  * Keys mirrored to process.env so subprocesses that read *_API_KEY see the latest value.
  */
 
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { injectApiKeysToEnv } from "../config/config.ts";
+import type { Credential, CredentialInfo, CredentialStore } from "../runtime/pi/types.ts";
 
 /**
  * Process-wide record of `*_API_KEY` env vars this class injected.

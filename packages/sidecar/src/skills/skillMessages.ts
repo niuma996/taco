@@ -2,7 +2,7 @@
  * $ARGUMENTS: replace placeholder if present; otherwise append at the end.
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "../runtime/pi/types.ts";
 
 /**
  * Replace every $ARGUMENTS placeholder with the caller's args string.

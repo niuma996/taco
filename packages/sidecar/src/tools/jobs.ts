@@ -14,9 +14,9 @@
  * See `memory.ts` for the same self-RPC pattern.
  */
 
-import type { AgentHarnessTool } from "@earendil-works/pi-agent-core";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { AgentHarnessTool } from "../runtime/pi/types.ts";
 import { JOBS_RPC } from "../scheduler/jobsRpc.ts";
 import type { Job, SessionStrategy } from "../scheduler/types.ts";
 import type { TacoToolContext } from "./context.ts";

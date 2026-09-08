@@ -7,8 +7,8 @@
  * `registry.addToolResultInterceptor` in `registerBuiltinExtensions`.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
+import type { AgentHarnessTool, ExecutionToolContext } from "../runtime/pi/types.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { ExtensionRegistry } from "./registry.ts";
 import { EXTERNAL_SOURCE } from "./registry.ts";
