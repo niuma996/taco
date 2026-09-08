@@ -84,18 +84,24 @@ export const SIDECAR_INSTANCE_ID = randomUUID();
  * well as pi 0.85's `event` field.
  *
  * The desktop reader in `applyEventToMessages` types its incoming event as
- * `SessionEventLike`, which still names the sub-event `assistantMessageEvent`
- * (the field name from pi 0.85's legacy `AgentEvent` shape). pi 0.85's
- * harness emits `HarnessEvent.message_update` with the field as `event` (plus
- * `message`, the actual snapshot of record, and optional `frame`, the real
- * delta). The two shapes coexist in pi: `HarnessEvent` (this stream) and
- * `AgentEvent` (legacy `Agent`/`agent-loop`). They are not contradictory; the
- * `.d.ts` matches the JS for both.
+ * `SessionEventLike`, which names the sub-event `assistantMessageEvent` (the
+ * field name from pi's legacy `AgentEvent` shape). pi 0.85's harness emits
+ * `HarnessEvent.message_update` with the same payload under `event`. Both
+ * shapes exist in pi — `HarnessEvent` (this stream) and `AgentEvent` (legacy
+ * `Agent`/`agent-loop`) — and each `.d.ts` matches its JS; the mismatch is
+ * only between which one the desktop models and which one we subscribe to.
  *
- * Carrying both names keeps the desktop reader working without forcing it to
- * migrate to `HarnessEvent` types. The right long-term direction is to read
- * `message` + `frame` directly on the desktop side, at which point this
- * adapter (and the `assistantMessageEvent` field on the wire) can go away.
+ * Do NOT "fix" this by switching the desktop to `message` + `frame`.
+ * `frame` is a de-duplicated replay increment, not the render stream: its
+ * encoder drops any delta already covered by the block's opening snapshot
+ * (`encodeTextDelta` returns undefined when `covered >= delta.length`), so
+ * with a provider that populates text at `text_start`, EVERY `*_delta` frame
+ * is absent — measured on a real harness run: 4 `message_update`s for a
+ * one-line reply, `frame` present only on `text_start` / `text_end`, and the
+ * text reconstructed from frames alone is empty. Reading `frame` reintroduces
+ * the "whole reply appears at once" bug that 3ba3a3c fixed. `event` is the
+ * only field carrying render-ready deltas.
+ *
  * Non-`message_update` events pass through untouched.
  */
 export function normalizeMessageUpdate(event: unknown): unknown {
