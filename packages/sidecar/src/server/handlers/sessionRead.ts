@@ -25,6 +25,7 @@ import {
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 
+import { resolveSessionByPrefix } from "../../runtime/sessionRegistry.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import {
     applyTuiVisibilityToContent,
@@ -79,22 +80,23 @@ async function getPersistedSessionKind(
     sessionId: AttachParams["sessionId"],
 ): Promise<"main" | "subagent"> {
     const sessions = await workspace.listSessions();
-    const exact = sessions.find((candidate) => candidate.id === sessionId);
-    const matches = exact
-        ? [exact]
-        : sessions.filter((candidate) => candidate.id.startsWith(sessionId));
-    if (matches.length > 1) {
+    // Shared with SessionRegistry.openSession — same "exact id, or the one
+    // session whose id starts with this prefix" resolution, so a caller cannot
+    // get one answer here and a different one from an attach.
+    const resolution = resolveSessionByPrefix(sessions, sessionId);
+    if (resolution.kind === "ambiguous") {
         throw new RpcHandlerError(
             ErrorCodes.InvalidParams,
             `session id prefix is ambiguous: ${sessionId}`,
         );
     }
-    const session = matches[0];
-    if (!session) return "main";
+    if (resolution.kind === "not_found") return "main";
     // The kind is a taco fact in the session's value store; pi 0.85 removed the
     // free-form metadata bag that used to carry it. An unreadable session is
     // treated as "main" rather than failing the request.
-    const facts = await workspace.getSessionFacts(session.id as SessionId).catch(() => undefined);
+    const facts = await workspace
+        .getSessionFacts(resolution.meta.id as SessionId)
+        .catch(() => undefined);
     return facts?.kind === "subagent" ? "subagent" : "main";
 }
 

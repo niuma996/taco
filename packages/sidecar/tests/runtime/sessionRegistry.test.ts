@@ -151,6 +151,19 @@ describe("SessionRegistry", () => {
         assert.equal(prefix.id, id);
     });
 
+    it("openSession rejects a prefix that matches more than one session", async () => {
+        const sr = makeRegistry();
+        // Two ids sharing an 8-char prefix — this is the collision
+        // resolveSessionByPrefix has to report rather than silently resolve.
+        const shared = uuidv7().slice(0, 8);
+        const idA = `${shared}${uuidv7().slice(8)}`;
+        const idB = `${shared}${uuidv7().slice(8)}`;
+        await seedSession(sr.repo, idA);
+        await seedSession(sr.repo, idB);
+        sr.invalidateListCache();
+        await assert.rejects(() => sr.openSession(shared), /session id prefix is ambiguous/);
+    });
+
     it("rename + getSessionName round-trip via cache", async () => {
         const sr = makeRegistry();
         const id = uuidv7();
