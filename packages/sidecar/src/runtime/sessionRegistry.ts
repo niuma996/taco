@@ -35,6 +35,7 @@ import type { CheckpointStore } from "../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../config/config.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
+import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import type { SkillReinjectorHandle } from "../skills/skillReinjector.ts";
 import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
@@ -50,6 +51,8 @@ import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts } from "./sessionFacts.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
+
+const log = createLogger("sidecar.sessionRegistry");
 
 /** `attach()` per-call override parameters — same shape as WorkspaceRuntime.AttachOptions */
 export interface AttachOptions {
@@ -218,6 +221,14 @@ export class SessionRegistry extends EventEmitter {
      */
     private readonly _nameCache = new Map<SessionId, string | undefined>();
 
+    /**
+     * sessionId → last facts record written. Populated together with the
+     * name cache by the single-pass JSONL scan, so `session.list` pays one
+     * stream scan per session rather than one for the title and another for
+     * the facts.
+     */
+    private readonly _factsCache = new Map<SessionId, SessionFacts>();
+
     /** Currently attached session map. */
     private readonly attached = new Map<SessionId, AttachedSession>();
 
@@ -318,6 +329,7 @@ export class SessionRegistry extends EventEmitter {
     invalidateListCache(): void {
         this._metadataCache = null;
         this._nameCache.clear();
+        this._factsCache.clear();
     }
 
     /** Get an existing session instance by id. */
@@ -404,8 +416,9 @@ export class SessionRegistry extends EventEmitter {
             return this._nameCache.get(sessionId);
         }
         const meta = await this.openSession(sessionId);
-        const name = await readSessionNameFromDisk(meta.path);
+        const { name, facts } = await readSessionMetadataFromDisk(meta.path);
         this._nameCache.set(sessionId, name);
+        this._factsCache.set(sessionId, facts);
         return name;
     }
 
@@ -413,12 +426,22 @@ export class SessionRegistry extends EventEmitter {
      * Read the sidecar's durable facts for a session (kind / agentType / depth /
      * parent linkage).
      *
-     * pi 0.85 fixed the session metadata shape, so these live in the session's
-     * value store and require opening the session. Callers that need them for
-     * every session in a list should expect one open per session.
+     * pi 0.85 fixed the session metadata shape, so these live in the value
+     * store on disk and are read via the same JSONL stream as the session
+     * title. Both populate a per-session cache so a `session.list` that needs
+     * both pays one scan per session rather than two. Falls through to a full
+     * `repo.open()` only when the on-disk cache misses *and* the path-based
+     * scan would not see a name line (i.e. an uninitialised session).
      */
     async getSessionFacts(sessionId: SessionId): Promise<SessionFacts> {
-        return this.withSession(sessionId, (session) => readSessionFacts(session));
+        if (this._factsCache.has(sessionId)) {
+            return this._factsCache.get(sessionId) ?? {};
+        }
+        const meta = await this.openSession(sessionId);
+        const { name, facts } = await readSessionMetadataFromDisk(meta.path);
+        this._nameCache.set(sessionId, name);
+        this._factsCache.set(sessionId, facts);
+        return facts;
     }
 
     /** Get the full chat tree history (from session leaf up to root). */
@@ -665,24 +688,32 @@ export class SessionRegistry extends EventEmitter {
  */
 const SESSION_NAME_NAMESPACE = "pi.session.name";
 
+/** Namespace taco writes per-session facts into. Mirrors SESSION_NAME_NAMESPACE. */
+const SESSION_FACTS_NAMESPACE = "taco.session.facts";
+
 /**
- * Read a session's title by streaming its JSONL, keeping only the last
- * name value written.
+ * Single-pass JSONL scan: pulls the session's title and sidecar facts in one
+ * read.
  *
- * `repo.open()` would give the same answer via `getSessionName()`, but it
- * builds a whole `JsonlSessionStorage` first: every line parsed into an entry,
- * plus `byId` and `labelsById` maps over all of them. For a title lookup that
- * is pure waste, and `session.list` pays it once per session — measured at
- * ~5MB of garbage per call over a 258-file store (32MB on disk), which is what
- * drove the daemon into a GC spiral where `session.list` stopped answering
- * inside its 15s budget.
+ * `repo.open()` would give both via getters, but it builds a whole
+ * `JsonlSessionStorage` first: every line parsed into an entry, plus `byId`
+ * and `labelsById` maps over all of them. For `session.list` that is pure
+ * waste — measured at ~5MB of garbage per call over a 258-file store (32MB on
+ * disk), which drove the daemon into a GC spiral where `session.list` stopped
+ * answering inside its 15s budget.
  *
  * Scanning cannot be short-circuited: a rename appends another name value,
- * and in this store 41/120 files have more than one, often with the newest near
- * EOF. So we must reach the end — but only name lines are parsed, and nothing
- * but the winning name is retained.
+ * and a fact rewrite appends another facts value. Both must reach EOF — but
+ * only matching lines are parsed, and nothing but the winners is retained.
+ *
+ * Because the scan reads pi's private on-disk encoding (storage format 4 is
+ * pre-stabilization; see pi spec §0.9), a silent miss on either field would
+ * leave `session.list` showing untitled / un-fact'd sessions with no signal.
+ * The parse-warn on zero hits turns silent breakage into an actionable log.
  */
-async function readSessionNameFromDisk(path: string): Promise<string | undefined> {
+async function readSessionMetadataFromDisk(
+    path: string,
+): Promise<{ name: string | undefined; facts: SessionFacts }> {
     // createReadStream + readline.createInterface is the standard streaming
     // pattern, but readline does NOT close the input stream on rl.close().
     // The file descriptor stays open and the underlying FSReqCallback never
@@ -697,12 +728,17 @@ async function readSessionNameFromDisk(path: string): Promise<string | undefined
         crlfDelay: Number.POSITIVE_INFINITY,
     });
     let name: string | undefined;
+    let facts: SessionFacts = {};
+    let lineCount = 0;
     try {
         for await (const line of rl) {
+            lineCount++;
             // Substring test before JSON.parse: the overwhelming majority of
             // lines are messages, and parsing them is exactly the cost this
             // function exists to avoid.
-            if (!line.includes(SESSION_NAME_NAMESPACE)) continue;
+            if (!line.includes(SESSION_NAME_NAMESPACE) && !line.includes(SESSION_FACTS_NAMESPACE)) {
+                continue;
+            }
             try {
                 const entry = JSON.parse(line) as {
                     kind?: string;
@@ -710,17 +746,27 @@ async function readSessionNameFromDisk(path: string): Promise<string | undefined
                     namespace?: string;
                     value?: unknown;
                 };
-                if (entry.kind !== "value" || entry.namespace !== SESSION_NAME_NAMESPACE) continue;
-                // A cleared name is `op: "delete"` (or a non-string value), which
-                // must reset the winner rather than keep the previous title.
-                if (entry.op === "delete" || typeof entry.value !== "string") {
-                    name = undefined;
-                    continue;
+                if (entry.kind !== "value" || entry.namespace === undefined) continue;
+                // A cleared value is `op: "delete"` (or a non-typed value),
+                // which must reset the winner rather than keep the previous
+                // value.
+                const cleared = entry.op === "delete";
+                if (entry.namespace === SESSION_NAME_NAMESPACE) {
+                    if (cleared || typeof entry.value !== "string") {
+                        name = undefined;
+                        continue;
+                    }
+                    name = entry.value.trim() || undefined;
+                } else if (entry.namespace === SESSION_FACTS_NAMESPACE) {
+                    if (cleared || typeof entry.value !== "object" || entry.value === null) {
+                        facts = {};
+                        continue;
+                    }
+                    facts = entry.value as SessionFacts;
                 }
-                name = entry.value.trim() || undefined;
             } catch {
                 // A torn last line (crash mid-append) must not fail the list.
-                // Keep whatever earlier name we already found.
+                // Keep whatever earlier values we already found.
             }
         }
     } finally {
@@ -732,5 +778,14 @@ async function readSessionNameFromDisk(path: string): Promise<string | undefined
         // RPCs — see commit message for the wedge-detector measurements.
         if (!stream.destroyed) stream.destroy();
     }
-    return name;
+    if (lineCount > 0 && name === undefined && Object.keys(facts).length === 0) {
+        // Storage format 4 is pre-stabilization per pi spec §0.9; a silent
+        // miss here would leave the list untitled with no signal. Warn so
+        // a pi upgrade that renames the namespace is visible.
+        log.warn("scanned jsonl found no name or facts lines; storage format may have changed", {
+            path,
+            lineCount,
+        });
+    }
+    return { name, facts };
 }

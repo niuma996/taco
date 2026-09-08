@@ -18,6 +18,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
+import { writeSessionFacts } from "../../src/runtime/sessionFacts.ts";
 import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
 import type { SessionTaskState } from "../../src/runtime/sessionTaskState.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
@@ -226,6 +227,65 @@ describe("SessionRegistry", () => {
         // The slot must still be free for a real consumer to take.
         const reopened = await sr.repo.open(await sr.openSession(id), harnessContext);
         await reopened.close(harnessContext);
+    });
+
+    // getSessionName and getSessionFacts read the same JSONL, so they share one
+    // stream scan and populate both caches. Splitting them back into two reads
+    // would double the per-session I/O of session.list, which is the exact cost
+    // that drove the daemon into a GC spiral before the scan was introduced.
+    //
+    // Instead of instrumenting createReadStream (a builtin named import cannot
+    // be patched reliably under ESM), the invariant is asserted directly: after
+    // one getter warms the cache, the file is removed, so a second read would
+    // fail with ENOENT. Both getters still answering proves one scan served both.
+    it("getSessionName warms the facts cache — the pair costs one file read", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.renameSession(id, "titled");
+        // Drop both caches so the first getter must stream the file.
+        sr.invalidateListCache();
+
+        const meta = await sr.openSession(id);
+        assert.equal(await sr.getSessionName(id), "titled");
+
+        // Any further disk read must now fail. _metadataCache still holds the
+        // path, so openSession keeps succeeding — only the stream would break.
+        rmSync(meta.path, { force: true });
+        assert.deepEqual(await sr.getSessionFacts(id), {});
+    });
+
+    it("getSessionFacts warms the name cache — the pair costs one file read", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.renameSession(id, "titled");
+        sr.invalidateListCache();
+
+        const meta = await sr.openSession(id);
+        assert.deepEqual(await sr.getSessionFacts(id), {});
+
+        rmSync(meta.path, { force: true });
+        assert.equal(await sr.getSessionName(id), "titled");
+    });
+
+    // Facts written at spawn time must survive the round-trip through the
+    // stream scan: the on-disk encoding is pi's private value-record format,
+    // so a format change would otherwise surface as silently-empty facts.
+    it("getSessionFacts reads spawn-time facts back off disk", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        const created = await sr.repo.create({ id, cwd }, harnessContext);
+        await writeSessionFacts(created, { kind: "subagent", agentType: "explorer", depth: 1 });
+        await created.close(harnessContext);
+        sr.invalidateListCache();
+
+        const facts = await sr.getSessionFacts(id);
+        assert.equal(facts.kind, "subagent");
+        assert.equal(facts.agentType, "explorer");
+        assert.equal(facts.depth, 1);
     });
 
     it("deleteSession removes from list and emits session.deleted", async () => {

@@ -71,7 +71,7 @@ describe("session.list kind filter", () => {
             async listSessions() {
                 return fakeList;
             },
-            async getName() {
+            async getSessionName() {
                 return undefined;
             },
             async getSessionFacts(id: string) {
@@ -230,7 +230,7 @@ describe("session.list pagination", () => {
             async listSessions() {
                 return fakeList;
             },
-            async getName() {
+            async getSessionName() {
                 return undefined;
             },
             async getSessionFacts(id: string) {

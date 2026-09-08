@@ -5,7 +5,6 @@
  * metadata; they do not interact with the harness turn loop.
  */
 
-import { stat } from "node:fs/promises";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
 import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type {
@@ -225,23 +224,21 @@ async function buildSessionEntry(
     m: JsonlSessionMetadata,
     md: SessionFacts,
 ): Promise<SessionListEntry> {
-    // File mtime approximates "last activity" — the .jsonl is appended on every
-    // turn (prompt writes a name value too). Tolerate a stat failure
-    // (file deleted/renamed between repo.list and here): leave undefined so
-    // clients fall back to createdAt, and never take down the whole list.
-    let updatedAt: string | undefined;
-    try {
-        updatedAt = (await stat(m.path)).mtime.toISOString();
-    } catch {
-        updatedAt = undefined;
-    }
+    // pi 0.85's `repo.list()` returns `modifiedAt` (epoch millis) on each
+    // metadata entry — reading it avoids one `stat()` per session over what
+    // can be hundreds of files in a real workspace. The wire contract is an
+    // ISO string; convert here so `sortSessionsDesc` parses consistently.
+    // Fall back to createdAt when modifiedAt is absent (test fixtures; older
+    // repos) so the list never carries an unparseable timestamp.
+    const updatedAtSource =
+        typeof m.modifiedAt === "number" && Number.isFinite(m.modifiedAt)
+            ? m.modifiedAt
+            : m.createdAt;
+    const updatedAt = new Date(updatedAtSource).toISOString();
     return {
         id: m.id,
         cwd: m.cwd,
         filePath: m.path,
-        // pi 0.85 stores epoch millis; the wire contract is an ISO string, and
-        // sortSessionsDesc feeds this straight into `new Date(...)` — a
-        // stringified epoch parses as NaN and breaks the ordering.
         createdAt: new Date(m.createdAt).toISOString(),
         updatedAt,
         kind: md.kind ?? "main",
@@ -253,7 +250,7 @@ async function buildSessionEntry(
         depth: md.depth,
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
-        name: await workspace.getName(m.id).catch((err) => {
+        name: await workspace.getSessionName(m.id).catch((err) => {
             log.error("getName failed in session.list", m.id, err);
             return undefined;
         }),
