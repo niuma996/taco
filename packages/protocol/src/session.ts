@@ -14,7 +14,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "./frames.js";
-import type { AgentMessage, AssistantMessage, ThinkingLevel } from "./messages.js";
+import type { AgentMessage, ThinkingLevel } from "./messages.js";
 import type { PlanStateUpdatedParams, TasksUpdatedParams } from "./push.js";
 
 export interface SessionMeta {
@@ -186,8 +186,10 @@ export interface CreateSessionParams {
 export interface CreateSessionResult {
     sessionId: SessionId;
     filePath: string;
-    /** Final assistant message of the first turn; null when no initial prompt ran. */
-    assistantMessage: AssistantMessage | null;
+    /** Terminal message of the first turn (assistant message under normal
+     *  flows, or a toolResult when the first turn closed on a terminating
+     *  tool call like askUser / planExit); null when no initial prompt ran. */
+    assistantMessage: AgentMessage | null;
 }
 
 export interface AttachParams {
