@@ -113,6 +113,31 @@ export interface AbortResult {
 }
 
 /**
+ * What happened to one operation that a previous process left in flight.
+ *
+ * `status` is about the recovery attempt, not the operation's own result:
+ *
+ *   - `recovered` — resume drove it to a terminal state; the lane is usable.
+ *     `outcome` carries pi's own status ("completed" / "aborted" / "suspended").
+ *   - `already_settled` — it finished between `create()` reporting it and the
+ *     resume call. Benign race, nothing was done.
+ *   - `failed` — resume could not drive it. The lane may still be occupied, so
+ *     this is the case that leaves a session needing manual intervention.
+ *   - `skipped` — the entry belonged to another lane, which this session cannot
+ *     resume (`lane.resume()` only recovers its own lane).
+ */
+export interface RecoveryOutcome {
+    readonly operationId: string;
+    readonly lane: string;
+    readonly kind: OpenOperation["kind"];
+    readonly status: "recovered" | "already_settled" | "failed" | "skipped";
+    /** pi's terminal status when `status` is `recovered`. */
+    readonly outcome?: string;
+    /** Failure detail when `status` is `failed`. */
+    readonly error?: string;
+}
+
+/**
  * Tag provider requests with the sidecar version.
  *
  * `user-agent: taco/<version>` — set on every NON-OAuth provider. OAuth
@@ -277,13 +302,22 @@ export class AttachedSession extends EventEmitter {
      * by pi's `AgentHarness.create()`. Empty when the session is fresh or
      * already settled before attach.
      *
-     * Recorded as it was at attach time — `create()` reports it once, and
-     * `resumeOpenOperations` drives it immediately afterwards, so a non-empty
-     * array here does NOT mean the lane is still stuck. It is kept for
-     * structured logging and post-mortems; nothing on the wire or in the
-     * desktop UI reads it.
+     * A snapshot of what attach *found*, not of what is still pending:
+     * `resumeOpenOperations` drives these immediately afterwards, so a non-empty
+     * array does NOT mean the lane is stuck. Read `recoveryOutcomes` for how
+     * each one actually ended. Nothing on the wire or in the desktop UI reads
+     * either field; both exist for structured logging and post-mortems.
      */
     resumableOperations: ReadonlyArray<OpenOperation>;
+    /**
+     * How each interrupted operation ended once recovery ran.
+     *
+     * Empty until recovery finishes (and forever, when there was nothing to
+     * recover). This is the field worth looking at after a crash: it separates
+     * "recovered cleanly" from "could not be recovered", which is the difference
+     * between a session that works and one the user has to abort by hand.
+     */
+    recoveryOutcomes: ReadonlyArray<RecoveryOutcome> = [];
     readonly sessionKind: "main" | "subagent";
     /**
      * Session-wide configuration and the hook/event registries.
@@ -750,7 +784,18 @@ export class AttachedSession extends EventEmitter {
         // actionable; anything else would resume the wrong lane. taco attaches
         // exactly one lane per session, so in practice this selects 0 or 1.
         const mine = open.find((operation) => operation.lane === MAIN_BRANCH);
+        // Record every entry, including the ones this session cannot act on —
+        // a post-mortem needs to see that they were seen and deliberately left.
+        const skipped: RecoveryOutcome[] = open
+            .filter((operation) => operation !== mine)
+            .map((operation) => ({
+                operationId: operation.operationId,
+                lane: operation.lane,
+                kind: operation.kind,
+                status: "skipped" as const,
+            }));
         if (mine === undefined) {
+            this.recoveryOutcomes = skipped;
             log.warn("interrupted operations belong to other lanes; not resuming", {
                 sessionId,
                 lanes: open.map((operation) => operation.lane),
@@ -767,26 +812,36 @@ export class AttachedSession extends EventEmitter {
             kind: mine.kind,
             ...(mine.aborting === true ? { aborting: true } : {}),
         };
+        const identity = { operationId: mine.operationId, lane: mine.lane, kind: mine.kind };
+        const record = (outcome: RecoveryOutcome): void => {
+            this.recoveryOutcomes = [...skipped, outcome];
+        };
         try {
             const result = await this.lane.resume(harnessContext);
             if (!result.ok) {
                 // NothingToResume is the benign race: the operation settled
                 // between `create()` reporting it and this call.
                 if (NothingToResume.is(result.error)) {
+                    record({ ...identity, status: "already_settled" });
                     log.debug("interrupted operation already settled", context);
                     return;
                 }
+                record({ ...identity, status: "failed", error: result.error.message });
                 log.warn("could not resume interrupted operation", {
                     ...context,
                     error: result.error.message,
                 });
                 return;
             }
-            log.info("resumed interrupted operation", {
-                ...context,
-                status: "status" in result.value ? result.value.status : "suspended",
-            });
+            const status = "status" in result.value ? result.value.status : "suspended";
+            record({ ...identity, status: "recovered", outcome: status });
+            log.info("resumed interrupted operation", { ...context, status });
         } catch (error) {
+            record({
+                ...identity,
+                status: "failed",
+                error: error instanceof Error ? error.message : String(error),
+            });
             log.error("resuming an interrupted operation threw", context, error);
         }
     }

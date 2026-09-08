@@ -185,6 +185,12 @@ describe("AttachedSession — streaming a turn", () => {
             // succeeds because `prompt` waits for recovery to settle first.
             const reply = await attached2.prompt("again", undefined, undefined);
             assert.equal(reply.role, "assistant");
+
+            // Recovery is reported as having actually recovered, not merely
+            // attempted — `failed` here would mean the prompt above only worked
+            // by luck.
+            assert.equal(attached2.recoveryOutcomes.length, 1);
+            assert.equal(attached2.recoveryOutcomes[0]?.status, "recovered");
         } finally {
             await attached2.dispose();
         }
@@ -200,6 +206,8 @@ describe("AttachedSession — streaming a turn", () => {
         const attached = await makeAttached("once");
         try {
             assert.deepEqual(attached.resumableOperations, []);
+            // Nothing to recover means recovery never ran, so no outcomes.
+            assert.deepEqual(attached.recoveryOutcomes, []);
         } finally {
             await attached.dispose();
         }

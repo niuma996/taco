@@ -251,7 +251,7 @@ async function buildSessionEntry(
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
         name: await workspace.getSessionName(m.id).catch((err) => {
-            log.error("getName failed in session.list", m.id, err);
+            log.error("getSessionName failed in session.list", m.id, err);
             return undefined;
         }),
     };
