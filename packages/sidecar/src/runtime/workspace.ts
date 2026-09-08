@@ -20,7 +20,6 @@ import type {
     ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { JsonlSessionRepo, setDefaultStreamFn } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
@@ -83,6 +82,7 @@ import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { DefaultDeferredToolRegistry } from "./deferredToolRegistry.ts";
 import type { ModelInfo, ProviderInfo } from "./modelRegistry.ts";
 import { applyBuiltinProviders, ModelRegistry } from "./modelRegistry.ts";
+import { NodeExecutionEnv } from "./pi/node.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
 import type { SessionFacts } from "./sessionFacts.ts";
 import { type AttachOptions, SessionRegistry } from "./sessionRegistry.ts";

@@ -6,7 +6,6 @@
  */
 
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
-import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type {
     AgentMessage,
     AttachParams,
@@ -32,6 +31,7 @@ import {
 import { RPC } from "@taco-ai/shared";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { uuidv7 } from "../../runtime/pi/values.ts";
 import type { SessionFacts } from "../../runtime/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";

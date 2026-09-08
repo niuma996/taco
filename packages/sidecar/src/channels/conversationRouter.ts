@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type { ImConversationEntry } from "@taco-ai/protocol";
 import { makeImCwd, parseImCwd } from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
+import { uuidv7 } from "../runtime/pi/values.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 
 const log = createLogger("channel:router");

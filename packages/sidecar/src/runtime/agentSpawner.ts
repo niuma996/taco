@@ -2,7 +2,6 @@
 
 import { EventEmitter } from "node:events";
 import type { HarnessEvent, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
-import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
@@ -19,6 +18,7 @@ import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
 import type { TacoTool } from "../tools/index.ts";
 import { createShellTool } from "../tools/shellTool.ts";
 import type { AttachedSession } from "./attachedSession.ts";
+import { uuidv7 } from "./pi/values.ts";
 import { findBranchEntries } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFacts } from "./sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
