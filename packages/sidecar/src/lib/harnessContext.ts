@@ -13,22 +13,19 @@
  * when the sidecar grows a real per-request context, only this file changes.
  */
 
-import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/pi-agent-core";
 
 /**
  * Root context for harness/session work that outlives any single RPC.
  *
  * Session attach, lane acquisition, tool registration and shutdown all use
  * this — they are daemon-lifetime operations with no caller to cancel them.
+ *
+ * Every harness/lane/session call threads a Context, but every call site in
+ * the sidecar today uses this process-lifetime root: caller AbortSignals do
+ * not flow into pi (drive's design cancels only the caller's observation, not
+ * the operation), so a per-request derived context would not buy anything
+ * currently. When the sidecar grows real per-request cancellation, add a
+ * `contextFor(signal)` here and have callers thread it through.
  */
 export const harnessContext: Context = BACKGROUND_CONTEXT;
-
-/**
- * Derive a cancellable context from an optional caller signal.
- *
- * Returns the root context unchanged when the caller has no signal, so
- * callers can pass `signal?: AbortSignal` straight through.
- */
-export function contextFor(signal: AbortSignal | undefined): Context {
-    return signal === undefined ? harnessContext : withAbortSignal(signal, harnessContext);
-}

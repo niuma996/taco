@@ -79,13 +79,11 @@ export function toTerminalError(operation: string, outcome: TerminalOutcome): Er
 /**
  * Whether a value represents pi's "lane is already running something" signal.
  *
- * Matches the tagged error, a `toHarnessError` wrapper around it, and the
- * `message === "busy"` shape used by existing test doubles.
+ * Matches the tagged error directly and a `toHarnessError` wrapper around it.
+ * `toHarnessError` preserves `_tag` so the wrapper is still classified here.
  */
 export function isBusyError(error: unknown): boolean {
     if (LaneBusy.is(error)) return true;
     if (typeof error !== "object" || error === null) return false;
-    const candidate = error as TaggedLike;
-    if (candidate._tag === "LaneBusy") return true;
-    return candidate.message === "busy";
+    return (error as TaggedLike)._tag === "LaneBusy";
 }

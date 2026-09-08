@@ -949,11 +949,6 @@ export class WorkspaceRuntime extends EventEmitter {
     async getSessionName(sessionId: SessionId): Promise<string | undefined> {
         return await this.sessionRegistry.getSessionName(sessionId);
     }
-    /** Alias of `getSessionName` — used by handlers migrated from the
-     *  pi Session API (pi 0.84 renamed `getName` to the canonical name). */
-    async getName(sessionId: SessionId): Promise<string | undefined> {
-        return this.getSessionName(sessionId);
-    }
 
     /** Full chat tree history (from the session's leaf up to the root). */
     async getHistory(

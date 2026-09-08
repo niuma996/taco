@@ -10,6 +10,7 @@ import { filterToolsForAgent } from "../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../agents/forkedHistory.ts";
 import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../agents/types.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
+import { createLogger } from "../lib/logger.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import { buildSystemPrompt, filterContributorsForTools } from "../prompts/buildSystemPrompt.ts";
@@ -22,6 +23,8 @@ import { findBranchEntries } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFacts } from "./sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
 import type { SessionTaskState } from "./sessionTaskState.ts";
+
+const log = createLogger("sidecar.agentSpawner");
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
@@ -559,7 +562,21 @@ export class AgentSpawner extends EventEmitter {
             args.parentSessionId,
             (session) => readSessionFacts(session),
         );
-        const parentDepth = parentFacts.depth ?? 0;
+        // Depth defaults to 0 only when facts are absent — but facts are
+        // written *after* repo.create(), so a session interrupted between
+        // the two steps reads back `{}` and would silently zero the recursion
+        // guard. Warn so a recurrence of the cbe4fe2 regression is visible
+        // instead of silently letting depth-1 spawn depth-1 grandchildren.
+        let parentDepth: number;
+        if (parentFacts.depth === undefined) {
+            log.warn(
+                "parent session has no depth fact; defaulting to 0 — recursion guard may be inactive",
+                { parentSessionId: args.parentSessionId },
+            );
+            parentDepth = 0;
+        } else {
+            parentDepth = parentFacts.depth;
+        }
         const childDepth = parentDepth + 1;
         const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
         // Fork: render the parent transcript once, up front. Reading the branch
@@ -897,10 +914,21 @@ export class AgentSpawner extends EventEmitter {
         // call inside executeSubagentSession.
         //
         // Depth comes from facts, not metadata — see the comment in `spawnSubagent`.
+        // Same non-atomic-write caveat applies: missing facts default to 0 with a
+        // warn so a regression does not look like a clean run.
         const parentFacts = await this.sessionRegistry.withSession(pid, (session) =>
             readSessionFacts(session),
         );
-        const parentDepth = parentFacts.depth ?? 0;
+        let parentDepth: number;
+        if (parentFacts.depth === undefined) {
+            log.warn(
+                "parent session has no depth fact; defaulting to 0 — recursion guard may be inactive",
+                { parentSessionId: pid, skillName: args.skillName },
+            );
+            parentDepth = 0;
+        } else {
+            parentDepth = parentFacts.depth;
+        }
         const childDepth = parentDepth + 1;
 
         const allowedSet = args.allowedTools ? new Set(args.allowedTools) : undefined;
