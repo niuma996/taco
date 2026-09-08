@@ -16,6 +16,7 @@ import {
     type HarnessEvent,
     laneConfig,
     NoActiveOperation,
+    NothingToResume,
     type OpenOperation,
     type PromptTemplate,
     type Session,
@@ -274,9 +275,13 @@ export class AttachedSession extends EventEmitter {
     /**
      * Operations left in flight by a previous process, surfaced as `open[]`
      * by pi's `AgentHarness.create()`. Empty when the session is fresh or
-     * already settled before attach. Kept internal for structured logging
-     * only — the pi 0.85.1 migration deliberately does not forward this data
-     * onto the wire or the desktop UI.
+     * already settled before attach.
+     *
+     * Recorded as it was at attach time — `create()` reports it once, and
+     * `resumeOpenOperations` drives it immediately afterwards, so a non-empty
+     * array here does NOT mean the lane is still stuck. It is kept for
+     * structured logging and post-mortems; nothing on the wire or in the
+     * desktop UI reads it.
      */
     resumableOperations: ReadonlyArray<OpenOperation>;
     readonly sessionKind: "main" | "subagent";
@@ -300,6 +305,15 @@ export class AttachedSession extends EventEmitter {
      */
     private thinkingLevel: ThinkingLevel;
     private unsubscribe?: () => void;
+    /**
+     * In-flight recovery of operations interrupted by a previous process.
+     *
+     * `create()` does not await it — a resumed run takes as long as a normal
+     * turn and attach must stay fast — but the lane holds the recovered
+     * operation until it settles, so anything that starts a run has to wait for
+     * this first or it gets `LaneBusy`. Cleared once recovery finishes.
+     */
+    private recovery: Promise<void> | undefined;
     /** Per-session handle to push state into the skill reinjector; undefined if no skills. */
     skillReinjector: SkillReinjectorHandle | undefined;
     /** Fire-and-forget memory extractor (undefined when no memory store). */
@@ -439,12 +453,13 @@ export class AttachedSession extends EventEmitter {
         );
 
         if (open.length > 0) {
-            // A run was in flight when the previous process died. pi leaves it
-            // resumable rather than rolling it back. The wire/UI notice is
-            // intentionally out of scope for the pi 0.85.1 migration; stash the
-            // data here so operations teams can see it in structured sidecar
-            // logs without exposing pi's open-ended OpenOperation shape on the
-            // protocol wire.
+            // A run was in flight when the previous process was killed. pi
+            // leaves it resumable rather than rolling it back, and a restored
+            // operation still occupies `state.operation` — the same field
+            // `lane.prompt()` rejects on with LaneBusy. Left undriven the
+            // session is permanently unusable, so this is logged here and
+            // resumed once the event/hook wiring is live (see
+            // `resumeOpenOperations` at the end of create()).
             log.warn("session has interrupted operations from a previous run", {
                 sessionId: args.session.metadata.id,
                 count: open.length,
@@ -681,7 +696,99 @@ export class AttachedSession extends EventEmitter {
             unwireHooks();
         };
 
+        // Deliberately last: resume drives a real run, which emits immediately.
+        // Every subscriber, hook and the tool surface must already be wired or
+        // the recovered turn's output is lost. Not awaited — a resumed run can
+        // take as long as a normal turn, and attach must not block on it.
+        if (open.length > 0) {
+            attached.recovery = attached.resumeOpenOperations(open).finally(() => {
+                attached.recovery = undefined;
+            });
+        }
+
         return attached;
+    }
+
+    /**
+     * Drive operations that `AgentHarness.create()` reported as still open.
+     *
+     * Why this is not optional: a restored operation stays in the lane's
+     * `state.operation`, and `lane.prompt()` rejects with `LaneBusy` whenever
+     * that field is non-null. Ignoring `open[]` therefore does not leak a bit of
+     * state — it leaves the session unable to accept another message, across
+     * restarts, with no way for the user to clear it.
+     *
+     * `lane.resume()` re-enters the existing operation rather than starting a
+     * new one, so the reply lands on the same branch the interrupted run was
+     * building. Tool calls whose outcome was never recorded are replayed only
+     * when the tool opts in with `replay: "safe"`; taco declares no such tool
+     * (and neither does pi for bash/edit/write), so recovery cannot re-run a
+     * side effect — the unfinished call is reported as interrupted instead.
+     *
+     * Failures are contained: this runs detached from `create()`, so throwing
+     * would surface as an unhandled rejection and take down the daemon rather
+     * than the session. A session that cannot be resumed is degraded, not
+     * fatal — the user can still abort it explicitly.
+     */
+    /**
+     * Block until crash recovery has released the lane. No-op in the normal
+     * case — `recovery` is only set when `create()` found an open operation.
+     *
+     * Never rejects: `resumeOpenOperations` already contains its own failures,
+     * and a caller waiting on recovery should proceed to its own `prompt()` (and
+     * get that call's real error) rather than inherit a recovery failure.
+     */
+    private async awaitRecovery(): Promise<void> {
+        await this.recovery?.catch(() => undefined);
+    }
+
+    private async resumeOpenOperations(open: ReadonlyArray<OpenOperation>): Promise<void> {
+        const sessionId = this.session.metadata.id;
+        // A lane holds at most one operation (`state.operation` is a single
+        // slot), and `lane.resume()` takes no id — it resumes whatever its own
+        // lane is holding. So only the entry for this session's lane is
+        // actionable; anything else would resume the wrong lane. taco attaches
+        // exactly one lane per session, so in practice this selects 0 or 1.
+        const mine = open.find((operation) => operation.lane === MAIN_BRANCH);
+        if (mine === undefined) {
+            log.warn("interrupted operations belong to other lanes; not resuming", {
+                sessionId,
+                lanes: open.map((operation) => operation.lane),
+            });
+            return;
+        }
+
+        // `aborting` means durable cancellation was requested before the crash.
+        // Resuming still runs the operation to its terminal state, which is what
+        // actually clears `state.operation` and frees the lane.
+        const context = {
+            sessionId,
+            operationId: mine.operationId,
+            kind: mine.kind,
+            ...(mine.aborting === true ? { aborting: true } : {}),
+        };
+        try {
+            const result = await this.lane.resume(harnessContext);
+            if (!result.ok) {
+                // NothingToResume is the benign race: the operation settled
+                // between `create()` reporting it and this call.
+                if (NothingToResume.is(result.error)) {
+                    log.debug("interrupted operation already settled", context);
+                    return;
+                }
+                log.warn("could not resume interrupted operation", {
+                    ...context,
+                    error: result.error.message,
+                });
+                return;
+            }
+            log.info("resumed interrupted operation", {
+                ...context,
+                status: "status" in result.value ? result.value.status : "suspended",
+            });
+        } catch (error) {
+            log.error("resuming an interrupted operation threw", context, error);
+        }
     }
 
     /**
@@ -702,6 +809,10 @@ export class AttachedSession extends EventEmitter {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
         }
+        // A recovered operation occupies the lane until it settles, so prompting
+        // during recovery would fail with LaneBusy — a spurious "session is
+        // busy" on the first message after a crash. Wait it out instead.
+        await this.awaitRecovery();
         const result = await this.lane.prompt(text, images, harnessContext);
         if (!result.ok) throw toHarnessError("session.prompt", result.error);
 

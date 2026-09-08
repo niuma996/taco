@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
+import { JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
@@ -100,6 +100,94 @@ describe("AttachedSession — streaming a turn", () => {
             updates.length > 0,
             `expected incremental updates, got only: ${events.map((e) => e.type).join(", ")}`,
         );
+    });
+
+    /**
+     * The case D1 exists for. A run interrupted by a killed process stays in
+     * the lane's `state.operation`, which is the same slot `lane.prompt()`
+     * rejects on — so without resume the session is permanently unusable, and
+     * a restart does not help because the operation is durable.
+     *
+     * Proven directly here rather than asserted on a stub: the first attach is
+     * abandoned mid-prompt (session closed under the running turn), then a
+     * second `AttachedSession.create` over the same session must recover on its
+     * own and accept a fresh prompt.
+     */
+    it("resumes an operation interrupted by a killed process, so the lane accepts prompts again", async () => {
+        const env = new NodeExecutionEnv({ cwd: tmp });
+        const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(tmp, "sessions") });
+        // A *paced* provider is what makes this deterministic. With
+        // `tokensPerSecond: 0` the reply lands in one tick and the run settles
+        // before the close, leaving nothing open (measured: only a 1-3ms window
+        // produced an open operation, i.e. a flaky test). Pacing the stream
+        // keeps the run mid-flight for the whole interrupt (measured: 5/5).
+        const faux = fauxProvider({ provider: "faux", tokensPerSecond: 2 } as never);
+        const models = createModels();
+        models.setProvider(faux.provider);
+        const id = uuidv7();
+        const longReply = "a fairly long reply with many tokens to pace out";
+
+        const build = async (session: unknown) =>
+            await AttachedSession.create({
+                session,
+                models,
+                model: faux.getModel(),
+                env,
+                systemPrompt: "test",
+                tools: [],
+                resources: {},
+                streamOptions: {},
+                taskStore: {
+                    lists: new Map(),
+                    getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                    setTaskState: () => {},
+                } as unknown as TaskStore,
+                planState: createPlanModeState(),
+                tasksDir: tmp,
+                sessionCwd: tmp as never,
+                getToolContext: () => ({ env, workspace: tmp as never }) as never,
+            } as never);
+
+        // First attach: start a turn and close the session while the stream is
+        // still being paced out. Awaiting the prompt is pointless — the point is
+        // that it never completes, which is what a killed process looks like.
+        faux.setResponses([fauxAssistantMessage([fauxText(longReply)])] as never);
+        const first = await repo.create({ id, cwd: tmp }, harnessContext);
+        const attached1 = await build(first);
+        const abandoned = attached1.prompt("go", undefined, undefined).catch(() => undefined);
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        await first.close(harnessContext).catch(() => undefined);
+        await abandoned;
+
+        // Second attach over the same session: create() reports the open
+        // operation and AttachedSession resumes it in the background.
+        const list = await repo.list(undefined, harnessContext);
+        const meta = list.find((m) => m.id === id);
+        assert.ok(meta, "the interrupted session should still be listed");
+        // Queue both replies up front: one for the resumed run, one for the
+        // prompt below. Setting them one at a time races the resume, which
+        // starts as soon as `create()` returns and consumes the head of the
+        // queue.
+        faux.setResponses([
+            fauxAssistantMessage([fauxText("recovered")]),
+            fauxAssistantMessage([fauxText("second")]),
+        ] as never);
+        const attached2 = await build(await repo.open(meta, harnessContext));
+        try {
+            assert.equal(
+                attached2.resumableOperations.length,
+                1,
+                "the interrupted run should be reported as open",
+            );
+
+            // The assertion that matters: this same call fails with LaneBusy
+            // while the recovered operation still occupies the lane, so it only
+            // succeeds because `prompt` waits for recovery to settle first.
+            const reply = await attached2.prompt("again", undefined, undefined);
+            assert.equal(reply.role, "assistant");
+        } finally {
+            await attached2.dispose();
+        }
     });
 
     it("starts with an empty resumableOperations array on a fresh session", async () => {
