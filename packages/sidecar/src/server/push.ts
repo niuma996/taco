@@ -80,18 +80,23 @@ export function makePushFrame<TParams = unknown>(opts: PushEventOptions): Server
 export const SIDECAR_INSTANCE_ID = randomUUID();
 
 /**
- * Restore the `assistantMessageEvent` field on a `message_update`.
+ * Carry the streamed sub-event on the legacy `assistantMessageEvent` field as
+ * well as pi 0.85's `event` field.
  *
- * pi 0.85's type declaration says the streamed sub-event arrives as
- * `assistantMessageEvent`, but the runtime emits it as `event`. Clients read
- * the declared name, so without this the field is `undefined`, every streaming
- * delta is dropped, and only the final `message_end` renders — the whole reply
- * appears at once with no visible streaming. Type-checking cannot catch it:
- * the shipped `.d.ts` disagrees with the shipped JS.
+ * The desktop reader in `applyEventToMessages` types its incoming event as
+ * `SessionEventLike`, which still names the sub-event `assistantMessageEvent`
+ * (the field name from pi 0.85's legacy `AgentEvent` shape). pi 0.85's
+ * harness emits `HarnessEvent.message_update` with the field as `event` (plus
+ * `message`, the actual snapshot of record, and optional `frame`, the real
+ * delta). The two shapes coexist in pi: `HarnessEvent` (this stream) and
+ * `AgentEvent` (legacy `Agent`/`agent-loop`). They are not contradictory; the
+ * `.d.ts` matches the JS for both.
  *
- * Both names are emitted so the frame keeps working whichever one a client
- * reads, and so a future pi release that honours its own declaration is a no-op
- * here. Non-`message_update` events pass through untouched.
+ * Carrying both names keeps the desktop reader working without forcing it to
+ * migrate to `HarnessEvent` types. The right long-term direction is to read
+ * `message` + `frame` directly on the desktop side, at which point this
+ * adapter (and the `assistantMessageEvent` field on the wire) can go away.
+ * Non-`message_update` events pass through untouched.
  */
 export function normalizeMessageUpdate(event: unknown): unknown {
     if (!event || typeof event !== "object") return event;

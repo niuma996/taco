@@ -46,13 +46,16 @@ export type Now = () => number;
  * every `harness.compact()` call so downstream consumers (the push adapter's
  * in-flight map, the desktop input freeze) can never be left latched on.
  *
- * Why this exists rather than reusing pi's `session_before_compact`: that event
- * is dispatched through `emitHook`, which only reaches type-specific
- * `harness.on(...)` handlers — never `harness.subscribe(...)`, which is the
- * channel that feeds `session.event`. Its counterpart `session_compact` goes
- * through `emitOwn` and *does* reach subscribers, so keying an interlock on the
- * pi events alone yields an end without a start, and no start at all for the
- * push layer. The `finally` that emits `end` is the pairing guarantee.
+ * pi 0.85 does emit `compaction_start` and `compaction_end` on the same event
+ * bus, but the sidecar's existing pair is kept for two reasons:
+ *
+ *   1. `tokensBefore` is not carried inline on `compaction_end`; the controller
+ *      resolves it via `getEntry(startEntryId)` so the push layer can show it.
+ *   2. A throw from `harness.compact()` never fires pi's `compaction_end`, so
+ *      the `finally` that emits our end signal is the only guarantee that a
+ *      started compaction is always followed by an end — same pair discipline
+ *      the prior comment described, but driven by our error path now, not by
+ *      a bus asymmetry.
  */
 export type CompactionLifecycleSignal =
     | { phase: "start"; tokensBefore: number }
