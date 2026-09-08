@@ -52,7 +52,11 @@ export interface AssistantMessage {
     responseModel?: string;
     responseId?: string;
     usage?: Usage;
-    stopReason?: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+    /** Mirrors pi's `StopReason` union. `"deferred"` means the provider returned
+     *  a durable handle and is still working; the desktop renders it like any
+     *  other non-error reason. Kept in sync with pi so the sidecar can hand its
+     *  messages to the wire without a structural cast. */
+    stopReason?: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
     errorMessage?: string;
     rawStopReason?: string;
     timestamp: number;
