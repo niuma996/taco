@@ -90,7 +90,7 @@ export function attachCommandPermission(
 /**
  * Backfill the agent card's `details.subSessionId` so the expanded view can
  * bind the live child stream while the subagent is still running. `details`
- * normally only arrives on tool_execution_end — until then the card renders
+ * normally only arrives on tool_end — until then the card renders
  * "spawning…" even though the child stream is already accumulating.
  */
 export function backfillSubagentDetails(

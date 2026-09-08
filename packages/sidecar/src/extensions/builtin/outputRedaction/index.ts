@@ -51,7 +51,7 @@ const PATTERNS: Array<{ re: RegExp; label: string }> = [
 
 /**
  * Redact secrets from a single string, returning `[redacted, wasModified]`.
- * Exported so push.ts can scrub `tool_execution_start` arguments before they
+ * Exported so push.ts can scrub `tool_start` arguments before they
  * reach the desktop UI.
  */
 export function redactString(s: string): [string, boolean] {

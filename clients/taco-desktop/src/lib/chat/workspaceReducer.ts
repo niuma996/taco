@@ -67,7 +67,7 @@ export interface WorkspaceState {
     /**
      * toolCallId → true means an askUser tool is waiting for user selection.
      * Source of truth for questions is tool.details.questions (written by
-     * applyEventToMessages). Set when tool_execution_end has details.waiting === true;
+     * applyEventToMessages). Set when tool_end has details.waiting === true;
      * cleared by ASKUSER_ANSWERED. Also applies to planExit: reducer treats it as an
      * askUser-style two-state tool (first waiting=true, second answered).
      */
@@ -99,7 +99,7 @@ export interface WorkspaceState {
     forceExpandTaskPanel: boolean;
     /**
      * parentToolCallId → true tracks agent tool calls awaiting subagent results.
-     * Written by SUBAGENT_SPAWNED; cleared by the corresponding tool_execution_end (agent).
+     * Written by SUBAGENT_SPAWNED; cleared by the corresponding tool_end (agent).
      * Used by UI to block sending: pending is false but a subagent running should still block.
      */
     agentToolPending: Record<string, true>;
@@ -520,18 +520,18 @@ export function workspacesReducer(
                     suppressedThinking: action.suppressedThinking,
                     now: action.now,
                 });
-                // toolName / isError / toolCallId live on the tool_execution_end branch of
+                // toolName / isError / toolCallId live on the tool_end branch of
                 // the SessionEventLike union; access them only after the type guard so TS
                 // narrows correctly.
                 const endedToolCallId =
-                    action.ev.type === "tool_execution_end" ? (action.ev.toolCallId ?? "") : null;
+                    action.ev.type === "tool_end" ? (action.ev.toolCallId ?? "") : null;
                 let askUserPending = existing.askUserPending;
                 // askUser / planExit share the same trigger: terminate + questions + a
-                // two-state waiting flag. Both tool_execution_end frames write the same
+                // two-state waiting flag. Both tool_end frames write the same
                 // tool card, so the second one carries no questions — clearing pending
                 // relies on applyEventToMessages having already merged them.
                 if (
-                    action.ev.type === "tool_execution_end" &&
+                    action.ev.type === "tool_end" &&
                     !action.ev.isError &&
                     isAskUserStyleTool(action.ev.toolName)
                 ) {
@@ -547,7 +547,7 @@ export function workspacesReducer(
                 // that frame was lost or arrived late — the tool finished but pending never
                 // cleared, leaving the composer disabled forever.
                 const clearsAgentPending =
-                    action.ev.type === "tool_execution_end" &&
+                    action.ev.type === "tool_end" &&
                     (action.ev.toolName === "agent" || action.ev.toolName === "skill");
                 return {
                     messages: result.messages,

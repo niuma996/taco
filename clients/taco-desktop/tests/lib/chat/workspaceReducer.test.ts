@@ -622,7 +622,7 @@ describe("subagent actions", () => {
             sid: "main-1",
             suppressedThinking: false,
             now: 3,
-            ev: { type: "tool_execution_end" as const, toolCallId, toolName, isError },
+            ev: { type: "tool_end" as const, toolCallId, toolName, isError },
         };
     }
 
@@ -685,7 +685,7 @@ describe("subagent actions", () => {
 
     it("SUBAGENT_SPAWNED backfills details.subSessionId on the matching agent tool", () => {
         // Without this backfill the agent card has no subSessionId until
-        // tool_execution_end, so it renders "spawning…" for the whole run even
+        // tool_end, so it renders "spawning…" for the whole run even
         // though the child stream is already accumulating.
         const state = {
             "/ws": baseWs({
@@ -934,7 +934,7 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
             suppressedThinking: false,
             now: 1,
             ev: {
-                type: "tool_execution_end",
+                type: "tool_end",
                 toolName: "askUser",
                 toolCallId,
                 isError: false,
@@ -962,7 +962,7 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
         // directly in the waiting !== true branch, contaminating the input —
         // StrictMode's double-call / time-travel debugging would break.
         const ev: SessionEventLike = {
-            type: "tool_execution_end",
+            type: "tool_end",
             toolName: "askUser",
             toolCallId: "tc-1",
             isError: false,

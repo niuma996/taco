@@ -2,7 +2,7 @@
  * planExit tool view — reuses AskUserToolView to render the same card.
  *
  * `tool.details.questions` is written by `applyEventToMessages` from
- * `tool_execution_end.details.questions`. The reducer treats planExit as an
+ * `tool_end.details.questions`. The reducer treats planExit as an
  * askUser trigger, so `ASKUSER_ANSWERED` clears pending and injects answers.
  */
 

@@ -22,7 +22,7 @@ import { redactUnknown } from "../extensions/builtin/outputRedaction/index.ts";
 /**
  * Scrub tool-call `args` before pushing to the desktop UI.
  *
- * `args` is forwarded on `tool_execution_start` *before* the tool runs —
+ * `args` is forwarded on `tool_start` *before* the tool runs —
  * the outputRedaction hook only sees `tool_result.content`, so a literal
  * key in a bash command would otherwise reach the desktop shell view raw.
  * Delegates to `redactUnknown`, which handles serialization + warn-on-failure.

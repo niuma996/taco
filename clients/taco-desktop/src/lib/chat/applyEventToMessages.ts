@@ -100,11 +100,11 @@ export function applyEventToMessages(
             return handleMessageUpdate(messages, ev, opts);
         case "message_end":
             return handleMessageEnd(messages, ev, opts);
-        case "tool_execution_start":
+        case "tool_start":
             return handleToolStart(messages, ev, opts);
-        case "tool_execution_update":
+        case "tool_update":
             return handleToolUpdate(messages, ev);
-        case "tool_execution_end":
+        case "tool_end":
             return handleToolEnd(messages, ev, opts);
         case "agent_end":
         case "turn_end":
@@ -251,7 +251,7 @@ function handleMessageEnd(
 
 function handleToolStart(
     messages: UiMessage[],
-    ev: Extract<SessionEventLike, { type: "tool_execution_start" }>,
+    ev: Extract<SessionEventLike, { type: "tool_start" }>,
     opts: ApplyEventOpts,
 ): ApplyEventResult {
     const toolCallId = ev.toolCallId ?? `${opts.now}`;
@@ -286,7 +286,7 @@ function handleToolStart(
 
 function handleToolUpdate(
     messages: UiMessage[],
-    ev: Extract<SessionEventLike, { type: "tool_execution_update" }>,
+    ev: Extract<SessionEventLike, { type: "tool_update" }>,
 ): ApplyEventResult {
     const toolCallId = ev.toolCallId ?? "";
     const assistant = findLastAssistant(messages);
@@ -306,7 +306,7 @@ function handleToolUpdate(
 
 function handleToolEnd(
     messages: UiMessage[],
-    ev: Extract<SessionEventLike, { type: "tool_execution_end" }>,
+    ev: Extract<SessionEventLike, { type: "tool_end" }>,
     opts: ApplyEventOpts,
 ): ApplyEventResult {
     const toolCallId = ev.toolCallId ?? "";
@@ -352,7 +352,7 @@ function handleToolEnd(
     // Pass through structured `details` — front-end views parse by
     // tool.name (e.g. edit's details.lines for absolute line numbers).
     //
-    // askUser / planExit's second tool_execution_end loses fields,
+    // askUser / planExit's second tool_end loses fields,
     // so we merge from the previous frame's tool card:
     //   - askUser: drops questions (returned details contain only answers)
     //   - planExit: drops questions + planContent (returned details
@@ -438,7 +438,7 @@ function applyAssistantSubEvent(
         case "start":
         case "done":
         case "error":
-            // toolcall_* events are handled separately via tool_execution_*.
+            // toolcall_* events are handled separately via tool_*.
             break;
     }
 }

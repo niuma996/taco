@@ -110,7 +110,7 @@ function makeExtractor(): MiniExtractor {
 
 /**
  * Mini-coordinator: a faithful copy of the AttachedSession block. If you
- * refactor one, refactor the other. Each `tool_execution_end` event flips a
+ * refactor one, refactor the other. Each `tool_end` event flips a
  * shared state; each `turn_end` event consumes it. We intentionally avoid
  * linking to AttachedSession so the test stays O(constant) and doesn't have
  * to mock AgentHarness.
@@ -122,7 +122,7 @@ function makeCoordinator(deps: {
 }) {
     const { session, extractor, state } = deps;
 
-    const handleToolExecutionEnd = (toolName: string, isError: boolean) => {
+    const handleToolEnd = (toolName: string, isError: boolean) => {
         if (toolName !== "memory" || isError) return;
         state.lastRememberMessageCountPromises.push(
             session.buildContext().then((ctx) => ctx.messages.length),
@@ -149,7 +149,7 @@ function makeCoordinator(deps: {
         });
     };
 
-    return { handleToolExecutionEnd, handleTurnEnd };
+    return { handleToolEnd, handleTurnEnd };
 }
 
 // Drain the microtask queue: every `.then()` schedules a microtask, and
@@ -179,7 +179,7 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
         assert.equal(identify(extractor.calls[0][0]), "user:m0");
     });
 
-    it("tool_execution_end('memory') then turn_end slices to messages after the offset", async () => {
+    it("tool_end('memory') then turn_end slices to messages after the offset", async () => {
         const extractor = makeExtractor();
         // First buildContext (from remember tool) sees 3 messages; turn_end
         // sees 5 — extractor should receive only [m3, m4].
@@ -191,13 +191,13 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             },
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
-        handleToolExecutionEnd("memory", false);
+        handleToolEnd("memory", false);
         await flush(); // let the remember Promise resolve to 3
         handleTurnEnd();
         await flush();
@@ -220,15 +220,15 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             buildContext: () => Promise.resolve({ messages: messages(2) }),
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
-        // Fire tool_execution_end but DON'T flush — the count Promise is
+        // Fire tool_end but DON'T flush — the count Promise is
         // still pending when turn_end runs.
-        handleToolExecutionEnd("memory", false);
+        handleToolEnd("memory", false);
         handleTurnEnd(); // synchronously consumes the pending Promise into `sinceCountPromise`
 
         // Before flush: the slot is already empty (synchronous reset).
@@ -269,13 +269,13 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             },
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
-        handleToolExecutionEnd("memory", false);
+        handleToolEnd("memory", false);
         await flush();
         handleTurnEnd();
         await flush();
@@ -289,13 +289,13 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             buildContext: () => Promise.resolve({ messages: messages(3) }),
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
-        handleToolExecutionEnd("memory", true); // ERROR → no capture
+        handleToolEnd("memory", true); // ERROR → no capture
         assert.equal(state.lastRememberMessageCountPromises.length, 0);
         handleTurnEnd();
         await flush();
@@ -310,14 +310,14 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             buildContext: () => Promise.resolve({ messages: messages(3) }),
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
-        handleToolExecutionEnd("read", false);
-        handleToolExecutionEnd("write", false);
+        handleToolEnd("read", false);
+        handleToolEnd("write", false);
         assert.equal(state.lastRememberMessageCountPromises.length, 0);
         handleTurnEnd();
         await flush();
@@ -356,15 +356,15 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             },
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
         // Fire both memory calls — both Promises are pending.
-        handleToolExecutionEnd("memory", false);
-        handleToolExecutionEnd("memory", false);
+        handleToolEnd("memory", false);
+        handleToolEnd("memory", false);
         // Verify both went into the array before either resolves.
         assert.equal(state.lastRememberMessageCountPromises.length, 2);
 
@@ -396,13 +396,13 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
             },
         };
         const state = freshState();
-        const { handleToolExecutionEnd, handleTurnEnd } = makeCoordinator({
+        const { handleToolEnd, handleTurnEnd } = makeCoordinator({
             session,
             extractor,
             state,
         });
 
-        handleToolExecutionEnd("memory", false);
+        handleToolEnd("memory", false);
         handleTurnEnd();
         await flush();
 

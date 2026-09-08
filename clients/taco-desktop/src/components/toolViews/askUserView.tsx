@@ -1,7 +1,7 @@
 /**
  * askUser tool view — interactive card rendered inside the assistant's tools.
  *
- * Data flow: `tool.details.questions` (from `tool_execution_end.details`) holds the
+ * Data flow: `tool.details.questions` (from `tool_end.details`) holds the
  * question list. Single-choice clicks dispatch directly; multi-select accumulates
  * locally and the Submit button dispatches. `ASKUSER_ANSWERED` clears pending; the
  * useWorkspaces effect then calls `session.submitAnswers` to hand structured answers

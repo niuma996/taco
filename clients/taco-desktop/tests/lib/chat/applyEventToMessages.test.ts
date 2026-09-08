@@ -176,7 +176,7 @@ describe("applyEventToMessages — message_end", () => {
 });
 
 describe("applyEventToMessages — tool execution", () => {
-    it("tool_execution_start → upsert 到 last assistant.tools", () => {
+    it("tool_start → upsert 到 last assistant.tools", () => {
         const start = asEv({
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
@@ -184,7 +184,7 @@ describe("applyEventToMessages — tool execution", () => {
         const started = applyEventToMessages([], start, baseOpts).messages;
 
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc1",
             toolName: "Read",
             args: { path: "/foo" },
@@ -196,20 +196,20 @@ describe("applyEventToMessages — tool execution", () => {
         assert.equal(asst.tools[0]?.status, "running");
     });
 
-    it("tool_execution_update → 写 partialResult 字符串", () => {
+    it("tool_update → 写 partialResult 字符串", () => {
         const start = asEv({
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
         });
         const started = applyEventToMessages([], start, baseOpts).messages;
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc1",
             toolName: "Read",
         });
         const after1 = applyEventToMessages(started, toolStart, baseOpts).messages;
         const update = asEv({
-            type: "tool_execution_update",
+            type: "tool_update",
             toolCallId: "tc1",
             partialResult: "partial data",
         });
@@ -218,20 +218,20 @@ describe("applyEventToMessages — tool execution", () => {
         assert.equal(asst.tools[0]?.resultText, "partial data");
     });
 
-    it("tool_execution_end(isError=false) → status=ok + resultText", () => {
+    it("tool_end(isError=false) → status=ok + resultText", () => {
         const start = asEv({
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
         });
         const started = applyEventToMessages([], start, baseOpts).messages;
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc1",
             toolName: "Read",
         });
         const after1 = applyEventToMessages(started, toolStart, baseOpts).messages;
         const end = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc1",
             isError: false,
             result: { content: [{ type: "text", text: "file contents" }] },
@@ -242,20 +242,20 @@ describe("applyEventToMessages — tool execution", () => {
         assert.ok(asst.tools[0]?.resultText?.includes("file contents"));
     });
 
-    it("tool_execution_end(isError=true) → status=error", () => {
+    it("tool_end(isError=true) → status=error", () => {
         const start = asEv({
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
         });
         const started = applyEventToMessages([], start, baseOpts).messages;
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc1",
             toolName: "Read",
         });
         const after1 = applyEventToMessages(started, toolStart, baseOpts).messages;
         const end = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc1",
             isError: true,
         });
@@ -264,9 +264,9 @@ describe("applyEventToMessages — tool execution", () => {
         assert.equal(asst.tools[0]?.status, "error");
     });
 
-    it("无 assistant 容器 → tool_execution_start 插入独立 tool row", () => {
+    it("无 assistant 容器 → tool_start 插入独立 tool row", () => {
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc1",
             toolName: "Read",
         });
@@ -301,14 +301,14 @@ describe("applyEventToMessages — 不 mutate 入参", () => {
         assert.notEqual(afterAssistant, originalAssistant);
     });
 
-    it("tool_execution_end 写 status 不改原始 assistant.tools[i].status", () => {
+    it("tool_end 写 status 不改原始 assistant.tools[i].status", () => {
         const start = asEv({
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
         });
         const started = applyEventToMessages([], start, baseOpts).messages;
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc1",
             toolName: "Read",
         });
@@ -316,7 +316,7 @@ describe("applyEventToMessages — 不 mutate 入参", () => {
         const originalTool = (after1[0] as Extract<UiMessage, { kind: "assistant" }>).tools[0];
 
         const end = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc1",
             isError: false,
             result: { content: [{ type: "text", text: "ok" }] },
@@ -329,9 +329,9 @@ describe("applyEventToMessages — 不 mutate 入参", () => {
     });
 });
 
-describe("applyEventToMessages — tool_execution_end details 合并", () => {
+describe("applyEventToMessages — tool_end details 合并", () => {
     /**
-     * Second tool_execution_end for planExit / askUser drops fields:
+     * Second tool_end for planExit / askUser drops fields:
      *   - askUser: drops questions (result details only include answers)
      *   - planExit: drops questions + planContent (result details only include approved;
      *     planContent is deliberately "" because planExit's second state skips readFileSync)
@@ -344,17 +344,17 @@ describe("applyEventToMessages — tool_execution_end details 合并", () => {
         });
         const started = applyEventToMessages([], start, baseOpts).messages;
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc-plan",
             toolName: "planExit",
         });
         return applyEventToMessages(started, toolStart, baseOpts).messages;
     }
 
-    it("planExit 首次 tool_execution_end 写入 questions + planContent", () => {
+    it("planExit 首次 tool_end 写入 questions + planContent", () => {
         const started = setupAssistantWithPlanExitStart();
         const end = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc-plan",
             toolName: "planExit",
             isError: false,
@@ -383,11 +383,11 @@ describe("applyEventToMessages — tool_execution_end details 合并", () => {
         assert.equal(details.planContent, "# Plan\n\nLong body...");
     });
 
-    it("planExit 二次 tool_execution_end 合并 questions + planContent from prev", () => {
+    it("planExit 二次 tool_end 合并 questions + planContent from prev", () => {
         const started = setupAssistantWithPlanExitStart();
         // First call
         const firstEnd = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc-plan",
             toolName: "planExit",
             isError: false,
@@ -404,7 +404,7 @@ describe("applyEventToMessages — tool_execution_end details 合并", () => {
 
         // Second call (user approved) — planContent deliberately "" means no re-read
         const secondEnd = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc-plan",
             toolName: "planExit",
             isError: false,
@@ -433,14 +433,14 @@ describe("applyEventToMessages — tool_execution_end details 合并", () => {
         assert.equal(details.approved, true, "approved from new must win");
     });
 
-    it("askUser 二次 tool_execution_end 合并 questions from prev", () => {
+    it("askUser 二次 tool_end 合并 questions from prev", () => {
         const start = asEv({
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
         });
         const started = applyEventToMessages([], start, baseOpts).messages;
         const toolStart = asEv({
-            type: "tool_execution_start",
+            type: "tool_start",
             toolCallId: "tc-ask",
             toolName: "askUser",
         });
@@ -448,7 +448,7 @@ describe("applyEventToMessages — tool_execution_end details 合并", () => {
 
         // First call
         const firstEnd = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc-ask",
             isError: false,
             result: {
@@ -463,7 +463,7 @@ describe("applyEventToMessages — tool_execution_end details 合并", () => {
 
         // Second call (user answered)
         const secondEnd = asEv({
-            type: "tool_execution_end",
+            type: "tool_end",
             toolCallId: "tc-ask",
             toolName: "askUser",
             isError: false,

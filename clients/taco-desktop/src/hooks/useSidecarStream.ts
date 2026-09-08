@@ -14,6 +14,9 @@ import type {
     SubagentSpawnedPayload,
     TaskListMeta,
     TasksUpdatedParams,
+    ToolCallEndParams,
+    ToolCallStartParams,
+    ToolCallUpdateParams,
 } from "@taco-ai/protocol";
 import { PushMethods } from "@taco-ai/protocol";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -188,55 +191,37 @@ function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void)
                     : { type: "EVENT", cwd: p.workspace, sid: p.session, ev },
             );
         }
+        // The three tool pushes are named methods, so the payload carries no
+        // `type` discriminant of its own — the method name IS the tag. Add the
+        // matching `SessionEventLike` tag and spread the params through: the
+        // protocol param interfaces declare exactly the fields the union
+        // branches read (plus `ts`, which the renderer ignores), so re-listing
+        // them by hand only creates a second place to forget a new field.
         case PushMethods.ToolCallStart: {
-            const params = (p.params ?? {}) as {
-                toolCallId: string;
-                toolName: string;
-                args?: unknown;
-            };
+            const params = (p.params ?? {}) as ToolCallStartParams;
             return void dispatch({
                 type: p.sessionKind === "subagent" ? "CHILD_MESSAGE_EVENT" : "EVENT",
                 cwd: p.workspace,
                 sid: p.session,
-                ev: {
-                    type: "tool_execution_start",
-                    toolCallId: params.toolCallId,
-                    toolName: params.toolName,
-                    args: params.args,
-                },
+                ev: { type: "tool_start", ...params },
             });
         }
         case PushMethods.ToolCallUpdate: {
-            const params = (p.params ?? {}) as { toolCallId: string; partialResult?: unknown };
+            const params = (p.params ?? {}) as ToolCallUpdateParams;
             return void dispatch({
                 type: p.sessionKind === "subagent" ? "CHILD_MESSAGE_EVENT" : "EVENT",
                 cwd: p.workspace,
                 sid: p.session,
-                ev: {
-                    type: "tool_execution_update",
-                    toolCallId: params.toolCallId,
-                    partialResult: params.partialResult,
-                },
+                ev: { type: "tool_update", ...params },
             });
         }
         case PushMethods.ToolCallEnd: {
-            const params = (p.params ?? {}) as {
-                toolCallId: string;
-                toolName?: string;
-                isError: boolean;
-                result?: { content?: Array<{ type?: string; text?: string }>; details?: unknown };
-            };
+            const params = (p.params ?? {}) as ToolCallEndParams;
             return void dispatch({
                 type: p.sessionKind === "subagent" ? "CHILD_MESSAGE_EVENT" : "EVENT",
                 cwd: p.workspace,
                 sid: p.session,
-                ev: {
-                    type: "tool_execution_end",
-                    toolCallId: params.toolCallId,
-                    toolName: params.toolName,
-                    isError: params.isError,
-                    result: params.result,
-                },
+                ev: { type: "tool_end", ...params },
             });
         }
     }

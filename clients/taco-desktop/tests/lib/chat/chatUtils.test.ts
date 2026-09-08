@@ -869,7 +869,7 @@ describe("foldContent", () => {
 });
 
 describe("stringifyResult", () => {
-    it("unwraps the { content: Part[] } tool_execution_end shape", () => {
+    it("unwraps the { content: Part[] } tool_end shape", () => {
         const result = { content: [{ type: "text", text: "done" }], details: { edits: 1 } };
         assert.equal(stringifyResult(result), "done");
     });

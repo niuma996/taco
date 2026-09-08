@@ -1207,8 +1207,8 @@ export class SidecarServer implements ServerRpcSurface {
      */
     private wireWorkspacePush(ws: WorkspaceRuntime, workspaceKey: WorkspaceId): void {
         ws.on("session.event", (e: RuntimePushEvent) => {
-            // Branch: tool_execution_* split into named push methods
-            // (session.tool_call_*); others stay as a blob in session.event.
+            // Branch: tool_start / tool_update / tool_end split into named
+            // push methods (session.tool_call_*); others stay as a blob in session.event.
             // Named events let the client route directly by method (no per-
             // message type switch), and reusing toolCallId as the push
             // frame.id lets the client dispatcher dedupe.

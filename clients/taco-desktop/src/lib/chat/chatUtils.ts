@@ -64,18 +64,18 @@ export type SessionEventLike =
           message?: MessageLike;
       }
     | {
-          type: "tool_execution_start";
+          type: "tool_start";
           toolCallId?: string;
           toolName?: string;
           args?: unknown;
       }
     | {
-          type: "tool_execution_update";
+          type: "tool_update";
           toolCallId?: string;
           partialResult?: unknown;
       }
     | {
-          type: "tool_execution_end";
+          type: "tool_end";
           toolCallId?: string;
           toolName?: string;
           args?: unknown;
@@ -150,7 +150,7 @@ export function foldContent(value: unknown): string {
 
 /**
  * Fold a tool result, which may arrive either as a bare value or wrapped as
- * `{ content: Part[] }` (the tool_execution_end shape). The unwrap is the only
+ * `{ content: Part[] }` (the tool_end shape). The unwrap is the only
  * thing this adds over foldContent.
  */
 export function stringifyResult(r: unknown): string {
@@ -184,7 +184,7 @@ export interface UiToolCall {
     resultText?: string;
     /**
      * Tool-specific structured details (passed through from
-     * tool_execution_end.result.details on the server). The edit tool writes
+     * tool_end.result.details on the server). The edit tool writes
      * { edits: number, lines: LineInfo[] } etc.; the front-end parses by
      * tool.name. `stringifyResult` does not read this field — `resultText`
      * and `details` are complementary.
