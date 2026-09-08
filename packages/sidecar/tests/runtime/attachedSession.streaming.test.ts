@@ -22,7 +22,7 @@ import { createModels } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
-import { AttachedSession } from "../../src/runtime/attachedSession.ts";
+import { AttachedSession, resolvePromptReply } from "../../src/runtime/attachedSession.ts";
 import { normalizeMessageUpdate } from "../../src/server/push.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 
@@ -44,14 +44,24 @@ after(() => {
 
 /** Build an AttachedSession over a faux provider. `register: false` leaves the
  *  provider out of the model registry, which makes the run fail with
- *  `model_unavailable` — the cheapest way to reach a terminal non-success run. */
-async function makeAttached(reply: string, register = true) {
+ *  `model_unavailable` — the cheapest way to reach a terminal non-success run.
+ *  `responses` overrides the default single-message response, and `tools` wires
+ *  a tool surface into the harness so a single-turn run can close on a tool
+ *  result rather than an assistant reply. */
+async function makeAttached(
+    reply: string,
+    register = true,
+    options: {
+        responses?: unknown[];
+        tools?: unknown[];
+    } = {},
+) {
     const env = new NodeExecutionEnv({ cwd: tmp });
     const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(tmp, "sessions") });
     // tokensPerSecond: 0 removes the pacing delay — the deltas still arrive as
     // separate events, the test just does not wait out a simulated token rate.
     const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
-    faux.setResponses([fauxAssistantMessage([fauxText(reply)])] as never);
+    faux.setResponses((options.responses ?? [fauxAssistantMessage([fauxText(reply)])]) as never);
     const models = createModels();
     if (register) models.setProvider(faux.provider);
 
@@ -62,7 +72,7 @@ async function makeAttached(reply: string, register = true) {
         model: faux.getModel(),
         env,
         systemPrompt: "test",
-        tools: [],
+        tools: (options.tools ?? []) as never,
         resources: {},
         streamOptions: {},
         taskStore: {
@@ -266,5 +276,74 @@ describe("AttachedSession.prompt — a run that fails without a reply", () => {
         } finally {
             await attached.dispose();
         }
+    });
+});
+
+describe("resolvePromptReply — accepts a terminating toolResult, rejects every other non-assistant tip", () => {
+    // Pure-function test of the helper extracted from AttachedSession.prompt.
+    // Full-harness tests can't reliably reach the "non-terminating toolResult
+    // tip" path (faux provider refuses to produce one without throwing), and
+    // testing only the happy path would leave the anomaly guard unverified.
+
+    const assistantReply = {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        timestamp: 0,
+    } as never;
+    const toolResultReply = {
+        role: "toolResult",
+        toolCallId: "tc-1",
+        toolName: "askUser",
+        content: [{ type: "text", text: "ask" }],
+        isError: false,
+        timestamp: 0,
+    } as never;
+    const userReply = {
+        role: "user",
+        content: [{ type: "text", text: "oops" }],
+        timestamp: 0,
+    } as never;
+
+    it("accepts an assistant message", () => {
+        assert.equal(resolvePromptReply(assistantReply, { type: "message" }), "accept");
+    });
+
+    it("accepts a toolResult entry whose MessageEntry carries terminate:true", () => {
+        assert.equal(
+            resolvePromptReply(toolResultReply, {
+                type: "message",
+                terminate: true,
+            }),
+            "accept",
+            "askUser / planExit-style close must surface the toolResult as a normal reply",
+        );
+    });
+
+    it("rejects a toolResult entry without terminate (real anomaly)", () => {
+        assert.equal(
+            resolvePromptReply(toolResultReply, { type: "message" }),
+            "reject",
+            "a non-terminating toolResult tip would mask an upstream shape change",
+        );
+    });
+
+    it("rejects a toolResult entry with terminate:false", () => {
+        assert.equal(
+            resolvePromptReply(toolResultReply, { type: "message", terminate: false }),
+            "reject",
+            "only terminate:true counts; terminate:false must keep the guard active",
+        );
+    });
+
+    it("rejects a toolResult reply whose entry is not a MessageEntry (e.g. compaction)", () => {
+        assert.equal(resolvePromptReply(toolResultReply, { type: "compaction" }), "reject");
+    });
+
+    it("rejects a user-role reply (aborted/early-error path)", () => {
+        assert.equal(resolvePromptReply(userReply, { type: "message" }), "reject");
+    });
+
+    it("rejects when the reply is undefined", () => {
+        assert.equal(resolvePromptReply(undefined, undefined), "reject");
     });
 });

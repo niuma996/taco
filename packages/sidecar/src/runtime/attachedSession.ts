@@ -26,7 +26,7 @@ import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Api, ImageContent, Model, Models } from "@earendil-works/pi-ai";
 import type {
     InstructionsConfig,
-    AssistantMessage as ProtocolAssistantMessage,
+    AgentMessage as ProtocolAgentMessage,
     SessionCompactResult,
     SessionContextInfoResult,
     SupportedLocale,
@@ -847,20 +847,32 @@ export class AttachedSession extends EventEmitter {
     }
 
     /**
-     * Send one prompt — awaits the reply. The turn's final message is the
-     * assistant reply by construction (pi runs until stop/aborted/error), so we
-     * narrow pi's wider AgentMessage union to the protocol AssistantMessage
-     * here rather than pushing an unsafe cast onto every consumer.
+     * Send one prompt — awaits the reply.
      *
      * pi 0.85 returns a `Result` carrying the operation record rather than the
-     * reply itself, so the assistant message is read back from the branch tip
-     * the run landed on.
+     * reply itself, so the message is read back from the branch tip the run
+     * landed on. The tip is normally an assistant message, but pi also allows
+     * a run to close on a toolResult entry whose MessageEntry carries
+     * `terminate: true` — that is how tools like askUser / planExit end a turn
+     * ("ask the user and wait for the next prompt"). Returning the toolResult
+     * message is correct: the protocol's `PromptResult.assistantMessage` is
+     * typed as the wider `AgentMessage`, and the desktop's
+     * `extractAssistantTextAndThinking` safely turns a non-assistant shape
+     * into empty text. Throwing here would have caused session.prompt to fail
+     * on a perfectly normal turn (the user-facing "expected an assistant
+     * reply, got role=toolResult" error, plus a spurious session.delete that
+     * removed a freshly-created session from the sidebar).
+     *
+     * A *non-assistant* tip without `terminate: true` still indicates a real
+     * shape anomaly (an aborted-then-resumed run, an upstream invariant
+     * change) and is left to fail loud — we don't want to silently downgrade
+     * an internal bug into "nothing happened".
      */
     async prompt(
         text: string,
         images?: ImageContent[],
         uiLocale?: SupportedLocale,
-    ): Promise<ProtocolAssistantMessage> {
+    ): Promise<ProtocolAgentMessage> {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
         }
@@ -883,8 +895,8 @@ export class AttachedSession extends EventEmitter {
         // A run that reaches a terminal state resolves `ok: true` — reaching one
         // is not a call failure — so `status` has to be checked separately.
         // `record.error` is the only place the reason lives; without this the
-        // failure surfaces as the "no assistant reply" error below, which
-        // reports the symptom and discards the cause (e.g. model_unavailable).
+        // failure surfaces as the "no reply" error below, which reports the
+        // symptom and discards the cause (e.g. model_unavailable).
         if (result.value.status !== "completed") {
             throw toTerminalError("session.prompt", result.value);
         }
@@ -894,18 +906,20 @@ export class AttachedSession extends EventEmitter {
             tipId === null ? undefined : await this.session.getEntry(tipId, harnessContext);
         const reply = entry?.type === "message" ? entry.message : undefined;
 
-        // pi's AgentMessage union is wider than the protocol AssistantMessage.
-        // The turn's terminal message is the assistant reply by construction,
-        // but an abort/early-error path could surface a non-assistant shape —
-        // fail loud here so a shape change never silently corrupts consumers.
-        if (reply === undefined || reply.role !== "assistant") {
+        if (resolvePromptReply(reply, entry) === "reject") {
             throw new Error(
                 `session.prompt expected an assistant reply, got role=${String(
                     (reply as { role?: unknown } | undefined)?.role,
                 )}`,
             );
         }
-        return reply as ProtocolAssistantMessage;
+        // pi's `AgentMessage` is structurally wider than the protocol's
+        // (e.g. AssistantMessage.stopReason carries a `"deferred"` variant
+        // we don't model). Cast through `unknown` so the protocol's narrower
+        // contract is enforced at the wire boundary; the desktop's
+        // `extractAssistantTextAndThinking` reads only `content` and ignores
+        // unknown stopReason values.
+        return reply as unknown as ProtocolAgentMessage;
     }
 
     /** Inject a steer message (mid-turn interrupt / append). */
@@ -1012,4 +1026,34 @@ export class AttachedSession extends EventEmitter {
         }
         this.removeAllListeners();
     }
+}
+
+/**
+ * Whether `prompt()` should accept a branch-tip entry as a valid reply, or
+ * surface the "expected an assistant reply" anomaly.
+ *
+ * The expected shape is an assistant message. The exception is a toolResult
+ * entry whose MessageEntry carries `terminate: true` — pi 0.85 lets a turn
+ * finish on such an entry (askUser / planExit-style close) and reports
+ * `status: "completed"` with the toolResult as the branch tip. Returning it
+ * directly keeps the desktop from seeing a misleading error and from
+ * `sessionDelete`-ing the freshly created session in its `sessionPrompt` catch.
+ *
+ * Any other non-assistant tip (a toolResult without `terminate`, a
+ * compaction / branch_summary entry, an aborted-and-resumed anomaly) is
+ * treated as a real shape problem and rejected — silent acceptance would mask
+ * upstream invariant changes.
+ */
+export function resolvePromptReply(
+    reply: AgentMessage | undefined,
+    entry: unknown,
+): "accept" | "reject" {
+    if (reply === undefined) return "reject";
+    if (reply.role === "assistant") return "accept";
+    const entryLike = entry as { type?: unknown; terminate?: boolean } | undefined;
+    const terminating =
+        entryLike?.type === "message" &&
+        entryLike.terminate === true &&
+        reply.role === "toolResult";
+    return terminating ? "accept" : "reject";
 }
