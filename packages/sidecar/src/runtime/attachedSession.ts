@@ -13,6 +13,7 @@ import {
     type AgentHarnessStreamOptions,
     type AgentLane,
     type AgentMessage,
+    type Entry,
     type HarnessEvent,
     laneConfig,
     NoActiveOperation,
@@ -293,6 +294,37 @@ export interface AttachedSessionOptions {
      * map so the runtime cache has a single writer.
      */
     sessionKind: "main" | "subagent";
+}
+
+/**
+ * Whether `prompt()` should accept a branch-tip entry as a valid reply, or
+ * surface the "expected an assistant reply" anomaly.
+ *
+ * The expected shape is an assistant message. The exception is a toolResult
+ * entry whose `MessageEntry.terminate` is `true` — pi 0.85 lets a turn finish
+ * on such an entry (askUser / planExit-style close) and reports
+ * `status: "completed"` with the toolResult as the branch tip. Returning it
+ * directly keeps the desktop from seeing a misleading error and from
+ * `sessionDelete`-ing the freshly created session in its `sessionPrompt` catch.
+ *
+ * Any other non-assistant tip (a toolResult without `terminate`, a
+ * compaction / branch_summary entry, an aborted-and-resumed anomaly) is a real
+ * shape problem and is rejected — silent acceptance would mask upstream
+ * invariant changes.
+ *
+ * `entry` is typed as pi's own `Entry` union rather than `unknown` so that a
+ * rename of `MessageEntry.terminate` upstream breaks the build here instead of
+ * silently degrading to "always reject" (which would reinstate the bug).
+ */
+export function resolvePromptReply(
+    reply: AgentMessage | undefined,
+    entry: Entry | undefined,
+): "accept" | "reject" {
+    if (reply === undefined) return "reject";
+    if (reply.role === "assistant") return "accept";
+    const terminating =
+        entry?.type === "message" && entry.terminate === true && reply.role === "toolResult";
+    return terminating ? "accept" : "reject";
 }
 
 export class AttachedSession extends EventEmitter {
@@ -913,13 +945,12 @@ export class AttachedSession extends EventEmitter {
                 )}`,
             );
         }
-        // pi's `AgentMessage` is structurally wider than the protocol's
-        // (e.g. AssistantMessage.stopReason carries a `"deferred"` variant
-        // we don't model). Cast through `unknown` so the protocol's narrower
-        // contract is enforced at the wire boundary; the desktop's
-        // `extractAssistantTextAndThinking` reads only `content` and ignores
-        // unknown stopReason values.
-        return reply as unknown as ProtocolAgentMessage;
+        // pi's message types carry provider-specific extras (`api`, `deferred`,
+        // …) that the protocol models loosely, so a single assertion still
+        // bridges the two. It is a plain cast, not a double one: the protocol's
+        // `stopReason` now covers pi's whole `StopReason` union, so the two
+        // shapes no longer structurally disagree.
+        return reply as ProtocolAgentMessage;
     }
 
     /** Inject a steer message (mid-turn interrupt / append). */
@@ -1026,34 +1057,4 @@ export class AttachedSession extends EventEmitter {
         }
         this.removeAllListeners();
     }
-}
-
-/**
- * Whether `prompt()` should accept a branch-tip entry as a valid reply, or
- * surface the "expected an assistant reply" anomaly.
- *
- * The expected shape is an assistant message. The exception is a toolResult
- * entry whose MessageEntry carries `terminate: true` — pi 0.85 lets a turn
- * finish on such an entry (askUser / planExit-style close) and reports
- * `status: "completed"` with the toolResult as the branch tip. Returning it
- * directly keeps the desktop from seeing a misleading error and from
- * `sessionDelete`-ing the freshly created session in its `sessionPrompt` catch.
- *
- * Any other non-assistant tip (a toolResult without `terminate`, a
- * compaction / branch_summary entry, an aborted-and-resumed anomaly) is
- * treated as a real shape problem and rejected — silent acceptance would mask
- * upstream invariant changes.
- */
-export function resolvePromptReply(
-    reply: AgentMessage | undefined,
-    entry: unknown,
-): "accept" | "reject" {
-    if (reply === undefined) return "reject";
-    if (reply.role === "assistant") return "accept";
-    const entryLike = entry as { type?: unknown; terminate?: boolean } | undefined;
-    const terminating =
-        entryLike?.type === "message" &&
-        entryLike.terminate === true &&
-        reply.role === "toolResult";
-    return terminating ? "accept" : "reject";
 }

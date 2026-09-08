@@ -1,7 +1,9 @@
 /**
  * AttachedSession turn behaviour, driven by a real harness over a faux provider.
  *
- * Both cases here need a real harness rather than event fixtures:
+ * These cases assert things about pi's own behaviour, so they need a real
+ * harness rather than event fixtures — a fixture would encode what we believe
+ * pi emits, which is exactly how the original bugs slipped through:
  *
  *  - Streaming: pi 0.85 emits the streamed sub-event under a different name than
  *    its own .d.ts declares, so a fixture written from the declaration is wrong
@@ -9,6 +11,11 @@
  *    whole reply at once. (The pre-existing applyEventToMessages test did.)
  *  - A run that fails without a reply: the interesting value is the operation
  *    record pi writes, which only exists when a real run terminates.
+ *  - A turn closing on a terminating tool call: the claim is that pi completes
+ *    the run with a toolResult as the branch tip, which only a real run shows.
+ *
+ * The final suite is a unit test for `resolvePromptReply`, covering the reject
+ * branches a faux-provider run cannot reach.
  */
 
 import { strict as assert } from "node:assert";
@@ -16,6 +23,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import type { AgentMessage, Entry } from "@earendil-works/pi-agent-core";
 import { JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createModels } from "@earendil-works/pi-ai/compat";
@@ -279,71 +287,143 @@ describe("AttachedSession.prompt — a run that fails without a reply", () => {
     });
 });
 
-describe("resolvePromptReply — accepts a terminating toolResult, rejects every other non-assistant tip", () => {
-    // Pure-function test of the helper extracted from AttachedSession.prompt.
-    // Full-harness tests can't reliably reach the "non-terminating toolResult
-    // tip" path (faux provider refuses to produce one without throwing), and
-    // testing only the happy path would leave the anomaly guard unverified.
+/**
+ * The end-to-end proof that a turn closing on a terminating tool call is a
+ * normal outcome. This has to run against a real harness: the claim under test
+ * is about pi's own behaviour (`allTerminate` flips the checkpoint continuation
+ * to `may_finish` with `includeFinalAssistant: false`, so the run completes
+ * with the toolResult as the branch tip), and a hand-written fixture would
+ * assert what we *believe* pi produces rather than what it does.
+ */
+describe("AttachedSession.prompt — a turn that closes on a terminating tool call", () => {
+    it("returns the toolResult as the reply instead of throwing", async () => {
+        const terminatingTool = {
+            name: "askUser",
+            label: "askUser",
+            description: "test stub",
+            parameters: { type: "object", properties: {} },
+            executionMode: "sequential",
+            async execute() {
+                return {
+                    content: [{ type: "text", text: "ask first" }],
+                    details: { questions: [], waiting: true },
+                    terminate: true,
+                };
+            },
+        };
+        const attached = await makeAttached("unused", true, {
+            responses: [
+                fauxAssistantMessage([
+                    fauxText("need to ask"),
+                    { type: "toolCall", id: "tc-1", name: "askUser", arguments: {} },
+                ]),
+            ],
+            tools: [terminatingTool],
+        });
+        try {
+            const reply = await attached.prompt("hi", undefined, undefined);
+            assert.equal(
+                reply.role,
+                "toolResult",
+                "a terminate-only turn must surface the toolResult entry as the reply",
+            );
+            // toolCallId / toolName must round-trip from the tool call into the
+            // returned message — that is what resolveAskUserQuestions matches on
+            // when the desktop later submits the user's answers.
+            const tr = reply as { toolCallId?: string; toolName?: string };
+            assert.equal(tr.toolName, "askUser");
+            assert.equal(tr.toolCallId, "tc-1");
+        } finally {
+            await attached.dispose();
+        }
+    });
+});
 
-    const assistantReply = {
+describe("resolvePromptReply — accepts a terminating toolResult, rejects every other non-assistant tip", () => {
+    // Unit coverage for the branches a harness run cannot reach: the faux
+    // provider throws `assistant_error` rather than producing a
+    // non-terminating toolResult tip, so the anomaly guard would otherwise go
+    // unverified. The accept-path is covered end-to-end by the suite above.
+    //
+    // Fixtures are full `Entry` values (not partials) because `resolvePromptReply`
+    // takes pi's real `Entry` union — a partial would not typecheck, which is
+    // the point: the compiler keeps these in step with upstream.
+    const entryBase = { id: "e-1", parentId: null, seq: 1, timestamp: 0 } as const;
+    const messageEntry = (message: AgentMessage, terminate?: true): Entry => ({
+        ...entryBase,
+        type: "message",
+        message,
+        ...(terminate ? { terminate } : {}),
+    });
+
+    const assistantReply: AgentMessage = {
         role: "assistant",
         content: [{ type: "text", text: "ok" }],
+        api: "faux",
+        provider: "faux",
+        model: "faux-1",
+        usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
         timestamp: 0,
-    } as never;
-    const toolResultReply = {
+    };
+    const toolResultReply: AgentMessage = {
         role: "toolResult",
         toolCallId: "tc-1",
         toolName: "askUser",
         content: [{ type: "text", text: "ask" }],
         isError: false,
         timestamp: 0,
-    } as never;
-    const userReply = {
+    };
+    const userReply: AgentMessage = {
         role: "user",
         content: [{ type: "text", text: "oops" }],
         timestamp: 0,
-    } as never;
+    };
 
     it("accepts an assistant message", () => {
-        assert.equal(resolvePromptReply(assistantReply, { type: "message" }), "accept");
+        assert.equal(resolvePromptReply(assistantReply, messageEntry(assistantReply)), "accept");
     });
 
-    it("accepts a toolResult entry whose MessageEntry carries terminate:true", () => {
+    it("accepts a toolResult whose entry carries terminate:true", () => {
         assert.equal(
-            resolvePromptReply(toolResultReply, {
-                type: "message",
-                terminate: true,
-            }),
+            resolvePromptReply(toolResultReply, messageEntry(toolResultReply, true)),
             "accept",
             "askUser / planExit-style close must surface the toolResult as a normal reply",
         );
     });
 
-    it("rejects a toolResult entry without terminate (real anomaly)", () => {
+    it("rejects a toolResult whose entry has no terminate flag (real anomaly)", () => {
         assert.equal(
-            resolvePromptReply(toolResultReply, { type: "message" }),
+            resolvePromptReply(toolResultReply, messageEntry(toolResultReply)),
             "reject",
-            "a non-terminating toolResult tip would mask an upstream shape change",
+            "accepting this would mask an upstream shape change",
         );
     });
 
-    it("rejects a toolResult entry with terminate:false", () => {
-        assert.equal(
-            resolvePromptReply(toolResultReply, { type: "message", terminate: false }),
-            "reject",
-            "only terminate:true counts; terminate:false must keep the guard active",
-        );
+    it("rejects a toolResult reply carried by a non-message entry (e.g. compaction)", () => {
+        const compactionEntry: Entry = {
+            ...entryBase,
+            type: "compaction",
+            summary: "s",
+            retainedTail: [],
+            tokensBefore: 0,
+            fromHook: false,
+        };
+        assert.equal(resolvePromptReply(toolResultReply, compactionEntry), "reject");
     });
 
-    it("rejects a toolResult reply whose entry is not a MessageEntry (e.g. compaction)", () => {
-        assert.equal(resolvePromptReply(toolResultReply, { type: "compaction" }), "reject");
+    it("rejects a user-role reply (aborted / early-error path)", () => {
+        assert.equal(resolvePromptReply(userReply, messageEntry(userReply)), "reject");
     });
 
-    it("rejects a user-role reply (aborted/early-error path)", () => {
-        assert.equal(resolvePromptReply(userReply, { type: "message" }), "reject");
-    });
-
-    it("rejects when the reply is undefined", () => {
+    it("rejects when there is no reply at all", () => {
         assert.equal(resolvePromptReply(undefined, undefined), "reject");
     });
 });
