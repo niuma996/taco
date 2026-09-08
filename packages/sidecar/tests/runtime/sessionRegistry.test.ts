@@ -10,6 +10,7 @@
 
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -197,6 +198,45 @@ describe("SessionRegistry", () => {
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
         assert.equal(await sr.getSessionName(id), undefined);
+    });
+
+    // pi commits a multi-write batch as a JSON array on one line. Only runtime
+    // state is batched today, so a name written that way is hypothetical — but
+    // the scanner used to read the object shape only, which meant an array line
+    // parsed to something whose `.kind` was undefined and was skipped, dropping
+    // the title with no error. Append a batched name write directly and require
+    // the scan to see it.
+    it("getSessionName reads a name committed inside a batched array line", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        const meta = await sr.openSession(id);
+        // Mirror pi's on-disk value-record shape; `seq` only has to be past the
+        // seeded entries for "last write wins" to select it.
+        await appendFile(
+            meta.path,
+            `${JSON.stringify([
+                {
+                    kind: "value",
+                    op: "set",
+                    seq: 9001,
+                    namespace: "pi.branch.tip",
+                    key: "main",
+                    value: "x",
+                },
+                {
+                    kind: "value",
+                    op: "set",
+                    seq: 9002,
+                    namespace: "pi.session.name",
+                    key: "",
+                    value: "batched-title",
+                },
+            ])}\n`,
+        );
+        sr.invalidateListCache();
+        assert.equal(await sr.getSessionName(id), "batched-title");
     });
 
     it("rename updates _nameCache precisely without invalidating list cache", async () => {

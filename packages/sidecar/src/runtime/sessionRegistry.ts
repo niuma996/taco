@@ -730,6 +730,37 @@ const SESSION_NAME_NAMESPACE = "pi.session.name";
 /** Namespace taco writes per-session facts into. Mirrors SESSION_NAME_NAMESPACE. */
 const SESSION_FACTS_NAMESPACE = "taco.session.facts";
 
+/** One pi value record as it appears on disk, seen through the fields we read. */
+interface ValueRecord {
+    readonly kind?: string;
+    readonly op?: string;
+    readonly namespace?: string;
+    readonly value?: unknown;
+}
+
+/**
+ * Does this first line look like pi's current (`JSONL_FORMAT_VERSION = 4`)
+ * storage header?
+ *
+ * pi accepts two header shapes (`parseJsonlSessionHeader`): the current
+ * `{v: 4, kind: "header", …}` and a legacy v3 `{type: "session", version: 3, …}`.
+ * Only the former stores the title and facts as namespaced value records, which
+ * is all this scanner can read. Mirrors pi's own discriminant — a structural
+ * check on `kind`/`v`, not a version-number comparison — so a file pi would
+ * route to its legacy reader is never mistaken for a broken current-format one.
+ *
+ * Returns false on an unparseable line: an unreadable header is not evidence
+ * that the namespaces changed.
+ */
+function isCurrentFormatHeader(line: string): boolean {
+    try {
+        const header = JSON.parse(line) as { v?: unknown; kind?: unknown };
+        return header.kind === "header" && header.v === 4;
+    } catch {
+        return false;
+    }
+}
+
 /**
  * Single-pass JSONL scan: pulls the session's title and sidecar facts in one
  * read.
@@ -745,10 +776,12 @@ const SESSION_FACTS_NAMESPACE = "taco.session.facts";
  * and a fact rewrite appends another facts value. Both must reach EOF — but
  * only matching lines are parsed, and nothing but the winners is retained.
  *
- * Because the scan reads pi's private on-disk encoding (storage format 4 is
- * pre-stabilization; see pi spec §0.9), a silent miss on either field would
- * leave `session.list` showing untitled / un-fact'd sessions with no signal.
- * The parse-warn on zero hits turns silent breakage into an actionable log.
+ * Because the scan reads pi's private on-disk encoding (`JSONL_FORMAT_VERSION`
+ * 4, whose value records are pre-stabilization per pi spec §0.9), a silent miss
+ * on either field would leave `session.list` showing untitled / un-fact'd
+ * sessions with no signal. The warn at the end turns that into an actionable
+ * log — but only for files that actually claim this format; see the condition
+ * for why legacy and never-named sessions must stay quiet.
  */
 async function readSessionMetadataFromDisk(
     path: string,
@@ -769,9 +802,18 @@ async function readSessionMetadataFromDisk(
     let name: string | undefined;
     let facts: SessionFacts = {};
     let lineCount = 0;
+    let sawFactsLine = false;
+    // Whether the header says this file uses the value-record encoding this
+    // scanner understands. A pi v3 legacy file stores its title as a
+    // `{type: "session_info", name}` entry with no namespace at all, so the
+    // absence of name/facts lines there is expected, not a format change.
+    let currentFormat = false;
     try {
         for await (const line of rl) {
             lineCount++;
+            if (lineCount === 1) {
+                currentFormat = isCurrentFormatHeader(line);
+            }
             // Substring test before JSON.parse: the overwhelming majority of
             // lines are messages, and parsing them is exactly the cost this
             // function exists to avoid.
@@ -779,29 +821,18 @@ async function readSessionMetadataFromDisk(
                 continue;
             }
             try {
-                const entry = JSON.parse(line) as {
-                    kind?: string;
-                    op?: string;
-                    namespace?: string;
-                    value?: unknown;
-                };
-                if (entry.kind !== "value" || entry.namespace === undefined) continue;
-                // A cleared value is `op: "delete"` (or a non-typed value),
-                // which must reset the winner rather than keep the previous
-                // value.
-                const cleared = entry.op === "delete";
-                if (entry.namespace === SESSION_NAME_NAMESPACE) {
-                    if (cleared || typeof entry.value !== "string") {
-                        name = undefined;
-                        continue;
-                    }
-                    name = entry.value.trim() || undefined;
-                } else if (entry.namespace === SESSION_FACTS_NAMESPACE) {
-                    if (cleared || typeof entry.value !== "object" || entry.value === null) {
-                        facts = {};
-                        continue;
-                    }
-                    facts = entry.value as SessionFacts;
+                const parsed = JSON.parse(line) as unknown;
+                // pi commits a multi-write batch as a JSON *array* on one line,
+                // not an object. Today only runtime state (pi.op.*, pi.lane.*,
+                // pi.branch.tip) is ever batched, so name/facts always arrive as
+                // single objects — but reading only the object shape means a
+                // future batched name write parses to an array whose `.kind` is
+                // undefined and gets skipped, losing the title with no error.
+                // Flatten instead, so both encodings work.
+                const records = Array.isArray(parsed) ? parsed : [parsed];
+                for (const record of records) {
+                    if (record === null || typeof record !== "object") continue;
+                    applyValueRecord(record as ValueRecord);
                 }
             } catch {
                 // A torn last line (crash mid-append) must not fail the list.
@@ -817,10 +848,47 @@ async function readSessionMetadataFromDisk(
         // RPCs — see commit message for the wedge-detector measurements.
         if (!stream.destroyed) stream.destroy();
     }
-    if (lineCount > 0 && name === undefined && Object.keys(facts).length === 0) {
-        // Storage format 4 is pre-stabilization per pi spec §0.9; a silent
-        // miss here would leave the list untitled with no signal. Warn so
-        // a pi upgrade that renames the namespace is visible.
+
+    function applyValueRecord(entry: ValueRecord): void {
+        if (entry.kind !== "value" || entry.namespace === undefined) return;
+        // A cleared value is `op: "delete"` (or a non-typed value),
+        // which must reset the winner rather than keep the previous
+        // value.
+        const cleared = entry.op === "delete";
+        if (entry.namespace === SESSION_NAME_NAMESPACE) {
+            if (cleared || typeof entry.value !== "string") {
+                name = undefined;
+                return;
+            }
+            name = entry.value.trim() || undefined;
+        } else if (entry.namespace === SESSION_FACTS_NAMESPACE) {
+            // Seen even when cleared or empty: `{}` is a legitimately written
+            // value, so presence of the record — not the size of the object —
+            // is what proves the namespace still resolves.
+            sawFactsLine = true;
+            if (cleared || typeof entry.value !== "object" || entry.value === null) {
+                facts = {};
+                return;
+            }
+            facts = entry.value as SessionFacts;
+        }
+    }
+    // Only a *current-format* file with neither line is suspicious. Two cases
+    // are normal and must stay quiet, or the warning fires on almost every
+    // session and stops meaning anything (measured: 261 of 276 files in a real
+    // store, because every one of them predates the value-record encoding):
+    //
+    //   - a pi v3 legacy file, whose title is a `session_info` entry with no
+    //     namespace — pi reads these through its own legacy path, and the
+    //     `repo.open()` fallback below returns the right answer anyway;
+    //   - a current-format session that has not been named or given facts yet
+    //     (freshly created, never renamed), where nothing has been written.
+    //
+    // What remains is the case worth a log: the file claims the encoding this
+    // scanner targets, has content, yet neither namespace resolved — i.e. a pi
+    // upgrade renamed them under us and `session.list` would silently show
+    // untitled, un-fact'd sessions.
+    if (currentFormat && lineCount > 1 && name === undefined && !sawFactsLine) {
         log.warn("scanned jsonl found no name or facts lines; storage format may have changed", {
             path,
             lineCount,
