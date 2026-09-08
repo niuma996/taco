@@ -8,7 +8,7 @@
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
 import { uuidv7 } from "@earendil-works/pi-agent-core";
 import type {
-    AssistantMessage,
+    AgentMessage,
     AttachParams,
     CreateSessionParams,
     DeleteSessionParams,
@@ -123,7 +123,7 @@ export function registerSessionLifecycleHandlers(): void {
             await session.close(harnessContext);
             workspace.invalidateListCache();
 
-            let assistantMessage: AssistantMessage | null = null;
+            let assistantMessage: AgentMessage | null = null;
             const hasInitialImages =
                 params.initialImages !== undefined && params.initialImages.length > 0;
             if (params.initialPrompt || hasInitialImages) {
