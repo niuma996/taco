@@ -4,10 +4,10 @@
 
 import { strict as assert } from "node:assert";
 import { afterEach, describe, it } from "node:test";
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
 import type { ContextEvent, ExtensionManifest } from "../../src/extensions/types.ts";
+import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 import { tagRegistry } from "../../src/tags/registry.ts";
 import type { TagSpec } from "../../src/tags/types.ts";
 

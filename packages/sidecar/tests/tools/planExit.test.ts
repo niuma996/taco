@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createPlanExitTool, type PlanExitToolDetails } from "../../src/tools/planExit.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

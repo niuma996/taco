@@ -7,7 +7,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "../../src/runtime/pi/types.ts";
 
 import { buildEnvContextHook } from "../../src/tags/envContext.ts";
 

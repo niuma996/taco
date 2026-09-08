@@ -19,15 +19,12 @@
  * "main" lane is branch "main".
  */
 
+import { harnessContext } from "../lib/harnessContext.ts";
+import type { AgentMessage, Context, Entry, Session } from "../runtime/pi/types.ts";
 import {
-    type AgentMessage,
-    type Context,
     createBranchSummaryMessage,
     createCompactionSummaryMessage,
-    type Entry,
-    type Session,
-} from "@earendil-works/pi-agent-core";
-import { harnessContext } from "../lib/harnessContext.ts";
+} from "../runtime/pi/values.ts";
 
 /** The harness's default lane, and therefore the default branch name. */
 export const MAIN_BRANCH = "main";

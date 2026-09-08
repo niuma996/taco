@@ -6,9 +6,9 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { Api, Model, Models, TextContent } from "@earendil-works/pi-ai";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { MemoryExtractorImpl, parseExtractionResult } from "../../src/memory/local/extractor.ts";
+import type { Api, Model, Models, TextContent } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 
 describe("parseExtractionResult", () => {

@@ -6,9 +6,8 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextEvent, ContextResult } from "../../src/extensions/types.ts";
+import type { AgentMessage } from "../../src/runtime/pi/types.ts";
 
 import { throttleByContent } from "../../src/tags/throttle.ts";
 

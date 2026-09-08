@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createGrepTool } from "../../src/tools/grep.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

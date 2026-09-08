@@ -9,9 +9,8 @@
 
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
-
-import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core";
 import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
+import type { JsonlSessionMetadata } from "../../src/runtime/pi/types.ts";
 
 import {
     getRegisteredMethod,

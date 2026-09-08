@@ -7,24 +7,6 @@
  */
 
 import { EventEmitter } from "node:events";
-import {
-    AgentHarness,
-    type AgentHarnessResources,
-    type AgentHarnessStreamOptions,
-    type AgentLane,
-    type AgentMessage,
-    type Entry,
-    type HarnessEvent,
-    laneConfig,
-    NoActiveOperation,
-    NothingToResume,
-    type OpenOperation,
-    type PromptTemplate,
-    type Session,
-    type ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { Api, ImageContent, Model, Models } from "@earendil-works/pi-ai";
 import type {
     InstructionsConfig,
     AgentMessage as ProtocolAgentMessage,
@@ -45,6 +27,29 @@ import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { MemoryExtractorImpl, type MemoryStore, sliceForExtraction } from "../memory/index.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
+import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
+import type {
+    AgentHarnessResources,
+    AgentHarnessStreamOptions,
+    AgentLane,
+    AgentMessage,
+    Api,
+    Entry,
+    HarnessEvent,
+    ImageContent,
+    Model,
+    Models,
+    OpenOperation,
+    PromptTemplate,
+    Session,
+    ThinkingLevel,
+} from "../runtime/pi/types.ts";
+import {
+    AgentHarness,
+    laneConfig,
+    NoActiveOperation,
+    NothingToResume,
+} from "../runtime/pi/values.ts";
 import type { SkillReinjectorHandle } from "../skills/skillReinjector.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";

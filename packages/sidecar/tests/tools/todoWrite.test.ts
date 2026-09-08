@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import type { TaskList } from "../../src/tasks/taskTypes.ts";

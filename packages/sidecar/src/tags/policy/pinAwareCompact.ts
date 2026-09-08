@@ -4,19 +4,22 @@
  * call pi's compact() → layer in file ops, facts, pin tail. Each step is guarded.
  */
 
-import {
-    type AgentMessage,
-    type CompactionPreparation,
-    type CompactResult,
-    compact,
-    DEFAULT_COMPACTION_SETTINGS,
-    type Entry,
-    type JsonValue,
-    prepareCompaction,
-} from "@earendil-works/pi-agent-core";
-import type { Model, Models } from "@earendil-works/pi-ai";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
+import type {
+    AgentMessage,
+    CompactionPreparation,
+    CompactResult,
+    Entry,
+    JsonValue,
+    Model,
+    Models,
+} from "../../runtime/pi/types.ts";
+import {
+    compact,
+    DEFAULT_COMPACTION_SETTINGS,
+    prepareCompaction,
+} from "../../runtime/pi/values.ts";
 import { extractAndStripPinned } from "../extractors.ts";
 import { EMPTY_FACTS, extractFacts, type FactSet, mergeFacts } from "../factExtractor.ts";
 import { tagRegistry } from "../registry.ts";

@@ -11,8 +11,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { loadSourcedSkills, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
     type ChannelStatusEntry,
     type ChannelsBindResult,
@@ -76,6 +74,8 @@ import { createLogger } from "../lib/logger.ts";
 import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/deferredToolRegistry.ts";
+import type { ImageContent, TextContent, ThinkingLevel } from "../runtime/pi/types.ts";
+import { loadSourcedSkills } from "../runtime/pi/values.ts";
 import type { ProviderKeyStore } from "../runtime/providerKeyStore.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
 import type {

@@ -9,16 +9,11 @@
  * accumulation.
  */
 
-import {
-    type AgentLane,
-    type Entry,
-    estimateContextTokens,
-    type Session,
-} from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SessionContextInfoResult } from "@taco-ai/protocol";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
+import type { AgentLane, Api, Entry, Model, Session } from "../runtime/pi/types.ts";
+import { estimateContextTokens } from "../runtime/pi/values.ts";
 import { buildBranchContext, MAIN_BRANCH } from "./sessionBranch.ts";
 
 const log = createLogger("contextInfoService");

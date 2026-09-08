@@ -1,9 +1,6 @@
 /** AgentSpawner — subagent creation and execution. */
 
 import { EventEmitter } from "node:events";
-import type { HarnessEvent, JsonlSessionRepo } from "@earendil-works/pi-agent-core";
-import type { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../agents/forkedHistory.ts";
@@ -13,6 +10,9 @@ import { createLogger } from "../lib/logger.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import { buildSystemPrompt, filterContributorsForTools } from "../prompts/buildSystemPrompt.ts";
+import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
+import type { Api, HarnessEvent, Model, MutableModels } from "../runtime/pi/types.ts";
+import type { JsonlSessionRepo } from "../runtime/pi/values.ts";
 import { interpolateArgs } from "../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
 import type { TacoTool } from "../tools/index.ts";

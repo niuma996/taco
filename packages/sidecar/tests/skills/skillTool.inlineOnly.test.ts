@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { Skill } from "@earendil-works/pi-agent-core";
+import type { Skill } from "../../src/runtime/pi/types.ts";
 import {
     preloadSkillFrontmatter,
     readSkillFrontmatter,

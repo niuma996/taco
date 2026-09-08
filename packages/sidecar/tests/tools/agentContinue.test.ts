@@ -5,8 +5,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { SubagentSpawnContext } from "../../src/agents/types.ts";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createAgentContinueTool } from "../../src/tools/agentContinue.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

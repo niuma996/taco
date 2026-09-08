@@ -9,7 +9,8 @@
  * is defined in one place.
  */
 
-import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "@earendil-works/pi-agent-core";
+import type { Context } from "../../src/runtime/pi/types.ts";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "../../src/runtime/pi/values.ts";
 
 /** The subset of a tool that tests invoke. */
 interface ExecutableTool<TParams, TResult> {

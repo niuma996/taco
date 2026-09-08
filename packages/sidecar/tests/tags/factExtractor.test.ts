@@ -11,9 +11,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, Model, Models } from "@earendil-works/pi-ai";
+import type { AgentMessage, Api, Model, Models } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 import {
     EMPTY_FACTS,

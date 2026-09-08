@@ -18,16 +18,11 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
-    type AgentHarness,
-    type AgentLane,
-    type ExecutionToolContext,
-    LaneBusy,
-    Result,
-} from "@earendil-works/pi-agent-core";
-import {
     CompactionController,
     type CompactionLifecycleSignal,
 } from "../../src/runtime/compactionController.ts";
+import type { AgentLane, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
+import { type AgentHarness, LaneBusy, Result } from "../../src/runtime/pi/values.ts";
 import { CompactionPushAdapter } from "../../src/server/compactionPushAdapter.ts";
 import type { EmitPushFn } from "../../src/server/pushTypes.ts";
 

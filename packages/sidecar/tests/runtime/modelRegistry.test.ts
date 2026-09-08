@@ -12,13 +12,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { type BuiltinProviderEntry, ModelRegistry } from "../../src/runtime/modelRegistry.ts";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
+import type { Api, Model, Provider } from "../../src/runtime/pi/types.ts";
+import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
 import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { SessionRegistry } from "../../src/runtime/sessionRegistry.ts";
 

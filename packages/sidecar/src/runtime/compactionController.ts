@@ -1,14 +1,6 @@
 /** CompactionController — auto-compaction scheduling + manual compaction entry point. */
 
 import { performance } from "node:perf_hooks";
-import {
-    type AgentHarness,
-    type AgentLane,
-    DEFAULT_COMPACTION_SETTINGS,
-    type Entry,
-    type ExecutionToolContext,
-    shouldCompact,
-} from "@earendil-works/pi-agent-core";
 import type { CompactionFailureReason, SessionCompactResult } from "@taco-ai/protocol";
 import { DEFAULT_COMPACTION_ENABLED, DEFAULT_COMPACTION_THRESHOLD } from "@taco-ai/protocol";
 import {
@@ -19,6 +11,12 @@ import {
 import { waitForEvent } from "../lib/async.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
+import type { AgentLane, Entry, ExecutionToolContext } from "../runtime/pi/types.ts";
+import {
+    type AgentHarness,
+    DEFAULT_COMPACTION_SETTINGS,
+    shouldCompact,
+} from "../runtime/pi/values.ts";
 import type { ContextUsage } from "./contextInfoService.ts";
 import { isBusyError, toHarnessError } from "./harnessErrors.ts";
 import type { PinOnceConsumer } from "./pinOnceConsumer.ts";

@@ -22,7 +22,13 @@
       "trailingCommas": "none"
     }
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -64,6 +70,36 @@
         "rules": {
           "suspicious": {
             "noConsole": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/sidecar/src/**",
+        "packages/sidecar/tests/**",
+        "!packages/sidecar/src/runtime/pi/**",
+        "!packages/sidecar/src/lib/harnessContext.ts",
+        "!packages/sidecar/src/runtime/harnessErrors.ts",
+        "!packages/sidecar/src/runtime/modelRegistry.ts",
+        "!packages/sidecar/src/runtime/customProvider.ts",
+        "!packages/sidecar/tests/runtime/attachedSession.streaming.test.ts",
+        "!packages/sidecar/tests/runtime/imToolFilter.test.ts",
+        "!packages/sidecar/tests/server/handlers/skills.diagnostics.test.ts",
+        "!packages/sidecar/tests/server/handlers/skills.inlineOnly.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@earendil-works/pi-agent-core": "Import pi types from src/runtime/pi/types.ts and pi values from src/runtime/pi/values.ts. ACL wrappers (lib/harnessContext.ts, runtime/harnessErrors.ts) and the provider/lazy fan-out (runtime/modelRegistry.ts, runtime/customProvider.ts) are exempted via this override's includes list.",
+                  "@earendil-works/pi-agent-core/node": "Import from src/runtime/pi/node.ts instead."
+                }
+              }
+            }
           }
         }
       }

@@ -11,10 +11,9 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { AgentLane, Entry, Session } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { ContextInfoService } from "../../src/runtime/contextInfoService.ts";
+import type { AgentLane, Api, Entry, Model, Session } from "../../src/runtime/pi/types.ts";
 import { MAIN_BRANCH } from "../../src/runtime/sessionBranch.ts";
 
 interface UsageParts {

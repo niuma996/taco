@@ -12,9 +12,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
@@ -23,6 +20,9 @@ import {
     DefaultDeferredToolRegistry,
     type ToolCandidate,
 } from "../../src/runtime/deferredToolRegistry.ts";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
+import type { Api, Model } from "../../src/runtime/pi/types.ts";
+import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";

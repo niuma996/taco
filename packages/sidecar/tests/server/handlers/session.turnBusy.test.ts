@@ -18,7 +18,7 @@
 
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
-import { LaneBusy } from "@earendil-works/pi-agent-core";
+import { LaneBusy } from "../../../src/runtime/pi/values.ts";
 
 import { getRegisteredMethod, RpcHandlerError } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";

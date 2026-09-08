@@ -1,6 +1,6 @@
 /** Minimal fake of the pi 0.85 harness+lane tool surface for unit tests. */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 import type { ToolCollection } from "../../src/runtime/sessionToolController.ts";
 
 /**

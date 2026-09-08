@@ -10,8 +10,8 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { TextContent } from "@earendil-works/pi-ai";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
+import type { TextContent } from "../../src/runtime/pi/types.ts";
 import { createAskUserTool } from "../../src/tools/askUser.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

@@ -5,9 +5,8 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { AgentHarnessStreamOptions } from "@earendil-works/pi-agent-core";
-import type { Models } from "@earendil-works/pi-ai";
 import { withTacoUserAgent } from "../../src/runtime/attachedSession.ts";
+import type { AgentHarnessStreamOptions, Models } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 
 /** Only `checkAuth` is exercised; the rest of Models is irrelevant here. */

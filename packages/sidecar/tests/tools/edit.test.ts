@@ -13,8 +13,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { createEditTool } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
+import { createEditTool } from "../../src/runtime/pi/values.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 
 async function runEdit(

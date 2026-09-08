@@ -6,8 +6,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { AgentHarnessTool, ExecutionToolContext } from "@earendil-works/pi-agent-core";
 import { filterToolsForAgent } from "../../src/agents/filterTools.ts";
+import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 
 type AgentTool = AgentHarnessTool<ExecutionToolContext>;
 

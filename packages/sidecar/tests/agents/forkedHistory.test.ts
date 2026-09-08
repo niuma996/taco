@@ -5,12 +5,12 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Entry } from "@earendil-works/pi-agent-core";
 import {
     buildForkedContext,
     estimateTokens,
     resolveContextMode,
 } from "../../src/agents/forkedHistory.ts";
+import type { Entry } from "../../src/runtime/pi/types.ts";
 
 /** Minimal message entries; cast once so the tests read as fixtures, not wire types. */
 function entries(

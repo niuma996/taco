@@ -11,16 +11,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, resolve as resolvePath } from "node:path";
-import type {
-    AgentHarnessResources,
-    AgentHarnessStreamOptions,
-    Entry,
-    JsonlSessionMetadata,
-    PromptTemplate,
-    ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import { JsonlSessionRepo, setDefaultStreamFn } from "@earendil-works/pi-agent-core";
-import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
     CustomProviderConfig,
@@ -67,6 +57,18 @@ import {
     type SystemPromptContributor,
 } from "../prompts/index.ts";
 import { formatSkillAuthoringGuidance } from "../prompts/skillAuthoringGuidance.ts";
+import type {
+    AgentHarnessResources,
+    AgentHarnessStreamOptions,
+    Api,
+    Entry,
+    JsonlSessionMetadata,
+    Model,
+    MutableModels,
+    PromptTemplate,
+    ThinkingLevel,
+} from "../runtime/pi/types.ts";
+import { JsonlSessionRepo, setDefaultStreamFn } from "../runtime/pi/values.ts";
 import type { SkillScanResult, TacoSkill } from "../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../tags/index.ts";
 import {

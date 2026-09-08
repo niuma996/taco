@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "../../src/runtime/pi/types.ts";
 
 import { buildCompactionReminderHook } from "../../src/tags/compactionReminder.ts";
 import {

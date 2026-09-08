@@ -17,8 +17,8 @@
  * inside loadSkillsFromDirInternal.
  */
 
-import type { Context } from "@earendil-works/pi-agent-core";
-import type { FileError, FileInfo, Result } from "@earendil-works/pi-agent-core/node";
+import type { FileError, FileInfo, Result } from "../runtime/pi/node.ts";
+import type { Context } from "../runtime/pi/types.ts";
 import { NodeExecutionEnv } from "./pi/node.ts";
 
 /** Normalize one FileInfo's `path` + `name` to forward slashes. */

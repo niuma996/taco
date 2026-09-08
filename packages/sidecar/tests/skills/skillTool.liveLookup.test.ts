@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Skill } from "@earendil-works/pi-agent-core";
+import type { Skill } from "../../src/runtime/pi/types.ts";
 import { createSkillTool } from "../../src/skills/skillTool.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

@@ -17,9 +17,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Skill } from "@earendil-works/pi-agent-core";
 import { loadAgents } from "../../src/agents/loadAgents.ts";
 import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/agentSpawner.ts";
+import type { Skill } from "../../src/runtime/pi/types.ts";
 import {
     parseYamlFrontmatter,
     preloadSkillFrontmatter,

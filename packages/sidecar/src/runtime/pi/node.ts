@@ -9,4 +9,6 @@
  * (so consumers can `extends` / `new`) and its type (so `import type` and
  * inline `type` markers keep working) without touching the upstream subpath.
  */
+
+export type { FileError, FileInfo, Result } from "@earendil-works/pi-agent-core/node";
 export { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";

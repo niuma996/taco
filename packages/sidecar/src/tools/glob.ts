@@ -6,17 +6,17 @@
  */
 
 import { isAbsolute, relative } from "node:path";
-import type {
-    AgentHarnessTool,
-    Context,
-    ExecutionToolContext,
-} from "@earendil-works/pi-agent-core";
-import { getOrThrow } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
 import fg from "fast-glob";
 import ignore from "ignore";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type {
+    AgentHarnessTool,
+    Context,
+    ExecutionToolContext,
+    TextContent,
+} from "../runtime/pi/types.ts";
+import { getOrThrow } from "../runtime/pi/values.ts";
 import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";
 
 export type GlobTool = AgentHarnessTool<ExecutionToolContext>;

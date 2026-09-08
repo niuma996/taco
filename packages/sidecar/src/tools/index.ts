@@ -11,12 +11,13 @@
  * state (workspace, call, actor). Tools no longer take constructor deps —
  * adding a new tool is a single-file change with no caller signature updates.
  */
-import type { AgentHarnessTool } from "@earendil-works/pi-agent-core";
-import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-agent-core";
+
 import type { SessionId } from "@taco-ai/protocol";
 import type { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import type { PlanSnapshotPublisher } from "../plan/planPushAdapter.ts";
+import type { AgentHarnessTool } from "../runtime/pi/types.ts";
+import { createEditTool, createReadTool, createWriteTool } from "../runtime/pi/values.ts";
 import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 import type { TaskStore } from "../tasks/taskTypes.ts";
 import { createAskUserTool } from "./askUser.ts";

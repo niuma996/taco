@@ -16,8 +16,9 @@
  * defaults rather than throwing.
  */
 
-import { type Context, type Session, value } from "@earendil-works/pi-agent-core";
 import { harnessContext } from "../lib/harnessContext.ts";
+import type { Context, Session } from "../runtime/pi/types.ts";
+import { value } from "../runtime/pi/values.ts";
 
 /** Durable per-session facts owned by the sidecar. */
 export interface SessionFacts {
