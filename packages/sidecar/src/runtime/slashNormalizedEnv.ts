@@ -56,8 +56,3 @@ export class SlashNormalizedExecutionEnv extends NodeExecutionEnv {
         return { ok: true, value: result.value.replace(/\\/g, "/") };
     }
 }
-
-/** Convert any path to forward-slash form. Idempotent on POSIX. */
-export function toForwardSlashes(p: string): string {
-    return p.replace(/\\/g, "/");
-}

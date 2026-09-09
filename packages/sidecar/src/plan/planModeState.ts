@@ -28,7 +28,3 @@ export function exitPlanMode(state: PlanModeState): void {
 export function isPlanModeActive(state: PlanModeState): boolean {
     return state.active;
 }
-
-export function getCurrentPlanSlug(state: PlanModeState): string | null {
-    return state.currentSlug;
-}

@@ -31,5 +31,3 @@ export const JOBS_RPC = {
     runNow: "jobs.runNow",
     history: "jobs.history",
 } as const;
-
-export type JobsRpcMethod = (typeof JOBS_RPC)[keyof typeof JOBS_RPC];

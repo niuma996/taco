@@ -33,19 +33,6 @@ function parseTaskList(content: string, filePath: string): TaskList | undefined 
     return parsed;
 }
 
-export async function loadTaskList(baseDir: string, listId: string): Promise<TaskList | undefined> {
-    try {
-        const filePath = join(baseDir, `${listId}.json`);
-        const content = await readFile(filePath, "utf-8");
-        return parseTaskList(content, filePath);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            return undefined;
-        }
-        throw error;
-    }
-}
-
 /** Read every *.json task list under a directory (used to hydrate on attach).
  *  Returns [] when the directory does not exist. */
 export async function loadAllTaskLists(baseDir: string): Promise<TaskList[]> {

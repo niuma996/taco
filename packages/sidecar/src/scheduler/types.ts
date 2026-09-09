@@ -29,6 +29,15 @@ export type ScheduleSpec =
     | { kind: "cron"; expr: string; tz?: string }
     | { kind: "interval"; ms: number };
 
+/**
+ * Typebox schema mirror of ScheduleSpec, kept available for future JSON
+ * validation of on-disk job files. Currently jobs are loaded by direct
+ * TypeScript decode (see scheduler/store.ts) and never round-trip through
+ * a schema validator.
+ *
+ * @knipignore
+ */
+/** @knipignore */
 export const scheduleSpecSchema: TSchema = Type.Union([
     Type.Object({
         kind: Type.Literal("cron"),
