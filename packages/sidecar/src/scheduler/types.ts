@@ -35,9 +35,8 @@ export type ScheduleSpec =
  * TypeScript decode (see scheduler/store.ts) and never round-trip through
  * a schema validator.
  *
- * @knipignore
+ * @internal
  */
-/** @knipignore */
 export const scheduleSpecSchema: TSchema = Type.Union([
     Type.Object({
         kind: Type.Literal("cron"),
