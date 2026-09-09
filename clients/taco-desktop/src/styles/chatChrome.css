@@ -156,38 +156,12 @@ main {
     color: var(--fg);
     background: var(--accent-bg-active);
 }
-/* log button: 26x26, same tier as copy. Hover bg signals clickability.
-   Path only in title/aria-label — not in the visual layout. */
-.session-info-log {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    width: 26px;
-    height: 26px;
-    min-width: auto;
-    background: transparent;
-    color: var(--fg-dim);
-    border-radius: var(--radius-sm);
-    border: 0;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition:
-        color 0.12s ease,
-        background 0.12s ease;
-}
-.session-info-log:hover {
-    color: var(--fg);
-    background: var(--accent-bg-hover);
-}
-.session-info-log:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-}
-
-/* File-tree drawer toggle — moved here from the topbar to clear the overlap
-   with the custom window controls on the frameless Windows build. Sits
-   right of the open-log button. Same visual treatment as its siblings. */
+/* Session-bar action buttons (log / tasks / file-tree): 26x26, same tier as
+   copy. Hover bg signals clickability; aria-pressed marks the active toggle.
+   The file-tree toggle moved here from the topbar to clear the overlap with
+   the custom window controls on the frameless Windows build. */
+.session-info-log,
+.session-info-tasks,
 .session-info-files {
     display: inline-flex;
     align-items: center;
@@ -206,16 +180,41 @@ main {
         color 0.12s ease,
         background 0.12s ease;
 }
+.session-info-log:hover,
+.session-info-tasks:hover,
 .session-info-files:hover {
     color: var(--fg);
     background: var(--accent-bg-hover);
 }
+.session-info-tasks[aria-pressed="true"],
 .session-info-files[aria-pressed="true"] {
     color: var(--accent);
 }
+.session-info-log:focus-visible,
+.session-info-tasks:focus-visible,
 .session-info-files:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+}
+
+/* Task-awareness dot on the task-panel button (panel closed only): 6px dot
+   pinned to the button's top-right corner. Dim = session has task artifacts
+   but all terminal; --active = tasks still running. */
+.session-info-tasks {
+    position: relative;
+}
+.session-info-tasks-dot {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-circle);
+    background: var(--fg-dim);
+    pointer-events: none;
+}
+.session-info-tasks-dot--active {
+    background: var(--accent);
 }
 
 /* Vertical divider between metadata and action buttons: 1px x 16px. */

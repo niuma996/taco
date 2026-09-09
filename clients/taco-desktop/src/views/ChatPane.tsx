@@ -70,6 +70,10 @@ export interface ChatPaneProps {
      *  session-info bar. Suppressed for IM conversations by the caller. */
     onToggleFiles?: () => void;
     filesOpen?: boolean;
+    /** Show / hide the task panel — surfaced as a button on the
+     *  session-info bar. */
+    onToggleTasks?: () => void;
+    tasksOpen?: boolean;
     /** When true, suppress the file-tree button (no filesystem to browse). */
     isIm?: boolean;
     /** Opaque floating overlay anchored above the input footer (currently the
@@ -104,6 +108,8 @@ export function ChatPane(props: ChatPaneProps) {
         onCommandPermission,
         onToggleFiles,
         filesOpen,
+        onToggleTasks,
+        tasksOpen,
         isIm,
         llmDumpDock,
     } = props;
@@ -203,6 +209,8 @@ export function ChatPane(props: ChatPaneProps) {
                 onToggleSidebar={onToggleSidebar}
                 onToggleFiles={onToggleFiles}
                 filesOpen={filesOpen}
+                onToggleTasks={onToggleTasks}
+                tasksOpen={tasksOpen}
                 isIm={isIm}
             />
             <main ref={mainRef}>

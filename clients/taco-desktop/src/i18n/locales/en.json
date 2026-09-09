@@ -33,7 +33,8 @@
       "running": "running"
     },
     "createdAtLabel": "created",
-    "openLog": "Open log file"
+    "openLog": "Open log file",
+    "taskPanel": "Task panel"
   },
   "input": {
     "placeholderRunning": "Agent is running…",
@@ -599,5 +600,8 @@
     "sessionStrategyImHint": "im:// workspaces can only reuse the current session; the server rejects other strategies.",
     "errorIntervalMs": "Interval (ms) must be a positive integer.",
     "errorCronExpr": "Cron expression must not be empty."
+  },
+  "tasks": {
+    "empty": "No tasks yet"
   }
 }

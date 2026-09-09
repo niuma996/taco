@@ -317,7 +317,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     history: action.history,
                 });
                 // First-ever snapshot for this sid (typical: taskCreate's first push) →
-                // force-expand TaskPanel regardless of prior manual collapse. TaskPanel clears
+                // force-open TaskPanel regardless of prior manual close. App clears
                 // the flag via CONSUMED so old-snapshot re-pushes don't keep popping it.
                 const prev = workspacesRef.current[action.cwd];
                 if (prev && prev.taskSnapshotsBySessionId[action.sid] === undefined) {

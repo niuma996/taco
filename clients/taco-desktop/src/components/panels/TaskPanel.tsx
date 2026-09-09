@@ -1,24 +1,19 @@
 import type { TaskItem, WorkspaceId } from "@taco-ai/protocol";
-import {
-    CheckCircle2,
-    ChevronDown,
-    ChevronRight,
-    Circle,
-    Loader2,
-    PanelRightClose,
-    XCircle,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, X, XCircle } from "lucide-react";
+import { useState } from "react";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
+import { useT } from "../../i18n/useI18n";
 import type { WorkspaceAction, WorkspaceState } from "../../lib/chat/workspaceReducer";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 
 /**
  * Renders the current session's task list.
  *
- * No tasks and collapsed → render nothing. With active tasks → icon per status
- * (spinning loader / circle / check / x). History rows show an inline badge
- * `{completedCount}/{taskCount}` and expand on click to show details.
+ * Open/close is controlled by the parent (session-bar toggle button). When
+ * open with no tasks, an empty placeholder is shown instead of nothing.
+ * Active tasks get an icon per status (spinning loader / circle / check / x).
+ * History rows show an inline badge `{completedCount}/{taskCount}` and expand
+ * on click to show details.
  *
  * `workspaces` is a prop (not fetched via useTaskSnapshot → useWorkspaces) to
  * avoid a dual-reducer bug where the two state instances diverge.
@@ -29,36 +24,25 @@ export function TaskPanel({
     sid,
     client,
     dispatchWs,
-    forceExpand,
+    open,
+    onClose,
 }: {
     cwd: WorkspaceId;
     workspaces: Record<string, WorkspaceState>;
     sid: string;
     client: TacoClient;
     dispatchWs: (action: WorkspaceAction) => void;
-    forceExpand: boolean;
+    open: boolean;
+    onClose: () => void;
 }) {
     const { active, history } = useTaskSnapshot(workspaces, cwd, sid);
-    const [collapsed, setCollapsed] = useState(false);
+    const { t } = useT();
 
-    // First write of a snapshot for this sid (taskCreate / todoWrite etc.)
-    // dispatches TASK_PANEL_FORCE_EXPAND via useWorkspaces — we consume it
-    // here by forcing re-expansion, then clear the flag with CONSUMED.
-    // Replaying an old snapshot (re-enter / re-attach) doesn't re-dispatch,
-    // so the panel won't keep popping open.
-    useEffect(() => {
-        if (!forceExpand) return;
-        setCollapsed(false);
-        dispatchWs({ type: "TASK_PANEL_FORCE_EXPAND_CONSUMED", cwd });
-    }, [forceExpand, cwd, dispatchWs]);
-
-    // No tasks: render nothing. Switching sessions also returns this to false
-    // (the component remounts).
-    if (active === null && history.length === 0) return null;
-    if (collapsed) return null;
+    if (!open) return null;
 
     // History details fetched per (session, listId). Undefined → triggers the RPC.
     const details = workspaces[cwd]?.historyDetailsBySessionId[sid] ?? {};
+    const hasTasks = active !== null || history.length > 0;
 
     return (
         <div className="task-panel">
@@ -71,13 +55,14 @@ export function TaskPanel({
                 <button
                     type="button"
                     className="task-panel-collapse"
-                    onClick={() => setCollapsed(true)}
-                    aria-label="收起任务面板"
-                    title="收起任务面板"
+                    onClick={onClose}
+                    aria-label="关闭任务面板"
+                    title="关闭任务面板"
                 >
-                    <PanelRightClose size={14} aria-hidden="true" />
+                    <X size={14} aria-hidden="true" />
                 </button>
             </div>
+            {!hasTasks && <div className="task-panel-empty">{t("tasks.empty")}</div>}
             {active && (
                 <section className="task-panel-active" aria-label="当前任务">
                     <ul className="task-list">

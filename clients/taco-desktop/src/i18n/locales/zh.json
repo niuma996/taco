@@ -33,7 +33,8 @@
       "running": "运行中"
     },
     "createdAtLabel": "创建于",
-    "openLog": "打开日志文件"
+    "openLog": "打开日志文件",
+    "taskPanel": "任务面板"
   },
   "input": {
     "placeholderRunning": "代理运行中…",
@@ -598,5 +599,8 @@
     "sessionStrategyImHint": "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
     "errorIntervalMs": "间隔（毫秒）必须是正整数。",
     "errorCronExpr": "Cron 表达式不能为空。"
+  },
+  "tasks": {
+    "empty": "暂无任务"
   }
 }

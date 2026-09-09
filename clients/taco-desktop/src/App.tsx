@@ -43,10 +43,12 @@ import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
 import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
+import { useTaskPanel } from "./hooks/useTaskPanel";
 import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
+import { consumeForceExpandFlag } from "./lib/chat/taskPanelForceExpand";
 import {
     readPersistedSidebarCollapsed,
     writePersistedSidebarCollapsed,
@@ -71,6 +73,12 @@ export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
     const filesDrawer = useFilesDrawer();
+    const {
+        open: taskPanelOpen,
+        show: showTaskPanel,
+        close: hideTaskPanel,
+        toggle: toggleTaskPanel,
+    } = useTaskPanel();
     useTheme();
     const { t } = useT();
     const { show: showToast } = useToast();
@@ -286,8 +294,20 @@ export default function App() {
         onImWorkspacesInvalidated: (_channelId) => {},
     });
 
-    // Task snapshot clearing on session switch is done synchronously in
-    // attachSessionInternal (no React effect, no race with first push).
+    // First-ever task snapshot for a sid (dispatched by useWorkspaces on
+    // tasks.updated) force-opens the panel; consume the flag so re-pushes of
+    // old snapshots don't keep reopening it.
+    const forceExpandTaskPanel = activeCwd
+        ? (workspaces[activeCwd]?.forceExpandTaskPanel ?? false)
+        : false;
+    useEffect(() => {
+        consumeForceExpandFlag({
+            forceExpandTaskPanel,
+            activeCwd,
+            showTaskPanel,
+            dispatchWs,
+        });
+    }, [forceExpandTaskPanel, activeCwd, dispatchWs, showTaskPanel]);
 
     // Chat input + modal orchestration lives in its own hook (eight sibling
     // useStates that don't interact with each other; bundling keeps App.tsx
@@ -631,6 +651,8 @@ export default function App() {
                                         copiedSessionId={copiedSessionId}
                                         onToggleFiles={() => filesDrawer.show()}
                                         filesOpen={filesDrawer.open}
+                                        onToggleTasks={toggleTaskPanel}
+                                        tasksOpen={taskPanelOpen}
                                         isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
                                         llmDumpDock={
                                             <LlmDumpDock
@@ -662,9 +684,8 @@ export default function App() {
                                             workspaces={workspaces}
                                             client={client}
                                             dispatchWs={dispatchWs}
-                                            forceExpand={
-                                                workspaces[activeCwd]?.forceExpandTaskPanel ?? false
-                                            }
+                                            open={taskPanelOpen}
+                                            onClose={hideTaskPanel}
                                         />
                                     )}
                                 </AskUserProvider>

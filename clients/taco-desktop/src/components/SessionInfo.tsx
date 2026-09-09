@@ -16,7 +16,15 @@
  */
 
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Check, ChevronsLeft, ChevronsRight, Copy, FileText, FolderTree } from "lucide-react";
+import {
+    Check,
+    ChevronsLeft,
+    ChevronsRight,
+    Copy,
+    FileText,
+    FolderTree,
+    ListTodo,
+} from "lucide-react";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 
@@ -28,6 +36,8 @@ export function SessionInfo({
     onToggleSidebar,
     onToggleFiles,
     filesOpen,
+    onToggleTasks,
+    tasksOpen,
     isIm,
 }: {
     ws: WorkspaceState | undefined;
@@ -38,6 +48,9 @@ export function SessionInfo({
     /** Show / hide the file-tree drawer. */
     onToggleFiles?: () => void;
     filesOpen?: boolean;
+    /** Show / hide the task panel. */
+    onToggleTasks?: () => void;
+    tasksOpen?: boolean;
     /** IM conversations have no filesystem; suppress the file-tree button only. */
     isIm?: boolean;
 }) {
@@ -45,6 +58,19 @@ export function SessionInfo({
     const activeId = ws?.activeSession;
     const activeMeta = activeId ? ws?.sessions.find((s) => s.id === activeId) : undefined;
     const isRunning = Boolean(ws?.pendingBySessionId[activeId ?? ""]);
+    // Task-awareness dot on the task-panel button (panel closed only):
+    // accent while any task is unfinished (pending / in_progress), dim when
+    // the session has task artifacts but all are terminal — the sidecar moves
+    // fully-finished lists into history, so "active" alone can't see them.
+    const taskSnapshot = activeId ? ws?.taskSnapshotsBySessionId[activeId] : undefined;
+    const hasUnfinishedTasks = Boolean(
+        taskSnapshot?.active?.tasks.some(
+            (task) => task.status === "pending" || task.status === "in_progress",
+        ),
+    );
+    const hasAnyTasks = Boolean(
+        taskSnapshot && (taskSnapshot.active || taskSnapshot.history.length),
+    );
     const toggle = (
         <button
             type="button"
@@ -120,6 +146,24 @@ export function SessionInfo({
                     }}
                 >
                     <FileText size={14} aria-hidden="true" />
+                </button>
+            )}
+            {onToggleTasks && (
+                <button
+                    type="button"
+                    className="session-info-tasks"
+                    title={t("session.taskPanel")}
+                    aria-label={t("session.taskPanel")}
+                    aria-pressed={tasksOpen ?? false}
+                    onClick={onToggleTasks}
+                >
+                    <ListTodo size={14} aria-hidden="true" />
+                    {hasAnyTasks && !tasksOpen && (
+                        <span
+                            className={`session-info-tasks-dot${hasUnfinishedTasks ? " session-info-tasks-dot--active" : ""}`}
+                            aria-hidden="true"
+                        />
+                    )}
                 </button>
             )}
             {onToggleFiles && !isIm && (
