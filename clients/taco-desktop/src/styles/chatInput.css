@@ -1,7 +1,9 @@
 /* chatInput.css — input footer, status bar, textarea, controls, send/stop/attach buttons; split from chat.css */
 
 footer.input {
-    /* Outer transparent wrapper: fills the chat panel bg, side margins let .input-card float above. */
+    /* Outer transparent wrapper: fills the chat panel bg, side margins let .input-card float above.
+       position:relative anchors floating overlays (LLM dump fab/panel) above the footer. */
+    position: relative;
     background: var(--chat-panel-bg);
     padding: 0.5rem 0.75rem 0.75rem;
     display: flex;

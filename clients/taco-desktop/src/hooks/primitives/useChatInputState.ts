@@ -3,12 +3,11 @@ import { type Dispatch, type SetStateAction, useState } from "react";
 
 /** UI-only state for the chat input area + the modals it drives.
  *
- *  Groups eight sibling `useState`s that share a single call-site
- *  (chat input + Confirm/Rename/FilesDrawer modals + LlmDumpPanel
- *  toggle + session-id copy hint) so App.tsx doesn't re-accrete one
- *  every time someone adds a chip. Setters keep the standard
- *  `Dispatch<SetStateAction<T>>` shape — needed by the auto-clear
- *  updater on `copiedSessionId`.
+ *  Groups seven sibling `useState`s that share a single call-site
+ *  (chat input + Confirm/Rename modals + session-id copy hint) so
+ *  App.tsx doesn't re-accrete one every time someone adds a chip.
+ *  Setters keep the standard `Dispatch<SetStateAction<T>>` shape —
+ *  needed by the auto-clear updater on `copiedSessionId`.
  */
 export interface UseChatInputStateResult {
     /** Session row id that just had its id copied; auto-clears. */
@@ -41,9 +40,6 @@ export interface UseChatInputStateResult {
             currentName: string;
         } | null>
     >;
-    /** LlmDumpPanel visibility. */
-    llmDumpOpen: boolean;
-    setLlmDumpOpen: Dispatch<SetStateAction<boolean>>;
 }
 
 export function useChatInputState(): UseChatInputStateResult {
@@ -61,7 +57,6 @@ export function useChatInputState(): UseChatInputStateResult {
         sessionId: string;
         currentName: string;
     } | null>(null);
-    const [llmDumpOpen, setLlmDumpOpen] = useState(false);
 
     return {
         copiedSessionId,
@@ -78,7 +73,5 @@ export function useChatInputState(): UseChatInputStateResult {
         setPendingDeleteSession,
         pendingRenameSession,
         setPendingRenameSession,
-        llmDumpOpen,
-        setLlmDumpOpen,
     };
 }

@@ -194,31 +194,45 @@
     color: var(--fg-dim);
 }
 
-/* LLM dump chip + panel (originally L1757-1847) */
-/* ── LLM dump chip (inline in topbar) + panel (floating bottom-right, avoids the input area) ── */
-.llm-dump-chip {
-    padding: 0.3rem 0.6rem;
-    background: transparent;
-    color: var(--fg);
+/* LLM dump fab + panel (originally L1757-1847) */
+/* ── LLM dump: translucent fab floating above the input footer, expanded panel at the same
+     anchor. Both are absolute inside footer.input (position:relative), so they track the
+     textarea's height instead of guessing it. ── */
+.llm-dump-fab {
+    position: absolute;
+    /* Inset from the right so it clears the chat scrollbar, which hugs the window edge. */
+    right: 1rem;
+    bottom: calc(100% + 0.5rem);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-elevated);
+    color: var(--fg-dim);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-size: 0.8rem;
+    border-radius: var(--radius-md);
+    font-size: 0.78rem;
     cursor: pointer;
-    -webkit-app-region: no-drag;
+    opacity: 0.45;
+    transition: opacity 0.12s ease;
 }
-.llm-dump-chip:hover {
-    background: var(--input-bg);
-    border-color: var(--accent);
+.llm-dump-fab:hover,
+.llm-dump-fab:focus-visible {
+    opacity: 1;
+}
+.llm-dump-fab-badge {
+    font-size: 0.72rem;
+    line-height: 1;
 }
 
 .llm-dump-panel {
-    /* Raised above the input footer to avoid overlap with the send button.
-       footer.input is about 5rem; 1rem margin keeps clear. */
-    position: fixed;
+    position: absolute;
+    /* Same inset as the fab so the panel opens directly above the button. */
     right: 1rem;
-    bottom: 6.5rem;
+    bottom: calc(100% + 0.5rem);
     z-index: 50;
-    width: min(640px, calc(100vw - 2rem));
+    width: min(640px, 100%);
     max-height: 60vh;
     display: flex;
     flex-direction: column;
@@ -260,19 +274,60 @@
     font-size: 0.85rem;
     color: var(--fg);
 }
-.llm-dump-pre {
-    margin: 0.4rem 0 0;
-    padding: 0.5rem;
-    background: var(--bg-elevated);
-    color: var(--fg);
+.llm-dump-lines {
+    margin-top: 0.4rem;
+    max-height: 320px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+/* One bordered block per dump line. Role-tinted left edge + badge via --line-role;
+   unmapped roles fall back to the neutral border/dim colors. */
+.llm-dump-line {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--line-role, var(--border-strong));
     border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    padding: 0.35rem 0.5rem;
+}
+.llm-dump-line--system {
+    --line-role: var(--system);
+}
+.llm-dump-line--user {
+    --line-role: var(--user);
+}
+.llm-dump-line--assistant {
+    --line-role: var(--assistant);
+}
+.llm-dump-line--toolresult {
+    --line-role: var(--tool);
+}
+.llm-dump-line-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin-bottom: 0.25rem;
+}
+.llm-dump-line-role {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--line-role, var(--fg-dim));
+}
+.llm-dump-line-index {
+    font-size: 0.68rem;
+    color: var(--fg-dim);
+}
+.llm-dump-line-body {
+    margin: 0;
     font-family: var(--mono);
     font-size: 0.78rem;
     line-height: 1.45;
-    max-height: 320px;
-    overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
+    color: var(--fg);
 }
 
 /* Global scrollbar (originally L1849-1883) */

@@ -1,11 +1,15 @@
 /**
- * LLM Dump — topbar chip + floating expanded panel.
+ * LLM Dump — floating entry button + expanded panel.
  *
- * `LlmDumpChip` is the always-visible entry point in the topbar.
- * `LlmDumpPanel` is the expanded state: bottom-right fixed panel with one
- * `<details>` per turn. Expand/collapse state is lifted to App.tsx.
+ * `LlmDumpFab` is the always-visible entry point: a translucent icon button
+ * floating above the input area (rendered inside footer.input, which is
+ * position:relative). `LlmDumpPanel` is the expanded state: one `<details>`
+ * per turn, anchored at the same spot. `LlmDumpDock` owns the open state and
+ * swaps between the two; App.tsx composes it and hands it to ChatPane as an
+ * opaque slot.
  */
 
+import { Bug } from "lucide-react";
 import { useState } from "react";
 import type { LlmDumpEntry } from "../hooks/useLlmDump.ts";
 import { useT } from "../i18n/useI18n";
@@ -17,40 +21,29 @@ function formatClock(ts: number): string {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export interface LlmDumpChipProps {
+export interface LlmDumpFabProps {
     count: number;
-    /** When true, the chip renders even with zero entries so the user has
-     *  immediate feedback that debug mode is on. Count badge is suppressed
-     *  in that case and a "waiting" hint takes its place. */
-    debugMode?: boolean;
     onClick: () => void;
 }
 
-/** Topbar inline entry. Mounted whenever debug mode is on or there are
- *  entries — see App.tsx for the gating condition. */
-export function LlmDumpChip(props: LlmDumpChipProps) {
+/** Translucent floating entry above the input area. Rendered whenever debug
+ *  mode is on or there are entries — LlmDumpDock owns the gating. */
+export function LlmDumpFab(props: LlmDumpFabProps) {
     const { t } = useT();
     const waiting = props.count === 0;
+    const label = waiting
+        ? t("debug.showLlmRequestDumpWaiting")
+        : `${t("debug.showLlmRequestDump")} (${props.count})`;
     return (
         <button
             type="button"
-            className="llm-dump-chip"
+            className="llm-dump-fab"
             onClick={props.onClick}
-            title={
-                waiting
-                    ? t("debug.showLlmRequestDumpWaiting", {
-                          defaultValue: props.debugMode
-                              ? "Debug mode is on — dump entries will appear after the next LLM call."
-                              : "Open the LLM request dump panel.",
-                      })
-                    : t("debug.showLlmRequestDump")
-            }
+            title={label}
+            aria-label={label}
         >
-            {waiting
-                ? t("debug.llmRequestDumpWaiting", {
-                      defaultValue: props.debugMode ? "LLM Dump (waiting)" : "LLM Request Dump",
-                  })
-                : `${t("debug.llmRequestDump")} (${props.count})`}
+            <Bug size={18} aria-hidden="true" />
+            {!waiting && <span className="llm-dump-fab-badge">{props.count}</span>}
         </button>
     );
 }
@@ -64,6 +57,32 @@ export interface LlmDumpPanelProps {
 function entryToText(entry: LlmDumpEntry): string {
     const header = `# === payload ${entry.index} @ ${formatClock(entry.timestamp)} ===`;
     return [header, ...entry.lines].join("\n");
+}
+
+type ParsedDumpLine =
+    | { kind: "role"; role: string; roleClass: string; index: number | null; body: string }
+    | { kind: "plain"; body: string };
+
+/** Split one dump line into role badge + body. sidecar emits `[system] body`
+ *  and `[N] role: body`; anything else renders without a badge. Bodies may
+ *  contain real newlines (unescaped on receipt), so the patterns use [\s\S]. */
+function parseDumpLine(line: string): ParsedDumpLine {
+    const system = line.match(/^\[system\] ([\s\S]*)$/);
+    if (system) {
+        return { kind: "role", role: "system", roleClass: "system", index: null, body: system[1] };
+    }
+    const msg = line.match(/^\[(\d+)\] ([^:]+): ([\s\S]*)$/);
+    if (msg) {
+        const role = msg[2];
+        return {
+            kind: "role",
+            role,
+            roleClass: role.toLowerCase().replace(/[^a-z]/g, ""),
+            index: Number(msg[1]),
+            body: msg[3],
+        };
+    }
+    return { kind: "plain", body: line };
 }
 
 export function LlmDumpPanel(props: LlmDumpPanelProps) {
@@ -121,10 +140,64 @@ export function LlmDumpPanel(props: LlmDumpPanelProps) {
                             #{entry.index} · {formatClock(entry.timestamp)} · {entry.lines.length}{" "}
                             lines
                         </summary>
-                        <pre className="llm-dump-pre">{entry.lines.join("\n")}</pre>
+                        <div className="llm-dump-lines">
+                            {entry.lines.map((line, i) => {
+                                const parsed = parseDumpLine(line);
+                                if (parsed.kind === "plain") {
+                                    return (
+                                        <div className="llm-dump-line" key={i}>
+                                            <pre className="llm-dump-line-body">{parsed.body}</pre>
+                                        </div>
+                                    );
+                                }
+                                return (
+                                    <div
+                                        className={`llm-dump-line llm-dump-line--${parsed.roleClass}`}
+                                        key={i}
+                                    >
+                                        <div className="llm-dump-line-head">
+                                            <span className="llm-dump-line-role">
+                                                {parsed.role}
+                                            </span>
+                                            {parsed.index !== null && (
+                                                <span className="llm-dump-line-index">
+                                                    #{parsed.index}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <pre className="llm-dump-line-body">{parsed.body}</pre>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </details>
                 ))}
             </div>
         </aside>
+    );
+}
+
+export interface LlmDumpDockProps {
+    entries: LlmDumpEntry[];
+    onClear: () => void;
+    /** Renders the fab even with zero entries, so the user sees debug mode is
+     *  on before the first LLM call lands. */
+    debugMode: boolean;
+}
+
+/** Owns the open state and the show/hide gating (debug mode on, or entries
+ *  exist). App.tsx composes it and hands it to ChatPane as an opaque slot, so
+ *  the view stays unaware of the debug wiring. */
+export function LlmDumpDock(props: LlmDumpDockProps) {
+    const [open, setOpen] = useState(false);
+    if (!props.debugMode && props.entries.length === 0) return null;
+    return open ? (
+        <LlmDumpPanel
+            entries={props.entries}
+            onClear={props.onClear}
+            onCollapse={() => setOpen(false)}
+        />
+    ) : (
+        <LlmDumpFab count={props.entries.length} onClick={() => setOpen(true)} />
     );
 }

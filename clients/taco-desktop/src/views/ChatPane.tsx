@@ -13,7 +13,7 @@ import type {
     ThinkingLevel,
 } from "@taco-ai/protocol";
 import { ArrowUp, Paperclip, Square } from "lucide-react";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef } from "react";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { Message } from "../components/Message";
@@ -72,6 +72,9 @@ export interface ChatPaneProps {
     filesOpen?: boolean;
     /** When true, suppress the file-tree button (no filesystem to browse). */
     isIm?: boolean;
+    /** Opaque floating overlay anchored above the input footer (currently the
+     *  LLM dump dock). Composed by the caller; the pane only places it. */
+    llmDumpDock?: ReactNode;
 }
 
 export function ChatPane(props: ChatPaneProps) {
@@ -102,6 +105,7 @@ export function ChatPane(props: ChatPaneProps) {
         onToggleFiles,
         filesOpen,
         isIm,
+        llmDumpDock,
     } = props;
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const { addFiles, handlePaste, removeAttachment } = useImageAttachments(
@@ -357,6 +361,7 @@ export function ChatPane(props: ChatPaneProps) {
                         </div>
                     </div>
                 </div>
+                {llmDumpDock}
             </footer>
         </div>
     );

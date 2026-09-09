@@ -15,7 +15,7 @@ import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { FilesDrawer } from "./components/FilesDrawer";
-import { LlmDumpChip, LlmDumpPanel } from "./components/LlmDumpPanel";
+import { LlmDumpDock } from "./components/LlmDumpPanel";
 import { OnboardingModal } from "./components/onboarding/OnboardingModal.js";
 import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { TaskPanel } from "./components/panels/TaskPanel";
@@ -163,6 +163,24 @@ export default function App() {
 
     // sidecar push routing: normalize + dedup → reducer action
     const llmDump = useLlmDump();
+    const { clear: clearLlmDump } = llmDump;
+
+    // Reset the LLM dump (buffer + dock UI) when leaving a session: switching
+    // sessions/workspaces or starting a new session clears it. The null →
+    // allocated-sid transition keeps it, so a new session's first LLM call
+    // stays visible instead of being wiped right after sending. The epoch
+    // remounts the dock so an open panel closes on the same boundary.
+    const dumpSessionKey = activeCwd && activeSid ? `${activeCwd} ${activeSid}` : null;
+    const prevDumpSessionKeyRef = useRef<string | null>(dumpSessionKey);
+    const [llmDumpEpoch, setLlmDumpEpoch] = useState(0);
+    useEffect(() => {
+        if (prevDumpSessionKeyRef.current === dumpSessionKey) return;
+        const hadSession = prevDumpSessionKeyRef.current !== null;
+        prevDumpSessionKeyRef.current = dumpSessionKey;
+        if (!hadSession) return;
+        clearLlmDump();
+        setLlmDumpEpoch((n) => n + 1);
+    }, [dumpSessionKey, clearLlmDump]);
     const { options: modelOptions, refresh: refreshModels } = useWorkspaceModels(
         client,
         activeCwd || null,
@@ -289,8 +307,6 @@ export default function App() {
         setPendingDeleteSession,
         pendingRenameSession,
         setPendingRenameSession,
-        llmDumpOpen,
-        setLlmDumpOpen,
     } = useChatInputState();
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -479,13 +495,6 @@ export default function App() {
                             <span>{t("session.new")}</span>
                         </button>
                     </div>
-                    {(globalConfigState.client.debugMode || llmDump.entries.length > 0) && (
-                        <LlmDumpChip
-                            count={llmDump.entries.length}
-                            debugMode={globalConfigState.client.debugMode ?? false}
-                            onClick={() => setLlmDumpOpen(true)}
-                        />
-                    )}
                     {/* ContextIndicator moved to ChatPane input-controls */}
                     {activeCwd && activeSid && (
                         <PlanModeIndicator
@@ -623,6 +632,16 @@ export default function App() {
                                         onToggleFiles={() => filesDrawer.show()}
                                         filesOpen={filesDrawer.open}
                                         isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
+                                        llmDumpDock={
+                                            <LlmDumpDock
+                                                key={llmDumpEpoch}
+                                                entries={llmDump.entries}
+                                                onClear={llmDump.clear}
+                                                debugMode={
+                                                    globalConfigState.client.debugMode ?? false
+                                                }
+                                            />
+                                        }
                                         onCommandPermission={async (
                                             requestId,
                                             approved,
@@ -854,13 +873,6 @@ export default function App() {
                 activeCwd={activeCwd}
                 onClose={filesDrawer.close}
             />
-            {llmDumpOpen && (
-                <LlmDumpPanel
-                    entries={llmDump.entries}
-                    onClear={llmDump.clear}
-                    onCollapse={() => setLlmDumpOpen(false)}
-                />
-            )}
             {lifecycle.desktopConfig !== null && isOnboardingRequired(lifecycle.desktopConfig) && (
                 <OnboardingModal
                     client={client}

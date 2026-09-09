@@ -501,6 +501,7 @@
   "debug": {
     "llmRequestDump": "LLM request dump",
     "showLlmRequestDump": "Show LLM request dump",
+    "showLlmRequestDumpWaiting": "Debug mode is on — dump entries will appear after the next LLM call",
     "panel": "LLM request dump",
     "copied": "Copied",
     "copyFailed": "Copy failed",

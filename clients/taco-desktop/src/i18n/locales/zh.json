@@ -500,6 +500,7 @@
   "debug": {
     "llmRequestDump": "LLM 请求转储",
     "showLlmRequestDump": "显示 LLM 请求转储",
+    "showLlmRequestDumpWaiting": "调试模式已开启 —— 下一次 LLM 调用后将显示转储条目",
     "panel": "LLM 请求转储",
     "copied": "已复制",
     "copyFailed": "复制失败",
