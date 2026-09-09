@@ -11,7 +11,7 @@ import type {
     SessionCompactionFinishedParams,
     SessionContextInfoResult,
 } from "@taco-ai/protocol";
-import { PushMethods } from "@taco-ai/protocol";
+import { ErrorCodes, PushMethods } from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
@@ -108,8 +108,14 @@ export function useSessionContextInfo(
             const result = await client.sessionContextInfo(activeCwd, sessionId);
             setInfo(result);
         } catch (e) {
-            // Indicator is auxiliary; RPC failures stay silent and retain the last value.
-            console.error("[taco] sessionContextInfo failed:", e);
+            // Not-attached is an expected race, not a failure: refresh fires on
+            // mount and on turn_end pushes before session.attach lands, and
+            // after a sidecar restart or scheduler detach the session stays
+            // un-attached until something re-attaches it. The indicator is
+            // auxiliary — retain the last value and stay quiet.
+            if ((e as { code?: string } | null)?.code !== ErrorCodes.InvalidState) {
+                console.error("[taco] sessionContextInfo failed:", e);
+            }
         } finally {
             setLoading(false);
         }

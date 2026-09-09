@@ -804,7 +804,15 @@ async function readSessionMetadataFromDisk(
     let name: string | undefined;
     let facts: SessionFacts = {};
     let lineCount = 0;
-    let sawFactsLine = false;
+    // Whether ANY namespaced value record was seen. A current-format session
+    // that was never named and never got facts (a plain user session, or a
+    // fork/spawn session that never went through sessionPrompt's setName) is
+    // normal — measured on a real store, 15 of 86 files have neither namespace
+    // — so name/facts absence alone is not a format-change signal. Zero
+    // namespaced records in a multi-line current-format file IS: pi always
+    // writes pi.op.* / pi.lane.* during activity, so none means the
+    // value-record encoding itself is gone.
+    let sawNamespacedValue = false;
     // Whether the header says this file uses the value-record encoding this
     // scanner understands. A pi v3 legacy file stores its title as a
     // `{type: "session_info", name}` entry with no namespace at all, so the
@@ -815,6 +823,9 @@ async function readSessionMetadataFromDisk(
             lineCount++;
             if (lineCount === 1) {
                 currentFormat = isCurrentFormatHeader(line);
+            }
+            if (line.includes('"namespace":"')) {
+                sawNamespacedValue = true;
             }
             // Substring test before JSON.parse: the overwhelming majority of
             // lines are messages, and parsing them is exactly the cost this
@@ -864,10 +875,6 @@ async function readSessionMetadataFromDisk(
             }
             name = entry.value.trim() || undefined;
         } else if (entry.namespace === SESSION_FACTS_NAMESPACE) {
-            // Seen even when cleared or empty: `{}` is a legitimately written
-            // value, so presence of the record — not the size of the object —
-            // is what proves the namespace still resolves.
-            sawFactsLine = true;
             if (cleared || typeof entry.value !== "object" || entry.value === null) {
                 facts = {};
                 return;
@@ -875,26 +882,28 @@ async function readSessionMetadataFromDisk(
             facts = entry.value as SessionFacts;
         }
     }
-    // Only a *current-format* file with neither line is suspicious. Two cases
-    // are normal and must stay quiet, or the warning fires on almost every
-    // session and stops meaning anything (measured: 261 of 276 files in a real
-    // store, because every one of them predates the value-record encoding):
+    // Only a *current-format* file with content but no namespaced value
+    // records at all is suspicious — pi writes pi.op.* / pi.lane.* during
+    // normal activity, so the encoding clearly still resolves whenever any
+    // are present. What remains is the case worth a log: the file claims the
+    // encoding this scanner targets, has content, yet no value record of any
+    // kind resolved — i.e. a pi upgrade replaced the encoding under us and
+    // `session.list` would silently show untitled, un-fact'd sessions.
+    // Legacy (v3) files and fresh never-named sessions must stay quiet; the
+    // measured store has many of both, and a warning that fires on almost
+    // every session stops meaning anything.
     //
-    //   - a pi v3 legacy file, whose title is a `session_info` entry with no
-    //     namespace — pi reads these through its own legacy path, and the
-    //     `repo.open()` fallback below returns the right answer anyway;
-    //   - a current-format session that has not been named or given facts yet
-    //     (freshly created, never renamed), where nothing has been written.
-    //
-    // What remains is the case worth a log: the file claims the encoding this
-    // scanner targets, has content, yet neither namespace resolved — i.e. a pi
-    // upgrade renamed them under us and `session.list` would silently show
-    // untitled, un-fact'd sessions.
-    if (currentFormat && lineCount > 1 && name === undefined && !sawFactsLine) {
-        log.warn("scanned jsonl found no name or facts lines; storage format may have changed", {
-            path,
-            lineCount,
-        });
+    // Deliberately info, not warn: the desktop client turns every sidecar
+    // warn-level line into a UI warning, and this diagnostic is for the log
+    // only — nothing the user can act on in the app.
+    if (currentFormat && lineCount > 1 && !sawNamespacedValue) {
+        log.info(
+            "scanned jsonl found no namespaced value records; storage format may have changed",
+            {
+                path,
+                lineCount,
+            },
+        );
     }
     return { name, facts };
 }
