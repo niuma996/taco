@@ -60,41 +60,6 @@ button svg {
     outline-offset: 1px;
 }
 
-.topbar-new-session {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.25rem;
-    /* Vertical padding trimmed (0.35rem -> 0.25rem) so the button doesn't fill
-       the fixed 32px topbar edge-to-edge; the resulting ~2-3px gap top/bottom
-       keeps the orange chip from hugging the header border. line-height stays
-       at the browser default so icon and text keep their natural proportions. */
-    padding: 0.25rem 0.55rem;
-    font-size: 0.85rem;
-    white-space: nowrap;
-    border-radius: var(--radius-sm);
-    -webkit-app-region: no-drag;
-    /* hugs right edge in picker-group (space-between), aligned with list row inner-right. */
-    flex: 0 0 auto;
-    /* Overrides global button { background: --accent } (Nord blue) with brand orange,
-       aligned with the desktop icon left color band. */
-    background: var(--brand-orange);
-}
-
-.topbar-new-session:hover:not(:disabled) {
-    background: var(--brand-orange-hover);
-}
-
-.topbar-new-session:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
-.topbar-new-session svg {
-    width: 14px;
-    height: 14px;
-}
-
 main {
     flex: 1;
     overflow-y: auto;

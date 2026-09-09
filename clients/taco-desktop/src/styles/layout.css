@@ -156,12 +156,11 @@ header.topbar select {
     border-radius: var(--radius-sm);
 }
 
-/* Left: WorkspacePicker, right: new-session button (space-between),
-   button right edge aligns with sidebar list row inner-right edge. */
+/* Holds only WorkspacePicker; width capped to the sidebar list width so its
+   right edge aligns with the sidebar list row inner-right edge below. */
 header.topbar .topbar-picker-group {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
     flex: 0 0 calc(var(--pane-width) - 0.5rem - 4px);
     min-width: 0;
@@ -169,9 +168,9 @@ header.topbar .topbar-picker-group {
 
 .topbar-workspace-select {
     /* Text-button style (not an input): transparent bg, no border, faint hint on hover.
-       Fills remaining space in picker-group; label truncates on overflow.
-       Vertical padding matches .topbar-new-session (0.35rem); horizontal padding is slightly
-       smaller (0.4rem) to give the label more room next to the tighter chevron spacing. */
+       Fills the picker-group; label truncates on overflow.
+       Vertical padding 0.35rem; horizontal padding is slightly smaller (0.4rem) to give
+       the label more room next to the tighter chevron spacing. */
     background: transparent;
     color: var(--fg);
     border: 0;
@@ -240,8 +239,10 @@ header.topbar .topbar-picker-group {
     z-index: 100;
     overflow: hidden;
     /* DropdownMenu has no trigger-width variable like Select; anchors to picker trigger width,
-       long workspace names truncate. */
+       long workspace names truncate. Capped to the same width as .topbar-picker-group /
+       aside.sidebar so the menu's right edge lines up with the sidebar list below it. */
     min-width: 180px;
+    max-width: calc(var(--pane-width) - 0.5rem - 4px);
     padding: 4px 0;
     max-height: min(60vh, 320px);
     overflow-y: auto;

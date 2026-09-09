@@ -8,7 +8,6 @@
 
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
-import { Plus } from "lucide-react";
 
 import { useEffect, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
@@ -485,17 +484,6 @@ export default function App() {
                             onChange={(cwd) => void switchWorkspace(cwd)}
                             onOpenFolder={() => void browseAndOpen()}
                         />
-                        <button
-                            type="button"
-                            className="topbar-new-session"
-                            onClick={handleNewSession}
-                            disabled={!ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
-                            title={t("session.newInWorkspace")}
-                            aria-label={t("session.newInWorkspace")}
-                        >
-                            <Plus size={15} aria-hidden="true" />
-                            <span>{t("session.new")}</span>
-                        </button>
                     </div>
                     {/* ContextIndicator moved to ChatPane input-controls */}
                     {activeCwd && activeSid && (
