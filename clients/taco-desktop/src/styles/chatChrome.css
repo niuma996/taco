@@ -21,31 +21,43 @@ button svg {
     vertical-align: middle;
 }
 
-/* Toggle button for the session list, left of the session id bar.
-   Follows .topbar's height rhythm (--rail-top-padding). No ::after divider —
-   flex gap already separates the toggle from the id area; an extra 1px line is visual noise. */
-.session-info-toggle {
+/* Sidebar toggle + new-chat button: the row's two "primary" actions get an
+   accent-tinted chip (bg + border) instead of the plain transparent icon
+   button style, so navigation / creation stand out from metadata actions
+   (copy / log / tasks / files). Both carry icon + text, so they size to
+   content rather than the fixed 26px square. */
+.session-info-toggle,
+.session-info-new {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    /* Circular button with accent tint so it reads as a distinct control,
-       not just another glyph in the bar. */
+    gap: 0.25rem;
+    padding: 0 0.5rem;
+    height: 26px;
     background: var(--accent-bg-hover);
     border: 1px solid var(--accent-bg-active);
-    border-radius: var(--radius-circle);
+    border-radius: var(--radius-sm);
     color: var(--accent);
     cursor: pointer;
-    padding: 0;
-    flex: 0 0 auto;
-    margin-right: 0.15rem;
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    transition:
+        color 0.12s ease,
+        background 0.12s ease;
 }
-
-.session-info-toggle:hover {
+.session-info-toggle:hover,
+.session-info-new:hover:not(:disabled) {
     color: var(--fg);
     background: var(--accent-bg-active);
     border-color: var(--accent);
+}
+.session-info-new:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.session-info-toggle:focus-visible,
+.session-info-new:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .topbar-new-session {
@@ -119,12 +131,6 @@ main {
 .session-info.empty {
     font-style: italic;
 }
-.session-info-label {
-    text-transform: uppercase;
-    font-size: 0.65rem;
-    letter-spacing: 0.08em;
-    color: var(--fg-dim);
-}
 .session-info-id {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: var(--fg);
@@ -133,11 +139,16 @@ main {
     background: none;
     border: none;
     padding: 0;
-    /* Tight spacing between id and copy; :has(+ .session-info-copy) only matches
-       the immediate sibling, so other gaps still use .session-info gap. */
 }
-.session-info-id:has(+ .session-info-copy) {
-    margin-right: -0.3rem;
+/* The four icon buttons (copy / log / tasks / files) form one tight cluster:
+   negative side margins cancel most of the row-level 0.6rem gap so the icons
+   read as a group rather than four spread-out buttons. */
+.session-info-copy,
+.session-info-log,
+.session-info-tasks,
+.session-info-files {
+    margin-left: -0.25rem;
+    margin-right: -0.25rem;
 }
 .session-info-copy {
     display: inline-flex;

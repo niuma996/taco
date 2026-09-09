@@ -316,16 +316,6 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     active: action.active,
                     history: action.history,
                 });
-                // First-ever snapshot for this sid (typical: taskCreate's first push) →
-                // force-open TaskPanel regardless of prior manual close. App clears
-                // the flag via CONSUMED so old-snapshot re-pushes don't keep popping it.
-                const prev = workspacesRef.current[action.cwd];
-                if (prev && prev.taskSnapshotsBySessionId[action.sid] === undefined) {
-                    dispatchWs({
-                        type: "TASK_PANEL_FORCE_EXPAND",
-                        cwd: action.cwd,
-                    });
-                }
             } else if (action.type === "PLAN_STATE_UPDATED") {
                 dispatchWs({
                     type: "PLAN_STATE_UPDATED",

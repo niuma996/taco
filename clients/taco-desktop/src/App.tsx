@@ -48,7 +48,6 @@ import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
-import { consumeForceExpandFlag } from "./lib/chat/taskPanelForceExpand";
 import {
     readPersistedSidebarCollapsed,
     writePersistedSidebarCollapsed,
@@ -73,12 +72,7 @@ export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
     const filesDrawer = useFilesDrawer();
-    const {
-        open: taskPanelOpen,
-        show: showTaskPanel,
-        close: hideTaskPanel,
-        toggle: toggleTaskPanel,
-    } = useTaskPanel();
+    const { open: taskPanelOpen, close: hideTaskPanel, toggle: toggleTaskPanel } = useTaskPanel();
     useTheme();
     const { t } = useT();
     const { show: showToast } = useToast();
@@ -294,21 +288,6 @@ export default function App() {
         onImWorkspacesInvalidated: (_channelId) => {},
     });
 
-    // First-ever task snapshot for a sid (dispatched by useWorkspaces on
-    // tasks.updated) force-opens the panel; consume the flag so re-pushes of
-    // old snapshots don't keep reopening it.
-    const forceExpandTaskPanel = activeCwd
-        ? (workspaces[activeCwd]?.forceExpandTaskPanel ?? false)
-        : false;
-    useEffect(() => {
-        consumeForceExpandFlag({
-            forceExpandTaskPanel,
-            activeCwd,
-            showTaskPanel,
-            dispatchWs,
-        });
-    }, [forceExpandTaskPanel, activeCwd, dispatchWs, showTaskPanel]);
-
     // Chat input + modal orchestration lives in its own hook (eight sibling
     // useStates that don't interact with each other; bundling keeps App.tsx
     // from re-accreting a useState every time someone adds a chip or modal).
@@ -467,6 +446,21 @@ export default function App() {
         }
     }
 
+    // Shared by the topbar chip and the session-info-bar button. Lazy
+    // creation: the new session id is allocated by the server on the first
+    // real send, not here. Only confirm when there's unsent content to
+    // discard.
+    function handleNewSession(): void {
+        if (input.trim() !== "" || attachments.length > 0) {
+            setPendingNewSessionCwd(activeCwd);
+            setConfirmNewSession(true);
+            return;
+        }
+        beginPendingNewSession(activeCwd);
+        setInput("");
+        setAttachments([]);
+    }
+
     return (
         <div className="app-shell">
             {/* Custom window controls — only used when the OS draws none. On
@@ -494,19 +488,7 @@ export default function App() {
                         <button
                             type="button"
                             className="topbar-new-session"
-                            onClick={() => {
-                                // Lazy creation: the new session id is allocated by the
-                                // server on the first real send, not here. Only confirm
-                                // when there's unsent content to discard.
-                                if (input.trim() !== "" || attachments.length > 0) {
-                                    setPendingNewSessionCwd(activeCwd);
-                                    setConfirmNewSession(true);
-                                    return;
-                                }
-                                beginPendingNewSession(activeCwd);
-                                setInput("");
-                                setAttachments([]);
-                            }}
+                            onClick={handleNewSession}
                             disabled={!ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
                             title={t("session.newInWorkspace")}
                             aria-label={t("session.newInWorkspace")}
@@ -649,10 +631,23 @@ export default function App() {
                                         }}
                                         onCopySessionId={(sid) => void copySessionId(sid)}
                                         copiedSessionId={copiedSessionId}
-                                        onToggleFiles={() => filesDrawer.show()}
+                                        onToggleFiles={() => {
+                                            // Tasks ↔ Files are mutually exclusive: opening
+                                            // one closes the other so the right edge never
+                                            // holds two panels stacked.
+                                            if (!filesDrawer.open) hideTaskPanel();
+                                            filesDrawer.toggle();
+                                        }}
                                         filesOpen={filesDrawer.open}
-                                        onToggleTasks={toggleTaskPanel}
+                                        onToggleTasks={() => {
+                                            if (!taskPanelOpen) filesDrawer.close();
+                                            toggleTaskPanel();
+                                        }}
                                         tasksOpen={taskPanelOpen}
+                                        onNewSession={handleNewSession}
+                                        newSessionDisabled={
+                                            !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
+                                        }
                                         isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
                                         llmDumpDock={
                                             <LlmDumpDock
@@ -822,6 +817,14 @@ export default function App() {
                             contentError={skillContentError}
                         />
                     )}
+                    {/* Inline right-side panel (same layer as TaskPanel): mounted
+                        across all mainViews so tree/preview state survives view
+                        switches. Renders nothing while closed. */}
+                    <FilesDrawer
+                        open={filesDrawer.open}
+                        activeCwd={activeCwd}
+                        onClose={filesDrawer.close}
+                    />
                 </div>
             </div>
             <ConfirmModal
@@ -888,11 +891,6 @@ export default function App() {
                     void bindChannel(id, force, creds);
                 }}
                 onCancel={() => setBindingChannelId(null)}
-            />
-            <FilesDrawer
-                open={filesDrawer.open}
-                activeCwd={activeCwd}
-                onClose={filesDrawer.close}
             />
             {lifecycle.desktopConfig !== null && isOnboardingRequired(lifecycle.desktopConfig) && (
                 <OnboardingModal

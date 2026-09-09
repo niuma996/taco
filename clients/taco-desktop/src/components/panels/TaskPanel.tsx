@@ -1,10 +1,11 @@
 import type { TaskItem, WorkspaceId } from "@taco-ai/protocol";
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, X, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
 import { useT } from "../../i18n/useI18n";
 import type { WorkspaceAction, WorkspaceState } from "../../lib/chat/workspaceReducer";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { RightPanel } from "./RightPanel";
 
 /**
  * Renders the current session's task list.
@@ -45,23 +46,12 @@ export function TaskPanel({
     const hasTasks = active !== null || history.length > 0;
 
     return (
-        <div className="task-panel">
-            <div className="task-panel-topbar">
-                {active ? (
-                    <h3 className="task-panel-name">{active.name}</h3>
-                ) : (
-                    <h3 className="task-panel-name">任务</h3>
-                )}
-                <button
-                    type="button"
-                    className="task-panel-collapse"
-                    onClick={onClose}
-                    aria-label="关闭任务面板"
-                    title="关闭任务面板"
-                >
-                    <X size={14} aria-hidden="true" />
-                </button>
-            </div>
+        <RightPanel
+            title={active ? active.name : "任务"}
+            onClose={onClose}
+            closeLabel="关闭任务面板"
+            className="task-panel"
+        >
             {!hasTasks && <div className="task-panel-empty">{t("tasks.empty")}</div>}
             {active && (
                 <section className="task-panel-active" aria-label="当前任务">
@@ -93,7 +83,7 @@ export function TaskPanel({
                     </ul>
                 </section>
             )}
-        </div>
+        </RightPanel>
     );
 }
 

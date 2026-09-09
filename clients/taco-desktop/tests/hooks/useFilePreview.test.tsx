@@ -4,9 +4,9 @@ import { describe, it, vi } from "vitest";
 
 import { useFilePreview } from "../../src/hooks/useFilePreview";
 import type { FsClient } from "../../src/lib/clients/fsClient";
-import { TEXT_TRUNCATE_BYTES } from "../../src/lib/fileTypes";
+import { MAX_PREVIEW_BYTES } from "../../src/lib/fileTypes";
 
-function makeApi(opts: { text?: string; throws?: boolean } = {}): FsClient {
+function makeApi(opts: { text?: string; size?: number; throws?: boolean } = {}): FsClient {
     return {
         readDir: vi.fn(async () => {
             return [];
@@ -15,11 +15,12 @@ function makeApi(opts: { text?: string; throws?: boolean } = {}): FsClient {
             if (opts.throws) throw new Error("EACCES");
             return opts.text ?? "";
         }),
+        sizeOf: vi.fn(async () => opts.size ?? 10),
     };
 }
 
 describe("useFilePreview — binary short-circuit", () => {
-    it("does not call readText for binary extensions", async () => {
+    it("blocks binary extensions without reading", async () => {
         const api = makeApi();
         const { result } = renderHook(() => useFilePreview(api));
 
@@ -27,7 +28,37 @@ describe("useFilePreview — binary short-circuit", () => {
             await result.current.select("logo.png");
         });
 
-        assert.equal(result.current.binary, true);
+        assert.equal(result.current.block, "binary");
+        assert.equal(result.current.content, null);
+        assert.equal((api.readText as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+        assert.equal((api.sizeOf as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+    });
+});
+
+describe("useFilePreview — unsupported extension", () => {
+    it("blocks extensions outside the preview allowlist", async () => {
+        const api = makeApi();
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("data.parquet");
+        });
+
+        assert.equal(result.current.block, "unsupported");
+        assert.equal((api.readText as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+    });
+});
+
+describe("useFilePreview — too large", () => {
+    it("blocks files over MAX_PREVIEW_BYTES without reading content", async () => {
+        const api = makeApi({ size: MAX_PREVIEW_BYTES + 1 });
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("big.log");
+        });
+
+        assert.equal(result.current.block, "tooLarge");
         assert.equal(result.current.content, null);
         assert.equal((api.readText as ReturnType<typeof vi.fn>).mock.calls.length, 0);
     });
@@ -42,24 +73,20 @@ describe("useFilePreview — text content", () => {
             await result.current.select("README.md");
         });
 
-        assert.equal(result.current.binary, false);
+        assert.equal(result.current.block, null);
         assert.equal(result.current.content, "hello\nworld");
-        assert.equal(result.current.truncated, false);
     });
-});
 
-describe("useFilePreview — truncation", () => {
-    it("truncates content > TEXT_TRUNCATE_BYTES and sets truncated=true", async () => {
-        const huge = "x".repeat(TEXT_TRUNCATE_BYTES + 100);
-        const api = makeApi({ text: huge });
+    it("previews extension-less files as plain text", async () => {
+        const api = makeApi({ text: "MIT License" });
         const { result } = renderHook(() => useFilePreview(api));
 
         await act(async () => {
-            await result.current.select("big.log");
+            await result.current.select("LICENSE");
         });
 
-        assert.equal(result.current.truncated, true);
-        assert.ok((result.current.content ?? "").length <= TEXT_TRUNCATE_BYTES);
+        assert.equal(result.current.block, null);
+        assert.equal(result.current.content, "MIT License");
     });
 });
 
@@ -89,6 +116,7 @@ describe("useFilePreview — cancellation", () => {
             readDir: vi.fn(async () => {
                 return [];
             }),
+            sizeOf: vi.fn(async () => 10),
             readText: vi.fn(async (rel: string) => {
                 if (rel === "a.txt") {
                     // Always create a fresh resolver so we can resolve old and new calls independently.
@@ -112,13 +140,23 @@ describe("useFilePreview — cancellation", () => {
         };
         const { result } = renderHook(() => useFilePreview(api));
 
-        // ── Step A: A pending → replaced by B ──────────────────────────────
-        // Start A (nonce 1) — pending
+        // readText sits behind the sizeOf gate, so each select needs a
+        // macrotask flush before its resolver registers.
+        const flush = () =>
+            act(async () => {
+                await new Promise((r) => setTimeout(r, 0));
+            });
+
+        // ── Step A: A's readText pending → replaced by B ────────────────────
+        // Start A (nonce 1); flush so it passes the sizeOf gate and its
+        // readText is pending.
         const aPromise = result.current.select("a.txt");
+        await flush();
         // Start B (nonce 2) — sets content=null immediately
         const bPromise = result.current.select("b.txt");
+        await flush();
 
-        // Resolve A's pending promise (nonce 1 stale vs nonce 2 in flight)
+        // Resolve A's pending readText (nonce 1 stale vs nonce 2 in flight)
         resolveA[0]("A-stale");
         await act(async () => {
             await aPromise;
@@ -134,10 +172,11 @@ describe("useFilePreview — cancellation", () => {
         assert.equal(result.current.content, "B-content");
 
         // ── Step B: A again ─────────────────────────────────────────────────
-        // Start A again (nonce 3) — sets content=null immediately
+        // Start A again (nonce 3); flush so its readText is pending.
         const aPromise2 = result.current.select("a.txt");
-        // resolveA[0] (nonce 1) is still pending; resolveA[1] belongs to nonce 3
-        // Resolve stale nonce-1 resolver — nonce mismatch, ignored
+        await flush();
+        // resolveA[0] (nonce 1) is already settled; resolveA[1] belongs to nonce 3.
+        // Resolve the stale nonce-1 resolver again — its closure already ran, no-op.
         resolveA[0]("A-old-from-first-select");
         // resolveA[1] resolves the nonce-3 call
         resolveA[1]("A-fresh");
@@ -163,5 +202,6 @@ describe("useFilePreview.clear", () => {
         assert.equal(result.current.content, null);
         assert.equal(result.current.selectedRelPath, null);
         assert.equal(result.current.loading, false);
+        assert.equal(result.current.block, null);
     });
 });

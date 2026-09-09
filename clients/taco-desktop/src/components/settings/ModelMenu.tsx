@@ -24,8 +24,8 @@ interface ModelMenuProps {
     /** When provided, the popover also renders a thinking-level slider at the bottom (chat-input scenario). */
     thinkingValue?: ThinkingLevel;
     onThinkingChange?: (next: ThinkingLevel) => void;
-    /** Popover placement: up (default; chat input) or down (settings drawer — its top
-     * space is too tight for an upward expand, and the `.drawer` overflow would clip it). */
+    /** Popover placement: up (default; chat input) or down (settings pane — its top
+     * space is too tight for an upward expand, and the pane overflow would clip it). */
     placement?: "up" | "down";
 }
 

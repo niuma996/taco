@@ -3,7 +3,6 @@
     "settings": "Settings",
     "theme": "Theme",
     "language": "Language",
-    "session": "Session",
     "saving": "Saving…",
     "dismiss": "Dismiss",
     "errorBoundaryTitle": "Something went wrong",
@@ -34,6 +33,9 @@
     },
     "createdAtLabel": "created",
     "openLog": "Open log file",
+    "sidebarShow": "Show session list",
+    "sidebarHide": "Hide session list",
+    "sidebarLabel": "Sessions",
     "taskPanel": "Task panel"
   },
   "input": {
@@ -103,8 +105,6 @@
     "schedules": "Schedules",
     "mcp": "MCP",
     "settings": "Settings",
-    "expand": "Expand",
-    "collapse": "Collapse",
     "noAgents": "No agents available.",
     "selectAgentPrompt": "Select an agent to view its prompt.",
     "contentPathLabel": "Path",
@@ -516,9 +516,14 @@
     "title": "Files",
     "previewEmpty": "Select a file to preview",
     "binaryFile": "Binary file: {ext}",
+    "unsupported": "Preview not supported for this file type",
+    "tooLarge": "File too large to preview",
+    "revealInFolder": "Reveal in folder",
+    "revealWorkspace": "Open workspace in file manager",
+    "viewRendered": "Rendered",
+    "viewSource": "Source",
     "loadError": "Can't read directory",
     "showHidden": "Show hidden files",
-    "truncated": "... truncated at 2 MB",
     "previewError": "Failed to read file"
   },
   "memory": {

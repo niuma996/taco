@@ -73,7 +73,8 @@ export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
     "o",
 ]);
 
-export const TEXT_TRUNCATE_BYTES = 2 * 1024 * 1024;
+/** Files larger than this are not read for preview — the "too large" state shows instead. */
+export const MAX_PREVIEW_BYTES = 512 * 1024;
 
 /** Get the basename suffix; returns "" when there's no extension. */
 export function getExtension(name: string): string {
@@ -85,6 +86,90 @@ export function getExtension(name: string): string {
 /** Whether the file is binary. Extension blacklist wins; unknown extensions are treated as text. */
 export function isBinary(name: string): boolean {
     return BINARY_EXTENSIONS.has(getExtension(name));
+}
+
+/**
+ * Extension → shiki language id for syntax highlighting. This is the preview
+ * allowlist: extensions absent here (and not binary) are "unsupported" and
+ * the popup shows a hint + reveal-in-folder button instead of reading them.
+ * "text" = previewed without highlighting; "markdown" additionally gets a
+ * rendered/source toggle.
+ */
+export const PREVIEW_LANGUAGES: Readonly<Record<string, string>> = {
+    // plain text (no highlight)
+    txt: "text",
+    log: "text",
+    csv: "text",
+    // docs
+    md: "markdown",
+    markdown: "markdown",
+    // web
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    jsx: "jsx",
+    ts: "typescript",
+    mts: "typescript",
+    cts: "typescript",
+    tsx: "tsx",
+    json: "json",
+    jsonc: "jsonc",
+    html: "html",
+    htm: "html",
+    css: "css",
+    scss: "scss",
+    less: "less",
+    vue: "vue",
+    svelte: "svelte",
+    // systems / app languages
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    cs: "csharp",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    hpp: "cpp",
+    rb: "ruby",
+    php: "php",
+    swift: "swift",
+    lua: "lua",
+    // shell / config / data
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    ini: "ini",
+    xml: "xml",
+    sql: "sql",
+    graphql: "graphql",
+    dockerfile: "dockerfile",
+    diff: "diff",
+};
+
+export type PreviewKind = "markdown" | "code" | "text" | "binary" | "unsupported";
+
+/** Classify a file for the preview popup. Extension-less files preview as plain text. */
+export function previewKindFor(name: string): PreviewKind {
+    if (isBinary(name)) return "binary";
+    const ext = getExtension(name);
+    if (ext === "") return "text";
+    const lang = PREVIEW_LANGUAGES[ext];
+    if (lang === undefined) return "unsupported";
+    if (lang === "markdown") return "markdown";
+    if (lang === "text") return "text";
+    return "code";
+}
+
+/** shiki language id for highlighting; "text" when the kind has no grammar. */
+export function shikiLangFor(name: string): string {
+    return PREVIEW_LANGUAGES[getExtension(name)] ?? "text";
 }
 
 /** Filter: drop ALWAYS_HIDE_NAMES; showHidden controls dotfile visibility. */

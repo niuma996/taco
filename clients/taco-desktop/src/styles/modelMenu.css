@@ -39,7 +39,7 @@
     box-shadow: 0 6px 18px var(--shadow-color);
     z-index: 200;
 }
-/* settings drawer: trigger is near the top, flip to downward popup to avoid .drawer overflow clipping. */
+/* settings pane: trigger is near the top, flip to downward popup to avoid pane overflow clipping. */
 .model-menu--down .model-menu-popup {
     bottom: auto;
     top: calc(100% + 0.4rem);

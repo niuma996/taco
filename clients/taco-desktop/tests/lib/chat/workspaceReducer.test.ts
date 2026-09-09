@@ -34,7 +34,6 @@ function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
         taskSnapshotsBySessionId: {},
         planStatesBySessionId: {},
         historyDetailsBySessionId: {},
-        forceExpandTaskPanel: false,
         ...overrides,
     };
 }
@@ -1139,44 +1138,6 @@ describe("workspacesReducer — history detail (lazy-loaded on expand)", () => {
             { type: "HISTORY_DETAIL_LOADED", cwd: "/other", sid: "s1", listId: "L", tasks: [] },
         );
         assert.deepEqual(next, {});
-    });
-});
-
-describe("workspacesReducer — task panel force-expand on first snapshot", () => {
-    it("TASK_PANEL_FORCE_EXPAND 写入标记", () => {
-        const state: Record<string, WorkspaceState> = { "/ws": baseWs() };
-        const next = workspacesReducer(state, {
-            type: "TASK_PANEL_FORCE_EXPAND",
-            cwd: "/ws",
-        });
-        assert.equal(next["/ws"]?.forceExpandTaskPanel, true);
-    });
-
-    it("CONSUMED 清除该 cwd 标记,其他 cwd 不动", () => {
-        const state: Record<string, WorkspaceState> = {
-            "/a": baseWs({ cwd: "/a" }),
-            "/b": baseWs({ cwd: "/b" }),
-        };
-        // Both cwds pre-set to force-expand
-        let next = workspacesReducer(state, { type: "TASK_PANEL_FORCE_EXPAND", cwd: "/a" });
-        next = workspacesReducer(next, { type: "TASK_PANEL_FORCE_EXPAND", cwd: "/b" });
-        assert.equal(next["/a"]?.forceExpandTaskPanel, true);
-        assert.equal(next["/b"]?.forceExpandTaskPanel, true);
-
-        next = workspacesReducer(next, {
-            type: "TASK_PANEL_FORCE_EXPAND_CONSUMED",
-            cwd: "/a",
-        });
-        assert.equal(next["/a"]?.forceExpandTaskPanel, false);
-        // /b untouched
-        assert.equal(next["/b"]?.forceExpandTaskPanel, true);
-    });
-
-    it("unknown cwd 时两个 action 都是 no-op", () => {
-        const fe = workspacesReducer({}, { type: "TASK_PANEL_FORCE_EXPAND", cwd: "/x" });
-        assert.deepEqual(fe, {});
-        const c = workspacesReducer({}, { type: "TASK_PANEL_FORCE_EXPAND_CONSUMED", cwd: "/x" });
-        assert.deepEqual(c, {});
     });
 });
 

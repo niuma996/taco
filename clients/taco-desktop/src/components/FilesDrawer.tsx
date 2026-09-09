@@ -1,20 +1,29 @@
 /**
- * FilesDrawer — top-level Radix Dialog container that holds useFileTree +
- * useFilePreview. The tree + preview pane render via sub-components; this
- * file only orchestrates:
+ * FilesDrawer — inline right-side panel holding useFileTree. A flex sibling
+ * inside .layout (same layer as TaskPanel), not a modal overlay: the chat
+ * area stays interactive while the panel is open.
+ *
+ * File preview is a floating popup (Radix Dialog) rather than an inline
+ * pane: the tree panel keeps its 280px width, and the preview gets a wide
+ * centered window without squeezing the chat column.
+ *
+ * This file only orchestrates:
  *  - activeCwd change → refresh tree + clear preview
  *  - open change → loadRoot once
- *  - Radix Dialog's open/close protocol
  */
 import * as Dialog from "@radix-ui/react-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { FolderOpen, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import { useFilePreview } from "../hooks/useFilePreview";
 import { useFileTree } from "../hooks/useFileTree";
 import { useT } from "../i18n/useI18n";
-import { createFsClient, type FsClient } from "../lib/clients/fsClient";
+import { createFsClient, type FsClient, resolveFsPath } from "../lib/clients/fsClient";
+import { lastSegment } from "../lib/workspaceStorage";
 import { FilesPreviewPane } from "./FilesPreviewPane";
 import { FilesTreeView } from "./FilesTreeView";
+import { RightPanel } from "./panels/RightPanel";
 import { Switch } from "./ui/Switch.tsx";
 
 // Shared between the switch and its visible label so clicking the text
@@ -39,10 +48,10 @@ export function FilesDrawer(props: FilesDrawerProps) {
 
     const tree = useFileTree(
         // Dummy api while cwd is null; the hook only calls it from effects.
-        fsClient ?? { readDir: async () => [], readText: async () => "" },
+        fsClient ?? { readDir: async () => [], readText: async () => "", sizeOf: async () => 0 },
     );
     const preview = useFilePreview(
-        fsClient ?? { readDir: async () => [], readText: async () => "" },
+        fsClient ?? { readDir: async () => [], readText: async () => "", sizeOf: async () => 0 },
     );
 
     // Drawer open / workspace switch → refresh tree + clear preview.
@@ -56,64 +65,45 @@ export function FilesDrawer(props: FilesDrawerProps) {
         preview.clear();
     }, [open, activeCwd, fsClient]);
 
-    // When cwd is null, render a minimal Radix shell. The early return must
-    // come after all hooks.
-    if (!activeCwd) {
-        return (
-            <Dialog.Root
-                open={open}
-                onOpenChange={(next) => {
-                    if (!next) onClose();
-                }}
-            >
-                <Dialog.Portal>
-                    <Dialog.Overlay className="drawer-backdrop" />
-                    <Dialog.Content
-                        className={`drawer files-drawer${preview.selectedRelPath ? " files-drawer-with-preview" : ""}`}
-                        aria-label={t("files.title")}
-                    >
-                        <header className="drawer-header">
-                            <Dialog.Title className="drawer-title">{t("files.title")}</Dialog.Title>
-                            <button
-                                type="button"
-                                className="drawer-close"
-                                onClick={onClose}
-                                aria-label={t("app.dismiss")}
-                            >
-                                ×
-                            </button>
-                        </header>
-                        <div className="files-preview-empty">{t("files.previewEmpty")}</div>
-                    </Dialog.Content>
-                </Dialog.Portal>
-            </Dialog.Root>
-        );
-    }
+    // Early return after hooks: a closed panel renders nothing but keeps
+    // tree/preview state alive for the next open.
+    if (!open) return null;
 
     return (
-        <Dialog.Root
-            open={open}
-            onOpenChange={(next) => {
-                if (!next) onClose();
-            }}
-        >
-            <Dialog.Portal>
-                <Dialog.Overlay className="drawer-backdrop" />
-                <Dialog.Content
-                    className={`drawer files-drawer${preview.selectedRelPath ? " files-drawer-with-preview" : ""}`}
-                    aria-label={t("files.title")}
-                >
-                    <header className="drawer-header">
-                        <Dialog.Title className="drawer-title">{t("files.title")}</Dialog.Title>
+        <>
+            <RightPanel
+                title={t("files.title")}
+                onClose={onClose}
+                closeLabel={t("app.dismiss")}
+                className="files-drawer"
+                actions={
+                    activeCwd && (
                         <button
                             type="button"
-                            className="drawer-close"
-                            onClick={onClose}
-                            aria-label={t("app.dismiss")}
+                            className="right-panel-icon-btn"
+                            onClick={() => {
+                                // openPath on a directory opens it in the OS file
+                                // manager (Finder/Explorer), so the user lands
+                                // on the workspace's contents directly.
+                                void openPath(activeCwd).catch((err: unknown) => {
+                                    console.error("[taco] open workspace failed", err);
+                                });
+                            }}
+                            aria-label={t("files.revealWorkspace")}
+                            title={t("files.revealWorkspace")}
                         >
-                            ×
+                            <FolderOpen size={14} aria-hidden="true" />
                         </button>
-                    </header>
+                    )
+                }
+            >
+                {!activeCwd ? (
+                    // files-drawer-body gives the empty state a flex:1 base so its
+                    // height:100% centering resolves against a stable height.
+                    <div className="files-drawer-body">
+                        <div className="files-preview-empty">{t("files.previewEmpty")}</div>
+                    </div>
+                ) : (
                     <div className="files-drawer-body">
                         <div className="files-tree-pane">
                             {tree.error && (
@@ -138,19 +128,52 @@ export function FilesDrawer(props: FilesDrawerProps) {
                                 <label htmlFor={showHiddenId}>{t("files.showHidden")}</label>
                             </div>
                         </div>
-                        {preview.selectedRelPath !== null && (
+                    </div>
+                )}
+            </RightPanel>
+            {preview.selectedRelPath !== null && activeCwd !== null && (
+                <Dialog.Root
+                    open
+                    onOpenChange={(next) => {
+                        if (!next) preview.clear();
+                    }}
+                >
+                    <Dialog.Portal>
+                        <Dialog.Overlay className="files-preview-backdrop" />
+                        <Dialog.Content
+                            className="files-preview-popup"
+                            aria-label={preview.selectedRelPath}
+                        >
+                            <div className="right-panel-topbar">
+                                <Dialog.Title asChild>
+                                    <h3 className="right-panel-title">
+                                        {lastSegment(preview.selectedRelPath)}
+                                    </h3>
+                                </Dialog.Title>
+                                <button
+                                    type="button"
+                                    className="right-panel-close"
+                                    onClick={() => preview.clear()}
+                                    aria-label={t("app.dismiss")}
+                                    title={t("app.dismiss")}
+                                >
+                                    <X size={14} aria-hidden="true" />
+                                </button>
+                            </div>
+                            {/* Keyed by path: resets the markdown rendered/source toggle per file. */}
                             <FilesPreviewPane
+                                key={preview.selectedRelPath}
                                 selectedRelPath={preview.selectedRelPath}
                                 content={preview.content}
-                                binary={preview.binary}
-                                truncated={preview.truncated}
+                                block={preview.block}
                                 error={preview.error}
                                 loading={preview.loading}
+                                absPath={resolveFsPath(activeCwd, preview.selectedRelPath)}
                             />
-                        )}
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+                        </Dialog.Content>
+                    </Dialog.Portal>
+                </Dialog.Root>
+            )}
+        </>
     );
 }

@@ -1,12 +1,12 @@
 /**
- * SessionInfo — top-of-ChatPane session info bar: sidebar toggle on the left,
- * then id (short) / copy / log / file-tree / status / creation time.
+ * SessionInfo — top-of-ChatPane session info bar. Left to right: session-list
+ * toggle, new-chat button, divider, then id (short) / copy / log / status /
+ * creation time, with the task panel and file-tree toggles pinned right.
  *
- * "Open log" and "toggle file tree" live on this row on purpose. They used
- * to be in two different topbar locations, and the file-tree button
- * overlapped the custom window chrome on the frameless Windows build.
- * Grouping them keeps every session-level action one click away from the
- * active session without crowding the topbar.
+ * The toggle and new-chat button are the row's two primary actions and share
+ * an accent-chip style (.session-info-toggle / .session-info-new); copy, log,
+ * tasks and files are plain icon buttons clustered with negative margins.
+ * "Open log" sits next to the copy button as a session-level action.
  *
  * "Open folder…" (the workspace picker entry that switches the active
  * workspace to a directory the user chooses) deliberately stays inside the
@@ -18,12 +18,13 @@
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
     Check,
-    ChevronsLeft,
-    ChevronsRight,
+    ChevronLeft,
+    ChevronRight,
     Copy,
     FileText,
     FolderTree,
     ListTodo,
+    Plus,
 } from "lucide-react";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
@@ -38,6 +39,8 @@ export function SessionInfo({
     filesOpen,
     onToggleTasks,
     tasksOpen,
+    onNewSession,
+    newSessionDisabled,
     isIm,
 }: {
     ws: WorkspaceState | undefined;
@@ -51,6 +54,9 @@ export function SessionInfo({
     /** Show / hide the task panel. */
     onToggleTasks?: () => void;
     tasksOpen?: boolean;
+    /** Start a new session — same action as the topbar "new chat" chip. */
+    onNewSession?: () => void;
+    newSessionDisabled?: boolean;
     /** IM conversations have no filesystem; suppress the file-tree button only. */
     isIm?: boolean;
 }) {
@@ -71,20 +77,25 @@ export function SessionInfo({
     const hasAnyTasks = Boolean(
         taskSnapshot && (taskSnapshot.active || taskSnapshot.history.length),
     );
+    // Fixed label "会话列表" with a direction chevron on its left — a bare
+    // icon here was too easy to misread ("is this a pager?"), and a label
+    // that flips between 展开/收起 changed width on every toggle. Fixed text
+    // + stateful icon keeps the button stable and self-explanatory.
     const toggle = (
         <button
             type="button"
             className="session-info-toggle"
             onClick={onToggleSidebar}
-            title={sidebarCollapsed ? t("activity.expand") : t("activity.collapse")}
-            aria-label={sidebarCollapsed ? t("activity.expand") : t("activity.collapse")}
+            title={sidebarCollapsed ? t("session.sidebarShow") : t("session.sidebarHide")}
+            aria-label={sidebarCollapsed ? t("session.sidebarShow") : t("session.sidebarHide")}
             aria-expanded={!sidebarCollapsed}
         >
             {sidebarCollapsed ? (
-                <ChevronsRight size={14} aria-hidden="true" />
+                <ChevronRight size={14} aria-hidden="true" />
             ) : (
-                <ChevronsLeft size={14} aria-hidden="true" />
+                <ChevronLeft size={14} aria-hidden="true" />
             )}
+            <span>{t("session.sidebarLabel")}</span>
         </button>
     );
     if (!activeId) {
@@ -100,7 +111,22 @@ export function SessionInfo({
     return (
         <div className="session-info">
             {toggle}
-            <span className="session-info-label">{t("app.session")}</span>
+            {onNewSession && (
+                // Same action as the topbar "new chat" chip, duplicated here so
+                // it's reachable without moving the cursor to the topbar.
+                <button
+                    type="button"
+                    className="session-info-new"
+                    onClick={onNewSession}
+                    disabled={newSessionDisabled}
+                    title={t("session.newInWorkspace")}
+                    aria-label={t("session.newInWorkspace")}
+                >
+                    <Plus size={14} aria-hidden="true" />
+                    <span>{t("session.new")}</span>
+                </button>
+            )}
+            <span className="session-info-divider" aria-hidden="true" />
             {/* Short id saves horizontal space; hover shows full id; copy uses the full value. */}
             <code className="session-info-id" title={activeId}>
                 {activeId.slice(0, 8)}
@@ -117,15 +143,6 @@ export function SessionInfo({
                     <Copy size={13} aria-hidden="true" />
                 )}
             </button>
-            <span className={`session-info-status ${isRunning ? "running" : "idle"}`}>
-                {t(statusKey)}
-            </span>
-            {activeMeta?.createdAt && (
-                <span className="session-info-time">
-                    {t("session.createdAtLabel")} {new Date(activeMeta.createdAt).toLocaleString()}
-                </span>
-            )}
-            {filePath && <span className="session-info-divider" aria-hidden="true" />}
             {filePath && (
                 <button
                     type="button"
@@ -148,6 +165,15 @@ export function SessionInfo({
                     <FileText size={14} aria-hidden="true" />
                 </button>
             )}
+            <span className={`session-info-status ${isRunning ? "running" : "idle"}`}>
+                {t(statusKey)}
+            </span>
+            {activeMeta?.createdAt && (
+                <span className="session-info-time">
+                    {t("session.createdAtLabel")} {new Date(activeMeta.createdAt).toLocaleString()}
+                </span>
+            )}
+            {filePath && <span className="session-info-divider" aria-hidden="true" />}
             {onToggleTasks && (
                 <button
                     type="button"
@@ -167,9 +193,9 @@ export function SessionInfo({
                 </button>
             )}
             {onToggleFiles && !isIm && (
-                // File-tree drawer toggle. The topbar's FolderTree button moved
-                // here to clear the overlap with the frameless window controls.
-                // Suppressed for IM conversations (no filesystem to browse).
+                // File-tree drawer toggle. Suppressed for IM conversations
+                // (no filesystem to browse). aria-pressed mirrors tasks so the
+                // two right-side icons visually track their panel state.
                 <button
                     type="button"
                     className="session-info-files"

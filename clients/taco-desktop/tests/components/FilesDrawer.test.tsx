@@ -3,8 +3,9 @@ import { strict as assert } from "node:assert";
  * FilesDrawer integration test.
  *
  * Covers: open drawer → loads root entries; click directory → expands;
- * click file → preview pane shows content. Uses vitest. Mocks
- * @tauri-apps/plugin-fs and useT.
+ * click file → preview popup opens with highlighted content. Uses vitest.
+ * Mocks @tauri-apps/plugin-fs (+ stat size gate), @tauri-apps/plugin-opener,
+ * and shiki (echoes code unhighlighted so token spans don't split assertions).
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -34,6 +35,17 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
         if (abs.endsWith("index.ts")) return "console.log('x')";
         throw new Error("not found");
     }),
+    stat: vi.fn(async () => ({ size: 100 })),
+}));
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+    revealItemInDir: vi.fn(async () => {}),
+}));
+
+// shiki's codeToHtml echoes the source wrapped in a .shiki pre — the test then
+// asserts on visible text without depending on token-level span splits.
+vi.mock("shiki", () => ({
+    codeToHtml: vi.fn(async (code: string) => `<pre class="shiki"><code>${code}</code></pre>`),
 }));
 
 // Mock useT
@@ -61,11 +73,10 @@ describe("FilesDrawer integration", () => {
             assert.ok(screen.getByText("index.ts"));
         });
 
-        // 3. select README.md → preview pane shows content
-        await user.click(screen.getByText("README.md"));
+        // 3. select index.ts → preview popup opens with the file content
+        await user.click(screen.getByText("index.ts"));
         await waitFor(() => {
-            assert.ok(screen.getByText("Hello"));
-            assert.ok(screen.getByText("World"));
+            assert.ok(screen.getByText("console.log('x')"));
         });
     });
 });

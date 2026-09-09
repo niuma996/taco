@@ -74,6 +74,10 @@ export interface ChatPaneProps {
      *  session-info bar. */
     onToggleTasks?: () => void;
     tasksOpen?: boolean;
+    /** Start a new session — same action as the topbar "new chat" chip. */
+    onNewSession?: () => void;
+    /** Disable the new-session button (no workspace / IM conversation). */
+    newSessionDisabled?: boolean;
     /** When true, suppress the file-tree button (no filesystem to browse). */
     isIm?: boolean;
     /** Opaque floating overlay anchored above the input footer (currently the
@@ -110,6 +114,8 @@ export function ChatPane(props: ChatPaneProps) {
         filesOpen,
         onToggleTasks,
         tasksOpen,
+        onNewSession,
+        newSessionDisabled,
         isIm,
         llmDumpDock,
     } = props;
@@ -211,6 +217,8 @@ export function ChatPane(props: ChatPaneProps) {
                 filesOpen={filesOpen}
                 onToggleTasks={onToggleTasks}
                 tasksOpen={tasksOpen}
+                onNewSession={onNewSession}
+                newSessionDisabled={newSessionDisabled}
                 isIm={isIm}
             />
             <main ref={mainRef}>

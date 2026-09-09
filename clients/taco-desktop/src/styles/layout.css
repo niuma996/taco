@@ -480,9 +480,41 @@ button.topbar-context-indicator {
     line-height: 1.4;
 }
 
-/* Close button: X on a persistent circular background, right side of the
-   panel header. */
-.task-panel-collapse {
+/* ── Active list area ── */
+.task-panel-active {
+    margin-bottom: 16px;
+}
+
+/* Placeholder shown while the panel is open but the session has no tasks. */
+.task-panel-empty {
+    color: var(--fg-dim);
+    padding: 8px 0;
+}
+
+/* RightPanel top bar: title + close button. Shared by TaskPanel and FilesDrawer. */
+.right-panel-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.right-panel-title {
+    font-weight: 600;
+    margin: 0;
+    color: var(--fg-primary, inherit);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+/* Header icon buttons (close, custom actions). Same circular background
+   treatment so every header button looks consistent. */
+.right-panel-close,
+.right-panel-icon-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -497,40 +529,10 @@ button.topbar-context-indicator {
     cursor: pointer;
 }
 
-.task-panel-collapse:hover {
+.right-panel-close:hover,
+.right-panel-icon-btn:hover {
     background: var(--border-subtle);
     color: var(--fg-primary);
-}
-
-/* ── Active list area ── */
-.task-panel-active {
-    margin-bottom: 16px;
-}
-
-/* Placeholder shown while the panel is open but the session has no tasks. */
-.task-panel-empty {
-    color: var(--fg-dim);
-    padding: 8px 0;
-}
-
-/* Top bar: title + collapse button. Shows generic "Tasks" if no active list. */
-.task-panel-topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    margin-bottom: 8px;
-}
-
-.task-panel-name {
-    font-weight: 600;
-    margin: 0;
-    color: var(--fg-primary, inherit);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-    min-width: 0;
 }
 
 .task-list {

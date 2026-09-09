@@ -3,7 +3,6 @@
     "settings": "设置",
     "theme": "主题",
     "language": "语言",
-    "session": "会话",
     "saving": "保存中…",
     "dismiss": "关闭",
     "errorBoundaryTitle": "出错了",
@@ -34,6 +33,9 @@
     },
     "createdAtLabel": "创建于",
     "openLog": "打开日志文件",
+    "sidebarShow": "展开会话列表",
+    "sidebarHide": "收起会话列表",
+    "sidebarLabel": "会话列表",
     "taskPanel": "任务面板"
   },
   "input": {
@@ -103,8 +105,6 @@
     "schedules": "定时任务",
     "mcp": "MCP",
     "settings": "设置",
-    "expand": "展开",
-    "collapse": "折叠",
     "noAgents": "暂无代理。",
     "selectAgentPrompt": "选择一个代理以查看其提示词。",
     "contentPathLabel": "路径",
@@ -515,9 +515,14 @@
     "title": "文件",
     "previewEmpty": "选择文件以预览",
     "binaryFile": "二进制文件: {ext}",
+    "unsupported": "暂不支持预览该类型文件",
+    "tooLarge": "文件过大，暂不支持预览",
+    "revealInFolder": "在文件夹中显示",
+    "revealWorkspace": "打开工作目录",
+    "viewRendered": "渲染",
+    "viewSource": "源码",
     "loadError": "无法读取目录",
     "showHidden": "显示隐藏文件",
-    "truncated": "... 已在 2 MB 处截断",
     "previewError": "读取文件失败"
   },
   "memory": {

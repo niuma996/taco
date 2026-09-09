@@ -92,12 +92,6 @@ export interface WorkspaceState {
         Record<string, { tasks: TaskItem[]; loadedAt: number }>
     >;
     /**
-     * TaskPanel should be force-opened (dispatched when the first task snapshot
-     * for a sid lands). Cleared by CONSUMED after App reads it, so an
-     * old-snapshot re-push doesn't keep popping the panel open. Not persisted.
-     */
-    forceExpandTaskPanel: boolean;
-    /**
      * parentToolCallId → true tracks agent tool calls awaiting subagent results.
      * Written by SUBAGENT_SPAWNED; cleared by the corresponding tool_end (agent).
      * Used by UI to block sending: pending is false but a subagent running should still block.
@@ -155,7 +149,6 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         taskSnapshotsBySessionId: {},
         planStatesBySessionId: {},
         historyDetailsBySessionId: {},
-        forceExpandTaskPanel: false,
         listCursor: undefined,
         listTotal: undefined,
     };
@@ -277,16 +270,6 @@ export type WorkspaceAction =
           sid: string;
           listId: string;
           tasks: TaskItem[];
-      }
-    | {
-          /** Dispatched by useSidecarStream on first task snapshot for a sid; App force-opens the panel on it. */
-          type: "TASK_PANEL_FORCE_EXPAND";
-          cwd: string;
-      }
-    | {
-          /** App clears the force-expand flag after consuming it once to avoid retriggering. */
-          type: "TASK_PANEL_FORCE_EXPAND_CONSUMED";
-          cwd: string;
       }
     | {
           /**
@@ -659,12 +642,6 @@ export function workspacesReducer(
                     },
                 },
             }));
-        case "TASK_PANEL_FORCE_EXPAND":
-            return updateWs(state, action.cwd, () => ({ forceExpandTaskPanel: true }));
-        case "TASK_PANEL_FORCE_EXPAND_CONSUMED":
-            return updateWs(state, action.cwd, (existing) =>
-                existing.forceExpandTaskPanel ? { forceExpandTaskPanel: false } : undefined,
-            );
         case "BEGIN_PENDING_NEW_SESSION":
             // Same reset shape as ATTACH's switch branch (subagent state, child streams,
             // askUser/agent-tool pendings): the new session must not inherit anything

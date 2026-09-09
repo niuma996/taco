@@ -6,8 +6,11 @@ import {
     BINARY_EXTENSIONS,
     filterEntries,
     isBinary,
+    MAX_PREVIEW_BYTES,
+    PREVIEW_LANGUAGES,
+    previewKindFor,
+    shikiLangFor,
     sortEntries,
-    TEXT_TRUNCATE_BYTES,
 } from "../../src/lib/fileTypes";
 
 describe("ALWAYS_HIDE_NAMES", () => {
@@ -26,9 +29,52 @@ describe("BINARY_EXTENSIONS", () => {
     });
 });
 
-describe("TEXT_TRUNCATE_BYTES", () => {
-    it("is 2 MiB", () => {
-        assert.equal(TEXT_TRUNCATE_BYTES, 2 * 1024 * 1024);
+describe("MAX_PREVIEW_BYTES", () => {
+    it("is 512 KiB", () => {
+        assert.equal(MAX_PREVIEW_BYTES, 512 * 1024);
+    });
+});
+
+describe("previewKindFor", () => {
+    it("classifies binary extensions", () => {
+        assert.equal(previewKindFor("logo.png"), "binary");
+        assert.equal(previewKindFor("archive.ZIP"), "binary");
+    });
+    it("classifies markdown", () => {
+        assert.equal(previewKindFor("README.md"), "markdown");
+        assert.equal(previewKindFor("notes.markdown"), "markdown");
+    });
+    it("classifies code files", () => {
+        assert.equal(previewKindFor("index.ts"), "code");
+        assert.equal(previewKindFor("main.py"), "code");
+        assert.equal(previewKindFor("config.yaml"), "code");
+    });
+    it("classifies plain-text and extension-less files as text", () => {
+        assert.equal(previewKindFor("a.txt"), "text");
+        assert.equal(previewKindFor("server.log"), "text");
+        assert.equal(previewKindFor("Makefile"), "text");
+        assert.equal(previewKindFor("LICENSE"), "text");
+    });
+    it("classifies extensions outside the allowlist as unsupported", () => {
+        assert.equal(previewKindFor("data.parquet"), "unsupported");
+        assert.equal(previewKindFor("book.epub"), "unsupported");
+    });
+});
+
+describe("shikiLangFor", () => {
+    it("maps extensions to shiki language ids", () => {
+        assert.equal(shikiLangFor("index.ts"), "typescript");
+        assert.equal(shikiLangFor("main.py"), "python");
+        assert.equal(shikiLangFor("README.md"), "markdown");
+    });
+    it("falls back to text for unknown or missing extensions", () => {
+        assert.equal(shikiLangFor("data.parquet"), "text");
+        assert.equal(shikiLangFor("Makefile"), "text");
+    });
+    it("every allowlist value is a non-empty string", () => {
+        for (const [ext, lang] of Object.entries(PREVIEW_LANGUAGES)) {
+            assert.ok(lang.length > 0, `empty lang for .${ext}`);
+        }
     });
 });
 

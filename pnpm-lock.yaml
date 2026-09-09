@@ -123,6 +123,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      shiki:
+        specifier: ^4.4.1
+        version: 4.4.1
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2.0.0
