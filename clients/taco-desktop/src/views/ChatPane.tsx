@@ -16,6 +16,7 @@ import { ArrowUp, Paperclip, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef } from "react";
 import { ContextIndicator } from "../components/ContextIndicator";
+import { EmptyChatState } from "../components/EmptyChatState";
 import { Message } from "../components/Message";
 import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
@@ -127,6 +128,9 @@ export function ChatPane(props: ChatPaneProps) {
     const { t } = useT();
 
     const canSend = input.trim().length > 0 || attachments.length > 0;
+    // Fresh chat (no messages yet) — covers both a brand-new session and one
+    // that was just created via "New chat" but never prompted.
+    const isEmptyChat = (ws?.messages ?? []).length === 0;
 
     // chat scroll auto-follow.
     //
@@ -222,9 +226,13 @@ export function ChatPane(props: ChatPaneProps) {
                 isIm={isIm}
             />
             <main ref={mainRef}>
-                {(ws?.messages ?? []).map((m) => (
-                    <Message key={m.id} m={m} onCommandPermission={onCommandPermission} />
-                ))}
+                {isEmptyChat ? (
+                    <EmptyChatState />
+                ) : (
+                    (ws?.messages ?? []).map((m) => (
+                        <Message key={m.id} m={m} onCommandPermission={onCommandPermission} />
+                    ))
+                )}
             </main>
             {/* Auto-compaction in progress: lock the input UI and surface the top status
                 bar. This is a belt-and-suspenders guard — the server's
@@ -341,13 +349,15 @@ export function ChatPane(props: ChatPaneProps) {
                             />
                         )}
                         <div className="input-right">
-                            <ContextIndicator
-                                info={contextIndicator.info}
-                                loading={contextIndicator.loading}
-                                compacting={contextIndicator.compacting}
-                                threshold={contextIndicator.threshold}
-                                className="input-context-indicator"
-                            />
+                            {!isEmptyChat && (
+                                <ContextIndicator
+                                    info={contextIndicator.info}
+                                    loading={contextIndicator.loading}
+                                    compacting={contextIndicator.compacting}
+                                    threshold={contextIndicator.threshold}
+                                    className="input-context-indicator"
+                                />
+                            )}
                             {pending ? (
                                 <button
                                     type="button"

@@ -33,10 +33,11 @@
     },
     "createdAtLabel": "创建于",
     "openLog": "打开日志文件",
-    "sidebarShow": "展开会话列表",
-    "sidebarHide": "收起会话列表",
-    "sidebarLabel": "会话列表",
-    "taskPanel": "任务面板"
+    "sidebarShow": "展开聊天列表",
+    "sidebarHide": "收起聊天列表",
+    "sidebarLabel": "聊天列表",
+    "taskPanel": "任务面板",
+    "noActiveSession": "暂无活动会话。新建一个,或从左侧选择一个。"
   },
   "input": {
     "placeholderRunning": "代理运行中…",

@@ -33,10 +33,11 @@
     },
     "createdAtLabel": "created",
     "openLog": "Open log file",
-    "sidebarShow": "Show session list",
-    "sidebarHide": "Hide session list",
-    "sidebarLabel": "Sessions",
-    "taskPanel": "Task panel"
+    "sidebarShow": "Show chat list",
+    "sidebarHide": "Hide chat list",
+    "sidebarLabel": "Chats",
+    "taskPanel": "Task panel",
+    "noActiveSession": "No active session. Create one or pick one from the left."
   },
   "input": {
     "placeholderRunning": "Agent is running…",

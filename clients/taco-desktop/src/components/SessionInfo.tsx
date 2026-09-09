@@ -77,7 +77,7 @@ export function SessionInfo({
     const hasAnyTasks = Boolean(
         taskSnapshot && (taskSnapshot.active || taskSnapshot.history.length),
     );
-    // Fixed label "会话列表" with a direction chevron on its left — a bare
+    // Fixed label "聊天列表" with a direction chevron on its left — a bare
     // icon here was too easy to misread ("is this a pager?"), and a label
     // that flips between 展开/收起 changed width on every toggle. Fixed text
     // + stateful icon keeps the button stable and self-explanatory.
@@ -102,7 +102,7 @@ export function SessionInfo({
         return (
             <div className="session-info empty">
                 {toggle}
-                No active session. Create one or pick one from the left.
+                {t("session.noActiveSession")}
             </div>
         );
     }

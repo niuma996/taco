@@ -46,6 +46,9 @@ aside.sidebar .session-item {
     border-radius: var(--radius-md);
     cursor: pointer;
     margin: 1px 4px 0.3rem;
+    /* Matches the left icon rail's shadow block height (56px). Applied to all
+       rows (not just .active) so row height doesn't change on selection. */
+    min-height: 56px;
     /* Subtle surface tint over the list bg — more transparent than pure --chat-bg.
        Text uses dim to distinguish from active state. */
     background: var(--surface-tint);
@@ -63,8 +66,6 @@ aside.sidebar .session-item:hover {
 aside.sidebar .session-item.active {
     background: var(--accent-bg-active);
     color: var(--fg);
-    /* Matches the left icon rail's shadow block height (56px). */
-    min-height: 56px;
 }
 
 /* Title row: status dot + title side by side. align-items:center vertically
