@@ -37,7 +37,12 @@
     "sidebarHide": "收起聊天列表",
     "sidebarLabel": "聊天列表",
     "taskPanel": "任务面板",
-    "noActiveSession": "暂无活动会话。新建一个,或从左侧选择一个。"
+    "noActiveSession": "暂无活动会话。新建一个,或从左侧选择一个。",
+    "slogans": [
+      "让想法快速变成可运行的代码。",
+      "随时向你的代码库提问。",
+      "更快交付，更聪明地排错。"
+    ]
   },
   "input": {
     "placeholderRunning": "代理运行中…",

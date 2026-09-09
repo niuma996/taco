@@ -297,6 +297,46 @@ header.topbar .topbar-picker-group {
     overflow: hidden;
 }
 
+/* ── Both side panels collapsed: 10% reading gutter ──────────────────────
+   Only the message bubbles and the input card get inset. Deliberately NOT
+   applied to .main-col or .session-info: the session bar keeps its full
+   width, and the padding lands *inside* the scroll container so
+   `main`'s background still paints edge-to-edge and its scrollbar stays
+   flush against the window's right edge (padding is inside the border
+   box, the scrollbar sits on it).
+
+   The base `main` rule uses right-padding 0 + `.message { margin-right }`
+   for its gutter; here the padding is symmetric, so that margin and the
+   empty-state's mirror padding are both zeroed to keep the content
+   optically centered. */
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] main {
+    padding-left: 10%;
+    padding-right: 10%;
+}
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] main > .message {
+    margin-right: 0;
+}
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] .empty-chat-state {
+    padding-right: 0;
+}
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] footer.input {
+    padding-inline: 10%;
+}
+
+/* The LLM dump fab / panel are absolutely positioned inside footer.input,
+   so their `right` resolves against the footer's *padding box* — the
+   footer's own padding-inline above does not move them, and they would
+   stay pinned to the window edge while the input card sits 10% inward.
+   Re-anchor them to the card's right edge. The panel's max width also
+   shrinks to the card's width so it can't spill into the left gutter. */
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] .llm-dump-fab,
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] .llm-dump-panel {
+    right: calc(10% + 1rem);
+}
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] .llm-dump-panel {
+    width: min(640px, calc(80% - 1rem));
+}
+
 /* ContextIndicator — topbar context usage bar. Single-row component: bar + percentage + optional loading marker.
    Color tiers via inline modifier class (.topbar-context-indicator--neutral | --warn | --danger | --overflow).
    Height constrained by topbar height = var(--rail-top-padding); must stay single-line. */
@@ -469,9 +509,10 @@ button.topbar-context-indicator {
 }
 
 /* TaskPanel — task list panel on the right side of the main area.
-   Width aligned with files-drawer (280px), right edge; has a placeholder for empty state. */
+   Width aligns with the chat list (--pane-width) so left and right panels
+   are visually balanced; the same clamp(220,20vw,340) tracks window width. */
 .task-panel {
-    width: 280px;
+    width: var(--pane-width);
     flex-shrink: 0;
     padding: 12px;
     overflow-y: auto;

@@ -505,7 +505,11 @@ export default function App() {
                         </div>
                     )}
                 </header>
-                <div className="layout">
+                <div
+                    className="layout"
+                    data-sidebar-collapsed={String(sidebarCollapsed)}
+                    data-right-open={String(filesDrawer.open || taskPanelOpen)}
+                >
                     {mainView === "chat" ? (
                         <>
                             {!sidebarCollapsed && (

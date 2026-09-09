@@ -37,7 +37,12 @@
     "sidebarHide": "Hide chat list",
     "sidebarLabel": "Chats",
     "taskPanel": "Task panel",
-    "noActiveSession": "No active session. Create one or pick one from the left."
+    "noActiveSession": "No active session. Create one or pick one from the left.",
+    "slogans": [
+      "Turning your ideas into working code.",
+      "Ask anything about your codebase.",
+      "Ship faster, debug smarter."
+    ]
   },
   "input": {
     "placeholderRunning": "Agent is running…",

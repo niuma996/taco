@@ -19,7 +19,6 @@ import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtil
 import {
     createEmptyWorkspace,
     type SessionMeta,
-    sortSessionsByUpdatedDesc,
     type WorkspaceAction,
     type WorkspaceState,
 } from "../lib/chat/workspaceReducer";
@@ -282,11 +281,13 @@ export function useWorkspaceLifecycle({
                     console.error("[taco] sessionList failed on switch", cwd, e);
                 }
             }
-            if (ws && ws.messages.length === 0 && !ws.activeSession && ws.sessions[0]) {
-                await attachSession(cwd, ws.sessions[0].id);
-            }
+            // Intentionally do NOT auto-attach sessions[0] here. Switching
+            // workspaces must land the user on the new-chat splash; opening
+            // an existing session is the sidebar's job (Sidebar onAttach →
+            // attachSession). Picking a session implicitly here would
+            // resurrect stale history on every workspace switch.
         },
-        [attachSession, dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions],
+        [dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions],
     );
 
     const initFromStorage = useCallback(async () => {
@@ -336,16 +337,11 @@ export function useWorkspaceLifecycle({
             placeholder[cwd] = createEmptyWorkspace(cwd, cwd === activeTarget);
         }
         dispatchWs({ type: "INIT", workspaces: placeholder });
-        // Pull each workspace's session list directly (bypassing loadWorkspaceSessions's dispatch)
-        // so Promise.all gives us the real sessions[0] for default attach.
-        // workspacesRef depends on a useEffect sync, so reading after await may still see stale.
-        //
         // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is now read
         // from ~/.taco/desktop.json by the Rust host at spawn time, so
         // client.start no longer takes options. Local pre-spawn LS reads are
         // still useful for the other client fields (theme, uiLanguage) that
         // drive synchronous UI before the sidecar answers.
-        const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
         // Cold-start barrier: a single `client.start(activeCwd)` first to give prewarm's spawn
         // a beat to finish before any sessionList fires. Without it the per-cwd `Promise.all`
         // races prewarm — prewarm's reap+respawn of a stale daemon takes seconds (Alive → dies
@@ -393,10 +389,6 @@ export function useWorkspaceLifecycle({
                 });
             }, 5000);
         }
-        // Pull the active workspace's session list directly so Promise.all gives us the real
-        // sessions[0] for default attach; workspacesRef depends on a useEffect sync, so reading
-        // after await may still see stale.
-        //
         // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is read from
         // ~/.taco/desktop.json by the Rust host, so client.start no longer takes options.
         //
@@ -428,7 +420,6 @@ export function useWorkspaceLifecycle({
                         client.sessionList(cwd),
                     );
                     dispatchListResult(cwd, list, false);
-                    firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
                     lastErr = undefined;
                     break;
                 } catch (err) {
@@ -462,26 +453,22 @@ export function useWorkspaceLifecycle({
         } catch (e) {
             console.error("[taco] loadGlobalConfig failed", e);
         }
-        const firstSession = firstSessionByCwd[activeTarget];
-        if (firstSession) {
-            await bootPhase("ui.attachFirstSession", () =>
-                attachSession(activeTarget, firstSession.id),
-            );
-        }
+        // Intentionally do NOT auto-attach the first session on cold start.
+        // First-use / restart lands the user on the new-chat splash; opening
+        // a prior session is the sidebar's job. Auto-attaching here would
+        // surface stale history on every restart.
         bootMark("ui.initFromStorage.done");
-    }, [client, attachSession, dispatchListResult, dispatchWs, setActiveCwd]);
+    }, [client, dispatchListResult, dispatchWs, setActiveCwd]);
 
     /** Called after sidecar restart — the sidecar process is replaced, so all attached session
-     * IDs become invalid in the new process. Refetch every workspace's session list + attach the
-     * first, syncing client state with the new sidecar. */
+     * IDs become invalid in the new process. Refetch every workspace's session list so the
+     * sidebar renders against the new daemon. Sessions stay unopened: the user lands on the
+     * new-chat splash, just like a cold start. */
     const reloadAllWorkspaces = useCallback(async (): Promise<void> => {
         const openedCwds = Object.keys(workspacesRef.current);
         // Active cwd lives in desktop.json now (it survives the sidecar restart
         // that triggered this reload — localStorage would also have survived, but
         // we go through the new path to keep both sources in sync).
-        const storedActive = await loadActiveCwd();
-        const activeTarget = resolveActiveCwd(storedActive, openedCwds);
-        const firstSessionByCwd: Record<string, SessionMeta | undefined> = {};
         await Promise.all(
             openedCwds.map(async (cwd) => {
                 // Two attempts, because this reload is itself the recovery path:
@@ -493,7 +480,6 @@ export function useWorkspaceLifecycle({
                     try {
                         const list = await client.sessionList(cwd);
                         dispatchListResult(cwd, list, false);
-                        firstSessionByCwd[cwd] = sortSessionsByUpdatedDesc(list.sessions ?? [])[0];
                         return;
                     } catch (err) {
                         console.error("[taco] sessionList failed (restart)", cwd, err);
@@ -501,11 +487,7 @@ export function useWorkspaceLifecycle({
                 }
             }),
         );
-        const firstSession = firstSessionByCwd[activeTarget];
-        if (firstSession) {
-            await attachSession(activeTarget, firstSession.id);
-        }
-    }, [client, attachSession, dispatchListResult, workspacesRef]);
+    }, [client, dispatchListResult, workspacesRef]);
 
     useEffect(() => {
         reloadAllWorkspacesRef.current = reloadAllWorkspaces;
