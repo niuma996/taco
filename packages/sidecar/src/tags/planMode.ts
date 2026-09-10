@@ -14,7 +14,7 @@ const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any 
 - Reading files
 - Calling the explorer subagent to explore the codebase
 - Writing the plan document at .taco/plans/<slug>.md
-- Calling AskUser when requirements are ambiguous
+- Calling askUser when requirements are ambiguous
 
 ## Planning Process
 

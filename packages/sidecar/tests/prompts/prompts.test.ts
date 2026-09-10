@@ -118,8 +118,11 @@ describe("buildSystemPrompt", () => {
         assert.match(out, /<session_role>/);
         assert.match(out, /You are running as a main session\./);
         assert.ok(!out.includes("Depth:"), "main session must not show a depth line");
-        assert.match(out, /- main: you are the user's primary assistant/);
-        assert.match(out, /- subagent: you are a delegated sub-agent/);
+        assert.match(out, /You are the user's primary assistant/);
+        assert.ok(
+            !out.includes("You are a delegated sub-agent"),
+            "main prompt must not carry the subagent role body",
+        );
     });
 
     it("renders subagent role with depth", () => {
@@ -131,6 +134,45 @@ describe("buildSystemPrompt", () => {
         assert.match(out, /do not recursively spawn further sub-agents/);
         assert.match(out, /If your task requires a tool that is not available in this session/);
         assert.match(out, /instruct the parent agent to complete that step/);
+        assert.ok(
+            !out.includes("user's primary assistant"),
+            "subagent prompt must not carry the main role body",
+        );
+    });
+
+    it("renders delegation guidance for main sessions only, with no leaked template markers", () => {
+        const main = buildSystemPrompt({ tools: [stubTool("read"), stubTool("agent")] });
+        assert.match(main, /decompose and delegate to sub-agents with the agent tool/);
+
+        const sub = buildSystemPrompt({
+            tools: [stubTool("read")],
+            sessionKind: { role: "subagent", depth: 1 },
+        });
+        assert.ok(
+            !sub.includes("delegate to sub-agents with the agent tool"),
+            "subagent must not be told to delegate — its role body forbids recursion",
+        );
+
+        // Regression: the delegation block shipped with literal `{subagent_delegation}`
+        // guards because only `{{double-brace}}` placeholders are interpolated.
+        for (const out of [main, sub]) {
+            assert.ok(
+                !out.includes("{subagent_delegation}"),
+                "literal guard must not reach the model",
+            );
+            assert.ok(
+                !out.includes("{/subagent_delegation}"),
+                "literal guard must not reach the model",
+            );
+            assert.ok(!out.includes("{{"), "no unfilled placeholder may remain");
+        }
+    });
+
+    it("frames a permission denial as a stop-and-ask, not a retry cue", () => {
+        const out = buildSystemPrompt({ tools: [stubTool("read")] });
+        assert.match(out, /A permission denial is a decision, not a mechanical failure/);
+        assert.match(out, /Do not route around it/);
+        assert.match(out, /Stop and call `askUser`/);
     });
 
     it("renders the platform section including the shell block when shell is available", () => {
@@ -182,9 +224,13 @@ describe("buildSystemPrompt", () => {
         assert.match(out, /<model_identity>anthropic\/claude-opus-4<\/model_identity>/);
     });
 
-    it("falls back to 'unknown' when no model identity is supplied", () => {
+    it("omits the model_identity section when no identity is supplied", () => {
         const out = buildSystemPrompt({ tools: [stubTool("read")] });
-        assert.match(out, /<model_identity>unknown<\/model_identity>/);
+        assert.ok(!out.includes("<model_identity>"), "unknown identity must drop the section");
+        assert.ok(
+            !out.includes("unknown</model_identity>"),
+            "must not render a placeholder identity",
+        );
     });
 
     it("includes the citation discipline section ahead of tone/workflow", () => {

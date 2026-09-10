@@ -110,12 +110,12 @@ export function createAskUserTool(): AskUserTool {
         name: "askUser",
         label: "askUser",
         description:
-            "Present one or more questions to the user and block until they answer. Use this when proceeding would require guessing on a decision the user likely has a preference on — in particular: (1) multiple valid approaches exist that aren't equivalent (architecture, library, a naming scheme the user must live with); (2) the action is destructive or hard to reverse; (3) the request is genuinely ambiguous about intent or scope. Skip it for choices with an obvious default or that you can verify from the code — pick a reasonable option, note it, and continue. You may ask several questions in one call, but each must target a distinct topic — never split one topic across multiple questions.",
+            "Present one or more questions to the user and block until they answer. Use this when proceeding would require guessing on a decision the user likely has a preference on — in particular: (1) multiple valid approaches exist that aren't equivalent (architecture, library, a naming scheme the user must live with); (2) the action is destructive or hard to reverse; (3) the request is genuinely ambiguous about intent or scope. Skip it only when the answer is already determined by the code or docs, or the user has already stated a preference — not merely because you could invent a plausible default. If you are unsure whether a decision needs the user, ask. You may ask several questions in one call, but each must target a distinct topic — never split one topic across multiple questions.",
         parameters: askUserSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Block the current turn to ask the user a structured question (multi-choice or free-form). Use only when the answer genuinely requires the user — model-inferable facts should not be asked.",
+                "Block the current turn to ask the user a structured question (multi-choice or free-form). Route genuine decisions the user should own here rather than posing them in your reply text — a fact you can infer from the code is not a question.",
             mutates: false,
         },
         async execute(

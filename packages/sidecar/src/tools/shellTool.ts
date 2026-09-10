@@ -41,14 +41,14 @@ type ShellToolResult = {
 };
 
 /**
- * Map a `CommandPermissionDecision.denialReason` to a `details.reason` value.
- * Keeping a `permission_` prefix avoids collision with other tools' reason
- * fields that may be merged into the same `details` payload downstream.
+ * Build the denial result for a `CommandPermissionDecision`.
  *
- *   "user_denied" → "permission_denied"
- *   "timeout"     → "permission_timeout"
- *   "aborted"     → "permission_aborted"
- *   undefined     → "permission_denied" (denied by policy, never asked)
+ * The text widens "do not retry this command" to "do not attempt the same
+ * outcome by another route": models otherwise read a denial as "use a different
+ * string" and re-attempt it through a pipe or a sibling tool. A `user_denied`
+ * routes the model to `askUser`; an `undefined` reason means the command was
+ * blocked by policy before any UI (deny rule, read-only broker, IM channel),
+ * where there is no user to ask — so that path explains and stops instead.
  */
 function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined): ShellToolResult {
     if (reason === "timeout") {
@@ -56,7 +56,7 @@ function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined)
             content: [
                 {
                     type: "text",
-                    text: "[command denied] The command was not executed because the permission request timed out. Do not retry automatically; ask the user whether they want to run it again.",
+                    text: "[command denied] The permission request timed out before the user responded. Do not retry automatically; if you still need this command, call `askUser` to ask the user. Otherwise wait for a new instruction.",
                 },
             ],
             details: { exitCode: -1, interrupted: false, reason: "permission_timeout" },
@@ -75,19 +75,32 @@ function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined)
             isError: true,
         };
     }
-    if (reason !== undefined && reason !== "user_denied") {
+    // No denialReason means the command never reached the UI — it was denied by
+    // policy (a deny rule, a read-only broker, an IM channel policy). There is
+    // no interactive user behind this denial, so do not route to `askUser`: a
+    // read-only subagent has no such tool. Explain and stop instead.
+    if (reason === undefined) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: "[command denied] This command was blocked by the workspace's permission policy, not by the user. Do not retry it, and do not attempt the same outcome by another route — a different command, a pipeline, or another tool that has the same effect is still blocked. Explain why it was blocked and stop; if it should be allowed, ask the user to change the policy.",
+                },
+            ],
+            details: { exitCode: -1, interrupted: false, reason: "permission_denied" },
+            isError: true,
+        };
+    }
+    if (reason !== "user_denied") {
         // broker emitted a new reason this build doesn't know about — fall
         // through to "user denied" text but flag it so it's visible in logs.
-        // `undefined` is not that case: the broker omits the field when a
-        // command is denied by policy without ever reaching the UI (a `deny`
-        // rule, or an `ask` degraded by a read-only broker).
         log.warn("unrecognised permission denial reason", { reason: String(reason) });
     }
     return {
         content: [
             {
                 type: "text",
-                text: "[command denied] The user explicitly denied execution of this command. Do not retry this command automatically unless the user gives a new instruction.",
+                text: "[command denied] The user denied this command. Do not retry it, and do not attempt the same outcome by another route — a different command, a pipeline, or another tool (`write`/`edit`) that has the same effect is still the denied action. The denial is about the intent, not the exact string. If you still need that outcome, stop and call `askUser` to ask how the user wants to proceed; otherwise wait for a new instruction.",
             },
         ],
         details: { exitCode: -1, interrupted: false, reason: "permission_denied" },

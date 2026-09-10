@@ -47,8 +47,9 @@ describe("shellTool permission results", () => {
         assert.equal(result.isError, true);
         assert.equal(result.details.reason, "permission_denied");
         assert.equal(result.details.exitCode, -1);
-        assert.match(textOf(result), /user explicitly denied/);
-        assert.match(textOf(result), /Do not retry/);
+        assert.match(textOf(result), /The user denied this command/);
+        assert.match(textOf(result), /another route/);
+        assert.match(textOf(result), /askUser/);
     });
 
     it("returns a timeout-specific failed result when approval expires", async () => {
@@ -65,6 +66,7 @@ describe("shellTool permission results", () => {
         assert.equal(result.details.reason, "permission_timeout");
         assert.match(textOf(result), /permission request timed out/);
         assert.match(textOf(result), /Do not retry automatically/);
+        assert.match(textOf(result), /askUser/);
     });
 
     it("returns an aborted failed result when the turn is cancelled", async () => {
@@ -97,6 +99,11 @@ describe("shellTool permission results", () => {
         assert.equal(result.isError, true);
         assert.equal(result.details.reason, "permission_denied");
         assert.equal(result.details.exitCode, -1);
+        assert.match(textOf(result), /blocked by the workspace's permission policy/);
+        assert.ok(
+            !textOf(result).includes("askUser"),
+            "policy denial has no interactive user to ask — must not route to askUser",
+        );
     });
 
     it("propagates isError from shell execution failures", async () => {

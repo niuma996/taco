@@ -10,7 +10,14 @@
 
 import { buildPlatformPrompt } from "./buildPlatformPrompt.ts";
 import { fillPlaceholders } from "./fillPlaceholders.ts";
-import { CORE_TEMPLATE, PATH_SEMANTICS_DEFAULT, PATH_SEMANTICS_HIDDEN } from "./templates/core.ts";
+import {
+    CORE_TEMPLATE,
+    PATH_SEMANTICS_DEFAULT,
+    PATH_SEMANTICS_HIDDEN,
+    SESSION_ROLE_MAIN,
+    SESSION_ROLE_SUBAGENT,
+    SUBAGENT_DELEGATION_BLOCK,
+} from "./templates/core.ts";
 import { toolSummaryForPrompt } from "./toolSummary.ts";
 import type { NamedTool } from "./types.ts";
 
@@ -79,9 +86,8 @@ export interface BuildSystemPromptOptions {
     /**
      * Identity of the model this prompt is being assembled for. Rendered
      * into the `<model_identity>` section so the model has a self-reference
-     * for cost / context-window reasoning. Defaults to "unknown" when the
-     * caller can't supply it — this keeps the placeholder valid rather
-     * than leaving a literal `{{MODEL_IDENTITY}}` token in the prompt.
+     * for cost / context-window reasoning. When omitted, the section is
+     * dropped entirely rather than rendered as `<model_identity>unknown</model_identity>`.
      */
     modelIdentity?: string;
     /**
@@ -117,8 +123,16 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
     const core = fillPlaceholders(CORE_TEMPLATE, {
         TOOL_NAMES: toolNamesText,
-        MODEL_IDENTITY: options.modelIdentity ?? "unknown",
+        // Drop the section when the identity is unknown — `<model_identity>unknown</model_identity>`
+        // is pure noise. The newlines are part of the value so both branches keep clean spacing.
+        MODEL_IDENTITY_SECTION: options.modelIdentity
+            ? `\n<model_identity>${options.modelIdentity}</model_identity>\n\n`
+            : "\n",
+        // Delegation guidance is main-only: a subagent's `<session_role>` body forbids
+        // spawning further subagents, so it must not read the opposite instruction.
+        SUBAGENT_DELEGATION: sessionKind.role === "main" ? SUBAGENT_DELEGATION_BLOCK : "",
         SESSION_ROLE: sessionKind.role,
+        SESSION_ROLE_BODY: sessionKind.role === "main" ? SESSION_ROLE_MAIN : SESSION_ROLE_SUBAGENT,
         DEPTH_LINE: sessionKind.depth > 0 ? ` Depth: ${sessionKind.depth}.` : "",
         PATH_SEMANTICS: options.hideWorkspacePath ? PATH_SEMANTICS_HIDDEN : PATH_SEMANTICS_DEFAULT,
     });
