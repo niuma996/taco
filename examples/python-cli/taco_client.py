@@ -8,7 +8,11 @@ process.  No npm/node required to read this file; the protocol is plain JSON.
 Usage:
     python3 taco_client.py [cwd]
 
-If `taco-sidecar` is not on PATH, set the TACO_SIDECAR_CMD environment variable.
+Locating the sidecar (in priority order):
+  - $TACO_SIDECAR_CMD [+ $TACO_SIDECAR_ARGS] (split on whitespace)
+  - `taco-sidecar` on PATH (e.g. `npm i -g @taco-ai/sidecar@^0.2.0`)
+For a monorepo dev run, point $TACO_SIDECAR_CMD at `tsx` and
+$TACO_SIDECAR_ARGS at `packages/sidecar/src/index.ts`.
 
 Wire flow (protocol v2+):
     spawn sidecar

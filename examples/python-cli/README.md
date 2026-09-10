@@ -1,19 +1,30 @@
 # Python CLI Example
 
-Zero-dependency Python client demonstrating the `taco-sidecar` NDJSON-over-stdio protocol.
+Zero-dependency Python client for `taco-sidecar` over NDJSON stdio.
+The script demonstrates the wire protocol without any npm / Node
+dependency on the client side — only the sidecar itself.
 
 ## Prerequisites
 
-- `taco-sidecar` installed and on `PATH` (e.g. `npm i -g @taco-ai/sidecar`),
-  **or** a checkout of this repo with `pnpm dev` running in `packages/sidecar`.
 - Python 3.9+
+- `taco-sidecar` reachable as one of:
+  - on `PATH` (e.g. `npm i -g @taco-ai/sidecar@^0.2.0`),
+  - the bundled binary from a release tarball at
+    `<install-prefix>/lib/node_modules/@taco-ai/sidecar/dist/runtime/<platform>/bin/taco-sidecar-node`,
+  - a monorepo checkout running `pnpm dev` in `packages/sidecar`
+    (TypeScript source via `tsx`),
+  - **or** set `TACO_SIDECAR_CMD` (and optionally `TACO_SIDECAR_ARGS`) to
+    point at any of the above. For a monorepo checkout:
+
+    ```bash
+    export TACO_SIDECAR_CMD=tsx
+    export TACO_SIDECAR_ARGS='packages/sidecar/src/index.ts'
+    ```
 
 ## Install
 
-No install step — the script is self-contained and uses only the Python
-standard library. Just clone the repo (or copy `taco_client.py`) and run it
-directly. The only "external" requirement is `taco-sidecar` itself, which
-the [Prerequisites](#prerequisites) section above covers.
+Nothing to install — the script uses only the Python standard library.
+Clone (or copy) `taco_client.py` and run it directly.
 
 ## Usage
 
@@ -25,28 +36,27 @@ python3 taco_client.py [cwd]
 
 ## What it does
 
-1. Spawns `taco-sidecar`
+1. Spawns `taco-sidecar`.
 2. Sends the mandatory `initialize` handshake (protocol v2+) and
-   reads the server capabilities + identity (serverVersion / pid /
-   instanceId) from the response
-3. Calls `workspace.list`
-4. Calls `session.create` (with `initialPrompt` to attach and run the
-   first turn in one call)
-5. Sends `session.prompt` and demonstrates push-frame interleaving
+   reads `serverVersion` / `protocolVersion` / `pid` / `instanceId`
+   from the response.
+3. Calls `workspace.list`.
+4. Calls `session.create` with `initialPrompt` so the session is
+   attached and the first turn runs in the same RPC.
+5. Sends `session.prompt` and demonstrates push-frame interleaving:
+   any `session.event` push frames that arrive while the RPC is in
+   flight are printed and the function keeps reading until the
+   `id`-matched response lands.
 
-> **Why the `initialize` step matters.** Since protocol v1.0, the
-> server rejects every RPC except `initialize` with code
-> `not_initialized` until the handshake completes. The
-> `clientCapabilities` field is optional but recommended.
->
-> **v1 → v2.** v2 removed the `sidecar.hello` push frame; the identity
-> fields that lived on it (`version` / `pid` / `instanceId`) are now
-> carried on the `initialize` response. The handshake is the same
-> single RPC, the readiness signal is the same response — only the
-> wire shape changed.
+> **Why `initialize` matters.** Since protocol v1.0, every RPC except
+> `initialize` returns `not_initialized` until the handshake completes.
+> In v2 the v1 `sidecar.hello` push frame was retired; the identity
+> fields moved onto the `initialize` response, which is now the
+> readiness signal.
 
-## Protocol note
+## Minimal stdio round-trip
 
-This script uses only the Python standard library (`subprocess`, `json`,
-`uuid`). The entire protocol is plain NDJSON — no SDK, no generated
-code required.
+For environments where installing the full client is overkill, the
+shared smoke script in `examples/snippets/stdio_smoke.py` covers
+`initialize → workspace.list → workspace.ensure → session.list`
+without touching LLM state.
