@@ -80,29 +80,10 @@ export function makePushFrame<TParams = unknown>(opts: PushEventOptions): Server
 export const SIDECAR_INSTANCE_ID = randomUUID();
 
 /**
- * Carry the streamed sub-event on the legacy `assistantMessageEvent` field as
- * well as pi 0.85's `event` field.
- *
- * The desktop reader in `applyEventToMessages` types its incoming event as
- * `SessionEventLike`, which names the sub-event `assistantMessageEvent` (the
- * field name from pi's legacy `AgentEvent` shape). pi 0.85's harness emits
- * `HarnessEvent.message_update` with the same payload under `event`. Both
- * shapes exist in pi — `HarnessEvent` (this stream) and `AgentEvent` (legacy
- * `Agent`/`agent-loop`) — and each `.d.ts` matches its JS; the mismatch is
- * only between which one the desktop models and which one we subscribe to.
- *
- * Do NOT "fix" this by switching the desktop to `message` + `frame`.
- * `frame` is a de-duplicated replay increment, not the render stream: its
- * encoder drops any delta already covered by the block's opening snapshot
- * (`encodeTextDelta` returns undefined when `covered >= delta.length`), so
- * with a provider that populates text at `text_start`, EVERY `*_delta` frame
- * is absent — measured on a real harness run: 4 `message_update`s for a
- * one-line reply, `frame` present only on `text_start` / `text_end`, and the
- * text reconstructed from frames alone is empty. Reading `frame` reintroduces
- * the "whole reply appears at once" bug that 3ba3a3c fixed. `event` is the
- * only field carrying render-ready deltas.
- *
- * Non-`message_update` events pass through untouched.
+ * Mirror pi 0.85 message_update `event` into the desktop's legacy
+ * `assistantMessageEvent` field. Use render-ready event deltas: replay frames
+ * deduplicate deltas covered by opening snapshots and can leave frame-only
+ * rendering empty when text_start already contains the provider's text.
  */
 export function normalizeMessageUpdate(event: unknown): unknown {
     if (!event || typeof event !== "object") return event;

@@ -764,26 +764,11 @@ function isCurrentFormatHeader(line: string): boolean {
 }
 
 /**
- * Single-pass JSONL scan: pulls the session's title and sidecar facts in one
- * read.
- *
- * `repo.open()` would give both via getters, but it builds a whole
- * `JsonlSessionStorage` first: every line parsed into an entry, plus `byId`
- * and `labelsById` maps over all of them. For `session.list` that is pure
- * waste — measured at ~5MB of garbage per call over a 258-file store (32MB on
- * disk), which drove the daemon into a GC spiral where `session.list` stopped
- * answering inside its 15s budget.
- *
- * Scanning cannot be short-circuited: a rename appends another name value,
- * and a fact rewrite appends another facts value. Both must reach EOF — but
- * only matching lines are parsed, and nothing but the winners is retained.
- *
- * Because the scan reads pi's private on-disk encoding (`JSONL_FORMAT_VERSION`
- * 4, whose value records are pre-stabilization per pi spec §0.9), a silent miss
- * on either field would leave `session.list` showing untitled / un-fact'd
- * sessions with no signal. The warn at the end turns that into an actionable
- * log — but only for files that actually claim this format; see the condition
- * for why legacy and never-named sessions must stay quiet.
+ * Scan titles and facts without materializing pi's full storage index for
+ * `session.list`. Read to EOF because renames and fact updates append values;
+ * parse only matching records and retain only the latest values.
+ * This relies on pi's private v4 encoding. Log suspicious current-format
+ * files with no namespaced values, but keep legacy and fresh files quiet.
  */
 async function readSessionMetadataFromDisk(
     path: string,

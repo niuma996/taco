@@ -884,26 +884,10 @@ export class AttachedSession extends EventEmitter {
     }
 
     /**
-     * Send one prompt — awaits the reply.
-     *
-     * pi 0.85 returns a `Result` carrying the operation record rather than the
-     * reply itself, so the message is read back from the branch tip the run
-     * landed on. The tip is normally an assistant message, but pi also allows
-     * a run to close on a toolResult entry whose MessageEntry carries
-     * `terminate: true` — that is how tools like askUser / planExit end a turn
-     * ("ask the user and wait for the next prompt"). Returning the toolResult
-     * message is correct: the protocol's `PromptResult.assistantMessage` is
-     * typed as the wider `AgentMessage`, and the desktop's
-     * `extractAssistantTextAndThinking` safely turns a non-assistant shape
-     * into empty text. Throwing here would have caused session.prompt to fail
-     * on a perfectly normal turn (the user-facing "expected an assistant
-     * reply, got role=toolResult" error, plus a spurious session.delete that
-     * removed a freshly-created session from the sidebar).
-     *
-     * A *non-assistant* tip without `terminate: true` still indicates a real
-     * shape anomaly (an aborted-then-resumed run, an upstream invariant
-     * change) and is left to fail loud — we don't want to silently downgrade
-     * an internal bug into "nothing happened".
+     * Send a prompt and read its reply from the branch tip identified by pi's
+     * operation result. A terminating toolResult (askUser / planExit) is a valid
+     * reply: the protocol accepts AgentMessage and the desktop handles it.
+     * Non-assistant tips without `terminate: true` remain invariant violations.
      */
     async prompt(
         text: string,
