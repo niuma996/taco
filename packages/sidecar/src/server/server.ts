@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
+    type ChannelInstanceConfig,
     type ChannelStatusEntry,
     type ChannelsBindResult,
     type ChannelsCreateResult,
@@ -1527,20 +1528,23 @@ export class SidecarServer implements ServerRpcSurface {
 
     /** IM channel control surface consumed by the `channels.*` handlers. */
     readonly channels: ChannelControl = {
-        list: (): ChannelsListResult => ({
-            available: BUILTIN_CHANNEL_MANIFESTS.map((m) => ({
-                name: m.name,
-                version: m.version,
-                description: m.description,
-                maxMessageLength: m.capabilities.maxMessageLength,
-                requiresPersistentProcess: m.capabilities.requiresPersistentProcess ?? false,
-                approvalButton: m.capabilities.approvalButton ?? false,
-            })),
-            configured: this.channelConfigs.map((cfg) =>
-                this.toStatusEntry(this.channelBindBroker.status(cfg.channelId), cfg),
-            ),
-            failed: [...this.failedChannels],
-        }),
+        list: (): ChannelsListResult => {
+            const configured = this.readConfiguredChannels();
+            return {
+                available: BUILTIN_CHANNEL_MANIFESTS.map((m) => ({
+                    name: m.name,
+                    version: m.version,
+                    description: m.description,
+                    maxMessageLength: m.capabilities.maxMessageLength,
+                    requiresPersistentProcess: m.capabilities.requiresPersistentProcess ?? false,
+                    approvalButton: m.capabilities.approvalButton ?? false,
+                })),
+                configured: configured.map((cfg) =>
+                    this.toStatusEntry(this.channelBindBroker.status(cfg.channelId), cfg),
+                ),
+                failed: [...this.failedChannels],
+            };
+        },
         // conversationRouter may be unset before start() finishes; treat that
         // as "no conversations yet" rather than throwing — listConversations
         // is a process-level query, not a precondition for IM to function.
@@ -1553,10 +1557,10 @@ export class SidecarServer implements ServerRpcSurface {
             const id = channelId ?? name;
             if (!isValidChannelId(id)) throw new Error(`invalid channelId: ${id}`);
 
-            // Read from disk rather than this.channelConfigs: another writer may
-            // have added an instance since startup, and saveGlobalConfig
-            // replaces the whole array.
-            const existing = readGlobalConfig().channels ?? [];
+            // Merge disk and in-memory: another writer may have added an
+            // instance since startup, and `channels.list` reads through this
+            // same helper so the two paths can't disagree about what exists.
+            const existing = this.readConfiguredChannels();
             if (existing.some((c) => c.channelId === id)) {
                 throw new Error(`channelId already exists: ${id}`);
             }
@@ -1680,12 +1684,54 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /**
+     * Union of in-memory `channelConfigs` (start-time snapshot) with anything
+     * written to taco.json since. Used by both `channels.list` and
+     * `channels.create` so they can't disagree about what exists — the bug
+     * they were diverging on surfaced as "channel already exists" without the
+     * UI seeing the new entry.
+     *
+     * Disk is authoritative; the in-memory record wins on `config` so a
+     * settings.write mutation made after startup isn't clobbered.
+     *
+     * Returns the wire (`ChannelInstanceConfig`) shape rather than the richer
+     * runtime `ChannelConfig`, since only the on-disk fields reach the wire.
+     */
+    private readConfiguredChannels(): ChannelInstanceConfig[] {
+        const onDisk = readGlobalConfig().channels ?? [];
+        const byId = new Map(this.channelConfigs.map((c) => [c.channelId, c]));
+        const merged: ChannelInstanceConfig[] = [];
+        const seen = new Set<string>();
+        for (const cfg of onDisk) {
+            const live = byId.get(cfg.channelId);
+            seen.add(cfg.channelId);
+            merged.push(
+                live
+                    ? { channelId: cfg.channelId, manifest: cfg.manifest, config: live.config }
+                    : cfg,
+            );
+        }
+        for (const cfg of this.channelConfigs) {
+            if (!seen.has(cfg.channelId)) {
+                merged.push({
+                    channelId: cfg.channelId,
+                    manifest: cfg.manifest,
+                    config: cfg.config,
+                });
+            }
+        }
+        return merged;
+    }
+
+    /**
      * Broker frames carry only the transition fields (channelId/state/QR/...).
      * The wire entry also needs the config-derived name and the on-disk
      * configured flag, so the push payload matches `channels.list` output and
      * the client's wholesale entry replacement stays consistent.
      */
-    private toStatusEntry(status: ChannelBindStatus, cfg?: ChannelConfig): ChannelStatusEntry {
+    private toStatusEntry(
+        status: ChannelBindStatus,
+        cfg?: { manifest: { name: string } },
+    ): ChannelStatusEntry {
         const config = cfg ?? this.channelConfigs.find((c) => c.channelId === status.channelId);
         return {
             channelId: status.channelId,
