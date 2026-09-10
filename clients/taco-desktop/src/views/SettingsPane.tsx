@@ -108,6 +108,7 @@ export function SettingsPane(props: SettingsPaneProps) {
                             checking={props.updateChecking}
                             lastError={props.updateError}
                             onCheck={props.onCheckUpdate}
+                            onRestart={props.onRestartSidecar}
                         />
                     )}
                 </div>

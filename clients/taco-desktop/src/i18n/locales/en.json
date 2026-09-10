@@ -303,7 +303,11 @@
       "statusChecking": "Checking…",
       "statusUpToDate": "Up to date",
       "statusAvailable": "Update available: v{{version}}",
-      "statusError": "Last check failed: {{error}}"
+      "statusError": "Last check failed: {{error}}",
+      "advancedTitle": "Advanced",
+      "advancedDesc": "Restart the sidecar to apply changes that only take effect after a restart (added or removed channels, plugins, MCP servers). Active sessions will be interrupted.",
+      "restartSidecar": "Restart sidecar",
+      "restarting": "Restarting…"
     }
   },
   "context": {

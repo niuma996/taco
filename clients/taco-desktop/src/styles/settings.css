@@ -822,3 +822,10 @@
     height: 16px;
     cursor: pointer;
 }
+
+/* Updates tab action buttons (Check now + Restart sidecar) share a fixed
+   width so the "Restarting…" / "Checking…" label swap doesn't shift the
+   button box. Tied to the longest label across locales. */
+.updates-tab-action {
+    min-width: 8.5rem;
+}

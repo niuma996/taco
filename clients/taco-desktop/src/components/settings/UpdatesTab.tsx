@@ -12,9 +12,15 @@
  * The dialog itself lives in App.tsx so it can stay mounted across
  * Settings tab switches; this tab only triggers the check + hands
  * the dialog open-state back via `onOpenDialog`.
+ *
+ * A secondary "Advanced" section exposes a manual `Restart sidecar` button
+ * — the lifecycle entry point for users who changed a setting that takes
+ * effect only after a restart (channels, plugins, MCP servers) and want
+ * to confirm the change without waiting for the per-pane flash banner.
  */
 
 import { useEffect, useState } from "react";
+import { useAutoClearError } from "../../hooks/primitives/useAutoClearError.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import { getCurrentVersion } from "../../lib/updater.ts";
 import { Button } from "../ui/Button.tsx";
@@ -34,6 +40,11 @@ export interface UpdatesTabProps {
     /** Triggers a fresh checkForUpdate() in the parent, which then
      *  updates updateAvailable + opens the dialog if applicable. */
     onCheck: () => void;
+    /** Triggers sidecar disposeAll + re-ensure each workspace. Surfaces
+     *  in the Advanced section so users who changed a restart-gated
+     *  setting (channels / plugins / MCP) can force the cycle without
+     *  waiting for the per-pane flash banner. */
+    onRestart: () => Promise<void>;
 }
 
 /** Status line for the "Status" row — single source of truth so the
@@ -43,6 +54,12 @@ type Status = "checking" | "upToDate" | "available" | "error";
 export function UpdatesTab(props: UpdatesTabProps) {
     const { t } = useT();
     const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+    const [restarting, setRestarting] = useState(false);
+    const {
+        error: restartError,
+        fail: failRestart,
+        clearError: clearRestartError,
+    } = useAutoClearError();
 
     useEffect(() => {
         // getVersion() throws in dev (no Tauri runtime); swallow and
@@ -76,6 +93,18 @@ export function UpdatesTab(props: UpdatesTabProps) {
         }
     })();
 
+    const restartSidecar = async () => {
+        clearRestartError();
+        setRestarting(true);
+        try {
+            await props.onRestart();
+        } catch (e) {
+            failRestart(e);
+        } finally {
+            setRestarting(false);
+        }
+    };
+
     return (
         <div className="settings-tab">
             <h3>{t("settings.updates.title")}</h3>
@@ -91,10 +120,30 @@ export function UpdatesTab(props: UpdatesTabProps) {
                 </div>
             </div>
             <div className="settings-row-block">
-                <Button variant="primary" disabled={props.checking} onClick={props.onCheck}>
+                <Button
+                    variant="primary"
+                    className="updates-tab-action"
+                    disabled={props.checking}
+                    onClick={props.onCheck}
+                >
                     {t("settings.updates.checkNow")}
                 </Button>
             </div>
+            <h3 className="settings-tab-h3-secondary">{t("settings.updates.advancedTitle")}</h3>
+            <p className="settings-tab-desc">{t("settings.updates.advancedDesc")}</p>
+            <div className="settings-row-block">
+                <Button
+                    variant="primary"
+                    className="updates-tab-action"
+                    disabled={restarting}
+                    onClick={() => void restartSidecar()}
+                >
+                    {restarting
+                        ? t("settings.updates.restarting")
+                        : t("settings.updates.restartSidecar")}
+                </Button>
+            </div>
+            {restartError && <div className="error-banner">{restartError}</div>}
         </div>
     );
 }

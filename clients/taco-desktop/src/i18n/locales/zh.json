@@ -302,7 +302,11 @@
       "statusChecking": "检查中…",
       "statusUpToDate": "已是最新版本",
       "statusAvailable": "有可用更新：v{{version}}",
-      "statusError": "上次检查失败：{{error}}"
+      "statusError": "上次检查失败：{{error}}",
+      "advancedTitle": "高级",
+      "advancedDesc": "重启 sidecar 以应用那些只在重启后生效的修改（新增或删除的渠道、插件、MCP 服务）。进行中的会话会被中断。",
+      "restartSidecar": "重启 sidecar",
+      "restarting": "重启中…"
     }
   },
   "context": {
