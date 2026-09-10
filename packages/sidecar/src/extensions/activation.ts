@@ -41,6 +41,7 @@ export class WorkspaceExtensionSet {
         builtins: [],
         external: [],
     };
+    private readonly _commandPermissionRules: string[] = [];
 
     addContribution(source: ExtensionSource, c: WorkspaceContribution): void {
         const bucket = source === "builtin" ? "builtins" : "external";
@@ -55,6 +56,9 @@ export class WorkspaceExtensionSet {
         }
         if (c.tools) {
             for (const t of c.tools) this._toolsWithSource.push(t);
+        }
+        if (c.commandPermissionRules) {
+            this._commandPermissionRules.push(...c.commandPermissionRules);
         }
         if (c.systemPrompt) {
             this._systemPromptContributors.push(c.systemPrompt);
@@ -85,6 +89,12 @@ export class WorkspaceExtensionSet {
             builtins: [...this._toolResultHooks.builtins],
             external: [...this._toolResultHooks.external],
         };
+    }
+
+    /** Extension-contributed shell allow-rules, deduped. Merged after the
+     *  user's `commandPermissions.rules` by the workspace's permission thunk. */
+    commandPermissionRules(): string[] {
+        return Array.from(new Set(this._commandPermissionRules));
     }
 }
 

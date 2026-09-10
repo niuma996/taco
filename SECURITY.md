@@ -50,3 +50,10 @@ machine. The threat model is scoped to that:
   those projects.
 - Issues in third-party agent / skill / extension frontmatter the
   user has explicitly added.
+- **Install commands embedded in vendored skills.** The bundled
+  `officecli` skill documents the vendor's own installer
+  (`curl … | bash`, served from `d.officecli.ai`); the model may
+  propose it and the user approves it through the normal permission
+  prompt. Taco vendors the skill *text*, not the payload — the
+  integrity of what that URL serves is the vendor's responsibility
+  (iOfficeAI/OfficeCLI, Apache-2.0).

@@ -8,6 +8,7 @@
 
 import type { BuiltinManifest } from "../builtinContract.ts";
 import { manifest as gitContextManifest } from "./gitContext/index.ts";
+import { manifest as officeCliManifest } from "./officeCli/index.ts";
 import { manifest as outputRedactionManifest } from "./outputRedaction/index.ts";
 import { manifest as projectManifestsManifest } from "./projectManifests/index.ts";
 
@@ -15,4 +16,5 @@ export const BUILTIN_EXTENSIONS: readonly BuiltinManifest[] = [
     outputRedactionManifest,
     gitContextManifest,
     projectManifestsManifest,
+    officeCliManifest,
 ];

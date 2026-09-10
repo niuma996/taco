@@ -48,13 +48,21 @@ async function loadDeduped(cwd: string): Promise<TacoSkill[]> {
 describe("server.ts skill-loading path: loadSourcedSkills + dedupeSkillsByName", () => {
     let tmpHome: string;
     let tmpCwd: string;
+    let tmpUserHome: string;
     let prevTacoHome: string | undefined;
+    let prevHome: string | undefined;
 
     before(() => {
         prevTacoHome = process.env.TACO_HOME;
+        prevHome = process.env.HOME;
         tmpHome = mkdtempSync(join(tmpdir(), "taco-server-skills-home-"));
         tmpCwd = mkdtempSync(join(tmpdir(), "taco-server-skills-cwd-"));
+        // Isolate $HOME: defaultSkillDirs reads ~/.claude/skills and ~/.pi/skills
+        // via os.homedir(), so a developer's personal skill sharing a name with
+        // one of these fixtures (or a builtin) would change the scan under test.
+        tmpUserHome = mkdtempSync(join(tmpdir(), "taco-server-skills-userhome-"));
         process.env.TACO_HOME = tmpHome;
+        process.env.HOME = tmpUserHome;
 
         // $TACO_HOME/skills/foo — global taco source (lower priority than project)
         writeSkill(join(tmpHome, "skills"), "foo", "foo from taco global");
@@ -68,8 +76,11 @@ describe("server.ts skill-loading path: loadSourcedSkills + dedupeSkillsByName",
     after(() => {
         if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
         else process.env.TACO_HOME = prevTacoHome;
+        if (prevHome === undefined) Reflect.deleteProperty(process.env, "HOME");
+        else process.env.HOME = prevHome;
         rmSync(tmpHome, { recursive: true, force: true });
         rmSync(tmpCwd, { recursive: true, force: true });
+        rmSync(tmpUserHome, { recursive: true, force: true });
     });
 
     it("dedupes same-named skill across sources, project <cwd>/.taco wins by first-wins order", async () => {

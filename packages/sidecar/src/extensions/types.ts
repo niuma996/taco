@@ -186,6 +186,13 @@ export interface WorkspaceContribution {
     toolResultHooks?: ToolResultHook[];
     tools?: Array<{ name: string; tool: TacoTool }>;
     systemPrompt?: SystemPromptContributor;
+    /**
+     * Shell allow-rules this extension adds for the workspace, merged after the
+     * user's `commandPermissions.rules`. In-memory only — never written to
+     * taco.json, so disabling the extension removes them with it. Rules use the
+     * same string syntax as taco.json (`officecli *`, `git status`).
+     */
+    commandPermissionRules?: string[];
     source?: ExtensionSource;
 }
 

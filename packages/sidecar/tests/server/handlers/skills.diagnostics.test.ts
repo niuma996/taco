@@ -74,13 +74,23 @@ async function reloadFromDisk(tmpCwd: string): Promise<{
 describe("skills.list diagnostics", () => {
     let tmpHome: string;
     let tmpCwd: string;
+    let tmpUserHome: string;
     let prevTacoHome: string | undefined;
+    let prevHome: string | undefined;
 
     before(() => {
         prevTacoHome = process.env.TACO_HOME;
+        prevHome = process.env.HOME;
         tmpHome = mkdtempSync(join(tmpdir(), "taco-skills-diag-home-"));
         tmpCwd = mkdtempSync(join(tmpdir(), "taco-skills-diag-cwd-"));
+        // Isolate $HOME too: defaultSkillDirs reads ~/.claude/skills and
+        // ~/.pi/skills via os.homedir(), so without this the scan picks up the
+        // developer's real user skills. A personal skill sharing a name with a
+        // builtin would then surface here as a duplicate_name diagnostic and
+        // fail the "omit when empty" assertion for an unrelated reason.
+        tmpUserHome = mkdtempSync(join(tmpdir(), "taco-skills-diag-userhome-"));
         process.env.TACO_HOME = tmpHome;
+        process.env.HOME = tmpUserHome;
 
         // Two user skills plus a third that collides with the second name, so a
         // single scan produces both kinds of warning.
@@ -108,8 +118,11 @@ describe("skills.list diagnostics", () => {
     after(() => {
         if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
         else process.env.TACO_HOME = prevTacoHome;
+        if (prevHome === undefined) Reflect.deleteProperty(process.env, "HOME");
+        else process.env.HOME = prevHome;
         rmSync(tmpHome, { recursive: true, force: true });
         rmSync(tmpCwd, { recursive: true, force: true });
+        rmSync(tmpUserHome, { recursive: true, force: true });
     });
 
     it("omits the diagnostics key when there are no warnings", async () => {

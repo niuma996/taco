@@ -34,13 +34,21 @@ function makeCtx(workspace: Partial<WorkspaceRuntime>) {
 describe("skills.list surfaces inlineOnly", () => {
     let tmpHome: string;
     let tmpCwd: string;
+    let tmpUserHome: string;
     let prevTacoHome: string | undefined;
+    let prevHome: string | undefined;
 
     before(() => {
         prevTacoHome = process.env.TACO_HOME;
+        prevHome = process.env.HOME;
         tmpHome = mkdtempSync(join(tmpdir(), "taco-skills-io-home-"));
         tmpCwd = mkdtempSync(join(tmpdir(), "taco-skills-io-cwd-"));
+        // Isolate $HOME: defaultSkillDirs reads ~/.claude/skills and ~/.pi/skills
+        // via os.homedir(), and the assertion below pins the real builtin
+        // fan-out-agents. A personal skill of the same name would shadow it.
+        tmpUserHome = mkdtempSync(join(tmpdir(), "taco-skills-io-userhome-"));
         process.env.TACO_HOME = tmpHome;
+        process.env.HOME = tmpUserHome;
 
         // The fan-out-agents skill is a real builtin — it MUST show up with
         // inlineOnly=true. The test still asserts on a separately-written
@@ -63,8 +71,11 @@ describe("skills.list surfaces inlineOnly", () => {
     after(() => {
         if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
         else process.env.TACO_HOME = prevTacoHome;
+        if (prevHome === undefined) Reflect.deleteProperty(process.env, "HOME");
+        else process.env.HOME = prevHome;
         rmSync(tmpHome, { recursive: true, force: true });
         rmSync(tmpCwd, { recursive: true, force: true });
+        rmSync(tmpUserHome, { recursive: true, force: true });
     });
 
     it("inlineOnly skills are flagged in the list response", async () => {

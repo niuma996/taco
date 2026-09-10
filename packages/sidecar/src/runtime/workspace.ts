@@ -452,7 +452,19 @@ export class WorkspaceRuntime extends EventEmitter {
         const imPolicy =
             options.imPolicy ?? (options.disableFsTools ? DEFAULT_IM_WORKSPACE_POLICY : undefined);
         this.permissionBroker = new PermissionBroker(
-            () => validateCommandPermissions(readGlobalConfig().commandPermissions, "taco.json"),
+            () => {
+                const base = validateCommandPermissions(
+                    readGlobalConfig().commandPermissions,
+                    "taco.json",
+                );
+                // Extension-contributed allow-rules are appended after the
+                // user's, in memory only. Read inside the thunk (a per-evaluation
+                // call) rather than captured, so the broker always sees the
+                // runtime's current extension set.
+                const extRules = this.extensions?.commandPermissionRules() ?? [];
+                if (extRules.length === 0) return base;
+                return { ...base, rules: Array.from(new Set([...base.rules, ...extRules])) };
+            },
             {
                 resolveDisplayContext: (sid) => this.sessionRegistry.resolveDisplayContext(sid),
                 imCommandPolicy: () => imPolicy?.commands,
