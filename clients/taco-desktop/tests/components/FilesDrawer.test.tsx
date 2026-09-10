@@ -36,6 +36,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
         throw new Error("not found");
     }),
     stat: vi.fn(async () => ({ size: 100 })),
+    readFile: vi.fn(async () => new Uint8Array()),
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({

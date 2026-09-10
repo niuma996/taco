@@ -9,13 +9,15 @@
  * The module has zero React dependencies; the UI layer (hooks) calls
  * `createFsClient(cwd)` inside effects.
  */
-import { readDir, readTextFile, stat } from "@tauri-apps/plugin-fs";
+import { readDir, readFile, readTextFile, stat } from "@tauri-apps/plugin-fs";
 
 import type { FileEntry } from "../fileTypes";
 
 export interface FsClient {
     readDir(relPath: string): Promise<FileEntry[]>;
     readText(relPath: string): Promise<string>;
+    /** Raw bytes, used for image previews. */
+    readBinary(relPath: string): Promise<Uint8Array>;
     /** File size in bytes; used by the preview gate before reading content. */
     sizeOf(relPath: string): Promise<number>;
 }
@@ -43,6 +45,10 @@ export function createFsClient(cwd: string): FsClient {
         async readText(relPath: string): Promise<string> {
             const abs = resolveFsPath(cwd, relPath);
             return readTextFile(abs);
+        },
+        async readBinary(relPath: string): Promise<Uint8Array> {
+            const abs = resolveFsPath(cwd, relPath);
+            return readFile(abs);
         },
         async sizeOf(relPath: string): Promise<number> {
             const abs = resolveFsPath(cwd, relPath);

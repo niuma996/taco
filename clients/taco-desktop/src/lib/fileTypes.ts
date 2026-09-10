@@ -73,8 +73,24 @@ export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
     "o",
 ]);
 
+/** Image extensions previewable inline, mapped to their MIME type. Image files stay in BINARY_EXTENSIONS too; previewKindFor checks this set first. */
+export const IMAGE_EXTENSIONS: Readonly<Record<string, string>> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    bmp: "image/bmp",
+    ico: "image/x-icon",
+    svg: "image/svg+xml",
+    avif: "image/avif",
+};
+
 /** Files larger than this are not read for preview — the "too large" state shows instead. */
 export const MAX_PREVIEW_BYTES = 512 * 1024;
+
+/** Image previews travel over IPC then expand by ~33% as base64, so they get a larger cap than text. */
+export const MAX_IMAGE_PREVIEW_BYTES = 10 * 1024 * 1024;
 
 /** Get the basename suffix; returns "" when there's no extension. */
 export function getExtension(name: string): string {
@@ -86,6 +102,11 @@ export function getExtension(name: string): string {
 /** Whether the file is binary. Extension blacklist wins; unknown extensions are treated as text. */
 export function isBinary(name: string): boolean {
     return BINARY_EXTENSIONS.has(getExtension(name));
+}
+
+/** MIME type when the file is an inline-previewable image; null otherwise. */
+export function imageMimeFor(name: string): string | null {
+    return IMAGE_EXTENSIONS[getExtension(name)] ?? null;
 }
 
 /**
@@ -153,10 +174,11 @@ export const PREVIEW_LANGUAGES: Readonly<Record<string, string>> = {
     diff: "diff",
 };
 
-export type PreviewKind = "markdown" | "code" | "text" | "binary" | "unsupported";
+export type PreviewKind = "image" | "markdown" | "code" | "text" | "binary" | "unsupported";
 
 /** Classify a file for the preview popup. Extension-less files preview as plain text. */
 export function previewKindFor(name: string): PreviewKind {
+    if (imageMimeFor(name) !== null) return "image";
     if (isBinary(name)) return "binary";
     const ext = getExtension(name);
     if (ext === "") return "text";

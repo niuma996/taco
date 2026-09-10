@@ -48,10 +48,20 @@ export function FilesDrawer(props: FilesDrawerProps) {
 
     const tree = useFileTree(
         // Dummy api while cwd is null; the hook only calls it from effects.
-        fsClient ?? { readDir: async () => [], readText: async () => "", sizeOf: async () => 0 },
+        fsClient ?? {
+            readDir: async () => [],
+            readText: async () => "",
+            readBinary: async () => new Uint8Array(),
+            sizeOf: async () => 0,
+        },
     );
     const preview = useFilePreview(
-        fsClient ?? { readDir: async () => [], readText: async () => "", sizeOf: async () => 0 },
+        fsClient ?? {
+            readDir: async () => [],
+            readText: async () => "",
+            readBinary: async () => new Uint8Array(),
+            sizeOf: async () => 0,
+        },
     );
 
     // Drawer open / workspace switch → refresh tree + clear preview.

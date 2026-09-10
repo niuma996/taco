@@ -841,6 +841,13 @@
     overflow: auto;
     padding: 0.6rem 0.8rem;
 }
+.files-preview-image {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    margin: 0 auto;
+    object-fit: contain;
+}
 .files-preview-md {
     padding: 0.2rem 0.4rem;
 }

@@ -14,6 +14,7 @@ function makeApi(map: Record<string, FileEntry[]>): FsClient {
     return {
         readDir: vi.fn(async (rel: string) => map[rel] ?? []),
         readText: vi.fn(async () => ""),
+        readBinary: vi.fn(async () => new Uint8Array()),
         sizeOf: vi.fn(async () => 0),
     };
 }
@@ -48,6 +49,7 @@ describe("useFileTree.loadRoot", () => {
                 throw new Error("EACCES");
             }),
             readText: vi.fn(async () => ""),
+            readBinary: vi.fn(async () => new Uint8Array()),
             sizeOf: vi.fn(async () => 0),
         };
         const { result } = renderHook(() => useFileTree(api));

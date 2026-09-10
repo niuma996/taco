@@ -12,7 +12,7 @@ import type {
     SessionContextInfoResult,
     ThinkingLevel,
 } from "@taco-ai/protocol";
-import { ArrowUp, Paperclip, Square } from "lucide-react";
+import { ArrowUp, ImageIcon, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef } from "react";
 import { ContextIndicator } from "../components/ContextIndicator";
@@ -331,7 +331,7 @@ export function ChatPane(props: ChatPaneProps) {
                                 pending || compacting || attachments.length >= MAX_ATTACHMENTS
                             }
                         >
-                            <Paperclip size={16} aria-hidden="true" />
+                            <ImageIcon size={16} aria-hidden="true" />
                         </button>
                         {activeModel && (
                             <ModelMenu

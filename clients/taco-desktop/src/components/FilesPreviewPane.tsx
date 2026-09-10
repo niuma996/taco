@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
 import type { PreviewBlock } from "../hooks/useFilePreview";
 import { useT } from "../i18n/useI18n";
-import { getExtension, shikiLangFor } from "../lib/fileTypes";
+import { getExtension, imageMimeFor, shikiLangFor } from "../lib/fileTypes";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 import { Button } from "./ui/Button";
 
@@ -35,6 +35,7 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
     const { t } = useT();
     const { selectedRelPath, content, block, error, loading, absPath } = props;
     const isMarkdown = shikiLangFor(selectedRelPath) === "markdown";
+    const isImage = imageMimeFor(selectedRelPath) !== null;
     const [mdView, setMdView] = useState<"rendered" | "source">("rendered");
 
     return (
@@ -76,7 +77,9 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                     block === null &&
                     !error &&
                     content !== null &&
-                    (isMarkdown && mdView === "rendered" ? (
+                    (isImage ? (
+                        <img className="files-preview-image" src={content} alt={selectedRelPath} />
+                    ) : isMarkdown && mdView === "rendered" ? (
                         <AssistantMarkdown
                             text={content}
                             className="md-assistant files-preview-md"

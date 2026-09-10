@@ -37,8 +37,13 @@ describe("MAX_PREVIEW_BYTES", () => {
 
 describe("previewKindFor", () => {
     it("classifies binary extensions", () => {
-        assert.equal(previewKindFor("logo.png"), "binary");
         assert.equal(previewKindFor("archive.ZIP"), "binary");
+        assert.equal(previewKindFor("doc.pdf"), "binary");
+    });
+    it("classifies image extensions", () => {
+        assert.equal(previewKindFor("logo.png"), "image");
+        assert.equal(previewKindFor("photo.JPG"), "image");
+        assert.equal(previewKindFor("diagram.svg"), "image");
     });
     it("classifies markdown", () => {
         assert.equal(previewKindFor("README.md"), "markdown");

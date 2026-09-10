@@ -4,9 +4,11 @@ import { describe, it, vi } from "vitest";
 
 import { useFilePreview } from "../../src/hooks/useFilePreview";
 import type { FsClient } from "../../src/lib/clients/fsClient";
-import { MAX_PREVIEW_BYTES } from "../../src/lib/fileTypes";
+import { MAX_IMAGE_PREVIEW_BYTES, MAX_PREVIEW_BYTES } from "../../src/lib/fileTypes";
 
-function makeApi(opts: { text?: string; size?: number; throws?: boolean } = {}): FsClient {
+function makeApi(
+    opts: { text?: string; size?: number; throws?: boolean; bytes?: Uint8Array } = {},
+): FsClient {
     return {
         readDir: vi.fn(async () => {
             return [];
@@ -14,6 +16,10 @@ function makeApi(opts: { text?: string; size?: number; throws?: boolean } = {}):
         readText: vi.fn(async () => {
             if (opts.throws) throw new Error("EACCES");
             return opts.text ?? "";
+        }),
+        readBinary: vi.fn(async () => {
+            if (opts.throws) throw new Error("EACCES");
+            return opts.bytes ?? new Uint8Array();
         }),
         sizeOf: vi.fn(async () => opts.size ?? 10),
     };
@@ -25,12 +31,13 @@ describe("useFilePreview — binary short-circuit", () => {
         const { result } = renderHook(() => useFilePreview(api));
 
         await act(async () => {
-            await result.current.select("logo.png");
+            await result.current.select("archive.zip");
         });
 
         assert.equal(result.current.block, "binary");
         assert.equal(result.current.content, null);
         assert.equal((api.readText as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+        assert.equal((api.readBinary as ReturnType<typeof vi.fn>).mock.calls.length, 0);
         assert.equal((api.sizeOf as ReturnType<typeof vi.fn>).mock.calls.length, 0);
     });
 });
@@ -61,6 +68,34 @@ describe("useFilePreview — too large", () => {
         assert.equal(result.current.block, "tooLarge");
         assert.equal(result.current.content, null);
         assert.equal((api.readText as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+    });
+});
+
+describe("useFilePreview — image", () => {
+    it("reads bytes and stores a data URL, never readText", async () => {
+        const api = makeApi({ bytes: new Uint8Array([1, 2, 3]) });
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("logo.png");
+        });
+
+        assert.equal(result.current.block, null);
+        assert.match(result.current.content ?? "", /^data:image\/png;base64,/);
+        assert.equal((api.readBinary as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+        assert.equal((api.readText as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+    });
+
+    it("blocks images over MAX_IMAGE_PREVIEW_BYTES without reading", async () => {
+        const api = makeApi({ size: MAX_IMAGE_PREVIEW_BYTES + 1 });
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("huge.png");
+        });
+
+        assert.equal(result.current.block, "tooLarge");
+        assert.equal((api.readBinary as ReturnType<typeof vi.fn>).mock.calls.length, 0);
     });
 });
 
@@ -117,6 +152,7 @@ describe("useFilePreview — cancellation", () => {
                 return [];
             }),
             sizeOf: vi.fn(async () => 10),
+            readBinary: vi.fn(async () => new Uint8Array()),
             readText: vi.fn(async (rel: string) => {
                 if (rel === "a.txt") {
                     // Always create a fresh resolver so we can resolve old and new calls independently.
