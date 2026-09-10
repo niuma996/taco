@@ -20,6 +20,24 @@ allowBuilds:
   esbuild: true
 ```
 
+### 1.1 系统服务注册（仅 release 构建）
+
+非 debug 桌面端在首次启动时，setup 流程会自动执行 `taco install`
+把 sidecar 注册成系统服务，使其在登出 / 重启后继续运行。CLI 在
+首次启动时静默完成，不需要用户额外操作。
+
+| 平台 | 注册方式 | 崩溃后自动重启 |
+|---|---|---|
+| macOS | LaunchAgent 写在 `~/Library/LaunchAgents/`，配 `RunAtLoad` | ✅（`KeepAlive`） |
+| Windows | Task Scheduler 任务，系统启动时运行（`ONSTART`） | ❌（本版本未配置） |
+| Linux | `taco install` 直接返回 `unsupported platform` | ❌ |
+
+`taco uninstall` 会移除系统注册但保留用户数据（sessions、logs、
+`~/.taco/`）。检查状态用 `taco status`，清理用 `taco stop` + `taco uninstall`。
+
+Linux 用户若要 daemon-on-boot，需要自写 systemd user unit。`taco start`
+本身在 Linux 上是可用的——只要用户登录，daemon 就一直跑。
+
 ## 2. 模型配置
 
 ### 2.1 配置加载顺序（后者覆盖前者）

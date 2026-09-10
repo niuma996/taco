@@ -1,9 +1,12 @@
 # `@taco-ai/desktop`
 
 Tauri 2 + React desktop for Taco. The reference client for
-`@taco-ai/sidecar` — owns the sidecar process, drives the typed
-RPC client, and renders the chat / sessions / settings / MCP /
-agents / skills / plugins / channels / memory / checkpoints panes.
+`@taco-ai/sidecar` — talks to the sidecar **daemon** over a long-lived
+NDJSON socket (with a separate control socket for `start` / `status` /
+`stop`), drives the typed RPC client, and renders the chat / sessions /
+settings / MCP / agents / skills / plugins / channels / memory /
+checkpoints panes. Direct stdio mode is supported by the sidecar but is
+not used by the desktop.
 
 ## Install (developer)
 
@@ -30,6 +33,53 @@ A release build produces platform-specific bundles (`.dmg` /
 `.app` for macOS, `.exe` / `.msi` for Windows, `.AppImage` /
 `.deb` for Linux). See the GitHub Releases page.
 
+> The first time you launch a release binary, macOS Gatekeeper and
+> Windows SmartScreen may each show a one-time "untrusted" prompt.
+> The root README has step-by-step workarounds (Privacy & Security
+> → Open Anyway, and SmartScreen → More info → Run anyway). Do
+> **not** disable SmartScreen or Gatekeeper to bypass them.
+
+### Lifecycle: close ≠ quit
+
+The desktop is a tray-resident app:
+
+- **Close button hides to tray**, not quits. The window's CloseRequested is
+  intercepted; clicking the X on the title bar hides the window and leaves
+  the sidecar daemon running in the background. The single-instance
+  plugin means a second launch focuses the existing window instead of
+  opening a new one.
+- **System tray** (or menu bar on macOS) has **Show Taco** and **Quit Taco**.
+  Quit Taco runs the application-level exit handler, which terminates the
+  sidecar daemon and only then exits the Tauri app. Use Quit when you want
+  the daemon to actually stop.
+- **macOS Dock**: clicking the dock icon reopens a hidden window.
+- **Daemon reconnect**: if the daemon exits unexpectedly (crash, manual
+  kill), the frontend rejects every in-flight RPC, then transparently
+  retries the reconnect with backoff `500ms → 1s → 2s → 5s` (up to four
+  attempts). On success, `initialize` runs again and the active session is
+  re-attached. **Active requests are not replayed** — they fail loudly so
+  the user can decide whether to resubmit. Active Quit / Restart paths do
+  not trigger this loop.
+- **All four reconnect attempts fail**: stop and let the user intervene
+  (reopen manually, run `taco status` from the CLI to confirm the daemon
+  state, or check `~/.taco/logs/daemon.err.log`). The UI surfaces a banner
+  but does not silently retry forever.
+
+### Auto-registered system service
+
+On the first launch of a non-debug release build, the desktop setup flow
+runs `taco install` to register a system-level daemon:
+
+- **macOS** — LaunchAgent in `~/Library/LaunchAgents/`, with `RunAtLoad`
+  and `KeepAlive` (the daemon restarts after a crash).
+- **Windows** — Task Scheduler task running at system startup. **Crash
+  restart is not configured** in this release.
+- **Linux** — `taco install` returns `unsupported platform`. There is no
+  auto-registration; use a systemd user unit if you need daemon-on-boot.
+
+`taco uninstall` removes the system registration but leaves user data
+(sessions, logs, `~/.taco/`) intact.
+
 ## What's here
 
 - **`src/`** — React 19 frontend (Vite + TypeScript).
@@ -49,10 +99,12 @@ A release build produces platform-specific bundles (`.dmg` /
     `sidecarLogLine.ts` (stderr parser).
   - **`i18n/`** — react-i18next with `locales/{en,zh}.json`.
 - **`src-tauri/`** — Rust backend.
-  - **`src/lib.rs`** — spawn sidecar, byte-pipe stdout to Tauri
-    events `sidecar-event` / `sidecar-exited`, `desktop.json`
-    read/write, `paths_are_dirs` existence probe,
-    `default_workspace_dir`, `set_fs_scope` for the FS plugin.
+  - **`src/lib.rs`** — connect to the sidecar daemon over its NDJSON
+    socket (split reader + writer), forward each NDJSON frame as a
+    Tauri event `sidecar-event`, bridge to the control socket for
+    `start` / `status` / `stop`, manage `desktop.json` read/write,
+    `paths_are_dirs` existence probe, `default_workspace_dir`,
+    `set_fs_scope` for the FS plugin.
   - **`src/log_file.rs`** — size-capped rotating log writer for
     `taco-desktop.log` + `llm-dump.log`.
 - **`scripts/stageSidecar.mjs`** — copies sidecar runtime artifacts
@@ -64,25 +116,25 @@ A release build produces platform-specific bundles (`.dmg` /
 
 | Command | Purpose |
 |---------|---------|
-| `workspace_ensure(cwd, debugMode, llmDumpToFile)` | Spawn the shared sidecar (or reuse the existing one); returns the captured first stdout line. |
-| `workspace_send(cwd, line)` | Write a single NDJSON line to the sidecar's stdin. `cwd` is API-compat only. |
-| `workspace_dispose_all()` | SIGTERM the sidecar; SIGKILL after 3 s. |
+| `workspace_ensure(cwd)` | Connect to the shared sidecar daemon (or prewarm one); idempotent. |
+| `workspace_send(cwd, line)` | Send a single NDJSON line over the daemon socket. `cwd` is API-compat only. |
+| `workspace_dispose_all()` | Tear down the desktop-side connection; the daemon keeps running until the tray Quit path or `taco stop` requests shutdown. |
 | `set_fs_scope(path)` | Grant the FS plugin recursive access to `path`. |
 | `desktop_config_read` / `desktop_config_write` | Read / write `~/.taco/desktop.json`. |
 | `default_workspace_dir()` | Return `$TACO_HOME/workspace`, mkdir if missing. |
 | `paths_are_dirs(paths)` | Bulk existence probe for workspace pruning. |
 
-The Rust layer is a byte pipe — it does not parse NDJSON. The
-React side does all frame parsing, routing, and dedup.
+The Rust layer forwards NDJSON frames verbatim; it does not parse them.
+The React side does all frame parsing, routing, dedup, and reconnect.
 
 ## Tauri events emitted
 
-- **`sidecar-event { line }`** — every stdout line from the
-  sidecar, forwarded verbatim. The frontend dispatcher decides
-  push vs response vs error.
-- **`sidecar-exited { code?, reason? }`** — process-level death
-  signal. The frontend rejects every pending RPC and re-prompts
-  the user to restart.
+- **`sidecar-event { line }`** — every NDJSON frame received from the
+  daemon's data socket, forwarded verbatim. The frontend dispatcher
+  decides push vs response vs error.
+- **`sidecar-exited { code?, reason? }`** — connection-level death. The
+  frontend rejects every in-flight RPC and starts the bounded reconnect
+  loop described in **Lifecycle: close ≠ quit** above.
 
 ## Overriding the sidecar spawn (e2e / dev)
 

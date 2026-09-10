@@ -23,6 +23,27 @@ allowBuilds:
   esbuild: true
 ```
 
+### 1.1 System service registration (release builds only)
+
+On the first launch of a non-debug desktop build, the setup flow runs
+`taco install` to register the sidecar as a system service so it
+survives logout / reboot. The CLI does this silently on first launch;
+nothing more is required from the user.
+
+| Platform | Registration | Auto-restart on crash |
+|---|---|---|
+| macOS | LaunchAgent in `~/Library/LaunchAgents/` with `RunAtLoad` | ✅ (`KeepAlive`) |
+| Windows | Task Scheduler task that runs at system startup (`ONSTART`) | ❌ (not configured in this release) |
+| Linux | `taco install` returns `unsupported platform` | ❌ |
+
+`taco uninstall` removes the registration but leaves user data
+(sessions, logs, `~/.taco/`) intact. Inspect state with `taco status`;
+remove with `taco stop` and `taco uninstall`.
+
+Linux users who need daemon-on-boot should write their own systemd
+user unit. `taco start` itself works on Linux — the daemon will run as
+long as the user is logged in.
+
 ## 2. Storage locations
 
 Taco reads / writes the following filesystem paths. The base is

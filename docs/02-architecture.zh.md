@@ -4,7 +4,7 @@
 
 ## 1. 协议层
 
-### 1.1 物理层：NDJSON over stdio
+### 1.1 物理层：NDJSON over stdio 或 daemon socket
 
 每行一个 JSON 帧：
 
@@ -14,12 +14,25 @@
 推送:  {"id":"<uuid>","method":"session.event","workspace":"/tmp/x","session":"<id>","params":{"event":<AgentHarnessEvent>}}
 ```
 
-为什么 NDJSON over stdio 而不是别的：
+Taco 在同一 NDJSON `line` 抽象上支持两种传输模式：
 
-- **零依赖**——只需 Node.js 自带 `readline` + `process.stdout`/`process.stdin`
+- **stdio 模式** —— 父子进程管道（`process.stdin` / `process.stdout`）。
+  每个客户端独占一个 sidecar 进程，生命周期跟父进程绑定。`@taco-ai/shared`
+  的 typed client 与各集成示例走的就是这条路径（见 §3.2）。
+- **daemon 模式** —— sidecar 作为常驻进程运行，通过 Unix domain socket
+  (`<runtime>/sidecar.sock`，Windows: `\\.\pipe\taco-sidecar`) 承载 NDJSON 流量，
+  并用独立的 control socket (`<runtime>/sidecar-ctl.sock`,
+  Windows: `\\.\pipe\taco-sidecar-ctl`) 处理 `start` / `status` / `stop`。
+  Tauri 桌面端和 `taco start` 走这条路径；详见 §3.3 与 §2.8。
+
+两种模式对调用方是透明的 —— typed client 不需要知道自己在哪条 transport 上。模式由启动方式决定（CLI 通过环境变量、桌面端通过 Tauri 配置）。
+
+为什么选 NDJSON：
+
+- **零依赖** —— stdio 模式只需 Node 自带 `readline` + `process.stdout`/`process.stdin`；daemon 模式只需一个 Unix socket reader。
 - **父子进程管道天然**——subprocess.stdin/.stdout 直接拿来用，不需要别的协议层
-- **人类可读**——调试时直接 `cat` 流能看到发生了什么
-- **可换 transport**——HTTP / Unix socket 是另外的 transport，NDJSON 的 `line` 抽象可以不变
+- **人类可读** —— 调试时直接 `cat` 流能看到发生了什么（stdio 模式）
+- **可换 transport**——HTTP / WebSocket 是另外的 transport，NDJSON 的 `line` 抽象可以不变
 
 ### 1.2 帧类型
 
@@ -287,10 +300,24 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
 
 ### 2.6 单进程作用域
 
-phase 1 是**单 sidecar 进程复用多 workspace/session**：
+sidecar 两种运行模式的隔离语义不同：
 
-- TUI / IDE 客户端如果只跑一个 workspace，1 个 sidecar 就够
-- 多 workspace 时：单进程内部按 `Map<cwd, WorkspaceRuntime>` 路由
+- **stdio 模式** —— 每个客户端独占一个 sidecar 进程，生命周期跟父进程绑定。
+  租户隔离 = 再起一个进程。
+- **daemon 模式** —— sidecar 作为常驻进程绑定到唯一的 control socket
+  （Unix: `<runtime>/sidecar-ctl.sock`，Windows: `\\.\pipe\taco-sidecar-ctl`）。
+  control socket 同时也是单实例锁：在同一 control endpoint 上重复
+  `taco start` 会复用既有 daemon，不会拉新进程。
+  因此 daemon 模式下的租户隔离是「换 control endpoint」，不是「再起一个进程」。
+  Unix 上意味着在每次 `taco start` 之前 export 不同的 `TACO_RUNTIME_DIR`，
+  让 data + control socket 落在不同目录；Windows 上 pipe 名是固定的，
+  不会随 `TACO_RUNTIME_DIR` 改变 —— 目前 CLI 不能在同一台机器上拉起第二个
+  daemon，需要独立用户或容器。
+
+同一个 daemon（daemon 模式）内部的路由：
+
+- 只有一个 workspace 的 TUI / IDE 客户端：仍接入同一 daemon
+- 多 workspace：单进程内部按 `Map<cwd, WorkspaceRuntime>` 路由
 - session 并发不受 workspace 限制：`SessionRegistry.attached` 按 `sessionId` 索引，一个 workspace 可同时挂载任意多个 active session
 - 唯一的并发闸门是 `SidecarServer.activeTurnCommands`，key 为 `(workspace, sessionId)`：同一 session 的第二个 turn 命令返回 `session_busy`，跨 session、跨 workspace 均不受影响。仅 `session.prompt` 与 `session.submitAnswers` 参与该闸门（`turnStart: true`）
 
@@ -341,20 +368,34 @@ sessionListModels(workspace, provider?): Promise<{models: ModelInfo[]}>
 
 ### 3.3 `@taco-ai/desktop` Tauri 骨架
 
+桌面端连接的是 **sidecar daemon**，不是 UI 持有的 stdio 子进程。
+daemon 生命周期由 `cli` 包与操作系统服务注册（如适用）共同管理；
+桌面端只负责 attach 到 data socket 并在断连时自动重连。
+
 - **Rust 后端 (`src-tauri/src/lib.rs`)**：
-  - `workspace_ensure(cwd)` — spawn 一个 sidecar 子进程（用 `tokio::process::Command`），按 cwd 路由存进 `HashMap<String, WorkspaceHandle>`
-  - `workspace_send(cwd, line)` — 写 NDJSON 到 stdin
-  - `workspace_dispose(cwd)` / `workspace_dispose_all()` — 杀进程
-  - 用 `tauri::Emitter` 把 stdout NDJSON 帧 emit 成 Tauri 事件 `sidecar-event`
+  - `workspace_ensure(cwd)` — 连接共享 sidecar daemon 的 NDJSON socket
+    （或预热一个）；幂等。桌面端不拉子进程、不走 stdin/stdout。
+  - `workspace_send(cwd, line)` — 把单条 NDJSON 帧写到 daemon 的 data socket。
+    `cwd` 仅为 API 兼容；sidecar 按协议里的 `params.workspace` 路由。
+  - `workspace_dispose_all()` — 断开桌面端的 socket 连接；daemon 继续运行，
+    直到托盘 Quit 或 `taco stop` 主动请求关闭。
+    完整的桌面端退出契约见 `clients/taco-desktop/README.md` 的
+    **Lifecycle: close ≠ quit** 一节。
+  - `set_fs_scope(path)` — 授予 FS plugin 路径访问
+  - `desktop_config_read` / `desktop_config_write` — 读写 `~/.taco/desktop.json`
+    （桌面端拥有的唯一文件）
+  - `default_workspace_dir` — 返回 `$TACO_HOME/workspace/` 并按需 `mkdir -p`
+  - `paths_are_dirs` — 批量存在性检查（用于 sidebar 本地存储中
+    失效 cwd 的剪枝）
+  - 把每条收到的 NDJSON 帧转发为 Tauri 事件 `sidecar-event { line }`
+  - socket 断开时发出 `sidecar-exited { code?, reason? }`，让 client
+    拒绝所有 pending RPC 并启动有界重连
+
 - **React 前端 (`src/`)**：
-  - `lib/sidecar.ts` — 封装 `invoke('workspace_ensure' / 'workspace_send' / ...)` 和 `listen('sidecar-event')`
-  - `lib/tacoClient.ts` — 基于 Tauri event 流做 typed client（跟 `@taco-ai/shared` 用法一样，但 spawn 在 Rust 层）
-  - `App.tsx` — 多 workspace sidebar + session list + chat pane（已能展示 push 增量）
-
-**Rust 端注意点**（已踩过坑）：
-
-- `#[tauri::command] async fn` 拿到的 `State<'_, ...>` 不能跨 `.await` hold lock — 否则 deadlock
-- 修正模式：在 `lock()` 内 clone 出所需的 `mpsc::Sender`、然后释放锁，再 `send().await`
+  - `lib/tacoClient.ts` — 在 Tauri transport 上的 typed `TacoClient`，
+    持有桌面端 README 描述的 reconnect 状态机
+  - `App.tsx` — workspace sidebar + session list + chat pane + settings
+    + plugins + skills + agents + channels + memory panes；共用一套状态机
 
 ## 4. 数据流示例
 

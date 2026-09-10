@@ -1,22 +1,36 @@
 # @taco-ai/cli
 
 Taco command-line launcher and daemon supervisor. Wraps `@taco-ai/sidecar`
-with user-facing subcommands (`start`, `status`, `install`, `upgrade`) and
-provides a single entry point the Tauri UI (and humans) can spawn the sidecar
-daemon through.
+with user-facing subcommands and provides a single entry point the Tauri
+desktop (and humans) can use to manage the sidecar daemon.
 
-## Subcommands (this PR)
+## Subcommands
 
-- `taco start` — spawn the sidecar daemon in socket-bridge mode. Prints the
-  NDJSON socket path on stdout (last line) so callers can connect.
+| Command | Purpose | Output |
+|---|---|---|
+| `taco start` | Spawn the sidecar daemon in socket-bridge mode (or reuse an existing healthy one). Daemonizes after writing its data + control socket paths. | NDJSON socket path on stdout (last line); exits once the daemon is up. |
+| `taco status` | Ping the control socket; report PID, uptime, protocol version, and instance id. | One-line summary on stdout; non-zero exit if no daemon is reachable. |
+| `taco stop` | Send a graceful shutdown to the control socket; wait, then SIGTERM / SIGKILL. | Removes the data socket + PID + start lock on success. |
+| `taco install` | Register the daemon as a system service so it survives reboots. macOS: LaunchAgent (`RunAtLoad` + `KeepAlive`). Windows: Task Scheduler `ONSTART` task. Linux: returns `unsupported platform`. | Writes the service definition; no stdout contract beyond the success line. |
+| `taco uninstall` | Remove the registered service. macOS: unloads + deletes the plist. Windows: deletes the Task Scheduler entry. Linux: no-op with a warning. | Removes the system registration; user data (sessions, logs, config) is **not** touched. |
+| `taco upgrade` | Download a new `@taco-ai/sidecar` release artifact, swap the binary, signal the daemon to restart. | Prints the installed version on stdout. |
 
-## Subcommands (later PRs)
+All commands write diagnostics to stderr. A non-zero exit indicates a failure
+of the operation itself (e.g. `taco stop` with no reachable daemon, `taco install`
+on Linux); `--help` is always supported.
 
-- `taco status` (PR2 follow-up / PR3): ping the control socket, report uptime.
-- `taco install` (PR3): write a launchd plist (macOS) / schtasks entry
-  (Windows) so the daemon survives reboot.
-- `taco upgrade` (PR4): download a new sidecar release artifact, swap binary,
-  signal the daemon to restart.
+## Platform capabilities
+
+| Capability | macOS | Windows | Linux |
+|---|---|---|---|
+| Spawn / connect to daemon | ✅ | ✅ | ✅ |
+| `taco status` / `taco stop` | ✅ | ✅ | ✅ |
+| `taco install` / `taco uninstall` (system service) | ✅ (LaunchAgent) | ✅ (Task Scheduler) | ❌ (unsupported) |
+| Auto-restart on crash (via the registered service) | ✅ (`KeepAlive`) | ❌ (not configured) | ❌ |
+
+Linux users who need daemon-on-boot must register the service themselves
+(e.g. systemd user unit). `taco start` works on Linux; the daemon will run
+as long as the user is logged in.
 
 ## Dev mode
 
@@ -25,3 +39,16 @@ checkout containing `pnpm-workspace.yaml`) to spawn the bundle via
 `tsx <repo>/packages/sidecar/src/index.ts` instead of the bundled
 `@taco-ai/sidecar-<platform>` artifact. Hot reload + TypeScript source paths
 in stack traces.
+
+## Endpoints
+
+| Platform | Data socket | Control socket |
+|---|---|---|
+| Unix | `$TACO_RUNTIME_DIR/sidecar.sock` | `$TACO_RUNTIME_DIR/sidecar-ctl.sock` |
+| Windows | `\\.\pipe\taco-sidecar` | `\\.\pipe\taco-sidecar-ctl` |
+
+The Windows pipe names are **fixed** and do not change with `TACO_RUNTIME_DIR`
+— so on Windows you cannot get a second daemon by pointing the CLI at a
+different runtime directory. The Unix layout follows the runtime directory,
+so Unix users can run isolated daemons by exporting a different
+`TACO_RUNTIME_DIR` before each `taco start`.

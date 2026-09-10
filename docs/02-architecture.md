@@ -27,7 +27,7 @@ The harness surface is still under construction:
 
 ## 1. Protocol layer
 
-### 1.1 Transport: NDJSON over stdio
+### 1.1 Transport: NDJSON over stdio or daemon socket
 
 Each line is one JSON frame:
 
@@ -37,12 +37,31 @@ response: {"id":"r1","ok":true,"result":{"cwd":"/tmp/x","sessionsRoot":"..."}}
 push:     {"id":"<uuid>","method":"session.event","workspace":"/tmp/x","session":"<id>","params":{"event":<AgentHarnessEvent>}}
 ```
 
-Why NDJSON over stdio rather than anything else:
+Taco supports two transport modes over the same NDJSON line abstraction:
 
-- **Zero dependencies** — only Node's built-in `readline` + `process.stdout` / `process.stdin`.
+- **stdio mode** — direct child-process pipes (`process.stdin` / `process.stdout`).
+  Each client owns its own sidecar process; lifetime is bound to the parent.
+  This is the path documented in §3.2 for the typed Node client and the
+  integration examples.
+- **daemon mode** — the sidecar runs as a long-lived process and accepts
+  multiple clients over a Unix domain socket (`<runtime>/sidecar.sock`,
+  Windows: `\\.\pipe\taco-sidecar`) for NDJSON traffic, with a separate
+  control socket (`<runtime>/sidecar-ctl.sock`, Windows: `\\.\pipe\taco-sidecar-ctl`)
+  for `start` / `status` / `stop`. The Tauri desktop and `taco start` use
+  this mode. See §3.3 for the desktop side and §2.6 for tenant isolation
+  semantics.
+
+The NDJSON `line` abstraction is identical across both modes — the
+typed client does not need to know which transport it sits on. Mode is
+chosen by how the sidecar is launched (env flags for the `cli`, Tauri
+config for the desktop).
+
+Why NDJSON rather than anything else:
+
+- **Zero dependencies** — only Node's built-in `readline` + `process.stdout` / `process.stdin` in stdio mode; a Unix socket reader in daemon mode.
 - **Natural fit for child-process pipes** — `subprocess.stdin/.stdout` are already there; no extra transport layer.
-- **Human-readable** — `cat` the stream to see what happened.
-- **Transport-swappable** — HTTP / Unix socket / WebSocket are alternate transports; the NDJSON `line` abstraction stays the same.
+- **Human-readable** — `cat` the stream to see what happened (stdio mode).
+- **Transport-swappable** — HTTP / WebSocket are alternate transports; the NDJSON `line` abstraction stays the same.
 
 ### 1.2 Frame types
 
@@ -316,11 +335,30 @@ change takes effect for newly-attached workspaces only. The desktop
 MCP settings pane provides an "Apply & restart" button that makes this
 explicit.
 
-### 2.8 Single-process scope
+### 2.8 Daemon scope and tenant isolation
 
-Phase 1 is **single sidecar process, many workspaces and sessions**:
+The runtime has two running modes, with different isolation semantics:
 
-- A TUI / IDE client that only uses one workspace: 1 sidecar.
+- **stdio mode** — each client owns its own sidecar process, lifetime
+  bound to the parent. Tenant isolation = start another process.
+- **daemon mode** — the sidecar runs as a long-lived process bound to a
+  single control socket (`<runtime>/sidecar-ctl.sock` on Unix,
+  `\\.\pipe\taco-sidecar-ctl` on Windows). The control socket also
+  serves as the single-instance lock: a second `taco start` against
+  the same control endpoint reuses the existing daemon rather than
+  spawning a new one. Tenant isolation in daemon mode is therefore
+  *another control endpoint*, not *another process*. On Unix, that
+  means exporting a different `TACO_RUNTIME_DIR` before each
+  `taco start` so the data + control sockets land in a different
+  directory. On Windows, the pipe names are fixed and do not change
+  with `TACO_RUNTIME_DIR` — there is no way to get a second daemon
+  through this CLI today; reach for a separate user account or
+  container if you need one.
+
+Within a single daemon (daemon mode), the inner routing looks like:
+
+- A TUI / IDE client that only uses one workspace: still talks to the
+  same daemon.
 - Multiple workspaces: one process, internal routing via
   `Map<cwd, WorkspaceRuntime>`.
 - Session concurrency is not bounded by workspace:
@@ -381,14 +419,22 @@ A frame that has neither is a `badFrame` warning.
 
 ### 3.3 `@taco-ai/desktop` Tauri shell
 
+The desktop connects to the **sidecar daemon**, not to a UI-owned stdio
+child. Daemon lifecycle is managed by the `cli` package and the OS
+service registration (when applicable); the desktop just attaches to
+the data socket and reconnects on failure.
+
 - **Rust backend (`src-tauri/src/lib.rs`)**:
-  - `workspace_ensure(cwd, debug_mode?, llm_dump_to_file?)` — spawn
-    a single shared sidecar process, store the writer. Subsequent
-    `workspace_ensure` calls reuse the same process.
-  - `workspace_send(cwd, line)` — write a single NDJSON line to the
-    sidecar's stdin. `cwd` is API-compat only; the sidecar routes
-    on `params.workspace` per the protocol.
-  - `workspace_dispose_all()` — close stdin, wait 3 s, SIGKILL.
+  - `workspace_ensure(cwd)` — connect to the shared sidecar daemon's NDJSON
+    socket (or prewarm one); idempotent. The desktop does not spawn a
+    child process or pipe stdin/stdout.
+  - `workspace_send(cwd, line)` — write a single NDJSON frame to the
+    daemon's data socket. `cwd` is API-compat only; the sidecar routes on
+    `params.workspace` per the protocol.
+  - `workspace_dispose_all()` — drop the desktop-side socket connection;
+    the daemon continues running until a tray Quit or `taco stop` requests
+    shutdown. See **Lifecycle: close ≠ quit** in `clients/taco-desktop/README.md`
+    for the full desktop shutdown contract.
   - `set_fs_scope(path)` — grant the FS plugin access to a path.
   - `desktop_config_read` / `desktop_config_write` — read / write
     `~/.taco/desktop.json` (the only file the desktop owns).
@@ -396,13 +442,15 @@ A frame that has neither is a `badFrame` warning.
     `mkdir -p` if missing.
   - `paths_are_dirs` — bulk check existence (used to prune
     invalid cwds in the sidebar's localStorage).
-  - Forwards every stdout line to a Tauri event `sidecar-event`.
-  - Forwards exit / SIGKILL via `sidecar-exited` so the client can
-    reject every pending RPC.
+  - Forwards every received NDJSON frame as a Tauri event
+    `sidecar-event { line }`.
+  - On socket loss, emits `sidecar-exited { code?, reason? }` so the
+    client can reject every pending RPC and start the bounded
+    reconnect loop.
 
 - **React frontend (`src/`)**:
-  - `lib/sidecar.ts` — `invoke('workspace_send')` + `listen('sidecar-event')`.
-  - `lib/tacoClient.ts` — typed `TacoClient` over the Tauri transport.
+  - `lib/tacoClient.ts` — typed `TacoClient` over the Tauri transport;
+    owns the reconnect state machine described in the desktop README.
   - `App.tsx` — workspace sidebar + session list + chat pane + settings
     + plugins + skills + agents + channels + memory panes; all driven
     by the same state machine.
