@@ -11,6 +11,16 @@
  * Always refuses to run with a dirty working tree unless `--allow-dirty`
  * is passed (the tag should point at a clean release commit).
  *
+ * Scope:
+ *   - desktop-v* → publish a GitHub Release with the Tauri bundle (DMG,
+ *     exe, portable) and surface it as "Latest". A GitHub Release is the
+ *     right home: users download from the Releases page.
+ *   - sidecar-v* → only push the tag so `release-sidecar.yml` runs and
+ *     publishes npm packages to the registry. Do NOT create a GitHub
+ *     Release for sidecar tags — the sidecar has no binary artifacts to
+ *     attach, and an empty Release page is noise. npm is the canonical
+ *     surface for the npm packages.
+ *
  * Usage:
  *   node scripts/release-tag.mjs 0.1.1              # dry-run, just print plan
  *   node scripts/release-tag.mjs 0.1.1 --push       # force-move + push
