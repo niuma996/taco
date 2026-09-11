@@ -22,18 +22,68 @@ const RISK_ORDER: Record<CommandRisk, number> = {
 /**
  * Exact commands (after normalization) that are considered read-only and safe.
  * Arguments must also be safe literals: no redirects, pipes, command
- * substitution, globs, semicolons, or backticks.
+ * substitution, globs, semicolons, or backticks. Tokens that mutate the
+ * filesystem or spawn processes live in {@link READ_ONLY_FORBIDDEN_FLAGS} and
+ * are rejected by {@link isStrictReadOnly} regardless of base.
  */
 const READ_ONLY = new Set([
     "pwd",
     "ls",
     "which",
+    "find",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "file",
+    "stat",
+    "du",
+    "df",
+    "echo",
+    "grep",
+    "diff",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "date",
+    "hostname",
+    "uname",
+    "whoami",
+    "id",
+    "md5sum",
+    "sha256sum",
+    "xxd",
+    "od",
     "git status",
     "git diff",
     "git log",
     "git show",
     "git branch",
     "git remote -v",
+]);
+
+/**
+ * Flags that mutate the filesystem or execute arbitrary commands. Listed
+ * here (rather than per-base) because flag values like `-mtime -7` or
+ * `-size +1k` legitimately start with `-`/`+` and a per-base whitelist
+ * cannot distinguish them from flags. None of the read-only commands other
+ * than `find` accept these flag names, so a global blacklist is safe.
+ */
+const READ_ONLY_FORBIDDEN_FLAGS: ReadonlySet<string> = new Set([
+    "-delete",
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    "-fprint",
+    "-fprint0",
+    "-fls",
+    "-fprintf",
 ]);
 
 const DESTRUCTIVE: Array<[RegExp, string]> = [
@@ -61,7 +111,7 @@ function normalize(command: string): string {
 
 const SHELL_METACHARACTERS = /[<>|;&$`\n(){}[\]*?]/;
 
-const SAFE_LITERAL = /^--?[A-Za-z0-9_-]+$|^[A-Za-z0-9_.-]+$/;
+const SAFE_LITERAL = /^--?[A-Za-z0-9_+/,+=-]+$|^[A-Za-z0-9_./,+=-]+$/;
 
 function containsShellSyntax(command: string): boolean {
     return SHELL_METACHARACTERS.test(command);
@@ -81,6 +131,15 @@ function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason
             reason: "command substitution may execute arbitrary code",
         };
     }
+    // Shell metacharacters change the base command's behavior (redirects,
+    // globs, subshells). A read-only base with a `>` redirect still writes,
+    // so report workspaceWrite instead of inheriting the base's risk.
+    if (containsShellSyntax(command)) {
+        return {
+            risk: "workspaceWrite",
+            reason: "shell metacharacters change the base command's behavior",
+        };
+    }
     for (const [pattern, reason] of PRIVILEGE_ESCAPE) {
         if (pattern.test(command)) return { risk: "privilegeEscape", reason };
     }
@@ -97,8 +156,18 @@ function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason
             reason: "may change remote state or send network data",
         };
     }
-    const token = command.match(/^[A-Za-z0-9._-]+(?:\s+[A-Za-z0-9._-]+)*/)?.[0] ?? "";
-    if (READ_ONLY.has(token)) return { risk: "readOnly", reason: "recognized read-only command" };
+    // Longest-prefix READ_ONLY match: mirrors isStrictReadOnly's base
+    // detection so `find . -name foo` reports the base command's risk
+    // (readOnly) instead of failing to find a multi-token entry.
+    const parts = command.split(/\s+/);
+    let matchedPrefix = "";
+    for (let i = 1; i <= parts.length; i++) {
+        const candidate = parts.slice(0, i).join(" ");
+        if (READ_ONLY.has(candidate)) matchedPrefix = candidate;
+    }
+    if (matchedPrefix) {
+        return { risk: "readOnly", reason: "recognized read-only command" };
+    }
     return { risk: "workspaceWrite", reason: "command may change the workspace" };
 }
 
@@ -144,10 +213,14 @@ export function isStrictReadOnly(command: string): boolean {
     // Read-only bases with mutating flags remain ask-only.
     if (READ_ONLY_BASES.has(base)) return false;
 
-    // Every remaining argument must be a simple literal flag/value.
+    // Every remaining argument must be a simple literal flag/value with no
+    // shell metacharacters. A small blacklist blocks flags that mutate state
+    // (mostly find's -delete / -exec / -fprint family); other read-only
+    // commands do not accept these flag names.
     for (let i = matchedTokens; i < parts.length; i++) {
         const part = parts[i] ?? "";
         if (containsShellSyntax(part)) return false;
+        if (READ_ONLY_FORBIDDEN_FLAGS.has(part)) return false;
         if (!SAFE_LITERAL.test(part)) return false;
     }
     return true;

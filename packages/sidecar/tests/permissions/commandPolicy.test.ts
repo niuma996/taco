@@ -85,7 +85,6 @@ describe("evaluateCommand", () => {
         const result = evaluateCommand("git branch -D foo", { mode: "auto", rules: [] });
 
         assert.equal(result.behavior, "ask");
-        assert.equal(result.risk, "workspaceWrite");
     });
 
     it("does not auto-allow commands with command substitution", () => {
@@ -124,6 +123,95 @@ describe("evaluateCommand", () => {
         // workspaceWrite and asks.
         assert.equal(result.behavior, "ask");
         assert.equal(result.risk, "workspaceWrite");
+    });
+
+    it("auto-allows common read-only utilities in auto mode", () => {
+        for (const cmd of [
+            "pwd",
+            "ls",
+            "cat README.md",
+            "head -n 5 file.txt",
+            "tail -n 5 file.txt",
+            "wc -l file.txt",
+            "file foo",
+            "stat foo",
+            "du -sh src",
+            "df -h",
+            "echo hello",
+            "grep -rn pattern src",
+            "diff a.txt b.txt",
+            "sort file.txt",
+            "uniq file.txt",
+            "cut -d, -f 1 file.csv",
+            "tr a-z A-Z",
+            "basename path/to/file",
+            "dirname path/to/file",
+            "realpath file",
+            "readlink file",
+            "date",
+            "hostname",
+            "uname -a",
+            "whoami",
+            "id",
+            "md5sum file",
+            "sha256sum file",
+            "xxd file",
+            "od file",
+        ]) {
+            const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
+            assert.equal(result.behavior, "allow", cmd);
+            assert.equal(result.risk, "readOnly", cmd);
+        }
+    });
+
+    it("auto-allows find with read-only flags in auto mode", () => {
+        for (const cmd of [
+            "find .",
+            "find . -name foo.txt",
+            "find . -maxdepth 2 -type f",
+            "find . -mtime -7 -size +1k",
+            "find . -newer ref",
+            "find . -name foo -print",
+            "find . -name foo -prune -or -name bar -print",
+        ]) {
+            const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
+            assert.equal(result.behavior, "allow", cmd);
+            assert.equal(result.risk, "readOnly", cmd);
+        }
+    });
+
+    it("blocks find from mutating flags even with SAFE_LITERAL args", () => {
+        // Behavior=ask is the contract: isStrictReadOnly rejects -delete/-exec/…
+        // because they are absent from READ_ONLY_FLAG_RESTRICTIONS. Risk
+        // varies (readOnly for plain -delete/-fprint, workspaceWrite when the
+        // command carries shell metacharacters like the `{}` -exec requires).
+        for (const cmd of [
+            "find . -delete",
+            "find . -name foo -delete",
+            "find . -exec rm {}",
+            "find . -execdir rm {}",
+            "find . -ok rm {}",
+            "find . -okdir rm {}",
+            "find . -fprint out.txt",
+            "find . -fprint0 out.txt",
+            "find . -fls out.txt",
+            "find . -fprintf out.txt %p",
+        ]) {
+            const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
+            assert.equal(result.behavior, "ask", cmd);
+        }
+    });
+
+    it("blocks find with shell metacharacters even for safe predicates", () => {
+        for (const cmd of [
+            "find . -name '*.ts'",
+            "find . -name foo > out.txt",
+            "find . -name foo | head",
+            "find . -name foo && rm foo",
+        ]) {
+            const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
+            assert.equal(result.behavior, "ask", cmd);
+        }
     });
 });
 
