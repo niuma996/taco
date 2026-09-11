@@ -74,6 +74,7 @@ export class ExtensionRegistry {
     private readonly _toolCallHooks: ToolCallHook[] = [];
     private readonly _toolResultHooks: ToolResultHookBuckets = { builtins: [], external: [] };
     private readonly _workspaceActivators: WorkspaceActivatorEntry[] = [];
+    private readonly _extensionSkillDirs: string[] = [];
     private readonly _extensionTagIndex: Map<string, Set<string>> = new Map();
     private readonly _report: { loaded: LoadedEntry[] } & Pick<
         RegistryReport,
@@ -120,6 +121,17 @@ export class ExtensionRegistry {
         activator: WorkspaceActivator,
     ): void {
         this._workspaceActivators.push({ source, extName, activator });
+    }
+
+    /**
+     * Record the skill directories an enabled builtin ships
+     * (`BuiltinManifest.skillDirs`, paths relative to `resourceRoot()`).
+     * Disabled builtins never reach this — `registerBuiltinExtensions` skips
+     * them — so their bundled skills are absent from the scan entirely rather
+     * than filtered out by name.
+     */
+    addExtensionSkillDirs(dirs: readonly string[]): void {
+        this._extensionSkillDirs.push(...dirs);
     }
 
     /**
@@ -206,6 +218,11 @@ export class ExtensionRegistry {
         return [...this._workspaceActivators];
     }
 
+    /** Skill dirs contributed by enabled builtins, in registration order. */
+    extensionSkillDirs(): readonly string[] {
+        return [...this._extensionSkillDirs];
+    }
+
     get report(): RegistryReport {
         return {
             loaded: [...this._report.loaded],
@@ -265,6 +282,9 @@ export async function registerBuiltinExtensions(
             //     (register runs addExtensionTag before this point)
             //   - a throwing register/activator lands the entry in `failed`
             //     only, never both `loaded` and `failed`
+            if (manifest.skillDirs) {
+                registry.addExtensionSkillDirs(manifest.skillDirs);
+            }
             const tags = registry.extensionTagsFor(manifest.name);
             registry.recordLoaded({
                 name: manifest.name,

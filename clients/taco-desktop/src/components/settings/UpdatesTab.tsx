@@ -1,5 +1,5 @@
 /**
- * UpdatesTab — Settings drawer "Updates" tab.
+ * UpdatesTab — Settings drawer "App" tab.
  *
  * Surfaces the desktop updater as a user-initiated check (no auto-popup
  * on cold start; the discoverability is the badge on the Settings

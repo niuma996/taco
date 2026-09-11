@@ -1,11 +1,14 @@
 /**
- * officecli builtin skill — structural load test.
+ * officecli bundled skill — structural load test.
  *
  * Guards against the skill being removed or its frontmatter drifting away
  * from the trigger-style description that the rest of taco's builtin skills
- * use. Body content is vendored from upstream and kept verbatim (see the
- * provenance note in SKILL.md), so the test does not assert on body prose —
- * that drifts with every officecli release and is owned upstream.
+ * use. The skill ships with the officeCli extension (declared via
+ * `BuiltinManifest.skillDirs`), so it lives under the extension's own
+ * directory rather than skills/builtin/. Body content is vendored from
+ * upstream and kept verbatim (see the provenance note in SKILL.md), so the
+ * test does not assert on body prose — that drifts with every officecli
+ * release and is owned upstream.
  */
 
 import assert from "node:assert/strict";
@@ -13,15 +16,27 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Skill } from "../../src/runtime/pi/types.ts";
+import type { Skill } from "../../../src/runtime/pi/types.ts";
 import {
     parseYamlFrontmatter,
     preloadSkillFrontmatter,
     readSkillFrontmatter,
-} from "../../src/skills/skillFrontmatter.ts";
+} from "../../../src/skills/skillFrontmatter.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SKILL_PATH = join(HERE, "..", "..", "src", "skills", "builtin", "officecli", "SKILL.md");
+const SKILL_PATH = join(
+    HERE,
+    "..",
+    "..",
+    "..",
+    "src",
+    "extensions",
+    "builtin",
+    "officeCli",
+    "skills",
+    "officecli",
+    "SKILL.md",
+);
 
 function body(): string {
     return readFileSync(SKILL_PATH, "utf-8");

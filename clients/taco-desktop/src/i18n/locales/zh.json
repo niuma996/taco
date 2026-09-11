@@ -292,10 +292,10 @@
     "mcpServerDisabled": "已禁用",
     "mcpServerDisabledHint": "sidecar 重启后生效",
     "tabSchedules": "定时任务",
-    "tabUpdates": "更新",
+    "tabUpdates": "应用",
     "updates": {
-      "title": "更新",
-      "desc": "检查桌面更新。新版本包含修复和功能，安装后会重启应用。",
+      "title": "应用",
+      "desc": "应用版本与桌面更新。新版本包含修复和功能，安装后会重启应用。",
       "currentVersion": "当前版本",
       "status": "状态",
       "checkNow": "立即检查",

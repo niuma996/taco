@@ -7,6 +7,7 @@
  *     lib/index.mjs           (esbuild ESM bundle)
  *     agents/builtin/*.md      (built-in agent definitions)
  *     skills/builtin/...      (built-in skills)
+ *     extensions/builtin/<name>/skills/...  (extension-bundled skills)
  *     manifest.json           (version, node, target, sha256)
  */
 
@@ -17,6 +18,7 @@ import {
     cpSync,
     existsSync,
     mkdirSync,
+    readdirSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -102,6 +104,21 @@ function main() {
     rmSync(join(outDir, "skills", "builtin"), { recursive: true, force: true });
     mkdirSync(join(outDir, "skills", "builtin"), { recursive: true });
     cpSync(SRC_SKILLS, join(outDir, "skills", "builtin"), { recursive: true });
+
+    // Extension-bundled skill dirs. BuiltinManifest.skillDirs are relative to
+    // resourceRoot(), which at runtime is this output dir — so each extension's
+    // skills/ subtree must land at extensions/builtin/<name>/skills. Clear the
+    // dest first so a removed extension leaves no stale skills behind.
+    const srcExtBuiltin = join(PKG_DIR, "src", "extensions", "builtin");
+    const outExtBuiltin = join(outDir, "extensions", "builtin");
+    rmSync(outExtBuiltin, { recursive: true, force: true });
+    for (const name of readdirSync(srcExtBuiltin)) {
+        const srcSkills = join(srcExtBuiltin, name, "skills");
+        if (!existsSync(srcSkills)) continue;
+        const destSkills = join(outExtBuiltin, name, "skills");
+        mkdirSync(dirname(destSkills), { recursive: true });
+        cpSync(srcSkills, destSkills, { recursive: true });
+    }
 
     // Node binary: TACO_NODE_RUNTIME override > process.execPath (current process Node).
     const sourceNode = process.env.TACO_NODE_RUNTIME ?? process.execPath;

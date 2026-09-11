@@ -44,4 +44,12 @@ export interface BuiltinManifest {
      * invoked once per workspace by `activateExtensions`.
      */
     readonly activator?: () => WorkspaceActivator | Promise<WorkspaceActivator>;
+    /**
+     * Skill directories this extension ships, each a path relative to
+     * `resourceRoot()` (e.g. "extensions/builtin/officeCli/skills"). Appended
+     * to the skill scan after `defaultSkillDirs` when the extension is enabled,
+     * so disabling the extension removes its bundled skills along with the rest
+     * of its contributions. Omitting this means the extension ships no skills.
+     */
+    readonly skillDirs?: readonly string[];
 }

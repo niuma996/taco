@@ -311,6 +311,22 @@ export function defaultSkillDirs(cwd: string): SkillDirInput[] {
 }
 
 /**
+ * Resolve extension-declared skill directories (`BuiltinManifest.skillDirs`,
+ * each a path relative to `resourceRoot()`) into scan inputs, for appending
+ * after `defaultSkillDirs`.
+ *
+ * Appended last so a user skill of the same name still wins, and tagged
+ * `source: "builtin"`: they ship with taco, are never watched for hot reload,
+ * and land in the skills.list "builtin" bucket. Only enabled extensions
+ * declare them — a disabled extension's directories are never collected, so
+ * its bundled skills disappear with it while a user's own copy is untouched.
+ */
+export function extensionSkillDirInputs(dirs: readonly string[]): SkillDirInput[] {
+    const fwd = (p: string) => p.replace(/\\/g, "/");
+    return dirs.map((dir) => ({ path: fwd(resolvePath(resourceRoot(), dir)), source: "builtin" }));
+}
+
+/**
  * Default sessionsRoot resolution.
  *
  * Priority (later overrides earlier):

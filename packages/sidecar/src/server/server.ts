@@ -62,8 +62,10 @@ import { makeImSessionsRoot } from "../channels/virtualWorkspace.ts";
 import { defaultAgentDirs } from "../config/agentDirs.ts";
 import {
     defaultSkillDirs,
+    extensionSkillDirInputs,
     type ResolvedCompaction,
     readGlobalConfig,
+    type SkillDirInput,
     saveGlobalConfig,
 } from "../config/config.ts";
 import { tacoHome } from "../config/tacoHome.ts";
@@ -951,9 +953,18 @@ export class SidecarServer implements ServerRpcSurface {
         // string". Combined with `defaultSkillDirs` (also forward-slash
         // normalized) both sides of the comparison agree.
         const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
+        // Enabled builtins may ship their own skill dirs (BuiltinManifest
+        // .skillDirs). They are appended after defaultSkillDirs so a user skill
+        // of the same name still wins by first-wins, and a disabled builtin
+        // contributes nothing — its dirs are never collected (see
+        // registerBuiltinExtensions).
+        const skillDirs: SkillDirInput[] = [
+            ...defaultSkillDirs(fsCwd),
+            ...extensionSkillDirInputs(this.extensionRegistry?.extensionSkillDirs() ?? []),
+        ];
         const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
             skillEnv,
-            defaultSkillDirs(fsCwd),
+            skillDirs,
             (skill, source): TacoSkill => ({ ...skill, source }),
             harnessContext,
         );

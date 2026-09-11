@@ -293,10 +293,10 @@
     "mcpServerDisabledHint": "Takes effect after sidecar restart",
     "tabSchedules": "Schedules",
     "sectionNavAria": "Settings sections",
-    "tabUpdates": "Updates",
+    "tabUpdates": "App",
     "updates": {
-      "title": "Updates",
-      "desc": "Check for desktop updates. New versions ship fixes and features; the app restarts after install.",
+      "title": "App",
+      "desc": "App version and desktop updates. New versions ship fixes and features; the app restarts after install.",
       "currentVersion": "Current version",
       "status": "Status",
       "checkNow": "Check now",
