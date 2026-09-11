@@ -41,6 +41,7 @@
       "generated/sidecar/lib/index.mjs": "sidecar/lib/index.mjs",
       "generated/sidecar/agents": "sidecar/agents",
       "generated/sidecar/skills": "sidecar/skills",
+      "generated/sidecar/extensions": "sidecar/extensions",
       "generated/sidecar/manifest.json": "sidecar/manifest.json",
       "generated/cli/taco.mjs": "cli/taco.mjs"
     },

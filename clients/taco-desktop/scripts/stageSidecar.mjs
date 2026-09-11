@@ -103,8 +103,10 @@ function main() {
     mkdirSync(binariesDir, { recursive: true });
     mkdirSync(generatedDir, { recursive: true });
 
-    // Copy lib / agents / skills → generated/sidecar/{lib,agents,skills}
-    const targets = ["lib", "agents", "skills", "manifest.json"];
+    // Copy lib / agents / skills / extensions → generated/sidecar/{lib,agents,skills,extensions}.
+    // `extensions/` carries each BuiltinManifest.skillDirs tree (e.g. officeCli's bundled
+    // SKILL.md); omitting it ships the extension as loaded but with no discoverable skills.
+    const targets = ["lib", "agents", "skills", "extensions", "manifest.json"];
     for (const name of targets) {
         const src = join(runtimeTriple, name);
         if (!existsSync(src)) {
