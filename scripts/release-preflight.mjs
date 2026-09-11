@@ -107,13 +107,16 @@ check("artifact-storage", () => {
         `  artifacts: ${fmt(usage.artifacts)}GB | cache: ${fmt(usage.cache)}GB | total: ${fmt(usage.total)}GB`,
     );
     // GitHub Free private repo: 500MB artifact + 2GB cache (combined model varies
-    // by plan). Warn above 400MB total — releases often push 200-500MB of build
-    // artifacts and we want a soft signal, not a hard error.
+    // by plan). Soft signal only — exceeding the limit will eventually cause
+    // the publish job to fail, but we don't gate on it here so a single
+    // backlog of old artifacts can't block a release. The publish step will
+    // surface the real failure if GitHub rejects the upload.
     if (usage.total > 400 * 1024 ** 2) {
-        throw new Error(
-            `artifact storage at ${fmt(usage.total)}GB; clean old artifacts before release ` +
-                "(Settings → Actions → General → Artifact and log retention)",
+        console.log(
+            `  WARN  artifact storage at ${fmt(usage.total)}GB; consider cleaning old ` +
+                "artifacts (Settings → Actions → General → Artifact and log retention)",
         );
+        return;
     }
     console.log("  under 400MB threshold — OK");
 });
