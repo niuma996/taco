@@ -1900,9 +1900,9 @@ export interface SharedSidecarDeps {
     /** Daemon-resident IM host — see SidecarServerOptions.imHost. */
     imHost?: ServerRpcSurface;
     /**
-     * Process-level client-sink fan-out registry (Phase 2). Populated by
-     * `runDaemon` so every NDJSON connection server registers its transport
-     * and the resident can push IM frames to every connected desktop.
+     * Process-level client-sink fan-out registry. Populated by `runDaemon`
+     * so every NDJSON connection server registers its transport and the
+     * resident can push IM frames to every connected desktop.
      */
     clientSinkRegistry?: ClientSinkRegistry;
     /**
