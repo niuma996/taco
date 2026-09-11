@@ -96,6 +96,12 @@ main {
 .session-info.empty {
     font-style: italic;
 }
+/* In the no-active-session bar there is no .session-info-time (the auto-margin
+   element that pins the right-hand icon cluster). The file-tree toggle stays
+   visible regardless of session state, so it pins itself right here. */
+.session-info.empty .session-info-files {
+    margin-left: auto;
+}
 .session-info-id {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: var(--fg);

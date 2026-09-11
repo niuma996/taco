@@ -98,11 +98,28 @@ export function SessionInfo({
             <span>{t("session.sidebarLabel")}</span>
         </button>
     );
+    // File-tree drawer toggle. Suppressed for IM conversations (no filesystem
+    // to browse). Independent of session state — it browses the workspace, so
+    // it also renders in the no-active-session (new chat) state. aria-pressed
+    // mirrors tasks so the two right-side icons track their panel state.
+    const filesButton = onToggleFiles && !isIm && (
+        <button
+            type="button"
+            className="session-info-files"
+            title={t("files.buttonLabel")}
+            aria-label={t("files.buttonLabel")}
+            aria-pressed={filesOpen ?? false}
+            onClick={() => onToggleFiles()}
+        >
+            <FolderTree size={14} aria-hidden="true" />
+        </button>
+    );
     if (!activeId) {
         return (
             <div className="session-info empty">
                 {toggle}
                 {t("session.noActiveSession")}
+                {filesButton}
             </div>
         );
     }
@@ -192,21 +209,7 @@ export function SessionInfo({
                     )}
                 </button>
             )}
-            {onToggleFiles && !isIm && (
-                // File-tree drawer toggle. Suppressed for IM conversations
-                // (no filesystem to browse). aria-pressed mirrors tasks so the
-                // two right-side icons visually track their panel state.
-                <button
-                    type="button"
-                    className="session-info-files"
-                    title={t("files.buttonLabel")}
-                    aria-label={t("files.buttonLabel")}
-                    aria-pressed={filesOpen ?? false}
-                    onClick={() => onToggleFiles()}
-                >
-                    <FolderTree size={14} aria-hidden="true" />
-                </button>
-            )}
+            {filesButton}
         </div>
     );
 }
