@@ -237,10 +237,56 @@ export interface SteerParams {
     workspace: WorkspaceId;
     sessionId: SessionId;
     text: string;
+    /** Images attached to the steering message (pi 0.85 supports image parts on steer). */
+    images?: ImageInput[];
     /**
      * Desktop UI language for THIS steer. Same semantics as PromptParams.uiLocale.
      */
     uiLocale?: SupportedLocale;
+}
+
+/**
+ * `session.steer` / `session.followUp` result. Both are pure enqueues: with no
+ * active run the message would sit in the lane inbox silently until the next
+ * prompt, so the server reports which side of that line the call landed on and
+ * the client falls back to `session.prompt` when idle.
+ */
+export type SteerResult =
+    | {
+          /** A run is in flight and will consume the message at a boundary. */
+          mode: "queued";
+          /**
+           * The queue entry just written. Clients key their optimistic queue row
+           * on this so the `queue_update` push reconciles by identity — matching
+           * on message text instead conflates two identical messages.
+           */
+          entryId: string;
+      }
+    | { mode: "idle" };
+
+/**
+ * Params for `session.followUp`. Identical wire shape to steer — the two differ
+ * only in when pi consumes the entry, not in what the caller sends.
+ */
+export type FollowUpParams = SteerParams;
+
+/**
+ * `session.followUp` result. Same contract as steer: pi's queue write returns
+ * the same `{ entryId }` either way.
+ */
+export type FollowUpResult = SteerResult;
+
+/** Params for `session.cancelQueued` — remove one not-yet-consumed queue entry. */
+export interface CancelQueuedParams {
+    workspace: WorkspaceId;
+    sessionId: SessionId;
+    /** entryId from the queue_update push, or from a steer result's echo. */
+    entryId: string;
+}
+
+/** `session.cancelQueued` result — mirrors pi's CancelQueuedResult kind. */
+export interface CancelQueuedResult {
+    kind: "cancelled" | "already_consumed" | "not_found";
 }
 
 export interface AbortParams {
@@ -251,6 +297,16 @@ export interface AbortParams {
 /** Explicit outcome for an idempotent cancellation request. */
 export interface AbortResult {
     status: "aborted" | "not_running";
+    /**
+     * Text of steering messages the abort drained from the lane inbox, in
+     * drain order, with empty (image-only) messages omitted. Present — possibly
+     * as an empty array — when status is "aborted"; absent entirely when status
+     * is "not_running". Clients restore these into the composer so an
+     * interrupted steer is not lost.
+     */
+    discardedSteer?: string[];
+    /** Same contract as discardedSteer, for pi's separate follow-up queue. */
+    discardedFollowUp?: string[];
 }
 
 export interface DeleteSessionParams {

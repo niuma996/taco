@@ -1,6 +1,5 @@
 /**
- * applyEventToMessages — apply a single session event to the messages list,
- * returning new messages + a pending-clear flag.
+ * applyEventToMessages — apply a single session event to the messages list.
  *
  * Design notes:
  *  - Pure: doesn't read external state. All dependencies (messages /
@@ -9,6 +8,10 @@
  *  - Immutability: never mutates the input `messages`; returns a new array.
  *  - No unstable time sources (Date.now, etc.) — callers pass `now` so tests
  *    stay deterministic.
+ *  - Messages only: run-lifecycle (run_start / run_end) and queue events
+ *    (queue_update / operation_abort) are handled by the reducer itself —
+ *    they key per session, so they must also apply to background sessions
+ *    whose message stream is dropped by the activeSession guard.
  *
  * Protocol quirk: `assistantMessageEvent` is a direct field on
  * message_update events (sibling of `message`), NOT under `ev.message`.
@@ -76,18 +79,11 @@ export interface ApplyEventOpts {
 export interface ApplyEventResult {
     /** Post-event messages list (may share reference with input when nothing changed). */
     messages: UiMessage[];
-    /**
-     * True when agent_end / turn_end was received (so UI can flip `pending`
-     * off); other events pass through `prevPending` (caller merges itself).
-     */
-    clearPending: boolean;
 }
 
-/**
- * Apply a single session event to the messages list, producing new messages
- * and a pending-clear flag. Dispatches to a per-type handler; terminal events
- * (agent_end / turn_end) only flip `clearPending`.
- */
+/** Apply a single session event to the messages list. Dispatches to a per-type
+ *  handler; event types that don't touch the message list fall through
+ *  unchanged. */
 export function applyEventToMessages(
     messages: UiMessage[],
     ev: SessionEventLike,
@@ -106,12 +102,10 @@ export function applyEventToMessages(
             return handleToolUpdate(messages, ev);
         case "tool_end":
             return handleToolEnd(messages, ev, opts);
-        case "agent_end":
-        case "turn_end":
-            return { messages, clearPending: true };
         default:
-            // Unknown event type — leave messages untouched, don't clear pending.
-            return { messages, clearPending: false };
+            // Everything else (run_start / run_end / turn_end / queue_update /
+            // operation_abort / …) doesn't touch the message list.
+            return { messages };
     }
 }
 
@@ -120,16 +114,15 @@ function handleMessageStart(
     ev: Extract<SessionEventLike, { type: "message_start" }>,
     opts: ApplyEventOpts,
 ): ApplyEventResult {
-    if (ev.message?.role !== "assistant") return { messages, clearPending: false };
+    if (ev.message?.role !== "assistant") return { messages };
     const ts = String(ev.message.timestamp ?? opts.now);
     const id = `live-asst-${ts}`;
-    if (messages.some((x) => x.id === id)) return { messages, clearPending: false };
+    if (messages.some((x) => x.id === id)) return { messages };
     return {
         messages: [
             ...messages,
             { id, kind: "assistant", text: "", ts: opts.now, tools: [], thinking: [] },
         ],
-        clearPending: false,
     };
 }
 
@@ -138,20 +131,20 @@ function handleMessageUpdate(
     ev: Extract<SessionEventLike, { type: "message_update" }>,
     opts: ApplyEventOpts,
 ): ApplyEventResult {
-    if (ev.message?.role !== "assistant") return { messages, clearPending: false };
+    if (ev.message?.role !== "assistant") return { messages };
     const ts = String(ev.message.timestamp ?? "");
     const idx = messages.findIndex((x) => x.kind === "assistant" && x.id === `live-asst-${ts}`);
-    if (idx < 0) return { messages, clearPending: false };
+    if (idx < 0) return { messages };
     const sub: AssistantSubEvent | undefined = ev.assistantMessageEvent;
-    if (!sub) return { messages, clearPending: false };
+    if (!sub) return { messages };
     // Clone the assistant bubble before mutating, to keep the pure-function contract.
     const target = messages[idx];
-    if (target?.kind !== "assistant") return { messages, clearPending: false };
+    if (target?.kind !== "assistant") return { messages };
     const cloned = cloneAssistant(target);
     applyAssistantSubEvent(cloned, sub, opts);
     const next = messages.slice();
     next[idx] = cloned;
-    return { messages: next, clearPending: false };
+    return { messages: next };
 }
 
 function handleMessageEnd(
@@ -160,11 +153,10 @@ function handleMessageEnd(
     opts: ApplyEventOpts,
 ): ApplyEventResult {
     const m = ev.message;
-    if (!m) return { messages, clearPending: false };
+    if (!m) return { messages };
     if (m.role === "user") {
         const id = `live-user-${m.timestamp ?? opts.now}`;
-        if (messages.some((existing) => existing.id === id))
-            return { messages, clearPending: false };
+        if (messages.some((existing) => existing.id === id)) return { messages };
         // Server-pushed user message snapshots can also carry image parts —
         // extract them onto UiMessage.images so history shows them in the UI.
         // Note: optimistic-pushed user bubbles already have attachments written;
@@ -198,7 +190,7 @@ function handleMessageEnd(
                 ts: opts.now,
                 ...(images.length > 0 ? { images } : {}),
             };
-            return { messages: next, clearPending: false };
+            return { messages: next };
         }
         return {
             messages: [
@@ -211,7 +203,6 @@ function handleMessageEnd(
                     ...(images.length > 0 ? { images } : {}),
                 },
             ],
-            clearPending: false,
         };
     }
     if (m.role === "assistant") {
@@ -227,11 +218,10 @@ function handleMessageEnd(
                     ...messages,
                     { id, kind: "assistant", text, ts: opts.now, tools: [], thinking },
                 ],
-                clearPending: false,
             };
         }
         const target = messages[idx];
-        if (target?.kind !== "assistant") return { messages, clearPending: false };
+        if (target?.kind !== "assistant") return { messages };
         const cloned = cloneAssistant(target);
         cloned.text = textFromMessage(m);
         for (let i = 0; i < (m.content?.length ?? 0); i++) {
@@ -244,9 +234,9 @@ function handleMessageEnd(
         }
         const next = messages.slice();
         next[idx] = cloned;
-        return { messages: next, clearPending: false };
+        return { messages: next };
     }
-    return { messages, clearPending: false };
+    return { messages };
 }
 
 function handleToolStart(
@@ -268,7 +258,7 @@ function handleToolStart(
         const idx = messages.lastIndexOf(assistant);
         const next = messages.slice();
         next[idx] = cloned;
-        return { messages: next, clearPending: false };
+        return { messages: next };
     }
     return {
         messages: [
@@ -280,7 +270,6 @@ function handleToolStart(
                 ts: opts.now,
             },
         ],
-        clearPending: false,
     };
 }
 
@@ -290,18 +279,18 @@ function handleToolUpdate(
 ): ApplyEventResult {
     const toolCallId = ev.toolCallId ?? "";
     const assistant = findLastAssistant(messages);
-    if (!assistant) return { messages, clearPending: false };
+    if (!assistant) return { messages };
     const t = assistant.tools.find((x) => x.id === toolCallId);
-    if (!t || ev.partialResult === undefined) return { messages, clearPending: false };
+    if (!t || ev.partialResult === undefined) return { messages };
     const cloned = cloneAssistant(assistant);
     const clonedTool = cloned.tools.find((x) => x.id === toolCallId);
-    if (!clonedTool) return { messages, clearPending: false };
+    if (!clonedTool) return { messages };
     clonedTool.resultText =
         typeof ev.partialResult === "string" ? ev.partialResult : safeStringify(ev.partialResult);
     const idx = messages.lastIndexOf(assistant);
     const next = messages.slice();
     next[idx] = cloned;
-    return { messages: next, clearPending: false };
+    return { messages: next };
 }
 
 function handleToolEnd(
@@ -323,7 +312,6 @@ function handleToolEnd(
                     ts: opts.now,
                 },
             ],
-            clearPending: false,
         };
     }
     const t = assistant.tools.find((x) => x.id === toolCallId);
@@ -338,12 +326,11 @@ function handleToolEnd(
                     ts: opts.now,
                 },
             ],
-            clearPending: false,
         };
     }
     const cloned = cloneAssistant(assistant);
     const clonedTool = cloned.tools.find((x) => x.id === toolCallId);
-    if (!clonedTool) return { messages, clearPending: false };
+    if (!clonedTool) return { messages };
     clonedTool.status = ev.isError ? "error" : "ok";
     // For tool cards embedded in assistant: store the raw result text (matches
     // the history path) and let the renderer handle truncation. We
@@ -387,7 +374,7 @@ function handleToolEnd(
     const idx = messages.lastIndexOf(assistant);
     const next = messages.slice();
     next[idx] = cloned;
-    return { messages: next, clearPending: false };
+    return { messages: next };
 }
 
 /**

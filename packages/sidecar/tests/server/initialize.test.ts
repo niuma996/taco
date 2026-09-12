@@ -74,7 +74,7 @@ describe("initialize handshake (stdio boundary)", () => {
         // v2 dropped the `sidecar.hello` push frame; the hello-shaped
         // identity fields now travel on the initialize response.
         assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
-        assert.deepEqual(result.protocolVersion, { major: 2, minor: 0 });
+        assert.deepEqual(result.protocolVersion, { major: 2, minor: 1 });
         assert.equal(typeof result.instanceId, "string");
         assert.equal(typeof result.pid, "number");
     });
@@ -113,7 +113,7 @@ describe("initialize handshake (stdio boundary)", () => {
 
     it("rejects a client minor newer than the server", async () => {
         const { transport } = await bootServer();
-        const resp = await sendLine(transport, initializeFrame("init-future", 1));
+        const resp = await sendLine(transport, initializeFrame("init-future", 2));
         assert.equal(resp.ok, false);
         if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
     });

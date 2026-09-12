@@ -18,12 +18,14 @@ import { useEffect, useRef } from "react";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { EmptyChatState } from "../components/EmptyChatState";
 import { Message } from "../components/Message";
+import { QueueBar } from "../components/QueueBar";
 import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
 import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
+import type { QueuedUiItem } from "../lib/chat/chatUtils";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import { MAX_ATTACHMENTS } from "../lib/imageAttachment";
 
@@ -31,7 +33,21 @@ export interface ChatPaneProps {
     ws: WorkspaceState | undefined;
     input: string;
     attachments: ImageInput[];
-    pending: boolean;
+    /**
+     * Anything in flight that warrants a Stop button: the active session's run
+     * OR agent-tool cards streaming from background sessions.
+     */
+    busy: boolean;
+    /**
+     * The active session has a turn in flight (run_start without its run_end).
+     * Unlocks the composer: Enter / the send button deliver the text as an
+     * in-run steer instead of starting a new turn.
+     */
+    runInFlight: boolean;
+    /** Not-yet-consumed steer/followUp entries for the active session (QueueBar). */
+    queuedItems: QueuedUiItem[];
+    /** Cancel one queued entry (QueueBar row cancel button). */
+    onCancelQueued: (item: QueuedUiItem) => void;
     /** Sidebar collapsed state + toggle, surfaced as a button on the session-info bar. */
     sidebarCollapsed: boolean;
     onToggleSidebar: () => void;
@@ -93,7 +109,10 @@ export function ChatPane(props: ChatPaneProps) {
         onToggleSidebar,
         input,
         attachments,
-        pending,
+        busy,
+        runInFlight,
+        queuedItems,
+        onCancelQueued,
         compacting,
         contextIndicator,
         onInputChange,
@@ -239,13 +258,14 @@ export function ChatPane(props: ChatPaneProps) {
                 awaitCompactionEnd already polls before the next send, so this
                 client-side lock mainly protects against rapid double-clicks
                 racing the server's wait window. */}
-            {compacting && !pending && (
+            {compacting && !busy && (
                 <output className="input-status input-status--compacting">
                     <span className="input-status__dot" aria-hidden="true" />
                     <span>{t("input.compactingNotice")}</span>
                 </output>
             )}
             <footer className="input">
+                <QueueBar items={queuedItems} onCancel={onCancelQueued} />
                 <div className="input-card">
                     {attachments.length > 0 && (
                         <div className="attachment-bar">
@@ -280,14 +300,17 @@ export function ChatPane(props: ChatPaneProps) {
                         value={input}
                         onChange={(e) => onInputChange(e.target.value)}
                         onPaste={handlePaste}
-                        disabled={pending || compacting}
+                        disabled={compacting}
                         onKeyDown={(e) => {
                             // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
                             // keyCode === 229 is a WebKit legacy fallback for older versions.
                             if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                             if (e.key === "Enter" && !e.shiftKey) {
                                 e.preventDefault();
-                                if (!pending && !compacting && canSend) {
+                                // The composer stays unlocked during a run: Enter
+                                // delivers the text as an in-run steer. Only a
+                                // compaction locks it.
+                                if (!compacting && canSend) {
                                     // Reset the textarea height before sending so the input snaps back to a
                                     // single line ahead of the React re-render — avoids a
                                     // single-frame flicker of the multi-line state.
@@ -300,7 +323,7 @@ export function ChatPane(props: ChatPaneProps) {
                             }
                         }}
                         placeholder={
-                            pending
+                            runInFlight
                                 ? t("input.placeholderRunning")
                                 : compacting
                                   ? t("input.placeholderCompacting")
@@ -327,9 +350,10 @@ export function ChatPane(props: ChatPaneProps) {
                             aria-label={t("input.attachImages")}
                             title={t("input.attachImages")}
                             onClick={() => fileInputRef.current?.click()}
-                            disabled={
-                                pending || compacting || attachments.length >= MAX_ATTACHMENTS
-                            }
+                            // Unlocked during a run: steer passthrough carries images
+                            // (session.steer accepts `images`). Compaction still locks —
+                            // its handler refuses new input until the compaction settles.
+                            disabled={compacting || attachments.length >= MAX_ATTACHMENTS}
                         >
                             <ImageIcon size={16} aria-hidden="true" />
                         </button>
@@ -343,8 +367,8 @@ export function ChatPane(props: ChatPaneProps) {
                                     defaultThinkingLevelForNewSession(getGlobalConfig().global)
                                 }
                                 onThinkingChange={onLevelChange}
-                                disabled={pending}
-                                pendingNote={pending}
+                                disabled={busy}
+                                pendingNote={busy}
                                 onOpen={onRefreshModels}
                             />
                         )}
@@ -358,7 +382,7 @@ export function ChatPane(props: ChatPaneProps) {
                                     className="input-context-indicator"
                                 />
                             )}
-                            {pending ? (
+                            {(busy || compacting) && (
                                 <button
                                     type="button"
                                     className="prompt-button stop"
@@ -367,7 +391,10 @@ export function ChatPane(props: ChatPaneProps) {
                                     <Square size={16} aria-hidden="true" />
                                     {t("input.stop")}
                                 </button>
-                            ) : (
+                            )}
+                            {runInFlight && (
+                                // Steer send: coexists with Stop so an in-run
+                                // message and an abort are both one click away.
                                 <button
                                     type="button"
                                     className="prompt-button send"
@@ -378,7 +405,28 @@ export function ChatPane(props: ChatPaneProps) {
                                         }
                                         onSend();
                                     }}
-                                    disabled={!canSend || pending || compacting}
+                                    disabled={!canSend || compacting}
+                                >
+                                    <ArrowUp size={16} aria-hidden="true" />
+                                    {t("input.sendSteer")}
+                                </button>
+                            )}
+                            {!runInFlight && !compacting && (
+                                // Background agent-tool activity (`busy` without
+                                // `runInFlight`) still allows a normal prompt: the
+                                // active session is idle. Without this branch that
+                                // state had Enter but no send button.
+                                <button
+                                    type="button"
+                                    className="prompt-button send"
+                                    onClick={() => {
+                                        const el = textareaRef.current;
+                                        if (el) {
+                                            el.style.height = "auto";
+                                        }
+                                        onSend();
+                                    }}
+                                    disabled={!canSend}
                                 >
                                     <ArrowUp size={16} aria-hidden="true" />
                                     {t("input.send")}

@@ -96,6 +96,8 @@ export default function App() {
         beginPendingNewSession,
         openImConversation,
         sendPrompt,
+        steerPrompt,
+        cancelQueued,
         abortPrompt,
         setSessionModel,
         setSessionLevel,
@@ -103,6 +105,12 @@ export default function App() {
     } = wsApi;
 
     const activeSid = ws?.activeSession;
+    // runInFlight = the active session has a turn in flight (run_start without
+    // its run_end). busy additionally covers agent-tool cards streaming from
+    // background sessions: Stop stays visible for those, but the composer only
+    // switches to steer mode on runInFlight.
+    const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
+    const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
     const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
 
     // Compaction-finished push → toast + refresh ratio + clear one-shot state.
@@ -567,13 +575,14 @@ export default function App() {
                                         }
                                         input={input}
                                         attachments={attachments}
-                                        pending={
-                                            Boolean(
-                                                ws?.activeSession
-                                                    ? ws.pendingBySessionId[ws.activeSession]
-                                                    : false,
-                                            ) || Object.keys(ws?.agentToolPending ?? {}).length > 0
+                                        busy={busy}
+                                        runInFlight={runInFlight}
+                                        queuedItems={
+                                            activeSid
+                                                ? (ws?.queuedBySessionId[activeSid] ?? [])
+                                                : []
                                         }
+                                        onCancelQueued={(item) => void cancelQueued(item.id)}
                                         compacting={contextInfo.compacting}
                                         contextIndicator={{
                                             info: contextInfo.info,
@@ -595,12 +604,27 @@ export default function App() {
                                             if (textareaRef.current) {
                                                 textareaRef.current.style.height = "auto";
                                             }
-                                            if (!(await sendPrompt(text, imgs))) {
+                                            const send = runInFlight ? steerPrompt : sendPrompt;
+                                            if (!(await send(text, imgs))) {
                                                 setInput(text);
                                                 setAttachments(imgs);
                                             }
                                         }}
-                                        onAbort={() => void abortPrompt()}
+                                        onAbort={() => {
+                                            void abortPrompt().then((texts) => {
+                                                if (texts.length === 0) return;
+                                                setInput((prev) => {
+                                                    const restored = texts.join("\n");
+                                                    // Append, never overwrite — the composer
+                                                    // may hold an unsent draft. Trim the
+                                                    // draft's trailing newlines so the join
+                                                    // doesn't leave a blank gap.
+                                                    const head = prev.replace(/\n+$/, "");
+                                                    return head ? `${head}\n${restored}` : restored;
+                                                });
+                                                autoResizeTextarea();
+                                            });
+                                        }}
                                         activeLevel={activeLevel}
                                         onLevelChange={(next) => void setSessionLevel(next)}
                                         activeModel={activeModelWithFallback}
@@ -616,7 +640,8 @@ export default function App() {
                                             if (textareaRef.current) {
                                                 textareaRef.current.style.height = "auto";
                                             }
-                                            if (!(await sendPrompt(text, imgs))) {
+                                            const send = runInFlight ? steerPrompt : sendPrompt;
+                                            if (!(await send(text, imgs))) {
                                                 setInput(text);
                                                 setAttachments(imgs);
                                             }

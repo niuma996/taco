@@ -38,6 +38,14 @@ export interface AssistantSubEvent {
     partial?: { content?: Array<{ type?: string; redacted?: boolean }> };
 }
 
+/** One item of a queue_update event's `queues` list — pi LaneQueuedItem,
+ * message-kind entries only (custom write entries carry no message). */
+export interface QueuedMessageLike {
+    entryId?: string;
+    kind?: string;
+    message?: MessageLike;
+}
+
 /**
  * Discriminated union of session events the UI consumes.
  *
@@ -86,8 +94,23 @@ export type SessionEventLike =
           };
           isError?: boolean;
       }
-    | { type: "agent_end" }
-    | { type: "turn_end" };
+    | { type: "turn_end" }
+    | { type: "run_start" }
+    | {
+          type: "run_end";
+          status?: "completed" | "aborted" | "failed";
+      }
+    | {
+          type: "queue_update";
+          /** Flat LaneQueuedItem list (pi QueueSnapshot): steer/followUp/nextRun inbox items. */
+          queues?: QueuedMessageLike[];
+      }
+    | {
+          type: "operation_abort";
+          /** Messages drained from the queues by the abort (pi reports them, clients use them to restore drafts). */
+          steer?: MessageLike[];
+          followUp?: MessageLike[];
+      };
 
 /** Shape of session.event.params from server push. */
 export interface SessionEventParams {
@@ -231,6 +254,50 @@ export type UiMessage =
       }
     | { id: string; kind: "tool"; text: string; ts: number } // orphan toolResult fallback render (no matching ToolCall)
     | { id: string; kind: "system"; text: string; ts: number };
+
+/**
+ * One steering-queue row shown above the composer while a run is in flight.
+ *
+ * Rows come from two places. Server rows are keyed by the lane's `entryId` and
+ * are replaced wholesale by every `queue_update`. Optimistic rows are local
+ * placeholders shown while the enqueue RPC is in flight; they carry a synthetic
+ * id and are retired when that RPC settles, never by the server list — pi emits
+ * `queue_update` before the RPC response, so a server row for a given message
+ * generally arrives while its own optimistic row is still pending.
+ */
+export interface QueuedUiItem {
+    /** Server entryId, or `optimistic-queued-*` while the enqueue is in flight. */
+    id: string;
+    kind: "steer" | "followUp" | "nextRun";
+    text: string;
+    /** True only for local placeholders; server rows omit it. */
+    optimistic?: boolean;
+}
+
+const QUEUED_UI_KINDS = new Set(["steer", "followUp", "nextRun"]);
+
+/**
+ * Convert a queue_update payload's `queues` list into renderable rows.
+ *
+ * Dropped: custom write entries (internal lane traffic, no message) and any
+ * entry without an `entryId`. pi always sets one; a row without it could not be
+ * cancelled, so rendering a dead cancel button is worse than omitting the row.
+ */
+export function queuedItemsFromEvent(ev: { queues?: QueuedMessageLike[] }): QueuedUiItem[] {
+    if (!Array.isArray(ev.queues)) return [];
+    const out: QueuedUiItem[] = [];
+    for (const item of ev.queues) {
+        if (!item || typeof item !== "object") continue;
+        if (!item.kind || !QUEUED_UI_KINDS.has(item.kind)) continue;
+        if (!item.message || !item.entryId) continue;
+        out.push({
+            id: item.entryId,
+            kind: item.kind as QueuedUiItem["kind"],
+            text: textFromMessage(item.message),
+        });
+    }
+    return out;
+}
 
 /** History-entry shape (inferred from SessionHistoryEntry). */
 export interface HistoryEntryLike {

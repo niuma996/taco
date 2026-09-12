@@ -8,9 +8,10 @@
  */
 
 import type { AgentMessage, ImageInput, ThinkingLevel } from "@taco-ai/protocol";
+import { ErrorCodes } from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
-import { historyToUiMessages, type UiMessage } from "../lib/chat/chatUtils";
+import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
 import {
     type WorkspaceAction,
     type WorkspaceState,
@@ -97,9 +98,28 @@ export interface UseWorkspacesApi {
      * Send a prompt. Return value signals "did it actually reach the backend":
      *  - true: sent (or new session created with initialPrompt); caller may clear the input.
      *  - false: empty after trim with no attachments / sessionPrompt threw; input should stay.
+     *
+     * When the server reports `session_busy` (a run is already in flight), this
+     * degrades to steerPrompt once — the user's text is delivered as an in-run
+     * steer rather than rejected. See STEER_PROMPT_HANDOFF for why the handoff
+     * cannot bounce more than once.
      */
     sendPrompt: (text: string, images?: ImageInput[]) => Promise<boolean>;
-    abortPrompt: () => Promise<void>;
+    /**
+     * Enqueue a steer message on the session's active run. Same return contract
+     * as sendPrompt. If the server reports the run is already over (`mode:
+     * "idle"`), this degrades to sendPrompt once so the text is not lost.
+     */
+    steerPrompt: (text: string, images?: ImageInput[]) => Promise<boolean>;
+    /** Cancel one not-yet-consumed queue entry by server entryId (QueueBar row). */
+    cancelQueued: (entryId: string) => Promise<void>;
+    /**
+     * Abort the active turn. Resolves to the drained steer/follow-up texts (in
+     * drain order) so the caller can restore them into the composer — an
+     * interrupted steer is user input, not garbage. Empty array when nothing
+     * was queued or the abort did not apply.
+     */
+    abortPrompt: () => Promise<string[]>;
 
     // ── thinking level ──
     setSessionLevel: (next: ThinkingLevel) => Promise<void>;
@@ -121,6 +141,19 @@ export interface UseWorkspacesApi {
     /** Write askUser user-selected answers + questions, read by sendPrompt at injection time. */
     setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => void;
 }
+
+/**
+ * Whether a send may still hand off to the other delivery path.
+ *
+ * sendPrompt and steerPrompt each degrade into the other: a prompt rejected with
+ * `session_busy` becomes a steer, and a steer that reports `idle` becomes a
+ * prompt. Both conditions are real server states rather than stale reads, so a
+ * session whose runs start and stop quickly (a queue draining, say) can flip
+ * between them repeatedly — nothing about the handoff converges on its own.
+ * The first hop passes "exhausted" so the second cannot hop again; it surfaces
+ * an error the user can retry instead.
+ */
+type SteerHandoff = "allowed" | "exhausted";
 
 export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const [workspaces, dispatchWs] = useReducer(workspacesReducer, {});
@@ -148,6 +181,14 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
      * no bubble added) until the first finishes.
      */
     const pendingCreateRef = useRef(false);
+    /**
+     * Session ids the user aborted via abortPrompt. The in-flight sessionPrompt
+     * RPC rejects once the abort lands ("session.prompt aborted") — that
+     * rejection is the expected outcome of the user's own Stop click, so
+     * sendPrompt's catch suppresses the error banner for it. Keyed by sid: the
+     * user may switch sessions between abort and rejection.
+     */
+    const abortRequestedRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         workspacesRef.current = workspaces;
     }, [workspaces]);
@@ -348,7 +389,11 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         dispatchWs({ type: "BEGIN_PENDING_NEW_SESSION", cwd });
     }, []);
 
-    async function sendPrompt(text: string, images?: ImageInput[]): Promise<boolean> {
+    async function sendPrompt(
+        text: string,
+        images?: ImageInput[],
+        handoff: SteerHandoff = "allowed",
+    ): Promise<boolean> {
         const trimmed = text.trim();
         // Allow image-only prompts (text empty but attachments present) — they go through the
         // full sessionCreate / sessionPrompt path (sidecar already supports params.initialPrompt ?? "").
@@ -459,6 +504,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     sid: created.sessionId,
                     pending: false,
                 });
+                // Same marker cleanup as the existing-session branch: a completed
+                // turn means no abort rejection is coming for it.
+                abortRequestedRef.current.delete(created.sessionId);
                 // Background refresh pulls the server-persisted auto-title and
                 // authoritative updatedAt into the sidebar — non-blocking, the
                 // optimistic row above is already correct.
@@ -466,11 +514,17 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 return true;
             } catch (err) {
                 console.error("[taco] sessionCreate/sessionPrompt failed", err);
-                setErrorBanner(`Prompt failed: ${(err as Error).message}`);
+                // Same user-abort case as the existing-session branch below.
+                const abortedByUser =
+                    createdSessionId !== undefined &&
+                    abortRequestedRef.current.delete(createdSessionId);
+                if (!abortedByUser) {
+                    setErrorBanner(`Prompt failed: ${(err as Error).message}`);
+                }
                 // sessionCreate may already have set this session's pending slot
-                // before the failure. Nothing else will ever clear it — the turn
-                // never started, so no turn_end / agent_end frame is coming — so
-                // the composer would stay disabled until the app restarts.
+                // before the failure. Nothing else will ever clear it — the run
+                // never started, so no run_end frame is coming — so the composer
+                // would stay disabled until the app restarts.
                 if (createdSessionId) {
                     dispatchWs({ type: "SET_PENDING", cwd, sid: createdSessionId, pending: false });
                 }
@@ -503,6 +557,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // reply). Refreshing after sessionPrompt returns avoids racing the server's title write
             // (a concurrent fire could read a stale title).
             void refreshSessionList(cwd);
+            // The turn completed, so no abort-induced rejection is coming for it.
+            // Dropping the marker here is what keeps it from outliving this turn:
+            // an abort that lands just as the run finishes resolves the RPC
+            // instead of rejecting it, and a marker left behind would swallow the
+            // error banner for this session's next genuine prompt failure.
+            abortRequestedRef.current.delete(promptSid);
             if (reply) {
                 dispatchWs({
                     type: "APPEND_ASSISTANT_FINAL",
@@ -520,21 +580,120 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             return true;
         } catch (err) {
             console.error("[taco] sessionPrompt failed", err);
+            // User-initiated abort rejects the in-flight prompt RPC — that is
+            // the expected Stop outcome, not a failure to banner. (Checked
+            // first: a session_busy from a concurrent turn should not consume
+            // the marker.)
+            if (abortRequestedRef.current.delete(promptSid)) {
+                dispatchWs({ type: "SET_PENDING", cwd, sid: promptSid, pending: false });
+                return false;
+            }
+            // session_busy = the server has a run in flight for this session. The
+            // turn-start failed, but the text can still land as an in-run steer —
+            // degrade instead of surfacing an error the user can't act on. Only
+            // once: see SteerHandoff.
+            // Pending deliberately stays set: session_busy means a run really is
+            // in flight, and its run_end is what clears the slot.
+            if ((err as { code?: string }).code === ErrorCodes.SessionBusy) {
+                if (handoff === "allowed") return steerPrompt(text, images, "exhausted");
+                setErrorBanner("Prompt failed: the session is busy; try again");
+                return false;
+            }
             setErrorBanner(`Prompt failed: ${(err as Error).message}`);
             dispatchWs({ type: "SET_PENDING", cwd, sid: promptSid, pending: false });
             return false;
         }
     }
 
-    async function abortPrompt(): Promise<void> {
+    async function steerPrompt(
+        text: string,
+        images?: ImageInput[],
+        handoff: SteerHandoff = "allowed",
+    ): Promise<boolean> {
+        const trimmed = text.trim();
+        if (!trimmed && (!images || images.length === 0)) return false;
         const cwd = activeCwd;
         const ws = workspacesRef.current[cwd];
-        if (!ws?.activeSession) return;
+        const uiLocale = getGlobalConfig().client.uiLanguage;
+        const steerSid = ws?.activeSession;
+        if (!steerSid) return false;
+        // A queued row only — deliberately no optimistic user bubble. A queued
+        // message is not yet part of the conversation: pi writes it to the lane
+        // inbox and may never consume it (the user aborts, or cancels the row),
+        // in which case a bubble would claim the message was sent when it never
+        // reached the model. The server's message_end push adds the bubble at
+        // the moment the run actually consumes the entry.
+        const queuedItem: QueuedUiItem = {
+            id: `optimistic-queued-${Date.now()}`,
+            kind: "steer",
+            text: trimmed,
+            optimistic: true,
+        };
+        dispatchWs({ type: "APPEND_QUEUED", cwd, sid: steerSid, item: queuedItem });
         try {
-            await client.sessionAbort(cwd, ws.activeSession);
+            const result = await client.sessionSteer(cwd, steerSid, trimmed, images, uiLocale);
+            if (result.mode !== "idle") return true;
+            // The run ended between the composer's steer and the server's check,
+            // so the entry would sit unconsumed until the next prompt. Hand back
+            // to the prompt path — but only once, see SteerHandoff.
+            if (handoff === "exhausted") {
+                setErrorBanner("Steer failed: the session stopped accepting input; try again");
+                return false;
+            }
+            return sendPrompt(text, images, "exhausted");
+        } catch (err) {
+            console.error("[taco] sessionSteer failed", err);
+            setErrorBanner(`Steer failed: ${(err as Error).message}`);
+            return false;
+        } finally {
+            // The optimistic row's job ends when the RPC settles: on success the
+            // server's queue_update has already delivered the real row (pi emits
+            // it from inside the lane command, before this response), and on
+            // failure there is nothing to show.
+            dispatchWs({ type: "REMOVE_QUEUED", cwd, sid: steerSid, id: queuedItem.id });
+        }
+    }
+
+    async function cancelQueued(entryId: string): Promise<void> {
+        const cwd = activeCwd;
+        const ws = workspacesRef.current[cwd];
+        const sid = ws?.activeSession;
+        if (!sid) return;
+        // Optimistic removal; the server's queue_update is the authority and
+        // re-adds the row if the entry turned out to be already consumed. Capture
+        // the row first so a failed RPC can restore it.
+        const item = (ws.queuedBySessionId[sid] ?? []).find((q) => q.id === entryId);
+        dispatchWs({ type: "REMOVE_QUEUED", cwd, sid, id: entryId });
+        try {
+            await client.sessionCancelQueued(cwd, sid, entryId);
+        } catch (err) {
+            console.error("[taco] sessionCancelQueued failed", err);
+            setErrorBanner(`Cancel failed: ${(err as Error).message}`);
+            if (item) dispatchWs({ type: "APPEND_QUEUED", cwd, sid, item });
+        }
+    }
+
+    async function abortPrompt(): Promise<string[]> {
+        const cwd = activeCwd;
+        const ws = workspacesRef.current[cwd];
+        if (!ws?.activeSession) return [];
+        // Mark before the RPC: the in-flight sessionPrompt's rejection can land
+        // before sessionAbort resolves, and sendPrompt's catch must already know
+        // this abort was user-initiated.
+        abortRequestedRef.current.add(ws.activeSession);
+        try {
+            const result = await client.sessionAbort(cwd, ws.activeSession);
+            // Discard order isn't preserved across the two queues server-side;
+            // steer went in first and reads more naturally restored first.
+            return [...(result.discardedSteer ?? []), ...(result.discardedFollowUp ?? [])];
         } catch (err) {
             console.error("[taco] sessionAbort failed", err);
+            // The abort never landed, so no abort-induced prompt rejection is
+            // coming — drop the marker or a later genuine failure would be
+            // misclassified as user-initiated.
+            abortRequestedRef.current.delete(ws.activeSession);
             setErrorBanner(`Abort failed: ${(err as Error).message}`);
+            return [];
         } finally {
             dispatchWs({ type: "SET_PENDING", cwd, sid: ws.activeSession, pending: false });
         }
@@ -576,6 +735,8 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         renameSession: lifecycle.renameSession,
         beginPendingNewSession,
         sendPrompt,
+        steerPrompt,
+        cancelQueued,
         abortPrompt,
         setSessionModel: settings.setSessionModel,
         setSessionLevel: settings.setSessionLevel,

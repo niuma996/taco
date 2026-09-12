@@ -15,6 +15,8 @@ import type {
     AgentsContentResult,
     AgentsListResult,
     AttachParams,
+    CancelQueuedParams,
+    CancelQueuedResult,
     ChannelsBindParams,
     ChannelsBindResult,
     ChannelsCreateParams,
@@ -38,6 +40,8 @@ import type {
     CreateSessionParams,
     CreateSessionResult,
     ExtensionsStatusResult,
+    FollowUpParams,
+    FollowUpResult,
     ImageInput,
     ImPolicyClearChatOverrideParams,
     ImPolicyGetParams,
@@ -92,6 +96,7 @@ import type {
     SkillContentResult,
     SkillsListResult,
     SteerParams,
+    SteerResult,
     SubmitAnswersParams,
     SupportedLocale,
     TaskItem,
@@ -203,7 +208,37 @@ export interface TypedRpc {
         uiLocale?: SupportedLocale,
         model?: { provider: string; id: string },
     ): Promise<PromptResult>;
-    sessionSteer(workspace: WorkspaceId, sessionId: SessionId, text: string): Promise<null>;
+    /**
+     * Enqueue a mid-run steering message, consumed at the next tool-batch
+     * boundary — "interrupt and redirect". Resolves promptly with the enqueue
+     * outcome: "queued" (plus the entryId to key an optimistic row on) or
+     * "idle" (no active run; the client should fall back to sessionPrompt).
+     */
+    sessionSteer(
+        workspace: WorkspaceId,
+        sessionId: SessionId,
+        text: string,
+        images?: ImageInput[],
+        uiLocale?: SupportedLocale,
+    ): Promise<SteerResult>;
+    /**
+     * Like sessionSteer, but consumed only once the run would otherwise finish —
+     * "queue behind the current work" rather than "interrupt it". Same result
+     * contract, including the idle fallback.
+     */
+    sessionFollowUp(
+        workspace: WorkspaceId,
+        sessionId: SessionId,
+        text: string,
+        images?: ImageInput[],
+        uiLocale?: SupportedLocale,
+    ): Promise<FollowUpResult>;
+    /** Remove one not-yet-consumed queue entry; "already_consumed" / "not_found" are normal outcomes. */
+    sessionCancelQueued(
+        workspace: WorkspaceId,
+        sessionId: SessionId,
+        entryId: string,
+    ): Promise<CancelQueuedResult>;
     /**
      * Submit askUser answers — sidecar injects <ask_user_context> into the user message.
      * The client does not need to know the tag wire format, only the structured answers.
@@ -502,9 +537,29 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 ...(model ? { model } : {}),
             }),
 
-        // sessionSteer: workspace + sessionId + text
-        sessionSteer: (workspace, sessionId, text) =>
-            call<SteerParams, null>(RPC.sessionSteer, workspace, { workspace, sessionId, text }),
+        // sessionSteer / sessionFollowUp: workspace + sessionId + text + optional images + optional uiLocale
+        sessionSteer: (workspace, sessionId, text, images, uiLocale) =>
+            call<SteerParams, SteerResult>(RPC.sessionSteer, workspace, {
+                workspace,
+                sessionId,
+                text,
+                ...(images && images.length > 0 ? { images } : {}),
+                ...(uiLocale ? { uiLocale } : {}),
+            }),
+        sessionFollowUp: (workspace, sessionId, text, images, uiLocale) =>
+            call<FollowUpParams, FollowUpResult>(RPC.sessionFollowUp, workspace, {
+                workspace,
+                sessionId,
+                text,
+                ...(images && images.length > 0 ? { images } : {}),
+                ...(uiLocale ? { uiLocale } : {}),
+            }),
+        sessionCancelQueued: (workspace, sessionId, entryId) =>
+            call<CancelQueuedParams, CancelQueuedResult>(RPC.sessionCancelQueued, workspace, {
+                workspace,
+                sessionId,
+                entryId,
+            }),
 
         // sessionSubmitAnswers: workspace + sessionId + toolCallId + answers + optional toolName
         sessionSubmitAnswers: (workspace, sessionId, toolCallId, answers, toolName) =>

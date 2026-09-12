@@ -66,6 +66,13 @@ import { ContextInfoService } from "./contextInfoService.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
+import {
+    type CancelQueuedKind,
+    cancelLaneQueued,
+    enqueueLaneMessage,
+    type QueueKind,
+    type SteerEnqueueResult,
+} from "./laneQueue.ts";
 import { PinOnceConsumer } from "./pinOnceConsumer.ts";
 import { sidecarVersion } from "./runtimeResources.ts";
 import { buildBranchContext, findBranchEntries, MAIN_BRANCH } from "./sessionBranch.ts";
@@ -942,13 +949,26 @@ export class AttachedSession extends EventEmitter {
         return reply as ProtocolAgentMessage;
     }
 
-    /** Inject a steer message (mid-turn interrupt / append). */
-    async steer(text: string, uiLocale?: SupportedLocale): Promise<void> {
+    /**
+     * Enqueue a message onto one of the lane's steering queues: `steer` is
+     * consumed at the next tool-batch checkpoint (interrupt and redirect),
+     * `followUp` only once the run would otherwise finish (queue behind it).
+     */
+    async enqueue(
+        kind: QueueKind,
+        text: string,
+        images?: ImageContent[],
+        uiLocale?: SupportedLocale,
+    ): Promise<SteerEnqueueResult> {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
         }
-        const result = await this.lane.steer(text, undefined, harnessContext);
-        if (!result.ok) throw toHarnessError("session.steer", result.error);
+        return await enqueueLaneMessage(this.lane, kind, text, images);
+    }
+
+    /** Remove one not-yet-consumed queue entry. "already_consumed" / "not_found" are normal outcomes. */
+    async cancelQueued(entryId: string): Promise<CancelQueuedKind> {
+        return await cancelLaneQueued(this.lane, entryId);
     }
 
     /** Effective UI locale — read by the reply_language hook on every context build. */

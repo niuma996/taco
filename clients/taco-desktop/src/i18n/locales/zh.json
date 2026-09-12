@@ -45,16 +45,24 @@
     ]
   },
   "input": {
-    "placeholderRunning": "代理运行中…",
+    "placeholderRunning": "代理运行中…可直接插话",
     "placeholderIdle": "输入提示后按回车…(可粘贴或附加图片)",
     "placeholderCompacting": "压缩上下文中,请稍候…",
     "compactingNotice": "正在压缩上下文,输入暂时被禁用",
     "send": "发送",
+    "sendSteer": "插话发送",
     "stop": "停止",
     "attachImages": "附加图片",
     "removeAttachment": "移除附件",
     "attachLimitWarn_one": "已拒绝 {{count}} 个文件:不是图片、超过 5MB,或超过 {{limit}} 张图片的上限。",
     "attachLimitWarn_other": "已拒绝 {{count}} 个文件:不是图片、超过 5MB,或超过 {{limit}} 张图片的上限。"
+  },
+  "queue": {
+    "title": "排队中的消息",
+    "kindSteer": "插话",
+    "kindFollowUp": "后续",
+    "kindNextRun": "下一轮",
+    "cancel": "取消排队"
   },
   "onboarding": {
     "languageTitle": "语言",

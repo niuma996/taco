@@ -11,6 +11,7 @@ export default defineConfig({
             "tests/hooks/useFileTree.test.tsx",
             "tests/hooks/useFilePreview.test.tsx",
             "tests/hooks/useImPolicy.test.tsx",
+            "tests/hooks/useWorkspacesSteer.test.tsx",
             "tests/hooks/useSaveConfigPatch.test.tsx",
             "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",

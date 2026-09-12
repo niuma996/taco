@@ -17,6 +17,10 @@ export const sessionPromptSchema = Type.Any();
 
 export const sessionSteerSchema = Type.Any();
 
+export const sessionFollowUpSchema = Type.Any();
+
+export const sessionCancelQueuedSchema = Type.Any();
+
 export const sessionAbortSchema = Type.Any();
 
 export const sessionSetModelSchema = Type.Any();

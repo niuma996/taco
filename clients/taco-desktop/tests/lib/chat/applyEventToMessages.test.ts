@@ -25,8 +25,7 @@ describe("applyEventToMessages — message lifecycle", () => {
             type: "message_start",
             message: { timestamp: "t1", role: "assistant" },
         });
-        const { messages, clearPending } = applyEventToMessages([], ev, baseOpts);
-        assert.equal(clearPending, false);
+        const { messages } = applyEventToMessages([], ev, baseOpts);
         assert.equal(messages.length, 1);
         const m = messages[0];
         assert.equal(m?.kind, "assistant");
@@ -482,23 +481,23 @@ describe("applyEventToMessages — tool_end details 合并", () => {
     });
 });
 
-describe("applyEventToMessages — pending 翻转", () => {
-    it("agent_end → clearPending=true", () => {
-        const { clearPending } = applyEventToMessages([], { type: "agent_end" }, baseOpts);
-        assert.equal(clearPending, true);
-    });
-
-    it("turn_end → clearPending=true", () => {
-        const { clearPending } = applyEventToMessages([], { type: "turn_end" }, baseOpts);
-        assert.equal(clearPending, true);
-    });
-
-    it("其他事件 → clearPending=false", () => {
-        const { clearPending } = applyEventToMessages(
+describe("applyEventToMessages — 非消息事件不动 messages", () => {
+    // run 生命周期 / 队列事件由 workspaceReducer 在 activeSession 守卫之前处理
+    // (后台会话也要更新 sidebar 状态点与队列条),这里只断言它们不碰消息列表。
+    it("run_start / run_end / turn_end → 返回入参引用", () => {
+        const initial = applyEventToMessages(
             [],
-            { type: "message_start", message: { timestamp: "t1", role: "assistant" } },
+            asEv({ type: "message_start", message: { timestamp: "t1", role: "assistant" } }),
             baseOpts,
-        );
-        assert.equal(clearPending, false);
+        ).messages;
+        for (const ev of [
+            asEv({ type: "run_start" }),
+            asEv({ type: "run_end", status: "completed" }),
+            asEv({ type: "run_end", status: "aborted" }),
+            asEv({ type: "turn_end" }),
+        ]) {
+            const { messages } = applyEventToMessages(initial, ev, baseOpts);
+            assert.equal(messages, initial);
+        }
     });
 });

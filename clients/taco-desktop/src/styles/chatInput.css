@@ -192,3 +192,67 @@ footer.input textarea:focus {
     opacity: 0.35;
     cursor: not-allowed;
 }
+
+/* Steering-queue strip (QueueBar): one row per not-yet-consumed steer/followUp
+   entry, in the same footer column as .input-card. Neutral styling — these are
+   pending user input, not a warning (contrast with .input-status). */
+.queue-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    /* ul element — drop the UA list styling. */
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.queue-bar__row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    font-size: 0.82rem;
+}
+
+.queue-bar__kind {
+    flex-shrink: 0;
+    padding: 0.05rem 0.4rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    font-size: 0.75rem;
+}
+
+.queue-bar__text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg-dim);
+}
+
+.queue-bar__cancel {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.15rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+}
+
+.queue-bar__cancel:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--fg);
+}
+
+.queue-bar__cancel:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}

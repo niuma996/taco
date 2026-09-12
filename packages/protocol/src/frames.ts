@@ -39,8 +39,11 @@ export type CompactionFailureReason =
     | "harness_error";
 
 /** Current wire compatibility contract. A major mismatch is not interoperable.
- *  v2 dropped the `sidecar.hello` push frame; v1 clients are not accepted. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 0 } as const;
+ *  v2 dropped the `sidecar.hello` push frame; v1 clients are not accepted.
+ *  2.1 added `session.cancelQueued` and gave `session.steer` a result body
+ *  (`{ mode, entryId }`); a 2.0 daemon still answers steer with `null`, which
+ *  a 2.1 client would misread as a successful enqueue. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 1 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

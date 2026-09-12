@@ -29,6 +29,10 @@ export const RPC = {
     sessionPlanStateGet: "session.planState.get",
     sessionPrompt: "session.prompt",
     sessionSteer: "session.steer",
+    /** Like steer, but consumed only at may-finish boundaries. */
+    sessionFollowUp: "session.followUp",
+    /** Remove one not-yet-consumed queue entry (steer/followUp/nextRun). */
+    sessionCancelQueued: "session.cancelQueued",
     sessionAbort: "session.abort",
     commandPermissionResolve: "commandPermission.resolve",
     sessionSetModel: "session.setModel",
@@ -100,8 +104,17 @@ export type RpcMethodName = (typeof RPC)[keyof typeof RPC];
  * sidebar empty with nothing to catch: the await simply never returned.
  *
  * Deliberately NOT in this set:
- *   - session.prompt / steer / compact / submitAnswers — model-bound, unbounded
+ *   - session.prompt / compact / submitAnswers — model-bound, unbounded
  *     by nature.
+ *   - session.steer / followUp — enqueue-style and bounded (the handler waits
+ *     out a compaction, then writes the inbox instantly), but the compaction
+ *     wait can outlast the 15s fast ceiling. A spurious client timeout would
+ *     leave the caller unsure whether the message landed in the queue — the
+ *     same ambiguity this set exists to avoid. Callers wait the full bounded
+ *     duration instead.
+ *   - session.cancelQueued — an inbox delete with no compaction wait, so it is
+ *     genuinely fast. Kept out anyway because it is a mutation: see the note on
+ *     mutations below.
  *   - provider.listModels — reaches out to a user-configured HTTP endpoint.
  *   - channels.* bind/verify — waits on a human completing a flow.
  *   - checkpoints.restore, memory.write, *.create/update/delete — mutations,

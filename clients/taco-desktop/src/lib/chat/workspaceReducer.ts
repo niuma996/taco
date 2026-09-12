@@ -16,7 +16,8 @@ import type {
     TasksUpdatedParams,
 } from "@taco-ai/protocol";
 import { applyEventToMessages } from "./applyEventToMessages";
-import type { SessionEventLike, UiMessage } from "./chatUtils";
+import type { QueuedUiItem, SessionEventLike, UiMessage } from "./chatUtils";
+import { queuedItemsFromEvent } from "./chatUtils";
 import {
     attachAskUserAnswers,
     attachCommandPermission,
@@ -53,8 +54,18 @@ export interface WorkspaceState {
      * sessionId → whether that session has an in-flight turn.
      * Per-session slot: switching sessions doesn't cross-contaminate; switching
      * back to a running session restores the "stop" button.
+     * Driven by run_start / run_end events (not turn_end — that fires at every
+     * mid-run tool-batch boundary); SET_PENDING stays as the optimistic /
+     * RPC-settle override.
      */
     pendingBySessionId: Record<string, boolean>;
+    /**
+     * sessionId → steering messages waiting in the lane's inbox (steer /
+     * followUp / nextRun). Replaced wholesale by each queue_update; drained
+     * by operation_abort. Optimistic rows (APPEND_QUEUED) survive until the
+     * server's list echoes the same kind + text.
+     */
+    queuedBySessionId: Record<string, QueuedUiItem[]>;
     /**
      * parentSession + parentToolCallId composite key → child sessionId + agentType.
      * Written by SUBAGENT_SPAWNED; cleared on ATTACH/INIT/REMOVE_SESSION (no cross-session residue).
@@ -146,6 +157,7 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         askUserPending: {},
         agentToolPending: {},
         pendingBySessionId: {},
+        queuedBySessionId: {},
         taskSnapshotsBySessionId: {},
         planStatesBySessionId: {},
         historyDetailsBySessionId: {},
@@ -202,6 +214,23 @@ export type WorkspaceAction =
           type: "APPEND_USER";
           cwd: string;
           msg: UiMessage;
+      }
+    | {
+          /** Local placeholder row shown while an enqueue RPC is in flight. */
+          type: "APPEND_QUEUED";
+          cwd: string;
+          sid: string;
+          item: QueuedUiItem;
+      }
+    | {
+          /**
+           * Drop one queued row by id: retires an optimistic row once its enqueue
+           * RPC settles, or removes a server row optimistically on cancel.
+           */
+          type: "REMOVE_QUEUED";
+          cwd: string;
+          sid: string;
+          id: string;
       }
     | {
           type: "APPLY_EVENT";
@@ -441,6 +470,7 @@ export function workspacesReducer(
                         : {}),
                     ...(wasActive ? { activeSession: undefined, messages: [] } : {}),
                     pendingBySessionId: omitKey(existing.pendingBySessionId, action.sid),
+                    queuedBySessionId: omitKey(existing.queuedBySessionId, action.sid),
                 };
             });
         case "SET_PENDING":
@@ -493,12 +523,77 @@ export function workspacesReducer(
             return updateWs(state, action.cwd, (existing) => ({
                 messages: [...existing.messages, action.msg],
             }));
+        case "APPEND_QUEUED":
+            return updateWs(state, action.cwd, (existing) => ({
+                queuedBySessionId: {
+                    ...existing.queuedBySessionId,
+                    [action.sid]: [...(existing.queuedBySessionId[action.sid] ?? []), action.item],
+                },
+            }));
+        case "REMOVE_QUEUED":
+            return updateWs(state, action.cwd, (existing) => {
+                const prev = existing.queuedBySessionId[action.sid];
+                if (!prev?.some((q) => q.id === action.id)) return undefined;
+                const remaining = prev.filter((q) => q.id !== action.id);
+                return {
+                    queuedBySessionId:
+                        remaining.length > 0
+                            ? { ...existing.queuedBySessionId, [action.sid]: remaining }
+                            : omitKey(existing.queuedBySessionId, action.sid),
+                };
+            });
         case "APPLY_EVENT":
             return updateWs(state, action.cwd, (existing) => {
+                // Run lifecycle + steering-queue state are keyed per session and
+                // drive the sidebar status dot / queue strip, so they update for
+                // background sessions too — before the activeSession guard below.
+                // Only run boundaries flip pending: `turn_end` fires mid-run at
+                // every tool-batch / response boundary (a steered turn extends
+                // the same run), so it must not be treated as "the turn is over".
+                let pendingBySessionId = existing.pendingBySessionId;
+                if (action.ev.type === "run_start") {
+                    pendingBySessionId = { ...pendingBySessionId, [action.sid]: true };
+                } else if (action.ev.type === "run_end") {
+                    // Completed / aborted / failed all mean the operation left the lane.
+                    pendingBySessionId = { ...pendingBySessionId, [action.sid]: false };
+                }
+                // Steering queue: queue_update replaces the server-owned rows,
+                // operation_abort drains everything. Neither touches messages.
+                //
+                // Optimistic rows are deliberately left alone here. pi emits
+                // queue_update from inside the lane command, before the enqueue
+                // RPC returns, so the server row for a message normally arrives
+                // while that message's own optimistic row is still pending —
+                // dropping optimistic rows on any server list would retire them
+                // a beat early, and matching them by text would conflate two
+                // identical steers. REMOVE_QUEUED retires them instead, keyed by
+                // the id the RPC caller holds.
+                let queuedBySessionId = existing.queuedBySessionId;
+                if (action.ev.type === "queue_update") {
+                    const prev = existing.queuedBySessionId[action.sid] ?? [];
+                    const next = [
+                        ...prev.filter((q) => q.optimistic),
+                        ...queuedItemsFromEvent(action.ev),
+                    ];
+                    queuedBySessionId =
+                        next.length > 0
+                            ? { ...existing.queuedBySessionId, [action.sid]: next }
+                            : omitKey(existing.queuedBySessionId, action.sid);
+                } else if (action.ev.type === "operation_abort") {
+                    queuedBySessionId = omitKey(existing.queuedBySessionId, action.sid);
+                }
                 // The shared messages array renders activeSession; background-session stream
                 // events must be dropped, otherwise they bleed into the currently displayed
                 // session (rebuilt from sessionEventLog / snapshot on switch-back).
-                if (existing.activeSession !== action.sid) return undefined;
+                if (existing.activeSession !== action.sid) {
+                    if (
+                        pendingBySessionId === existing.pendingBySessionId &&
+                        queuedBySessionId === existing.queuedBySessionId
+                    ) {
+                        return undefined;
+                    }
+                    return { pendingBySessionId, queuedBySessionId };
+                }
                 const result = applyEventToMessages(existing.messages, action.ev, {
                     suppressedThinking: action.suppressedThinking,
                     now: action.now,
@@ -534,13 +629,12 @@ export function workspacesReducer(
                     (action.ev.toolName === "agent" || action.ev.toolName === "skill");
                 return {
                     messages: result.messages,
-                    pendingBySessionId: result.clearPending
-                        ? { ...existing.pendingBySessionId, [action.sid]: false }
-                        : existing.pendingBySessionId,
+                    pendingBySessionId,
                     askUserPending,
                     agentToolPending: clearsAgentPending
                         ? omitKey(existing.agentToolPending, endedToolCallId ?? "")
                         : existing.agentToolPending,
+                    queuedBySessionId,
                 };
             });
         case "SUBAGENT_SPAWNED":
@@ -658,6 +752,7 @@ export function workspacesReducer(
                 askUserPending: {},
                 agentToolPending: {},
                 pendingBySessionId: {},
+                queuedBySessionId: {},
             }));
     }
 }

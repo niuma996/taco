@@ -16,13 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
 /** Event types that require a fresh indicator snapshot. */
-const REFRESH_EVENT_TYPES = new Set<string>([
-    "session_compact",
-    "model_update",
-    "agent_end",
-    "turn_end",
-    "settled",
-]);
+const REFRESH_EVENT_TYPES = new Set<string>(["session_compact", "model_update", "turn_end"]);
 
 /** Watchdog window for a CompactionFinished frame. If the frame is lost
  *  (sidecar restart, push gap not recovered, bug), the input must not stay

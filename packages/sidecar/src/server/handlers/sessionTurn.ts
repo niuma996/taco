@@ -7,14 +7,22 @@
 
 import type {
     AbortParams,
+    AbortResult,
+    CancelQueuedParams,
+    CancelQueuedResult,
+    FollowUpParams,
+    FollowUpResult,
     PromptParams,
     PromptResult,
     SteerParams,
+    SteerResult,
     SubmitAnswersParams,
 } from "@taco-ai/protocol";
 import {
     ErrorCodes,
     sessionAbortSchema,
+    sessionCancelQueuedSchema,
+    sessionFollowUpSchema,
     sessionPromptSchema,
     sessionSteerSchema,
     sessionSubmitAnswersSchema,
@@ -24,6 +32,7 @@ import { RPC } from "@taco-ai/shared";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { isBusyError } from "../../runtime/harnessErrors.ts";
+import { textsFromAgentMessages } from "../../runtime/messageText.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
     formatAskUserContextBody,
@@ -131,11 +140,50 @@ export function registerSessionTurnHandlers(): void {
         true,
         async ({ workspace, server, params }: MethodCtx<SteerParams>) => {
             const attached = requireAttached(workspace, params.sessionId);
-            await server.awaitCompactionEnd(params.workspace, params.sessionId);
-            await attached.steer(params.text, params.uiLocale);
-            return null;
+            // Same compaction contract as prompt: bounded wait, then a
+            // retryable session_busy — never a silent enqueue that sits
+            // unconsumed behind a compaction.
+            await requireCompactionSettled(server, params.workspace, params.sessionId);
+            const result: SteerResult = await attached.enqueue(
+                "steer",
+                params.text,
+                params.images,
+                params.uiLocale,
+            );
+            return result;
         },
         { command: true, schema: sessionSteerSchema },
+    );
+
+    registerMethod(
+        RPC.sessionFollowUp,
+        true,
+        async ({ workspace, server, params }: MethodCtx<FollowUpParams>) => {
+            const attached = requireAttached(workspace, params.sessionId);
+            await requireCompactionSettled(server, params.workspace, params.sessionId);
+            const result: FollowUpResult = await attached.enqueue(
+                "followUp",
+                params.text,
+                params.images,
+                params.uiLocale,
+            );
+            return result;
+        },
+        { command: true, schema: sessionFollowUpSchema },
+    );
+
+    registerMethod(
+        RPC.sessionCancelQueued,
+        true,
+        // No compaction wait: cancelling is a pure inbox delete that a
+        // compaction never contends for, unlike the enqueue paths above.
+        async ({ workspace, params }: MethodCtx<CancelQueuedParams>) => {
+            const attached = requireAttached(workspace, params.sessionId);
+            const kind = await attached.cancelQueued(params.entryId);
+            const result: CancelQueuedResult = { kind };
+            return result;
+        },
+        { command: true, schema: sessionCancelQueuedSchema },
     );
 
     registerMethod(
@@ -168,9 +216,16 @@ export function registerSessionTurnHandlers(): void {
         true,
         async ({ workspace, params }: MethodCtx<AbortParams>) => {
             const attached = workspace.getAttached(params.sessionId);
-            if (!attached) return { status: "not_running" };
-            await attached.abort();
-            return { status: "aborted" };
+            if (!attached) return { status: "not_running" } satisfies AbortResult;
+            const cleared = await attached.abort();
+            // Hand the drained steering texts back so clients can restore them
+            // into the composer — an interrupted steer is user input, not garbage.
+            const result: AbortResult = {
+                status: "aborted",
+                discardedSteer: textsFromAgentMessages(cleared.clearedSteer),
+                discardedFollowUp: textsFromAgentMessages(cleared.clearedFollowUp),
+            };
+            return result;
         },
         { command: true, schema: sessionAbortSchema },
     );

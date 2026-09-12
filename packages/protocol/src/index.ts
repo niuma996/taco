@@ -197,9 +197,13 @@ export type {
     AbortParams,
     AbortResult,
     AttachParams,
+    CancelQueuedParams,
+    CancelQueuedResult,
     CreateSessionParams,
     CreateSessionResult,
     DeleteSessionParams,
+    FollowUpParams,
+    FollowUpResult,
     ListModelsParams,
     PromptParams,
     PromptResult,
@@ -227,6 +231,7 @@ export type {
     SessionSnapshotGetParams,
     SetModelParams,
     SteerParams,
+    SteerResult,
 } from "./session.js";
 export { SESSION_LIST_DEFAULT_LIMIT, SESSION_LIST_MAX_LIMIT } from "./session.js";
 // Tools / skills / agents / askUser / subagent RPC types.

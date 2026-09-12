@@ -19,6 +19,7 @@ import {
     historyToUiMessages,
     type MessageLike,
     parseEntryTimestamp,
+    queuedItemsFromEvent,
     stringifyResult,
     summarizeToolArgs,
     toolResultLine,
@@ -959,5 +960,67 @@ describe("historyToUiMessages — entry timestamps", () => {
     it("preserves an ISO timestamp", () => {
         const ui = historyToUiMessages([userEntry("2026-01-01T00:00:00.000Z")]);
         assert.equal(ui[0]?.ts, Date.parse("2026-01-01T00:00:00.000Z"));
+    });
+});
+
+describe("queuedItemsFromEvent", () => {
+    it("keys rows by entryId and keeps steer/followUp/nextRun kinds", () => {
+        const rows = queuedItemsFromEvent({
+            queues: [
+                {
+                    entryId: "e1",
+                    kind: "steer",
+                    message: { role: "user", content: "redirect" },
+                },
+                {
+                    entryId: "e2",
+                    kind: "followUp",
+                    message: { role: "user", content: "later" },
+                },
+                {
+                    entryId: "e3",
+                    kind: "nextRun",
+                    message: { role: "user", content: "next" },
+                },
+            ],
+        });
+        assert.deepEqual(rows, [
+            { id: "e1", kind: "steer", text: "redirect" },
+            { id: "e2", kind: "followUp", text: "later" },
+            { id: "e3", kind: "nextRun", text: "next" },
+        ]);
+    });
+
+    it("drops entries without an entryId — they could never be cancelled", () => {
+        const rows = queuedItemsFromEvent({
+            queues: [
+                {
+                    kind: "steer",
+                    type: "message",
+                    message: { role: "user", content: "orphan" },
+                } as never,
+            ],
+        });
+        assert.deepEqual(rows, []);
+    });
+
+    it("drops custom write entries (no message) and unknown kinds", () => {
+        const rows = queuedItemsFromEvent({
+            queues: [
+                { entryId: "w1", kind: "steer", type: "write" } as never,
+                {
+                    entryId: "k1",
+                    kind: "bogus",
+                    type: "message",
+                    message: { role: "user", content: "x" },
+                } as never,
+            ],
+        });
+        assert.deepEqual(rows, []);
+    });
+
+    it("returns [] when queues is missing or not an array", () => {
+        assert.deepEqual(queuedItemsFromEvent({}), []);
+        assert.deepEqual(queuedItemsFromEvent({ queues: "nope" as never }), []);
     });
 });

@@ -45,16 +45,24 @@
     ]
   },
   "input": {
-    "placeholderRunning": "Agent is running…",
+    "placeholderRunning": "Agent is running… type here to steer",
     "placeholderIdle": "Type a prompt and hit Enter… (paste or attach images)",
     "placeholderCompacting": "Compressing context — please wait…",
     "compactingNotice": "Compacting context, your input is temporarily disabled",
     "send": "Send",
+    "sendSteer": "Send steer",
     "stop": "Stop",
     "attachImages": "Attach images",
     "removeAttachment": "Remove attachment",
     "attachLimitWarn_one": "{{count}} file rejected: not an image, larger than 5MB, or would exceed {{limit}}-image limit.",
     "attachLimitWarn_other": "{{count}} files rejected: not an image, larger than 5MB, or would exceed {{limit}}-image limit."
+  },
+  "queue": {
+    "title": "Queued messages",
+    "kindSteer": "Steer",
+    "kindFollowUp": "Follow-up",
+    "kindNextRun": "Next run",
+    "cancel": "Remove from queue"
   },
   "onboarding": {
     "languageTitle": "Language",

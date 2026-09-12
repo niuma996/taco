@@ -31,6 +31,7 @@ function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
         askUserPending: {},
         agentToolPending: {},
         pendingBySessionId: {},
+        queuedBySessionId: {},
         taskSnapshotsBySessionId: {},
         planStatesBySessionId: {},
         historyDetailsBySessionId: {},
@@ -1246,5 +1247,286 @@ describe("workspacesReducer — per-session pending", () => {
         assert.equal(afterClear["/ws"]?.pendingBySessionId.s1, false);
         // active session s2 still unaffected
         assert.equal(afterClear["/ws"]?.pendingBySessionId.s2, false);
+    });
+});
+
+describe("workspacesReducer — run events drive pending", () => {
+    it("run_start sets the session's pending slot", () => {
+        const state = { "/ws": baseWs({ activeSession: "s1" }) };
+        const next = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: { type: "run_start" } as SessionEventLike,
+        });
+        assert.equal(next["/ws"]?.pendingBySessionId.s1, true);
+    });
+
+    it("run_end clears pending; mid-run turn_end does not", () => {
+        let state: Record<string, WorkspaceState> = {
+            "/ws": baseWs({ activeSession: "s1", pendingBySessionId: { s1: true } }),
+        };
+        state = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: { type: "turn_end" } as SessionEventLike,
+        });
+        assert.equal(state["/ws"]?.pendingBySessionId.s1, true, "turn_end must not clear");
+        state = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: { type: "run_end", status: "completed" } as SessionEventLike,
+        });
+        assert.equal(state["/ws"]?.pendingBySessionId.s1, false);
+    });
+
+    it("background-session run events still drive that session's pending slot", () => {
+        // The sidebar status dot reads pendingBySessionId[sid] for every session,
+        // so run events must apply even when the sid is not activeSession (e.g.
+        // an IM-channel turn running while the user views another chat).
+        let state: Record<string, WorkspaceState> = {
+            "/ws": baseWs({
+                activeSession: "active",
+                messages: [{ id: "m1", kind: "user", text: "keep", ts: 1 } as UiMessage],
+            }),
+        };
+        state = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "bg",
+            suppressedThinking: false,
+            now: 1,
+            ev: { type: "run_start" } as SessionEventLike,
+        });
+        assert.equal(state["/ws"]?.pendingBySessionId.bg, true);
+        assert.equal(state["/ws"]?.messages.length, 1, "messages untouched for background sid");
+        state = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "bg",
+            suppressedThinking: false,
+            now: 2,
+            ev: { type: "run_end", status: "completed" } as SessionEventLike,
+        });
+        assert.equal(state["/ws"]?.pendingBySessionId.bg, false);
+    });
+});
+
+describe("workspacesReducer — steering queue", () => {
+    const steerEvent = (texts: Array<{ entryId: string; text: string }>) =>
+        ({
+            type: "queue_update",
+            queues: texts.map((t) => ({
+                entryId: t.entryId,
+                kind: "steer",
+                type: "message",
+                message: { role: "user", content: t.text },
+            })),
+        }) as unknown as SessionEventLike;
+
+    it("queue_update replaces the authoritative list", () => {
+        const state = { "/ws": baseWs({ activeSession: "s1" }) };
+        const next = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: steerEvent([
+                { entryId: "e1", text: "wait, also do X" },
+                { entryId: "e2", text: "and Y" },
+            ]),
+        });
+        const queue = next["/ws"]?.queuedBySessionId.s1 ?? [];
+        assert.equal(queue.length, 2);
+        assert.equal(queue[0]?.id, "e1");
+        assert.equal(queue[0]?.kind, "steer");
+        assert.equal(queue[1]?.text, "and Y");
+    });
+
+    it("queue_update keeps ALL optimistic rows; only REMOVE_QUEUED retires them", () => {
+        // pi emits queue_update from inside the lane command, before the enqueue
+        // RPC response arrives, so the server row lands while the matching
+        // optimistic row is still pending. The reducer must not try to match
+        // them (two identical steers would conflate); the enqueue caller retires
+        // its own optimistic row via REMOVE_QUEUED once the RPC settles.
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s1",
+                queuedBySessionId: {
+                    s1: [
+                        {
+                            id: "optimistic-queued-1",
+                            kind: "steer" as const,
+                            text: "echo me",
+                            optimistic: true,
+                        },
+                        {
+                            id: "optimistic-queued-2",
+                            kind: "steer" as const,
+                            text: "still local",
+                            optimistic: true,
+                        },
+                    ],
+                },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: steerEvent([{ entryId: "e1", text: "echo me" }]),
+        });
+        const queue = next["/ws"]?.queuedBySessionId.s1 ?? [];
+        // Optimistic rows keep their slots ahead of the server list, even the
+        // one the server just echoed.
+        assert.deepEqual(
+            queue.map((q) => [q.id, q.text]),
+            [
+                ["optimistic-queued-1", "echo me"],
+                ["optimistic-queued-2", "still local"],
+                ["e1", "echo me"],
+            ],
+        );
+    });
+
+    it("queue_update replaces only the server rows, wholesale", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s1",
+                queuedBySessionId: {
+                    s1: [
+                        { id: "e-old", kind: "steer" as const, text: "stale server row" },
+                        {
+                            id: "optimistic-queued-1",
+                            kind: "followUp" as const,
+                            text: "local",
+                            optimistic: true,
+                        },
+                    ],
+                },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: steerEvent([{ entryId: "e-new", text: "fresh server row" }]),
+        });
+        const queue = next["/ws"]?.queuedBySessionId.s1 ?? [];
+        assert.deepEqual(
+            queue.map((q) => q.id),
+            ["optimistic-queued-1", "e-new"],
+        );
+    });
+
+    it("operation_abort drains the queue for that session", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s1",
+                queuedBySessionId: {
+                    s1: [{ id: "e1", kind: "steer" as const, text: "x" }],
+                    s2: [{ id: "e2", kind: "steer" as const, text: "y" }],
+                },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+            ev: { type: "operation_abort", steer: [], followUp: [] } as SessionEventLike,
+        });
+        assert.equal(next["/ws"]?.queuedBySessionId.s1, undefined);
+        assert.equal(next["/ws"]?.queuedBySessionId.s2?.length, 1, "other session untouched");
+    });
+
+    it("APPEND_QUEUED / REMOVE_QUEUED manage optimistic rows", () => {
+        let state: Record<string, WorkspaceState> = { "/ws": baseWs({ activeSession: "s1" }) };
+        state = workspacesReducer(state, {
+            type: "APPEND_QUEUED",
+            cwd: "/ws",
+            sid: "s1",
+            item: {
+                id: "optimistic-queued-9",
+                kind: "steer",
+                text: "pending words",
+                optimistic: true,
+            },
+        });
+        assert.equal(state["/ws"]?.queuedBySessionId.s1?.length, 1);
+        const removed = workspacesReducer(state, {
+            type: "REMOVE_QUEUED",
+            cwd: "/ws",
+            sid: "s1",
+            id: "optimistic-queued-9",
+        });
+        assert.equal(removed["/ws"]?.queuedBySessionId.s1, undefined);
+        // Removing an unknown id is a no-op (identity preserved).
+        const noop = workspacesReducer(state, {
+            type: "REMOVE_QUEUED",
+            cwd: "/ws",
+            sid: "s1",
+            id: "nope",
+        });
+        assert.equal(noop, state);
+    });
+
+    it("REMOVE_SESSION drops the removed sid's queue slot", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s2",
+                sessions: [
+                    { id: "s1", createdAt: "2024-01-01" },
+                    { id: "s2", createdAt: "2024-01-02" },
+                ],
+                queuedBySessionId: {
+                    s1: [{ id: "e1", kind: "steer" as const, text: "x" }],
+                    s2: [{ id: "e2", kind: "steer" as const, text: "y" }],
+                },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "REMOVE_SESSION",
+            cwd: "/ws",
+            sid: "s1",
+        });
+        assert.equal(next["/ws"]?.queuedBySessionId.s1, undefined);
+        assert.equal(next["/ws"]?.queuedBySessionId.s2?.length, 1);
+    });
+
+    it("background-session queue_update tracks that session without touching messages", () => {
+        // Otherwise queued rows accumulate while a session runs in the
+        // background and are stale when the user switches back.
+        const state = {
+            "/ws": baseWs({
+                activeSession: "active",
+                messages: [{ id: "m1", kind: "user", text: "keep", ts: 1 } as UiMessage],
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "bg",
+            suppressedThinking: false,
+            now: 1,
+            ev: steerEvent([{ entryId: "e1", text: "bg steer" }]),
+        });
+        assert.equal(next["/ws"]?.queuedBySessionId.bg?.length, 1);
+        assert.equal(next["/ws"]?.queuedBySessionId.bg?.[0]?.id, "e1");
+        assert.equal(next["/ws"]?.messages.length, 1, "messages untouched for background sid");
     });
 });
