@@ -970,25 +970,19 @@ export class WorkspaceRuntime extends EventEmitter {
     }
 
     /**
-     * Re-assemble the workspace toolset and, when it changed, rebuild the baked
-     * system prompt to match. Returns the fresh set plus the names it retired,
-     * or undefined when nothing changed. `removed` travels with the result
-     * because the caller holds the session's full toolset, which is a superset
-     * of this one — only the workspace knows which names it retired.
+     * Re-assemble the workspace toolset and rebuild the system prompt when
+     * the set changed; returns the fresh set plus the names it retired, or
+     * undefined when nothing changed. `removed` travels because the caller
+     * holds the session's full toolset, which is a superset of this one.
      *
-     * Called at the start of every turn. Assembly is cheap — re-resolving the
-     * policy (a small file read), rebuilding the tool objects and re-rendering
-     * the prompt measure ~0.075 ms combined, against a model call three to five
-     * orders of magnitude larger — so paying it per turn buys convergence for
-     * free: any config that feeds tool assembly (IM policy, extensions) reaches
-     * a live conversation on its next message, with no per-source invalidation
-     * plumbing and no file watchers.
+     * Called at the start of every turn. Assembly is cheap (~0.075 ms
+     * combined) against a model call 3-5 orders of magnitude larger, so
+     * paying it per turn buys convergence for free: any config that feeds
+     * tool assembly reaches a live conversation on its next message, with
+     * no per-source invalidation plumbing.
      *
-     * The comparison is what makes this safe to do unconditionally. The system
-     * prompt is the model's KV-cache prefix, so rewriting it every turn would
-     * miss the cache every turn. Comparing tool names first means the steady
-     * state rewrites nothing and stays byte-identical; only a real change pays
-     * one miss.
+     * The name-comparison guard keeps the steady state byte-identical —
+     * only a real change pays one KV-cache miss.
      */
     refreshToolset(
         sessionId: SessionId,

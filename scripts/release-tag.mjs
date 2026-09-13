@@ -2,27 +2,20 @@
 /**
  * release-tag.mjs — move desktop-v* and sidecar-v* tags to HEAD and push.
  *
- * Tags are force-moved (delete remote + recreate locally + push) because
- * the release pipeline overwrites the version at publish time and the
- * `git checkout --` reset in the workflow only restores manifests — it
- * does not move the tag back if the publish job crashed mid-way.
- *
- * Defaults to dry-run; pass `--push` to actually delete-and-push tags.
- * Always refuses to run with a dirty working tree unless `--allow-dirty`
- * is passed (the tag should point at a clean release commit).
+ * Tags are force-moved because the release pipeline overwrites the version
+ * at publish time; the workflow's `git checkout --` only restores manifests,
+ * not the tag. Defaults to dry-run; pass `--push` to actually push. Refuses
+ * a dirty working tree unless `--allow-dirty` is passed.
  *
  * Scope:
  *   - desktop-v* → publish a GitHub Release with the Tauri bundle (DMG,
- *     exe, portable) and surface it as "Latest". A GitHub Release is the
- *     right home: users download from the Releases page.
+ *     exe, portable) — the Releases page is the canonical home for binaries.
  *   - sidecar-v* → only push the tag so `release-sidecar.yml` runs and
- *     publishes npm packages to the registry. Do NOT create a GitHub
- *     Release for sidecar tags — the sidecar has no binary artifacts to
- *     attach, and an empty Release page is noise. npm is the canonical
- *     surface for the npm packages.
+ *     publishes npm packages. Do NOT create a GitHub Release — the sidecar
+ *     has no binary artifacts, and an empty Release page is noise.
  *
  * Usage:
- *   node scripts/release-tag.mjs 0.1.1              # dry-run, just print plan
+ *   node scripts/release-tag.mjs 0.1.1              # dry-run
  *   node scripts/release-tag.mjs 0.1.1 --push       # force-move + push
  *   node scripts/release-tag.mjs 0.1.1 --allow-dirty
  */
