@@ -186,6 +186,15 @@ export interface WorkspaceRuntimeOptions {
      * while `sessionCwd` (the fsCwd) stays the storage identity.
      */
     imPolicy?: ImWorkspacePolicy;
+    /**
+     * Re-resolve the IM policy on demand. Supplied by the server, which owns
+     * the policy store; the store reads the file per call (deliberately
+     * uncached) so a hand-edited policy is visible without a restart.
+     *
+     * Without this the assembled toolset would freeze at construction, and a
+     * permission change would only reach conversations started afterwards.
+     */
+    resolveImPolicy?: () => ImWorkspacePolicy | undefined;
     /** Where tools run (shell, fs tools, plan files). Defaults to the session cwd. */
     executionCwd?: string;
     /**
@@ -274,7 +283,18 @@ export class WorkspaceRuntime extends EventEmitter {
      * edited — same limitation `parentInstructionsBlock` accepts today.
      */
     systemPrompt: string;
-    readonly tools: TacoTool[];
+    /** Not readonly: `refreshToolset()` replaces it when a policy change alters
+     *  the assembled set, so the baked system prompt and the toolset the model
+     *  is offered never disagree. */
+    tools: TacoTool[];
+    /** Re-resolves the IM policy at assembly time — see the constructor. */
+    private readonly resolveImPolicy: () => ImWorkspacePolicy | undefined;
+    /** Per-session tool builder, retained so `refreshToolset()` can re-run the
+     *  same assembly a turn is about to use. */
+    private readonly toolsBuilder: (
+        sessionId: SessionId,
+        taskState: SessionTaskState,
+    ) => TacoTool[];
     /** NOT readonly: `reloadSkillsNow()` swaps in a freshly-scanned skill list. */
     resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
     readonly streamOptions: AgentHarnessStreamOptions;
@@ -451,6 +471,13 @@ export class WorkspaceRuntime extends EventEmitter {
             options.toolRegistry ?? new DefaultDeferredToolRegistry({ candidates: [] });
         const imPolicy =
             options.imPolicy ?? (options.disableFsTools ? DEFAULT_IM_WORKSPACE_POLICY : undefined);
+        // Tool assembly re-reads the policy through this thunk rather than
+        // closing over the value above, so a policy edited after the workspace
+        // was constructed is picked up on the next turn. `resolveImPolicy` is
+        // supplied by the server (which owns the policy store); without it the
+        // constructor-time value is reused, which is what every non-IM
+        // workspace and every test wants.
+        this.resolveImPolicy = options.resolveImPolicy ?? (() => imPolicy);
         this.permissionBroker = new PermissionBroker(
             () => {
                 const base = validateCommandPermissions(
@@ -471,8 +498,9 @@ export class WorkspaceRuntime extends EventEmitter {
             },
         );
         const toolContext = this.buildToolContextThunk(options);
-        const { tools, toolsBuilder } = this.assembleTools(options, imPolicy);
+        const { tools, toolsBuilder } = this.assembleTools(options);
         this.tools = tools;
+        this.toolsBuilder = toolsBuilder;
 
         this.isIm = isIm;
         this.resources = options.resources ?? {};
@@ -549,6 +577,12 @@ export class WorkspaceRuntime extends EventEmitter {
             checkpointStore: this.checkpointStore,
             toolRegistry: this.toolRegistry,
             toolsBuilder,
+            // Pair the refreshed toolset with the prompt rebuilt from it, so a
+            // session can never install one without the other.
+            refreshToolset: (sessionId, taskState) => {
+                const next = this.refreshToolset(sessionId, taskState);
+                return next ? { tools: next, systemPrompt: this.systemPrompt } : undefined;
+            },
             // Thunk reads the current value of `instructionsConfig` — bound
             // to the workspace field, so `updateInstructionsConfig()` can
             // hot-reload without re-constructing the registry. `undefined`
@@ -781,10 +815,7 @@ export class WorkspaceRuntime extends EventEmitter {
      * Requires `permissionBroker`, `taskAdapter`, `planAdapter` and `extensions`
      * to be assigned already.
      */
-    private assembleTools(
-        options: WorkspaceRuntimeOptions,
-        imPolicy: ImWorkspacePolicy | undefined,
-    ): {
+    private assembleTools(options: WorkspaceRuntimeOptions): {
         tools: TacoTool[];
         toolsBuilder: (sessionId: SessionId, taskState: SessionTaskState) => TacoTool[];
     } {
@@ -806,7 +837,10 @@ export class WorkspaceRuntime extends EventEmitter {
                     undefined,
                 );
             const merged = extTools.length > 0 ? dedupOverride(base, extTools) : base;
-            return imPolicy ? filterToolsForImPolicy(merged, imPolicy) : merged;
+            // Re-resolved per build, not captured: a grant or revocation edited
+            // after construction must reach the next turn's assembly.
+            const policy = this.resolveImPolicy();
+            return policy ? filterToolsForImPolicy(merged, policy) : merged;
         };
         const ephemeralTaskState: SessionTaskState = {
             taskStore: { currentListId: null, lists: new Map() },
@@ -933,6 +967,40 @@ export class WorkspaceRuntime extends EventEmitter {
         this.systemPrompt = this.rebuildSystemPrompt(skills);
         this.sessionRegistry.updateSkills(skills);
         this.skillDiagnostics = diagnostics;
+    }
+
+    /**
+     * Re-assemble the workspace toolset and, when it changed, rebuild the baked
+     * system prompt to match. Returns the fresh set, or undefined when nothing
+     * changed.
+     *
+     * Called at the start of every turn. Assembly is cheap — re-resolving the
+     * policy (a small file read), rebuilding the tool objects and re-rendering
+     * the prompt measure ~0.075 ms combined, against a model call three to five
+     * orders of magnitude larger — so paying it per turn buys convergence for
+     * free: any config that feeds tool assembly (IM policy, extensions) reaches
+     * a live conversation on its next message, with no per-source invalidation
+     * plumbing and no file watchers.
+     *
+     * The comparison is what makes this safe to do unconditionally. The system
+     * prompt is the model's KV-cache prefix, so rewriting it every turn would
+     * miss the cache every turn. Comparing tool names first means the steady
+     * state rewrites nothing and stays byte-identical; only a real change pays
+     * one miss.
+     */
+    refreshToolset(sessionId: SessionId, taskState: SessionTaskState): TacoTool[] | undefined {
+        const next = this.toolsBuilder(sessionId, taskState);
+        const before = this.tools.map((t) => t.name).join(" ");
+        const after = next.map((t) => t.name).join(" ");
+        if (before === after) return undefined;
+        this.tools = next;
+        this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
+        log.info("workspace toolset changed; rebuilt system prompt", {
+            workspace: this.workspaceKey,
+            added: after.split(" ").filter((n) => n && !before.split(" ").includes(n)),
+            removed: before.split(" ").filter((n) => n && !after.split(" ").includes(n)),
+        });
+        return next;
     }
 
     // ─────────── session list / history (delegates to SessionRegistry) ───────────

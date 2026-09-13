@@ -150,6 +150,12 @@ export interface SessionRegistryOptions {
      * SessionRegistry.attach falls back to this.tools (workspace-static set).
      */
     readonly toolsBuilder?: (sessionId: SessionId, taskState: SessionTaskState) => TacoTool[];
+    /** Per-turn toolset convergence; returns undefined when nothing changed.
+     *  Supplied by WorkspaceRuntime (which owns the prompt it rebuilds). */
+    readonly refreshToolset?: (
+        sessionId: SessionId,
+        taskState: SessionTaskState,
+    ) => { tools: TacoTool[]; systemPrompt: string } | undefined;
     /** Dynamic-tool candidate directory; forwarded to AttachedSession.create to wire AddTools and restore. */
     readonly toolRegistry?: DeferredToolRegistry;
     /**
@@ -284,6 +290,12 @@ export class SessionRegistry extends EventEmitter {
     private readonly toolsBuilder:
         | ((sessionId: SessionId, taskState: SessionTaskState) => TacoTool[])
         | undefined;
+    private readonly refreshToolset:
+        | ((
+              sessionId: SessionId,
+              taskState: SessionTaskState,
+          ) => { tools: TacoTool[]; systemPrompt: string } | undefined)
+        | undefined;
     /** NOT readonly: `updateSkills()` swaps this in on hot reload. */
     private skills: readonly TacoSkill[];
     private readonly skillAuthoringGuidance?: string;
@@ -320,6 +332,7 @@ export class SessionRegistry extends EventEmitter {
         this.memoryStore = options.memoryStore;
         this.isIm = options.isIm;
         this.toolsBuilder = options.toolsBuilder;
+        this.refreshToolset = options.refreshToolset;
     }
 
     getListingTools(): TacoTool[] {
@@ -634,6 +647,13 @@ export class SessionRegistry extends EventEmitter {
             tasksDir: resolvedTaskState.tasksDir,
             checkpointStore: this.checkpointStore,
             toolRegistry: this.toolRegistry,
+            // Main sessions only: a subagent's toolset is deliberately narrowed
+            // by its caller (depth-filtered, `agent` removed), so re-imposing
+            // the workspace set on it would widen it back.
+            refreshToolset:
+                sessionKind === "main" && this.refreshToolset
+                    ? () => this.refreshToolset?.(sessionId, resolvedTaskState)
+                    : undefined,
             getInstructionsConfig: this.getInstructionsConfig,
             getImChannelContext: this.getImChannelContext,
             getToolContext: this.getToolContext,

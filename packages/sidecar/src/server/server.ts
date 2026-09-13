@@ -884,6 +884,7 @@ export class SidecarServer implements ServerRpcSurface {
         disableFsTools: boolean;
         executionCwd: string;
         imPolicy?: ImWorkspacePolicy;
+        imRoute?: ImRoute;
     } {
         // IM workspace: cwd may be the fsCwd (scratch path) when called from
         // executeRpcRequest — detect the IM URL pattern before the isIm branch.
@@ -922,7 +923,18 @@ export class SidecarServer implements ServerRpcSurface {
             }
         }
 
-        return { workspaceKey, fsCwd, sessionsRoot, isIm, disableFsTools, executionCwd, imPolicy };
+        return {
+            workspaceKey,
+            fsCwd,
+            sessionsRoot,
+            isIm,
+            disableFsTools,
+            executionCwd,
+            imPolicy,
+            // Returned so the workspace can re-resolve the policy per turn
+            // instead of reusing the snapshot taken above.
+            imRoute: parsedIm,
+        };
     }
 
     /**
@@ -1117,6 +1129,14 @@ export class SidecarServer implements ServerRpcSurface {
                 skillDiagnostics,
                 executionCwd: paths.executionCwd,
                 imPolicy: paths.imPolicy,
+                // Re-resolve per turn rather than freezing the constructor-time
+                // value: the store reads the file on each call (deliberately
+                // uncached), so a policy edited by hand or from another process
+                // reaches a live conversation on its next message.
+                resolveImPolicy: (() => {
+                    const route = paths.imRoute;
+                    return route ? () => this.imPolicyStore.resolve(route) : undefined;
+                })(),
                 toolRegistry,
                 // Hot-reload wiring: only the user-writable dirs are watched —
                 // the builtin dir ships with the binary and only changes via

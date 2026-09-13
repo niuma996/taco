@@ -291,6 +291,17 @@ export interface AttachedSessionOptions {
      */
     toolRegistry?: DeferredToolRegistry;
     /**
+     * Re-assemble the workspace toolset for this session, returning it only when
+     * it differs from what the workspace last handed out (undefined = unchanged,
+     * the steady state). Called at the start of each turn so a permission change
+     * reaches an existing conversation on its next message.
+     *
+     * Returns the system prompt alongside the tools because the two must move
+     * together: offering a tool the prompt says you lack — or the reverse —
+     * is worse than either being stale.
+     */
+    refreshToolset?: () => { tools: TacoTool[]; systemPrompt: string } | undefined;
+    /**
      * Per-turn `TacoToolContext` provider. The harness invokes it once per
      * turn snapshot and threads the result into every tool's `execute`.
      * Workspace-supplied; lazy so future hot-reload flows (imRouting /
@@ -412,6 +423,9 @@ export class AttachedSession extends EventEmitter {
      * the full conversation.
      */
     private lastRememberMessageCountPromises: Promise<number>[] = [];
+    /** Converges the toolset + system prompt at the start of a turn; no-op when
+     *  the workspace supplied no refresher (subagents, tests). */
+    private applyToolsetRefresh?: () => Promise<void>;
     /** Dynamic-tool controller; undefined when no toolRegistry is configured. */
     readonly toolController: SessionToolController | undefined;
     /**
@@ -508,6 +522,10 @@ export class AttachedSession extends EventEmitter {
             toolController = controller;
         }
 
+        // Mutable so the per-turn refresh can swap in a rebuilt prompt; read
+        // through the thunk handed to AgentHarness below.
+        let currentSystemPrompt = args.systemPrompt;
+
         // `AgentHarness.create` restores suspended operations off the session,
         // so it is async and may report work that was interrupted mid-run by a
         // previous daemon exit.
@@ -517,7 +535,11 @@ export class AttachedSession extends EventEmitter {
                 models: args.models,
                 model: args.model,
                 thinkingLevel: args.thinkingLevel ?? "off",
-                systemPrompt: args.systemPrompt,
+                // A thunk, not the string: pi calls it while assembling each
+                // request, so a prompt rebuilt by refreshToolset (below) is
+                // picked up without having to mutate harness state. Falls back
+                // to the attach-time value when no refresher is wired.
+                systemPrompt: () => currentSystemPrompt,
                 tools: initialTools,
                 resources: args.resources,
                 streamOptions: await withTacoUserAgent(
@@ -558,66 +580,6 @@ export class AttachedSession extends EventEmitter {
             getActiveToolNames: () => lane.getActiveTools(harnessContext),
             setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
         });
-
-        // ── Re-align the lane's active-tool allowlist with the toolset this
-        // attach actually assembled ──
-        //
-        // pi treats `configuration.activeToolNames` as the authoritative
-        // allowlist of what the model may see: it defaults to "every tool
-        // passed in" only for a brand-new session
-        // (harness.js `options.activeToolNames ?? tools.map(...)`), and
-        // thereafter the value restored from the transcript wins. taco does not
-        // pass `activeToolNames` into AgentHarness.create, so an existing
-        // session keeps whatever allowlist was persisted the last time
-        // `addTools` wrote one — permanently.
-        //
-        // That froze IM permission changes out of existing conversations in
-        // both directions. Granting `tools.shell: "allow"` left the tool
-        // defined-but-unexposed (the model insisted it had no shell even after
-        // a daemon restart, because the stale allowlist lives in the session
-        // file, not in memory). Worse, revoking a grant did NOT take effect
-        // either: a tool dropped from the assembled set stayed on the persisted
-        // allowlist, so the permission could not be withdrawn.
-        //
-        // Intersect-then-extend against the assembled set:
-        //  - drop names no longer assembled → revocation takes effect;
-        //  - add newly assembled names → a fresh grant becomes visible.
-        // Only touch it when it actually differs, so a normal attach writes
-        // nothing to the transcript.
-        const assembledNames = initialTools.map((t) => t.name);
-        const persistedActive = await lane.getActiveTools(harnessContext);
-        if (persistedActive.length > 0) {
-            const assembledSet = new Set(assembledNames);
-            // A name can be missing from the assembled set for two very
-            // different reasons, and only one of them is a revocation:
-            //  - policy no longer grants it → drop it (the point of this pass);
-            //  - its candidate is still registered but load() threw this time
-            //    (e.g. an MCP server that is down) → restoreTools deliberately
-            //    swallows that and keeps the name so the next attach retries.
-            // Treating the second case as a revocation would turn a transient
-            // MCP outage into permanent tool loss, so registered candidates are
-            // exempt from the intersection.
-            const retryableNames = new Set(
-                args.toolRegistry?.listCandidates().map((c) => c.name) ?? [],
-            );
-            const retained = persistedActive.filter(
-                (name) => assembledSet.has(name) || retryableNames.has(name),
-            );
-            const retainedSet = new Set(retained);
-            const added = assembledNames.filter((name) => !retainedSet.has(name));
-            const realigned = [...retained, ...added];
-            const changed =
-                realigned.length !== persistedActive.length ||
-                realigned.some((name, i) => name !== persistedActive[i]);
-            if (changed) {
-                await lane.setActiveTools(realigned, harnessContext);
-                log.info("realigned active tools with the assembled toolset", {
-                    sessionId: args.session.metadata.id,
-                    revoked: persistedActive.filter((n) => !retainedSet.has(n)),
-                    granted: added,
-                });
-            }
-        }
 
         const branchEntries = await findBranchEntries(args.session);
         const pinOnceConsumer = new PinOnceConsumer(branchEntries);
@@ -666,6 +628,24 @@ export class AttachedSession extends EventEmitter {
             args.sessionKind,
         );
         attachedCell.current = attached;
+        // Per-turn toolset convergence. Assigned here rather than threaded
+        // through the constructor (already 11 params); the setter also owns the
+        // prompt cell so the two can only move together.
+        if (args.refreshToolset) {
+            const refresh = args.refreshToolset;
+            attached.applyToolsetRefresh = async () => {
+                const next = refresh();
+                if (!next) return; // unchanged — the steady state, no writes
+                currentSystemPrompt = next.systemPrompt;
+                await harness.setTools([...next.tools], harnessContext);
+                // pi gates visibility on the lane allowlist, so a tool that is
+                // merely defined stays invisible; realign it to the new set.
+                await lane.setActiveTools(
+                    next.tools.map((t) => t.name),
+                    harnessContext,
+                );
+            };
+        }
 
         // Per-session task/plan state must be assigned before wireHarnessHooks —
         // hook thunks read attached.taskStore / planState / tasksDir at context build.
@@ -968,6 +948,9 @@ export class AttachedSession extends EventEmitter {
         // during recovery would fail with LaneBusy — a spurious "session is
         // busy" on the first message after a crash. Wait it out instead.
         await this.awaitRecovery();
+        // Converge before the run reads the toolset: a permission granted or
+        // revoked since the last message takes effect on this turn.
+        await this.applyToolsetRefresh?.();
         const result = await this.lane.prompt(text, images, harnessContext);
         if (!result.ok) throw toHarnessError("session.prompt", result.error);
 
