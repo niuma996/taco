@@ -151,11 +151,13 @@ export interface SessionRegistryOptions {
      */
     readonly toolsBuilder?: (sessionId: SessionId, taskState: SessionTaskState) => TacoTool[];
     /** Per-turn toolset convergence; returns undefined when nothing changed.
-     *  Supplied by WorkspaceRuntime (which owns the prompt it rebuilds). */
+     *  Supplied by WorkspaceRuntime (which owns the prompt it rebuilds).
+     *  `removed` lists the workspace-level names the change retired, so the
+     *  session can drop exactly those instead of replacing its whole toolset. */
     readonly refreshToolset?: (
         sessionId: SessionId,
         taskState: SessionTaskState,
-    ) => { tools: TacoTool[]; systemPrompt: string } | undefined;
+    ) => { tools: TacoTool[]; removed: string[]; systemPrompt: string } | undefined;
     /** Dynamic-tool candidate directory; forwarded to AttachedSession.create to wire AddTools and restore. */
     readonly toolRegistry?: DeferredToolRegistry;
     /**
@@ -294,7 +296,7 @@ export class SessionRegistry extends EventEmitter {
         | ((
               sessionId: SessionId,
               taskState: SessionTaskState,
-          ) => { tools: TacoTool[]; systemPrompt: string } | undefined)
+          ) => { tools: TacoTool[]; removed: string[]; systemPrompt: string } | undefined)
         | undefined;
     /** NOT readonly: `updateSkills()` swaps this in on hot reload. */
     private skills: readonly TacoSkill[];

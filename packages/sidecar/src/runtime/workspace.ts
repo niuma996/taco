@@ -581,7 +581,7 @@ export class WorkspaceRuntime extends EventEmitter {
             // session can never install one without the other.
             refreshToolset: (sessionId, taskState) => {
                 const next = this.refreshToolset(sessionId, taskState);
-                return next ? { tools: next, systemPrompt: this.systemPrompt } : undefined;
+                return next ? { ...next, systemPrompt: this.systemPrompt } : undefined;
             },
             // Thunk reads the current value of `instructionsConfig` — bound
             // to the workspace field, so `updateInstructionsConfig()` can
@@ -971,8 +971,10 @@ export class WorkspaceRuntime extends EventEmitter {
 
     /**
      * Re-assemble the workspace toolset and, when it changed, rebuild the baked
-     * system prompt to match. Returns the fresh set, or undefined when nothing
-     * changed.
+     * system prompt to match. Returns the fresh set plus the names it retired,
+     * or undefined when nothing changed. `removed` travels with the result
+     * because the caller holds the session's full toolset, which is a superset
+     * of this one — only the workspace knows which names it retired.
      *
      * Called at the start of every turn. Assembly is cheap — re-resolving the
      * policy (a small file read), rebuilding the tool objects and re-rendering
@@ -988,19 +990,26 @@ export class WorkspaceRuntime extends EventEmitter {
      * state rewrites nothing and stays byte-identical; only a real change pays
      * one miss.
      */
-    refreshToolset(sessionId: SessionId, taskState: SessionTaskState): TacoTool[] | undefined {
+    refreshToolset(
+        sessionId: SessionId,
+        taskState: SessionTaskState,
+    ): { tools: TacoTool[]; removed: string[] } | undefined {
         const next = this.toolsBuilder(sessionId, taskState);
-        const before = this.tools.map((t) => t.name).join(" ");
-        const after = next.map((t) => t.name).join(" ");
+        const before = this.tools.map((t) => t.name).join("\u0000");
+        const after = next.map((t) => t.name).join("\u0000");
         if (before === after) return undefined;
         this.tools = next;
         this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
+        const added = after.split("\u0000").filter((n) => n && !before.split("\u0000").includes(n));
+        const removed = before
+            .split("\u0000")
+            .filter((n) => n && !after.split("\u0000").includes(n));
         log.info("workspace toolset changed; rebuilt system prompt", {
             workspace: this.workspaceKey,
-            added: after.split(" ").filter((n) => n && !before.split(" ").includes(n)),
-            removed: before.split(" ").filter((n) => n && !after.split(" ").includes(n)),
+            added,
+            removed,
         });
-        return next;
+        return { tools: next, removed };
     }
 
     // ─────────── session list / history (delegates to SessionRegistry) ───────────

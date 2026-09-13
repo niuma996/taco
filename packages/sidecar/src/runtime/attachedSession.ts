@@ -298,9 +298,12 @@ export interface AttachedSessionOptions {
      *
      * Returns the system prompt alongside the tools because the two must move
      * together: offering a tool the prompt says you lack — or the reverse —
-     * is worse than either being stale.
+     * is worse than either being stale. `removed` names the workspace tools the
+     * change retired; the session layer keeps everything else it had installed.
      */
-    refreshToolset?: () => { tools: TacoTool[]; systemPrompt: string } | undefined;
+    refreshToolset?: () =>
+        | { tools: TacoTool[]; removed: string[]; systemPrompt: string }
+        | undefined;
     /**
      * Per-turn `TacoToolContext` provider. The harness invokes it once per
      * turn snapshot and threads the result into every tool's `execute`.
@@ -636,14 +639,29 @@ export class AttachedSession extends EventEmitter {
             attached.applyToolsetRefresh = async () => {
                 const next = refresh();
                 if (!next) return; // unchanged — the steady state, no writes
+                const retired = new Set(next.removed);
+                const nextNames = new Set(next.tools.map((t) => t.name));
+                // `next.tools` is only the workspace-level set. Taking it as the
+                // new collection would delete the tools this layer installed
+                // (agent / skill / addTools / restored / always candidates) while
+                // the allowlist still named them — which pi rejects as
+                // `configured_tools_unavailable`; taking it as the new allowlist
+                // would hide those same tools instead. So drop only what the
+                // workspace retired and leave the rest alone.
+                const current = await harness.getTools(harnessContext);
+                const kept = current.filter((t) => !retired.has(t.name) && !nextNames.has(t.name));
+                const merged = [...next.tools, ...kept];
+                const active = (await lane.getActiveTools(harnessContext)).filter(
+                    (name) => !retired.has(name),
+                );
+                for (const name of nextNames) {
+                    if (!active.includes(name)) active.push(name);
+                }
                 currentSystemPrompt = next.systemPrompt;
-                await harness.setTools([...next.tools], harnessContext);
+                await harness.setTools(merged, harnessContext);
                 // pi gates visibility on the lane allowlist, so a tool that is
                 // merely defined stays invisible; realign it to the new set.
-                await lane.setActiveTools(
-                    next.tools.map((t) => t.name),
-                    harnessContext,
-                );
+                await lane.setActiveTools(active, harnessContext);
             };
         }
 

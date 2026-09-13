@@ -361,6 +361,7 @@ describe("AttachedSession — dynamic tools", () => {
             granted = false; // converged; subsequent turns see no further change
             return {
                 tools: [...baseTools, fakeTool("shell")],
+                removed: [],
                 systemPrompt: "test prompt with shell",
             };
         };
@@ -402,6 +403,73 @@ describe("AttachedSession — dynamic tools", () => {
             (after ?? []).includes("shell"),
             `a tool granted between turns must become active, got: ${(after ?? []).join(", ")}`,
         );
+        await attached.abort();
+    });
+
+    it("a refresh swaps the workspace subset without dropping the session's own tools", async () => {
+        // The refresher returns only the workspace-level set, while the session
+        // also holds tools this layer installed (addTools, always candidates).
+        // Installing the refresher's set verbatim would strip them — so a policy
+        // edit mid-conversation would cost the session its agent/skill/addTools
+        // tools along with the permission it meant to change.
+        const registry = new DefaultDeferredToolRegistry({
+            candidates: [makeToolCandidate("always-tool", "always")],
+        });
+        const session = await repo.create({ cwd: tmpDir }, harnessContext);
+
+        let granted = false;
+        const baseTools = [fakeTool("builtin-tool")];
+        const attached = await AttachedSession.create({
+            session,
+            models,
+            model: stubModel,
+            env,
+            systemPrompt: "test prompt",
+            tools: baseTools,
+            resources: {},
+            streamOptions: {},
+            taskStore: {
+                getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                setTaskState: () => {},
+            } as unknown as TaskStore,
+            planState: createPlanModeState(),
+            tasksDir: tmpDir,
+            toolRegistry: registry,
+            sessionCwd: tmpDir as never,
+            getToolContext: (): TacoToolContext => ({ env, workspace: tmpDir as never }),
+            sessionKind: "main",
+            refreshToolset: () => {
+                if (!granted) return undefined;
+                granted = false;
+                return {
+                    tools: [...baseTools, fakeTool("shell")],
+                    removed: [],
+                    systemPrompt: "test prompt with shell",
+                };
+            },
+        } as AttachedSessionOptions);
+
+        const before = (await attached.toolController?.activeToolNames()) ?? [];
+        assert.ok(before.includes("addTools"), "precondition: addTools is resident");
+        assert.ok(before.includes("always-tool"), "precondition: always candidate is resident");
+
+        granted = true;
+        await attached.prompt("hello").catch(() => undefined);
+
+        const after = (await attached.toolController?.activeToolNames()) ?? [];
+        const installed = (await attached.toolController?.installedToolNames()) ?? [];
+        assert.ok(after.includes("shell"), `granted tool must activate, got: ${after.join(", ")}`);
+        assert.ok(
+            installed.includes("shell"),
+            `granted tool must be defined, got: ${installed.join(", ")}`,
+        );
+        for (const name of ["addTools", "always-tool"]) {
+            assert.ok(
+                installed.includes(name),
+                `${name} must survive the refresh, got: ${installed.join(", ")}`,
+            );
+            assert.ok(after.includes(name), `${name} must stay active, got: ${after.join(", ")}`);
+        }
         await attached.abort();
     });
 });

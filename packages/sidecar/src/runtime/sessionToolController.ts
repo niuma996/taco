@@ -65,6 +65,12 @@ export interface SessionToolController {
     loadedToolNames(): readonly string[];
     /** Current active tool names (built-ins + dynamic, mirrors lane state). */
     activeToolNames(): Promise<readonly string[]>;
+    /**
+     * Names of every tool currently *defined* (the collection half, as opposed
+     * to `activeToolNames`'s lane half). The two can disagree: a name on the
+     * lane allowlist with no definition behind it makes pi fail the generation.
+     */
+    installedToolNames(): Promise<readonly string[]>;
     /** The registry for this session — used by AddTools.description to list candidates. */
     readonly registry: DeferredToolRegistry;
 }
@@ -91,6 +97,11 @@ export class DefaultSessionToolController implements SessionToolController {
     async activeToolNames(): Promise<readonly string[]> {
         if (!this.harness) return [];
         return [...(await this.harness.getActiveToolNames())];
+    }
+
+    async installedToolNames(): Promise<readonly string[]> {
+        if (!this.harness) return [];
+        return (await this.harness.getTools()).map((tool) => tool.name);
     }
 
     /**
