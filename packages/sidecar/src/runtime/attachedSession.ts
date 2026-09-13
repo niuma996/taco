@@ -559,6 +559,52 @@ export class AttachedSession extends EventEmitter {
             setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
         });
 
+        // ── Re-align the lane's active-tool allowlist with the toolset this
+        // attach actually assembled ──
+        //
+        // pi treats `configuration.activeToolNames` as the authoritative
+        // allowlist of what the model may see: it defaults to "every tool
+        // passed in" only for a brand-new session
+        // (harness.js `options.activeToolNames ?? tools.map(...)`), and
+        // thereafter the value restored from the transcript wins. taco does not
+        // pass `activeToolNames` into AgentHarness.create, so an existing
+        // session keeps whatever allowlist was persisted the last time
+        // `addTools` wrote one — permanently.
+        //
+        // That froze IM permission changes out of existing conversations in
+        // both directions. Granting `tools.shell: "allow"` left the tool
+        // defined-but-unexposed (the model insisted it had no shell even after
+        // a daemon restart, because the stale allowlist lives in the session
+        // file, not in memory). Worse, revoking a grant did NOT take effect
+        // either: a tool dropped from the assembled set stayed on the persisted
+        // allowlist, so the permission could not be withdrawn.
+        //
+        // Intersect-then-extend against the assembled set:
+        //  - drop names no longer assembled → revocation takes effect;
+        //  - add newly assembled names → a fresh grant becomes visible.
+        // Only touch it when it actually differs, so a normal attach writes
+        // nothing to the transcript.
+        const assembledNames = initialTools.map((t) => t.name);
+        const persistedActive = await lane.getActiveTools(harnessContext);
+        if (persistedActive.length > 0) {
+            const assembledSet = new Set(assembledNames);
+            const retained = persistedActive.filter((name) => assembledSet.has(name));
+            const retainedSet = new Set(retained);
+            const added = assembledNames.filter((name) => !retainedSet.has(name));
+            const realigned = [...retained, ...added];
+            const changed =
+                realigned.length !== persistedActive.length ||
+                realigned.some((name, i) => name !== persistedActive[i]);
+            if (changed) {
+                await lane.setActiveTools(realigned, harnessContext);
+                log.info("realigned active tools with the assembled toolset", {
+                    sessionId: args.session.metadata.id,
+                    revoked: persistedActive.filter((n) => !assembledSet.has(n)),
+                    granted: added,
+                });
+            }
+        }
+
         const branchEntries = await findBranchEntries(args.session);
         const pinOnceConsumer = new PinOnceConsumer(branchEntries);
 

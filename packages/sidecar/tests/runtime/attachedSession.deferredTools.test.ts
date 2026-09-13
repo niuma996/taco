@@ -277,4 +277,69 @@ describe("AttachedSession — dynamic tools", () => {
         );
         await reloaded.abort();
     });
+
+    it("re-attach re-aligns the persisted allowlist with the assembled toolset", async () => {
+        // pi treats configuration.activeToolNames as the authoritative allowlist
+        // of what the model may see, defaulting to "all tools passed in" only for
+        // a brand-new session; afterwards the value restored from the transcript
+        // wins. Since taco does not pass activeToolNames into
+        // AgentHarness.create, an existing session used to keep whatever
+        // allowlist was persisted by the last addTools() call forever.
+        //
+        // That froze IM permission edits out of existing conversations both
+        // ways: granting tools.shell:"allow" left the tool defined but never
+        // exposed (surviving a daemon restart, since the stale allowlist lives
+        // in the session file), and revoking a grant did not take effect either.
+        const registry = new DefaultDeferredToolRegistry({ candidates: [] });
+        const session = await repo.create({ cwd: tmpDir }, harnessContext);
+        const baseOpts = {
+            session,
+            models,
+            model: stubModel,
+            env,
+            systemPrompt: "test prompt",
+            resources: {},
+            streamOptions: {},
+            taskStore: {
+                getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                setTaskState: () => {},
+            } as unknown as TaskStore,
+            planState: createPlanModeState(),
+            tasksDir: tmpDir,
+            toolRegistry: registry,
+            sessionCwd: tmpDir as never,
+            getToolContext: (): TacoToolContext => ({ env, workspace: tmpDir as never }),
+            sessionKind: "main" as const,
+        };
+
+        // First attach with a restricted toolset, then persist an allowlist by
+        // calling addTools (the only writer of activeToolNames).
+        const first = await AttachedSession.create({
+            ...baseOpts,
+            tools: [fakeTool("keep-me"), fakeTool("revoke-me")],
+        } as AttachedSessionOptions);
+        await first.toolController?.addTools([]);
+        const before = (await first.toolController?.activeToolNames()) ?? [];
+        assert.ok(before.includes("revoke-me"), "precondition: allowlist persisted revoke-me");
+        assert.ok(!before.includes("grant-me"), "precondition: grant-me not yet assembled");
+        await first.abort();
+
+        // Re-attach with a changed toolset: "revoke-me" is gone (policy revoked
+        // it) and "grant-me" is new (policy granted it).
+        const reloaded = await AttachedSession.create({
+            ...baseOpts,
+            tools: [fakeTool("keep-me"), fakeTool("grant-me")],
+        } as AttachedSessionOptions);
+        const after = (await reloaded.toolController?.activeToolNames()) ?? [];
+        assert.ok(after.includes("keep-me"), "a still-assembled tool stays active");
+        assert.ok(
+            after.includes("grant-me"),
+            "a newly assembled tool must become active, or a fresh grant stays invisible",
+        );
+        assert.ok(
+            !after.includes("revoke-me"),
+            "a no-longer-assembled tool must drop out, or a revoked permission cannot be withdrawn",
+        );
+        await reloaded.abort();
+    });
 });
