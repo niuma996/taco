@@ -165,6 +165,22 @@ export class JobStore {
             // spread never sees `undefined`. We still write the array back
             // (next save) so the file picks up the field naturally.
             const withHistory = job.history ? job : { ...job, history: [] };
+            // Same treatment for the run counters, which postdate the first
+            // job files: seed them to 0 so `applyRunOutcome` never folds an
+            // `undefined` into arithmetic. The caps themselves stay absent —
+            // absent `max_runs` means unlimited, and absent
+            // `max_consecutive_failures` resolves to the shared default at
+            // read time, so writing a literal here would freeze old jobs to
+            // today's number.
+            const withCounters =
+                withHistory.run_count !== undefined &&
+                withHistory.consecutive_failures !== undefined
+                    ? withHistory
+                    : {
+                          ...withHistory,
+                          run_count: withHistory.run_count ?? 0,
+                          consecutive_failures: withHistory.consecutive_failures ?? 0,
+                      };
             // Channel jobs (im:// workspace) only support
             // sessionStrategy="reuse". Files written before that rule —
             // or via the old schedules UI, whose strategy picker had no
@@ -174,14 +190,14 @@ export class JobStore {
             // manual edit. An absent field is left absent: the
             // dispatcher already defaults im:// to "reuse".
             const workspace =
-                typeof withHistory.args?.workspace === "string" ? withHistory.args.workspace : "";
+                typeof withCounters.args?.workspace === "string" ? withCounters.args.workspace : "";
             const withStrategy =
                 workspace.startsWith("im://") &&
-                withHistory.sessionStrategy !== undefined &&
-                withHistory.sessionStrategy !== "reuse"
-                    ? { ...withHistory, sessionStrategy: "reuse" as const }
-                    : withHistory;
-            if (withStrategy !== withHistory && persistMigration) {
+                withCounters.sessionStrategy !== undefined &&
+                withCounters.sessionStrategy !== "reuse"
+                    ? { ...withCounters, sessionStrategy: "reuse" as const }
+                    : withCounters;
+            if (withStrategy !== withCounters && persistMigration) {
                 await this.save(withStrategy).catch((err: unknown) =>
                     log.warn(`failed to persist strategy migration for ${path}: ${String(err)}`),
                 );

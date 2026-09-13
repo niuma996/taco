@@ -42,7 +42,36 @@ test("save + get round-trip preserves all fields", async () => {
         const job = sampleJob();
         await store.save(job);
         const round = await store.get(job.id);
-        deepStrictEqual(round, job);
+        // Reads seed the run counters when absent (see readOne), so the
+        // round-trip is the saved job plus those two zeroes. The caps stay
+        // absent: unlimited runs, breaker resolved at read time.
+        deepStrictEqual(round, { ...job, run_count: 0, consecutive_failures: 0 });
+    });
+});
+
+test("reading a legacy job seeds run counters without inventing caps", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        // A job file written before the counters existed.
+        await writeFile(
+            join(dir, "legacy.json"),
+            JSON.stringify({
+                id: "legacy",
+                name: "old",
+                schedule: { kind: "interval", ms: 60_000 },
+                command: "agent.invoke",
+                args: { prompt: "x" },
+                enabled: true,
+                run_on_startup: false,
+            }),
+        );
+        const round = await store.get("legacy");
+        strictEqual(round?.run_count, 0);
+        strictEqual(round?.consecutive_failures, 0);
+        // Absent caps must NOT be materialized — writing today's default
+        // into the file would freeze the job to this release's number.
+        strictEqual(round?.max_runs, undefined);
+        strictEqual(round?.max_consecutive_failures, undefined);
     });
 });
 

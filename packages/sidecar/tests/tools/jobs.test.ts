@@ -63,7 +63,7 @@ function defaultStubResult(method: string): unknown {
     if (method === JOBS_RPC.create) return { job: { id: "" } };
     if (method === JOBS_RPC.update) return { job: { id: "" } };
     if (method === JOBS_RPC.delete) return { deleted: false };
-    if (method === JOBS_RPC.runNow) return { ran: false };
+    if (method === JOBS_RPC.runNow) return { status: "skipped" };
     if (method === JOBS_RPC.history) return { history: null };
     return null;
 }

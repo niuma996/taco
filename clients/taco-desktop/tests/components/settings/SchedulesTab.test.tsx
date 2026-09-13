@@ -58,7 +58,7 @@ function makeClient(jobs: Partial<ScriptedJobsClient> = {}): TacoClient {
         create: ({ job }: Record<string, unknown>) => Promise.resolve({ job }),
         update: ({ job }: Record<string, unknown>) => Promise.resolve({ job }),
         delete: () => Promise.resolve({ deleted: true }),
-        runNow: () => Promise.resolve({ ran: true }),
+        runNow: () => Promise.resolve({ status: "ok" }),
         history: () => Promise.resolve({ history: null }),
     };
     const full = { ...defaults, ...jobs };
@@ -359,6 +359,14 @@ describe("SchedulesTab — modal add / edit flow", () => {
         // history on update and seeds it on create; clients shouldn't
         // send it either way).
         expect("history" in submitted.job).toBe(false);
+        // Same guard for the server-managed run counters — a client that
+        // sent them could reset its own cap on the next save.
+        expect("run_count" in submitted.job).toBe(false);
+        expect("consecutive_failures" in submitted.job).toBe(false);
+        // An untouched max-runs field must be omitted entirely — the server
+        // reads an absent `max_runs` as unlimited, and a literal `undefined`
+        // or `0` would mean something else.
+        expect("max_runs" in submitted.job).toBe(false);
         expect(submitted.job.args).toEqual({});
 
         // Dialog closes on successful save so the table refresh can
@@ -366,6 +374,32 @@ describe("SchedulesTab — modal add / edit flow", () => {
         await waitFor(() => {
             expect(screen.queryByText("schedules.newTitle")).toBeNull();
         });
+    });
+
+    it("submits max_runs when the field is filled in", async () => {
+        const createSpy = vi.fn(({ job }: Record<string, unknown>) =>
+            Promise.resolve({ job: { id: "new", ...(job as object) } }),
+        );
+        const client = makeClient({
+            create: createSpy,
+            list: () => Promise.resolve({ jobs: [] }),
+        });
+        const user = userEvent.setup();
+        render(<SchedulesTab client={client} />);
+        await waitFor(() => {
+            expect(screen.getByText("schedules.empty")).toBeTruthy();
+        });
+        await openAddDialog(user);
+        await fillValidCreateDraft(user, "once");
+        // 1 → a one-shot job, the case that previously had to be faked with
+        // a long interval plus a manual delete.
+        await user.type(screen.getByLabelText("schedules.fieldMaxRuns"), "1");
+        await user.click(screen.getByRole("button", { name: "schedules.actionCreate" }));
+        await waitFor(() => {
+            expect(createSpy).toHaveBeenCalledTimes(1);
+        });
+        const submitted = createSpy.mock.calls[0]?.[0] as { job: { max_runs?: number } };
+        expect(submitted.job.max_runs).toBe(1);
     });
 
     it("opens the edit dialog pre-filled from the row and submits to jobs.update", async () => {

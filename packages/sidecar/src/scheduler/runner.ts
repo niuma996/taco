@@ -20,7 +20,13 @@ import { join } from "node:path";
 import { createLogger } from "../lib/logger.ts";
 import type { ScheduledHandle } from "./cronerAdapter.ts";
 import { nextFireAfter, scheduleNext } from "./cronerAdapter.ts";
-import { HISTORY_LIMIT, type Job, type JobHistoryEntry } from "./types.ts";
+import {
+    DEFAULT_MAX_CONSECUTIVE_FAILURES,
+    HISTORY_LIMIT,
+    type Job,
+    type JobHistoryEntry,
+    type JobRunResult,
+} from "./types.ts";
 
 const log = createLogger("sidecar.scheduler");
 
@@ -35,6 +41,59 @@ function isPidAlive(pid: number): boolean {
         const code = (err as NodeJS.ErrnoException)?.code;
         return code === undefined; // undefined = no error, signal accepted
     }
+}
+
+/** Post-fire counter state, plus the retirement verdict.
+ *
+ *  Split out as a pure function so the policy is testable without a store,
+ *  timers or a live fire. */
+export interface RunOutcomeUpdate {
+    run_count: number;
+    consecutive_failures: number;
+    /** Set only when this fire exhausted a cap — the caller flips
+     *  `enabled: false` and detaches the timer. */
+    disabled_reason?: string;
+}
+
+/**
+ * Fold one fire's result into the job's counters and decide whether the job
+ * retires itself.
+ *
+ * Counters are derived from `latest` — the freshly re-read stored copy —
+ * never from the snapshot the fire captured, because a concurrent write
+ * (the pin strategy's `onPinnedSessionCreated`, a UI edit) may have landed
+ * mid-fire. Incrementing a stale counter would silently under-count and let
+ * a `max_runs: 1` job fire twice.
+ *
+ * "ok" here means the dispatcher accepted the fire, not that the model turn
+ * completed — on a busy session the dispatcher degrades to a `followUp`
+ * enqueue (see dispatcher.ts) and reports success the moment the enqueue
+ * lands. `run_count` therefore counts accepted fires, not completed turns.
+ */
+export function applyRunOutcome(latest: Job, ok: boolean): RunOutcomeUpdate {
+    const run_count = (latest.run_count ?? 0) + (ok ? 1 : 0);
+    // Any success clears the breaker: the target is *consecutive* trouble,
+    // so a job that alternates ok/err is healthy enough to keep running.
+    const consecutive_failures = ok ? 0 : (latest.consecutive_failures ?? 0) + 1;
+
+    const maxRuns = latest.max_runs;
+    if (maxRuns !== undefined && run_count >= maxRuns) {
+        return {
+            run_count,
+            consecutive_failures,
+            disabled_reason: `completed ${run_count} of ${maxRuns} scheduled run(s)`,
+        };
+    }
+    // An explicit 0 opts out of the breaker entirely.
+    const budget = latest.max_consecutive_failures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES;
+    if (budget > 0 && consecutive_failures >= budget) {
+        return {
+            run_count,
+            consecutive_failures,
+            disabled_reason: `disabled after ${consecutive_failures} consecutive failure(s)`,
+        };
+    }
+    return { run_count, consecutive_failures };
 }
 
 /** Function signature for the command dispatcher — the daemon supplies an
@@ -138,11 +197,12 @@ export class Scheduler {
     }
 
     /** Force-fire a job immediately, bypassing the schedule. Used by
-     *  `jobs.runNow` RPC. Returns true if the fire actually ran, false
-     *  if it was rejected by an existing lock. */
-    async runNow(id: string): Promise<boolean> {
+     *  `jobs.runNow` RPC. Returns the fire outcome — `skipped` when an
+     *  existing fire holds the lock (dropped, not queued), `ok` on a
+     *  completed run, `failed` with the invocation error otherwise. */
+    async runNow(id: string): Promise<JobRunResult> {
         const job = await this.opts.store.get(id);
-        if (!job) return false;
+        if (!job) return { status: "failed", error: "job not found" };
         return this.runJob(job);
     }
 
@@ -169,9 +229,8 @@ export class Scheduler {
         }
     }
 
-    private async runJob(job: Job): Promise<boolean> {
+    private async runJob(job: Job): Promise<JobRunResult> {
         const lockPath = join(this.opts.lockDir ?? ".", `${job.id}.lock`);
-        let acquired = false;
         try {
             // `wx` → create-only; EEXIST means another invocation holds the lock.
             await writeFile(
@@ -179,11 +238,10 @@ export class Scheduler {
                 JSON.stringify({ pid: process.pid, started_at: this.nowString() }),
                 { flag: "wx" },
             );
-            acquired = true;
         } catch (err) {
             if ((err as NodeJS.ErrnoException).code === "EEXIST") {
                 log.info(`job ${job.id} still running; skipping overlapping fire`);
-                return false;
+                return { status: "skipped" };
             }
             throw err;
         }
@@ -228,21 +286,54 @@ export class Scheduler {
             // session yet" branch and create another session (we found 9
             // duplicate jsonl files for one pin job this way). Only the two
             // fields this fire owns are layered onto the latest copy.
+            // Counters ride the same mutate: one atomic read-modify-write per
+            // fire, so the increment can't race the history append.
+            //
+            // NOTE on "ok" semantics: when the dispatcher degraded a busy
+            // `session.prompt` to a `session.followUp` enqueue (see
+            // dispatcher.ts promptWithBusyFallback), `entry.status = "ok"`
+            // here means the fire was ACCEPTED, not that the model turn
+            // completed. `run_count` therefore increments on enqueue, not on
+            // completion — a self-fired `max_runs: 1` job retires itself
+            // before its own work finishes, and the actual agent loop runs
+            // asynchronously at the next `may_finish` boundary. Documented
+            // in the jobsRunNow tool summary (tools/jobs.ts).
+            let retired: string | undefined;
             await this.opts.store
                 .mutate(job.id, (latest) => {
                     if (!latest || latest.generation !== job.generation) return latest;
-                    return { ...latest, history: job.history, last_run_at: entry.ended_at };
+                    const counters = applyRunOutcome(latest, entry.status === "ok");
+                    retired = counters.disabled_reason;
+                    return {
+                        ...latest,
+                        history: job.history,
+                        last_run_at: entry.ended_at,
+                        run_count: counters.run_count,
+                        consecutive_failures: counters.consecutive_failures,
+                        ...(counters.disabled_reason
+                            ? { enabled: false, disabled_reason: counters.disabled_reason }
+                            : {}),
+                    };
                 })
                 .catch((err) => {
                     log.error(`failed to persist history for ${job.id}: ${String(err)}`);
+                    // The timer must not be torn down on a failed write —
+                    // the counter never committed, so the job is still live.
+                    retired = undefined;
                 });
+            // Stop the timer only after the disable durably landed, otherwise
+            // a restart would rearm a job the store still thinks is enabled.
+            if (retired) {
+                log.info(`job ${job.id} retired itself: ${retired}`);
+                this.detach(job.id);
+            }
             if (releaseLockAfterInvocation) {
                 await unlink(lockPath).catch(() => {
                     /* lock may have been removed by another process — fine */
                 });
             }
         }
-        return acquired;
+        return entry.status === "ok" ? { status: "ok" } : { status: "failed", error: entry.error };
     }
 
     private nowString(): string {

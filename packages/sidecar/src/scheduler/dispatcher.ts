@@ -28,7 +28,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { RpcRequest, RpcResponse } from "@taco-ai/protocol";
+import { ErrorCodes, type RpcRequest, type RpcResponse } from "@taco-ai/protocol";
 
 import { createLogger } from "../lib/logger.ts";
 import type { Job, SessionStrategy } from "./types.ts";
@@ -268,12 +268,51 @@ async function attachAndPrompt(
         params: { workspace, sessionId },
     });
     if (!attach.ok) throw new ScheduledCommandFailed(attach.error.code, attach.error.message);
-    const promptRes = await server.dispatchRpc({
+    await promptWithBusyFallback(server, workspace, sessionId, prompt);
+}
+
+/** Deliver a job's prompt, degrading to a queued follow-up when the target
+ *  session already has a turn in flight.
+ *
+ *  `reuse` re-prompts the session bound to the job's chat, and the common way
+ *  a job is force-fired is from inside that very conversation's turn — the
+ *  agent calling `jobsRunNow` on itself. A bare `session.prompt` there is a
+ *  guaranteed self-collision: pi's lane holds a single operation slot and
+ *  rejects the second prompt with `LaneBusy` → `SessionBusy`. Failing the
+ *  fire is what led the observed IM session to conclude "this is a deadlock".
+ *  Queue the prompt as a follow-up instead — consumed at the run's next
+ *  `may_finish` boundary — mirroring the IM ingress busy path
+ *  (channels/ingress.ts deliverAsFollowUp).
+ *
+ *  If the run ended between the rejection and the enqueue (mode "idle"), retry
+ *  the prompt once so the fire isn't left sitting in an unconsumed inbox. */
+async function promptWithBusyFallback(
+    server: DispatchSurface,
+    workspace: string,
+    sessionId: string,
+    prompt: string,
+): Promise<void> {
+    const params = { workspace, sessionId, text: prompt };
+    const res = await server.dispatchRpc({
         id: randomUUID(),
         method: "session.prompt",
-        params: { workspace, sessionId, text: prompt },
+        params,
     });
-    if (!promptRes.ok) {
-        throw new ScheduledCommandFailed(promptRes.error.code, promptRes.error.message);
+    if (res.ok) return;
+    if (res.error.code !== ErrorCodes.SessionBusy) {
+        throw new ScheduledCommandFailed(res.error.code, res.error.message);
     }
+    const queued = await server.dispatchRpc({
+        id: randomUUID(),
+        method: "session.followUp",
+        params,
+    });
+    if (!queued.ok) throw new ScheduledCommandFailed(queued.error.code, queued.error.message);
+    if ((queued.result as { mode?: string } | undefined)?.mode !== "idle") return;
+    const retry = await server.dispatchRpc({
+        id: randomUUID(),
+        method: "session.prompt",
+        params,
+    });
+    if (!retry.ok) throw new ScheduledCommandFailed(retry.error.code, retry.error.message);
 }

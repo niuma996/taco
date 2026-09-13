@@ -28,7 +28,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
-import type { Actor, Job, JobHistoryEntry } from "../scheduler/types.ts";
+import type { Actor, Job, JobHistoryEntry, JobRunResult } from "../scheduler/types.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
 import type { WorkspaceRuntime } from "./workspace.ts";
 
@@ -93,7 +93,7 @@ export interface JobsControl {
     create(job: Job, actor?: Actor): Promise<Job>;
     update(job: Job, actor?: Actor): Promise<Job>;
     delete(id: string, actor?: Actor): Promise<void>;
-    runNow(id: string, actor?: Actor): Promise<boolean>;
+    runNow(id: string, actor?: Actor): Promise<JobRunResult>;
     history(id: string, actor?: Actor): Promise<JobHistoryEntry[] | null>;
 }
 

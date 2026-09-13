@@ -88,6 +88,40 @@ export interface Job {
     /** Whether to replay a missed fire when the daemon comes back up.
      *  Only applies when `enabled` is also true. */
     run_on_startup: boolean;
+    /** Cap on *successful* runs before the job retires itself (sets
+     *  `enabled: false` and stops its timer). Absent = unlimited.
+     *
+     *  Exists because `ScheduleSpec` has no one-shot kind: asking for "run
+     *  this once, now" previously meant faking a long interval and
+     *  remembering to delete the job afterwards. When the delete was
+     *  forgotten the job kept firing on that fake schedule forever.
+     *  `max_runs: 1` expresses the intent directly. */
+    max_runs?: number;
+    /** Successful runs so far — server-managed, incremented only on
+     *  `status: "ok"`. Client-supplied values are overwritten by
+     *  JobsController (same rule as `history`), otherwise a caller could
+     *  reset the counter and escape its own `max_runs`. */
+    run_count?: number;
+    /** Circuit breaker: consecutive failed fires tolerated before the job
+     *  retires itself. Absent = DEFAULT_MAX_CONSECUTIVE_FAILURES; an
+     *  explicit 0 disables the breaker.
+     *
+     *  Counts *consecutive* failures (any success resets it) so a job that
+     *  fails intermittently is never retired for transient trouble. Guards
+     *  the case `max_runs` cannot: a job whose command is permanently
+     *  broken (bad credentials, removed binary) never reaches a success, so
+     *  a success-only cap would let it retry on schedule forever. */
+    max_consecutive_failures?: number;
+    /** Consecutive failed fires — server-managed, reset to 0 by any
+     *  success. Same anti-tamper rule as `run_count`. */
+    consecutive_failures?: number;
+    /** Why the scheduler disabled this job on its own. Set alongside
+     *  `enabled: false` when a cap or the breaker trips, so an operator
+     *  can tell self-retirement from a manual toggle. Not folded into
+     *  `history` because that ring holds only HISTORY_LIMIT entries and
+     *  would eventually discard the reason. Cleared when a job is
+     *  re-enabled. */
+    disabled_reason?: string;
     last_run_at?: string;
     next_run_at?: string;
     /** Newest-first; capped at HISTORY_LIMIT (20) entries. The store
@@ -112,4 +146,21 @@ export interface Job {
     pinnedSessionId?: string;
 }
 
+/** Outcome of one job fire, surfaced to `jobs.runNow` callers so a force-fire
+ *  reports what actually happened instead of only whether the lock was
+ *  acquired. `skipped` = an overlapping fire held the lock (this fire was
+ *  dropped, not queued); `failed` carries the invocation error. Without this,
+ *  a run whose `session.prompt` was rejected still rendered as "fired" and the
+ *  caller had to read history to learn otherwise. */
+export interface JobRunResult {
+    status: "ok" | "skipped" | "failed";
+    error?: string;
+}
+
 export const HISTORY_LIMIT = 20;
+
+/** Consecutive-failure budget applied when a job sets no explicit
+ *  `max_consecutive_failures`. Deliberately not 1–2: a fire that exceeds
+ *  `fireTimeoutMs` also records `err`, so a job whose model turn is merely
+ *  slow can accumulate a few non-genuine failures before doing real work. */
+export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 5;

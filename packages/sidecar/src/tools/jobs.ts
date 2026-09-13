@@ -18,7 +18,7 @@ import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
 import { JOBS_RPC } from "../scheduler/jobsRpc.ts";
-import type { Job, SessionStrategy } from "../scheduler/types.ts";
+import type { Job, JobRunResult, SessionStrategy } from "../scheduler/types.ts";
 import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
@@ -78,6 +78,31 @@ const jobSchema = Type.Object({
     ),
     enabled: Type.Boolean(),
     run_on_startup: Type.Boolean(),
+    max_runs: Type.Optional(
+        Type.Integer({
+            minimum: 1,
+            description:
+                "Cap on SUCCESSFUL runs, after which the job disables itself " +
+                "(the record and its history are kept, so you can still read the " +
+                "result). Omit for an unlimited recurring job. Use " +
+                "`max_runs: 1` for a one-shot task — that is the correct way to " +
+                'ask for "run this once, now": create it, call jobsRunNow, and it ' +
+                "retires itself. Do NOT fake a one-shot with a long interval you " +
+                "intend to delete later; a forgotten delete keeps firing forever. " +
+                "Failed fires do not count toward this cap, so a run that errors " +
+                "is retried on schedule.",
+        }),
+    ),
+    max_consecutive_failures: Type.Optional(
+        Type.Integer({
+            minimum: 0,
+            description:
+                "Circuit breaker: disable the job after this many CONSECUTIVE " +
+                "failed fires (any success resets the count). Omit to use the " +
+                "default of 5; set 0 to disable the breaker. Guards against a job " +
+                "whose command is permanently broken retrying on schedule forever.",
+        }),
+    ),
     sessionStrategy: Type.Optional(sessionStrategySchema),
     pinnedSessionId: Type.Optional(Type.String()),
 });
@@ -271,16 +296,22 @@ export function createJobsDeleteTool(): AgentHarnessTool<TacoToolContext> {
 }
 
 export function createJobsRunNowTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsRunNowInput, { ran: boolean }>({
+    return buildJobsTool<JobsRunNowInput, JobRunResult>({
         name: "jobsRunNow",
         label: "jobsRunNow",
         summary:
-            "Force-fire a job immediately, outside its schedule. Returns ran=true if the fire actually started, ran=false if an existing fire holds the lock (the new fire is dropped, not queued).",
+            'Force-fire a job immediately, outside its schedule. Returns status="ok" once the fire was ACCEPTED (this is not the same as "completed": when the target session already has a turn in flight, the dispatcher degrades to a follow-up enqueue and reports "ok" the moment the enqueue lands, BEFORE the model turn actually runs — so a self-fired max_runs:1 job may retire itself before its own work finishes; the agent loop completes asynchronously at the next may_finish boundary). status="skipped" means an overlapping fire held the lock (this fire was dropped, not queued). status="failed" carries the invocation error.',
         mutates: true,
         schema: jobsRunNowSchema,
         rpcMethod: JOBS_RPC.runNow,
         buildParams: (input) => ({ id: input.id }),
-        render: (input, result, _ctx) => `${result.ran ? "fired" : "busy"} ${input.id}`,
+        render: (input, result, _ctx) => {
+            if (result.status === "ok") return `fired ${input.id}`;
+            if (result.status === "skipped") {
+                return `not fired ${input.id}: another fire holds the lock`;
+            }
+            return `fire failed ${input.id}: ${result.error ?? "unknown error"}`;
+        },
     });
 }
 

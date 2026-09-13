@@ -29,7 +29,7 @@ import { JobsScopeError } from "../lib/jobsErrors.ts";
 import type { JobsControl } from "../runtime/serverRpcSurface.ts";
 import { createJobId } from "./jobId.ts";
 import type { Scheduler } from "./runner.ts";
-import type { Actor, Job, JobHistoryEntry } from "./types.ts";
+import type { Actor, Job, JobHistoryEntry, JobRunResult } from "./types.ts";
 
 export class JobsController implements JobsControl {
     constructor(
@@ -82,6 +82,12 @@ export class JobsController implements JobsControl {
                 id: job.id || createJobId(),
                 generation: randomUUID(),
                 history: [],
+                // Server-managed, same rule as `history`: a fresh job starts
+                // at zero no matter what the caller sent, so a client cannot
+                // pre-load counters to dodge its own caps.
+                run_count: 0,
+                consecutive_failures: 0,
+                disabled_reason: undefined,
                 last_run_at: undefined,
                 next_run_at: undefined,
             }),
@@ -132,6 +138,19 @@ export class JobsController implements JobsControl {
                     history: current.history,
                     last_run_at: current.last_run_at,
                     next_run_at: current.next_run_at,
+                    // Counters are server-managed: take the stored values,
+                    // never the caller's. Re-enabling a self-retired job is
+                    // the one exception — it clears the breaker and the
+                    // reason, otherwise a job disabled for consecutive
+                    // failures would trip again on its very next fire and
+                    // look impossible to revive from the UI. `run_count` is
+                    // deliberately NOT reset: raising `max_runs` is how you
+                    // grant a finished job more runs.
+                    run_count: current.run_count ?? 0,
+                    consecutive_failures:
+                        job.enabled && !current.enabled ? 0 : (current.consecutive_failures ?? 0),
+                    disabled_reason:
+                        job.enabled && !current.enabled ? undefined : current.disabled_reason,
                     sessionStrategy: job.sessionStrategy ?? current.sessionStrategy,
                     pinnedSessionId:
                         job.sessionStrategy !== undefined &&
@@ -166,9 +185,9 @@ export class JobsController implements JobsControl {
         await this.scheduler.reload(id);
     }
 
-    async runNow(id: string, actor?: Actor): Promise<boolean> {
+    async runNow(id: string, actor?: Actor): Promise<JobRunResult> {
         const existing = await this.store.get(id);
-        if (!existing) return false;
+        if (!existing) return { status: "failed", error: "job not found" };
         assertActorMatchesJob(existing, actor);
         return this.scheduler.runNow(id);
     }

@@ -31,6 +31,9 @@ export interface ScheduleDraft {
     enabled: boolean;
     run_on_startup: boolean;
     sessionStrategy: SessionStrategy;
+    /** Raw text of the max-runs field. Held as a string because TextInput is
+     *  controlled and "" has to mean "unlimited" (not 0). */
+    maxRunsInput: string;
 }
 
 export interface ScheduleSubmit {
@@ -41,6 +44,8 @@ export interface ScheduleSubmit {
     enabled: boolean;
     run_on_startup: boolean;
     sessionStrategy: SessionStrategy;
+    /** Parsed from `maxRunsInput`; omitted entirely when the field is empty. */
+    max_runs?: number;
 }
 
 export interface ScheduleFormDialogProps {
@@ -68,6 +73,7 @@ const EMPTY_DRAFT: ScheduleDraft = {
     enabled: true,
     run_on_startup: false,
     sessionStrategy: "pin",
+    maxRunsInput: "",
 };
 
 const SCHEDULE_KIND_OPTIONS = [
@@ -92,7 +98,18 @@ function draftFromJob(job: Job): ScheduleDraft {
         enabled: job.enabled,
         run_on_startup: job.run_on_startup,
         sessionStrategy: job.sessionStrategy ?? "pin",
+        // Absent cap renders as an empty field, not a "0" that a later save
+        // would persist as a bogus unlimited-but-written cap.
+        maxRunsInput: job.max_runs != null ? String(job.max_runs) : "",
     };
+}
+
+/** "" → undefined (unlimited); otherwise the parsed cap. `validateDraft`
+ *  has already rejected anything that isn't a positive integer, so a NaN
+ *  cannot reach here. */
+function parseMaxRuns(raw: string): number | undefined {
+    const trimmed = raw.trim();
+    return trimmed === "" ? undefined : Number.parseInt(trimmed, 10);
 }
 
 /** Single source of truth for "is this draft ready to submit?". Both
@@ -104,7 +121,8 @@ type DraftError =
     | { field: "name"; message: string }
     | { field: "intervalMs"; message: string }
     | { field: "cronExpr"; message: string }
-    | { field: "argsJson"; message: string };
+    | { field: "argsJson"; message: string }
+    | { field: "maxRuns"; message: string };
 
 function validateDraft(draft: ScheduleDraft): {
     ok: boolean;
@@ -122,6 +140,19 @@ function validateDraft(draft: ScheduleDraft): {
     }
     if (draft.schedule.kind === "cron" && !draft.schedule.expr.trim()) {
         errors.push({ field: "cronExpr", message: "Cron expression must not be empty." });
+    }
+    // Empty = unlimited, which is valid. Anything else must be a positive
+    // integer: a 0 or a fraction would make the server's `run_count >=
+    // max_runs` comparison retire the job at the wrong moment.
+    // Leading zeros are rejected too — `<input type="number">` doesn't strip
+    // them, so "01" would otherwise round-trip to `max_runs: 1` silently
+    // and confuse the user about what they actually saved.
+    const maxRuns = draft.maxRunsInput.trim();
+    if (
+        maxRuns !== "" &&
+        !(/^\d+$/.test(maxRuns) && !/^0\d+$/.test(maxRuns) && Number.parseInt(maxRuns, 10) >= 1)
+    ) {
+        errors.push({ field: "maxRuns", message: "Max runs must be a positive integer or empty." });
     }
     let args: Record<string, unknown> | undefined;
     try {
@@ -218,6 +249,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             // inline errors are already on screen.
             return;
         }
+        const maxRuns = parseMaxRuns(draft.maxRunsInput);
         onSave({
             name: draft.name.trim(),
             schedule: draft.schedule,
@@ -226,6 +258,10 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             enabled: draft.enabled,
             run_on_startup: draft.run_on_startup,
             sessionStrategy: effectiveStrategy,
+            // Spread in only when set: an untouched field must not carry the
+            // key at all, so the submitted shape says "unlimited" by absence
+            // rather than by a literal undefined.
+            ...(maxRuns === undefined ? {} : { max_runs: maxRuns }),
         });
     }, [draft, effectiveStrategy, onSave, validation]);
 
@@ -402,6 +438,27 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                             options={SESSION_STRATEGY_OPTIONS}
                             disabled={isImWorkspace}
                             label={t("schedules.fieldSessionStrategy", "Session strategy")}
+                        />
+                    </FormField>
+
+                    <FormField
+                        label={t("schedules.fieldMaxRuns", "Max runs")}
+                        hint={t(
+                            "schedules.fieldMaxRunsHint",
+                            "达到该成功运行次数后任务自动停用（记录保留）。留空表示不限次数。",
+                        )}
+                        error={
+                            errorFor("maxRuns")
+                                ? t("schedules.errorMaxRuns", "最大运行次数必须是正整数。")
+                                : undefined
+                        }
+                    >
+                        <TextInput
+                            id="schedules-form-max-runs"
+                            type="number"
+                            min={1}
+                            value={draft.maxRunsInput}
+                            onChange={(e) => setDraft({ ...draft, maxRunsInput: e.target.value })}
                         />
                     </FormField>
 

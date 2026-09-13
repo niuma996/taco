@@ -259,10 +259,14 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                 // call rejects.
                                 setRunningId(job.id);
                                 try {
-                                    const accepted = await jobs.runNow(job.id);
-                                    if (!accepted) {
+                                    const result = await jobs.runNow(job.id);
+                                    if (result.status === "skipped") {
                                         jobs.setActionError(
                                             t("schedules.busy", "上次运行还没结束，请稍候再触发"),
+                                        );
+                                    } else if (result.status === "failed") {
+                                        jobs.setActionError(
+                                            result.error ?? t("schedules.runFailed", "触发失败"),
                                         );
                                     } else {
                                         jobs.setActionError(null);

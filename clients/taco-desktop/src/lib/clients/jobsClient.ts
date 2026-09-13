@@ -47,6 +47,20 @@ export interface Job {
     sessionStrategy?: SessionStrategy;
     /** Set after the first fire of a `pin` job. */
     pinnedSessionId?: string;
+    /** Cap on successful runs; absent = unlimited. Set 1 for a one-shot job. */
+    max_runs?: number;
+    /** Successful runs so far. Server-managed — the daemon zeroes it on
+     *  create and preserves the stored value on update regardless of what
+     *  the client sends. Optional so create/update inputs need not stub it. */
+    run_count?: number;
+    /** Consecutive-failure budget before the job disables itself; absent =
+     *  the server default, 0 disables the breaker. */
+    max_consecutive_failures?: number;
+    /** Consecutive failed fires. Server-managed, same rule as `run_count`. */
+    consecutive_failures?: number;
+    /** Why the scheduler disabled this job on its own (cap reached or
+     *  breaker tripped). Cleared when the job is re-enabled. */
+    disabled_reason?: string;
 }
 
 export type SessionStrategy = "new" | "reuse" | "pin";
@@ -62,6 +76,15 @@ export interface JobHistoryEntry {
     error?: string;
 }
 
+/** Mirrors the sidecar's `JobRunResult` — the outcome of a force-fire.
+ *  `skipped` = an overlapping fire held the lock; `failed` carries the
+ *  invocation error. Replaces the old boolean that reported only whether
+ *  the lock was taken, which mislabelled a rejected run as "fired". */
+export interface JobRunResult {
+    status: "ok" | "skipped" | "failed";
+    error?: string;
+}
+
 /** Mirrors the sidecar's `Actor` — kept here so the desktop doesn't import
  *  the scheduler module directly (different module graph). */
 export type Actor =
@@ -74,7 +97,7 @@ export interface JobsClient {
     create(job: Omit<Job, "id">, actor?: Actor): Promise<Job>;
     update(job: Job, actor?: Actor): Promise<Job>;
     delete(id: string, actor?: Actor): Promise<boolean>;
-    runNow(id: string, actor?: Actor): Promise<boolean>;
+    runNow(id: string, actor?: Actor): Promise<JobRunResult>;
     history(id: string, actor?: Actor): Promise<JobHistoryEntry[] | null>;
 }
 
@@ -93,9 +116,6 @@ interface UpdateResult {
 interface DeleteResult {
     deleted: boolean;
 }
-interface RunNowResult {
-    ran: boolean;
-}
 interface HistoryResult {
     history: JobHistoryEntry[] | null;
 }
@@ -111,8 +131,7 @@ export function createJobsClient(client: TacoClient): JobsClient {
             call<UpdateResult>(client, JOBS_RPC.update, { job }, actor).then((r) => r.job),
         delete: (id, actor) =>
             call<DeleteResult>(client, JOBS_RPC.delete, { id }, actor).then((r) => r.deleted),
-        runNow: (id, actor) =>
-            call<RunNowResult>(client, JOBS_RPC.runNow, { id }, actor).then((r) => r.ran),
+        runNow: (id, actor) => call<JobRunResult>(client, JOBS_RPC.runNow, { id }, actor),
         history: (id, actor) =>
             call<HistoryResult>(client, JOBS_RPC.history, { id }, actor).then((r) => r.history),
     };

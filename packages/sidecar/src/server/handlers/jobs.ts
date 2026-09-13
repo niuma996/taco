@@ -20,7 +20,13 @@ import { Type } from "typebox";
 import { JobAlreadyExistsError, JobsScopeError } from "../../lib/jobsErrors.ts";
 import { safeJobId } from "../../scheduler/jobId.ts";
 import { JOBS_RPC } from "../../scheduler/jobsRpc.ts";
-import type { Actor, Job, JobHistoryEntry, SessionStrategy } from "../../scheduler/types.ts";
+import type {
+    Actor,
+    Job,
+    JobHistoryEntry,
+    JobRunResult,
+    SessionStrategy,
+} from "../../scheduler/types.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 /** Shared by jobs.get / jobs.delete / jobs.runNow / jobs.history: every
@@ -52,9 +58,6 @@ interface JobsUpdateParams {
 }
 interface JobsDeleteResult {
     deleted: boolean;
-}
-interface JobsRunNowResult {
-    ran: boolean;
 }
 interface JobsHistoryResult {
     // Mirrors JobsController.history()'s return type directly rather than
@@ -172,18 +175,16 @@ export function registerJobsHandlers(): void {
     registerMethod(
         JOBS_RPC.runNow,
         false,
-        async ({ server, params }: MethodCtx<JobsIdParams>): Promise<JobsRunNowResult> => {
+        async ({ server, params }: MethodCtx<JobsIdParams>): Promise<JobRunResult> => {
             if (!server.jobs) throw new RpcHandlerError("not_ready", "scheduler not running");
             const id = expectString(params, "id");
             safeJobId(id);
             const actor = extractActor(params);
-            let ran = false;
             try {
-                ran = await server.jobs.runNow(id, actor);
+                return await server.jobs.runNow(id, actor);
             } catch (err) {
                 throw scopeErrorToRpc(err);
             }
-            return { ran };
         },
         { schema: Type.Any() },
     );
@@ -279,6 +280,30 @@ function assertJob(params: unknown, field: string, requireId = false): Job {
     }
     if (typeof obj.run_on_startup !== "boolean") {
         throw new RpcHandlerError("invalid_params", `${field}.run_on_startup must be a boolean`);
+    }
+    // Caps are optional, but a malformed one must not reach the store: a
+    // fractional or negative `max_runs` would make `run_count >= max_runs`
+    // either never or immediately true, retiring the job at the wrong time.
+    if (
+        obj.max_runs !== undefined &&
+        (typeof obj.max_runs !== "number" || !Number.isInteger(obj.max_runs) || obj.max_runs < 1)
+    ) {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.max_runs must be an integer >= 1 when present`,
+        );
+    }
+    if (
+        obj.max_consecutive_failures !== undefined &&
+        (typeof obj.max_consecutive_failures !== "number" ||
+            !Number.isInteger(obj.max_consecutive_failures) ||
+            obj.max_consecutive_failures < 0)
+    ) {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.max_consecutive_failures must be an integer >= 0 when present ` +
+                "(0 disables the circuit breaker)",
+        );
     }
     if (obj.sessionStrategy !== undefined && !isSessionStrategy(obj.sessionStrategy)) {
         throw new RpcHandlerError(

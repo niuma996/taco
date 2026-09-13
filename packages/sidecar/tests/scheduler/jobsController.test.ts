@@ -157,15 +157,90 @@ test("delete() removes the file + lock; reload leaves no timer", async () => {
     });
 });
 
-test("runNow() returns false for unknown id, true when fired", async () => {
+test("create() ignores caller-supplied run counters", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
+        const ctrl = new JobsController(store, scheduler, dir);
+        // A caller pre-loading counters would otherwise escape its own cap.
+        const created = await ctrl.create(
+            sampleJob("a", {
+                enabled: false,
+                max_runs: 1,
+                run_count: 99,
+                consecutive_failures: 42,
+            }),
+        );
+        strictEqual(created.run_count, 0);
+        strictEqual(created.consecutive_failures, 0);
+        // The cap itself is caller-owned and must survive.
+        strictEqual(created.max_runs, 1);
+        // reload() attaches a timer whenever the stored job is enabled; a
+        // test that leaves one armed hangs the whole file at exit.
+        scheduler.stop();
+    });
+});
+
+test("update() keeps stored counters instead of the caller's", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
+        const ctrl = new JobsController(store, scheduler, dir);
+        const created = await ctrl.create(sampleJob("a", { enabled: false, max_runs: 5 }));
+        await store.mutate(created.id, (cur) =>
+            cur ? { ...cur, run_count: 3, consecutive_failures: 2 } : cur,
+        );
+        const updated = await ctrl.update({
+            ...created,
+            name: "renamed",
+            run_count: 0,
+            consecutive_failures: 0,
+        });
+        strictEqual(updated.name, "renamed");
+        strictEqual(updated.run_count, 3, "counter must not be resettable via update");
+        strictEqual(updated.consecutive_failures, 2);
+        scheduler.stop();
+    });
+});
+
+test("re-enabling a self-retired job clears the breaker and reason", async () => {
+    await withTmp(async (dir) => {
+        const store = new JobStore(dir);
+        const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
+        const ctrl = new JobsController(store, scheduler, dir);
+        const created = await ctrl.create(sampleJob("a", { enabled: true }));
+        // Simulate the runner retiring it for consecutive failures.
+        await store.mutate(created.id, (cur) =>
+            cur
+                ? {
+                      ...cur,
+                      enabled: false,
+                      consecutive_failures: 5,
+                      disabled_reason: "disabled after 5 consecutive failure(s)",
+                      run_count: 2,
+                  }
+                : cur,
+        );
+        const revived = await ctrl.update({ ...created, enabled: true });
+        // Without the reset the job would trip again on its very next fire
+        // and look impossible to revive from the UI.
+        strictEqual(revived.consecutive_failures, 0);
+        strictEqual(revived.disabled_reason, undefined);
+        // run_count is NOT reset — raising max_runs is how you grant more runs.
+        strictEqual(revived.run_count, 2);
+        scheduler.stop();
+    });
+});
+
+test("runNow() reports failed for unknown id, ok when fired", async () => {
     await withTmp(async (dir) => {
         const store = new JobStore(dir);
         const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
         await scheduler.start();
         const ctrl = new JobsController(store, scheduler, dir);
         await ctrl.create(sampleJob("a", { enabled: false }));
-        strictEqual(await ctrl.runNow("missing"), false);
-        strictEqual(await ctrl.runNow("a"), true);
+        strictEqual((await ctrl.runNow("missing")).status, "failed");
+        strictEqual((await ctrl.runNow("a")).status, "ok");
         scheduler.stop();
     });
 });

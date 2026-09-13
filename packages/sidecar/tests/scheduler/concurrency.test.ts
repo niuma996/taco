@@ -153,7 +153,7 @@ test("update racing with invoke that writes pinnedSessionId — pin write surviv
                 generation: job.generation,
             }),
         ]);
-        strictEqual(ran, true);
+        strictEqual(ran.status, "ok");
 
         const persisted = await store.get("pin");
         ok(persisted);
@@ -256,10 +256,10 @@ test("a job deleted mid-fire does not resurrect on the next tick", async () => {
         await scheduler.start();
 
         // First fire deletes the job from the store.
-        strictEqual(await scheduler.runNow("ghost"), true);
+        strictEqual((await scheduler.runNow("ghost")).status, "ok");
         strictEqual(await store.get("ghost"), null);
         // Second runNow against the deleted job must be a no-op.
-        strictEqual(await scheduler.runNow("ghost"), false);
+        strictEqual((await scheduler.runNow("ghost")).status, "failed");
         strictEqual(invocations, 1, "second runNow must not resurrect");
         scheduler.stop();
     });
@@ -303,13 +303,12 @@ test("fire timeout surfaces as err and rejects overlapping fires", async () => {
         await scheduler.start();
 
         // runJob surfaces the timeout as a recorded err history entry
-        // (not a thrown runNow), because the lock was acquired and the
-        // scheduler still owned the fire — the timeout is a per-fire
-        // failure, not a "couldn't fire" failure. Pin both.
-        strictEqual(await scheduler.runNow("slow"), true);
+        // (not a thrown runNow), and reports status "failed" — the lock
+        // was acquired but the per-fire invocation did not complete.
+        strictEqual((await scheduler.runNow("slow")).status, "failed");
         // Lock still held while invoke is running — second runNow is
-        // rejected (returns false, not error).
-        strictEqual(await scheduler.runNow("slow"), false);
+        // skipped (the overlapping fire is dropped, not errored).
+        strictEqual((await scheduler.runNow("slow")).status, "skipped");
 
         const persisted = await store.get("slow");
         ok(persisted);
@@ -342,10 +341,11 @@ test("fire timeout surfaces as err and rejects overlapping fires", async () => {
         }
         ok(lockGone, "lock must be released after the timed-out invoke settles");
         // And the next tick can re-enter: a fresh fire acquires the
-        // lock (returns true). It times out again — the invoke still
-        // takes 200ms against the 20ms fireTimeoutMs — so we assert
-        // re-entry only, not the outcome.
-        strictEqual(await scheduler.runNow("slow"), true);
+        // lock (status "failed", since the invoke still takes 200ms
+        // against the 20ms fireTimeoutMs). We assert re-entry, not the
+        // timing outcome — any status other than "skipped" proves the
+        // lock was re-acquired.
+        ok((await scheduler.runNow("slow")).status !== "skipped");
     });
 });
 

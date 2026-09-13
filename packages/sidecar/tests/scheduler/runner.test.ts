@@ -12,8 +12,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Scheduler } from "../../src/scheduler/runner.ts";
-import type { Job } from "../../src/scheduler/types.ts";
+import { applyRunOutcome, Scheduler } from "../../src/scheduler/runner.ts";
+import { DEFAULT_MAX_CONSECUTIVE_FAILURES, type Job } from "../../src/scheduler/types.ts";
 
 class MemoryStore {
     public jobs = new Map<string, Job>();
@@ -204,7 +204,7 @@ test("history is truncated to HISTORY_LIMIT (20) entries", async () => {
     });
 });
 
-test("runNow fires the job once and returns true; missing job returns false", async () => {
+test("runNow fires the job once and reports ok; missing job reports failed", async () => {
     await withTmp(async (dir) => {
         const store = new MemoryStore();
         store.jobs.set("a", intervalJob("a", 60_000, { enabled: false }));
@@ -217,9 +217,154 @@ test("runNow fires the job once and returns true; missing job returns false", as
             },
         });
         await scheduler.start();
-        strictEqual(await scheduler.runNow("a"), true);
+        strictEqual((await scheduler.runNow("a")).status, "ok");
         strictEqual(invoked, 1);
-        strictEqual(await scheduler.runNow("nope"), false);
+        strictEqual((await scheduler.runNow("nope")).status, "failed");
+        scheduler.stop();
+    });
+});
+
+// ─── run caps + circuit breaker (applyRunOutcome policy) ─────────────────────
+
+test("applyRunOutcome counts only successes toward max_runs", () => {
+    const job = intervalJob("j", 1_000, { max_runs: 2 });
+    // A failure must not consume the budget — the whole point of a
+    // success-only cap is that an errored fire gets retried on schedule.
+    const afterFail = applyRunOutcome(job, false);
+    strictEqual(afterFail.run_count, 0);
+    strictEqual(afterFail.disabled_reason, undefined);
+
+    const afterOne = applyRunOutcome({ ...job, run_count: 0 }, true);
+    strictEqual(afterOne.run_count, 1);
+    strictEqual(afterOne.disabled_reason, undefined, "1 of 2 must stay enabled");
+
+    const afterTwo = applyRunOutcome({ ...job, run_count: 1 }, true);
+    strictEqual(afterTwo.run_count, 2);
+    ok(afterTwo.disabled_reason, "reaching max_runs must retire the job");
+});
+
+test("applyRunOutcome retires a one-shot job after its single success", () => {
+    const oneShot = intervalJob("once", 86_400_000, { max_runs: 1 });
+    const out = applyRunOutcome(oneShot, true);
+    strictEqual(out.run_count, 1);
+    ok(out.disabled_reason);
+});
+
+test("applyRunOutcome leaves an uncapped job alone forever", () => {
+    const out = applyRunOutcome(intervalJob("j", 1_000, { run_count: 9_999 }), true);
+    strictEqual(out.run_count, 10_000);
+    strictEqual(out.disabled_reason, undefined);
+});
+
+test("applyRunOutcome trips the breaker on consecutive failures only", () => {
+    const job = intervalJob("j", 1_000, { max_consecutive_failures: 3 });
+    strictEqual(
+        applyRunOutcome({ ...job, consecutive_failures: 1 }, false).consecutive_failures,
+        2,
+    );
+    strictEqual(
+        applyRunOutcome({ ...job, consecutive_failures: 1 }, false).disabled_reason,
+        undefined,
+    );
+    // A success in between resets the streak, so the job survives.
+    strictEqual(applyRunOutcome({ ...job, consecutive_failures: 2 }, true).consecutive_failures, 0);
+    ok(applyRunOutcome({ ...job, consecutive_failures: 2 }, false).disabled_reason);
+});
+
+test("applyRunOutcome applies the default breaker budget when unset", () => {
+    const job = intervalJob("j", 1_000);
+    const atEdge = applyRunOutcome(
+        { ...job, consecutive_failures: DEFAULT_MAX_CONSECUTIVE_FAILURES - 1 },
+        false,
+    );
+    ok(atEdge.disabled_reason, "an unset budget must still protect the job");
+});
+
+test("applyRunOutcome honours max_consecutive_failures: 0 as opt-out", () => {
+    const job = intervalJob("j", 1_000, { max_consecutive_failures: 0 });
+    const out = applyRunOutcome({ ...job, consecutive_failures: 999 }, false);
+    strictEqual(out.consecutive_failures, 1_000);
+    strictEqual(out.disabled_reason, undefined, "0 disables the breaker entirely");
+});
+
+test("a max_runs:1 job disables itself and stops firing after one success", async () => {
+    await withTmp(async (dir) => {
+        const store = new MemoryStore();
+        store.jobs.set("once", intervalJob("once", 20, { max_runs: 1 }));
+        let invoked = 0;
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {
+                invoked += 1;
+            },
+        });
+        await scheduler.start();
+        await waitFor(() => invoked >= 1, 2_000);
+        // Give the 20ms interval several more windows: a job that failed to
+        // detach would rack up further fires here.
+        await new Promise((r) => setTimeout(r, 200));
+        strictEqual(invoked, 1, "retired job must not fire again");
+        const saved = store.jobs.get("once");
+        strictEqual(saved?.enabled, false);
+        strictEqual(saved?.run_count, 1);
+        ok(saved?.disabled_reason, "self-retirement must record a reason");
+        // History survives, so the operator can still read the run's outcome.
+        strictEqual(saved?.history?.length, 1);
+        strictEqual(saved?.history?.[0].status, "ok");
+        scheduler.stop();
+    });
+});
+
+test("a permanently failing job trips the breaker and stops firing", async () => {
+    await withTmp(async (dir) => {
+        const store = new MemoryStore();
+        store.jobs.set(
+            "broken",
+            intervalJob("broken", 20, { max_consecutive_failures: 2, max_runs: 5 }),
+        );
+        let attempts = 0;
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {
+                attempts += 1;
+                throw new Error("command not found");
+            },
+        });
+        await scheduler.start();
+        await waitFor(() => (store.jobs.get("broken")?.enabled ?? true) === false, 2_000);
+        const settled = attempts;
+        await new Promise((r) => setTimeout(r, 200));
+        strictEqual(attempts, settled, "breaker must stop further attempts");
+        const saved = store.jobs.get("broken");
+        strictEqual(saved?.enabled, false);
+        strictEqual(saved?.consecutive_failures, 2);
+        // The success cap was never reached — the breaker is what saved us.
+        strictEqual(saved?.run_count, 0);
+        ok(/consecutive/.test(saved?.disabled_reason ?? ""));
+        scheduler.stop();
+    });
+});
+
+test("runNow reports failed with the invoke error when the fire rejects", async () => {
+    // Regression guard for the "fired but actually failed" misreport: a fire
+    // whose invocation rejects must not come back as a success just because
+    // the lock was taken.
+    await withTmp(async (dir) => {
+        const store = new MemoryStore();
+        store.jobs.set("boom", intervalJob("boom", 60_000, { enabled: false }));
+        const scheduler = new Scheduler({
+            store,
+            lockDir: dir,
+            invoke: async () => {
+                throw new Error("prompt rejected: session_busy");
+            },
+        });
+        await scheduler.start();
+        const outcome = await scheduler.runNow("boom");
+        strictEqual(outcome.status, "failed");
+        strictEqual(outcome.error, "prompt rejected: session_busy");
         scheduler.stop();
     });
 });
@@ -246,7 +391,7 @@ test("reload reattaches the timer to reflect the latest stored copy", async () =
         // For interval jobs we exposed nextRun as `now + ms`; sleep 10ms
         // and assert the date moved forward by inspecting internal state
         // via runNow instead (a non-throw = handle is live).
-        strictEqual(await scheduler.runNow("a"), true);
+        strictEqual((await scheduler.runNow("a")).status, "ok");
         scheduler.stop();
     });
 });
@@ -437,8 +582,8 @@ test("invoke timeout records an error but retains the lock until the invocation 
                 }),
         });
         await scheduler.start();
-        const ran = await scheduler.runNow("hang");
-        strictEqual(ran, true);
+        const outcome = await scheduler.runNow("hang");
+        strictEqual(outcome.status, "failed");
         const saved = store.jobs.get("hang");
         ok(saved);
         strictEqual(saved.history.length, 1);
@@ -452,7 +597,7 @@ test("invoke timeout records an error but retains the lock until the invocation 
         // The underlying invocation is still active, so a second fire must be
         // rejected instead of overlapping the same job/session turn.
         ok(await readFile(join(dir, "hang.lock")));
-        strictEqual(await scheduler.runNow("hang"), false);
+        strictEqual((await scheduler.runNow("hang")).status, "skipped");
         // Settle the underlying invoke so the test process can exit cleanly.
         await new Promise((r) => setTimeout(r, 20));
         strictEqual(settled, false, "invoke promise is intentionally not cancelled");
@@ -513,7 +658,7 @@ test("runJob on a legacy job (no history field) does not crash and writes ok", a
         });
         await scheduler.start();
         const ran = await scheduler.runNow("legacy");
-        strictEqual(ran, true);
+        strictEqual(ran.status, "ok");
         const saved = store.jobs.get("legacy");
         ok(saved);
         ok(Array.isArray(saved.history));
@@ -545,7 +690,7 @@ test("a field invoke writes mid-fire survives the history save", async () => {
             },
         });
         const ran = await scheduler.runNow("pinjob");
-        strictEqual(ran, true);
+        strictEqual(ran.status, "ok");
         const saved = store.jobs.get("pinjob");
         ok(saved);
         // The field invoke wrote is still there...
@@ -570,7 +715,7 @@ test("a job deleted mid-fire is not resurrected by the runner", async () => {
             },
         });
         const ran = await scheduler.runNow("gone");
-        strictEqual(ran, true);
+        strictEqual(ran.status, "ok");
         strictEqual(store.jobs.get("gone"), undefined);
         scheduler.stop();
     });

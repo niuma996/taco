@@ -14,7 +14,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { makeImCwd, type RpcRequest, type RpcResponse } from "@taco-ai/protocol";
+import { ErrorCodes, makeImCwd, type RpcRequest, type RpcResponse } from "@taco-ai/protocol";
 import {
     createJobDispatcher,
     InvalidSessionStrategy,
@@ -216,6 +216,112 @@ describe("createJobDispatcher — reuse strategy", () => {
             () => dispatcher(invokeJob(im, "x", { sessionStrategy: "reuse" })),
             (err: unknown): err is InvalidSessionStrategy =>
                 err instanceof InvalidSessionStrategy && /no session bound/.test(err.message),
+        );
+    });
+
+    it("queues the prompt as a follow-up when the session is busy", async () => {
+        // The self-collision case: a job force-fired from inside the target
+        // conversation's own turn. A bare re-prompt hits LaneBusy →
+        // SessionBusy; instead of failing the fire, enqueue it so it runs at
+        // the run's next may_finish boundary.
+        const im = makeImCwd("ch1", "peer-1", "chat-1");
+        const existingId = "existing-sess-1";
+        const fake = makeFakeServer(async (req) => {
+            if (req.method === "session.attach") {
+                return { id: req.id, ok: true as const, result: null };
+            }
+            if (req.method === "session.prompt") {
+                return {
+                    id: req.id,
+                    ok: false as const,
+                    error: { code: ErrorCodes.SessionBusy, message: "turn active" },
+                };
+            }
+            if (req.method === "session.followUp") {
+                const p = req.params as { sessionId?: string; text?: string };
+                assert.equal(p.sessionId, existingId);
+                assert.equal(p.text, "ping");
+                return { id: req.id, ok: true as const, result: { mode: "queued" } };
+            }
+            throw new Error(`unexpected method ${req.method}`);
+        });
+        fake.lookupRoute = (workspace) =>
+            workspace === im ? { sessionId: existingId } : undefined;
+        const dispatcher = createJobDispatcher(() => fake);
+        await dispatcher(invokeJob(im, "ping", { sessionStrategy: "reuse" }));
+        assert.deepEqual(
+            fake.calls.map((c) => c.method),
+            ["session.attach", "session.prompt", "session.followUp"],
+        );
+    });
+
+    it("retries the prompt once when the follow-up reports idle", async () => {
+        // The run ended between the busy rejection and the enqueue; the
+        // follow-up would otherwise sit in an unconsumed inbox, so re-prompt.
+        const im = makeImCwd("ch1", "peer-1", "chat-1");
+        const existingId = "existing-sess-1";
+        let prompts = 0;
+        const fake = makeFakeServer(async (req) => {
+            if (req.method === "session.attach") {
+                return { id: req.id, ok: true as const, result: null };
+            }
+            if (req.method === "session.prompt") {
+                prompts += 1;
+                if (prompts === 1) {
+                    return {
+                        id: req.id,
+                        ok: false as const,
+                        error: { code: ErrorCodes.SessionBusy, message: "turn active" },
+                    };
+                }
+                return { id: req.id, ok: true as const, result: null };
+            }
+            if (req.method === "session.followUp") {
+                return { id: req.id, ok: true as const, result: { mode: "idle" } };
+            }
+            throw new Error(`unexpected method ${req.method}`);
+        });
+        fake.lookupRoute = (workspace) =>
+            workspace === im ? { sessionId: existingId } : undefined;
+        const dispatcher = createJobDispatcher(() => fake);
+        await dispatcher(invokeJob(im, "ping", { sessionStrategy: "reuse" }));
+        assert.deepEqual(
+            fake.calls.map((c) => c.method),
+            ["session.attach", "session.prompt", "session.followUp", "session.prompt"],
+        );
+    });
+
+    it("surfaces a follow-up failure instead of the bare busy error", async () => {
+        const im = makeImCwd("ch1", "peer-1", "chat-1");
+        const fake = makeFakeServer(async (req) => {
+            if (req.method === "session.attach") {
+                return { id: req.id, ok: true as const, result: null };
+            }
+            if (req.method === "session.prompt") {
+                return {
+                    id: req.id,
+                    ok: false as const,
+                    error: { code: ErrorCodes.SessionBusy, message: "turn active" },
+                };
+            }
+            if (req.method === "session.followUp") {
+                return {
+                    id: req.id,
+                    ok: false as const,
+                    error: { code: "invalid_state", message: "lane wedged" },
+                };
+            }
+            throw new Error(`unexpected method ${req.method}`);
+        });
+        fake.lookupRoute = (workspace) =>
+            workspace === im ? { sessionId: "existing-sess-1" } : undefined;
+        const dispatcher = createJobDispatcher(() => fake);
+        await assert.rejects(
+            () => dispatcher(invokeJob(im, "ping", { sessionStrategy: "reuse" })),
+            (err: unknown): err is ScheduledCommandFailed =>
+                err instanceof ScheduledCommandFailed &&
+                err.code === "invalid_state" &&
+                err.message === "lane wedged",
         );
     });
 });
