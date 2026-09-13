@@ -278,6 +278,69 @@ describe("AttachedSession — dynamic tools", () => {
         await reloaded.abort();
     });
 
+    it("re-alignment preserves a persisted name whose candidate failed to load", async () => {
+        // restoreTools deliberately swallows a failing load and leaves the name
+        // on the persisted allowlist so the next attach retries it (an MCP
+        // server that is merely down must not cost the user their tool). The
+        // allowlist re-alignment intersects against the assembled toolset,
+        // which excludes tools that failed to load — so it must not treat
+        // "failed to load this time" as "revoked by policy", or a transient MCP
+        // outage would silently drop the tool forever.
+        let failLoad = true;
+        const flaky: ToolCandidate = {
+            name: "flaky-mcp-tool",
+            summary: "flaky-mcp-tool",
+            loading: "deferred",
+            source: "mcp",
+            load: async () => {
+                if (failLoad) throw new Error("mcp server down");
+                return fakeTool("flaky-mcp-tool");
+            },
+        };
+        const registry = new DefaultDeferredToolRegistry({ candidates: [flaky] });
+        const session = await repo.create({ cwd: tmpDir }, harnessContext);
+        const opts = {
+            session,
+            models,
+            model: stubModel,
+            env,
+            systemPrompt: "test prompt",
+            tools: [fakeTool("builtin-tool")],
+            resources: {},
+            streamOptions: {},
+            taskStore: {
+                getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                setTaskState: () => {},
+            } as unknown as TaskStore,
+            planState: createPlanModeState(),
+            tasksDir: tmpDir,
+            toolRegistry: registry,
+            sessionCwd: tmpDir as never,
+            getToolContext: (): TacoToolContext => ({ env, workspace: tmpDir as never }),
+            sessionKind: "main" as const,
+        } as AttachedSessionOptions;
+
+        // Load it successfully once so the name lands on the allowlist.
+        failLoad = false;
+        const first = await AttachedSession.create(opts);
+        await first.toolController?.addTools(["flaky-mcp-tool"]);
+        assert.ok(
+            ((await first.toolController?.activeToolNames()) ?? []).includes("flaky-mcp-tool"),
+            "precondition: the tool is on the persisted allowlist",
+        );
+        await first.abort();
+
+        // Re-attach while the MCP server is down: the load throws, so the tool
+        // is absent from the assembled set.
+        failLoad = true;
+        const reloaded = await AttachedSession.create(opts);
+        assert.ok(
+            ((await reloaded.toolController?.activeToolNames()) ?? []).includes("flaky-mcp-tool"),
+            "a name kept for retry must survive re-alignment, not be dropped as revoked",
+        );
+        await reloaded.abort();
+    });
+
     it("re-attach re-aligns the persisted allowlist with the assembled toolset", async () => {
         // pi treats configuration.activeToolNames as the authoritative allowlist
         // of what the model may see, defaulting to "all tools passed in" only for

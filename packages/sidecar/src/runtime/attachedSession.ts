@@ -588,7 +588,21 @@ export class AttachedSession extends EventEmitter {
         const persistedActive = await lane.getActiveTools(harnessContext);
         if (persistedActive.length > 0) {
             const assembledSet = new Set(assembledNames);
-            const retained = persistedActive.filter((name) => assembledSet.has(name));
+            // A name can be missing from the assembled set for two very
+            // different reasons, and only one of them is a revocation:
+            //  - policy no longer grants it → drop it (the point of this pass);
+            //  - its candidate is still registered but load() threw this time
+            //    (e.g. an MCP server that is down) → restoreTools deliberately
+            //    swallows that and keeps the name so the next attach retries.
+            // Treating the second case as a revocation would turn a transient
+            // MCP outage into permanent tool loss, so registered candidates are
+            // exempt from the intersection.
+            const retryableNames = new Set(
+                args.toolRegistry?.listCandidates().map((c) => c.name) ?? [],
+            );
+            const retained = persistedActive.filter(
+                (name) => assembledSet.has(name) || retryableNames.has(name),
+            );
             const retainedSet = new Set(retained);
             const added = assembledNames.filter((name) => !retainedSet.has(name));
             const realigned = [...retained, ...added];
@@ -599,7 +613,7 @@ export class AttachedSession extends EventEmitter {
                 await lane.setActiveTools(realigned, harnessContext);
                 log.info("realigned active tools with the assembled toolset", {
                     sessionId: args.session.metadata.id,
-                    revoked: persistedActive.filter((n) => !assembledSet.has(n)),
+                    revoked: persistedActive.filter((n) => !retainedSet.has(n)),
                     granted: added,
                 });
             }
