@@ -60,7 +60,7 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
         sessionsRoot,
         env,
         models,
-        systemPrompt: "test prompt",
+        getSystemPrompt: () => "test prompt",
         tools: [],
         resources: {},
         streamOptions: {},

@@ -31,8 +31,14 @@ export interface AgentSpawnerOptions {
     readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
-    /** Parent session toolset — `filterToolsForAgent` further restricts by agent whitelist / depth. */
-    readonly tools: TacoTool[];
+    /**
+     * Parent session toolset — `filterToolsForAgent` further restricts by agent
+     * whitelist / depth. A thunk, not a value: `WorkspaceRuntime.refreshToolset`
+     * replaces the workspace's tool array per turn (IM policy grants, extension
+     * changes), and a captured array would spawn every subsequent subagent
+     * against whatever toolset existed when the workspace was constructed.
+     */
+    readonly getTools: () => TacoTool[];
     /** Subagent definition registry; `spawnSubagent` looks up by `agentType`. */
     readonly agents: AgentDefinition[];
     /** SessionRegistry reference — used to call attachChild / openSession / invalidateListCache. */
@@ -140,7 +146,8 @@ export class AgentSpawner extends EventEmitter {
     readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
-    readonly tools: TacoTool[];
+    /** Public so tests can assert on the live parent toolset a spawn would see. */
+    readonly getTools: () => TacoTool[];
     readonly agents: AgentDefinition[];
     private readonly sessionRegistry: SessionRegistry;
     private readonly systemPromptContributors: SystemPromptContributor[];
@@ -151,7 +158,7 @@ export class AgentSpawner extends EventEmitter {
         this.repo = options.repo;
         this.env = options.env;
         this.models = options.models;
-        this.tools = options.tools;
+        this.getTools = options.getTools;
         this.agents = options.agents;
         this.sessionRegistry = options.sessionRegistry;
         this.systemPromptContributors = options.systemPromptContributors ?? [];
@@ -578,7 +585,7 @@ export class AgentSpawner extends EventEmitter {
             parentDepth = parentFacts.depth;
         }
         const childDepth = parentDepth + 1;
-        const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
+        const childTools = filterToolsForAgent(this.getTools(), def.tools, childDepth);
         // Fork: render the parent transcript once, up front. Reading the branch
         // here (not inside runSubagentSession) keeps the I/O out of the hot
         // attach path and lets us persist the exact string the child saw so a
@@ -770,7 +777,7 @@ export class AgentSpawner extends EventEmitter {
             sessionId: args.subSessionId,
             agentType,
             childDepth,
-            allowedTools: filterToolsForAgent(this.tools, def.tools, childDepth),
+            allowedTools: filterToolsForAgent(this.getTools(), def.tools, childDepth),
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             // Re-inject the fork transcript from the spawn-time snapshot so a
@@ -933,7 +940,7 @@ export class AgentSpawner extends EventEmitter {
 
         const allowedSet = args.allowedTools ? new Set(args.allowedTools) : undefined;
         const filtered = filterToolsForAgent(
-            this.tools,
+            this.getTools(),
             allowedSet ? [...allowedSet] : undefined,
             childDepth,
         );

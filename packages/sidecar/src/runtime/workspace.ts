@@ -494,7 +494,11 @@ export class WorkspaceRuntime extends EventEmitter {
             },
             {
                 resolveDisplayContext: (sid) => this.sessionRegistry.resolveDisplayContext(sid),
-                imCommandPolicy: () => imPolicy?.commands,
+                // Read through the same thunk tool assembly uses (not the
+                // `imPolicy` const above) so a hand-edited `commands` block —
+                // `mode`, `allow` — reaches command evaluation on the next
+                // call, not just the next turn's tool list.
+                imCommandPolicy: () => this.resolveImPolicy()?.commands,
             },
         );
         const toolContext = this.buildToolContextThunk(options);
@@ -549,7 +553,7 @@ export class WorkspaceRuntime extends EventEmitter {
             env: this.env,
             models: this.models,
             defaultModel: this.defaultModel,
-            systemPrompt: this.systemPrompt,
+            getSystemPrompt: () => this.systemPrompt,
             tools: this.tools,
             resources: this.resources,
             streamOptions: this.streamOptions,
@@ -605,7 +609,7 @@ export class WorkspaceRuntime extends EventEmitter {
             repo: this.repo,
             env: this.env,
             models: this.models,
-            tools: this.tools,
+            getTools: () => this.tools,
             agents,
             sessionRegistry: this.sessionRegistry,
             systemPromptContributors:

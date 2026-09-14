@@ -243,8 +243,12 @@ export interface AttachedSessionOptions {
      * when prompt/steer carries no explicit uiLocale. See replyLanguage.ts.
      */
     defaultUiLocale?: SupportedLocale;
-    /** Loaded skills — passed through to the skill body reinjector hook. */
-    skills?: readonly TacoSkill[];
+    /**
+     * Thunk over the loaded skill list — forwarded to the skill body
+     * reinjector hook. See `HookWiringOptions.getSkills` for why this must
+     * stay a thunk rather than a captured array.
+     */
+    getSkills?: () => readonly TacoSkill[];
     /**
      * Auto-compaction policy. After the harness settles (with nextTurnCount=0),
      * `maybeCompact()` derives reserveTokens from `model.contextWindow * threshold`,
@@ -703,7 +707,7 @@ export class AttachedSession extends EventEmitter {
                 extensionContextHooks: args.extensionContextHooks,
                 extensionToolCallHooks: args.extensionToolCallHooks,
                 extensionToolResultHooks: args.extensionToolResultHooks,
-                skills: args.skills,
+                getSkills: args.getSkills,
                 memoryStore: args.memoryStore,
                 getActiveTasksState: () => ({
                     store: attached.taskStore,

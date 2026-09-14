@@ -63,7 +63,7 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
         env,
         models,
         // defaultModel left undefined — attach tests are out of scope here
-        systemPrompt: "test prompt",
+        getSystemPrompt: () => "test prompt",
         tools: [fakeTool("fake-tool")],
         resources: {},
         streamOptions: {},

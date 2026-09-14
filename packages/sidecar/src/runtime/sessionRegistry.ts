@@ -71,7 +71,15 @@ export interface SessionRegistryOptions {
     readonly env: NodeExecutionEnv;
     readonly models: Models;
     readonly defaultModel?: Model<Api>;
-    readonly systemPrompt: string;
+    /**
+     * A thunk, not a value: `WorkspaceRuntime.refreshToolset()` and
+     * `reloadSkillsNow()` both rebuild the workspace's baked prompt after
+     * construction. A captured string would leave a session attached after
+     * one of those rebuilds with the *previous* prompt — the same tool/prompt
+     * mismatch `refreshToolset` exists to prevent, just on the attach path
+     * instead of the per-turn one.
+     */
+    readonly getSystemPrompt: () => string;
     readonly tools: TacoTool[];
     readonly resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
     readonly streamOptions: AgentHarnessStreamOptions;
@@ -231,7 +239,7 @@ export class SessionRegistry extends EventEmitter {
     // the current value; already-attached sessions keep their own model until
     // switched. See WorkspaceRuntime.setDefaultModel.
     defaultModel?: Model<Api>;
-    readonly systemPrompt: string;
+    private readonly getSystemPrompt: () => string;
     readonly tools: TacoTool[];
     /** NOT readonly: `updateSkills()` replaces this so every attach after a
      *  hot reload gives its new harness the same fresh skill resources that
@@ -312,7 +320,7 @@ export class SessionRegistry extends EventEmitter {
         this.env = options.env;
         this.models = options.models;
         this.defaultModel = options.defaultModel;
-        this.systemPrompt = options.systemPrompt;
+        this.getSystemPrompt = options.getSystemPrompt;
         this.tools = options.tools;
         this.resources = options.resources;
         this.streamOptions = options.streamOptions;
@@ -631,7 +639,7 @@ export class SessionRegistry extends EventEmitter {
             models: this.models,
             env: this.env,
             model: opts.model ?? this.defaultModel,
-            systemPrompt: systemPrompt ?? this.systemPrompt,
+            systemPrompt: systemPrompt ?? this.getSystemPrompt(),
             tools,
             resources: this.resources,
             streamOptions: this.streamOptions,
@@ -641,7 +649,7 @@ export class SessionRegistry extends EventEmitter {
             extensionToolCallHooks: this.extensions?.toolCallHooks(),
             extensionToolResultHooks: this.extensions?.toolResultHooks(),
             defaultUiLocale: this.defaultUiLocale,
-            skills: this.skills,
+            getSkills: () => this.skills,
             memoryStore: this.memoryStore,
             isIm: this.isIm,
             taskStore: resolvedTaskState.taskStore,

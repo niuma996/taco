@@ -99,8 +99,15 @@ export interface HookWiringOptions {
     extensionToolCallHooks?: ToolCallHook[];
     /** Extension tool_result interceptors (builtins + external); undefined treated as empty. */
     extensionToolResultHooks?: ToolResultHookBuckets;
-    /** Loaded Skill[] — used by the reinjector hook in SkillTool. */
-    skills?: readonly Skill[];
+    /**
+     * Thunk over the loaded skill list — used by the reinjector hook in
+     * SkillTool. A thunk, not a snapshot array: `SessionRegistry.skills` is
+     * mutable (`updateSkills()` swaps it on hot reload), and the reinjector
+     * runs on every context build for the lifetime of the harness, so a
+     * captured array would keep restoring bodies from whatever skill set
+     * existed when the session attached.
+     */
+    getSkills?: () => readonly Skill[];
     /**
      * Thunk that reads the current compaction threshold live (supplied by
      * AttachedSession, same source as `effectiveCompaction`). The pin-aware
@@ -368,8 +375,20 @@ export async function wireHarnessHooks(
         disposers.push(onContext(buildPlanModeContextHook(() => getActiveTasksState().planState)));
     }
     // 7. skill body reinjection: drain pending queue + restore compacted-away skill bodies
-    if (opts.skills && opts.skills.length > 0) {
-        const { hook, handle } = buildSkillReinjector({ skills: opts.skills });
+    //
+    // Gated on the thunk being supplied at all, not on it being non-empty right
+    // now: a workspace that starts with zero skills but gets one hot-loaded
+    // later needs this hook installed from the start, since it is wired once
+    // per harness and cannot be added after attach. `SkillStore.skills` is a
+    // getter (not a captured array) so every hook invocation re-reads the
+    // live list through `getSkills`.
+    const getSkills = opts.getSkills;
+    if (getSkills) {
+        const { hook, handle } = buildSkillReinjector({
+            get skills() {
+                return getSkills();
+            },
+        });
         disposers.push(onContext(hook));
         skillReinjector = handle;
     }
