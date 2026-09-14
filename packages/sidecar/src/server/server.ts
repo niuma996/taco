@@ -12,12 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
-    type ChannelInstanceConfig,
     type ChannelStatusEntry,
-    type ChannelsBindResult,
-    type ChannelsCreateResult,
-    type ChannelsListResult,
-    type ChannelsRetryResult,
     type ClientCapabilities,
     type CustomProviderConfig,
     ErrorCodes,
@@ -40,12 +35,10 @@ import {
 import { Value } from "typebox/value";
 import { loadAgents } from "../agents/loadAgents.ts";
 import type { AgentDefinition } from "../agents/types.ts";
-import { BUILTIN_CHANNEL_MANIFESTS } from "../channels/builtinManifests.ts";
 import type { ChannelBindStatus } from "../channels/channelBindBroker.ts";
 import { ChannelBindBroker } from "../channels/channelBindBroker.ts";
-import { FileChannelConfigStore, hasStoredCredentials } from "../channels/channelConfigStore.ts";
+import { FileChannelConfigStore } from "../channels/channelConfigStore.ts";
 import { ChannelFactory } from "../channels/channelFactory.ts";
-import { isValidChannelId } from "../channels/configValidator.ts";
 import { ConversationRouter } from "../channels/conversationRouter.ts";
 import type { ImRoute, ImWorkspacePolicy } from "../channels/imWorkspacePolicy.ts";
 import {
@@ -66,7 +59,6 @@ import {
     type ResolvedCompaction,
     readGlobalConfig,
     type SkillDirInput,
-    saveGlobalConfig,
 } from "../config/config.ts";
 import { tacoHome } from "../config/tacoHome.ts";
 import { activateExtensions } from "../extensions/activation.ts";
@@ -101,12 +93,9 @@ import {
     readSkillFrontmatter,
 } from "../skills/skillFrontmatter.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
-import {
-    applyTuiVisibilityToContent,
-    type ImChannelContext,
-    isContentEmptyAfterVisibility,
-} from "../tags/index.ts";
+import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
+import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
@@ -387,6 +376,8 @@ export class SidecarServer implements ServerRpcSurface {
      *  configured set independently of which ones actually started. */
     private channelConfigs: readonly ChannelConfig[] = [];
     private failedChannels: readonly { channelId: string; error: string }[] = [];
+    /** IM channel control surface — see `channelControl.ts`. */
+    private readonly channelControl: ChannelControlSurface;
     private transport?: Transport;
     /**
      * True once stop() has run. Used by buildWorkspace to drop a workspace it
@@ -514,6 +505,14 @@ export class SidecarServer implements ServerRpcSurface {
                 this.conversationRouter?.listAll(channelId).map((e) => e.peerId) ?? [],
         });
         // Explicitly register all builtin method handlers instead of relying on module-level side-effect imports.
+        this.channelControl = createChannelControl({
+            channelRegistry: this.channelRegistry,
+            channelBindBroker: this.channelBindBroker,
+            getConversationRouter: () => this.conversationRouter,
+            getChannelConfigs: () => this.channelConfigs,
+            getFailedChannels: () => this.failedChannels,
+        });
+        this.channels = this.channelControl.channels;
         registerBuiltinMethods();
     }
 
@@ -543,6 +542,12 @@ export class SidecarServer implements ServerRpcSurface {
         transport: Transport = this.options.transport ?? new StdioTransport(),
         channelConfigs: readonly ChannelConfig[] = this.options.channels ?? [],
     ): Promise<void> {
+        // A stopped server can be restarted on a fresh transport (see
+        // `initialize.test.ts`); every other piece of connection state is
+        // reset in stop(), so this flag must be too — otherwise the first
+        // ensureWorkspace after a restart takes the "stopped" branch and
+        // disposes the workspace it just built.
+        this.stopped = false;
         this.transport = transport;
         transport.onRequest((line) => void this.handleLine(line));
         await transport.open();
@@ -609,7 +614,7 @@ export class SidecarServer implements ServerRpcSurface {
         // config-derived name and the on-disk configured flag. Building it
         // here keeps the push payload identical to `channels.list` output —
         // the client replaces the entry wholesale on applyChannelStatus.
-        this.broadcastChannelStatus(this.toStatusEntry(s));
+        this.broadcastChannelStatus(this.channelControl.toStatusEntry(s));
     };
 
     private clearCommandSweeper(): void {
@@ -658,6 +663,11 @@ export class SidecarServer implements ServerRpcSurface {
         // observe whatever the constructor throws, not a cancelled value.
         this.workspaceFlight.clear();
         this.commandRecords.clear();
+        // The active-turn table is workspace\0sessionId keyed and only drops a
+        // key when its outcome settles. A turn interrupted by stop() never
+        // settles, so without this clear the restarted server would answer
+        // `session_busy` for that session forever.
+        this.activeTurnCommands.clear();
         this.clearCommandSweeper();
         this.sessionEvents.clear();
         this.isInitialized = false;
@@ -1151,7 +1161,7 @@ export class SidecarServer implements ServerRpcSurface {
                 // IM channel identity for the <im_channel> context tag — the
                 // workspace only calls this for IM workspaces, passing the
                 // route's channelId; peer/chat ids never reach it.
-                resolveImChannel: (channelId) => this.resolveImChannel(channelId),
+                resolveImChannel: (channelId) => this.channelControl.resolveImChannel(channelId),
                 // In-process self-RPC entry — used by the memory tool (and future
                 // self-RPC tools).
                 dispatchRpc: (req) => this.handleRpcRequest(req),
@@ -1557,110 +1567,10 @@ export class SidecarServer implements ServerRpcSurface {
         }
     }
 
-    /** IM channel control surface consumed by the `channels.*` handlers. */
-    readonly channels: ChannelControl = {
-        list: (): ChannelsListResult => {
-            const configured = this.readConfiguredChannels();
-            return {
-                available: BUILTIN_CHANNEL_MANIFESTS.map((m) => ({
-                    name: m.name,
-                    version: m.version,
-                    description: m.description,
-                    maxMessageLength: m.capabilities.maxMessageLength,
-                    requiresPersistentProcess: m.capabilities.requiresPersistentProcess ?? false,
-                    approvalButton: m.capabilities.approvalButton ?? false,
-                })),
-                configured: configured.map((cfg) =>
-                    this.toStatusEntry(this.channelBindBroker.status(cfg.channelId), cfg),
-                ),
-                failed: [...this.failedChannels],
-            };
-        },
-        // conversationRouter may be unset before start() finishes; treat that
-        // as "no conversations yet" rather than throwing — listConversations
-        // is a process-level query, not a precondition for IM to function.
-        listConversations: (channelId) => ({
-            conversations: this.conversationRouter?.listAll(channelId) ?? [],
-        }),
-        create: (name, channelId): ChannelsCreateResult => {
-            const manifest = BUILTIN_CHANNEL_MANIFESTS.find((m) => m.name === name);
-            if (!manifest) throw new Error(`unknown channel type: ${name}`);
-            const id = channelId ?? name;
-            if (!isValidChannelId(id)) throw new Error(`invalid channelId: ${id}`);
-
-            // Merge disk and in-memory: another writer may have added an
-            // instance since startup, and `channels.list` reads through this
-            // same helper so the two paths can't disagree about what exists.
-            const existing = this.readConfiguredChannels();
-            if (existing.some((c) => c.channelId === id)) {
-                throw new Error(`channelId already exists: ${id}`);
-            }
-            saveGlobalConfig({
-                channels: [
-                    ...existing,
-                    {
-                        channelId: id,
-                        manifest: {
-                            name: manifest.name,
-                            version: manifest.version,
-                        },
-                        config: {},
-                    },
-                ],
-            });
-            // Channels load statically at startup (same as extensions), so the
-            // new instance is not bindable until the sidecar restarts.
-            return { channelId: id, requiresRestart: true };
-        },
-        bind: async (channelId, force, creds): Promise<ChannelsBindResult> => {
-            const cfg = this.channelConfigs.find((c) => c.channelId === channelId);
-            if (!cfg) throw new Error(`unknown channelId: ${channelId}`);
-            if (!this.channelRegistry.has(channelId)) {
-                throw new Error(`channel ${channelId} is not running`);
-            }
-            // Login is deliberately not awaited: the QR flow needs many
-            // seconds of human interaction, and progress is reported through
-            // `channel.status_changed` pushes instead. The wecom channel uses
-            // the same fire-and-forget path; the awaited surface just kicks
-            // a (creds → store → connect) sequence in the background.
-            void this.channelRegistry.login(channelId, force, creds).catch((e: unknown) => {
-                const message = e instanceof Error ? e.message : String(e);
-                log.error(`channel ${channelId} bind failed: ${message}`);
-                this.channelBindBroker.setState(channelId, "error", { message });
-            });
-            return { channelId, state: this.channelBindBroker.status(channelId).state };
-        },
-        submitVerifyCode: (requestId, code) =>
-            this.channelBindBroker.submitVerifyCode(requestId, code),
-        unbind: async (channelId) => {
-            if (!this.channelConfigs.some((c) => c.channelId === channelId)) {
-                throw new Error(`unknown channelId: ${channelId}`);
-            }
-            await this.channelRegistry.logout(channelId);
-            this.channelBindBroker.reset(channelId);
-        },
-        retry: async (channelId): Promise<ChannelsRetryResult> => {
-            const cfg = this.channelConfigs.find((c) => c.channelId === channelId);
-            if (!cfg) throw new Error(`unknown channelId: ${channelId}`);
-            if (!this.channelRegistry.has(channelId)) {
-                throw new Error(`channel ${channelId} is not running`);
-            }
-            // Fire-and-forget for the same reason as `bind`: reconnect kicks
-            // the SDK's WS retry cycle, and progress arrives through
-            // channel.status_changed pushes. Errors land in the broker's error
-            // state for the UI to surface.
-            void this.channelRegistry.retryWithStoredCreds(channelId).catch((e: unknown) => {
-                const message = e instanceof Error ? e.message : String(e);
-                log.error(`channel ${channelId} retry failed: ${message}`);
-                this.channelBindBroker.setState(channelId, "error", { message });
-            });
-            // For wecom, reconnect() sets "connecting" synchronously before the
-            // void promise is scheduled, so this status is already the new one;
-            // for no-op channels it reports the current state. Either way the
-            // caller should not treat it as authoritative — follow the push.
-            return { channelId, state: this.channelBindBroker.status(channelId).state };
-        },
-    };
+    /** IM channel control surface consumed by the `channels.*` handlers.
+     *  A data property rather than a getter: tests stub the whole surface to
+     *  drive bind error paths, and `readonly` is compile-time only. */
+    readonly channels: ChannelControl;
 
     /** IM workspace policy control surface consumed by the `imPolicy.*` handlers. */
     readonly imPolicy: ImPolicyControl = {
@@ -1712,86 +1622,6 @@ export class SidecarServer implements ServerRpcSurface {
             if (cwd.startsWith(IM_CWD_PREFIX)) continue;
             this.emitPush(PushMethods.ChannelStatusChanged, cwd, undefined, { channel });
         }
-    }
-
-    /**
-     * Union of in-memory `channelConfigs` (start-time snapshot) with anything
-     * written to taco.json since. Used by both `channels.list` and
-     * `channels.create` so they can't disagree about what exists — the bug
-     * they were diverging on surfaced as "channel already exists" without the
-     * UI seeing the new entry.
-     *
-     * Disk is authoritative; the in-memory record wins on `config` so a
-     * settings.write mutation made after startup isn't clobbered.
-     *
-     * Returns the wire (`ChannelInstanceConfig`) shape rather than the richer
-     * runtime `ChannelConfig`, since only the on-disk fields reach the wire.
-     */
-    private readConfiguredChannels(): ChannelInstanceConfig[] {
-        const onDisk = readGlobalConfig().channels ?? [];
-        const byId = new Map(this.channelConfigs.map((c) => [c.channelId, c]));
-        const merged: ChannelInstanceConfig[] = [];
-        const seen = new Set<string>();
-        for (const cfg of onDisk) {
-            const live = byId.get(cfg.channelId);
-            seen.add(cfg.channelId);
-            merged.push(
-                live
-                    ? { channelId: cfg.channelId, manifest: cfg.manifest, config: live.config }
-                    : cfg,
-            );
-        }
-        for (const cfg of this.channelConfigs) {
-            if (!seen.has(cfg.channelId)) {
-                merged.push({
-                    channelId: cfg.channelId,
-                    manifest: cfg.manifest,
-                    config: cfg.config,
-                });
-            }
-        }
-        return merged;
-    }
-
-    /**
-     * Broker frames carry only the transition fields (channelId/state/QR/...).
-     * The wire entry also needs the config-derived name and the on-disk
-     * configured flag, so the push payload matches `channels.list` output and
-     * the client's wholesale entry replacement stays consistent.
-     */
-    private toStatusEntry(
-        status: ChannelBindStatus,
-        cfg?: { manifest: { name: string } },
-    ): ChannelStatusEntry {
-        const config = cfg ?? this.channelConfigs.find((c) => c.channelId === status.channelId);
-        return {
-            channelId: status.channelId,
-            name: config?.manifest.name ?? status.channelId,
-            state: status.state,
-            // Probed from disk, not derived from state: the contract is
-            // "credentials are stored, regardless of connectivity", so an
-            // errored/expired binding still reports true and the UI offers
-            // Rebind instead of Bind.
-            configured: hasStoredCredentials(status.channelId),
-            qrUrl: status.qrUrl,
-            requestId: status.requestId,
-            retry: status.retry,
-            message: status.message,
-        };
-    }
-
-    /**
-     * Resolve a configured channel instance id to its safe IM channel identity
-     * for the `<im_channel>` context tag. Deliberately minimal — only platform
-     * type (manifest name) + instance id. No bind state, no configuration
-     * contents, no credentials, no peer/chat identifiers. Unknown ids → undefined.
-     * Read from the current `channelConfigs` on every call so a settings.write
-     * reconfiguration is reflected on the next LLM turn.
-     */
-    private resolveImChannel(channelId: string): ImChannelContext | undefined {
-        const cfg = this.channelConfigs.find((c) => c.channelId === channelId);
-        if (!cfg) return undefined;
-        return { type: cfg.manifest.name, channelId: cfg.channelId };
     }
 
     /** Invalidate notification for `channels.listConversations`. Triggered by
