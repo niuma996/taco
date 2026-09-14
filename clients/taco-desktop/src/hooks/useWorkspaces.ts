@@ -39,6 +39,8 @@ export interface UseWorkspacesApi {
     activeWs: WorkspaceState | undefined;
     sessionLevels: Record<string, ThinkingLevel>;
     errorBanner: string | null;
+    /** See `UseWorkspaceLifecycleApi.defaultCwdSettled`. */
+    defaultCwdSettled: boolean;
 
     // ── top-level lifecycle ──
     /** Handle SidecarAction — entry paired with useSidecarStream's onAction. */
@@ -719,6 +721,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         activeWs,
         sessionLevels: settings.sessionLevels,
         errorBanner,
+        defaultCwdSettled: lifecycle.defaultCwdSettled,
         dispatch,
         dispatchWs,
         setErrorBanner,

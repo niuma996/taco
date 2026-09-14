@@ -13,7 +13,7 @@
 import type { SessionListResult } from "@taco-ai/protocol";
 import { SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { type MutableRefObject, useCallback, useEffect, useRef } from "react";
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { bootMark, bootPhase } from "../lib/bootTrace";
 import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
 import {
@@ -64,6 +64,15 @@ export interface UseWorkspaceLifecycleApi {
     ) => Promise<SnapshotRecovery>;
     deleteSession: (cwd: string, sid: string) => Promise<void>;
     renameSession: (cwd: string, sid: string, name: string) => Promise<void>;
+    /**
+     * True once `initDefaultCwd()` has settled — on success AND on failure.
+     * Gates UI that pre-fills from `getDefaultCwd()`: reading it earlier yields
+     * the empty synchronous placeholder. Deliberately not "the default resolved
+     * successfully": when the Tauri call fails the default stays empty forever,
+     * and gating on a non-empty cwd would hide onboarding permanently on a
+     * fresh install, leaving no path to pick a directory manually.
+     */
+    defaultCwdSettled: boolean;
     /** Refresh one workspace's session list (sidebar titles) without attaching. */
     refreshSessionList: (cwd: string) => Promise<void>;
     /** Re-attach the given session, reading through a ref so callers created
@@ -94,6 +103,8 @@ export function useWorkspaceLifecycle({
 }: UseWorkspaceLifecycleOptions): UseWorkspaceLifecycleApi {
     /** StrictMode double-run guard — see initFromStorage top. */
     const initStartedRef = useRef(false);
+    /** See `UseWorkspaceLifecycleApi.defaultCwdSettled`. */
+    const [defaultCwdSettled, setDefaultCwdSettled] = useState(false);
 
     /** Apply a SessionListResult to the reducer. Centralizes the
      *  result→dispatch mapping so initial load, refresh, and load-more share
@@ -306,7 +317,17 @@ export function useWorkspaceLifecycle({
         // Resolve the real default cwd ($TACO_HOME/workspace, created on demand)
         // before reading storage — loadOpenedCwds / resolveActiveCwd fall back to
         // it, and the sync placeholder value points at a path that may not exist.
-        await bootPhase("ui.initDefaultCwd", () => initDefaultCwd());
+        //
+        // `initDefaultCwd` swallows its own errors (keeping the empty fallback),
+        // so returning from this await means "settled", not "succeeded" — which
+        // is exactly the signal `defaultCwdSettled` promises. try/finally guards
+        // the case where bootPhase itself throws: a stuck flag would hide
+        // onboarding forever.
+        try {
+            await bootPhase("ui.initDefaultCwd", () => initDefaultCwd());
+        } finally {
+            setDefaultCwdSettled(true);
+        }
         // Read opened + active from desktop.json (via the Rust host). The read
         // also runs the one-shot migration from the legacy localStorage keys,
         // so an upgrade-in-place user lands in the same workspaces as before.
@@ -750,6 +771,7 @@ export function useWorkspaceLifecycle({
         restoreSessionSnapshot,
         deleteSession,
         renameSession,
+        defaultCwdSettled,
         refreshSessionList,
         attachSessionRef,
     };

@@ -82,6 +82,7 @@ export default function App() {
         activeModel,
         activeLevel,
         errorBanner,
+        defaultCwdSettled,
         dispatch,
         dispatchWs,
         setErrorBanner,
@@ -911,12 +912,14 @@ export default function App() {
             />
             {lifecycle.desktopConfig !== null &&
                 isOnboardingRequired(lifecycle.desktopConfig) &&
-                // OnboardingModal's WorkspaceStep pre-fills from defaultCwd; if
-                // initDefaultCwd hasn't resolved yet the input shows empty
-                // and a fresh install has to type a path. useWorkspaceLifecycle
-                // sets activeCwd only after initDefaultCwd completes, so
-                // activeCwd !== "" is a strict "defaultCwd is populated" gate.
-                activeCwd !== "" && (
+                // OnboardingModal's WorkspaceStep pre-fills from defaultCwd, and
+                // desktopConfig loads on a separate effect that can win the race
+                // against initDefaultCwd — mounting then shows the empty
+                // synchronous placeholder. Gate on "settled", not on a non-empty
+                // cwd: when default_workspace_dir fails the default stays empty
+                // forever, and a non-empty check would hide onboarding
+                // permanently with no way to pick a directory by hand.
+                defaultCwdSettled && (
                     <OnboardingModal
                         client={client}
                         wsApi={wsApi}
