@@ -1,7 +1,7 @@
 /** Minimal fake of the pi 0.85 harness+lane tool surface for unit tests. */
 
+import type { ToolCollection } from "../../src/runtime/harness/sessionToolController.ts";
 import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
-import type { ToolCollection } from "../../src/runtime/sessionToolController.ts";
 
 /**
  * In pi 0.85 tool definitions live on the harness while the active set lives on

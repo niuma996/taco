@@ -54,7 +54,7 @@ export type {
     PinAwareCompactHookOptions,
     PinAwareCompactionDetails,
 } from "./policy/pinAwareCompact.ts";
-// Pin-aware compression hook — sole consumer is `runtime/hookWiring.ts`,
+// Pin-aware compression hook — sole consumer is `runtime/harness/hookWiring.ts`,
 // which registers it as a trusted `session_before_compact` hook.
 export { buildPinAwareCompactHook } from "./policy/pinAwareCompact.ts";
 export { isContentEmptyAfterVisibility } from "./policy/visibility.ts";

@@ -7,7 +7,7 @@
  * means the consumer is accurate even after an AttachedSession restart.
  */
 
-import type { Entry } from "../runtime/pi/types.ts";
+import type { Entry } from "../pi/types.ts";
 
 /** Persisted shape stored in `CompactionEntry.details`. */
 export interface PinOnceConsumedDetails {

@@ -2,7 +2,11 @@
  * AttachedSession — binds one session to an AgentHarness.
  * Forwards harness events/errors as "event"/"error", wraps prompt / steer /
  * abort / setModel, delegates compaction to CompactionController and context
- * usage to ContextInfoService. Hook wiring lives in `./hookWiring.ts`.
+ * usage to ContextInfoService. Hook wiring lives in `./hookWiring.ts`,
+ * harness-event wiring + per-turn bookkeeping in `./turnBookkeeping.ts`,
+ * crash recovery in `../session/sessionRecovery.ts`, toolset convergence in
+ * `./toolsetRefresh.ts`; reply validation / request tagging live in
+ * `./promptReply.ts` and `../models/requestHeaders.ts`.
  * dispose() aborts the harness and releases all listeners/subscriptions.
  */
 
@@ -15,27 +19,40 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import { CheckpointManager } from "../checkpoints/manager.ts";
-import type { CheckpointStore } from "../checkpoints/store.ts";
-import type { ResolvedCompaction } from "../config/config.ts";
+import { CheckpointManager } from "../../checkpoints/manager.ts";
+import type { CheckpointStore } from "../../checkpoints/store.ts";
+import type { ResolvedCompaction } from "../../config/config.ts";
 import type {
     ContextHookBuckets,
     ToolCallHook,
     ToolResultHookBuckets,
-} from "../extensions/index.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import { MemoryExtractorImpl, type MemoryStore, sliceForExtraction } from "../memory/index.ts";
-import type { PlanModeState } from "../plan/planModeState.ts";
-import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
+} from "../../extensions/index.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import { MemoryExtractorImpl, type MemoryStore } from "../../memory/index.ts";
+import type { PlanModeState } from "../../plan/planModeState.ts";
+import type { SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
+import type { TacoSkill } from "../../skills/tacoSkill.ts";
+import type { ImChannelContext } from "../../tags/index.ts";
+import type { TaskStore } from "../../tasks/taskTypes.ts";
+import { createAddToolsTool } from "../../tools/addTools.ts";
+import type { TacoToolContext } from "../../tools/context.ts";
+import type { TacoTool } from "../../tools/index.ts";
+import {
+    COMPACTION_END_EVENT,
+    COMPACTION_START_EVENT,
+    CompactionController,
+} from "../compaction/compactionController.ts";
+import { ContextInfoService } from "../compaction/contextInfoService.ts";
+import { PinOnceConsumer } from "../compaction/pinOnceConsumer.ts";
+import { withTacoUserAgent } from "../models/requestHeaders.ts";
+import type { NodeExecutionEnv } from "../pi/node.ts";
 import type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
     AgentLane,
     AgentMessage,
     Api,
-    Entry,
-    HarnessEvent,
     ImageContent,
     Model,
     Models,
@@ -43,26 +60,10 @@ import type {
     PromptTemplate,
     Session,
     ThinkingLevel,
-} from "../runtime/pi/types.ts";
-import {
-    AgentHarness,
-    laneConfig,
-    NoActiveOperation,
-    NothingToResume,
-} from "../runtime/pi/values.ts";
-import type { SkillReinjectorHandle } from "../skills/skillReinjector.ts";
-import type { TacoSkill } from "../skills/tacoSkill.ts";
-import type { ImChannelContext } from "../tags/index.ts";
-import type { TaskStore } from "../tasks/taskTypes.ts";
-import { createAddToolsTool } from "../tools/addTools.ts";
-import type { TacoToolContext } from "../tools/context.ts";
-import type { TacoTool } from "../tools/index.ts";
-import {
-    COMPACTION_END_EVENT,
-    COMPACTION_START_EVENT,
-    CompactionController,
-} from "./compactionController.ts";
-import { ContextInfoService } from "./contextInfoService.ts";
+} from "../pi/types.ts";
+import { AgentHarness, laneConfig, NoActiveOperation } from "../pi/values.ts";
+import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
+import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
@@ -73,140 +74,19 @@ import {
     type QueueKind,
     type SteerEnqueueResult,
 } from "./laneQueue.ts";
-import { PinOnceConsumer } from "./pinOnceConsumer.ts";
-import { sidecarVersion } from "./runtimeResources.ts";
-import { buildBranchContext, findBranchEntries, MAIN_BRANCH } from "./sessionBranch.ts";
+import { resolvePromptReply } from "./promptReply.ts";
 import {
     DefaultSessionToolController,
     type SessionToolController,
 } from "./sessionToolController.ts";
+import { createToolsetRefresher } from "./toolsetRefresh.ts";
+import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
 
 const log = createLogger("attachedSession");
-
-/**
- * Harness event types republished onto the session's "event" stream.
- *
- * pi 0.85 replaced the catch-all `harness.subscribe(cb)` with a typed
- * per-event bus, so the set of forwarded events is now explicit. These are the
- * types the desktop renders: streaming assistant output, tool-call lifecycle,
- * turn/run boundaries, queue depth, retry status and usage.
- *
- * Deliberately omitted: `handler_error` and `fault` (internal diagnostics that
- * are logged, not surfaced), `entry_added` (redundant with `message_*`),
- * `lane_created` / `value_update` / `config_update` (no UI), and the
- * `compaction_*` pair, which CompactionController republishes with its own
- * paired lifecycle signal so the push adapter's interlock stays intact.
- */
-const REPUBLISHED_EVENTS = [
-    "run_start",
-    "run_end",
-    "run_suspend",
-    "run_resume",
-    "turn_start",
-    "turn_end",
-    "message_start",
-    "message_update",
-    "message_end",
-    "tool_start",
-    "tool_update",
-    "tool_end",
-    "queue_update",
-    "retry_scheduled",
-    "retry_start",
-    "retry_end",
-    "operation_abort",
-    "navigation_start",
-    "navigation_end",
-    "usage",
-] as const satisfies readonly HarnessEvent["type"][];
 
 export interface AbortResult {
     clearedSteer: AgentMessage[];
     clearedFollowUp: AgentMessage[];
-}
-
-/**
- * What happened to one operation that a previous process left in flight.
- *
- * `status` is about the recovery attempt, not the operation's own result:
- *
- *   - `recovered` — resume drove it to a terminal state; the lane is usable.
- *     `outcome` carries pi's own status ("completed" / "aborted" / "suspended").
- *   - `already_settled` — it finished between `create()` reporting it and the
- *     resume call. Benign race, nothing was done.
- *   - `failed` — resume could not drive it. The lane may still be occupied, so
- *     this is the case that leaves a session needing manual intervention.
- *   - `skipped` — the entry belonged to another lane, which this session cannot
- *     resume (`lane.resume()` only recovers its own lane).
- */
-export interface RecoveryOutcome {
-    readonly operationId: string;
-    readonly lane: string;
-    readonly kind: OpenOperation["kind"];
-    readonly status: "recovered" | "already_settled" | "failed" | "skipped";
-    /** pi's terminal status when `status` is `recovered`. */
-    readonly outcome?: string;
-    /** Failure detail when `status` is `failed`. */
-    readonly error?: string;
-}
-
-/**
- * Tag provider requests with the sidecar version.
- *
- * `user-agent: taco/<version>` — set on every NON-OAuth provider. OAuth
- * providers (Anthropic OAuth in particular) need their
- * `claude-cli/<version>` identity preserved: pi-ai's openai / anthropic
- * SDKs read `this.constructor.name` for the default UA, and overriding
- * with `taco/<version>` would lose Claude Code's OAuth beta features.
- * The OAuth check uses `checkAuth` (never triggers a token refresh)
- * rather than `getAuth`.
- *
- * `x-taco-sidecar-version: <version>` — set on EVERY provider. It's
- * metadata, not identity, so it never conflicts with the OAuth UA. On
- * an OAuth call it's the only taco tag that survives, which is enough
- * to attribute the request to a taco version in the provider's logs.
- *
- * If `checkAuth` cannot classify the provider we skip the UA override
- * but still attach the version header — the version is safe; the UA
- * is the identity-bearing field.
- */
-export async function withTacoUserAgent(
-    streamOptions: AgentHarnessStreamOptions,
-    models: Models,
-    provider: string,
-): Promise<AgentHarnessStreamOptions> {
-    let skipUserAgent = false;
-    try {
-        const authCheck = await models.checkAuth(provider);
-        skipUserAgent = authCheck?.type === "oauth";
-    } catch {
-        // Credential-store failures must not block attach; safe to drop
-        // the UA override (we don't know if it would override an OAuth
-        // identity) but keep the version header — it's metadata only.
-        skipUserAgent = true;
-    }
-
-    const version = sidecarVersion();
-    // Strip any caller-supplied `user-agent` on the OAuth path. pi-ai
-    // hardcodes `claude-cli/<version>` for Anthropic OAuth to keep Claude
-    // Code's OAuth beta features enabled, and a caller's UA in
-    // `streamOptions.headers` would otherwise survive the spread and
-    // override it (we are the last merge layer before pi-ai's defaults).
-    const callerHeaders = { ...streamOptions.headers };
-    if (skipUserAgent) delete callerHeaders["user-agent"];
-
-    const tags: Record<string, string> = {
-        "x-taco-sidecar-version": version,
-        ...(skipUserAgent ? {} : { "user-agent": `taco/${version}` }),
-    };
-
-    return {
-        ...streamOptions,
-        headers: {
-            ...callerHeaders,
-            ...tags,
-        },
-    };
 }
 
 export interface AttachedSessionOptions {
@@ -326,37 +206,6 @@ export interface AttachedSessionOptions {
     sessionKind: "main" | "subagent";
 }
 
-/**
- * Whether `prompt()` should accept a branch-tip entry as a valid reply, or
- * surface the "expected an assistant reply" anomaly.
- *
- * The expected shape is an assistant message. The exception is a toolResult
- * entry whose `MessageEntry.terminate` is `true` — pi 0.85 lets a turn finish
- * on such an entry (askUser / planExit-style close) and reports
- * `status: "completed"` with the toolResult as the branch tip. Returning it
- * directly keeps the desktop from seeing a misleading error and from
- * `sessionDelete`-ing the freshly created session in its `sessionPrompt` catch.
- *
- * Any other non-assistant tip (a toolResult without `terminate`, a
- * compaction / branch_summary entry, an aborted-and-resumed anomaly) is a real
- * shape problem and is rejected — silent acceptance would mask upstream
- * invariant changes.
- *
- * `entry` is typed as pi's own `Entry` union rather than `unknown` so that a
- * rename of `MessageEntry.terminate` upstream breaks the build here instead of
- * silently degrading to "always reject" (which would reinstate the bug).
- */
-export function resolvePromptReply(
-    reply: AgentMessage | undefined,
-    entry: Entry | undefined,
-): "accept" | "reject" {
-    if (reply === undefined) return "reject";
-    if (reply.role === "assistant") return "accept";
-    const terminating =
-        entry?.type === "message" && entry.terminate === true && reply.role === "toolResult";
-    return terminating ? "accept" : "reject";
-}
-
 export class AttachedSession extends EventEmitter {
     readonly session: Session;
     /**
@@ -422,14 +271,6 @@ export class AttachedSession extends EventEmitter {
     taskStore!: TaskStore;
     planState!: PlanModeState;
     tasksDir!: string;
-    /**
-     * Coordinator state for the "remember → extract incremental" protocol.
-     * `tool_end("memory")` stores a Promise; `turn_end` chains off
-     * it via the microtask queue so it never double-extracts or skips an offset.
-     * If no remember tool fired, the field is `undefined` and extraction covers
-     * the full conversation.
-     */
-    private lastRememberMessageCountPromises: Promise<number>[] = [];
     /** Converges the toolset + system prompt at the start of a turn; no-op when
      *  the workspace supplied no refresher (subagents, tests). */
     private applyToolsetRefresh?: () => Promise<void>;
@@ -636,37 +477,17 @@ export class AttachedSession extends EventEmitter {
         );
         attachedCell.current = attached;
         // Per-turn toolset convergence. Assigned here rather than threaded
-        // through the constructor (already 11 params); the setter also owns the
-        // prompt cell so the two can only move together.
+        // through the constructor (already 11 params); the refresher also owns
+        // the prompt cell so the two can only move together.
         if (args.refreshToolset) {
-            const refresh = args.refreshToolset;
-            attached.applyToolsetRefresh = async () => {
-                const next = refresh();
-                if (!next) return; // unchanged — the steady state, no writes
-                const retired = new Set(next.removed);
-                const nextNames = new Set(next.tools.map((t) => t.name));
-                // `next.tools` is only the workspace-level set. Taking it as the
-                // new collection would delete the tools this layer installed
-                // (agent / skill / addTools / restored / always candidates) while
-                // the allowlist still named them — which pi rejects as
-                // `configured_tools_unavailable`; taking it as the new allowlist
-                // would hide those same tools instead. So drop only what the
-                // workspace retired and leave the rest alone.
-                const current = await harness.getTools(harnessContext);
-                const kept = current.filter((t) => !retired.has(t.name) && !nextNames.has(t.name));
-                const merged = [...next.tools, ...kept];
-                const active = (await lane.getActiveTools(harnessContext)).filter(
-                    (name) => !retired.has(name),
-                );
-                for (const name of nextNames) {
-                    if (!active.includes(name)) active.push(name);
-                }
-                currentSystemPrompt = next.systemPrompt;
-                await harness.setTools(merged, harnessContext);
-                // pi gates visibility on the lane allowlist, so a tool that is
-                // merely defined stays invisible; realign it to the new set.
-                await lane.setActiveTools(active, harnessContext);
-            };
+            attached.applyToolsetRefresh = createToolsetRefresher({
+                harness,
+                lane,
+                refresh: args.refreshToolset,
+                setSystemPrompt: (prompt) => {
+                    currentSystemPrompt = prompt;
+                },
+            });
         }
 
         // Per-session task/plan state must be assigned before wireHarnessHooks —
@@ -735,98 +556,15 @@ export class AttachedSession extends EventEmitter {
                   )
                 : undefined;
 
-        // pi 0.85 replaced the single `harness.subscribe(cb)` firehose with a
-        // per-type bus. Republish every type the desktop consumes onto the
-        // "event" stream, then attach the turn-boundary bookkeeping.
-        const republish = (event: HarnessEvent): void => {
-            try {
-                attached.emit("event", event);
-            } catch (error) {
-                // A downstream listener that throws must not abort this callback:
-                // the checkpoint window close, memory extraction, and compaction
-                // bookkeeping below still have to run. One bad subscriber never
-                // starves the turn-boundary work.
-                log.warn("event listener threw; continuing turn-boundary bookkeeping", {
-                    eventType: event.type,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-        };
-
-        const disposers: Array<() => void> = [];
-        for (const type of REPUBLISHED_EVENTS) {
-            disposers.push(harness.events.on(type, republish));
-        }
-
-        // Memory extraction — coordinator across two events:
-        //   tool_end ("memory") → pushes a Promise<number> resolving to the
-        //     context message count right after the commit.
-        //   turn_end → takes ownership of all pending Promises (resets the
-        //     array synchronously), then awaits their min offset. This handles
-        //     multiple memory calls in the same turn — instead of overwriting,
-        //     we take the earliest offset so only messages BEFORE all memory
-        //     calls are sent to the extractor.
-        disposers.push(
-            harness.events.on("tool_end", (event) => {
-                if (event.toolName !== "memory" || event.isError) return;
-                // Push synchronously so turn_end's Promise.all sees it regardless of
-                // microtask timing; the rejection is absorbed here (Infinity never wins
-                // Math.min), so a context-build failure can't become an unhandled
-                // rejection nor poison the offset computation.
-                attached.lastRememberMessageCountPromises.push(
-                    buildBranchContext(attached.session)
-                        .then((messages) => messages.length)
-                        .catch((error) => {
-                            log.warn(
-                                "context build failed during memory offset snapshot, skipping:",
-                                error instanceof Error ? error.message : String(error),
-                            );
-                            return Number.POSITIVE_INFINITY;
-                        }),
-                );
-            }),
-        );
-
-        disposers.push(
-            harness.events.on("turn_end", () => {
-                // Close the checkpoint window so the next turn's first write opens
-                // a fresh restore point instead of folding into this turn's.
-                attached.checkpoints?.endTurn();
-
-                const extractor = attached.memoryExtractor;
-                if (extractor === undefined) return;
-                // Synchronous take + reset — after this line, no other code
-                // path writes to lastRememberMessageCountPromises.
-                const promises = attached.lastRememberMessageCountPromises;
-                attached.lastRememberMessageCountPromises = [];
-                buildBranchContext(attached.session)
-                    .then(async (contextMessages) => {
-                        let sinceCount: number | undefined;
-                        if (promises.length > 0) {
-                            try {
-                                const counts = await Promise.all(promises);
-                                sinceCount = Math.min(...counts);
-                            } catch {
-                                // extractor failure must never bleed into the
-                                // turn — fall back to "no offset" semantics
-                                sinceCount = undefined;
-                            }
-                        }
-                        const messages = sliceForExtraction(contextMessages, sinceCount);
-                        if (messages.length > 0) {
-                            await extractor.onTurnEnd(messages);
-                        }
-                    })
-                    .catch((error) => {
-                        // The context build or the extractor rejecting must never
-                        // surface as an unhandled rejection on this fire-and-forget chain.
-                        log.warn(
-                            "memory extraction after turn_end failed:",
-                            error instanceof Error ? error.message : String(error),
-                        );
-                    });
-            }),
-        );
+        // Republish the harness events the desktop consumes, plus per-turn
+        // bookkeeping (checkpoint window close, incremental memory extraction).
+        const disposers = wireTurnBookkeeping({
+            harness,
+            session: args.session,
+            emitEvent: (event) => attached.emit("event", event),
+            getCheckpoints: () => attached.checkpoints,
+            getExtractor: () => attached.memoryExtractor,
+        });
 
         // Auto-compaction scheduling + PinOnceConsumer updates.
         disposers.push(...compactionController.subscribe());
@@ -841,115 +579,33 @@ export class AttachedSession extends EventEmitter {
         // the recovered turn's output is lost. Not awaited — a resumed run can
         // take as long as a normal turn, and attach must not block on it.
         if (open.length > 0) {
-            attached.recovery = attached.resumeOpenOperations(open).finally(() => {
-                attached.recovery = undefined;
-            });
+            attached.recovery = resumeOpenOperations({
+                lane,
+                sessionId: args.session.metadata.id,
+                open,
+            })
+                .then((outcomes) => {
+                    attached.recoveryOutcomes = outcomes;
+                })
+                .finally(() => {
+                    attached.recovery = undefined;
+                });
         }
 
         return attached;
     }
 
     /**
-     * Drive operations that `AgentHarness.create()` reported as still open.
-     *
-     * Why this is not optional: a restored operation stays in the lane's
-     * `state.operation`, and `lane.prompt()` rejects with `LaneBusy` whenever
-     * that field is non-null. Ignoring `open[]` therefore does not leak a bit of
-     * state — it leaves the session unable to accept another message, across
-     * restarts, with no way for the user to clear it.
-     *
-     * `lane.resume()` re-enters the existing operation rather than starting a
-     * new one, so the reply lands on the same branch the interrupted run was
-     * building. Tool calls whose outcome was never recorded are replayed only
-     * when the tool opts in with `replay: "safe"`; taco declares no such tool
-     * (and neither does pi for bash/edit/write), so recovery cannot re-run a
-     * side effect — the unfinished call is reported as interrupted instead.
-     *
-     * Failures are contained: this runs detached from `create()`, so throwing
-     * would surface as an unhandled rejection and take down the daemon rather
-     * than the session. A session that cannot be resumed is degraded, not
-     * fatal — the user can still abort it explicitly.
-     */
-    /**
      * Block until crash recovery has released the lane. No-op in the normal
      * case — `recovery` is only set when `create()` found an open operation.
      *
-     * Never rejects: `resumeOpenOperations` already contains its own failures,
-     * and a caller waiting on recovery should proceed to its own `prompt()` (and
-     * get that call's real error) rather than inherit a recovery failure.
+     * Never rejects: `sessionRecovery.resumeOpenOperations` already contains its own
+     * failures, and a caller waiting on recovery should proceed to its own
+     * `prompt()` (and get that call's real error) rather than inherit a recovery
+     * failure.
      */
     private async awaitRecovery(): Promise<void> {
         await this.recovery?.catch(() => undefined);
-    }
-
-    private async resumeOpenOperations(open: ReadonlyArray<OpenOperation>): Promise<void> {
-        const sessionId = this.session.metadata.id;
-        // A lane holds at most one operation (`state.operation` is a single
-        // slot), and `lane.resume()` takes no id — it resumes whatever its own
-        // lane is holding. So only the entry for this session's lane is
-        // actionable; anything else would resume the wrong lane. taco attaches
-        // exactly one lane per session, so in practice this selects 0 or 1.
-        const mine = open.find((operation) => operation.lane === MAIN_BRANCH);
-        // Record every entry, including the ones this session cannot act on —
-        // a post-mortem needs to see that they were seen and deliberately left.
-        const skipped: RecoveryOutcome[] = open
-            .filter((operation) => operation !== mine)
-            .map((operation) => ({
-                operationId: operation.operationId,
-                lane: operation.lane,
-                kind: operation.kind,
-                status: "skipped" as const,
-            }));
-        if (mine === undefined) {
-            this.recoveryOutcomes = skipped;
-            log.warn("interrupted operations belong to other lanes; not resuming", {
-                sessionId,
-                lanes: open.map((operation) => operation.lane),
-            });
-            return;
-        }
-
-        // `aborting` means durable cancellation was requested before the crash.
-        // Resuming still runs the operation to its terminal state, which is what
-        // actually clears `state.operation` and frees the lane.
-        const context = {
-            sessionId,
-            operationId: mine.operationId,
-            kind: mine.kind,
-            ...(mine.aborting === true ? { aborting: true } : {}),
-        };
-        const identity = { operationId: mine.operationId, lane: mine.lane, kind: mine.kind };
-        const record = (outcome: RecoveryOutcome): void => {
-            this.recoveryOutcomes = [...skipped, outcome];
-        };
-        try {
-            const result = await this.lane.resume(harnessContext);
-            if (!result.ok) {
-                // NothingToResume is the benign race: the operation settled
-                // between `create()` reporting it and this call.
-                if (NothingToResume.is(result.error)) {
-                    record({ ...identity, status: "already_settled" });
-                    log.debug("interrupted operation already settled", context);
-                    return;
-                }
-                record({ ...identity, status: "failed", error: result.error.message });
-                log.warn("could not resume interrupted operation", {
-                    ...context,
-                    error: result.error.message,
-                });
-                return;
-            }
-            const status = "status" in result.value ? result.value.status : "suspended";
-            record({ ...identity, status: "recovered", outcome: status });
-            log.info("resumed interrupted operation", { ...context, status });
-        } catch (error) {
-            record({
-                ...identity,
-                status: "failed",
-                error: error instanceof Error ? error.message : String(error),
-            });
-            log.error("resuming an interrupted operation threw", context, error);
-        }
     }
 
     /**

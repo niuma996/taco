@@ -25,7 +25,7 @@ import {
 import { RPC } from "@taco-ai/shared";
 import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
 
-import { resolveSessionByPrefix } from "../../runtime/sessionRegistry.ts";
+import { resolveSessionByPrefix } from "../../runtime/session/sessionLookup.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import {
     applyTuiVisibilityToContent,

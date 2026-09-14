@@ -12,7 +12,7 @@ import { after, afterEach, before, describe, it } from "node:test";
 import { DEFAULT_COMPACTION_ENABLED, DEFAULT_COMPACTION_THRESHOLD } from "@taco-ai/protocol";
 
 import { type ResolvedCompaction, saveGlobalConfig } from "../../src/config/config.ts";
-import { CompactionController } from "../../src/runtime/compactionController.ts";
+import { CompactionController } from "../../src/runtime/compaction/compactionController.ts";
 
 /** Minimal fake harness — CompactionController.effectiveCompaction() doesn't touch it. */
 const fakeHarness = {

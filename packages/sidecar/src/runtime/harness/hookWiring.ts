@@ -10,8 +10,8 @@
  */
 
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
-import type { CheckpointManager } from "../checkpoints/manager.ts";
-import { redactString } from "../extensions/builtin/outputRedaction/index.ts";
+import type { CheckpointManager } from "../../checkpoints/manager.ts";
+import { redactString } from "../../extensions/builtin/outputRedaction/index.ts";
 import type {
     ContextEvent,
     ContextHookBuckets,
@@ -22,24 +22,13 @@ import type {
     ToolResultEvent,
     ToolResultHookBuckets,
     ToolResultPatch,
-} from "../extensions/index.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import type { MemoryStore } from "../memory/index.ts";
-import { buildMemoryContextHook } from "../memory/memoryTag.ts";
-import { createMutationGateHook } from "../permissions/mutationGate.ts";
-import type {
-    AgentHarness,
-    AgentLane,
-    AgentMessage,
-    AgentToolResult,
-    ExecutionToolContext,
-    JsonValue,
-    Models,
-    Skill,
-    ThinkingLevel,
-} from "../runtime/pi/types.ts";
-import { buildSkillReinjector, type SkillReinjectorHandle } from "../skills/skillReinjector.ts";
+} from "../../extensions/index.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import type { MemoryStore } from "../../memory/index.ts";
+import { buildMemoryContextHook } from "../../memory/memoryTag.ts";
+import { createMutationGateHook } from "../../permissions/mutationGate.ts";
+import { buildSkillReinjector, type SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import {
     buildCompactionReminderHook,
     buildDropPolicyContextHook,
@@ -51,11 +40,22 @@ import {
     buildReplyLanguageContextHook,
     buildStripThinkingContextHook,
     type ImChannelContext,
-} from "../tags/index.ts";
-import { throttleByContent } from "../tags/throttle.ts";
-import { type ActiveTasksState, buildActiveTasksContextHook } from "../tasks/activeTasksTag.ts";
-import { buildTodoWriteReminderContextHook } from "../tasks/todoWriteReminder.ts";
-import type { PinOnceConsumer } from "./pinOnceConsumer.ts";
+} from "../../tags/index.ts";
+import { throttleByContent } from "../../tags/throttle.ts";
+import { type ActiveTasksState, buildActiveTasksContextHook } from "../../tasks/activeTasksTag.ts";
+import { buildTodoWriteReminderContextHook } from "../../tasks/todoWriteReminder.ts";
+import type { PinOnceConsumer } from "../compaction/pinOnceConsumer.ts";
+import type {
+    AgentHarness,
+    AgentLane,
+    AgentMessage,
+    AgentToolResult,
+    ExecutionToolContext,
+    JsonValue,
+    Models,
+    Skill,
+    ThinkingLevel,
+} from "../pi/types.ts";
 
 const log = createLogger("taco-ext");
 

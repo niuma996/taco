@@ -7,18 +7,14 @@ import {
     type ResolvedCompaction,
     readGlobalConfig,
     validateCompactionConfig,
-} from "../config/config.ts";
-import { waitForEvent } from "../lib/async.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import type { AgentLane, Entry, ExecutionToolContext } from "../runtime/pi/types.ts";
-import {
-    type AgentHarness,
-    DEFAULT_COMPACTION_SETTINGS,
-    shouldCompact,
-} from "../runtime/pi/values.ts";
+} from "../../config/config.ts";
+import { waitForEvent } from "../../lib/async.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import { isBusyError, toHarnessError } from "../harness/harnessErrors.ts";
+import type { AgentLane, Entry, ExecutionToolContext } from "../pi/types.ts";
+import { type AgentHarness, DEFAULT_COMPACTION_SETTINGS, shouldCompact } from "../pi/values.ts";
 import type { ContextUsage } from "./contextInfoService.ts";
-import { isBusyError, toHarnessError } from "./harnessErrors.ts";
 import type { PinOnceConsumer } from "./pinOnceConsumer.ts";
 
 const log = createLogger("compactionController");

@@ -24,7 +24,7 @@ import type { ServerPush } from "@taco-ai/protocol";
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
 import { MockChannel, mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelConfig } from "../../src/channels/registry.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import type { ServerFrame, Transport } from "../../src/server/transport.ts";

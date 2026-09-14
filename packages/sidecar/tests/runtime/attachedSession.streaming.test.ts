@@ -30,7 +30,8 @@ import { createModels } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
-import { AttachedSession, resolvePromptReply } from "../../src/runtime/attachedSession.ts";
+import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
+import { resolvePromptReply } from "../../src/runtime/harness/promptReply.ts";
 import { normalizeMessageUpdate } from "../../src/server/push.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 

@@ -16,8 +16,8 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { defaultSkillDirs } from "../../src/config/config.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
+import { SlashNormalizedExecutionEnv } from "../../src/runtime/harness/slashNormalizedEnv.ts";
 import { loadSourcedSkills } from "../../src/runtime/pi/values.ts";
-import { SlashNormalizedExecutionEnv } from "../../src/runtime/slashNormalizedEnv.ts";
 import { dedupeSkillsByName } from "../../src/skills/dedupeSkills.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 

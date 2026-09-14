@@ -8,11 +8,11 @@ import { Value } from "typebox/value";
 import {
     DefaultDeferredToolRegistry,
     type ToolCandidate,
-} from "../../src/runtime/deferredToolRegistry.ts";
+} from "../../src/runtime/harness/deferredToolRegistry.ts";
 import {
     type AddToolsResult,
     DefaultSessionToolController,
-} from "../../src/runtime/sessionToolController.ts";
+} from "../../src/runtime/harness/sessionToolController.ts";
 import { type AddToolsToolInput, createAddToolsTool } from "../../src/tools/addTools.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";

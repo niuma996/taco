@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { withHookTimeout, wrapHook } from "../../src/runtime/hookWiring.ts";
+import { withHookTimeout, wrapHook } from "../../src/runtime/harness/hookWiring.ts";
 
 describe("withHookTimeout", () => {
     it("resolves fast promises with the original value", async () => {

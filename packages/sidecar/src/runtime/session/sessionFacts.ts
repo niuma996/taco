@@ -16,9 +16,12 @@
  * defaults rather than throwing.
  */
 
-import { harnessContext } from "../lib/harnessContext.ts";
-import type { Context, Session } from "../runtime/pi/types.ts";
-import { value } from "../runtime/pi/values.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import type { Context, Session } from "../pi/types.ts";
+import { value } from "../pi/values.ts";
+
+const log = createLogger("sidecar.sessionFacts");
 
 /** Durable per-session facts owned by the sidecar. */
 export interface SessionFacts {
@@ -67,4 +70,27 @@ export async function writeSessionFacts(
     context: Context = harnessContext,
 ): Promise<void> {
     await session.setValue(FACTS, facts, context);
+}
+
+/**
+ * Parent depth for the recursion guard, tolerating the non-atomic write.
+ *
+ * Depth lives in the value store, written *after* `repo.create()` — so a
+ * session interrupted between the two steps reads back `{}`. Defaulting
+ * silently would zero the guard and let a depth-1 subagent spawn depth-1
+ * grandchildren, so this warns instead: a recurrence shows up in the log
+ * rather than looking like a clean run.
+ *
+ * Shared by the Agent-tool and Skill-tool spawn paths, which must not disagree
+ * about the depth they hand to `filterToolsForAgent`.
+ */
+export function resolveParentDepth(facts: SessionFacts, context: Record<string, unknown>): number {
+    if (facts.depth === undefined) {
+        log.warn(
+            "parent session has no depth fact; defaulting to 0 — recursion guard may be inactive",
+            context,
+        );
+        return 0;
+    }
+    return facts.depth;
 }

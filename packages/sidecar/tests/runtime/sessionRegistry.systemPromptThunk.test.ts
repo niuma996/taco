@@ -23,10 +23,13 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { AttachedSession } from "../../src/runtime/attachedSession.ts";
+import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
-import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
+import {
+    SessionRegistry,
+    type SessionRegistryOptions,
+} from "../../src/runtime/session/sessionRegistry.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 const fakeTool = (name: string): TacoTool =>

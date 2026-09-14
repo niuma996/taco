@@ -15,7 +15,7 @@
  * concurrent calls never merge on a stale harness snapshot.
  */
 
-import type { AgentHarnessTool, ExecutionToolContext } from "../runtime/pi/types.ts";
+import type { AgentHarnessTool, ExecutionToolContext } from "../pi/types.ts";
 
 /**
  * Minimal harness/lane surface required by the controller — allows a fake for
@@ -34,7 +34,7 @@ export interface ToolCollection {
     setActiveToolNames(names: readonly string[]): Promise<void>;
 }
 
-import type { TacoTool } from "../tools/index.ts";
+import type { TacoTool } from "../../tools/index.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 
 export interface AddToolsResult {

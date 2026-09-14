@@ -78,17 +78,22 @@ import {
 } from "../tasks/taskPushAdapter.ts";
 import type { SelfRpcCall, TacoToolContext } from "../tools/context.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
-import { AgentSpawner, findModelById } from "./agentSpawner.ts";
-import type { AttachedSession } from "./attachedSession.ts";
-import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
-import { DefaultDeferredToolRegistry } from "./deferredToolRegistry.ts";
-import type { ModelInfo, ProviderInfo } from "./modelRegistry.ts";
-import { applyBuiltinProviders, ModelRegistry } from "./modelRegistry.ts";
+import type { AttachedSession } from "./harness/attachedSession.ts";
+import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
+import { DefaultDeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
+import {
+    applyBuiltinProviders,
+    findModelById,
+    type ModelInfo,
+    ModelRegistry,
+    type ProviderInfo,
+} from "./models/modelRegistry.ts";
+import type { ProviderKeyStore } from "./models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "./pi/node.ts";
-import type { ProviderKeyStore } from "./providerKeyStore.ts";
-import type { SessionFacts } from "./sessionFacts.ts";
-import { type AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
-import type { SessionTaskState } from "./sessionTaskState.ts";
+import type { SessionFacts } from "./session/sessionFacts.ts";
+import { type AttachOptions, SessionRegistry } from "./session/sessionRegistry.ts";
+import type { SessionTaskState } from "./session/sessionTaskState.ts";
+import { AgentSpawner } from "./subagent/agentSpawner.ts";
 import { dedupOverride, filterToolsForImPolicy } from "./toolAssembly.ts";
 
 const log = createLogger("workspace");

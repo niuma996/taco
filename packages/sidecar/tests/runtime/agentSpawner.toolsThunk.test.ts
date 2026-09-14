@@ -22,7 +22,7 @@ import { after, before, describe, it } from "node:test";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 

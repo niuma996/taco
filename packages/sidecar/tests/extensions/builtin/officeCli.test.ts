@@ -23,8 +23,8 @@ import { manifest as officeCliManifest } from "../../../src/extensions/builtin/o
 import { ExtensionRegistry, registerBuiltinExtensions } from "../../../src/extensions/registry.ts";
 import { harnessContext } from "../../../src/lib/harnessContext.ts";
 import { evaluateCommand } from "../../../src/permissions/commandPolicy.ts";
+import { SlashNormalizedExecutionEnv } from "../../../src/runtime/harness/slashNormalizedEnv.ts";
 import { loadSourcedSkills } from "../../../src/runtime/pi/values.ts";
-import { SlashNormalizedExecutionEnv } from "../../../src/runtime/slashNormalizedEnv.ts";
 import type { TacoSkill } from "../../../src/skills/tacoSkill.ts";
 
 const OFFICECLI_RULE = "officecli *";

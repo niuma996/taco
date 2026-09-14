@@ -4,7 +4,7 @@
  *
  * Static, process-lifetime content lives here (identity, rules, platform).
  * Per-turn / session-mutable content (CLAUDE.md, cwd, time) is injected as
- * context tags by `runtime/attachedSession.ts`. Templates are `.ts` constants
+ * context tags by `runtime/harness/attachedSession.ts`. Templates are `.ts` constants
  * (not `.md`) so no dist-path resolution and strings are type-checked.
  */
 

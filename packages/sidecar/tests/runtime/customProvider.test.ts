@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { validateCustomProviders } from "../../src/config/config.ts";
-import { buildCustomProvider } from "../../src/runtime/customProvider.ts";
+import { buildCustomProvider } from "../../src/runtime/models/customProvider.ts";
 
 const VALID = {
     id: "custom:myrelay",

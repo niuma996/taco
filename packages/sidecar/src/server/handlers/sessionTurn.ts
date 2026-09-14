@@ -31,8 +31,8 @@ import { RPC } from "@taco-ai/shared";
 
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
-import { isBusyError } from "../../runtime/harnessErrors.ts";
-import { textsFromAgentMessages } from "../../runtime/messageText.ts";
+import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
+import { textsFromAgentMessages } from "../../runtime/harness/messageText.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
     formatAskUserContextBody,

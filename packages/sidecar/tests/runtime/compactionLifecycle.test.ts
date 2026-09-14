@@ -20,7 +20,7 @@ import { describe, it } from "node:test";
 import {
     CompactionController,
     type CompactionLifecycleSignal,
-} from "../../src/runtime/compactionController.ts";
+} from "../../src/runtime/compaction/compactionController.ts";
 import type { AgentLane, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 import { type AgentHarness, LaneBusy, Result } from "../../src/runtime/pi/values.ts";
 import { CompactionPushAdapter } from "../../src/server/compactionPushAdapter.ts";

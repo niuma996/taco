@@ -5,7 +5,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { withTacoUserAgent } from "../../src/runtime/attachedSession.ts";
+import { withTacoUserAgent } from "../../src/runtime/models/requestHeaders.ts";
 import type { AgentHarnessStreamOptions, Models } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 

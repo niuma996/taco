@@ -10,7 +10,7 @@
  * This module has no MCP dependency.
  */
 
-import type { TacoTool } from "../tools/index.ts";
+import type { TacoTool } from "../../tools/index.ts";
 
 export type ToolCandidateSource = "builtin" | "mcp";
 

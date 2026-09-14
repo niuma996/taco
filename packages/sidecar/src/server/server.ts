@@ -76,10 +76,11 @@ import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
-import { DefaultDeferredToolRegistry } from "../runtime/deferredToolRegistry.ts";
+import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
+import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
+import type { ProviderKeyStore } from "../runtime/models/providerKeyStore.ts";
 import type { ImageContent, TextContent, ThinkingLevel } from "../runtime/pi/types.ts";
 import { loadSourcedSkills } from "../runtime/pi/values.ts";
-import type { ProviderKeyStore } from "../runtime/providerKeyStore.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
 import type {
     ChannelControl,
@@ -87,7 +88,6 @@ import type {
     JobsControl,
     ServerRpcSurface,
 } from "../runtime/serverRpcSurface.ts";
-import { SlashNormalizedExecutionEnv } from "../runtime/slashNormalizedEnv.ts";
 import { WorkspaceRuntime } from "../runtime/workspace.ts";
 import { dedupeSkillsByNameWithDuplicates } from "../skills/dedupeSkills.ts";
 import {

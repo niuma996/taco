@@ -15,7 +15,10 @@ import {
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { waitForEvent } from "../lib/async.ts";
-import { COMPACTION_END_EVENT, COMPACTION_START_EVENT } from "../runtime/compactionController.ts";
+import {
+    COMPACTION_END_EVENT,
+    COMPACTION_START_EVENT,
+} from "../runtime/compaction/compactionController.ts";
 import type { EmitPushFn } from "./pushTypes.ts";
 
 interface InflightCompaction {

@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
-import { wireHarnessHooks } from "../../src/runtime/hookWiring.ts";
+import { wireHarnessHooks } from "../../src/runtime/harness/hookWiring.ts";
 import type { AgentHarness, AgentLane, AgentMessage, Skill } from "../../src/runtime/pi/types.ts";
 
 type TransformHandler = (event: {

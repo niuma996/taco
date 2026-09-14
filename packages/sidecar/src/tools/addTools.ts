@@ -11,8 +11,11 @@
 
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type {
+    AddToolsResult,
+    SessionToolController,
+} from "../runtime/harness/sessionToolController.ts";
 import type { ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
-import type { AddToolsResult, SessionToolController } from "../runtime/sessionToolController.ts";
 import type { TacoTool } from "./index.ts";
 
 // Exported so the tools.list handler can surface addTools' schema without a

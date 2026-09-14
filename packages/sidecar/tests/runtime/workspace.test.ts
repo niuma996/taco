@@ -13,7 +13,7 @@ import { after, before, describe, it } from "node:test";
 import { activateExtensions } from "../../src/extensions/activation.ts";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 

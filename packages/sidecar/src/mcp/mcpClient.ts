@@ -10,7 +10,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "@taco-ai/protocol";
 import type { Logger } from "../lib/logger.ts";
-import { scrubbedProcessEnv } from "../runtime/providerKeyStore.ts";
+import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 
 export interface McpToolInfo {
     name: string;

@@ -24,9 +24,10 @@ import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 import { zaiCodingCnProvider } from "@earendil-works/pi-ai/providers/zai-coding-cn";
 import type { CustomProviderConfig, SessionId } from "@taco-ai/protocol";
+import type { Api, Model } from "../pi/types.ts";
+import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import { buildCustomProvider } from "./customProvider.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
-import type { SessionRegistry } from "./sessionRegistry.ts";
 
 export interface ModelInfo {
     provider: string;
@@ -97,6 +98,14 @@ export function applyBuiltinProviders(
     for (const cfg of customProviders) {
         models.setProvider(buildCustomProvider(cfg));
     }
+}
+
+/** Looks up a model by id across providers. */
+export function findModelById(models: MutableModels, id: string): Model<Api> | undefined {
+    for (const m of models.getModels() as Array<Model<Api>>) {
+        if (m.id === id) return m;
+    }
+    return undefined;
 }
 
 export interface ModelRegistryOptions {

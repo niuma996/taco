@@ -5,7 +5,7 @@
 import type { AttachParams } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 
-import type { AttachedSession } from "../../runtime/attachedSession.ts";
+import type { AttachedSession } from "../../runtime/harness/attachedSession.ts";
 import type { AttachOptions, WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { RpcHandlerError } from "../methodRegistry.ts";
 

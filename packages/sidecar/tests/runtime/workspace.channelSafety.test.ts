@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import { buildSystemPrompt } from "../../src/prompts/buildSystemPrompt.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 /** The flag the spawner inherits from the workspace and replays into child prompts. */

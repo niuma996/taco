@@ -15,11 +15,14 @@ import { after, before, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
-import { AttachedSession, type AttachedSessionOptions } from "../../src/runtime/attachedSession.ts";
+import {
+    AttachedSession,
+    type AttachedSessionOptions,
+} from "../../src/runtime/harness/attachedSession.ts";
 import {
     DefaultDeferredToolRegistry,
     type ToolCandidate,
-} from "../../src/runtime/deferredToolRegistry.ts";
+} from "../../src/runtime/harness/deferredToolRegistry.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Api, Model } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";

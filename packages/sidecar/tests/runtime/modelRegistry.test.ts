@@ -15,12 +15,15 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type { WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { type BuiltinProviderEntry, ModelRegistry } from "../../src/runtime/modelRegistry.ts";
+import {
+    type BuiltinProviderEntry,
+    ModelRegistry,
+} from "../../src/runtime/models/modelRegistry.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Api, Model, Provider } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
-import { SessionRegistry } from "../../src/runtime/sessionRegistry.ts";
+import { SessionRegistry } from "../../src/runtime/session/sessionRegistry.ts";
 
 /**
  * Build a minimal stub Provider by hand. Real `createProvider` requires many

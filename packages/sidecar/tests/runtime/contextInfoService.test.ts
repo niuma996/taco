@@ -12,9 +12,9 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ContextInfoService } from "../../src/runtime/contextInfoService.ts";
+import { ContextInfoService } from "../../src/runtime/compaction/contextInfoService.ts";
 import type { AgentLane, Api, Entry, Model, Session } from "../../src/runtime/pi/types.ts";
-import { MAIN_BRANCH } from "../../src/runtime/sessionBranch.ts";
+import { MAIN_BRANCH } from "../../src/runtime/session/sessionBranch.ts";
 
 interface UsageParts {
     input: number;

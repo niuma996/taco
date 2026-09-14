@@ -7,8 +7,8 @@
  */
 
 import type { AskUserQuestion, AskUserToolDetails } from "@taco-ai/protocol";
-import type { AttachedSession } from "../runtime/attachedSession.ts";
-import { findBranchEntries } from "../runtime/sessionBranch.ts";
+import type { AttachedSession } from "../runtime/harness/attachedSession.ts";
+import { findBranchEntries } from "../runtime/session/sessionBranch.ts";
 
 export function formatAskUserContextBody(
     toolName: string,

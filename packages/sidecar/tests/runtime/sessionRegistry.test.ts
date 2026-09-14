@@ -19,9 +19,12 @@ import type { WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
-import { writeSessionFacts } from "../../src/runtime/sessionFacts.ts";
-import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
-import type { SessionTaskState } from "../../src/runtime/sessionTaskState.ts";
+import { writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
+import {
+    SessionRegistry,
+    type SessionRegistryOptions,
+} from "../../src/runtime/session/sessionRegistry.ts";
+import type { SessionTaskState } from "../../src/runtime/session/sessionTaskState.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 const fakeTool = (name: string): TacoTool =>

@@ -20,7 +20,10 @@ import type { WorkspaceId } from "@taco-ai/protocol";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Skill } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
-import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
+import {
+    SessionRegistry,
+    type SessionRegistryOptions,
+} from "../../src/runtime/session/sessionRegistry.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { InstructionsConfig } from "@taco-ai/protocol";
-import { ProviderKeyStore } from "../../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";

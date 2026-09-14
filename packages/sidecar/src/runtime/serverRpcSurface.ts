@@ -29,7 +29,7 @@ import type {
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
 import type { Actor, Job, JobHistoryEntry, JobRunResult } from "../scheduler/types.ts";
-import type { ProviderKeyStore } from "./providerKeyStore.ts";
+import type { ProviderKeyStore } from "./models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "./workspace.ts";
 
 /**

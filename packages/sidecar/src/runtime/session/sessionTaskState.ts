@@ -1,10 +1,10 @@
 import type { SessionId } from "@taco-ai/protocol";
-import { createPlanModeState, type PlanModeState } from "../plan/planModeState.ts";
-import { findActiveListId } from "../tasks/activeList.ts";
-import { createTaskStore } from "../tasks/createTaskStore.ts";
-import { sessionTasksDir } from "../tasks/sessionTasksDir.ts";
-import { loadAllTaskLists } from "../tasks/taskPersistence.ts";
-import type { TaskStore } from "../tasks/taskTypes.ts";
+import { createPlanModeState, type PlanModeState } from "../../plan/planModeState.ts";
+import { findActiveListId } from "../../tasks/activeList.ts";
+import { createTaskStore } from "../../tasks/createTaskStore.ts";
+import { sessionTasksDir } from "../../tasks/sessionTasksDir.ts";
+import { loadAllTaskLists } from "../../tasks/taskPersistence.ts";
+import type { TaskStore } from "../../tasks/taskTypes.ts";
 
 export interface SessionTaskState {
     taskStore: TaskStore;

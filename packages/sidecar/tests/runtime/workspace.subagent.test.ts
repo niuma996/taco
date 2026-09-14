@@ -12,8 +12,8 @@ import { after, before, describe, it } from "node:test";
 import type { SessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
-import { type SessionFacts, writeSessionFacts } from "../../src/runtime/sessionFacts.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import { type SessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 const defs: AgentDefinition[] = [
