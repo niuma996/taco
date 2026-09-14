@@ -909,16 +909,23 @@ export default function App() {
                 }}
                 onCancel={() => setBindingChannelId(null)}
             />
-            {lifecycle.desktopConfig !== null && isOnboardingRequired(lifecycle.desktopConfig) && (
-                <OnboardingModal
-                    client={client}
-                    wsApi={wsApi}
-                    defaultCwd={getDefaultCwd()}
-                    onComplete={(status: OnboardingStatus) => {
-                        lifecycle.setDesktopConfig((prev) => ({ ...prev, onboarding: status }));
-                    }}
-                />
-            )}
+            {lifecycle.desktopConfig !== null &&
+                isOnboardingRequired(lifecycle.desktopConfig) &&
+                // OnboardingModal's WorkspaceStep pre-fills from defaultCwd; if
+                // initDefaultCwd hasn't resolved yet the input shows empty
+                // and a fresh install has to type a path. useWorkspaceLifecycle
+                // sets activeCwd only after initDefaultCwd completes, so
+                // activeCwd !== "" is a strict "defaultCwd is populated" gate.
+                activeCwd !== "" && (
+                    <OnboardingModal
+                        client={client}
+                        wsApi={wsApi}
+                        defaultCwd={getDefaultCwd()}
+                        onComplete={(status: OnboardingStatus) => {
+                            lifecycle.setDesktopConfig((prev) => ({ ...prev, onboarding: status }));
+                        }}
+                    />
+                )}
             <UpdateDialog
                 open={lifecycle.updateDialog.open}
                 initialVersion={lifecycle.updateDialog.version}
