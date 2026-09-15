@@ -9,7 +9,7 @@
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
 
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ConfirmModal } from "./components/ConfirmModal";
@@ -17,6 +17,7 @@ import { FilesDrawer } from "./components/FilesDrawer";
 import { LlmDumpDock } from "./components/LlmDumpPanel";
 import { OnboardingModal } from "./components/onboarding/OnboardingModal.js";
 import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
+import { SubagentPanel } from "./components/panels/SubagentPanel";
 import { TaskPanel } from "./components/panels/TaskPanel";
 import { RenameModal } from "./components/RenameModal";
 import { McpSection } from "./components/settings/McpSection.tsx";
@@ -70,10 +71,8 @@ export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
     const rightPanel = useRightPanel();
-    // Temporary: only the setter is consumed here (by openInPanel below). Task 8 will
-    // read selectedSubSessionId to feed SubagentPanel's `selectedSubSessionId` prop and
-    // remove this suppression.
-    // biome-ignore lint/correctness/noUnusedVariables: consumed by Task 8, see comment above
+    // Selected child session for SubagentPanel; pushed in via the SubagentProvider's
+    // openInPanel callback when an agent card is opened. SubagentPanel below reads it.
     const [selectedSubSessionId, setSelectedSubSessionId] = useState<string | null>(null);
     useTheme();
     const { t } = useT();
@@ -520,6 +519,7 @@ export default function App() {
                     className="layout"
                     data-sidebar-collapsed={String(sidebarCollapsed)}
                     data-right-open={String(rightPanel.panel !== "none")}
+                    style={{ "--right-panel-width": `${rightPanel.width}px` } as CSSProperties}
                 >
                     {mainView === "chat" ? (
                         <>
@@ -696,6 +696,8 @@ export default function App() {
                                             dispatchWs={dispatchWs}
                                             open={rightPanel.panel === "tasks"}
                                             onClose={rightPanel.close}
+                                            resizeHandleProps={rightPanel.resizeHandleProps}
+                                            resizeLabel={t("rightPanel.resizeHandle")}
                                         />
                                     )}
                                 </AskUserProvider>
@@ -839,6 +841,19 @@ export default function App() {
                         open={rightPanel.panel === "files"}
                         activeCwd={activeCwd}
                         onClose={rightPanel.close}
+                        resizeHandleProps={rightPanel.resizeHandleProps}
+                        resizeLabel={t("rightPanel.resizeHandle")}
+                    />
+                    {/* SubagentPanel: derived from ws.messages via SubagentProvider; mounted
+                        alongside the other right-side panels. Closes via the rightPanel X. */}
+                    <SubagentPanel
+                        messages={ws?.messages ?? []}
+                        open={rightPanel.panel === "subagents"}
+                        selectedSubSessionId={selectedSubSessionId}
+                        onSelect={setSelectedSubSessionId}
+                        onClose={rightPanel.close}
+                        resizeHandleProps={rightPanel.resizeHandleProps}
+                        resizeLabel={t("rightPanel.resizeHandle")}
                     />
                 </div>
             </div>
