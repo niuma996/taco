@@ -20,6 +20,7 @@
     "test:theme": "tsx --test tests/lib/theme.test.ts tests/lib/clientSettings.test.ts",
     "test:logline": "tsx --test tests/lib/sidecarLogLine.test.ts",
     "test:reducer": "tsx --test tests/lib/chat/workspaceReducer.test.ts",
+    "test:subagent": "tsx --test tests/lib/chat/subagentList.test.ts",
     "test:files": "vitest run tests/hooks/useFileTree.test.tsx tests/hooks/useFilePreview.test.tsx tests/components/FilesDrawer.test.tsx",
     "test:memory": "vitest run tests/components/MemoryPane.test.tsx"
   },
