@@ -171,7 +171,11 @@ export function registerSessionLifecycleHandlers(): void {
     registerMethod(
         RPC.sessionAttach,
         true,
-        async ({ workspace, params }: MethodCtx<AttachParams>) => {
+        async ({ server, cwd, workspace, params }: MethodCtx<AttachParams>) => {
+            // Before attach: the `attached` frame itself is the first
+            // sequenced push a reconnecting client sees, so the ring must be
+            // seeded from disk tail before this handler emits anything.
+            await server.hydrateSessionEvents(cwd, params.sessionId);
             await workspace.attach(params.sessionId, { thinkingLevel: params.thinkingLevel });
             // Read after attach so the client can tell a live agent tool call from
             // one orphaned by a previous process exit. A history read alone cannot:

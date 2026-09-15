@@ -108,6 +108,13 @@ export interface ServerRpcSurface {
     ): SessionEventsGetResult;
     getSessionLastSeq(workspace: WorkspaceId, sessionId: SessionId): number;
     clearSessionEvents(workspace: WorkspaceId, sessionId: SessionId): void;
+    /**
+     * Seed the replay ring for a session from its disk tail (no-op while the
+     * in-memory ring is live). Handlers that can observe the session's first
+     * frame after a sidecar restart (attach / events.get / snapshot.get) call
+     * this first so seq numbering continues instead of resetting to 1.
+     */
+    hydrateSessionEvents(workspace: WorkspaceId, sessionId: SessionId): Promise<void>;
     readonly extensionRegistry?: ExtensionRegistry;
     /**
      * Process-level API key store. The `settings.write` handler calls `update()` to trigger hot reload —

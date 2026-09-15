@@ -98,6 +98,7 @@ import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
+import type { DurablePushLog } from "./durablePushLog.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
 import { getRegisteredMethod, listRegisteredMethods, type MethodCtx } from "./methodRegistry.ts";
 import { registerBuiltinMethods } from "./methods.ts";
@@ -158,6 +159,18 @@ export interface SidecarServerOptions {
      * for the entire process lifetime).
      */
     instructionsConfig?: InstructionsConfig;
+    /**
+     * Disk tail backing the sequenced-push replay ring, so client cursors
+     * survive a sidecar restart (`hydrateSessionEvents`).
+     *
+     * Process-wide by contract — every server that writes a tail MUST share
+     * one instance, because seq numbering lives in each server's ring and two
+     * writers on one stream file would interleave two sequences. Omit it for a
+     * server whose pushes no client consumes (the daemon's scheduler sidecar):
+     * it has no cursor to preserve and its seqs would corrupt a desktop's.
+     * See `DurablePushLog`'s "One writer per stream".
+     */
+    pushLog?: DurablePushLog;
     /** Process-wide extension registry — shared across all workspaces */
     extensionRegistry?: ExtensionRegistry;
     /**
@@ -274,7 +287,14 @@ export class SidecarServer implements ServerRpcSurface {
     private readonly workspaceMap = new Map<WorkspaceId, WorkspaceRuntime>();
     private readonly commandRecords = new Map<string, CommandRecord>();
     private readonly activeTurnCommands = new Map<string, Promise<CommandOutcome>>();
-    private readonly sessionEvents = new SessionEventLog();
+    /**
+     * Replay ring for sequenced pushes. The disk tail behind it —
+     * `hydrateSessionEvents` reads it back after a restart so client cursors
+     * keep seeing contiguous seqs — is injected rather than constructed here:
+     * a daemon runs several servers and they must share one writer per stream
+     * file. See `DurablePushLog`'s "One writer per stream".
+     */
+    private readonly sessionEvents: SessionEventLog;
     /**
      * Cold-start single-flight for workspace constructions, keyed by
      * workspaceKey. Concurrent ensureWorkspace() calls for the same cwd
@@ -472,6 +492,12 @@ export class SidecarServer implements ServerRpcSurface {
         this.instructionsConfig = options.instructionsConfig;
         this.mcpServers = options.mcpServers ?? [];
         this.imPolicyStore = new ImWorkspacePolicyStore();
+        // No `pushLog` → ring only. Servers whose frames no client observes
+        // (the daemon's scheduler sidecar on a NullTransport) deliberately get
+        // no tail: they have no cursor to preserve, and their seqs would
+        // corrupt a desktop's. Stdio / tests are single-server, so they
+        // construct their own.
+        this.sessionEvents = new SessionEventLog(512, options.pushLog);
         // Daemon-resident ownership: when `imHost` is injected, this server
         // is a non-owner connection instance — skip loadAndStart, forward
         // im:// RPCs, delegate imPolicy writes. Otherwise (stdio / tests /
@@ -535,6 +561,10 @@ export class SidecarServer implements ServerRpcSurface {
 
     clearSessionEvents(workspace: WorkspaceId, sessionId: SessionId): void {
         this.sessionEvents.clearSession(workspace, sessionId);
+    }
+
+    hydrateSessionEvents(workspace: WorkspaceId, sessionId: SessionId): Promise<void> {
+        return this.sessionEvents.hydrate(workspace, sessionId);
     }
 
     /** Start the service — read stdin (NDJSON), write push events to stdout */
@@ -669,6 +699,15 @@ export class SidecarServer implements ServerRpcSurface {
         // `session_busy` for that session forever.
         this.activeTurnCommands.clear();
         this.clearCommandSweeper();
+        // Drain the push tail BEFORE dropping the ring: a graceful restart is
+        // exactly when seq continuity matters, and the buffered window would
+        // otherwise be lost — leaving the restarted server to hydrate a seq
+        // lower than the client's cursor and discard live frames as duplicates.
+        // Best-effort: a failed flush degrades to the snapshot-recovery path,
+        // so it must not block shutdown.
+        await this.sessionEvents.flushDurable().catch((err: unknown) => {
+            log.warn(`push tail flush on shutdown failed: ${String(err)}`);
+        });
         this.sessionEvents.clear();
         this.isInitialized = false;
         this.clientUiLocale = undefined;
@@ -1771,6 +1810,12 @@ export interface SharedSidecarDeps {
      * setters. Populated by `runDaemon`; omitted on stdio / tests.
      */
     serverRegistry?: ServerRegistry;
+    /**
+     * Process-level disk tail for sequenced pushes — see
+     * `SidecarServerOptions.pushLog`. Shared across every connection server so
+     * one instance owns each stream file.
+     */
+    pushLog?: DurablePushLog;
 }
 
 /**
@@ -1814,6 +1859,7 @@ export function startServer(deps: SharedSidecarDeps, transport: Transport): Star
         imHost: deps.imHost,
         clientSinkRegistry: deps.clientSinkRegistry,
         serverRegistry: deps.serverRegistry,
+        pushLog: deps.pushLog,
     });
     const ready = server.start(transport);
     return {

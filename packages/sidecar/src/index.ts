@@ -35,6 +35,7 @@ import { Scheduler } from "./scheduler/runner.ts";
 import { JobStore } from "./scheduler/store.ts";
 import { ClientSinkRegistry } from "./server/clientSinkRegistry.ts";
 import { handleControlChannel } from "./server/controlChannel.ts";
+import { DurablePushLog } from "./server/durablePushLog.ts";
 import { NullTransport } from "./server/nullTransport.ts";
 import { type SharedSidecarDeps, SidecarServer, startServer } from "./server/server.ts";
 import { ServerRegistry } from "./server/serverRegistry.ts";
@@ -355,6 +356,12 @@ async function runDaemon(
         // Phase 1's regression — already-open IM views going stale — would
         // remain. Each SidecarServer adds its own transport on start().
         const clientSinkRegistry = new ClientSinkRegistry();
+        // One writer per stream file, process-wide: seq numbering lives in each
+        // server's replay ring, so two DurablePushLog instances over the same
+        // directory would race the read-merge-rename compaction path. Shared by
+        // the IM host and every NDJSON connection; `schedulerSidecar` is
+        // deliberately excluded (NullTransport — no client cursor to preserve).
+        const pushLog = new DurablePushLog(join(tacoHome(), "push-log"));
         // Settings-setter fan-out: settings.write invoked from any
         // NDJSON connection must reach BOTH residents (imHost +
         // schedulerSidecar). The desktop's per-RPC server is a third
@@ -380,7 +387,11 @@ async function runDaemon(
             ...sharedChannelStack,
             clientSinkRegistry,
             serverRegistry,
+            pushLog,
         });
+        // No `pushLog`: its pushes go to a NullTransport, so there is no client
+        // cursor to keep continuous, and writing its ring's seqs into a
+        // desktop's tail would corrupt the continuity the tail exists for.
         const schedulerSidecar = new SidecarServer({
             ...toSharedSidecarDeps(deps),
             serverRegistry,
@@ -445,6 +456,7 @@ async function runDaemon(
             imHost,
             clientSinkRegistry,
             serverRegistry,
+            pushLog,
         };
 
         // Stale-socket cleanup before we try to bind. A previous daemon that
@@ -633,7 +645,11 @@ async function runDaemon(
  * this when TACO_DAEMON_MODE is unset.
  */
 async function runStdio(deps: ResolvedDeps): Promise<void> {
-    const server = new SidecarServer(toSharedSidecarDeps(deps));
+    const server = new SidecarServer({
+        ...toSharedSidecarDeps(deps),
+        // Single server in this process, so it owns every stream file outright.
+        pushLog: new DurablePushLog(join(tacoHome(), "push-log")),
+    });
     void server.start();
 
     const shutdown = async (sig: string) => {
