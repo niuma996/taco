@@ -9,7 +9,7 @@
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
 import { asWorkspaceId, IM_CWD_PREFIX } from "@taco-ai/protocol";
 
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ConfirmModal } from "./components/ConfirmModal";
@@ -26,6 +26,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
+import { useStableCallback } from "./hooks/primitives/useStableCallback";
 import { useTheme } from "./hooks/primitives/useTheme";
 import { useToast } from "./hooks/primitives/useToast";
 import { useAgentsPane } from "./hooks/useAgentsPane";
@@ -47,6 +48,7 @@ import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
+import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
 import {
     readPersistedSidebarCollapsed,
     writePersistedSidebarCollapsed,
@@ -70,7 +72,14 @@ import { ToolsPane } from "./views/ToolsPane";
 export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
-    const rightPanel = useRightPanel();
+    // Sidebar collapse state — collapsed sidebar shrinks to a rail with only the
+    // expand button, letting ChatPane fill the main area. Chat view only.
+    // Persisted to localStorage so the layout survives restarts.
+    // Declared above useRightPanel, which needs it to bound the panel's width.
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(
+        () => readPersistedSidebarCollapsed() ?? false,
+    );
+    const rightPanel = useRightPanel(sidebarCollapsed);
     // Selected child session for SubagentPanel; pushed in via the SubagentProvider's
     // openInPanel callback when an agent card is opened. SubagentPanel below reads it.
     const [selectedSubSessionId, setSelectedSubSessionId] = useState<string | null>(null);
@@ -115,6 +124,45 @@ export default function App() {
     const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
     const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
     const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
+
+    // Subagent list for the session-bar awareness dot. Derived here as well as
+    // inside SubagentPanel because the dot must render while the panel is shut.
+    const subagentEntries = useMemo(() => deriveSubagents(ws?.messages ?? []), [ws?.messages]);
+
+    // Drop the panel's selection when the session or workspace changes: the id
+    // belongs to the session that produced it, and keeping it would silently
+    // re-select a stale child on return. Same composite-key + ref guard as the
+    // LLM dump reset below. Panel-open state is deliberately left alone —
+    // switching mainView away and back should restore the panel as it was.
+    const subagentSessionKey = activeCwd && activeSid ? `${activeCwd} ${activeSid}` : null;
+    const prevSubagentSessionKeyRef = useRef<string | null>(subagentSessionKey);
+    useEffect(() => {
+        if (prevSubagentSessionKeyRef.current === subagentSessionKey) return;
+        prevSubagentSessionKeyRef.current = subagentSessionKey;
+        setSelectedSubSessionId(null);
+    }, [subagentSessionKey]);
+
+    // Stable identities for the SubagentProvider context value. Inline arrows
+    // here would be new on every render, invalidating the provider's useMemo
+    // and re-rendering every useSubagent() consumer on any workspace update.
+    const childMessages = ws?.childMessagesBySubSessionId;
+    const childHistory = ws?.childHistoryLoaded;
+    const liveMessagesFor = useCallback(
+        (subSessionId: string) => childMessages?.[subSessionId] ?? [],
+        [childMessages],
+    );
+    const historyMessagesFor = useCallback(
+        (subSessionId: string) => childHistory?.[subSessionId] ?? [],
+        [childHistory],
+    );
+    const stableLoadSubagentHistory = useStableCallback(loadSubagentHistory);
+    const openInPanel = useCallback(
+        (subSessionId: string) => {
+            rightPanel.show("subagents");
+            setSelectedSubSessionId(subSessionId);
+        },
+        [rightPanel.show],
+    );
 
     // Compaction-finished push → toast + refresh ratio + clear one-shot state.
     // See useSessionContextInfo.lastCompactionFinished.
@@ -243,12 +291,6 @@ export default function App() {
         | "mcp"
         | "settings"
     >("chat");
-    // Sidebar collapse state — collapsed sidebar shrinks to a rail with only the
-    // expand button, letting ChatPane fill the main area. Chat view only.
-    // Persisted to localStorage so the layout survives restarts.
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(
-        () => readPersistedSidebarCollapsed() ?? false,
-    );
 
     // Fallback chain mirrors activeLevel:
     //   1. per-session override (already shown)
@@ -554,17 +596,10 @@ export default function App() {
                             )}
                             <SubagentProvider
                                 cwd={activeCwd}
-                                loadSubagentHistory={loadSubagentHistory}
-                                liveMessagesFor={(subSessionId) =>
-                                    ws?.childMessagesBySubSessionId?.[subSessionId] ?? []
-                                }
-                                historyMessagesFor={(subSessionId) =>
-                                    ws?.childHistoryLoaded?.[subSessionId] ?? []
-                                }
-                                openInPanel={(subSessionId) => {
-                                    rightPanel.show("subagents");
-                                    setSelectedSubSessionId(subSessionId);
-                                }}
+                                loadSubagentHistory={stableLoadSubagentHistory}
+                                liveMessagesFor={liveMessagesFor}
+                                historyMessagesFor={historyMessagesFor}
+                                openInPanel={openInPanel}
                             >
                                 <AskUserProvider
                                     cwd={activeCwd}
@@ -660,6 +695,9 @@ export default function App() {
                                         filesOpen={rightPanel.panel === "files"}
                                         onToggleTasks={() => rightPanel.toggle("tasks")}
                                         tasksOpen={rightPanel.panel === "tasks"}
+                                        onToggleSubagents={() => rightPanel.toggle("subagents")}
+                                        subagentsOpen={rightPanel.panel === "subagents"}
+                                        subagentDot={subagentDotState(subagentEntries)}
                                         onNewSession={handleNewSession}
                                         newSessionDisabled={
                                             !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
