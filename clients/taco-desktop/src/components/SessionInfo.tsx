@@ -17,6 +17,7 @@
 
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+    Bot,
     Check,
     ChevronLeft,
     ChevronRight,
@@ -39,6 +40,9 @@ export function SessionInfo({
     filesOpen,
     onToggleTasks,
     tasksOpen,
+    onToggleSubagents,
+    subagentsOpen,
+    subagentDot,
     onNewSession,
     newSessionDisabled,
     isIm,
@@ -54,6 +58,11 @@ export function SessionInfo({
     /** Show / hide the task panel. */
     onToggleTasks?: () => void;
     tasksOpen?: boolean;
+    /** Show / hide the subagent panel. */
+    onToggleSubagents?: () => void;
+    subagentsOpen?: boolean;
+    /** none = hide the dot, idle = all terminal, active = at least one running. */
+    subagentDot?: "none" | "idle" | "active";
     /** Start a new session — same action as the topbar "new chat" chip. */
     onNewSession?: () => void;
     newSessionDisabled?: boolean;
@@ -191,6 +200,24 @@ export function SessionInfo({
                 </span>
             )}
             {filePath && <span className="session-info-divider" aria-hidden="true" />}
+            {onToggleSubagents && (
+                <button
+                    type="button"
+                    className="session-info-subagents"
+                    title={t("session.subagentPanel")}
+                    aria-label={t("session.subagentPanel")}
+                    aria-pressed={subagentsOpen ?? false}
+                    onClick={onToggleSubagents}
+                >
+                    <Bot size={14} aria-hidden="true" />
+                    {subagentDot !== undefined && subagentDot !== "none" && !subagentsOpen && (
+                        <span
+                            className={`session-info-tasks-dot${subagentDot === "active" ? " session-info-tasks-dot--active" : ""}`}
+                            aria-hidden="true"
+                        />
+                    )}
+                </button>
+            )}
             {onToggleTasks && (
                 <button
                     type="button"

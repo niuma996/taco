@@ -1,7 +1,7 @@
 /* toolCards.css — agent tool card + askUser tool card (rendered in message stream); split from panes.css */
 
-/* Agent tool card — subagent delegate. Collapsed: shows type + description + status.
-   Expanded: shows prompt summary + child session message stream. */
+/* Agent tool card — subagent delegate entry point. Shows type + description +
+   status; click opens the child session in the right-side subagent panel. */
 .agent-card {
     margin-top: 0.4rem;
     border: 1px solid var(--border);
@@ -27,13 +27,10 @@
 .agent-card-header:hover {
     background: var(--hover-overlay);
 }
-.agent-card-chevron {
-    transition: transform 0.1s;
-    flex-shrink: 0;
-    color: var(--fg-dim);
-}
-.agent-card-chevron.expanded {
-    transform: rotate(90deg);
+/* A detached agent call has no child session to open. */
+.agent-card-header:disabled {
+    cursor: default;
+    opacity: 0.6;
 }
 .agent-card-type {
     font-weight: 600;
@@ -62,42 +59,6 @@
     color: var(--fg-dim);
     font-family: var(--mono);
     font-size: 0.8em;
-}
-.agent-card-body {
-    padding: 0.5rem 0.6rem;
-    border-top: 1px solid var(--border);
-    background: var(--bg-secondary);
-}
-.agent-card-prompt {
-    margin-bottom: 0.5rem;
-}
-.agent-card-prompt-label {
-    display: block;
-    font-size: 0.75em;
-    color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.25rem;
-}
-.agent-card-prompt pre {
-    margin: 0;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    color: var(--fg);
-    font-family: var(--mono);
-    font-size: 0.9em;
-}
-.agent-card-stream {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    max-height: 600px;
-    overflow-y: auto;
-}
-.agent-card-empty {
-    color: var(--fg-dim);
-    font-style: italic;
-    padding: 0.4rem 0;
 }
 
 /* ── askUser tool card ── */

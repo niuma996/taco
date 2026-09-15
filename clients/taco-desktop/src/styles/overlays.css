@@ -722,11 +722,11 @@
 }
 
 /* FilesDrawer — inline right-side panel (flex sibling in .layout, same layer
-   as TaskPanel). Width matches --pane-width so it tracks the chat list /
-   task panel on the left; selecting a file opens the preview as a floating
-   popup instead of widening this panel. */
+   as TaskPanel). Width comes from --right-panel-width, shared by all three
+   right-side panels; selecting a file opens the preview as a floating popup
+   instead of widening this panel. */
 .files-drawer {
-    width: var(--pane-width);
+    width: var(--right-panel-width);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;

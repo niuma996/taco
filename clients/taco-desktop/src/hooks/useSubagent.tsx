@@ -28,6 +28,11 @@ export interface SubagentContextValue {
      * events will arrive after detach).
      */
     historyMessagesFor: (subSessionId: string) => UiMessage[];
+    /**
+     * Opens the given child session in the right-side panel. The inline card is
+     * only an entry point now — the child stream renders in exactly one place.
+     */
+    openInPanel: (subSessionId: string) => void;
 }
 
 const SubagentContext = createContext<SubagentContextValue | null>(null);
@@ -41,6 +46,7 @@ export interface SubagentProviderProps {
      */
     liveMessagesFor: (subSessionId: string) => UiMessage[];
     historyMessagesFor: (subSessionId: string) => UiMessage[];
+    openInPanel: (subSessionId: string) => void;
     children: ReactNode;
 }
 
@@ -49,12 +55,13 @@ export function SubagentProvider({
     loadSubagentHistory,
     liveMessagesFor,
     historyMessagesFor,
+    openInPanel,
     children,
 }: SubagentProviderProps) {
     // cwd is generally stable; other deps change ref every time workspaces state changes.
     const value = useMemo<SubagentContextValue>(
-        () => ({ cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor }),
-        [cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor],
+        () => ({ cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor, openInPanel }),
+        [cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor, openInPanel],
     );
     return <SubagentContext.Provider value={value}>{children}</SubagentContext.Provider>;
 }

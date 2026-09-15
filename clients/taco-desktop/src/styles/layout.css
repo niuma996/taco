@@ -286,6 +286,9 @@ header.topbar .topbar-picker-group {
     flex: 1;
     min-width: 0;
     overflow: hidden;
+    position: relative;
+    /* Shared by the task / files / subagent panels; overridden inline by App. */
+    --right-panel-width: var(--pane-width);
 }
 
 /* Right column: topbar → content area → input, top-to-bottom filling remaining width and full height. */
@@ -509,10 +512,10 @@ button.topbar-context-indicator {
 }
 
 /* TaskPanel — task list panel on the right side of the main area.
-   Width aligns with the chat list (--pane-width) so left and right panels
-   are visually balanced; the same clamp(220,20vw,340) tracks window width. */
+   Width comes from --right-panel-width, shared and draggable across the
+   task / files / subagent panels (see useDragResize / useRightPanel). */
 .task-panel {
-    width: var(--pane-width);
+    width: var(--right-panel-width);
     flex-shrink: 0;
     padding: 12px;
     overflow-y: auto;
@@ -520,6 +523,34 @@ button.topbar-context-indicator {
     background: var(--bg-secondary, transparent);
     font-size: 13px;
     line-height: 1.4;
+}
+
+/* Drag handle on the panel's left edge: 4px hit area, 1px visual line. The
+   panel needs position:relative for this to anchor. */
+.right-panel-resize {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 1;
+}
+
+.right-panel-resize:hover,
+.right-panel-resize:focus-visible {
+    background: var(--accent-border);
+}
+
+.right-panel-resize:focus-visible {
+    outline: none;
+}
+
+.task-panel,
+.files-drawer,
+.subagent-panel {
+    position: relative;
 }
 
 /* ── Active list area ── */
@@ -540,6 +571,13 @@ button.topbar-context-indicator {
     justify-content: space-between;
     gap: 6px;
     margin-bottom: 8px;
+}
+
+/* SubagentPanel puts a whole PaneHeader (title + count + search) into
+   RightPanel's title slot, so it must claim the row's free space. */
+.right-panel-topbar > .pane-header {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .right-panel-title {

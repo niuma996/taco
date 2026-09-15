@@ -37,12 +37,29 @@
     "sidebarHide": "收起聊天列表",
     "sidebarLabel": "聊天列表",
     "taskPanel": "任务面板",
+    "subagentPanel": "子代理面板",
     "noActiveSession": "暂无活动会话。新建一个,或从左侧选择一个。",
     "slogans": [
       "让想法快速变成可运行的代码。",
       "随时向你的代码库提问。",
       "更快交付，更聪明地排错。"
     ]
+  },
+  "subagents": {
+    "title": "子代理",
+    "empty": "本次会话还没有子代理。",
+    "noMatch": "没有匹配的子代理。",
+    "detached": "子代理已断开（会话中断），无法查看消息。",
+    "selectPrompt": "从上方选择一个子代理。",
+    "starting": "启动中…",
+    "noMessages": "该子代理没有消息。",
+    "historyFailed": "历史记录加载失败",
+    "retry": "重试",
+    "promptLabel": "提示词",
+    "loading": "加载中…"
+  },
+  "rightPanel": {
+    "resizeHandle": "拖动调整面板宽度"
   },
   "input": {
     "placeholderRunning": "代理运行中…可直接插话",

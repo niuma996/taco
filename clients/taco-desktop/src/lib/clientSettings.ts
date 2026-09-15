@@ -71,6 +71,7 @@ export const LS_DEBUG_MODE = "taco.debugMode";
 export const LS_LLM_DUMP_TO_FILE = "taco.llmDumpToFile";
 export const LS_UI_LANGUAGE = "taco.uiLanguage";
 export const LS_SIDEBAR_COLLAPSED = "taco.sidebarCollapsed";
+export const LS_RIGHT_PANEL_WIDTH = "taco.rightPanelWidth";
 
 function isValidTheme(v: unknown): v is ThemePreference {
     return v === "light" || v === "dark" || v === "system";
@@ -82,6 +83,11 @@ export function isValidUiLanguage(v: unknown): v is UiLanguagePreference {
 
 function isBoolean(v: unknown): v is boolean {
     return typeof v === "boolean";
+}
+
+/** Rejects NaN and Infinity so a corrupt value can't reach the layout. */
+function isFiniteNumber(v: unknown): v is number {
+    return typeof v === "number" && Number.isFinite(v);
 }
 
 /**
@@ -168,6 +174,15 @@ export function readPersistedSidebarCollapsed(): boolean | undefined {
 
 export function writePersistedSidebarCollapsed(v: boolean | undefined): void {
     writeLs(LS_SIDEBAR_COLLAPSED, v);
+}
+
+/** Right-side panel width in px, shared by the task / files / subagent panels. */
+export function readPersistedRightPanelWidth(): number | undefined {
+    return readLs(LS_RIGHT_PANEL_WIDTH, isFiniteNumber);
+}
+
+export function writePersistedRightPanelWidth(v: number | undefined): void {
+    writeLs(LS_RIGHT_PANEL_WIDTH, v);
 }
 
 function readRaw(): PersistedClientSettings {
