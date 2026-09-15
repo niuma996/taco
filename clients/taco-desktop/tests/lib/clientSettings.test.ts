@@ -16,12 +16,15 @@ import {
     isValidUiLanguage,
     LS_DEBUG_MODE,
     LS_LLM_DUMP_TO_FILE,
+    LS_RIGHT_PANEL_WIDTH,
     LS_THEME,
     LS_UI_LANGUAGE,
     readClientSettings,
+    readPersistedRightPanelWidth,
     readPersistedThemePreference,
     readPersistedUiLanguage,
     saveClientSettings,
+    writePersistedRightPanelWidth,
     writePersistedUiLanguage,
 } from "../../src/lib/clientSettings";
 
@@ -297,6 +300,28 @@ describe("clientSettings", () => {
                 () => saveClientSettings({ uiLanguage: "fr" as never }),
                 /invalid uiLanguage value/,
             );
+        });
+    });
+
+    describe("rightPanelWidth 持久化", () => {
+        it("写入后能读回", () => {
+            writePersistedRightPanelWidth(320);
+            assert.equal(readPersistedRightPanelWidth(), 320);
+        });
+
+        it("未设置时返回 undefined", () => {
+            writePersistedRightPanelWidth(undefined);
+            assert.equal(readPersistedRightPanelWidth(), undefined);
+        });
+
+        it("非数字的脏值被丢弃", () => {
+            localStorage.setItem(LS_RIGHT_PANEL_WIDTH, JSON.stringify("wide"));
+            assert.equal(readPersistedRightPanelWidth(), undefined);
+        });
+
+        it("NaN 不会被当成有效值读回", () => {
+            localStorage.setItem(LS_RIGHT_PANEL_WIDTH, "NaN");
+            assert.equal(readPersistedRightPanelWidth(), undefined);
         });
     });
 });

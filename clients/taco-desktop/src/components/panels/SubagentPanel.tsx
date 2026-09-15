@@ -10,6 +10,7 @@
  */
 
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
 import { useSubagent } from "../../hooks/useSubagent";
 import { useT } from "../../i18n/useI18n";
 import type { UiMessage } from "../../lib/chat/chatUtils";
@@ -34,12 +35,16 @@ export function SubagentPanel({
     selectedSubSessionId,
     onSelect,
     onClose,
+    resizeHandleProps,
+    resizeLabel,
 }: {
     messages: readonly UiMessage[];
     open: boolean;
     selectedSubSessionId: string | null;
     onSelect: (subSessionId: string) => void;
     onClose: () => void;
+    resizeHandleProps?: DragHandleProps;
+    resizeLabel?: string;
 }): ReactElement | null {
     const { t } = useT();
     const [query, setQuery] = useState("");
@@ -65,6 +70,8 @@ export function SubagentPanel({
             onClose={onClose}
             closeLabel={t("app.dismiss")}
             className="subagent-panel"
+            resizeHandleProps={resizeHandleProps}
+            resizeLabel={resizeLabel}
         >
             {entries.length === 0 ? (
                 <div className="subagent-panel-empty">{t("subagents.empty")}</div>

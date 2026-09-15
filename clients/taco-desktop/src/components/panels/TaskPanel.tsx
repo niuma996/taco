@@ -1,6 +1,7 @@
 import type { TaskItem, WorkspaceId } from "@taco-ai/protocol";
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
+import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
 import { useT } from "../../i18n/useI18n";
 import type { WorkspaceAction, WorkspaceState } from "../../lib/chat/workspaceReducer";
@@ -27,6 +28,8 @@ export function TaskPanel({
     dispatchWs,
     open,
     onClose,
+    resizeHandleProps,
+    resizeLabel,
 }: {
     cwd: WorkspaceId;
     workspaces: Record<string, WorkspaceState>;
@@ -35,6 +38,8 @@ export function TaskPanel({
     dispatchWs: (action: WorkspaceAction) => void;
     open: boolean;
     onClose: () => void;
+    resizeHandleProps?: DragHandleProps;
+    resizeLabel?: string;
 }) {
     const { active, history } = useTaskSnapshot(workspaces, cwd, sid);
     const { t } = useT();
@@ -51,6 +56,8 @@ export function TaskPanel({
             onClose={onClose}
             closeLabel="关闭任务面板"
             className="task-panel"
+            resizeHandleProps={resizeHandleProps}
+            resizeLabel={resizeLabel}
         >
             {!hasTasks && <div className="task-panel-empty">{t("tasks.empty")}</div>}
             {active && (

@@ -7,6 +7,9 @@
  * has to remember to enforce.
  */
 import { useCallback, useState } from "react";
+import { clampPanelWidth, RIGHT_PANEL_DEFAULT_WIDTH } from "../lib/chat/subagentList";
+import { readPersistedRightPanelWidth, writePersistedRightPanelWidth } from "../lib/clientSettings";
+import { type DragHandleProps, useDragResize } from "./primitives/useDragResize";
 
 export type RightPanelKind = "none" | "tasks" | "files" | "subagents";
 
@@ -16,6 +19,9 @@ export interface UseRightPanelApi {
     close: () => void;
     /** Opens unconditionally; auto-open must not toggle an open panel closed. */
     show: (kind: Exclude<RightPanelKind, "none">) => void;
+    /** Shared by all three panels; already clamped to the current viewport. */
+    width: number;
+    resizeHandleProps: DragHandleProps;
 }
 
 export function useRightPanel(): UseRightPanelApi {
@@ -28,5 +34,17 @@ export function useRightPanel(): UseRightPanelApi {
     const close = useCallback(() => setPanel("none"), []);
     const show = useCallback((kind: Exclude<RightPanelKind, "none">) => setPanel(kind), []);
 
-    return { panel, toggle, close, show };
+    // Re-clamped on every read rather than written back: a window narrower than
+    // the persisted width should render narrower without losing the preference.
+    const clamp = useCallback((raw: number) => clampPanelWidth(raw, window.innerWidth), []);
+
+    const { width, handleProps: resizeHandleProps } = useDragResize({
+        initial: readPersistedRightPanelWidth() ?? RIGHT_PANEL_DEFAULT_WIDTH,
+        min: 220,
+        max: 640,
+        clamp,
+        onCommit: writePersistedRightPanelWidth,
+    });
+
+    return { panel, toggle, close, show, width, resizeHandleProps };
 }

@@ -16,6 +16,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { FolderOpen, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
+import type { DragHandleProps } from "../hooks/primitives/useDragResize";
 import { useFilePreview } from "../hooks/useFilePreview";
 import { useFileTree } from "../hooks/useFileTree";
 import { useT } from "../i18n/useI18n";
@@ -34,10 +35,12 @@ export interface FilesDrawerProps {
     open: boolean;
     activeCwd: string | null;
     onClose: () => void;
+    resizeHandleProps?: DragHandleProps;
+    resizeLabel?: string;
 }
 
 export function FilesDrawer(props: FilesDrawerProps) {
-    const { open, activeCwd, onClose } = props;
+    const { open, activeCwd, onClose, resizeHandleProps, resizeLabel } = props;
     const { t } = useT();
 
     // Rebuild fsClient whenever activeCwd changes (the closure captures cwd).
@@ -86,6 +89,8 @@ export function FilesDrawer(props: FilesDrawerProps) {
                 onClose={onClose}
                 closeLabel={t("app.dismiss")}
                 className="files-drawer"
+                resizeHandleProps={resizeHandleProps}
+                resizeLabel={resizeLabel}
                 actions={
                     activeCwd && (
                         <button
