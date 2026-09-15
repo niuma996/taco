@@ -496,6 +496,14 @@ export async function wireHarnessHooks(
             onSnapshotFailure: (path, reason) => {
                 log.error(`checkpoint snapshot failed for ${path}: ${reason}`);
             },
+            // Unknown-tool path fence exemption. Resolved live from the
+            // harness toolset (not a captured list) so toolset refreshes —
+            // deferred tools, addTools, skill packs — are reflected. MCP and
+            // extension tools carry no `taco` metadata, so they are fenced.
+            isKnownReadOnly: async (toolName) => {
+                const tools = await harness.getTools(harnessContext);
+                return tools.find((t) => t.name === toolName)?.taco?.mutates === false;
+            },
         });
         disposers.push(
             onToolCall(
