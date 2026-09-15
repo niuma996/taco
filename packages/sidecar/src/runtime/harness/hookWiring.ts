@@ -23,6 +23,7 @@ import type {
     ToolResultHookBuckets,
     ToolResultPatch,
 } from "../../extensions/index.ts";
+import { withDeadline } from "../../lib/async.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { MemoryStore } from "../../memory/index.ts";
@@ -69,15 +70,22 @@ const log = createLogger("taco-ext");
  */
 export const HOOK_TIMEOUT_MS = 2_000;
 
+/**
+ * Thin wrapper over `withDeadline` for extension hooks. Keeps the original
+ * `(promise, label)` signature so existing call sites and tests do not
+ * change; the underlying timer / signal / cleanup logic now lives in one
+ * place (`lib/async.withDeadline`) and is shared with MCP, shell, and
+ * future capability callers.
+ *
+ * The trailing " hook" on the label preserves the original error message
+ * (`"foo hook timed out after 2000ms"`) so downstream log scrapers and
+ * error-string assertions keep working.
+ */
 export function withHookTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-            reject(new Error(`${label} hook timed out after ${HOOK_TIMEOUT_MS}ms`));
-        }, HOOK_TIMEOUT_MS);
-    });
-    return Promise.race([promise, timeout]).finally(() => {
-        if (timer) clearTimeout(timer);
+    return withDeadline(promise, {
+        timeoutMs: HOOK_TIMEOUT_MS,
+        code: "HOOK_TIMEOUT",
+        label: `${label} hook`,
     });
 }
 

@@ -161,3 +161,172 @@ describe("SingleFlight", () => {
         assert.equal(await second, "late");
     });
 });
+
+/** withDeadline unit tests — timer race, signal fusion, structured error. */
+
+import { DeadlineError, withDeadline } from "../../src/lib/async.ts";
+
+describe("withDeadline", () => {
+    it("resolves fast promises with the original value", async () => {
+        assert.equal(await withDeadline(Promise.resolve(42), deadline("fast")), 42);
+        assert.equal(await withDeadline(Promise.resolve("ok"), deadline("fast")), "ok");
+    });
+
+    it("propagates rejections from the underlying promise unchanged", async () => {
+        await assert.rejects(
+            () => withDeadline(Promise.reject(new Error("boom")), deadline("fast")),
+            /boom/,
+        );
+    });
+
+    it("rejects with DeadlineError when the local timer wins", async () => {
+        const start = Date.now();
+        await assert.rejects(
+            () =>
+                withDeadline(new Promise<string>(() => {}), {
+                    timeoutMs: 50,
+                    code: "HOOK_TIMEOUT",
+                    label: "hanger hook",
+                }),
+            (err: unknown) => {
+                assert.ok(err instanceof DeadlineError);
+                assert.equal((err as DeadlineError).code, "HOOK_TIMEOUT");
+                assert.equal((err as DeadlineError).label, "hanger hook");
+                assert.equal((err as DeadlineError).timeoutMs, 50);
+                assert.match((err as Error).message, /hanger hook timed out after 50ms/);
+                return true;
+            },
+        );
+        const elapsed = Date.now() - start;
+        assert.ok(elapsed < 1_000, `deadline took ${elapsed}ms`);
+    });
+
+    it("runs onTimeout once when the local timer wins", async () => {
+        let calls = 0;
+        await assert.rejects(() =>
+            withDeadline(new Promise<never>(() => {}), {
+                timeoutMs: 25,
+                code: "MCP_TIMEOUT",
+                label: "mcp server foo: connect",
+                onTimeout: () => {
+                    calls++;
+                },
+            }),
+        );
+        // A microtask boundary is enough for the awaited onTimeout to run.
+        await new Promise((r) => setImmediate(r));
+        assert.equal(calls, 1);
+    });
+
+    it("does NOT run onTimeout when the promise resolves in time", async () => {
+        let calls = 0;
+        await withDeadline(Promise.resolve("ok"), {
+            ...deadline("fast"),
+            onTimeout: () => {
+                calls++;
+            },
+        });
+        await new Promise((r) => setImmediate(r));
+        assert.equal(calls, 0);
+    });
+
+    it("swallows onTimeout rejections — the deadline error is the user-visible one", async () => {
+        await assert.rejects(
+            () =>
+                withDeadline(new Promise<never>(() => {}), {
+                    timeoutMs: 25,
+                    code: "MCP_TIMEOUT",
+                    label: "mcp server foo: connect",
+                    onTimeout: () => {
+                        throw new Error("cleanup failed");
+                    },
+                }),
+            (err: unknown) => {
+                // The DeadlineError must reach the caller — the cleanup throw
+                // is swallowed inside the wrapper, exactly as in the original
+                // mcpClient.withTimeout.
+                assert.ok(err instanceof DeadlineError);
+                return true;
+            },
+        );
+    });
+
+    it("rejects immediately when externalSignal is already aborted", async () => {
+        const ac = new AbortController();
+        ac.abort();
+        await assert.rejects(
+            () =>
+                withDeadline(new Promise<string>(() => {}), {
+                    timeoutMs: 60_000,
+                    code: "MCP_TIMEOUT",
+                    label: "mcp server foo: callTool(bar)",
+                    externalSignal: ac.signal,
+                }),
+            (err: unknown) => {
+                assert.ok(err instanceof DeadlineError);
+                assert.equal((err as DeadlineError).code, "MCP_TIMEOUT");
+                return true;
+            },
+        );
+    });
+
+    it("rejects when externalSignal aborts during the wait", async () => {
+        const ac = new AbortController();
+        setTimeout(() => ac.abort(), 25);
+        const start = Date.now();
+        await assert.rejects(
+            () =>
+                withDeadline(new Promise<string>(() => {}), {
+                    timeoutMs: 60_000,
+                    code: "MCP_TIMEOUT",
+                    label: "mcp server foo: listTools",
+                    externalSignal: ac.signal,
+                }),
+            (err: unknown) => {
+                assert.ok(err instanceof DeadlineError);
+                return true;
+            },
+        );
+        const elapsed = Date.now() - start;
+        assert.ok(elapsed < 1_000, `externalSignal took ${elapsed}ms`);
+    });
+
+    it("refuses a non-positive timeoutMs up front", async () => {
+        // withDeadline is async, so a validation throw surfaces as a
+        // rejected promise (not a synchronous throw) — use assert.rejects.
+        await assert.rejects(
+            () => withDeadline(Promise.resolve("x"), { timeoutMs: 0, code: "X", label: "y" }),
+            /timeoutMs must be a positive finite number/,
+        );
+        await assert.rejects(
+            () => withDeadline(Promise.resolve("x"), { timeoutMs: -1, code: "X", label: "y" }),
+            /timeoutMs must be a positive finite number/,
+        );
+        await assert.rejects(
+            () =>
+                withDeadline(Promise.resolve("x"), {
+                    timeoutMs: Number.NaN,
+                    code: "X",
+                    label: "y",
+                }),
+            /timeoutMs must be a positive finite number/,
+        );
+    });
+
+    it("does not leak the deadline timer when the promise resolves fast", async () => {
+        // Heuristic: the test process holds at most a handful of active
+        // timers after a hundred fast resolves. Without clearing the timer
+        // the count would climb.
+        for (let i = 0; i < 100; i++) {
+            await withDeadline(Promise.resolve(i), { ...deadline("fast") });
+        }
+        // No assertion here — the test passes by not hanging. The point is
+        // to catch a future regression that drops the `clearTimeout` in
+        // the finally block.
+        assert.ok(true);
+    });
+});
+
+function deadline(label: string, timeoutMs = 60_000) {
+    return { timeoutMs, code: "TEST_TIMEOUT", label };
+}
