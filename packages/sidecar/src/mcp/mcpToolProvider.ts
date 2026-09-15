@@ -10,7 +10,7 @@
 
 import type { McpServerConfig } from "@taco-ai/protocol";
 import type { Logger } from "../lib/logger.ts";
-import type { ToolCandidate, ToolLoadingMode } from "../runtime/deferredToolRegistry.ts";
+import type { ToolCandidate, ToolLoadingMode } from "../runtime/harness/deferredToolRegistry.ts";
 import {
     createMcpClient,
     type McpClientFactory,

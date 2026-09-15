@@ -7,7 +7,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
-import { scrubbedProcessEnv } from "../../../runtime/providerKeyStore.ts";
+import { scrubbedProcessEnv } from "../../../runtime/models/providerKeyStore.ts";
 import { tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";

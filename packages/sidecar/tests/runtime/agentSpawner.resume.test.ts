@@ -20,11 +20,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
-import { MAIN_BRANCH } from "../../src/runtime/sessionBranch.ts";
-import { type SessionFacts, writeSessionFacts } from "../../src/runtime/sessionFacts.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import { MAIN_BRANCH } from "../../src/runtime/session/sessionBranch.ts";
+import { type SessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 const defs: AgentDefinition[] = [
@@ -48,7 +49,7 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-resume-"));
         ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd,
+            cwd: asWorkspaceId(cwd),
             sessionsRoot,
             agents: defs,
         });
@@ -79,9 +80,9 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
 
     it("returns isError when the subSessionId does not exist", async () => {
         const res = await ws.agentSpawner.resumeSubagent({
-            parentSessionId: "does-not-matter",
+            parentSessionId: asSessionId("does-not-matter"),
             parentToolCallId: "tc",
-            subSessionId: "ghost-session",
+            subSessionId: asSessionId("ghost-session"),
             prompt: "follow up",
         });
         assert.equal(res.isError, true);
@@ -95,9 +96,9 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // repo.create bypasses its invalidation, so flush explicitly.
         ws.sessionRegistry.invalidateListCache();
         const res = await ws.agentSpawner.resumeSubagent({
-            parentSessionId: "anything",
+            parentSessionId: asSessionId("anything"),
             parentToolCallId: "tc",
-            subSessionId: "main-session",
+            subSessionId: asSessionId("main-session"),
             prompt: "follow up",
         });
         assert.equal(res.isError, true);
@@ -120,9 +121,9 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         });
         ws.sessionRegistry.invalidateListCache();
         const res = await ws.agentSpawner.resumeSubagent({
-            parentSessionId: parentB,
+            parentSessionId: asSessionId(parentB),
             parentToolCallId: "tcB",
-            subSessionId: "child-of-A",
+            subSessionId: asSessionId("child-of-A"),
             prompt: "follow up",
         });
         assert.equal(res.isError, true);
@@ -156,15 +157,15 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         };
         try {
             const p1 = ws.agentSpawner.resumeSubagent({
-                parentSessionId: "p",
+                parentSessionId: asSessionId("p"),
                 parentToolCallId: "tc",
-                subSessionId: "same-sub",
+                subSessionId: asSessionId("same-sub"),
                 prompt: "1",
             });
             const p2 = ws.agentSpawner.resumeSubagent({
-                parentSessionId: "p",
+                parentSessionId: asSessionId("p"),
                 parentToolCallId: "tc",
-                subSessionId: "same-sub",
+                subSessionId: asSessionId("same-sub"),
                 prompt: "2",
             });
             const [r1, r2] = await Promise.all([p1, p2]);
@@ -191,15 +192,15 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         await seedSession("child-defgone", {
             kind: "subagent",
             agentType: "ghost-agent",
-            parentSessionId: parent,
+            parentSessionId: asSessionId(parent),
             parentToolCallId: "tcD",
             depth: 1,
         });
         ws.sessionRegistry.invalidateListCache();
         const res = await ws.agentSpawner.resumeSubagent({
-            parentSessionId: parent,
+            parentSessionId: asSessionId(parent),
             parentToolCallId: "tcD",
-            subSessionId: "child-defgone",
+            subSessionId: asSessionId("child-defgone"),
             prompt: "follow up",
         });
         assert.equal(res.isError, true);
@@ -216,7 +217,7 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         await seedSession("child-exhausted", {
             kind: "subagent",
             agentType: "explorer",
-            parentSessionId: parent,
+            parentSessionId: asSessionId(parent),
             parentToolCallId: "tcE",
             depth: 1,
         });
@@ -225,7 +226,7 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // Use the raw repo handle so we don't need to drive a real harness.
         // AssistantMessage requires api/provider/model/usage/stopReason — the
         // counter only reads `role === "assistant"`, so the rest is stubbed.
-        const meta = await ws.sessionRegistry.openSession("child-exhausted");
+        const meta = await ws.sessionRegistry.openSession(asSessionId("child-exhausted"));
         const session = await ws.repo.open(meta, harnessContext);
         // 0.85 moved appendMessage from Session onto Branch, and a freshly
         // created session has no branch yet.
@@ -264,9 +265,9 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // 0.85's repo rejects a second open while the first is live.
         await session.close(harnessContext);
         const res = await ws.agentSpawner.resumeSubagent({
-            parentSessionId: parent,
+            parentSessionId: asSessionId(parent),
             parentToolCallId: "tcE",
-            subSessionId: "child-exhausted",
+            subSessionId: asSessionId("child-exhausted"),
             prompt: "follow up",
         });
         assert.equal(res.isError, true);
@@ -287,9 +288,9 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         ws.sessionRegistry.invalidateListCache();
         const before = map.size;
         await ws.agentSpawner.resumeSubagent({
-            parentSessionId: "x",
+            parentSessionId: asSessionId("x"),
             parentToolCallId: "tc",
-            subSessionId: "main-cache-probe",
+            subSessionId: asSessionId("main-cache-probe"),
             prompt: "p",
         });
         assert.equal(map.size, before, "resumeInFlight must drain on settle, not retain entries");

@@ -10,6 +10,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asSessionId } from "@taco-ai/protocol";
 import { ensureAttached, requireAttached } from "../../../src/server/handlers/attachGuard.ts";
 import { RpcHandlerError } from "../../../src/server/methodRegistry.ts";
 
@@ -19,7 +20,7 @@ describe("requireAttached", () => {
             getAttached: () => undefined,
         };
         assert.throws(
-            () => requireAttached(workspace as never, "sess-1"),
+            () => requireAttached(workspace as never, asSessionId("sess-1")),
             (e: unknown) =>
                 e instanceof RpcHandlerError &&
                 e.code === "invalid_state" &&
@@ -32,7 +33,7 @@ describe("requireAttached", () => {
         const workspace = {
             getAttached: () => attached,
         };
-        assert.equal(requireAttached(workspace as never, "sess-1"), attached);
+        assert.equal(requireAttached(workspace as never, asSessionId("sess-1")), attached);
     });
 });
 
@@ -46,7 +47,7 @@ describe("ensureAttached", () => {
                 return attached;
             },
         };
-        const result = await ensureAttached(workspace as never, "sess-2");
+        const result = await ensureAttached(workspace as never, asSessionId("sess-2"));
         assert.deepEqual(result, { id: "sess-2" });
     });
 
@@ -60,7 +61,7 @@ describe("ensureAttached", () => {
                 return existing;
             },
         };
-        const result = await ensureAttached(workspace as never, "sess-3");
+        const result = await ensureAttached(workspace as never, asSessionId("sess-3"));
         assert.equal(result, existing);
         assert.equal(attachCalls, 0, "attach must not be called when already attached");
     });
@@ -73,7 +74,7 @@ describe("ensureAttached", () => {
             },
         };
         await assert.rejects(
-            () => ensureAttached(workspace as never, "sess-4"),
+            () => ensureAttached(workspace as never, asSessionId("sess-4")),
             (e: unknown) => e instanceof Error && e.message === "disk full",
         );
     });

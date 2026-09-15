@@ -13,8 +13,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { WorkspaceExtensionSet } from "../../src/extensions/activation.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
@@ -55,7 +56,7 @@ function extensionsWith(rules: string[]): Readonly<WorkspaceExtensionSet> {
 function makeWorkspace(extensions?: Readonly<WorkspaceExtensionSet>): WorkspaceRuntime {
     return new WorkspaceRuntime({
         providerKeyStore: new ProviderKeyStore({}),
-        cwd: tmpDir,
+        cwd: asWorkspaceId(tmpDir),
         tools: [fakeTool("noop")],
         extensions,
     });

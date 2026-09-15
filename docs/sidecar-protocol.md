@@ -274,10 +274,25 @@ interface SessionEventReplay {
 - `resetRequired: true` → ring no longer covers the requested range; reset
   state and reload from `firstSeq` (or, for deletes, treat as fresh session).
 
-**Not a wire guarantee.** This log is process-local and best-effort. Across
-a sidecar restart the ring is empty (`firstSeq = 1, lastSeq = 0`) regardless
-of `afterSeq`. Clients must always consult `resetRequired` before applying
-events.
+**Not a wire guarantee.** This log is best-effort. Sequenced frames are
+additionally buffered to a per-stream disk tail
+(`$TACO_HOME/push-log/<sessionId>-<workspaceHash>.jsonl`, bounded and compacted
+to the same 512-frame window); after a sidecar restart the ring is re-seeded
+from that tail when a client attaches to or queries the session (`hydrate`), so
+seq numbering continues across restarts instead of resetting to 1.
+
+Caveats, all of which degrade to the `resetRequired` snapshot path rather than
+to wrong data:
+
+- The tail is flushed on a short timer and not fsynced. A graceful shutdown
+  drains it; a crash can lose the last flush window or tear the final line.
+- Events evicted from both the ring and the tail stay unrecoverable through
+  push replay — `sessions/<workspace>/<sessionId>.jsonl` remains authoritative.
+- Exactly one replay ring may extend a given stream's tail (seqs are numbered
+  per ring). If the same session is opened over two connections, the second
+  one's frames are not persisted and it falls back to snapshot recovery.
+
+Clients must always consult `resetRequired` before applying events.
 
 ---
 

@@ -7,7 +7,7 @@
  */
 
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
-import { IM_CWD_PREFIX } from "@taco-ai/protocol";
+import { asWorkspaceId, IM_CWD_PREFIX } from "@taco-ai/protocol";
 
 import { useEffect, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
@@ -82,6 +82,7 @@ export default function App() {
         activeModel,
         activeLevel,
         errorBanner,
+        defaultCwdSettled,
         dispatch,
         dispatchWs,
         setErrorBanner,
@@ -192,14 +193,14 @@ export default function App() {
     }, [dumpSessionKey, clearLlmDump]);
     const { options: modelOptions, refresh: refreshModels } = useWorkspaceModels(
         client,
-        activeCwd || null,
+        activeCwd ? asWorkspaceId(activeCwd) : null,
         Boolean(ws),
     );
     // Picker only offers models from providers with a configured key —
     // useProviders supplies the configured flag, key changes trigger a refresh.
     const { providers, refresh: refreshProviders } = useProviders(
         client,
-        activeCwd || null,
+        activeCwd ? asWorkspaceId(activeCwd) : null,
         Boolean(ws),
     );
     const configuredProviderIds = new Set(providers.filter((p) => p.configured).map((p) => p.id));
@@ -340,7 +341,7 @@ export default function App() {
         // so the restarted sidecar's first lines aren't lost to a torn-down
         // listener that React is still reattaching.
         await sidecarLogListenerReady;
-        await Promise.all(cwds.map((cwd) => client.start(cwd)));
+        await Promise.all(cwds.map((cwd) => client.start(asWorkspaceId(cwd))));
         try {
             await loadGlobalConfig(client);
         } catch (e) {
@@ -496,7 +497,7 @@ export default function App() {
                     {/* ContextIndicator moved to ChatPane input-controls */}
                     {activeCwd && activeSid && (
                         <PlanModeIndicator
-                            cwd={activeCwd}
+                            cwd={asWorkspaceId(activeCwd)}
                             sid={activeSid}
                             workspaces={workspaces}
                         />
@@ -682,16 +683,19 @@ export default function App() {
                                             scope: CommandPermissionScope,
                                         ) => {
                                             if (!activeCwd) return;
-                                            await client.commandPermissionResolve(activeCwd, {
-                                                requestId,
-                                                approved,
-                                                scope,
-                                            });
+                                            await client.commandPermissionResolve(
+                                                asWorkspaceId(activeCwd),
+                                                {
+                                                    requestId,
+                                                    approved,
+                                                    scope,
+                                                },
+                                            );
                                         }}
                                     />
                                     {activeCwd && activeSid && (
                                         <TaskPanel
-                                            cwd={activeCwd}
+                                            cwd={asWorkspaceId(activeCwd)}
                                             sid={activeSid}
                                             workspaces={workspaces}
                                             client={client}
@@ -804,7 +808,7 @@ export default function App() {
                             client={client}
                             onRestartSidecar={restartSidecar}
                             modelOptions={filteredOptions}
-                            workspace={activeCwd || null}
+                            workspace={activeCwd ? asWorkspaceId(activeCwd) : null}
                             onRefreshModels={refreshAfterKeyChange}
                             updateAvailable={lifecycle.updateStatus.available}
                             updateChecking={lifecycle.updateStatus.checking}
@@ -909,16 +913,25 @@ export default function App() {
                 }}
                 onCancel={() => setBindingChannelId(null)}
             />
-            {lifecycle.desktopConfig !== null && isOnboardingRequired(lifecycle.desktopConfig) && (
-                <OnboardingModal
-                    client={client}
-                    wsApi={wsApi}
-                    defaultCwd={getDefaultCwd()}
-                    onComplete={(status: OnboardingStatus) => {
-                        lifecycle.setDesktopConfig((prev) => ({ ...prev, onboarding: status }));
-                    }}
-                />
-            )}
+            {lifecycle.desktopConfig !== null &&
+                isOnboardingRequired(lifecycle.desktopConfig) &&
+                // OnboardingModal's WorkspaceStep pre-fills from defaultCwd, and
+                // desktopConfig loads on a separate effect that can win the race
+                // against initDefaultCwd — mounting then shows the empty
+                // synchronous placeholder. Gate on "settled", not on a non-empty
+                // cwd: when default_workspace_dir fails the default stays empty
+                // forever, and a non-empty check would hide onboarding
+                // permanently with no way to pick a directory by hand.
+                defaultCwdSettled && (
+                    <OnboardingModal
+                        client={client}
+                        wsApi={wsApi}
+                        defaultCwd={getDefaultCwd()}
+                        onComplete={(status: OnboardingStatus) => {
+                            lifecycle.setDesktopConfig((prev) => ({ ...prev, onboarding: status }));
+                        }}
+                    />
+                )}
             <UpdateDialog
                 open={lifecycle.updateDialog.open}
                 initialVersion={lifecycle.updateDialog.version}

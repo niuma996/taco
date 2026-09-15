@@ -105,6 +105,7 @@ import type {
     ToolsListResult,
     WorkspaceId,
 } from "@taco-ai/protocol";
+import { asToolCallId } from "@taco-ai/protocol";
 import { RPC } from "./rpcMethods.js";
 
 /**
@@ -566,7 +567,7 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             call<SubmitAnswersParams, null>(RPC.sessionSubmitAnswers, workspace, {
                 workspace,
                 sessionId,
-                toolCallId,
+                toolCallId: asToolCallId(toolCallId),
                 answers,
                 ...(toolName ? { toolName } : {}),
             }),

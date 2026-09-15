@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import { TaskPushAdapter } from "../../src/tasks/taskPushAdapter.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 
@@ -40,7 +41,7 @@ describe("TaskPushAdapter", () => {
                 ],
             ]),
         };
-        adapter.publishTasksUpdated("ws1", "sess1", store);
+        adapter.publishTasksUpdated(asWorkspaceId("ws1"), asSessionId("sess1"), store);
 
         assert.equal(captured.length, 1);
         assert.equal(captured[0].method, "tasks.updated");
@@ -67,7 +68,7 @@ describe("TaskPushAdapter", () => {
             currentListId: null,
             lists: new Map(),
         };
-        adapter.publishTasksUpdated("ws1", "sess1", store);
+        adapter.publishTasksUpdated(asWorkspaceId("ws1"), asSessionId("sess1"), store);
 
         assert.equal(captured.length, 1);
         const params = captured[0].params as { active: unknown };
@@ -84,7 +85,7 @@ describe("TaskPushAdapter", () => {
             currentListId: null,
             lists: new Map(),
         };
-        adapter.publishTasksUpdated("ws-x", "sess-y", store);
+        adapter.publishTasksUpdated(asWorkspaceId("ws-x"), asSessionId("sess-y"), store);
 
         // Route split: workspace in frame, sessionId in params (each is the single source of truth).
         assert.equal(captured[0].workspace, "ws-x");

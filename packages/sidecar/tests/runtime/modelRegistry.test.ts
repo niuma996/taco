@@ -13,14 +13,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
-import type { WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { type BuiltinProviderEntry, ModelRegistry } from "../../src/runtime/modelRegistry.ts";
+import {
+    type BuiltinProviderEntry,
+    ModelRegistry,
+} from "../../src/runtime/models/modelRegistry.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Api, Model, Provider } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
-import { SessionRegistry } from "../../src/runtime/sessionRegistry.ts";
+import { SessionRegistry } from "../../src/runtime/session/sessionRegistry.ts";
 
 /**
  * Build a minimal stub Provider by hand. Real `createProvider` requires many
@@ -88,12 +91,20 @@ function makeSessionRegistry(): SessionRegistry {
         sessionsRoot,
         env,
         models,
-        systemPrompt: "test",
+        getSystemPrompt: () => "test",
         tools: [],
         resources: {},
         streamOptions: {},
-        spawnSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
-        resumeSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
+        spawnSubagent: async () => ({
+            subSessionId: asSessionId("stub"),
+            resultText: "",
+            isError: true,
+        }),
+        resumeSubagent: async () => ({
+            subSessionId: asSessionId("stub"),
+            resultText: "",
+            isError: true,
+        }),
         spawnSkillSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
         availableAgentTypes: [],
         skills: [],
@@ -225,7 +236,10 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             builtinProviders: STUBS,
         });
         const id = uuidv7();
-        await assert.rejects(() => mr.setSessionModel(id, "stub-a", "model-a"), /not attached/);
+        await assert.rejects(
+            () => mr.setSessionModel(asSessionId(id), "stub-a", "model-a"),
+            /not attached/,
+        );
     });
 
     it("setSessionModel throws on unknown model when session is attached", async () => {
@@ -239,12 +253,20 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             env,
             models,
             defaultModel,
-            systemPrompt: "test",
+            getSystemPrompt: () => "test",
             tools: [],
             resources: {},
             streamOptions: {},
-            spawnSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
-            resumeSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
+            spawnSubagent: async () => ({
+                subSessionId: asSessionId("stub"),
+                resultText: "",
+                isError: true,
+            }),
+            resumeSubagent: async () => ({
+                subSessionId: asSessionId("stub"),
+                resultText: "",
+                isError: true,
+            }),
             spawnSkillSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
             availableAgentTypes: [],
             skills: [],
@@ -261,10 +283,10 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
         // second open of the same id while the first is still live.
         await (await repo.create({ id: sessionId, cwd }, harnessContext)).close(harnessContext);
         sr.invalidateListCache();
-        await sr.attach(sessionId);
+        await sr.attach(asSessionId(sessionId));
         try {
             await assert.rejects(
-                () => mr.setSessionModel(sessionId, "stub-a", "nonexistent-model"),
+                () => mr.setSessionModel(asSessionId(sessionId), "stub-a", "nonexistent-model"),
                 /unknown model/,
             );
         } finally {

@@ -9,8 +9,7 @@
  */
 
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync } from "node:fs";
-import { basename, resolve as resolvePath } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
     CustomProviderConfig,
@@ -22,8 +21,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import { IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
-import { type FSWatcher, watch as watchFs } from "chokidar";
+import { asSessionId, asWorkspaceId, IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
 import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -40,7 +38,6 @@ import {
 } from "../config/config.ts";
 import { renderInstructionBlock, resolveInstructions } from "../config/instructions.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
-import { SingleFlight } from "../lib/async.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import { LocalMemoryStore, NoOpMemoryStore } from "../memory/index.ts";
@@ -78,30 +75,28 @@ import {
 } from "../tasks/taskPushAdapter.ts";
 import type { SelfRpcCall, TacoToolContext } from "../tools/context.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
-import { AgentSpawner, findModelById } from "./agentSpawner.ts";
-import type { AttachedSession } from "./attachedSession.ts";
-import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
-import { DefaultDeferredToolRegistry } from "./deferredToolRegistry.ts";
-import type { ModelInfo, ProviderInfo } from "./modelRegistry.ts";
-import { applyBuiltinProviders, ModelRegistry } from "./modelRegistry.ts";
+import type { AttachedSession } from "./harness/attachedSession.ts";
+import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
+import { DefaultDeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
+import {
+    applyBuiltinProviders,
+    findModelById,
+    type ModelInfo,
+    ModelRegistry,
+    type ProviderInfo,
+} from "./models/modelRegistry.ts";
+import type { ProviderKeyStore } from "./models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "./pi/node.ts";
-import type { ProviderKeyStore } from "./providerKeyStore.ts";
-import type { SessionFacts } from "./sessionFacts.ts";
-import { type AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
-import type { SessionTaskState } from "./sessionTaskState.ts";
+import type { SessionFacts } from "./session/sessionFacts.ts";
+import { type AttachOptions, SessionRegistry } from "./session/sessionRegistry.ts";
+import type { SessionTaskState } from "./session/sessionTaskState.ts";
+import { SkillHotReloader } from "./skillHotReload.ts";
+import { AgentSpawner } from "./subagent/agentSpawner.ts";
 import { dedupOverride, filterToolsForImPolicy } from "./toolAssembly.ts";
 
 const log = createLogger("workspace");
 
-/**
- * How long to wait after the last skill-directory fs event before rescanning.
- * One `SKILL.md` save is normally several events in quick succession (write +
- * rename + parent-dir touch), and an editor's atomic-save dance can add more,
- * so the timer is reset on every event and only the trailing one reloads.
- */
-const SKILL_RELOAD_DEBOUNCE_MS = 300;
-
-export type { AttachOptions, ModelInfo };
+export type { AttachOptions };
 
 export interface WorkspaceRuntimeOptions {
     cwd: WorkspaceId;
@@ -348,28 +343,26 @@ export class WorkspaceRuntime extends EventEmitter {
     /** Dynamic-tool candidate directory (enables AddTools when present). */
     readonly toolRegistry: DeferredToolRegistry;
 
+    /** Owns the skill watcher, its debounce timer and the in-flight scan. */
+    private readonly skillHotReload: SkillHotReloader;
+
     /**
      * Skill load warnings from the most recent scan — malformed SKILL.md files
-     * and name collisions. Read by the `skills.list` handler.
-     *
-     * NOT readonly: `reloadSkillsNow()` replaces it wholesale, so a file the
-     * user just fixed stops being reported and a newly-broken one starts.
-     * Replacing rather than appending is the point — these describe the current
-     * state of the skill directories, not a running history.
+     * and name collisions. Read by the `skills.list` handler. Replaced rather
+     * than appended on each scan: these describe the current state of the skill
+     * directories, not a running history.
      */
-    skillDiagnostics: readonly SkillDiagnosticEntry[];
+    get skillDiagnostics(): readonly SkillDiagnosticEntry[] {
+        return this.skillHotReload.currentDiagnostics();
+    }
 
-    /** Injected by SidecarServer; absent (and no watcher created) in direct-construction tests. */
-    private readonly reloadSkillsCallback?: () => Promise<SkillScanResult>;
-    /** Collapses concurrent fs-change events (and any concurrent explicit
-     *  `reloadSkillsNow()` calls) into one in-flight scan. */
-    private readonly skillReloadFlight: SingleFlight<"skills", SkillScanResult>;
-    /** Resolves when chokidar has completed its initial scan. Tests await this
-     *  before creating a file; production need not await it because events
-     *  that happen before readiness are covered by the cold-start scan. */
-    readonly skillWatcherReady?: Promise<void>;
-    private skillWatcher?: FSWatcher;
-    private skillReloadDebounce?: NodeJS.Timeout;
+    /** Resolves when chokidar has completed its initial scan; undefined when no
+     *  watcher was created. Tests await this before creating a file; production
+     *  need not await it because events that happen before readiness are
+     *  covered by the cold-start scan. */
+    get skillWatcherReady(): Promise<void> | undefined {
+        return this.skillHotReload.ready;
+    }
 
     /**
      * Workspace task push adapter — server calls publishCurrentTaskSnapshot on
@@ -418,15 +411,15 @@ export class WorkspaceRuntime extends EventEmitter {
         // workspaceKey is stored separately for push frame / parseImCwd routing.
         // sessionCwd is the storage identity and MUST NOT change once a session
         // exists — JsonlSessionRepo partitions by it (encodeCwd).
-        this.sessionCwd = isIm
-            ? (options.fsCwd ?? resolvePath(options.cwd))
-            : resolvePath(options.cwd);
+        this.sessionCwd = asWorkspaceId(
+            isIm ? (options.fsCwd ?? resolvePath(options.cwd)) : resolvePath(options.cwd),
+        );
         // executionCwd is a soft association: where shell/fs tools run. It may
         // be repointed by IM policy (local binding / per-chat scratch) without
         // affecting session storage.
-        this.executionCwd = options.executionCwd
-            ? resolvePath(options.executionCwd)
-            : this.sessionCwd;
+        this.executionCwd = asWorkspaceId(
+            options.executionCwd ? resolvePath(options.executionCwd) : this.sessionCwd,
+        );
         this.workspaceKey = options.workspaceKey ?? this.sessionCwd;
         this.sessionsRoot = defaultSessionsRoot(options.sessionsRoot);
         // executionCwd, not sessionCwd — defaultSkillDirs (inside
@@ -493,8 +486,13 @@ export class WorkspaceRuntime extends EventEmitter {
                 return { ...base, rules: Array.from(new Set([...base.rules, ...extRules])) };
             },
             {
-                resolveDisplayContext: (sid) => this.sessionRegistry.resolveDisplayContext(sid),
-                imCommandPolicy: () => imPolicy?.commands,
+                resolveDisplayContext: (sid) =>
+                    this.sessionRegistry.resolveDisplayContext(asSessionId(sid)),
+                // Read through the same thunk tool assembly uses (not the
+                // `imPolicy` const above) so a hand-edited `commands` block —
+                // `mode`, `allow` — reaches command evaluation on the next
+                // call, not just the next turn's tool list.
+                imCommandPolicy: () => this.resolveImPolicy()?.commands,
             },
         );
         const toolContext = this.buildToolContextThunk(options);
@@ -549,7 +547,7 @@ export class WorkspaceRuntime extends EventEmitter {
             env: this.env,
             models: this.models,
             defaultModel: this.defaultModel,
-            systemPrompt: this.systemPrompt,
+            getSystemPrompt: () => this.systemPrompt,
             tools: this.tools,
             resources: this.resources,
             streamOptions: this.streamOptions,
@@ -605,7 +603,7 @@ export class WorkspaceRuntime extends EventEmitter {
             repo: this.repo,
             env: this.env,
             models: this.models,
-            tools: this.tools,
+            getTools: () => this.tools,
             agents,
             sessionRegistry: this.sessionRegistry,
             systemPromptContributors:
@@ -643,82 +641,19 @@ export class WorkspaceRuntime extends EventEmitter {
         ]);
         forwardEvents(this.agentSpawner, this, ["subagent.spawned"]);
 
-        // Skill hot reload: only set up a watcher when both are given —
-        // `SidecarServer.buildWorkspace` always passes both, but direct
-        // construction (unit tests, and any future non-fs caller) getting
-        // neither is the correct default: no watcher, no dependency on
-        // chokidar's filesystem semantics.
-        this.skillDiagnostics = options.skillDiagnostics ?? [];
-        this.reloadSkillsCallback = options.reloadSkills;
-        this.skillReloadFlight = new SingleFlight<"skills", SkillScanResult>(async () => {
-            if (!this.reloadSkillsCallback) {
-                return {
-                    skills: [...(this.resources.skills ?? [])],
-                    diagnostics: [...this.skillDiagnostics],
-                };
-            }
-            return await this.reloadSkillsCallback();
+        // Skill hot reload: watcher, debounce timer and the in-flight scan all
+        // live in `SkillHotReloader`; the workspace only says what "apply the
+        // scan" means.
+        this.skillHotReload = new SkillHotReloader({
+            skillDirs: options.skillDirs,
+            reloadSkills: options.reloadSkills,
+            initialDiagnostics: options.skillDiagnostics,
+            applyScan: (skills) => {
+                this.resources = { ...this.resources, skills };
+                this.systemPrompt = this.rebuildSystemPrompt(skills);
+                this.sessionRegistry.updateSkills(skills);
+            },
         });
-        if (options.skillDirs && options.skillDirs.length > 0 && options.reloadSkills) {
-            // chokidar v4 watches the nearest *existing* ancestor of a missing
-            // path and reports it once it appears — but only when some ancestor
-            // exists. For a path whose whole parent chain is absent (the common
-            // first-run case for `<cwd>/.taco/skills`, since `.taco/` itself is
-            // only created lazily), chokidar watches nothing and never emits.
-            // Verified against chokidar 4.0.3: `getWatched()` is `{}` and the
-            // first `mkdir -p` + SKILL.md write produces zero events. So ensure
-            // the taco-owned leaf exists first (`<cwd>/.taco/skills`,
-            // `$TACO_HOME/skills`). mkdir is idempotent and these are taco's own
-            // dirs; we deliberately do NOT watch an ancestor like `cwd`, because
-            // that would fire a rescan on every unrelated file change in the
-            // project. `~/.claude/skills` / `~/.pi/skills` belong to other tools
-            // — never created here; for those the parent dir already exists, so
-            // the nearest-ancestor fallback works.
-            for (const dir of options.skillDirs) {
-                if (!dir.includes("/.taco/")) continue;
-                try {
-                    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-                } catch (e) {
-                    log.warn(
-                        `could not create skill dir ${dir} for watching: ${e instanceof Error ? e.message : String(e)}`,
-                    );
-                }
-            }
-            // Only SKILL.md matters for hot reload: skill metadata/instructions
-            // live there, while every other file under a skill dir (helper
-            // scripts, templates, images, node_modules…) is read lazily at
-            // invocation time. The bundled sidecar has no fsevents, so chokidar
-            // falls back to per-file fs.watch — watching whole dirs holds one fd
-            // per file (measured: +778 fds for ~450 skill files). Filtering
-            // non-SKILL.md files out of the watch drops that to ~148 (the
-            // SKILL.md files plus the directories chokidar must keep watching to
-            // discover newly added skills). Directories are never ignored here:
-            // pruning one would hide a SKILL.md created inside it later.
-            const watcher = watchFs([...options.skillDirs], {
-                ignoreInitial: true,
-                ignored: (path, stats) => Boolean(stats?.isFile()) && basename(path) !== "SKILL.md",
-            });
-            this.skillWatcher = watcher;
-            this.skillWatcherReady = new Promise((resolve) => {
-                watcher.once("ready", resolve);
-            });
-            watcher.on("all", () => {
-                // One timer field, reset on every event — see
-                // SKILL_RELOAD_DEBOUNCE_MS for why only the trailing event in
-                // a burst should reload.
-                if (this.skillReloadDebounce) clearTimeout(this.skillReloadDebounce);
-                this.skillReloadDebounce = setTimeout(() => {
-                    this.reloadSkillsNow().catch((e) => {
-                        log.warn(
-                            `skill hot reload failed: ${e instanceof Error ? e.message : String(e)}`,
-                        );
-                    });
-                }, SKILL_RELOAD_DEBOUNCE_MS);
-            });
-            watcher.on("error", (e) => {
-                log.warn(`skill watcher error: ${e instanceof Error ? e.message : String(e)}`);
-            });
-        }
     }
 
     /**
@@ -796,7 +731,7 @@ export class WorkspaceRuntime extends EventEmitter {
               : undefined;
         return () => ({
             env: this.env,
-            workspace: this.workspaceKey,
+            workspace: asWorkspaceId(this.workspaceKey),
             ...(selfRpc ? { call: selfRpc } : {}),
             ...(actor ? { actor } : {}),
         });
@@ -945,28 +880,20 @@ export class WorkspaceRuntime extends EventEmitter {
     }
 
     /**
-     * Re-scan skill directories and apply the result: `resources.skills`,
-     * the workspace's baked `systemPrompt`, every attached session's live
-     * `skill`-tool lookup (`SessionRegistry.updateSkills`), and
-     * `skillDiagnostics` all pick up the new scan. Diagnostics are
-     * replaced, not merged — they describe the current on-disk state.
+     * Re-scan skill directories and apply the result: `resources.skills`, the
+     * workspace's baked `systemPrompt`, every attached session's live `skill`-tool
+     * lookup (`SessionRegistry.updateSkills`) and `skillDiagnostics` all pick up
+     * the new scan. Diagnostics are replaced, not merged — they describe the
+     * current on-disk state.
+     *
+     * Caveat: does NOT retroactively edit an already-attached session's own baked
+     * system prompt — same limitation `updateInstructionsConfig` accepts today. A
+     * session open before this call won't learn a brand-new skill exists until
+     * it's re-attached, but it CAN still invoke one by name and sees frontmatter
+     * changes immediately.
      */
-    // Caveat: does NOT retroactively edit an already-attached session's
-    // own baked system prompt — same limitation `updateInstructionsConfig`
-    // accepts today. A session that was open before this call won't learn
-    // a brand-new skill exists until it's re-attached, but it CAN still
-    // invoke one by name and sees frontmatter changes immediately.
-    // Concurrent calls (multiple fs-change bursts, or an explicit call
-    // racing a debounced one) collapse into a single in-flight scan via
-    // `skillReloadFlight` — same SingleFlight pattern SidecarServer uses
-    // for cold-start workspace builds.
     async reloadSkillsNow(): Promise<void> {
-        if (!this.reloadSkillsCallback) return;
-        const { skills, diagnostics } = await this.skillReloadFlight.run("skills");
-        this.resources = { ...this.resources, skills };
-        this.systemPrompt = this.rebuildSystemPrompt(skills);
-        this.sessionRegistry.updateSkills(skills);
-        this.skillDiagnostics = diagnostics;
+        await this.skillHotReload.reloadNow();
     }
 
     /**
@@ -1276,8 +1203,7 @@ export class WorkspaceRuntime extends EventEmitter {
         //    forwarding subscription so no pushes bubble up after abort
         //  - modelRegistry needs no dispose: the catalog is permanent and it does
         //    not subscribe to ProviderKeyStore
-        if (this.skillReloadDebounce) clearTimeout(this.skillReloadDebounce);
-        await this.skillWatcher?.close();
+        await this.skillHotReload.dispose();
         this.permissionBroker.cleanupAll();
         this.agentSpawner.removeAllListeners();
         await this.sessionRegistry.dispose();

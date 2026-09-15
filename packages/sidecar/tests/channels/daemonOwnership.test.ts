@@ -31,7 +31,7 @@ import { after, before, describe, it } from "node:test";
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
 import { MockChannel, mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelConfig } from "../../src/channels/registry.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { NullTransport } from "../../src/server/nullTransport.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";

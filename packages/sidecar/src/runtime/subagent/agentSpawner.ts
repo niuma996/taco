@@ -1,38 +1,51 @@
-/** AgentSpawner — subagent creation and execution. */
+/**
+ * AgentSpawner — subagent creation and execution: validates the agentType,
+ * narrows the toolset, then drives the child to completion.
+ *
+ * The child's attach assembly lives in `./childAttach.ts`, its run loop in
+ * `./subagentRunner.ts`, and the parent-depth read in `../session/sessionFacts.ts`.
+ */
 
 import { EventEmitter } from "node:events";
-import type { CommandPermissionConfig, SessionId, WorkspaceId } from "@taco-ai/protocol";
-import { filterToolsForAgent } from "../agents/filterTools.ts";
-import { buildForkedContext, resolveContextMode } from "../agents/forkedHistory.ts";
-import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../agents/types.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import { PermissionBroker } from "../permissions/permissionBroker.ts";
-import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
-import { buildSystemPrompt, filterContributorsForTools } from "../prompts/buildSystemPrompt.ts";
-import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
-import type { Api, HarnessEvent, Model, MutableModels } from "../runtime/pi/types.ts";
-import type { JsonlSessionRepo } from "../runtime/pi/values.ts";
-import { interpolateArgs } from "../skills/skillMessages.ts";
-import type { SpawnSkillSubagentOptions } from "../skills/skillTool.ts";
-import type { TacoTool } from "../tools/index.ts";
-import { createShellTool } from "../tools/shellTool.ts";
-import type { AttachedSession } from "./attachedSession.ts";
-import { uuidv7 } from "./pi/values.ts";
-import { findBranchEntries } from "./sessionBranch.ts";
-import { readSessionFacts, type SessionFacts, writeSessionFacts } from "./sessionFacts.ts";
-import type { AttachOptions, SessionRegistry } from "./sessionRegistry.ts";
-import type { SessionTaskState } from "./sessionTaskState.ts";
-
-const log = createLogger("sidecar.agentSpawner");
+import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
+import { filterToolsForAgent } from "../../agents/filterTools.ts";
+import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
+import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../../agents/types.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import type { SystemPromptContributor } from "../../prompts/buildSystemPrompt.ts";
+import { interpolateArgs } from "../../skills/skillMessages.ts";
+import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
+import type { TacoTool } from "../../tools/index.ts";
+import type { AttachedSession } from "../harness/attachedSession.ts";
+import { findModelById } from "../models/modelRegistry.ts";
+import type { NodeExecutionEnv } from "../pi/node.ts";
+import type { Api, Model, MutableModels } from "../pi/types.ts";
+import type { JsonlSessionRepo } from "../pi/values.ts";
+import { uuidv7 } from "../pi/values.ts";
+import { findBranchEntries } from "../session/sessionBranch.ts";
+import {
+    readSessionFacts,
+    resolveParentDepth,
+    type SessionFacts,
+    writeSessionFacts,
+} from "../session/sessionFacts.ts";
+import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.ts";
+import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
+import { runAttachedSubagent } from "./subagentRunner.ts";
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
     readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
-    /** Parent session toolset — `filterToolsForAgent` further restricts by agent whitelist / depth. */
-    readonly tools: TacoTool[];
+    /**
+     * Parent session toolset — `filterToolsForAgent` further restricts by agent
+     * whitelist / depth. A thunk, not a value: `WorkspaceRuntime.refreshToolset`
+     * replaces the workspace's tool array per turn (IM policy grants, extension
+     * changes), and a captured array would spawn every subsequent subagent
+     * against whatever toolset existed when the workspace was constructed.
+     */
+    readonly getTools: () => TacoTool[];
     /** Subagent definition registry; `spawnSubagent` looks up by `agentType`. */
     readonly agents: AgentDefinition[];
     /** SessionRegistry reference — used to call attachChild / openSession / invalidateListCache. */
@@ -76,16 +89,6 @@ export interface AgentSpawnerOptions {
      */
     readonly getParentInstructionsBlock?: () => string;
 }
-
-/**
- * Agent types whose `shell` tool is swapped for a read-only-broker instance.
- *
- * Membership is a permission boundary, not a hint: these profiles tell the
- * model it must not mutate anything, and prose alone does not stop a shell
- * call. Any profile whose body claims read-only must be listed here, or the
- * child inherits the user's root-session allowlist and can write.
- */
-export const READ_ONLY_SHELL_AGENT_TYPES: ReadonlySet<string> = new Set(["explorer", "reviewer"]);
 
 /** Arguments for one subagent run. Shared by `executeSubagentSession` and its body. */
 export interface SubagentSessionArgs {
@@ -140,7 +143,8 @@ export class AgentSpawner extends EventEmitter {
     readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
-    readonly tools: TacoTool[];
+    /** Public so tests can assert on the live parent toolset a spawn would see. */
+    readonly getTools: () => TacoTool[];
     readonly agents: AgentDefinition[];
     private readonly sessionRegistry: SessionRegistry;
     private readonly systemPromptContributors: SystemPromptContributor[];
@@ -151,7 +155,7 @@ export class AgentSpawner extends EventEmitter {
         this.repo = options.repo;
         this.env = options.env;
         this.models = options.models;
-        this.tools = options.tools;
+        this.getTools = options.getTools;
         this.agents = options.agents;
         this.sessionRegistry = options.sessionRegistry;
         this.systemPromptContributors = options.systemPromptContributors ?? [];
@@ -219,6 +223,18 @@ export class AgentSpawner extends EventEmitter {
         return [...(this.inFlight.get(parentSessionId) ?? [])];
     }
 
+    /** Child-attach inputs this spawner owns — one definition so spawn and resume agree. */
+    private get childAttachDeps(): ChildAttachDeps {
+        return {
+            toolsForChildSession: (sessionId) =>
+                this.sessionRegistry.toolsForChildSession(sessionId),
+            systemPromptContributors: this.systemPromptContributors,
+            projectContext: this.projectContext,
+            hideWorkspacePath: this.hideWorkspacePath,
+            getParentInstructionsBlock: this.getParentInstructionsBlock,
+        };
+    }
+
     /**
      * Mark a parent tool call as having a live subagent for the duration of `run`.
      * Registered before the child session exists so the attach window is covered,
@@ -244,106 +260,6 @@ export class AgentSpawner extends EventEmitter {
                 if (current.size === 0) this.inFlight.delete(parentSessionId);
             }
         }
-    }
-
-    /**
-     * Build the (tools, taskState, systemPrompt) triple a child harness attaches
-     * with. Shared by a fresh spawn and a resume so the contributor order —
-     * forked context, then few-shots, then role body, then inherited parent
-     * instructions — has exactly one definition. A resume that assembled this
-     * order independently could drift from spawn and silently change what the
-     * child sees mid-conversation.
-     *
-     * `allowedTools` is the already-narrowed toolset (whitelist + depth); this
-     * only intersects it with the session-scoped rebuild, so a caller cannot
-     * widen a child's capabilities by routing through here.
-     */
-    private async prepareChildAttach(args: {
-        sessionId: SessionId;
-        agentType: string | undefined;
-        childDepth: number;
-        allowedTools: readonly TacoTool[];
-        rolePrompt?: string;
-        fewShots?: ReadonlyArray<AgentFewShot>;
-        forkedContext?: string;
-        modelIdentity: string | undefined;
-    }): Promise<{ tools: TacoTool[]; taskState: SessionTaskState; systemPrompt: string }> {
-        // Rebuild session-scoped tools so shell commands receive the child
-        // session id and therefore use the same permission broker as main
-        // sessions. Both halves of the (tools, taskState) pair come from ONE
-        // toolsForChildSession call — mixing a taskState from one call with
-        // tools built elsewhere diverges the two TaskStore instances (see the
-        // note in sessionRegistry.ts).
-        const allowedNames = new Set(args.allowedTools.map((tool) => tool.name));
-        const { tools: rawTools, taskState } = await this.sessionRegistry.toolsForChildSession(
-            args.sessionId,
-        );
-        const tools = rawTools.filter((tool) => allowedNames.has(tool.name));
-
-        // Read-only profiles get an isolated-broker shell so the user's
-        // root-session allowlist cannot leak in. Membership in
-        // READ_ONLY_SHELL_AGENT_TYPES is a permission boundary, not a hint.
-        const shellIdx =
-            args.agentType !== undefined && READ_ONLY_SHELL_AGENT_TYPES.has(args.agentType)
-                ? tools.findIndex((t) => t.name === "shell")
-                : -1;
-        if (shellIdx !== -1) {
-            const readonlyBroker = new PermissionBroker(
-                () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
-                { readOnly: true },
-            );
-            // Replace in place so the toolset keeps its original ordering.
-            tools[shellIdx] = createShellTool({
-                permissionBroker: readonlyBroker,
-                sessionId: args.sessionId,
-            });
-        }
-
-        // Rebuild the system prompt from the child's actual toolset so read-only
-        // agents (e.g. explorer) don't inherit shell instructions they cannot
-        // act on. Contributors tagged with capability requirements (e.g.
-        // `<available_skills>` requires the `skill` tool) are filtered against
-        // that same toolset — otherwise the listing describes a tool the
-        // subagent cannot call.
-        const filteredContributors = filterContributorsForTools(
-            this.systemPromptContributors,
-            new Set(tools.map((tool) => tool.name)),
-        );
-        const profileContributors: SystemPromptContributor[] = [];
-        // Fork transcript first: it is background for the task, not the task.
-        if (args.forkedContext) profileContributors.push({ append: args.forkedContext });
-        // Few-shots before the role body so they establish the contract the
-        // profile expects (citation shape, stop condition) before it takes over.
-        const fewShotsBlock = formatFewShots(args.fewShots);
-        if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
-        // Role body after the generic guidance so it wins on conflict — a
-        // read-only explorer must not inherit the main agent's "act, then
-        // verify" framing.
-        const role = args.rolePrompt?.trim();
-        if (role) profileContributors.push({ append: role });
-        // Parent's resolved instruction blocks (CLAUDE.md / AGENTS.md /
-        // DESIGN.md) last, so the agent's role body can override them. Read
-        // through the thunk so a `settings.write` since the parent attached
-        // reaches this child.
-        const parentInstructions = this.getParentInstructionsBlock();
-        if (parentInstructions) profileContributors.push({ append: parentInstructions });
-
-        const systemPrompt = buildSystemPrompt({
-            tools,
-            modelIdentity: args.modelIdentity,
-            // `<project_context>` is workspace-level state — every child sees
-            // the same denylist. Read once at workspace construction and passed
-            // in, so a rebuild never re-reads disk.
-            projectContext: this.projectContext,
-            hideWorkspacePath: this.hideWorkspacePath,
-            contributors:
-                profileContributors.length > 0
-                    ? [...filteredContributors, ...profileContributors]
-                    : filteredContributors,
-            sessionKind: { role: "subagent", depth: args.childDepth },
-        });
-
-        return { tools, taskState, systemPrompt };
     }
 
     /**
@@ -411,8 +327,8 @@ export class AgentSpawner extends EventEmitter {
             tools: childTools,
             taskState: childTaskState,
             systemPrompt: childSystemPrompt,
-        } = await this.prepareChildAttach({
-            sessionId: childSessionId,
+        } = await prepareChildAttach(this.childAttachDeps, {
+            sessionId: asSessionId(childSessionId),
             agentType: args.agentType,
             childDepth,
             allowedTools: args.tools,
@@ -431,7 +347,7 @@ export class AgentSpawner extends EventEmitter {
         let attached: AttachedSession;
         try {
             attached = await this.sessionRegistry.attachChild(
-                childSessionId,
+                asSessionId(childSessionId),
                 { thinkingLevel: "off", model: args.model } satisfies AttachOptions,
                 childTools,
                 childTaskState,
@@ -439,90 +355,20 @@ export class AgentSpawner extends EventEmitter {
             );
         } catch (e) {
             return {
-                subSessionId: childSessionId,
+                subSessionId: asSessionId(childSessionId),
                 resultText: e instanceof Error ? e.message : String(e),
                 isError: true,
             };
         }
 
-        return this.runAttachedSubagent({
-            subSessionId: childSessionId,
+        return runAttachedSubagent({
+            subSessionId: asSessionId(childSessionId),
             attached,
             prompt: args.prompt,
             maxTurns: args.maxTurns,
             signal: args.signal,
+            readLastAssistantText: (id) => this.extractLastAssistantText(id),
         });
-    }
-
-    /**
-     * Run prompt on an already-attached child harness and extract the final
-     * text. Shared by `executeSubagentSession` (after a fresh attach) and
-     * `resumeSubagent` (after re-attaching to a pre-existing session). The
-     * turn cap is the **remaining** budget for this resume — callers are
-     * responsible for subtracting already-consumed turns from `maxTurns`.
-     */
-    private async runAttachedSubagent(args: {
-        subSessionId: SessionId;
-        attached: AttachedSession;
-        prompt: string;
-        maxTurns?: number;
-        signal?: AbortSignal;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
-        const { subSessionId, attached } = args;
-
-        // Run prompt (blocking until complete or aborted).
-        // The turn cap is enforced here rather than by the harness, which takes
-        // no turn limit: count completed turns and abort on the cap. Whatever
-        // the child produced up to that point is still returned below, so a
-        // capped run degrades to a partial answer instead of an error.
-        const cap = args.maxTurns !== undefined && args.maxTurns > 0 ? args.maxTurns : undefined;
-        let turnsUsed = 0;
-        let hitCap = false;
-        const onTurnEnd = (event: HarnessEvent): void => {
-            if (event.type !== "turn_end" || cap === undefined) return;
-            turnsUsed++;
-            if (turnsUsed >= cap && !hitCap) {
-                hitCap = true;
-                void attached.abort();
-            }
-        };
-        if (cap !== undefined) attached.on("event", onTurnEnd);
-
-        try {
-            await attached.prompt(args.prompt);
-        } catch (e) {
-            // hitCap before signal.aborted: keep partial answer instead of discarding it.
-            if (hitCap) {
-                const { text } = await this.extractLastAssistantText(subSessionId);
-                return {
-                    subSessionId,
-                    resultText: partialResult(text, cap ?? turnsUsed),
-                    isError: false,
-                };
-            }
-            if (args.signal?.aborted) {
-                return { subSessionId, resultText: "(aborted)", isError: true };
-            }
-            return {
-                subSessionId,
-                resultText: e instanceof Error ? e.message : String(e),
-                isError: true,
-            };
-        } finally {
-            if (cap !== undefined) attached.off("event", onTurnEnd);
-        }
-
-        // Extract last assistant text. An empty reply is a failure, not a
-        // success whose text happens to be the literal string below.
-        const { text, isEmpty } = await this.extractLastAssistantText(subSessionId);
-        if (isEmpty) {
-            return {
-                subSessionId,
-                resultText: "subagent returned an empty response",
-                isError: true,
-            };
-        }
-        return { subSessionId, resultText: text, isError: false };
     }
 
     /**
@@ -554,31 +400,17 @@ export class AgentSpawner extends EventEmitter {
         // a caller error — see resolveContextMode for the precedence rationale.
         const contextMode = resolveContextMode(args.context, def.context);
         // Compute parent depth to feed filterToolsForAgent before delegating.
-        // Depth lives in the session's value store (pi 0.85 removed the free-form
-        // metadata bag); reading it off JsonlSessionMetadata returned undefined,
-        // which silently zeroed parentDepth and broke the recursion guard —
-        // depth-1 subagents could spawn depth-1 grandchildren.
+        // Depth lives in the session's value store, not `JsonlSessionMetadata`
+        // (pi 0.85 removed the free-form metadata bag), so it needs a read.
         const parentFacts = await this.sessionRegistry.withSession(
             args.parentSessionId,
             (session) => readSessionFacts(session),
         );
-        // Depth defaults to 0 only when facts are absent — but facts are
-        // written *after* repo.create(), so a session interrupted between
-        // the two steps reads back `{}` and would silently zero the recursion
-        // guard. Warn so a recurrence of the cbe4fe2 regression is visible
-        // instead of silently letting depth-1 spawn depth-1 grandchildren.
-        let parentDepth: number;
-        if (parentFacts.depth === undefined) {
-            log.warn(
-                "parent session has no depth fact; defaulting to 0 — recursion guard may be inactive",
-                { parentSessionId: args.parentSessionId },
-            );
-            parentDepth = 0;
-        } else {
-            parentDepth = parentFacts.depth;
-        }
+        const parentDepth = resolveParentDepth(parentFacts, {
+            parentSessionId: args.parentSessionId,
+        });
         const childDepth = parentDepth + 1;
-        const childTools = filterToolsForAgent(this.tools, def.tools, childDepth);
+        const childTools = filterToolsForAgent(this.getTools(), def.tools, childDepth);
         // Fork: render the parent transcript once, up front. Reading the branch
         // here (not inside runSubagentSession) keeps the I/O out of the hot
         // attach path and lets us persist the exact string the child saw so a
@@ -766,11 +598,11 @@ export class AgentSpawner extends EventEmitter {
             tools: attachedChildTools,
             taskState: childTaskState,
             systemPrompt: childSystemPrompt,
-        } = await this.prepareChildAttach({
+        } = await prepareChildAttach(this.childAttachDeps, {
             sessionId: args.subSessionId,
             agentType,
             childDepth,
-            allowedTools: filterToolsForAgent(this.tools, def.tools, childDepth),
+            allowedTools: filterToolsForAgent(this.getTools(), def.tools, childDepth),
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             // Re-inject the fork transcript from the spawn-time snapshot so a
@@ -798,12 +630,13 @@ export class AgentSpawner extends EventEmitter {
             };
         }
 
-        return this.runAttachedSubagent({
+        return runAttachedSubagent({
             subSessionId: args.subSessionId,
             attached,
             prompt: args.prompt,
             maxTurns,
             signal: args.signal,
+            readLastAssistantText: (id) => this.extractLastAssistantText(id),
         });
     }
 
@@ -865,7 +698,7 @@ export class AgentSpawner extends EventEmitter {
         }
 
         return this.runSkillSubagent({
-            parentSessionId: opts.parentSessionId,
+            parentSessionId: asSessionId(opts.parentSessionId),
             parentToolCallId: opts.parentToolCallId,
             skillName: opts.skillName,
             skillContent: opts.skillContent,
@@ -912,28 +745,18 @@ export class AgentSpawner extends EventEmitter {
         // recursively spawn grandchildren (which would let it call Skill again and
         // explode tokens / loop). Computing here also avoids a second openSession()
         // call inside executeSubagentSession.
-        //
-        // Depth comes from facts, not metadata — see the comment in `spawnSubagent`.
-        // Same non-atomic-write caveat applies: missing facts default to 0 with a
-        // warn so a regression does not look like a clean run.
         const parentFacts = await this.sessionRegistry.withSession(pid, (session) =>
             readSessionFacts(session),
         );
-        let parentDepth: number;
-        if (parentFacts.depth === undefined) {
-            log.warn(
-                "parent session has no depth fact; defaulting to 0 — recursion guard may be inactive",
-                { parentSessionId: pid, skillName: args.skillName },
-            );
-            parentDepth = 0;
-        } else {
-            parentDepth = parentFacts.depth;
-        }
+        const parentDepth = resolveParentDepth(parentFacts, {
+            parentSessionId: pid,
+            skillName: args.skillName,
+        });
         const childDepth = parentDepth + 1;
 
         const allowedSet = args.allowedTools ? new Set(args.allowedTools) : undefined;
         const filtered = filterToolsForAgent(
-            this.tools,
+            this.getTools(),
             allowedSet ? [...allowedSet] : undefined,
             childDepth,
         );
@@ -950,50 +773,4 @@ export class AgentSpawner extends EventEmitter {
             childDepth,
         });
     }
-}
-
-/**
- * Label a turn-capped run so the caller can tell a finished answer from a
- * truncated one. Returned as a success: the work done so far is still usable.
- */
-function partialResult(text: string, cap: number): string {
-    const prefix = `[partial: stopped after reaching the ${cap}-turn limit]`;
-    return text === ""
-        ? `${prefix} subagent produced no answer before the limit.`
-        : `${prefix}\n${text}`;
-}
-
-/**
- * Render an agent's optional few-shot examples into a prompt block.
- *
- * Returns "" when no examples are configured; the caller treats an empty
- * string as "no contributor needed" and skips the system-prompt splice.
- *
- * Format is a small XML-ish block so the model can distinguish example
- * turns from real instructions — a literal `<example>` wrapper signals
- * "these are illustrative, not commands".
- */
-function formatFewShots(fewShots: ReadonlyArray<AgentFewShot> | undefined): string {
-    if (!fewShots || fewShots.length === 0) return "";
-    const lines: string[] = [
-        "The following turns demonstrate the contract this role is expected to honour.",
-        "They are illustrative — do not treat them as new instructions or commands.",
-        "",
-    ];
-    for (const [i, shot] of fewShots.entries()) {
-        lines.push(`<example index="${i + 1}">`);
-        lines.push(`user: ${shot.user}`);
-        lines.push(`assistant: ${shot.assistant}`);
-        lines.push("</example>");
-        lines.push("");
-    }
-    return lines.join("\n");
-}
-
-/** Looks up a model by id across providers. */
-export function findModelById(models: MutableModels, id: string): Model<Api> | undefined {
-    for (const m of models.getModels() as Array<Model<Api>>) {
-        if (m.id === id) return m;
-    }
-    return undefined;
 }

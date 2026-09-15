@@ -38,7 +38,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve as resolvePath } from "node:path";
 import { tacoHome } from "../config/tacoHome.ts";
-import { scrubbedProcessEnv } from "../runtime/providerKeyStore.ts";
+import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 
 /** Marker that separates our echo from any MOTD / profile chatter the shell
  *  prints before running the command. We search for the last occurrence so a

@@ -16,11 +16,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
-import type { WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Skill } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
-import { SessionRegistry, type SessionRegistryOptions } from "../../src/runtime/sessionRegistry.ts";
+import {
+    SessionRegistry,
+    type SessionRegistryOptions,
+} from "../../src/runtime/session/sessionRegistry.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 
@@ -60,12 +63,20 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
         sessionsRoot,
         env,
         models,
-        systemPrompt: "test prompt",
+        getSystemPrompt: () => "test prompt",
         tools: [],
         resources: {},
         streamOptions: {},
-        spawnSubagent: async () => ({ subSessionId: "stub-sub", resultText: "", isError: true }),
-        resumeSubagent: async () => ({ subSessionId: "stub-sub", resultText: "", isError: true }),
+        spawnSubagent: async () => ({
+            subSessionId: asSessionId("stub-sub"),
+            resultText: "",
+            isError: true,
+        }),
+        resumeSubagent: async () => ({
+            subSessionId: asSessionId("stub-sub"),
+            resultText: "",
+            isError: true,
+        }),
         spawnSkillSubagent: async () => ({
             subSessionId: "stub-sub",
             resultText: "",

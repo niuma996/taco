@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { asSessionId } from "@taco-ai/protocol";
 import type { SubagentSpawnContext } from "../../src/agents/types.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createAgentTool } from "../../src/tools/agent.ts";
@@ -15,8 +16,12 @@ describe("agent tool", () => {
 
     /** Non-executing spawn context, for tests that only inspect the description. */
     const stubCtx = (): SubagentSpawnContext => ({
-        spawn: async () => ({ subSessionId: "", resultText: "", isError: false }),
-        continue: async () => ({ subSessionId: "", resultText: "", isError: true }),
+        spawn: async () => ({ subSessionId: asSessionId("stub"), resultText: "", isError: false }),
+        continue: async () => ({
+            subSessionId: asSessionId("stub"),
+            resultText: "",
+            isError: true,
+        }),
     });
 
     it("forwards params to spawn and wraps result into content+details", async () => {
@@ -24,10 +29,10 @@ describe("agent tool", () => {
         const ctx: SubagentSpawnContext = {
             async spawn(args) {
                 captured = args;
-                return { subSessionId: "sub-1", resultText: "done", isError: false };
+                return { subSessionId: asSessionId("sub-1"), resultText: "done", isError: false };
             },
             async continue() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
         };
         const tool = createAgentTool(ctx, [{ agentType: "explorer" }, { agentType: "coder" }]);
@@ -59,10 +64,10 @@ describe("agent tool", () => {
         const ctx: SubagentSpawnContext = {
             async spawn(args) {
                 captured = args;
-                return { subSessionId: "sub-1", resultText: "done", isError: false };
+                return { subSessionId: asSessionId("sub-1"), resultText: "done", isError: false };
             },
             async continue() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
         };
         const tool = createAgentTool(ctx, [{ agentType: "reviewer" }]);
@@ -89,8 +94,16 @@ describe("agent tool", () => {
     it("lists available agent types in the description", () => {
         const tool = createAgentTool(
             {
-                spawn: async () => ({ subSessionId: "", resultText: "", isError: false }),
-                continue: async () => ({ subSessionId: "", resultText: "", isError: true }),
+                spawn: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: false,
+                }),
+                continue: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: true,
+                }),
             },
             [{ agentType: "explorer" }, { agentType: "coder" }],
         );
@@ -180,11 +193,15 @@ describe("agent tool", () => {
         const tool = createAgentTool(
             {
                 spawn: async () => ({
-                    subSessionId: "sub-x",
+                    subSessionId: asSessionId("sub-x"),
                     resultText: "unknown agent type: bogus",
                     isError: true,
                 }),
-                continue: async () => ({ subSessionId: "", resultText: "", isError: true }),
+                continue: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: true,
+                }),
             },
             [{ agentType: "explorer" }],
         );
@@ -209,8 +226,16 @@ describe("agent tool", () => {
         // parallel for fan-out to work.
         const tool = createAgentTool(
             {
-                spawn: async () => ({ subSessionId: "", resultText: "", isError: false }),
-                continue: async () => ({ subSessionId: "", resultText: "", isError: true }),
+                spawn: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: false,
+                }),
+                continue: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: true,
+                }),
             },
             [{ agentType: "explorer" }],
         );
@@ -232,12 +257,16 @@ describe("agent tool", () => {
                     await new Promise((r) => setTimeout(r, PER_CALL_MS));
                     active--;
                     return {
-                        subSessionId: `sub-${peakActive}`,
+                        subSessionId: asSessionId(`sub-${peakActive}`),
                         resultText: `peak-${peakActive}`,
                         isError: false,
                     };
                 },
-                continue: async () => ({ subSessionId: "", resultText: "", isError: true }),
+                continue: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: true,
+                }),
             },
             [{ agentType: "explorer" }],
         );

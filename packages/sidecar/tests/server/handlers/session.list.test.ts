@@ -13,7 +13,12 @@ import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
 
 import type { SessionListEntry } from "@taco-ai/protocol";
-import { SESSION_LIST_DEFAULT_LIMIT, SESSION_LIST_MAX_LIMIT } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    SESSION_LIST_DEFAULT_LIMIT,
+    SESSION_LIST_MAX_LIMIT,
+} from "@taco-ai/protocol";
 import {
     findCursorIndex,
     normalizeLimit,
@@ -32,7 +37,13 @@ function entry(
     updatedAt?: string,
     createdAt = "2026-01-01T00:00:00Z",
 ): SessionListEntry {
-    return { id, cwd: "/ws", filePath: `/ws/${id}.jsonl`, createdAt, updatedAt };
+    return {
+        id: asSessionId(id),
+        cwd: asWorkspaceId("/ws"),
+        filePath: `/ws/${id}.jsonl`,
+        createdAt,
+        updatedAt,
+    };
 }
 
 describe("session.list kind filter", () => {
@@ -186,32 +197,41 @@ describe("findCursorIndex", () => {
     });
 
     it("resumes just past the cursor entry", () => {
-        assert.equal(findCursorIndex(sorted, { updatedAt: "2026-03-01T00:00:00Z", id: "a" }), 1);
-        assert.equal(findCursorIndex(sorted, { updatedAt: "2026-02-01T00:00:00Z", id: "b" }), 2);
+        assert.equal(
+            findCursorIndex(sorted, { updatedAt: "2026-03-01T00:00:00Z", id: asSessionId("a") }),
+            1,
+        );
+        assert.equal(
+            findCursorIndex(sorted, { updatedAt: "2026-02-01T00:00:00Z", id: asSessionId("b") }),
+            2,
+        );
     });
 
     it("returns the list length when the cursor is at or past the tail", () => {
         // Cursor on the last entry — nothing older remains.
         assert.equal(
-            findCursorIndex(sorted, { updatedAt: "2026-01-01T00:00:00Z", id: "c" }),
+            findCursorIndex(sorted, { updatedAt: "2026-01-01T00:00:00Z", id: asSessionId("c") }),
             sorted.length,
         );
         // Cursor older than everything — also past the tail.
         assert.equal(
-            findCursorIndex(sorted, { updatedAt: "2020-01-01T00:00:00Z", id: "zzz" }),
+            findCursorIndex(sorted, { updatedAt: "2020-01-01T00:00:00Z", id: asSessionId("zzz") }),
             sorted.length,
         );
     });
 
     it("handles an empty list", () => {
-        assert.equal(findCursorIndex([], { updatedAt: "2026-01-01T00:00:00Z", id: "a" }), 0);
+        assert.equal(
+            findCursorIndex([], { updatedAt: "2026-01-01T00:00:00Z", id: asSessionId("a") }),
+            0,
+        );
     });
 
     it("resolves same-timestamp cursors by id so a tie cannot repeat a page", () => {
         const same = "2026-04-01T00:00:00Z";
         const tied = sortSessionsDesc([entry("a", same), entry("b", same), entry("c", same)]);
         // sorted desc by id => [c, b, a]; cursor at "b" must resume on "a".
-        assert.equal(findCursorIndex(tied, { updatedAt: same, id: "b" }), 2);
+        assert.equal(findCursorIndex(tied, { updatedAt: same, id: asSessionId("b") }), 2);
     });
 });
 

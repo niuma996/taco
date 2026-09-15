@@ -7,7 +7,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, describe, it } from "node:test";
 
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 
 /**
  * Snapshot of `*_API_KEY` env vars so each test can run against a clean env

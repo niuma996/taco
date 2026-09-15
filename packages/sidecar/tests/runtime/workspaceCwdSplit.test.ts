@@ -81,10 +81,10 @@ describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
     it("a subagent cannot recover a tool the workspace policy denied", () => {
         const ws = makeRuntime({ imPolicy: DEFAULT_POLICY });
         assert.ok(!ws.tools.some((t) => t.name === "shell"));
-        assert.ok(!ws.agentSpawner.tools.some((t) => t.name === "shell"));
+        assert.ok(!ws.agentSpawner.getTools().some((t) => t.name === "shell"));
 
         const explicit = filterToolsForAgent(
-            ws.agentSpawner.tools as never,
+            ws.agentSpawner.getTools() as never,
             ["shell", "read", "grep"],
             1,
         );
@@ -94,13 +94,13 @@ describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
             "whitelisting shell must not resurrect it",
         );
 
-        const inheritAll = filterToolsForAgent(ws.agentSpawner.tools as never, undefined, 1);
+        const inheritAll = filterToolsForAgent(ws.agentSpawner.getTools() as never, undefined, 1);
         assert.ok(!inheritAll.some((t) => t.name === "shell"));
     });
 
     it("a subagent does receive a tool the policy allows", () => {
         const ws = makeRuntime({ imPolicy: SHELL_ALLOW_POLICY });
-        const child = filterToolsForAgent(ws.agentSpawner.tools as never, ["shell"], 1);
+        const child = filterToolsForAgent(ws.agentSpawner.getTools() as never, ["shell"], 1);
         assert.deepEqual(
             child.map((t) => t.name),
             ["shell"],

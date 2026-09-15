@@ -40,6 +40,126 @@ export function waitForEvent(opts: WaitForEventOptions): WaitForEvent {
 }
 
 /**
+ * Error thrown when a `withDeadline` wait times out. `code` is the stable
+ * machine-routable token callers branch on (`HOOK_TIMEOUT`, `MCP_TIMEOUT`,
+ * `SHELL_TIMEOUT`); `label` is the human-readable context that landed in the
+ * message; `timeoutMs` is the budget that elapsed. Carrying all three on the
+ * instance means callers do not have to inspect the message to know which
+ * deadline fired, and a typed `instanceof` check is enough — both of those are
+ * the alternatives that go wrong in nested timeouts where one outer wrapper's
+ * expiry reads as another inner wrapper's.
+ */
+export class DeadlineError extends Error {
+    readonly code: string;
+    readonly label: string;
+    readonly timeoutMs: number;
+    constructor(code: string, label: string, timeoutMs: number) {
+        super(`${label} timed out after ${timeoutMs}ms`);
+        this.name = "DeadlineError";
+        this.code = code;
+        this.label = label;
+        this.timeoutMs = timeoutMs;
+    }
+}
+
+export interface WithDeadlineOptions {
+    /** Maximum wait before the local race wins. Must be a positive finite number. */
+    readonly timeoutMs: number;
+    /**
+     * Stable machine-routable token identifying which capability's timeout
+     * fired. Surfaced on `DeadlineError.code` so retry / fall-back logic
+     * branches on the value rather than parsing the message.
+     */
+    readonly code: string;
+    /**
+     * Human-readable context that lands in the error message. Distinct from
+     * `code` so logs stay readable while routing stays stable: e.g.
+     * code `"MCP_TIMEOUT"`, label `"mcp server foo: connect"`.
+     */
+    readonly label: string;
+    /**
+     * Caller-supplied abort signal (e.g. session stop). Combined with the
+     * deadline signal so either cancels the underlying call.
+     */
+    readonly externalSignal?: AbortSignal;
+    /**
+     * Called once if the deadline fires before the promise resolves. Use it
+     * to dispose of resources the local race cannot reach (stdio child,
+     * in-flight HTTP request). Must not throw — failures are swallowed.
+     */
+    readonly onTimeout?: () => void | Promise<void>;
+}
+
+/**
+ * Races `promise` against a local deadline timer. The deadline signal is
+ * fused with `externalSignal` so either can cancel the underlying call,
+ * and `onTimeout` runs once if the local timer wins so the caller can
+ * dispose of resources the race cannot reach itself.
+ *
+ * Two-layer cancellation exists because not every SDK call respects its
+ * AbortSignal (e.g. stuck on a native IO read): the local race is the
+ * backstop, while `onTimeout` is for freeing the child process / connection
+ * the race can never cancel itself.
+ *
+ * The race rejects with `DeadlineError` carrying `code` / `label` /
+ * `timeoutMs` so a typed check is enough to route — message parsing would
+ * drift the moment a label changes.
+ */
+export async function withDeadline<T>(promise: Promise<T>, opts: WithDeadlineOptions): Promise<T> {
+    const { timeoutMs, code, label, externalSignal, onTimeout } = opts;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new Error(
+            `withDeadline: timeoutMs must be a positive finite number, got ${timeoutMs}`,
+        );
+    }
+    const ac = new AbortController();
+    const onExternalAbort = (): void => ac.abort();
+    if (externalSignal) {
+        if (externalSignal.aborted) ac.abort();
+        else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+    let timedOut = false;
+    const timer = setTimeout(() => {
+        timedOut = true;
+        ac.abort();
+    }, timeoutMs);
+    try {
+        return await Promise.race([promise, rejectOnAbort(ac.signal, code, label, timeoutMs)]);
+    } catch (err) {
+        if (timedOut && onTimeout) {
+            try {
+                await onTimeout();
+            } catch {
+                // Swallow — the deadline reject is the user-visible error;
+                // cleanup failures are not actionable here.
+            }
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
+        if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+        ac.abort();
+    }
+}
+
+function rejectOnAbort(
+    signal: AbortSignal,
+    code: string,
+    label: string,
+    timeoutMs: number,
+): Promise<never> {
+    return new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+            reject(new DeadlineError(code, label, timeoutMs));
+            return;
+        }
+        signal.addEventListener("abort", () => reject(new DeadlineError(code, label, timeoutMs)), {
+            once: true,
+        });
+    });
+}
+
+/**
  * Single-flight a per-key async factory. Concurrent calls for the same key
  * share one in-flight promise; later calls after the promise resolves or
  * rejects retry the factory (failures are not cached).

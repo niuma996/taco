@@ -10,7 +10,7 @@
  * it a ModelMenu change on a blank session is silently dropped.
  */
 
-import type { ThinkingLevel } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, type ThinkingLevel } from "@taco-ai/protocol";
 import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -109,7 +109,11 @@ export function useSessionSettings({
                 activeSession,
                 next,
                 async () => {
-                    await client.sessionSetThinkingLevel(activeCwd, activeSession, next);
+                    await client.sessionSetThinkingLevel(
+                        asWorkspaceId(activeCwd),
+                        asSessionId(activeSession),
+                        next,
+                    );
                 },
                 "sessionSetThinkingLevel",
             );
@@ -131,7 +135,12 @@ export function useSessionSettings({
                 activeSession,
                 next,
                 async () => {
-                    await client.sessionSetModel(activeCwd, activeSession, next.provider, next.id);
+                    await client.sessionSetModel(
+                        asWorkspaceId(activeCwd),
+                        asSessionId(activeSession),
+                        next.provider,
+                        next.id,
+                    );
                 },
                 "sessionSetModel",
             );

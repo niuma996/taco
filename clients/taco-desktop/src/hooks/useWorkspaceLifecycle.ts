@@ -11,9 +11,9 @@
  */
 
 import type { SessionListResult } from "@taco-ai/protocol";
-import { SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { type MutableRefObject, useCallback, useEffect, useRef } from "react";
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { bootMark, bootPhase } from "../lib/bootTrace";
 import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
 import {
@@ -64,6 +64,15 @@ export interface UseWorkspaceLifecycleApi {
     ) => Promise<SnapshotRecovery>;
     deleteSession: (cwd: string, sid: string) => Promise<void>;
     renameSession: (cwd: string, sid: string, name: string) => Promise<void>;
+    /**
+     * True once `initDefaultCwd()` has settled — on success AND on failure.
+     * Gates UI that pre-fills from `getDefaultCwd()`: reading it earlier yields
+     * the empty synchronous placeholder. Deliberately not "the default resolved
+     * successfully": when the Tauri call fails the default stays empty forever,
+     * and gating on a non-empty cwd would hide onboarding permanently on a
+     * fresh install, leaving no path to pick a directory manually.
+     */
+    defaultCwdSettled: boolean;
     /** Refresh one workspace's session list (sidebar titles) without attaching. */
     refreshSessionList: (cwd: string) => Promise<void>;
     /** Re-attach the given session, reading through a ref so callers created
@@ -94,6 +103,8 @@ export function useWorkspaceLifecycle({
 }: UseWorkspaceLifecycleOptions): UseWorkspaceLifecycleApi {
     /** StrictMode double-run guard — see initFromStorage top. */
     const initStartedRef = useRef(false);
+    /** See `UseWorkspaceLifecycleApi.defaultCwdSettled`. */
+    const [defaultCwdSettled, setDefaultCwdSettled] = useState(false);
 
     /** Apply a SessionListResult to the reducer. Centralizes the
      *  result→dispatch mapping so initial load, refresh, and load-more share
@@ -125,10 +136,10 @@ export function useWorkspaceLifecycle({
             // debugMode no longer needs to be passed per-call: the Rust host reads
             // it from ~/.taco/desktop.json at spawn time, so every spawn
             // (prewarm, reconnect, Apply & Restart) sees the current value.
-            await client.start(cwd);
+            await client.start(asWorkspaceId(cwd));
             // Default page size (no full:true) — pagination must actually page on
             // initial load, not fetch every session up front.
-            dispatchListResult(cwd, await client.sessionList(cwd), false);
+            dispatchListResult(cwd, await client.sessionList(asWorkspaceId(cwd)), false);
         },
         [client, dispatchListResult],
     );
@@ -145,7 +156,7 @@ export function useWorkspaceLifecycle({
                 // instead of collapsing it back to the first page.
                 const loaded = workspacesRef.current[cwd]?.sessions.length ?? 0;
                 const list = await client.sessionList(
-                    cwd,
+                    asWorkspaceId(cwd),
                     loaded > SESSION_LIST_DEFAULT_LIMIT ? { limit: loaded } : undefined,
                 );
                 dispatchListResult(cwd, list, false);
@@ -160,7 +171,10 @@ export function useWorkspaceLifecycle({
         async (cwd: string, sessionId: string): Promise<void> => {
             let inFlightAgentToolCallIds: string[] | undefined;
             try {
-                const attachResult = await client.sessionAttach(cwd, sessionId);
+                const attachResult = await client.sessionAttach(
+                    asWorkspaceId(cwd),
+                    asSessionId(sessionId),
+                );
                 inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
             } catch (err) {
                 const msg = `Cannot open session: ${(err as Error).message}`;
@@ -176,7 +190,7 @@ export function useWorkspaceLifecycle({
             }
             let hist: Awaited<ReturnType<typeof client.sessionHistory>>;
             try {
-                hist = await client.sessionHistory(cwd, sessionId);
+                hist = await client.sessionHistory(asWorkspaceId(cwd), asSessionId(sessionId));
             } catch (err) {
                 // sessionAttach succeeded — the session is valid on the sidecar.
                 // Only the history pull failed; dispatch an empty ATTACH so the
@@ -217,7 +231,7 @@ export function useWorkspaceLifecycle({
             // cursor would discard those pushes as duplicates. Keep the split until push-recovery
             // semantics change deliberately.
             try {
-                const r = await client.sessionTasksGet(cwd, sessionId);
+                const r = await client.sessionTasksGet(asWorkspaceId(cwd), asSessionId(sessionId));
                 dispatchWs({
                     type: "TASKS_UPDATED",
                     cwd,
@@ -229,7 +243,10 @@ export function useWorkspaceLifecycle({
                 /* Older sidecar may lack this RPC — rely on push. */
             }
             try {
-                const p = await client.sessionPlanStateGet(cwd, sessionId);
+                const p = await client.sessionPlanStateGet(
+                    asWorkspaceId(cwd),
+                    asSessionId(sessionId),
+                );
                 dispatchWs({
                     type: "PLAN_STATE_UPDATED",
                     cwd,
@@ -306,7 +323,17 @@ export function useWorkspaceLifecycle({
         // Resolve the real default cwd ($TACO_HOME/workspace, created on demand)
         // before reading storage — loadOpenedCwds / resolveActiveCwd fall back to
         // it, and the sync placeholder value points at a path that may not exist.
-        await bootPhase("ui.initDefaultCwd", () => initDefaultCwd());
+        //
+        // `initDefaultCwd` swallows its own errors (keeping the empty fallback),
+        // so returning from this await means "settled", not "succeeded" — which
+        // is exactly the signal `defaultCwdSettled` promises. try/finally guards
+        // the case where bootPhase itself throws: a stuck flag would hide
+        // onboarding forever.
+        try {
+            await bootPhase("ui.initDefaultCwd", () => initDefaultCwd());
+        } finally {
+            setDefaultCwdSettled(true);
+        }
         // Read opened + active from desktop.json (via the Rust host). The read
         // also runs the one-shot migration from the legacy localStorage keys,
         // so an upgrade-in-place user lands in the same workspaces as before.
@@ -365,7 +392,9 @@ export function useWorkspaceLifecycle({
                 // 10s awaitHandshake ceiling, so 3 attempts can legitimately
                 // consume ~34s. Per-attempt marks distinguish "one slow attempt"
                 // from "the budget was walked to exhaustion".
-                await bootPhase(`ui.leader.start.attempt${i}`, () => client.start(activeTarget));
+                await bootPhase(`ui.leader.start.attempt${i}`, () =>
+                    client.start(asWorkspaceId(activeTarget)),
+                );
                 leaderOk = true;
                 break;
             } catch (err) {
@@ -409,7 +438,9 @@ export function useWorkspaceLifecycle({
                     await new Promise((r) => setTimeout(r, delay));
                 }
                 try {
-                    await bootPhase(`ui.percwd.start[${cwd}]`, () => client.start(cwd));
+                    await bootPhase(`ui.percwd.start[${cwd}]`, () =>
+                        client.start(asWorkspaceId(cwd)),
+                    );
                     // sessionList is bounded only by rpcTimeoutMs, which
                     // defaults to 1,000,000ms. If the daemon accepts the
                     // connection and completes the handshake but never
@@ -417,7 +448,7 @@ export function useWorkspaceLifecycle({
                     // with no error to catch — the mark is how we tell that
                     // apart from a slow-but-answering daemon.
                     const list = await bootPhase(`ui.percwd.sessionList[${cwd}]`, () =>
-                        client.sessionList(cwd),
+                        client.sessionList(asWorkspaceId(cwd)),
                     );
                     dispatchListResult(cwd, list, false);
                     lastErr = undefined;
@@ -478,7 +509,7 @@ export function useWorkspaceLifecycle({
                 for (const delay of [0, 2000]) {
                     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
                     try {
-                        const list = await client.sessionList(cwd);
+                        const list = await client.sessionList(asWorkspaceId(cwd));
                         dispatchListResult(cwd, list, false);
                         return;
                     } catch (err) {
@@ -637,7 +668,10 @@ export function useWorkspaceLifecycle({
             _sessionKind: "main" | "subagent",
         ): Promise<SnapshotRecovery> => {
             try {
-                const snapshot = await client.sessionSnapshotGet(cwd, sessionId);
+                const snapshot = await client.sessionSnapshotGet(
+                    asWorkspaceId(cwd),
+                    asSessionId(sessionId),
+                );
                 const messages = historyToUiMessages(
                     snapshot.history.entries as Parameters<typeof historyToUiMessages>[0],
                 );
@@ -683,7 +717,7 @@ export function useWorkspaceLifecycle({
     const deleteSession = useCallback(
         async (cwd: string, sessionId: string): Promise<void> => {
             try {
-                await client.sessionDelete(cwd, sessionId);
+                await client.sessionDelete(asWorkspaceId(cwd), asSessionId(sessionId));
             } catch (err) {
                 const msg = `Failed to delete session: ${(err as Error).message}`;
                 console.error("[taco] deleteSession failed", cwd, sessionId, err);
@@ -711,7 +745,16 @@ export function useWorkspaceLifecycle({
             const cursor = workspacesRef.current[cwd]?.listCursor;
             if (!cursor) return;
             try {
-                dispatchListResult(cwd, await client.sessionList(cwd, { cursor }), true);
+                dispatchListResult(
+                    cwd,
+                    await client.sessionList(asWorkspaceId(cwd), {
+                        cursor: {
+                            updatedAt: cursor.updatedAt,
+                            id: asSessionId(cursor.id),
+                        },
+                    }),
+                    true,
+                );
             } catch (err) {
                 console.error("[taco] loadMoreSessions failed", cwd, err);
             }
@@ -722,7 +765,7 @@ export function useWorkspaceLifecycle({
     const renameSession = useCallback(
         async (cwd: string, sessionId: string, name: string): Promise<void> => {
             try {
-                await client.sessionRename(cwd, sessionId, name);
+                await client.sessionRename(asWorkspaceId(cwd), asSessionId(sessionId), name);
             } catch (err) {
                 const msg = `Failed to rename session: ${(err as Error).message}`;
                 console.error("[taco] renameSession failed", cwd, sessionId, err);
@@ -750,6 +793,7 @@ export function useWorkspaceLifecycle({
         restoreSessionSnapshot,
         deleteSession,
         renameSession,
+        defaultCwdSettled,
         refreshSessionList,
         attachSessionRef,
     };

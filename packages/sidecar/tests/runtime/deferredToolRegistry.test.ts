@@ -8,7 +8,7 @@ import {
     DefaultDeferredToolRegistry,
     type DeferredToolRegistryOptions,
     type ToolCandidate,
-} from "../../src/runtime/deferredToolRegistry.ts";
+} from "../../src/runtime/harness/deferredToolRegistry.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 const fakeTool = (name: string): TacoTool =>

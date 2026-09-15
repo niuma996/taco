@@ -12,6 +12,12 @@ describe("mutation gate", () => {
     let planState: ReturnType<typeof createPlanModeState>;
     let gate: ReturnType<typeof createMutationGateHook>;
 
+    // Stand-in for the production wiring's live toolset lookup: built-in
+    // read-only tools declare `taco.mutates === false`; everything else
+    // (MCP / extension tools) is unknown and therefore fenced.
+    const isKnownReadOnly = (toolName: string): boolean =>
+        ["read", "grep", "glob", "askUser", "todoWrite"].includes(toolName);
+
     beforeEach(() => {
         const base = mkdtempSync(join(tmpdir(), "taco-gate-"));
         root = join(base, "workspace");
@@ -19,7 +25,7 @@ describe("mutation gate", () => {
         mkdirSync(root, { recursive: true });
         mkdirSync(outside, { recursive: true });
         planState = createPlanModeState();
-        gate = createMutationGateHook({ root, getPlanState: () => planState });
+        gate = createMutationGateHook({ root, getPlanState: () => planState, isKnownReadOnly });
     });
 
     afterEach(() => {
@@ -149,6 +155,92 @@ describe("mutation gate", () => {
             assert.equal(result, undefined);
             assert.equal(snapshotFailures.length, 1);
             assert.match(snapshotFailures[0].reason, /disk full/);
+        });
+    });
+
+    describe("unknown tool path fence", () => {
+        it("blocks an absolute path outside the root on any path-like key", async () => {
+            for (const key of ["path", "file_path", "filepath", "filename", "file", "target"]) {
+                const result = await gate({
+                    toolName: "mcp__fs__write_file",
+                    input: { [key]: join(outside, "a.ts") },
+                });
+                assert.equal(result?.block, true, `key ${key} should be fenced`);
+                assert.match(result?.reason ?? "", /absolute path outside the workspace root/);
+            }
+        });
+
+        it("blocks an absolute path that escapes through a symlinked ancestor", async () => {
+            symlinkSync(outside, join(root, "escape"), "dir");
+            const result = await gate({
+                toolName: "mcp__fs__write_file",
+                input: { path: join(root, "escape", "a.ts") },
+            });
+            assert.equal(result?.block, true);
+        });
+
+        it("allows an absolute path inside the root", async () => {
+            const result = await gate({
+                toolName: "mcp__fs__write_file",
+                input: { path: join(root, "src/a.ts") },
+            });
+            assert.equal(result, undefined);
+        });
+
+        // Relative values are out of scope by design: the gate does not know
+        // which directory an unknown tool resolves them against, so refusing
+        // them would reject legitimate non-path arguments while proving
+        // nothing about where the tool would actually write.
+        it("allows relative values, including traversal and non-path strings", async () => {
+            for (const value of [
+                "src/a.ts",
+                "../outside/a.ts",
+                "../v2/endpoint",
+                "release/1.2",
+                "",
+            ]) {
+                const result = await gate({
+                    toolName: "mcp__http__request",
+                    input: { target: value },
+                });
+                assert.equal(result, undefined, `value ${JSON.stringify(value)} should pass`);
+            }
+        });
+
+        it("allows URL-shaped values", async () => {
+            for (const value of [
+                "https://api.example.com/v1/models",
+                "file:///etc/passwd",
+                "s3://bucket/key",
+            ]) {
+                const result = await gate({
+                    toolName: "mcp__http__request",
+                    input: { path: value },
+                });
+                assert.equal(result, undefined, `value ${JSON.stringify(value)} should pass`);
+            }
+        });
+
+        it("ignores non-string values", async () => {
+            const result = await gate({
+                toolName: "mcp__fs__write_file",
+                input: { path: 42 },
+            });
+            assert.equal(result, undefined);
+        });
+
+        it("exempts tools the predicate reports as read-only", async () => {
+            const result = await gate({ toolName: "read", input: { path: join(outside, "a.ts") } });
+            assert.equal(result, undefined);
+        });
+
+        it("fences every unknown tool when no predicate is supplied", async () => {
+            const local = createMutationGateHook({ root, getPlanState: () => planState });
+            const result = await local({
+                toolName: "read",
+                input: { path: join(outside, "a.ts") },
+            });
+            assert.equal(result?.block, true);
         });
     });
 });

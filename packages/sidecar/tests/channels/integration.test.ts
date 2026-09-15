@@ -15,7 +15,7 @@ import { after, before, describe, it } from "node:test";
 import type { ServerPush } from "@taco-ai/protocol";
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
 import { MockChannel } from "../../src/channels/builtin/mockChannel.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 

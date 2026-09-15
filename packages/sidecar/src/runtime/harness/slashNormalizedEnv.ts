@@ -17,9 +17,9 @@
  * inside loadSkillsFromDirInternal.
  */
 
-import type { FileError, FileInfo, Result } from "../runtime/pi/node.ts";
-import type { Context } from "../runtime/pi/types.ts";
-import { NodeExecutionEnv } from "./pi/node.ts";
+import type { FileError, FileInfo, Result } from "../pi/node.ts";
+import { NodeExecutionEnv } from "../pi/node.ts";
+import type { Context } from "../pi/types.ts";
 
 /** Normalize one FileInfo's `path` + `name` to forward slashes. */
 function normalizeFileInfo(info: FileInfo): FileInfo {

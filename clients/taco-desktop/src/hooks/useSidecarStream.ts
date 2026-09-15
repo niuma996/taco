@@ -18,7 +18,7 @@ import type {
     ToolCallStartParams,
     ToolCallUpdateParams,
 } from "@taco-ai/protocol";
-import { PushMethods } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
@@ -291,7 +291,7 @@ export function useSidecarStream(
     if (!processorRef.current) {
         processorRef.current = new SessionPushProcessor({
             getEvents: (workspace, session, afterSeq) =>
-                client.sessionEventsGet(workspace, session, afterSeq),
+                client.sessionEventsGet(asWorkspaceId(workspace), asSessionId(session), afterSeq),
             deliver: (push) => normalizePushFrame(push, onActionRef),
             recoverSnapshot: (workspace, session, sessionKind) =>
                 onSnapshotRequiredRef(workspace, session, sessionKind),

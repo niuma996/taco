@@ -6,9 +6,9 @@
  * has to be decided here rather than by the caller.
  */
 
-import { harnessContext } from "../lib/harnessContext.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import type { AgentLane, ImageContent } from "../pi/types.ts";
 import { toHarnessError } from "./harnessErrors.ts";
-import type { AgentLane, ImageContent } from "./pi/types.ts";
 
 /**
  * Outcome of a steering enqueue.

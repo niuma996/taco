@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ServerPush, SessionEventsGetResult } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    type ServerPush,
+    type SessionEventsGetResult,
+} from "@taco-ai/protocol";
 import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor.ts";
 
 function frame(seq: number): ServerPush {
     return {
         method: "session.event",
-        workspace: "/workspace",
-        session: "session",
+        workspace: asWorkspaceId("/workspace"),
+        session: asSessionId("session"),
         seq,
         params: { event: { type: "message_start" } },
     };

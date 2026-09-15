@@ -1,4 +1,4 @@
-import type { AgentEntry } from "@taco-ai/protocol";
+import { type AgentEntry, asWorkspaceId } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
@@ -40,7 +40,7 @@ export function useAgentsPane(
         setAgentContentError(null);
         clearAgentsError();
         void client
-            .agentsList(activeCwd)
+            .agentsList(asWorkspaceId(activeCwd))
             .then((r) => {
                 setAgents(r.agents);
                 if (r.agents.length > 0) {
@@ -64,7 +64,7 @@ export function useAgentsPane(
         if (!selectedAgentType || !activeCwd) return;
         setAgentContentLoading(true);
         void client
-            .agentsContent(activeCwd, selectedAgentType)
+            .agentsContent(asWorkspaceId(activeCwd), selectedAgentType)
             .then((r) => {
                 if (cancelled) return;
                 setAgentContent(r.systemPrompt);

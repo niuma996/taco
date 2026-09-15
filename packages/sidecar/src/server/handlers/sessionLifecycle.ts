@@ -17,6 +17,8 @@ import type {
     SessionListParams,
 } from "@taco-ai/protocol";
 import {
+    asSessionId,
+    asWorkspaceId,
     ErrorCodes,
     SESSION_LIST_DEFAULT_LIMIT,
     SESSION_LIST_MAX_LIMIT,
@@ -32,7 +34,7 @@ import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { JsonlSessionMetadata } from "../../runtime/pi/types.ts";
 import { uuidv7 } from "../../runtime/pi/values.ts";
-import type { SessionFacts } from "../../runtime/sessionFacts.ts";
+import type { SessionFacts } from "../../runtime/session/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -128,7 +130,7 @@ export function registerSessionLifecycleHandlers(): void {
                 params.initialImages !== undefined && params.initialImages.length > 0;
             if (params.initialPrompt || hasInitialImages) {
                 try {
-                    const attached = await workspace.attach(meta.id, {
+                    const attached = await workspace.attach(asSessionId(meta.id), {
                         thinkingLevel: params.thinkingLevel,
                     });
                     const title = (params.initialPrompt ?? "")
@@ -150,7 +152,7 @@ export function registerSessionLifecycleHandlers(): void {
                     workspace.invalidateListCache();
                 } catch (e) {
                     try {
-                        await workspace.detach(meta.id);
+                        await workspace.detach(asSessionId(meta.id));
                         await workspace.repo.delete(meta, harnessContext);
                         workspace.invalidateListCache();
                     } catch {
@@ -171,7 +173,11 @@ export function registerSessionLifecycleHandlers(): void {
     registerMethod(
         RPC.sessionAttach,
         true,
-        async ({ workspace, params }: MethodCtx<AttachParams>) => {
+        async ({ server, cwd, workspace, params }: MethodCtx<AttachParams>) => {
+            // Before attach: the `attached` frame itself is the first
+            // sequenced push a reconnecting client sees, so the ring must be
+            // seeded from disk tail before this handler emits anything.
+            await server.hydrateSessionEvents(cwd, params.sessionId);
             await workspace.attach(params.sessionId, { thinkingLevel: params.thinkingLevel });
             // Read after attach so the client can tell a live agent tool call from
             // one orphaned by a previous process exit. A history read alone cannot:
@@ -236,8 +242,8 @@ async function buildSessionEntry(
             : m.createdAt;
     const updatedAt = new Date(updatedAtSource).toISOString();
     return {
-        id: m.id,
-        cwd: m.cwd,
+        id: asSessionId(m.id),
+        cwd: asWorkspaceId(m.cwd),
         filePath: m.path,
         createdAt: new Date(m.createdAt).toISOString(),
         updatedAt,
@@ -245,12 +251,17 @@ async function buildSessionEntry(
         agentType: md.agentType,
         // `parentSessionId` is standard 0.85 metadata; the fact is the fallback
         // for sessions written before it moved.
-        parentSessionId: m.parentSessionId ?? md.parentSessionId,
+        parentSessionId:
+            m.parentSessionId !== undefined
+                ? asSessionId(m.parentSessionId)
+                : md.parentSessionId !== undefined
+                  ? asSessionId(md.parentSessionId)
+                  : undefined,
         parentToolCallId: md.parentToolCallId,
         depth: md.depth,
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
-        name: await workspace.getSessionName(m.id).catch((err) => {
+        name: await workspace.getSessionName(asSessionId(m.id)).catch((err) => {
             log.error("getSessionName failed in session.list", m.id, err);
             return undefined;
         }),

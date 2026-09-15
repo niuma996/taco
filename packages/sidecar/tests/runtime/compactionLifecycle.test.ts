@@ -17,17 +17,18 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import {
     CompactionController,
     type CompactionLifecycleSignal,
-} from "../../src/runtime/compactionController.ts";
+} from "../../src/runtime/compaction/compactionController.ts";
 import type { AgentLane, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 import { type AgentHarness, LaneBusy, Result } from "../../src/runtime/pi/values.ts";
 import { CompactionPushAdapter } from "../../src/server/compactionPushAdapter.ts";
 import type { EmitPushFn } from "../../src/server/pushTypes.ts";
 
-const CWD = "/tmp/ws";
-const SESSION = "sess-1";
+const CWD = asWorkspaceId("/tmp/ws");
+const SESSION = asSessionId("sess-1");
 
 /** Records every push frame the adapter emits, in order. */
 function newAdapter(): {

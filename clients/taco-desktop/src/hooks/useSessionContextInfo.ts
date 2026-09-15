@@ -6,12 +6,15 @@
  * failures retain the previous indicator value.
  */
 
-import type {
-    CompactionFailureReason,
-    SessionCompactionFinishedParams,
-    SessionContextInfoResult,
+import {
+    asSessionId,
+    asWorkspaceId,
+    type CompactionFailureReason,
+    ErrorCodes,
+    PushMethods,
+    type SessionCompactionFinishedParams,
+    type SessionContextInfoResult,
 } from "@taco-ai/protocol";
-import { ErrorCodes, PushMethods } from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
@@ -99,7 +102,10 @@ export function useSessionContextInfo(
         }
         setLoading(true);
         try {
-            const result = await client.sessionContextInfo(activeCwd, sessionId);
+            const result = await client.sessionContextInfo(
+                asWorkspaceId(activeCwd),
+                asSessionId(sessionId),
+            );
             setInfo(result);
         } catch (e) {
             // Not-attached is an expected race, not a failure: refresh fires on

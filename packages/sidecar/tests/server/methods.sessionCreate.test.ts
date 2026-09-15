@@ -10,6 +10,7 @@
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
 import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import type { JsonlSessionMetadata } from "../../src/runtime/pi/types.ts";
 
 import {
@@ -57,7 +58,7 @@ function makeStub(): WorkspaceStub {
         path: "/tmp/test-ws/.pi/agent/sessions/sess-1.jsonl",
     };
     return {
-        cwd: "/tmp/test-ws",
+        cwd: asWorkspaceId("/tmp/test-ws"),
         calls,
         attached,
         meta,

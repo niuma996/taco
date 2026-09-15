@@ -17,9 +17,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 const defs: AgentDefinition[] = [
@@ -47,7 +48,7 @@ describe("AgentSpawner parent-instructions inheritance", () => {
         writeFileSync(join(cwd, "CLAUDE.md"), CLAUDE_MD);
         ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd,
+            cwd: asWorkspaceId(cwd),
             sessionsRoot,
             agents: defs,
         });
@@ -84,7 +85,7 @@ describe("AgentSpawner parent-instructions inheritance", () => {
 
     async function spawnAndCapture(toolCallId: string): Promise<string> {
         const res = await ws.spawnSubagent({
-            parentSessionId: "parent-1",
+            parentSessionId: asSessionId("parent-1"),
             parentToolCallId: toolCallId,
             agentType: "coder",
             prompt: "go",

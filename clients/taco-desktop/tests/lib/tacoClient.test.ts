@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CURRENT_SESSION_FORMAT_VERSION, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
+import {
+    asWorkspaceId,
+    CURRENT_SESSION_FORMAT_VERSION,
+    SIDECAR_PROTOCOL_VERSION,
+} from "@taco-ai/protocol";
 import { FAST_RPC_METHODS, FAST_RPC_TIMEOUT_MS } from "@taco-ai/shared";
 import { TacoClient } from "../../src/lib/clients/tacoClient.ts";
 import type { SidecarClient, SidecarExit, SidecarFrame } from "../../src/lib/sidecar.ts";
@@ -126,9 +130,11 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 test("desktop client waits for initialize and rejects pending RPC when its sidecar exits", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 50 });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
-    const pending = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
+    const pending = client.call(asWorkspaceId("/workspace/a"), "session.list", {
+        workspace: "/workspace/a",
+    });
     // initialize + the session.list RPC = 2 frames sent.
     // `await Promise.resolve()` flushes the microtask that `ensureInitialized`
     // schedules inside `call()` (added by the cold-start hardening pass to close
@@ -148,10 +154,10 @@ test("concurrent starts share one initialize handshake — the storm fix", async
     // 4 concurrent start(cwd) share one handshake — the old per-cwd readiness
     // would all timeout here at 10s.
     await Promise.all([
-        client.start("/workspace/a"),
-        client.start("/workspace/b"),
-        client.start("/workspace/c"),
-        client.start("/workspace/d"),
+        client.start(asWorkspaceId("/workspace/a")),
+        client.start(asWorkspaceId("/workspace/b")),
+        client.start(asWorkspaceId("/workspace/c")),
+        client.start(asWorkspaceId("/workspace/d")),
     ]);
     await client.dispose();
 });
@@ -159,9 +165,9 @@ test("concurrent starts share one initialize handshake — the storm fix", async
 test("a start issued after initialize resolves immediately", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a"); // handshake already done, processInitialized = true
+    await client.start(asWorkspaceId("/workspace/a")); // handshake already done, processInitialized = true
     // Subsequent workspace starts must not block 10s — should resolve immediately.
-    await client.start("/workspace/b");
+    await client.start(asWorkspaceId("/workspace/b"));
     await client.dispose();
 });
 
@@ -171,8 +177,8 @@ test("daemon replacement notifies epoch subscribers on the new handshake", async
     const replacements: string[] = [];
     client.onWorkspaceEpochChanged((workspace) => replacements.push(workspace));
 
-    await client.start("/workspace/a");
-    await client.start("/workspace/b");
+    await client.start(asWorkspaceId("/workspace/a"));
+    await client.start(asWorkspaceId("/workspace/b"));
     // Exit itself must NOT fire epoch handlers — the dead daemon's owner set
     // is snapshotted (replacedCwds) and the epoch table keeps the old
     // instanceId, so the next handshake classifies the new daemon as
@@ -181,7 +187,7 @@ test("daemon replacement notifies epoch subscribers on the new handshake", async
     assert.deepEqual(replacements, []);
 
     sidecar.instanceId = "instance-2";
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     assert.deepEqual(replacements.sort(), ["/workspace/a", "/workspace/b"]);
     await client.dispose();
 });
@@ -197,14 +203,14 @@ test("a throwing workspace-epoch handler does not break the replacement handshak
     });
     client.onWorkspaceEpochChanged((workspace) => goodNotifications.push(workspace));
 
-    await client.start("/workspace/a");
-    await client.start("/workspace/b");
+    await client.start(asWorkspaceId("/workspace/a"));
+    await client.start(asWorkspaceId("/workspace/b"));
     // Replace daemon, then re-handshake so runInitialize observes "replaced".
     sidecar.emitExit({ code: undefined });
     sidecar.instanceId = "instance-2";
     // start() must succeed even with a throwing handler in the set — the
     // outer try/catch in runInitialize would have rejected initialization.
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     assert.deepEqual(goodNotifications.sort(), ["/workspace/a", "/workspace/b"]);
     await client.dispose();
 });
@@ -216,8 +222,8 @@ test("a failed start rejects the shared promise so concurrent waiters don't hang
     sidecar.ackInitialize = false;
     const client = new TacoClient({ sidecar });
     // Two concurrent starts share the same initialization promise.
-    const first = client.start("/workspace/a");
-    const second = client.start("/workspace/b");
+    const first = client.start(asWorkspaceId("/workspace/a"));
+    const second = client.start(asWorkspaceId("/workspace/b"));
     // Must yield before emitExit so both starts have fully resumed their
     // onPush/onExit awaits and created the shared initialization promise.
     // setImmediate fires after the microtask queue is drained, once is enough.
@@ -241,10 +247,10 @@ test("a failed start rejects the shared promise so concurrent waiters don't hang
 test("after process exit, a new start can rebuild readiness", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     sidecar.emitExit({ code: 1 }); // process dead — ensuredCwds / handshake state cleared
     // A new start must be able to rebuild the initialize handshake.
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     await client.dispose();
 });
 
@@ -257,7 +263,7 @@ test("a fresh client attaching to a running sidecar handshakes via initialize di
     const client = new TacoClient({ sidecar });
 
     const t = Date.now();
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     const elapsed = Date.now() - t;
     assert.ok(elapsed < 1000, `expected immediate readiness, took ${elapsed}ms`);
     assert.equal(sidecar.initializeCount(), 1);
@@ -274,8 +280,8 @@ test("start() catch rejects the shared promise — not just handleExit", async (
     sidecar.ackInitialize = false; // start(B)'s ensureWorkspace succeeds, blocks at awaitInitialization
     const client = new TacoClient({ sidecar });
 
-    const first = client.start("/workspace/a"); // ensureWorkspace throws immediately, catch triggers
-    const second = client.start("/workspace/b"); // shares the promise, waiting for initialize
+    const first = client.start(asWorkspaceId("/workspace/a")); // ensureWorkspace throws immediately, catch triggers
+    const second = client.start(asWorkspaceId("/workspace/b")); // shares the promise, waiting for initialize
 
     const t = Date.now();
     await assert.rejects(first, /simulated spawn failure for \/workspace\/a/);
@@ -300,7 +306,7 @@ test("start sends initialize before resolving", async () => {
         await originalSend(cwd, frame);
     };
 
-    const startPromise = client.start("/workspace/a");
+    const startPromise = client.start(asWorkspaceId("/workspace/a"));
     // Initialize is sent during start()'s await chain, not before start() is called.
     assert.equal(initializeSent, false);
     await startPromise;
@@ -316,11 +322,11 @@ test("a late-joining client handshakes independently on the same sidecar", async
     // client instance — the late joiner must send its own.
     const sidecar = new FakeSidecarClient();
     const first = new TacoClient({ sidecar });
-    await first.start("/workspace/a");
+    await first.start(asWorkspaceId("/workspace/a"));
     assert.equal(sidecar.initializeCount(), 1);
 
     const second = new TacoClient({ sidecar });
-    await second.start("/workspace/b");
+    await second.start(asWorkspaceId("/workspace/b"));
     assert.equal(sidecar.initializeCount(), 2);
 
     await first.dispose();
@@ -331,10 +337,10 @@ test("concurrent starts share one initialize", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await Promise.all([
-        client.start("/workspace/a"),
-        client.start("/workspace/b"),
-        client.start("/workspace/c"),
-        client.start("/workspace/d"),
+        client.start(asWorkspaceId("/workspace/a")),
+        client.start(asWorkspaceId("/workspace/b")),
+        client.start(asWorkspaceId("/workspace/c")),
+        client.start(asWorkspaceId("/workspace/d")),
     ]);
     assert.equal(sidecar.initializeCount(), 1);
     await client.dispose();
@@ -343,14 +349,14 @@ test("concurrent starts share one initialize", async () => {
 test("later workspace start reuses the same initialize", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     // After processInitialized, the second start should be a
     // no-op for the handshake (the `if (ensuredCwds.has) return` short-circuits
     // before runInitialize is touched). Confirms we do not re-handshake.
     const initBefore = sidecar.sent.filter(
         (s) => (s.frame as { method?: string }).method === "initialize",
     ).length;
-    await client.start("/workspace/b");
+    await client.start(asWorkspaceId("/workspace/b"));
     const initAfter = sidecar.sent.filter(
         (s) => (s.frame as { method?: string }).method === "initialize",
     ).length;
@@ -362,13 +368,13 @@ test("later workspace start reuses the same initialize", async () => {
 test("sidecar replacement triggers a fresh initialize", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     const initBefore = sidecar.initializeCount();
     // Replacement sidecar: the old process dies, the new one reports a
     // different instanceId. The next start must re-handshake.
     sidecar.emitExit({ code: undefined });
     sidecar.instanceId = "instance-2";
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     const initAfter = sidecar.initializeCount();
     assert.ok(
         initAfter > initBefore,
@@ -380,7 +386,7 @@ test("sidecar replacement triggers a fresh initialize", async () => {
 test("initialize response carries the serverCapabilities shape", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     // The response was already pushed by FakeSidecarClient.send. Reach back
     // into the dispatcher to verify the shape. (If `initialize` were rejected,
     // start would have thrown — the fact that it resolved confirms ok: true.)
@@ -406,18 +412,18 @@ test("an initialize timeout rejects the start", async () => {
         }
     };
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 80 });
-    await assert.rejects(client.start("/workspace/a"), /initialize/);
+    await assert.rejects(client.start(asWorkspaceId("/workspace/a")), /initialize/);
     await client.dispose();
 });
 
 test("sends exactly one initialize per sidecar process", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     assert.equal(sidecar.initializeCount(), 1, "one handshake per process");
     // The handshake is process-scoped client state, so the second workspace
     // must reuse the completed handshake rather than re-negotiating.
-    await client.start("/workspace/b");
+    await client.start(asWorkspaceId("/workspace/b"));
     assert.equal(sidecar.initializeCount(), 1, "second workspace must not re-handshake");
     await client.dispose();
 });
@@ -426,7 +432,7 @@ test("process death mid-handshake rejects start immediately", async () => {
     const sidecar = new FakeSidecarClient();
     sidecar.ackInitialize = false; // handshake never answered
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 60 });
-    const starting = client.start("/workspace/a");
+    const starting = client.start(asWorkspaceId("/workspace/a"));
     await new Promise((resolve) => setTimeout(resolve, 10));
     sidecar.emitExit({ code: 1 });
 
@@ -445,12 +451,12 @@ test("a start after a failed handshake can still recover", async () => {
     const sidecar = new FakeSidecarClient();
     sidecar.ackInitialize = false;
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 60 });
-    await assert.rejects(client.start("/workspace/a"));
+    await assert.rejects(client.start(asWorkspaceId("/workspace/a")));
 
     // The sidecar recovers; start() itself drives the retry handshake.
     sidecar.ackInitialize = true;
     const started = Date.now();
-    await client.start("/workspace/b");
+    await client.start(asWorkspaceId("/workspace/b"));
     assert.ok(
         Date.now() - started < 3_000,
         `expected fast recovery, took ${Date.now() - started}ms`,
@@ -461,7 +467,7 @@ test("a start after a failed handshake can still recover", async () => {
 test("PR4: sidecar exit schedules an upgrade-aware reconnect that re-spawns", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
 
@@ -483,7 +489,7 @@ test("PR4: sidecar exit triggers upgrade --apply when the marker is present", as
     const sidecar = new FakeSidecarClient();
     sidecar.upgradeMarker = true;
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
 
@@ -502,7 +508,7 @@ test("PR4: sidecar exit tolerates upgrade --apply failure (best-effort)", async 
     sidecar.upgradeMarker = true;
     sidecar.failUpgradeApply = true;
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
     // Must not throw — the reconnect loop swallows the apply error and
     // proceeds to re-ensure against the existing binary.
@@ -529,7 +535,7 @@ test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async
         return original(cwd);
     };
 
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     const callsAfterStart = ensureCalls;
     assert.ok(callsAfterStart >= 1, "start() should call ensureWorkspace");
 
@@ -547,7 +553,7 @@ test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async
 test("PR4: multiple sidecar exits during one reconnect only schedule one loop", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
     sidecar.upgradeMarker = true;
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
@@ -572,11 +578,15 @@ test("call() self-heals a not_initialized error from a stale connection", async 
     // with it, call() awaits the new handshake and succeeds.
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
-    const first = client.call<unknown, { ok: boolean }>("/workspace/a", "session.list", {
-        workspace: "/workspace/a",
-    });
+    const first = client.call<unknown, { ok: boolean }>(
+        asWorkspaceId("/workspace/a"),
+        "session.list",
+        {
+            workspace: "/workspace/a",
+        },
+    );
     // Wait one tick so sendOnce registers the pending before we push a response.
     await Promise.resolve();
     const firstId = sidecar.lastNonInitializeId();
@@ -613,9 +623,11 @@ test("call() does not retry not_initialized when the handshake itself fails", as
     // sitting on the dispatcher's 1,000,000ms default.
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 80 });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
-    const first = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
+    const first = client.call(asWorkspaceId("/workspace/a"), "session.list", {
+        workspace: "/workspace/a",
+    });
     await Promise.resolve();
     const firstId = sidecar.lastNonInitializeId();
     assert.ok(firstId);
@@ -645,11 +657,13 @@ test("fast-tier RPCs are bounded when the daemon handshakes then goes silent", a
     // No rpcTimeoutMs: exercise the production default, which is what the
     // desktop constructs in App.tsx.
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
     // The fake never answers non-initialize RPCs, which is exactly the wedged
     // daemon we need: handshake fine, everything after it silent.
 
-    const pending = client.call("/workspace/a", "session.list", { workspace: "/workspace/a" });
+    const pending = client.call(asWorkspaceId("/workspace/a"), "session.list", {
+        workspace: "/workspace/a",
+    });
     let settled: "pending" | "rejected" = "pending";
     const watched = pending.then(
         () => {
@@ -678,9 +692,11 @@ test("model-bound RPCs keep the long ceiling and are not truncated", async () =>
     // regresses, long agent turns would abort at 15s.
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
-    const pending = client.call("/workspace/a", "session.prompt", { workspace: "/workspace/a" });
+    const pending = client.call(asWorkspaceId("/workspace/a"), "session.prompt", {
+        workspace: "/workspace/a",
+    });
     let rejected = false;
     void pending.catch(() => {
         rejected = true;
@@ -706,13 +722,13 @@ test("an explicit rpcTimeoutMs overrides the fast tier in both directions", asyn
     // bound must not be handed the looser 15s one.
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar, rpcTimeoutMs: 50 });
-    await client.start("/workspace/a");
+    await client.start(asWorkspaceId("/workspace/a"));
 
     // assert.rejects awaits the promise itself — attaching the handler up front
     // matters here: the rejection fires at 50ms, so any intervening `sleep`
     // would leave it briefly unhandled and the test runner fails the file.
     await assert.rejects(
-        client.call("/workspace/a", "session.list", { workspace: "/workspace/a" }),
+        client.call(asWorkspaceId("/workspace/a"), "session.list", { workspace: "/workspace/a" }),
         /RPC timeout after 50ms: session\.list/,
     );
     await client.dispose();

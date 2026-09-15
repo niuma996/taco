@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
 import { harnessContext } from "../../../src/lib/harnessContext.ts";
-import { SlashNormalizedExecutionEnv } from "../../../src/runtime/slashNormalizedEnv.ts";
+import { SlashNormalizedExecutionEnv } from "../../../src/runtime/harness/slashNormalizedEnv.ts";
 import type { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";

@@ -19,6 +19,8 @@ import type {
     SubmitAnswersParams,
 } from "@taco-ai/protocol";
 import {
+    asSessionId,
+    asWorkspaceId,
     ErrorCodes,
     sessionAbortSchema,
     sessionCancelQueuedSchema,
@@ -31,8 +33,8 @@ import { RPC } from "@taco-ai/shared";
 
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
-import { isBusyError } from "../../runtime/harnessErrors.ts";
-import { textsFromAgentMessages } from "../../runtime/messageText.ts";
+import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
+import { textsFromAgentMessages } from "../../runtime/harness/messageText.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
     formatAskUserContextBody,
@@ -70,7 +72,11 @@ async function requireCompactionSettled(
     workspace: string,
     sessionId: string,
 ): Promise<void> {
-    const settled = await server.awaitCompactionEnd(workspace, sessionId, COMPACTION_WAIT_MS);
+    const settled = await server.awaitCompactionEnd(
+        asWorkspaceId(workspace),
+        asSessionId(sessionId),
+        COMPACTION_WAIT_MS,
+    );
     if (!settled) {
         throw new RpcHandlerError(
             ErrorCodes.SessionBusy,

@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import { createLogger } from "../lib/logger.ts";
-import type { PinOnceConsumer } from "../runtime/pinOnceConsumer.ts";
+import type { PinOnceConsumer } from "../runtime/compaction/pinOnceConsumer.ts";
 import { createUserMessage, tagWrap } from "../tags/builder.ts";
 import type { MemoryStore } from "./types.ts";
 

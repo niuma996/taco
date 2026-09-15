@@ -10,8 +10,8 @@
  */
 
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
-import type { CheckpointManager } from "../checkpoints/manager.ts";
-import { redactString } from "../extensions/builtin/outputRedaction/index.ts";
+import type { CheckpointManager } from "../../checkpoints/manager.ts";
+import { redactString } from "../../extensions/builtin/outputRedaction/index.ts";
 import type {
     ContextEvent,
     ContextHookBuckets,
@@ -22,24 +22,14 @@ import type {
     ToolResultEvent,
     ToolResultHookBuckets,
     ToolResultPatch,
-} from "../extensions/index.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import type { MemoryStore } from "../memory/index.ts";
-import { buildMemoryContextHook } from "../memory/memoryTag.ts";
-import { createMutationGateHook } from "../permissions/mutationGate.ts";
-import type {
-    AgentHarness,
-    AgentLane,
-    AgentMessage,
-    AgentToolResult,
-    ExecutionToolContext,
-    JsonValue,
-    Models,
-    Skill,
-    ThinkingLevel,
-} from "../runtime/pi/types.ts";
-import { buildSkillReinjector, type SkillReinjectorHandle } from "../skills/skillReinjector.ts";
+} from "../../extensions/index.ts";
+import { withDeadline } from "../../lib/async.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import type { MemoryStore } from "../../memory/index.ts";
+import { buildMemoryContextHook } from "../../memory/memoryTag.ts";
+import { createMutationGateHook } from "../../permissions/mutationGate.ts";
+import { buildSkillReinjector, type SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import {
     buildCompactionReminderHook,
     buildDropPolicyContextHook,
@@ -51,11 +41,22 @@ import {
     buildReplyLanguageContextHook,
     buildStripThinkingContextHook,
     type ImChannelContext,
-} from "../tags/index.ts";
-import { throttleByContent } from "../tags/throttle.ts";
-import { type ActiveTasksState, buildActiveTasksContextHook } from "../tasks/activeTasksTag.ts";
-import { buildTodoWriteReminderContextHook } from "../tasks/todoWriteReminder.ts";
-import type { PinOnceConsumer } from "./pinOnceConsumer.ts";
+} from "../../tags/index.ts";
+import { throttleByContent } from "../../tags/throttle.ts";
+import { type ActiveTasksState, buildActiveTasksContextHook } from "../../tasks/activeTasksTag.ts";
+import { buildTodoWriteReminderContextHook } from "../../tasks/todoWriteReminder.ts";
+import type { PinOnceConsumer } from "../compaction/pinOnceConsumer.ts";
+import type {
+    AgentHarness,
+    AgentLane,
+    AgentMessage,
+    AgentToolResult,
+    ExecutionToolContext,
+    JsonValue,
+    Models,
+    Skill,
+    ThinkingLevel,
+} from "../pi/types.ts";
 
 const log = createLogger("taco-ext");
 
@@ -69,15 +70,22 @@ const log = createLogger("taco-ext");
  */
 export const HOOK_TIMEOUT_MS = 2_000;
 
+/**
+ * Thin wrapper over `withDeadline` for extension hooks. Keeps the original
+ * `(promise, label)` signature so existing call sites and tests do not
+ * change; the underlying timer / signal / cleanup logic now lives in one
+ * place (`lib/async.withDeadline`) and is shared with MCP, shell, and
+ * future capability callers.
+ *
+ * The trailing " hook" on the label preserves the original error message
+ * (`"foo hook timed out after 2000ms"`) so downstream log scrapers and
+ * error-string assertions keep working.
+ */
 export function withHookTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-            reject(new Error(`${label} hook timed out after ${HOOK_TIMEOUT_MS}ms`));
-        }, HOOK_TIMEOUT_MS);
-    });
-    return Promise.race([promise, timeout]).finally(() => {
-        if (timer) clearTimeout(timer);
+    return withDeadline(promise, {
+        timeoutMs: HOOK_TIMEOUT_MS,
+        code: "HOOK_TIMEOUT",
+        label: `${label} hook`,
     });
 }
 
@@ -99,8 +107,15 @@ export interface HookWiringOptions {
     extensionToolCallHooks?: ToolCallHook[];
     /** Extension tool_result interceptors (builtins + external); undefined treated as empty. */
     extensionToolResultHooks?: ToolResultHookBuckets;
-    /** Loaded Skill[] — used by the reinjector hook in SkillTool. */
-    skills?: readonly Skill[];
+    /**
+     * Thunk over the loaded skill list — used by the reinjector hook in
+     * SkillTool. A thunk, not a snapshot array: `SessionRegistry.skills` is
+     * mutable (`updateSkills()` swaps it on hot reload), and the reinjector
+     * runs on every context build for the lifetime of the harness, so a
+     * captured array would keep restoring bodies from whatever skill set
+     * existed when the session attached.
+     */
+    getSkills?: () => readonly Skill[];
     /**
      * Thunk that reads the current compaction threshold live (supplied by
      * AttachedSession, same source as `effectiveCompaction`). The pin-aware
@@ -368,8 +383,20 @@ export async function wireHarnessHooks(
         disposers.push(onContext(buildPlanModeContextHook(() => getActiveTasksState().planState)));
     }
     // 7. skill body reinjection: drain pending queue + restore compacted-away skill bodies
-    if (opts.skills && opts.skills.length > 0) {
-        const { hook, handle } = buildSkillReinjector({ skills: opts.skills });
+    //
+    // Gated on the thunk being supplied at all, not on it being non-empty right
+    // now: a workspace that starts with zero skills but gets one hot-loaded
+    // later needs this hook installed from the start, since it is wired once
+    // per harness and cannot be added after attach. `SkillStore.skills` is a
+    // getter (not a captured array) so every hook invocation re-reads the
+    // live list through `getSkills`.
+    const getSkills = opts.getSkills;
+    if (getSkills) {
+        const { hook, handle } = buildSkillReinjector({
+            get skills() {
+                return getSkills();
+            },
+        });
         disposers.push(onContext(hook));
         skillReinjector = handle;
     }
@@ -468,6 +495,14 @@ export async function wireHarnessHooks(
                 : undefined,
             onSnapshotFailure: (path, reason) => {
                 log.error(`checkpoint snapshot failed for ${path}: ${reason}`);
+            },
+            // Unknown-tool path fence exemption. Resolved live from the
+            // harness toolset (not a captured list) so toolset refreshes —
+            // deferred tools, addTools, skill packs — are reflected. MCP and
+            // extension tools carry no `taco` metadata, so they are fenced.
+            isKnownReadOnly: async (toolName) => {
+                const tools = await harness.getTools(harnessContext);
+                return tools.find((t) => t.name === toolName)?.taco?.mutates === false;
             },
         });
         disposers.push(

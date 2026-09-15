@@ -3,7 +3,7 @@
  * askUser payload, subagent.spawned push. All workspace-scoped.
  */
 
-import type { SessionId, WorkspaceId } from "./frames.js";
+import type { SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 
 // tools.list
 
@@ -259,7 +259,7 @@ export interface AskUserToolDetails {
 export interface SubmitAnswersParams {
     workspace: WorkspaceId;
     sessionId: SessionId;
-    toolCallId: string;
+    toolCallId: ToolCallId;
     answers: Record<string, string | string[]>;
     /** Aligned with `AskUserPayload.toolName`; defaults to "askUser". */
     toolName?: string;

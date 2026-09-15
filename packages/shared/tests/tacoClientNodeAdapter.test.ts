@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { RPC } from "../rpcMethods.js";
 import { TacoClient } from "../tacoClientNode.js";
 
@@ -33,8 +34,8 @@ class ThinClient extends TacoClient {
 
 test("Node adapter: workspace param is ignored; call receives only (method, params)", async () => {
     const client = new ThinClient({ spawn: { command: "true", args: [] } });
-    await client.sessionList("/ws/A");
-    await client.sessionList("/ws/B/different/path");
+    await client.sessionList(asWorkspaceId("/ws/A"));
+    await client.sessionList(asWorkspaceId("/ws/B/different/path"));
     assert.equal(client.recorded.length, 2);
     assert.equal(client.recorded[0].method, RPC.sessionList);
     assert.deepEqual(client.recorded[0].params, { workspace: "/ws/A" });
@@ -48,7 +49,7 @@ test("Node adapter: workspace param is ignored; call receives only (method, para
 test("Node adapter: call and callProcess share a call() — process-level and workspace-level RPC converge in the Node single-instance model", async () => {
     const client = new ThinClient({ spawn: { command: "true", args: [] } });
     await client.settingsGet();
-    await client.workspaceEnsure("/ws/X");
+    await client.workspaceEnsure(asWorkspaceId("/ws/X"));
     assert.equal(client.recorded.length, 2);
     assert.equal(client.recorded[0].method, RPC.settingsGet);
     assert.equal(client.recorded[0].params, undefined);
@@ -58,7 +59,11 @@ test("Node adapter: call and callProcess share a call() — process-level and wo
 
 test("Node adapter:sessionCreate object 形状透传 workspace", async () => {
     const client = new ThinClient({ spawn: { command: "true", args: [] } });
-    await client.sessionCreate({ workspace: "/w", initialPrompt: "hi", thinkingLevel: "low" });
+    await client.sessionCreate({
+        workspace: asWorkspaceId("/w"),
+        initialPrompt: "hi",
+        thinkingLevel: "low",
+    });
     assert.deepEqual(client.recorded[0].params, {
         workspace: "/w",
         initialPrompt: "hi",

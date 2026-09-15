@@ -24,8 +24,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { InstructionsConfig } from "@taco-ai/protocol";
-import { ProviderKeyStore } from "../../../src/runtime/providerKeyStore.ts";
+import { asWorkspaceId, type InstructionsConfig } from "@taco-ai/protocol";
+import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
@@ -50,7 +50,7 @@ describe("WorkspaceRuntime — instructionsConfig plumbing", () => {
         };
         const ws = new WorkspaceRuntime({
             providerKeyStore: providerKeyStore(),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             instructionsConfig: cfg,
         });
         assert.deepEqual(ws.instructionsConfig, cfg);
@@ -62,7 +62,7 @@ describe("WorkspaceRuntime — instructionsConfig plumbing", () => {
         // its hook falls back to defaults.
         const ws = new WorkspaceRuntime({
             providerKeyStore: providerKeyStore(),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
         });
         assert.equal(ws.instructionsConfig, undefined);
     });
@@ -74,7 +74,7 @@ describe("WorkspaceRuntime — instructionsConfig plumbing", () => {
         };
         const ws = new WorkspaceRuntime({
             providerKeyStore: providerKeyStore(),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             instructionsConfig: initial,
         });
 

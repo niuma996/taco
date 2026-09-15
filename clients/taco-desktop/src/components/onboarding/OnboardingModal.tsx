@@ -1,3 +1,4 @@
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProviders } from "../../hooks/useProviders.js";
 import type { UseWorkspacesApi } from "../../hooks/useWorkspaces.js";
@@ -42,13 +43,20 @@ export function OnboardingModal(props: OnboardingModalProps) {
     // onboarding scrim visually competes with it — the only feedback the
     // user can rely on while this overlay is up is an in-modal banner.
     const openError = props.wsApi.errorBanner;
+    // `asWorkspaceId` throws on an empty string, so brand once here rather than
+    // at each use site: a bare call inside the JSX below would take down the
+    // whole modal via the error boundary if `defaultCwd` never resolved (the
+    // Tauri default-dir call can fail, and this overlay is gated on "settled",
+    // not on a non-empty cwd). Null means "no workspace chosen yet" and every
+    // consumer already handles it.
+    const workspace = workspaceCwd ? asWorkspaceId(workspaceCwd) : null;
     // Live provider list — drives both the Next gate (≥1 configured) and the Done
     // summary's real count. Fetched against `workspaceCwd`; only enabled from the
     // provider step onward so welcome/workspace don't trigger a fetch against the
     // default-cwd placeholder that the sidecar hasn't ensured yet.
     const { providers, refresh: refreshProviders } = useProviders(
         props.client,
-        workspaceCwd,
+        workspace,
         step === "provider" || step === "model" || step === "done",
     );
     // The parent's useProviders fetched once when entering provider step,
@@ -215,17 +223,22 @@ export function OnboardingModal(props: OnboardingModalProps) {
                             {openError}
                         </div>
                     )}
-                    {step === "provider" && (
+                    {/* Both steps query the sidecar per workspace, so neither
+                        can render without one. `goNext` only leaves the
+                        workspace step once `openWorkspace` succeeded, so this
+                        is a guard against an unreachable state rather than a
+                        visible branch. */}
+                    {step === "provider" && workspace && (
                         <ProviderStep
                             client={props.client}
-                            workspace={workspaceCwd}
+                            workspace={workspace}
                             onConfigured={handleProviderConfigured}
                         />
                     )}
-                    {step === "model" && (
+                    {step === "model" && workspace && (
                         <ModelStep
                             client={props.client}
-                            workspace={workspaceCwd}
+                            workspace={workspace}
                             onSelect={(sel) => setSelectedModel(sel)}
                         />
                     )}

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { ChannelRegistry } from "../../src/channels/registry.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 

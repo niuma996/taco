@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert";
 import { afterEach, describe, it } from "node:test";
 import { PermissionBroker } from "../../src/permissions/permissionBroker.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
 import { createShellTool } from "../../src/tools/shellTool.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 

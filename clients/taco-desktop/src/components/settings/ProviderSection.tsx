@@ -51,13 +51,15 @@ export function ProviderSection(props: ProviderSectionProps) {
         () => getGlobalConfig().global.customProviders ?? [],
     );
 
-    // Sync local cache after useProviders refresh. Use getGlobalConfig() as the single
-    // source of truth — shallow comparison by id would leave stale baseUrl/models after
-    // editing non-id fields of an existing custom provider.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: providers ref is stable
+    // Sync local cache after globalConfig changes. Depends on globalState
+    // (NOT providers): the builtin list is the same and the relevant edit is
+    // a custom provider add/delete/edit, which only moves globalState. The
+    // previous dep [providers] was a stable builtin list that did not fire
+    // when customProviders changed — edits landed in desktop.json but the
+    // section's local cache showed stale baseUrl/models until a hard reload.
     useEffect(() => {
-        setCustomProviders(getGlobalConfig().global.customProviders ?? []);
-    }, [providers]);
+        setCustomProviders(globalState.global.customProviders ?? []);
+    }, [globalState.global]);
 
     if (!props.workspace) return null;
 

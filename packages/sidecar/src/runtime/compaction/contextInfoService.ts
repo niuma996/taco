@@ -10,11 +10,11 @@
  */
 
 import type { SessionContextInfoResult } from "@taco-ai/protocol";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import type { AgentLane, Api, Entry, Model, Session } from "../runtime/pi/types.ts";
-import { estimateContextTokens } from "../runtime/pi/values.ts";
-import { buildBranchContext, MAIN_BRANCH } from "./sessionBranch.ts";
+import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import type { AgentLane, Api, Entry, Model, Session } from "../pi/types.ts";
+import { estimateContextTokens } from "../pi/values.ts";
+import { buildBranchContext, MAIN_BRANCH } from "../session/sessionBranch.ts";
 
 const log = createLogger("contextInfoService");
 

@@ -8,6 +8,7 @@
  */
 
 import {
+    asWorkspaceId,
     CURRENT_SESSION_FORMAT_VERSION,
     ErrorCodes,
     isCompatibleSidecarProtocol,
@@ -56,12 +57,12 @@ interface Readiness {
 }
 
 /**
- * One in-flight or settled handshake. Every concurrent `start()` caller observes the
- * same settlement — success resolves `processInitialized` and unblocks every awaiter;
- * failure rejects every awaiter (no timeout past the initial handshake). Late responses
- * from a previous generation (daemon replacement / death) are dropped: they'd otherwise
- * set `processInitialized` against a stale connection and lock out reconnect — the bug
- * that produced 30-60s stalls on every cold start.
+ * One in-flight or settled handshake. Every concurrent `start()` caller observes
+ * the same settlement — success resolves `processInitialized` and unblocks every
+ * awaiter; failure rejects every awaiter (no timeout past the initial handshake).
+ * Late responses from a previous generation are dropped rather than settling this
+ * one: they'd otherwise set `processInitialized` against a dead connection and
+ * lock out reconnect.
  */
 interface Handshake extends Readiness {
     /** Monotonic id — bumped on every new handshake. */
@@ -119,13 +120,10 @@ export class TacoClient extends TacoClientBase {
      */
     private replacedCwds = new Set<WorkspaceId>();
     /**
-     * Process-level handshake state. `processInitialized` flips true after a successful
-     * `initialize` response; `handshake` is the single in-flight or settled handshake
-     * promise every concurrent `start()` caller awaits. The previous design kept
-     * `processInitialization` (a single promise) but its success path could mark
-     * `processInitialized=true` without resolving the awaiters — late responses from a
-     * dead daemon poisoned reconnect, so every cold start paid 10s × N timeout cascades.
-     * The new monotonic handshake checks `generation` and drops mismatches.
+     * Process-level handshake state. `processInitialized` flips true after a
+     * successful `initialize` response; `handshake` is the single in-flight or
+     * settled handshake every concurrent `start()` caller awaits. `generation` is
+     * monotonic so a response belonging to a superseded handshake is dropped.
      */
     private handshake: Handshake | null = null;
     private handshakeGeneration = 0;
@@ -141,12 +139,12 @@ export class TacoClient extends TacoClientBase {
      * ensured, and the handshake cannot wait for that.
      */
     private pendingProcessCwd: WorkspaceId | undefined;
-    /** PR4: cwd the last `start(cwd)` call used. Persists across `sidecar-exited`
+    /** Cwd the last `start(cwd)` call used. Persists across `sidecar-exited`
      *  events so the reconnect loop knows which workspace to re-ensure.
      *  Distinct from `pendingProcessCwd` (cleared on exit) and from
      *  `ensuredCwds` (cleared on exit so a fresh handshake can run). */
     private reconnectCwd: WorkspaceId | undefined;
-    /** PR4: set while a reconnect is in flight so a second `sidecar-exited`
+    /** Set while a reconnect is in flight so a second `sidecar-exited`
      *  event during the same disconnect storm doesn't schedule a parallel
      *  reconnect (which would race on the shared handshake). */
     private reconnectInFlight = false;
@@ -191,7 +189,7 @@ export class TacoClient extends TacoClientBase {
         // runInitialize runs concurrently with other start() callers and reads
         // this field to find a transport channel.
         this.pendingProcessCwd = cwd;
-        // PR4: remember the cwd so a sidecar-exited event can reconnect.
+        // Remember the cwd so a sidecar-exited event can reconnect.
         this.reconnectCwd = cwd;
         const handshake = this.createHandshake();
         try {
@@ -252,13 +250,13 @@ export class TacoClient extends TacoClientBase {
 
     /** Pull — registers pending via the dispatcher and sends the frame.
      *
-     * Self-healing on the slot-replacement race: if the Rust slot is replaced between the
-     * handshake completing and this call's frame landing on the wire, the daemon
-     * (per-connection `isInitialized=false` for the new connection) returns `not_initialized`.
-     * The old code let that rejection escape as an Unhandled Promise Rejection (notably in
-     * `attachSession`'s unguarded `sessionHistory` call). The new code treats `not_initialized`
-     * as a transient: it awaits the in-flight reconnect handshake and retries the call
-     * exactly once. After that, the call either succeeds or surfaces a real error.
+     * Self-healing on the slot-replacement race: if the Rust slot is replaced
+     * between the handshake completing and this call's frame landing on the wire,
+     * the daemon (per-connection `isInitialized=false` for the new connection)
+     * returns `not_initialized`. Treat that as transient — await the in-flight
+     * reconnect handshake and retry exactly once — so it never escapes to the
+     * caller as an unhandled rejection. After that retry the call either succeeds
+     * or surfaces a real error.
      */
     async call<TParams = unknown, TResult = unknown>(
         workspace: WorkspaceId,
@@ -377,29 +375,20 @@ export class TacoClient extends TacoClientBase {
     }
 
     /**
-     * Block until the process handshake has completed (success or failure). Called by
-     * `call()` only — `runInitialize` sends the handshake frame itself. Happy path is
-     * `processInitialized === true` (no await). A mid-handshake call awaits the in-flight
-     * handshake; a call after a daemon death that hasn't yet triggered `handleExit`'s
-     * reconnect triggers one itself, so `call()` is self-healing on the slot-replacement
-     * race window.
+     * Block until the process handshake has completed (success or failure). Kicks
+     * `runInitialize` when no handshake exists yet, then awaits whichever handshake
+     * that kick attached — so the caller resumes only after the daemon has answered
+     * `initialize`, closing the cold-start race where a follow-up RPC in the same
+     * tick reaches a daemon whose workspaceMap is unbuilt.
+     *
+     * Await failures are swallowed: `call()` retries on `not_initialized`, so the
+     * handshake rejection surfaces through that retry rather than here.
      *
      * IMPORTANT: the `processInitialized` fast path must NOT `await` — even
      * `await Promise.resolve()` introduces a microtask boundary that lets synchronous
      * `emitExit()` race ahead of `sendOnce`'s pending registration, leaving the RPC
      * stranded until its 50ms timer fires. The "desktop client waits for initialize" test
      * exercises this race. Keep the check synchronous.
-     */
-    /**
-     * Trigger the initialize handshake and await its settlement. Synchronous on the happy
-     * path; on the cold-start path it kicks runInitialize (fire-and-forget for the init
-     * frame) and waits for the handshake promise so the caller only resumes after the
-     * daemon has answered initialize. The await closes the cold-start race where a
-     * follow-up RPC in the same tick reaches the daemon with workspaceMap unbuilt.
-     *
-     * Returns once the handshake resolves (or rejects). The caller — `call()` — catches
-     * the rejection if the RPC should fail fast; the common shape is "let the send retry
-     * on not_initialized" so this method swallows await failures.
      */
     private async ensureInitialized(workspace: WorkspaceId): Promise<void> {
         if (this.processInitialized) return;
@@ -574,7 +563,7 @@ export class TacoClient extends TacoClientBase {
     ): void {
         for (const handler of this.sessionEpochChangeHandlers) {
             try {
-                handler({ workspace, sessionId, transition });
+                handler({ workspace: asWorkspaceId(workspace), sessionId, transition });
             } catch (err) {
                 console.error("[taco] session-epoch handler threw", err);
             }
@@ -585,13 +574,11 @@ export class TacoClient extends TacoClientBase {
      * Send a single `initialize` request for the current sidecar process. On success, flip
      * `processInitialized` and resolve the in-flight handshake. On failure (incompatible
      * protocol / timeout / transport send failure), reject the handshake so concurrent
-     * `start(cwd)` callers fail too — and crucially, the send-failure path settles the
-     * handshake immediately rather than waiting for the dispatcher's 1000s timeout (which
-     * is what made the previous design burn 10s per stall).
+     * `start(cwd)` callers fail too — the send-failure path settles it immediately rather
+     * than waiting for the dispatcher's 1000s timeout.
      *
-     * The late-response guard (generation mismatch) is the actual fix for the 30-60s
-     * cold-start stall: a response from the dead daemon's connection that arrives after
-     * `handleExit` started a new handshake must NOT mutate `processInitialized`, or
+     * Late responses must not mutate `processInitialized`: a response arriving after
+     * `handleExit` started a new handshake is dropped by the generation check, or
      * reconnect's runInitialize would early-return on the stale flag and leave the new
      * handshake unresolvable.
      */
@@ -785,7 +772,7 @@ export class TacoClient extends TacoClientBase {
         // to know which workspaces the dead daemon owned.
         this.replacedCwds = new Set(this.ensuredCwds);
         this.ensuredCwds.clear();
-        // PR4: schedule an upgrade-aware reconnect. We don't reconnect from
+        // Schedule an upgrade-aware reconnect. We don't reconnect from
         // `dispose()` because that's a deliberate shutdown — the caller
         // owns the lifecycle. `reconnectCwd` stays set so the loop knows
         // which workspace to re-ensure against.
@@ -794,9 +781,9 @@ export class TacoClient extends TacoClientBase {
         }
     }
 
-    /** PR4: reconnect with backoff + upgrade-marker detection.
+    /** Reconnect with backoff + upgrade-marker detection.
      *
-     * Flow per the plan's `ensureDaemon` pseudocode: (1) wait `backoffMs` (500 → 1s → 2s → 5s);
+     * Flow: (1) wait `backoffMs` (500 → 1s → 2s → 5s);
      * (2) probe `upgradeMarkerPresent`; if true, run `upgradeApply` (atomic staging → live
      * swap, clear marker); (3) re-call `start(cwd)` — same path as mount, so a successful
      * reconnect goes through the same initialize handshake and emits the same epoch

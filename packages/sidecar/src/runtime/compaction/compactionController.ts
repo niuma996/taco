@@ -7,18 +7,14 @@ import {
     type ResolvedCompaction,
     readGlobalConfig,
     validateCompactionConfig,
-} from "../config/config.ts";
-import { waitForEvent } from "../lib/async.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
-import { createLogger } from "../lib/logger.ts";
-import type { AgentLane, Entry, ExecutionToolContext } from "../runtime/pi/types.ts";
-import {
-    type AgentHarness,
-    DEFAULT_COMPACTION_SETTINGS,
-    shouldCompact,
-} from "../runtime/pi/values.ts";
+} from "../../config/config.ts";
+import { waitForEvent } from "../../lib/async.ts";
+import { contextFor, harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
+import { isBusyError, toHarnessError } from "../harness/harnessErrors.ts";
+import type { AgentLane, Entry, ExecutionToolContext } from "../pi/types.ts";
+import { type AgentHarness, DEFAULT_COMPACTION_SETTINGS, shouldCompact } from "../pi/values.ts";
 import type { ContextUsage } from "./contextInfoService.ts";
-import { isBusyError, toHarnessError } from "./harnessErrors.ts";
 import type { PinOnceConsumer } from "./pinOnceConsumer.ts";
 
 const log = createLogger("compactionController");
@@ -83,8 +79,17 @@ function classifyCompactFailure(e: unknown): CompactionFailureReason {
     if (isBusyError(e)) return "busy";
     const tag = (e as { _tag?: unknown } | null)?._tag;
     if (tag === "NothingToCompact") return "nothing";
+    // pi's `CompactionError` carries a structured `code`; an aborted summary
+    // (the caller's signal reached the provider request) reports "aborted".
+    // Read it before falling back to the message so a reworded pi message
+    // cannot silently reclassify a cancellation as a harness failure.
+    const code = (e as { code?: unknown } | null)?.code;
+    if (code === "aborted") return "aborted";
     const message = e instanceof Error ? e.message : String(e);
     if (/nothing to compact/i.test(message)) return "nothing";
+    // Message sniffing stays as the backstop for test doubles and non-pi
+    // rejections (e.g. a raw AbortError from a wrapper), which carry no code.
+    if (/abort/i.test(message)) return "aborted";
     if (/cancel/i.test(message)) return "cancelled";
     return "harness_error";
 }
@@ -201,8 +206,13 @@ export class CompactionController {
      *
      * A lifecycle-sink throw must not turn into a compaction failure, hence
      * the guards around each emit.
+     *
+     * `signal`, when supplied, is threaded into pi's Context so the summary
+     * LLM call itself aborts with the caller (pi passes `context.abortSignal`
+     * to the provider request); pi then finishes the compaction with status
+     * "aborted" or a thrown `CompactionError`.
      */
-    private async runCompact(customInstructions?: string): Promise<void> {
+    private async runCompact(customInstructions?: string, signal?: AbortSignal): Promise<void> {
         const tokensBefore = await this.readTokensBefore();
         try {
             this.onLifecycle?.({ phase: "start", tokensBefore });
@@ -213,7 +223,7 @@ export class CompactionController {
         try {
             const result = await this.lane.compact(
                 customInstructions === undefined ? undefined : { customInstructions },
-                harnessContext,
+                signal ? contextFor(signal) : harnessContext,
             );
             if (!result.ok) throw toHarnessError("compact", result.error);
             const status = result.value.compaction.status;
@@ -221,7 +231,12 @@ export class CompactionController {
                 // `declined` means a `before_compaction` hook refused; `aborted`
                 // and `failed` speak for themselves. None of them throw in 0.85,
                 // so the reason has to be derived from the operation record.
-                reason = status === "declined" ? "cancelled" : "harness_error";
+                reason =
+                    status === "declined"
+                        ? "cancelled"
+                        : status === "aborted"
+                          ? "aborted"
+                          : "harness_error";
             }
         } catch (e) {
             // Classify before rethrowing so the `end` signal can carry a
@@ -396,11 +411,12 @@ export class CompactionController {
      * `{ ok: false, reason }` — `reason` distinguishes them so callers do not
      * have to parse logs.
      *
-     * Cancellation is best-effort: pi's `harness.compact()` takes no
-     * AbortSignal, so aborting only stops us waiting. An in-flight LLM summary
-     * call runs to completion on the sidecar and may still append a compaction
-     * entry to the session; we just no longer report it. Use `signal` to let
-     * the UI escape a stuck "compacting" badge, not to halt the model call.
+     * Cancellation: the caller's signal is threaded into pi's Context
+     * (`contextFor`), so aborting cancels the in-flight summary LLM call —
+     * pi hands `context.abortSignal` to the provider request. A cancelled
+     * summary surfaces as status "aborted" or a thrown `CompactionError`;
+     * the wait resolves `{ ok: false, reason: "aborted" }` either way, and no
+     * compaction entry is committed for the aborted attempt.
      */
     async compact(
         customInstructions?: string,
@@ -431,7 +447,7 @@ export class CompactionController {
             }
         }
         let harnessError: unknown;
-        this.runCompact(customInstructions).catch((err: unknown) => {
+        this.runCompact(customInstructions, signal).catch((err: unknown) => {
             // Record before cancelling so the failure path can tell a harness
             // rejection apart from a timeout.
             harnessError = err;

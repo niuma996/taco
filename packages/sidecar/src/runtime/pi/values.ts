@@ -21,7 +21,7 @@
  *   - `BACKGROUND_CONTEXT` — production reads `harnessContext` from
  *     `lib/harnessContext.ts`, which owns the choice of root context.
  *   - `LaneBusy` — production classifies harness failures through
- *     `runtime/harnessErrors.ts` rather than matching the tag directly.
+ *     `runtime/harness/harnessErrors.ts` rather than matching the tag directly.
  *
  * If you are writing production code and the symbol you want is one of
  * those, use the wrapper. The re-export is here so tests can construct and

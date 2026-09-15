@@ -5,9 +5,8 @@
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { isInjectedEnvKey } from "../runtime/models/providerKeyStore.ts";
 import type { TextContent } from "../runtime/pi/types.ts";
-
-import { isInjectedEnvKey } from "../runtime/providerKeyStore.ts";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB

@@ -9,8 +9,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "@taco-ai/protocol";
+import { withDeadline } from "../lib/async.ts";
 import type { Logger } from "../lib/logger.ts";
-import { scrubbedProcessEnv } from "../runtime/providerKeyStore.ts";
+import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 
 export interface McpToolInfo {
     name: string;
@@ -51,78 +52,32 @@ function pipeStderr(transport: StdioClientTransport, serverId: string, log: Logg
     });
 }
 
-export interface WithTimeoutOptions {
-    timeoutMs: number;
-    serverId: string;
-    op: string;
-    /** Caller-supplied abort signal (e.g. session stop). Combined with the
-     *  deadline signal so either can cancel the underlying call. */
-    externalSignal?: AbortSignal;
-    /** Called once if the deadline fires before the SDK call resolves. Use it
-     *  to dispose of resources the local race can't reach (stdio child,
-     *  in-flight HTTP request). Must not throw — failures are swallowed. */
-    onTimeout?: () => void | Promise<void>;
-}
-
 /**
- * Races `promise` against a local deadline timer. Passes a combined
- * (external + deadline) AbortSignal to the SDK so the underlying request is
- * cancelled, and invokes `onTimeout` once if the local timer wins so the
- * caller can dispose of resources the race can't reach.
+ * Helper for `withDeadline` calls in this module: packs MCP-specific
+ * `serverId` / `op` into the unified `label` so the error message keeps
+ * reading `mcp server <id>: <op> timed out after <ms>ms` exactly as before.
  *
- * Two-layer cancellation exists because not every SDK call respects its
- * AbortSignal (e.g. stuck on a native IO read): the local race is the
- * backstop, while `onTimeout` is for freeing the child process / connection
- * the race can never cancel itself.
+ * The `externalSignal` and `onTimeout` pass through to `withDeadline`; this
+ * is the only difference from `withDeadline`'s signature — the rest of the
+ * timeout logic (timer, signal fusion, cleanup race, structured error) now
+ * lives in one place.
  */
-async function withTimeout<T>(promise: Promise<T>, opts: WithTimeoutOptions): Promise<T> {
-    const { timeoutMs, serverId, op, externalSignal, onTimeout } = opts;
-    const ac = new AbortController();
-    const onExternalAbort = () => ac.abort();
-    if (externalSignal) {
-        if (externalSignal.aborted) ac.abort();
-        else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
-    }
-    let timedOut = false;
-    const timer = setTimeout(() => {
-        timedOut = true;
-        ac.abort();
-    }, timeoutMs);
-    try {
-        return await Promise.race([promise, rejectOnAbort(ac.signal, serverId, op, timeoutMs)]);
-    } catch (err) {
-        if (timedOut && onTimeout) {
-            try {
-                await onTimeout();
-            } catch {
-                // Swallow — the deadline reject is the user-visible error;
-                // close() failures are not actionable here.
-            }
-        }
-        throw err;
-    } finally {
-        clearTimeout(timer);
-        if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
-        ac.abort();
-    }
-}
-
-function rejectOnAbort(
-    signal: AbortSignal,
-    serverId: string,
-    op: string,
-    timeoutMs: number,
-): Promise<never> {
-    return new Promise((_resolve, reject) => {
-        if (signal.aborted) {
-            reject(new Error(`mcp server ${serverId}: ${op} timed out after ${timeoutMs}ms`));
-            return;
-        }
-        signal.addEventListener(
-            "abort",
-            () => reject(new Error(`mcp server ${serverId}: ${op} timed out after ${timeoutMs}ms`)),
-            { once: true },
-        );
+async function mcpDeadline<T>(
+    promise: Promise<T>,
+    args: {
+        timeoutMs: number;
+        serverId: string;
+        op: string;
+        externalSignal?: AbortSignal;
+        onTimeout?: () => void | Promise<void>;
+    },
+): Promise<T> {
+    return withDeadline(promise, {
+        timeoutMs: args.timeoutMs,
+        code: "MCP_TIMEOUT",
+        label: `mcp server ${args.serverId}: ${args.op}`,
+        ...(args.externalSignal !== undefined ? { externalSignal: args.externalSignal } : {}),
+        ...(args.onTimeout !== undefined ? { onTimeout: args.onTimeout } : {}),
     });
 }
 
@@ -201,7 +156,7 @@ export async function createMcpClient(cfg: McpServerConfig, log: Logger): Promis
                 stderr: "pipe",
             });
             pipeStderr(stdio, cfg.id, log);
-            await withTimeout(client.connect(stdio), {
+            await mcpDeadline(client.connect(stdio), {
                 timeoutMs,
                 serverId: cfg.id,
                 op: "connect",
@@ -213,7 +168,7 @@ export async function createMcpClient(cfg: McpServerConfig, log: Logger): Promis
             const http = new StreamableHTTPClientTransport(new URL(cfg.url), {
                 requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
             });
-            await withTimeout(client.connect(http), {
+            await mcpDeadline(client.connect(http), {
                 timeoutMs,
                 serverId: cfg.id,
                 op: "connect",
@@ -230,7 +185,7 @@ export async function createMcpClient(cfg: McpServerConfig, log: Logger): Promis
     return {
         serverId: cfg.id,
         async listTools(signal) {
-            const { tools } = await withTimeout(
+            const { tools } = await mcpDeadline(
                 client.listTools(undefined, { signal, timeout: timeoutMs }),
                 {
                     timeoutMs,
@@ -247,7 +202,7 @@ export async function createMcpClient(cfg: McpServerConfig, log: Logger): Promis
             }));
         },
         async callTool(name, args, signal) {
-            const result = await withTimeout(
+            const result = await mcpDeadline(
                 client.callTool({ name, arguments: args as Record<string, unknown> }, undefined, {
                     signal,
                     timeout: timeoutMs,

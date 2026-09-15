@@ -9,6 +9,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 
 import { CompactionPushAdapter } from "../../src/server/compactionPushAdapter.ts";
 import type { EmitPushFn } from "../../src/server/pushTypes.ts";
@@ -23,8 +24,8 @@ function newAdapter(): CompactionPushAdapter {
 describe("CompactionPushAdapter.awaitCompactionEnd", () => {
     it("returns true immediately when the session is not compressing", async () => {
         const adapter = newAdapter();
-        const cwd = "/tmp/ws";
-        const sessionId = "sess-not-compacting";
+        const cwd = asWorkspaceId("/tmp/ws");
+        const sessionId = asSessionId("sess-not-compacting");
 
         const start = Date.now();
         const ok = await adapter.awaitCompactionEnd(cwd, sessionId, 5000);
@@ -36,8 +37,8 @@ describe("CompactionPushAdapter.awaitCompactionEnd", () => {
 
     it("resolves true when compaction:done fires before timeout", async () => {
         const adapter = newAdapter();
-        const cwd = "/tmp/ws";
-        const sessionId = "sess-compacting-fast";
+        const cwd = asWorkspaceId("/tmp/ws");
+        const sessionId = asSessionId("sess-compacting-fast");
 
         // Simulate started (via public entry, matching the production path),
         // then fire finished within 50ms (also via public entry).
@@ -59,8 +60,8 @@ describe("CompactionPushAdapter.awaitCompactionEnd", () => {
 
     it("returns false when timeout elapses before done fires", async () => {
         const adapter = newAdapter();
-        const cwd = "/tmp/ws";
-        const sessionId = "sess-compacting-slow";
+        const cwd = asWorkspaceId("/tmp/ws");
+        const sessionId = asSessionId("sess-compacting-slow");
 
         // Simulate started, but never finished — let await hit the timeout path.
         adapter.handleSessionEvent(cwd, sessionId, {
@@ -80,8 +81,8 @@ describe("CompactionPushAdapter.awaitCompactionEnd", () => {
 
     it("isCompressing reflects inflight membership", () => {
         const adapter = newAdapter();
-        const cwd = "/tmp/ws";
-        const sessionId = "sess-toggle";
+        const cwd = asWorkspaceId("/tmp/ws");
+        const sessionId = asSessionId("sess-toggle");
 
         assert.equal(adapter.isCompressing(cwd, sessionId), false);
         // Simulate started → isCompressing turns true

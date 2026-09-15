@@ -21,10 +21,11 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { ServerPush } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
 import { MockChannel, mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelConfig } from "../../src/channels/registry.ts";
-import { ProviderKeyStore } from "../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import type { ServerFrame, Transport } from "../../src/server/transport.ts";
@@ -69,8 +70,8 @@ describe("ClientSinkRegistry", () => {
         const frame: ServerFrame = {
             kind: "push",
             method: "session.turn.started",
-            workspace: "im://ch/u/c",
-            session: "s",
+            workspace: asWorkspaceId("im://ch/u/c"),
+            session: asSessionId("s"),
             sessionKind: "main",
             params: {},
             seq: 1,

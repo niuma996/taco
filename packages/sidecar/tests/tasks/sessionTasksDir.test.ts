@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { asSessionId } from "@taco-ai/protocol";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { sessionTasksDir } from "../../src/tasks/sessionTasksDir.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
@@ -10,7 +11,7 @@ import { loadAllTaskLists, saveTaskListToDisk } from "../../src/tasks/taskPersis
 
 describe("sessionTasksDir", () => {
     it("is scoped under the caller-supplied sessionsRoot", () => {
-        const dir = sessionTasksDir("abc-123", "/var/taco/sessions");
+        const dir = sessionTasksDir(asSessionId("abc-123"), "/var/taco/sessions");
         // Path is joined with `path.join`, so use `join` here too — the
         // original assertion hard-coded POSIX "/" and broke on Windows.
         assert.equal(dir, join("/var/taco", "sessions", "abc-123", "tasks"));
@@ -20,7 +21,7 @@ describe("sessionTasksDir", () => {
         // Regression: hardcoded homedir() ignored TACO_HOME, splitting session
         // data and task state onto different roots — attach would hydrate an
         // empty task list.
-        const dir = sessionTasksDir("abc-123", "/srv/taco/sessions");
+        const dir = sessionTasksDir(asSessionId("abc-123"), "/srv/taco/sessions");
         assert.equal(dir, join("/srv/taco", "sessions", "abc-123", "tasks"));
     });
 });

@@ -150,7 +150,7 @@ Keep the whole thing proportional to what was actually found. Five reviewers ret
 Review this change through the RIPPLE EFFECTS lens only.
 
 Files changed (authoritative — do not re-derive):
-  packages/sidecar/src/runtime/agentSpawner.ts
+  packages/sidecar/src/runtime/subagent/agentSpawner.ts
   packages/sidecar/src/agents/types.ts
   packages/sidecar/src/tools/agent.ts
 

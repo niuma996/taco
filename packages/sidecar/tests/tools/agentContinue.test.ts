@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { asSessionId } from "@taco-ai/protocol";
 import type { SubagentSpawnContext } from "../../src/agents/types.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createAgentContinueTool } from "../../src/tools/agentContinue.ts";
@@ -17,11 +18,15 @@ describe("agentContinue tool", () => {
         let captured: unknown;
         const ctx: SubagentSpawnContext = {
             async spawn() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
             async continue(args) {
                 captured = args;
-                return { subSessionId: "sub-9", resultText: "continued", isError: false };
+                return {
+                    subSessionId: asSessionId("sub-9"),
+                    resultText: "continued",
+                    isError: false,
+                };
             },
         };
         const tool = createAgentContinueTool(ctx);
@@ -45,11 +50,11 @@ describe("agentContinue tool", () => {
     it("prefixes the result with 'subagent continue error:' when isError", async () => {
         const tool = createAgentContinueTool({
             async spawn() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
             async continue() {
                 return {
-                    subSessionId: "sub-x",
+                    subSessionId: asSessionId("sub-x"),
                     resultText: "different parent session",
                     isError: true,
                 };
@@ -69,10 +74,10 @@ describe("agentContinue tool", () => {
     it("exposes a `name`, `taco.promptSummary`, and a `subSessionId` schema field", () => {
         const tool = createAgentContinueTool({
             async spawn() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
             async continue() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
         });
         assert.equal(tool.name, "agentContinue");
@@ -89,10 +94,10 @@ describe("agentContinue tool", () => {
         // batch to sequential if any tool is sequential.
         const tool = createAgentContinueTool({
             async spawn() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
             async continue() {
-                return { subSessionId: "", resultText: "", isError: true };
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
         });
         assert.equal(tool.executionMode, "parallel");

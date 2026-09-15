@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import { JOBS_RPC } from "../../src/scheduler/jobsRpc.ts";
 import type { Job } from "../../src/scheduler/types.ts";
@@ -44,7 +45,7 @@ function makeCtx(records: CallRecord[]): TacoToolContext {
     };
     return {
         env: undefined as never,
-        workspace: "/tmp/ws",
+        workspace: asWorkspaceId("/tmp/ws"),
         call,
         actor: { kind: "ide", workspace: "/tmp/ws" },
     };
@@ -52,7 +53,7 @@ function makeCtx(records: CallRecord[]): TacoToolContext {
 
 function makeImCtx(records: CallRecord[]): TacoToolContext {
     const ctx = makeCtx(records);
-    ctx.workspace = "im://ch1/u1/c1";
+    ctx.workspace = asWorkspaceId("im://ch1/u1/c1");
     ctx.actor = { kind: "im", channelId: "ch1", peerId: "u1", chatId: "c1" };
     return ctx;
 }
@@ -373,7 +374,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
             () =>
                 invokeTool(tool, {}, {
                     env: undefined as never,
-                    workspace: "/tmp/ws",
+                    workspace: asWorkspaceId("/tmp/ws"),
                 } as TacoToolContext),
             /no self-RPC dispatcher/,
         );
@@ -406,7 +407,7 @@ describe("jobs tools — list rendering", () => {
         };
         const ctx: TacoToolContext = {
             env: undefined as never,
-            workspace: "/tmp/ws",
+            workspace: asWorkspaceId("/tmp/ws"),
             call: async <P, R>(_method: string, _workspace: string, _params: P): Promise<R> => {
                 return stubResult as R;
             },
@@ -439,7 +440,7 @@ describe("jobs tools — list rendering", () => {
         };
         const makeCtxWithActor = (actor: TacoToolContext["actor"]): TacoToolContext => ({
             env: undefined as never,
-            workspace: "/tmp/ws",
+            workspace: asWorkspaceId("/tmp/ws"),
             call: async <_P, R>(): Promise<R> => stubResult as R,
             actor,
         });

@@ -8,6 +8,8 @@
 
 import { randomUUID } from "node:crypto";
 import {
+    asSessionId,
+    asToolCallId,
     type CommandPermissionRequestedParams,
     type PushMethodName,
     PushMethods,
@@ -64,7 +66,7 @@ export function makePushFrame<TParams = unknown>(opts: PushEventOptions): Server
         id: opts.id ?? randomUUID(),
         method: opts.method,
         workspace: opts.workspace,
-        session: opts.session,
+        session: opts.session === undefined ? undefined : asSessionId(opts.session),
         seq: opts.seq,
         sessionKind: opts.sessionKind,
         params: opts.params as TParams,
@@ -134,7 +136,7 @@ export function toToolCallPush(event: unknown):
             method: PushMethods.ToolCallStart,
             params: {
                 ts,
-                toolCallId: ee.toolCallId,
+                toolCallId: asToolCallId(ee.toolCallId),
                 toolName: ee.toolName ?? "tool",
                 args: redactedArgs,
             },
@@ -146,7 +148,7 @@ export function toToolCallPush(event: unknown):
             method: PushMethods.ToolCallUpdate,
             params: {
                 ts,
-                toolCallId: ee.toolCallId,
+                toolCallId: asToolCallId(ee.toolCallId),
                 partialResult: ee.partialResult,
             },
             id: ee.toolCallId,
@@ -156,7 +158,7 @@ export function toToolCallPush(event: unknown):
         method: PushMethods.ToolCallEnd,
         params: {
             ts,
-            toolCallId: ee.toolCallId,
+            toolCallId: asToolCallId(ee.toolCallId),
             toolName: ee.toolName ?? "tool",
             isError: ee.isError === true,
             result: ee.result,

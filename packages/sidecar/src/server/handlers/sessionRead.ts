@@ -25,7 +25,7 @@ import {
 import { RPC } from "@taco-ai/shared";
 import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
 
-import { resolveSessionByPrefix } from "../../runtime/sessionRegistry.ts";
+import { resolveSessionByPrefix } from "../../runtime/session/sessionLookup.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import {
     applyTuiVisibilityToContent,
@@ -104,16 +104,17 @@ export function registerSessionReadHandlers(): void {
     registerMethod(
         RPC.sessionEventsGet,
         true,
-        ({ server, params }: MethodCtx<SessionEventsGetParams>) => {
+        async ({ server, params }: MethodCtx<SessionEventsGetParams>) => {
             if (!Number.isInteger(params.afterSeq) || params.afterSeq < 0) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,
                     "afterSeq must be a non-negative integer",
                 );
             }
-            return Promise.resolve(
-                server.getSessionEvents(params.workspace, params.sessionId, params.afterSeq),
-            );
+            // A client replaying across a sidecar restart may reach this
+            // before any attach — hydrate so the ring reflects the disk tail.
+            await server.hydrateSessionEvents(params.workspace, params.sessionId);
+            return server.getSessionEvents(params.workspace, params.sessionId, params.afterSeq);
         },
         { schema: sessionEventsGetSchema },
     );
@@ -132,6 +133,10 @@ export function registerSessionReadHandlers(): void {
         true,
         async ({ workspace, params, server }: MethodCtx<SessionSnapshotGetParams>) => {
             const sessionKind = await getPersistedSessionKind(workspace, params.sessionId);
+            // Same restart-window reasoning as sessionEventsGet: lastSeq feeds
+            // snapshotSeq, so the ring must know about the disk tail first or
+            // the client would adopt snapshotSeq=0 and re-recover on every push.
+            await server.hydrateSessionEvents(params.workspace, params.sessionId);
             for (let attempt = 0; attempt < 3; attempt++) {
                 const beforeSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
                 const history = toSessionHistory(

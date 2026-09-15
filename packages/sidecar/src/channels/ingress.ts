@@ -1,5 +1,5 @@
 import type { ImageInput, PromptParams, SteerResult } from "@taco-ai/protocol";
-import { ErrorCodes } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -52,8 +52,8 @@ export class DefaultChannelContext implements ChannelContext {
                 // id is used for frame-level response / tracing, commandId for sidecar command idempotency dedup.
                 const id = msg.platformMessageId;
                 const params: PromptParams = {
-                    workspace,
-                    sessionId,
+                    workspace: asWorkspaceId(workspace),
+                    sessionId: asSessionId(sessionId),
                     text: msg.text,
                     images: msg.media
                         ?.filter((m) => m.kind === "image")

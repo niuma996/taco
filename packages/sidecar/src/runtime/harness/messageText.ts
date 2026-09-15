@@ -5,7 +5,7 @@
  * composer instead of being lost.
  */
 
-import type { AgentMessage } from "./pi/types.ts";
+import type { AgentMessage } from "../pi/types.ts";
 
 /** Concatenate the text parts of a message; "" for non-text content. */
 export function textFromAgentMessage(message: AgentMessage): string {

@@ -100,6 +100,7 @@ export type { ErrorCode } from "./errors.js";
 export { ErrorCodes } from "./errors.js";
 // Wire frames — routing keys, request/response/push, hello + capabilities.
 export type {
+    Brand,
     ClientCapabilities,
     CompactionFailureReason,
     ImageInput,
@@ -111,13 +112,18 @@ export type {
     SessionId,
     SidecarCapabilities,
     SupportedLocale,
+    ToolCallId,
     WorkspaceId,
 } from "./frames.js";
 export {
+    asSessionId,
+    asToolCallId,
+    asWorkspaceId,
     CURRENT_SESSION_FORMAT_VERSION,
     isCompatibleClientProtocol,
     isCompatibleSidecarProtocol,
     SIDECAR_PROTOCOL_VERSION,
+    WORKSPACE_ANY,
 } from "./frames.js";
 // imPolicy.* RPC types — IM workspace policy admin surface.
 export type {

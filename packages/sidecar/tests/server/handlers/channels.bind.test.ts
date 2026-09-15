@@ -16,7 +16,7 @@ import {
     WechatSdkMissingError,
     WecomSdkMissingError,
 } from "../../../src/channels/channelFactory.ts";
-import { ProviderKeyStore } from "../../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { SidecarServer } from "../../../src/server/server.ts";
 

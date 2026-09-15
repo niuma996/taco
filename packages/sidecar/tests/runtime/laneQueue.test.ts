@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cancelLaneQueued, enqueueLaneMessage } from "../../src/runtime/laneQueue.ts";
+import { cancelLaneQueued, enqueueLaneMessage } from "../../src/runtime/harness/laneQueue.ts";
 import type { AgentLane } from "../../src/runtime/pi/types.ts";
 
 type OperationKind = "run" | "compaction" | "navigation";

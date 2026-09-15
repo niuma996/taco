@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { McpServerConfig, McpServerConfigView } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../../src/config/config.ts";
-import { ProviderKeyStore } from "../../../src/runtime/providerKeyStore.ts";
+import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { SidecarServer } from "../../../src/server/server.ts";

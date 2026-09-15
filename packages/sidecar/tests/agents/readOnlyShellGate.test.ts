@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { loadAgents } from "../../src/agents/loadAgents.ts";
 import { isStrictReadOnly } from "../../src/permissions/commandPolicy.ts";
-import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/agentSpawner.ts";
+import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/subagent/childAttach.ts";
 
 const BUILTIN_DIR = join(import.meta.dirname, "..", "..", "src", "agents", "builtin");
 

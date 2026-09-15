@@ -82,7 +82,7 @@ describe("skills.list surfaces inlineOnly", () => {
         const { loadSourcedSkills } = await import("@earendil-works/pi-agent-core");
         const { defaultSkillDirs } = await import("../../../src/config/config.ts");
         const { SlashNormalizedExecutionEnv } = await import(
-            "../../../src/runtime/slashNormalizedEnv.ts"
+            "../../../src/runtime/harness/slashNormalizedEnv.ts"
         );
         const { dedupeSkillsByName } = await import("../../../src/skills/dedupeSkills.ts");
         const { preloadSkillFrontmatter, readSkillFrontmatter } = await import(
