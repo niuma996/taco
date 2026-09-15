@@ -33,16 +33,15 @@ import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConversationsPane } from "./hooks/useConversationsPane";
-import { useFilesDrawer } from "./hooks/useFilesDrawer";
 import { useLlmDump } from "./hooks/useLlmDump";
 import { useMemoryPane } from "./hooks/useMemoryPane";
 import { usePluginsPane } from "./hooks/usePluginsPane";
 import { useProviders } from "./hooks/useProviders";
+import { useRightPanel } from "./hooks/useRightPanel";
 import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
 import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
-import { useTaskPanel } from "./hooks/useTaskPanel";
 import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
@@ -70,8 +69,7 @@ import { ToolsPane } from "./views/ToolsPane";
 export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
-    const filesDrawer = useFilesDrawer();
-    const { open: taskPanelOpen, close: hideTaskPanel, toggle: toggleTaskPanel } = useTaskPanel();
+    const rightPanel = useRightPanel();
     useTheme();
     const { t } = useT();
     const { show: showToast } = useToast();
@@ -516,7 +514,7 @@ export default function App() {
                 <div
                     className="layout"
                     data-sidebar-collapsed={String(sidebarCollapsed)}
-                    data-right-open={String(filesDrawer.open || taskPanelOpen)}
+                    data-right-open={String(rightPanel.panel !== "none")}
                 >
                     {mainView === "chat" ? (
                         <>
@@ -648,19 +646,10 @@ export default function App() {
                                         }}
                                         onCopySessionId={(sid) => void copySessionId(sid)}
                                         copiedSessionId={copiedSessionId}
-                                        onToggleFiles={() => {
-                                            // Tasks ↔ Files are mutually exclusive: opening
-                                            // one closes the other so the right edge never
-                                            // holds two panels stacked.
-                                            if (!filesDrawer.open) hideTaskPanel();
-                                            filesDrawer.toggle();
-                                        }}
-                                        filesOpen={filesDrawer.open}
-                                        onToggleTasks={() => {
-                                            if (!taskPanelOpen) filesDrawer.close();
-                                            toggleTaskPanel();
-                                        }}
-                                        tasksOpen={taskPanelOpen}
+                                        onToggleFiles={() => rightPanel.toggle("files")}
+                                        filesOpen={rightPanel.panel === "files"}
+                                        onToggleTasks={() => rightPanel.toggle("tasks")}
+                                        tasksOpen={rightPanel.panel === "tasks"}
                                         onNewSession={handleNewSession}
                                         newSessionDisabled={
                                             !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
@@ -696,8 +685,8 @@ export default function App() {
                                             workspaces={workspaces}
                                             client={client}
                                             dispatchWs={dispatchWs}
-                                            open={taskPanelOpen}
-                                            onClose={hideTaskPanel}
+                                            open={rightPanel.panel === "tasks"}
+                                            onClose={rightPanel.close}
                                         />
                                     )}
                                 </AskUserProvider>
@@ -838,9 +827,9 @@ export default function App() {
                         across all mainViews so tree/preview state survives view
                         switches. Renders nothing while closed. */}
                     <FilesDrawer
-                        open={filesDrawer.open}
+                        open={rightPanel.panel === "files"}
                         activeCwd={activeCwd}
-                        onClose={filesDrawer.close}
+                        onClose={rightPanel.close}
                     />
                 </div>
             </div>
