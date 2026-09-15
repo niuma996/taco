@@ -704,6 +704,19 @@ export default function App() {
                                             resizeLabel={t("rightPanel.resizeHandle")}
                                         />
                                     )}
+                                    {/* SubagentPanel mounts inside SubagentProvider (its
+                                        SubagentDetail consumes useSubagent) and alongside
+                                        TaskPanel in the chat view — both panels live in the
+                                        same right-side slot. */}
+                                    <SubagentPanel
+                                        messages={ws?.messages ?? []}
+                                        open={rightPanel.panel === "subagents"}
+                                        selectedSubSessionId={selectedSubSessionId}
+                                        onSelect={setSelectedSubSessionId}
+                                        onClose={rightPanel.close}
+                                        resizeHandleProps={rightPanel.resizeHandleProps}
+                                        resizeLabel={t("rightPanel.resizeHandle")}
+                                    />
                                 </AskUserProvider>
                             </SubagentProvider>
                         </>
@@ -844,17 +857,6 @@ export default function App() {
                     <FilesDrawer
                         open={rightPanel.panel === "files"}
                         activeCwd={activeCwd}
-                        onClose={rightPanel.close}
-                        resizeHandleProps={rightPanel.resizeHandleProps}
-                        resizeLabel={t("rightPanel.resizeHandle")}
-                    />
-                    {/* SubagentPanel: derived from ws.messages via SubagentProvider; mounted
-                        alongside the other right-side panels. Closes via the rightPanel X. */}
-                    <SubagentPanel
-                        messages={ws?.messages ?? []}
-                        open={rightPanel.panel === "subagents"}
-                        selectedSubSessionId={selectedSubSessionId}
-                        onSelect={setSelectedSubSessionId}
                         onClose={rightPanel.close}
                         resizeHandleProps={rightPanel.resizeHandleProps}
                         resizeLabel={t("rightPanel.resizeHandle")}
