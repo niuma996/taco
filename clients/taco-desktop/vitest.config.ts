@@ -14,6 +14,8 @@ export default defineConfig({
             "tests/hooks/useWorkspacesSteer.test.tsx",
             "tests/hooks/useWorkspacesDefaultCwdSettled.test.tsx",
             "tests/hooks/useSaveConfigPatch.test.tsx",
+            "tests/hooks/useDragResize.test.tsx",
+            "tests/hooks/useRightPanel.test.tsx",
             "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",
             "tests/components/MemoryPane.test.tsx",
