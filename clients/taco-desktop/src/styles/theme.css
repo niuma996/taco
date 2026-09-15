@@ -56,7 +56,7 @@
     --bg-elevated: #1a1d23;
     --surface-tint: rgba(255, 255, 255, 0.03);
 
-    /* Secondary surface — above --bg-elevated. Used by .skills-detail-content / .agent-card-body. */
+    /* Secondary surface — above --bg-elevated. Used by .skills-detail-content / .askuser-option. */
     --bg-secondary: #1f2229;
     /* List row hover overlay — fainter than --accent-bg-hover, pure transparent white. */
     --hover-overlay: rgba(255, 255, 255, 0.05);

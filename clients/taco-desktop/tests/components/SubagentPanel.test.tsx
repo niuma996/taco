@@ -68,6 +68,7 @@ function renderPanel(opts: HarnessOpts = {}) {
             loadSubagentHistory={loadHistory}
             liveMessagesFor={(id) => live[id] ?? []}
             historyMessagesFor={(id) => history[id] ?? []}
+            openInPanel={() => {}}
         >
             <SubagentPanel
                 messages={messages}
@@ -92,6 +93,7 @@ describe("SubagentPanel — 列表", () => {
                 loadSubagentHistory={async () => {}}
                 liveMessagesFor={() => []}
                 historyMessagesFor={() => []}
+                openInPanel={() => {}}
             >
                 <SubagentPanel
                     messages={[asst("m1", [agentTool()])]}

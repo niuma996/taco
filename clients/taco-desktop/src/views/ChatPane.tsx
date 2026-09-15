@@ -91,6 +91,11 @@ export interface ChatPaneProps {
      *  session-info bar. */
     onToggleTasks?: () => void;
     tasksOpen?: boolean;
+    /** Show / hide the subagent panel — surfaced as a button on the
+     *  session-info bar. */
+    onToggleSubagents?: () => void;
+    subagentsOpen?: boolean;
+    subagentDot?: "none" | "idle" | "active";
     /** Start a new session — same action as the topbar "new chat" chip. */
     onNewSession?: () => void;
     /** Disable the new-session button (no workspace / IM conversation). */
@@ -134,6 +139,9 @@ export function ChatPane(props: ChatPaneProps) {
         filesOpen,
         onToggleTasks,
         tasksOpen,
+        onToggleSubagents,
+        subagentsOpen,
+        subagentDot,
         onNewSession,
         newSessionDisabled,
         isIm,
@@ -240,6 +248,9 @@ export function ChatPane(props: ChatPaneProps) {
                 filesOpen={filesOpen}
                 onToggleTasks={onToggleTasks}
                 tasksOpen={tasksOpen}
+                onToggleSubagents={onToggleSubagents}
+                subagentsOpen={subagentsOpen}
+                subagentDot={subagentDot}
                 onNewSession={onNewSession}
                 newSessionDisabled={newSessionDisabled}
                 isIm={isIm}

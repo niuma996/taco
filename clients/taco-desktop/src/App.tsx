@@ -70,6 +70,11 @@ export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
     const rightPanel = useRightPanel();
+    // Temporary: only the setter is consumed here (by openInPanel below). Task 8 will
+    // read selectedSubSessionId to feed SubagentPanel's `selectedSubSessionId` prop and
+    // remove this suppression.
+    // biome-ignore lint/correctness/noUnusedVariables: consumed by Task 8, see comment above
+    const [selectedSubSessionId, setSelectedSubSessionId] = useState<string | null>(null);
     useTheme();
     const { t } = useT();
     const { show: showToast } = useToast();
@@ -555,6 +560,10 @@ export default function App() {
                                 historyMessagesFor={(subSessionId) =>
                                     ws?.childHistoryLoaded?.[subSessionId] ?? []
                                 }
+                                openInPanel={(subSessionId) => {
+                                    rightPanel.show("subagents");
+                                    setSelectedSubSessionId(subSessionId);
+                                }}
                             >
                                 <AskUserProvider
                                     cwd={activeCwd}

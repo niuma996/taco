@@ -117,6 +117,7 @@ main {
 .session-info-copy,
 .session-info-log,
 .session-info-tasks,
+.session-info-subagents,
 .session-info-files {
     margin-left: -0.25rem;
     margin-right: -0.25rem;
@@ -144,6 +145,7 @@ main {
    the custom window controls on the frameless Windows build. */
 .session-info-log,
 .session-info-tasks,
+.session-info-subagents,
 .session-info-files {
     display: inline-flex;
     align-items: center;
@@ -164,16 +166,19 @@ main {
 }
 .session-info-log:hover,
 .session-info-tasks:hover,
+.session-info-subagents:hover,
 .session-info-files:hover {
     color: var(--fg);
     background: var(--accent-bg-hover);
 }
 .session-info-tasks[aria-pressed="true"],
+.session-info-subagents[aria-pressed="true"],
 .session-info-files[aria-pressed="true"] {
     color: var(--accent);
 }
 .session-info-log:focus-visible,
 .session-info-tasks:focus-visible,
+.session-info-subagents:focus-visible,
 .session-info-files:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
@@ -181,8 +186,10 @@ main {
 
 /* Task-awareness dot on the task-panel button (panel closed only): 6px dot
    pinned to the button's top-right corner. Dim = session has task artifacts
-   but all terminal; --active = tasks still running. */
-.session-info-tasks {
+   but all terminal; --active = tasks still running. Subagent button reuses
+   the same dot class — visual semantics are identical. */
+.session-info-tasks,
+.session-info-subagents {
     position: relative;
 }
 .session-info-tasks-dot {
