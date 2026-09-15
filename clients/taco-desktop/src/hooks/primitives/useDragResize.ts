@@ -12,7 +12,7 @@
  * window would leave the body stuck with a resize cursor and text selection
  * disabled.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface DragHandleProps {
     role: "separator";
@@ -44,15 +44,25 @@ export function useDragResize({
     clamp: (raw: number) => number;
     onCommit: (width: number) => void;
 }): { width: number; handleProps: DragHandleProps; reset: () => void } {
+    // Two values, deliberately: `requested` is what the user asked for, `width`
+    // is what currently fits. Storing only the clamped width would destroy the
+    // preference the first time it is clipped — a 600px panel clamped to 400 on
+    // a narrow window could never widen back when the room returns, because
+    // nothing remembers the 600.
+    const [requested, setRequested] = useState(initial);
     const [width, setWidth] = useState(() => clamp(initial));
-    // Mirrors `width` for synchronous reads inside closures (onPointerDown's
-    // drag handlers, onKeyDown) without pulling `width` into their deps.
+    // Mirrors both for synchronous reads inside closures (onPointerDown's drag
+    // handlers, onKeyDown) without pulling them into those deps.
     const widthRef = useRef(width);
     widthRef.current = width;
+    const requestedRef = useRef(requested);
+    requestedRef.current = requested;
 
     const commit = useCallback(
         (next: number) => {
             const clamped = clamp(next);
+            setRequested(next);
+            requestedRef.current = next;
             setWidth(clamped);
             widthRef.current = clamped;
             onCommit(clamped);
@@ -72,6 +82,10 @@ export function useDragResize({
                 const next = clamp(startWidth + (startX - ev.clientX));
                 setWidth(next);
                 widthRef.current = next;
+                // A drag is an explicit request, so it also becomes the
+                // preference — the pointer cannot exceed the clamp anyway.
+                setRequested(next);
+                requestedRef.current = next;
             };
 
             const stop = () => {
@@ -91,6 +105,29 @@ export function useDragResize({
         },
         [clamp, onCommit],
     );
+
+    // Re-clamp whenever the upper bound moves. `clamp` owns a viewport-dependent
+    // bound, so a width that was legal on a wide window falls out of range when
+    // the window shrinks, or when a persisted width is restored on a smaller
+    // screen. Runs on mount and on every `clamp` identity change, not only on
+    // resize events: a bound that tracks surrounding layout (the sidebar
+    // collapsing, say) moves without the window ever resizing.
+    //
+    // Re-clamps `requested`, not the current width, so the move is reversible —
+    // room reappearing restores the full preference instead of leaving it stuck
+    // at whatever the narrowest layout allowed. onCommit is deliberately not
+    // called: the stored preference must survive a temporary squeeze.
+    useEffect(() => {
+        const apply = () => {
+            const next = clamp(requestedRef.current);
+            if (next === widthRef.current) return;
+            widthRef.current = next;
+            setWidth(next);
+        };
+        apply();
+        window.addEventListener("resize", apply);
+        return () => window.removeEventListener("resize", apply);
+    }, [clamp]);
 
     const reset = useCallback(() => commit(initial), [commit, initial]);
 

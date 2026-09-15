@@ -7,7 +7,11 @@
  * has to remember to enforce.
  */
 import { useCallback, useState } from "react";
-import { clampPanelWidth, RIGHT_PANEL_DEFAULT_WIDTH } from "../lib/chat/subagentList";
+import {
+    clampPanelWidth,
+    RIGHT_PANEL_DEFAULT_WIDTH,
+    sidebarWidthPx,
+} from "../lib/chat/subagentList";
 import { readPersistedRightPanelWidth, writePersistedRightPanelWidth } from "../lib/clientSettings";
 import { type DragHandleProps, useDragResize } from "./primitives/useDragResize";
 
@@ -24,7 +28,7 @@ export interface UseRightPanelApi {
     resizeHandleProps: DragHandleProps;
 }
 
-export function useRightPanel(): UseRightPanelApi {
+export function useRightPanel(sidebarCollapsed = false): UseRightPanelApi {
     const [panel, setPanel] = useState<RightPanelKind>("none");
 
     const toggle = useCallback((kind: Exclude<RightPanelKind, "none">) => {
@@ -34,9 +38,20 @@ export function useRightPanel(): UseRightPanelApi {
     const close = useCallback(() => setPanel("none"), []);
     const show = useCallback((kind: Exclude<RightPanelKind, "none">) => setPanel(kind), []);
 
-    // Re-clamped on every read rather than written back: a window narrower than
-    // the persisted width should render narrower without losing the preference.
-    const clamp = useCallback((raw: number) => clampPanelWidth(raw, window.innerWidth), []);
+    // Identity changes with sidebarCollapsed so useDragResize re-clamps when
+    // the sidebar frees up (or reclaims) horizontal space — collapsing it
+    // raises the panel's ceiling without any window resize event firing.
+    // A width clamped down by a narrow viewport is never written back, so the
+    // stored preference survives and returns when there is room again.
+    const clamp = useCallback(
+        (raw: number) =>
+            clampPanelWidth(
+                raw,
+                window.innerWidth,
+                sidebarWidthPx(window.innerWidth, sidebarCollapsed),
+            ),
+        [sidebarCollapsed],
+    );
 
     const { width, handleProps: resizeHandleProps } = useDragResize({
         initial: readPersistedRightPanelWidth() ?? RIGHT_PANEL_DEFAULT_WIDTH,

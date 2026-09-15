@@ -16,6 +16,7 @@ import {
     RIGHT_PANEL_DEFAULT_WIDTH,
     type SubagentEntry,
     shouldAutoOpen,
+    sidebarWidthPx,
     subagentDotState,
 } from "../../../src/lib/chat/subagentList";
 
@@ -350,12 +351,24 @@ describe("clampPanelWidth", () => {
         assert.equal(clampPanelWidth(9999, 1440), 640);
     });
 
-    it("窄视口时上限退为 50vw", () => {
-        assert.equal(clampPanelWidth(600, 800), 400);
+    it("上限为视口减去侧边栏与主内容区保底", () => {
+        // 1000 - 220 - 480 = 300
+        assert.equal(clampPanelWidth(600, 1000, 220), 300);
+    });
+
+    it("侧边栏折叠(0)时上限更宽", () => {
+        // 1000 - 0 - 480 = 520，仍低于 640 上限
+        assert.equal(clampPanelWidth(600, 1000, 0), 520);
+    });
+
+    it("主内容区保底优先于持久化的宽值", () => {
+        // 1280 - 288 - 480 = 512：640 的持久值被压到 512
+        assert.equal(clampPanelWidth(640, 1280, 288), 512);
     });
 
     it("极窄视口下限优先，保证不小于 220", () => {
         assert.equal(clampPanelWidth(300, 300), 220);
+        assert.equal(clampPanelWidth(300, 600, 220), 220);
     });
 
     it("非数字 / NaN / 负数 / undefined 回落默认值", () => {
@@ -370,5 +383,26 @@ describe("clampPanelWidth", () => {
         const v = clampPanelWidth(300, Number.NaN);
         assert.ok(Number.isFinite(v));
         assert.equal(v, 300);
+    });
+
+    it("侧边栏宽度非法时按 0 处理", () => {
+        assert.equal(clampPanelWidth(600, 1000, Number.NaN), 520);
+        assert.equal(clampPanelWidth(600, 1000, -50), 520);
+    });
+});
+
+describe("sidebarWidthPx", () => {
+    it("折叠时为 0", () => {
+        assert.equal(sidebarWidthPx(1440, true), 0);
+    });
+
+    it("镜像 theme.css 的 clamp(220px, 20vw, 340px)", () => {
+        assert.equal(sidebarWidthPx(1000, false), 220); // 20vw = 200 → 下限 220
+        assert.equal(sidebarWidthPx(1440, false), 288); // 20vw = 288 → 区间内
+        assert.equal(sidebarWidthPx(2560, false), 340); // 20vw = 512 → 上限 340
+    });
+
+    it("视口非法时回落默认视口而非 NaN", () => {
+        assert.equal(sidebarWidthPx(Number.NaN, false), 288);
     });
 });

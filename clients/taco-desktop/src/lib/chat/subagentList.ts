@@ -35,6 +35,13 @@ const RIGHT_PANEL_MIN_WIDTH = 220;
 const RIGHT_PANEL_MAX_WIDTH = 640;
 const FALLBACK_VIEWPORT_WIDTH = 1440;
 
+/**
+ * Floor for the chat column, subtracted from the panel's upper bound. Below
+ * this the composer buttons wrap and assistant code blocks stop being
+ * readable, which matters more than honouring a wide persisted panel.
+ */
+const MAIN_CONTENT_MIN_WIDTH = 480;
+
 const AGENT_TOOL_NAMES = new Set(["agent", "agentContinue"]);
 
 const TOOL_CALL_STATUSES = new Set<ToolCallStatus>(["running", "ok", "error"]);
@@ -164,16 +171,37 @@ export function shouldAutoOpen(
 /**
  * Clamp a persisted or dragged width into the allowed range.
  *
- * The upper bound also tracks the viewport so a wide panel restored on a small
- * window cannot squeeze the chat column out; the lower bound wins on very
- * narrow viewports, since a panel below 220px is unusable either way.
+ * The upper bound is whatever is left after the sidebar and the chat column's
+ * 480px floor, so widening the panel can never squeeze the chat out — pass
+ * `sidebarWidth: 0` when the sidebar is collapsed to reclaim that space. The
+ * lower bound wins on very narrow viewports, since a panel below 220px is
+ * unusable either way and a clipped panel beats a vanished one.
  */
-export function clampPanelWidth(raw: unknown, viewportWidth: number): number {
+export function clampPanelWidth(raw: unknown, viewportWidth: number, sidebarWidth = 0): number {
     if (typeof raw !== "number" || Number.isNaN(raw)) return RIGHT_PANEL_DEFAULT_WIDTH;
     const viewport =
         Number.isFinite(viewportWidth) && viewportWidth > 0
             ? viewportWidth
             : FALLBACK_VIEWPORT_WIDTH;
-    const upper = Math.min(RIGHT_PANEL_MAX_WIDTH, Math.floor(viewport / 2));
+    const sidebar = Number.isFinite(sidebarWidth) && sidebarWidth > 0 ? sidebarWidth : 0;
+    const upper = Math.min(
+        RIGHT_PANEL_MAX_WIDTH,
+        Math.floor(viewport - sidebar - MAIN_CONTENT_MIN_WIDTH),
+    );
     return Math.round(Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(upper, raw)));
+}
+
+/**
+ * Sidebar width in px for clampPanelWidth, mirroring `--pane-width` in
+ * theme.css (`clamp(220px, 20vw, 340px)`). Duplicated in JS because custom
+ * properties holding a `clamp()` come back unresolved from getComputedStyle,
+ * so the value cannot be read back from CSS. Keep in sync with theme.css.
+ */
+export function sidebarWidthPx(viewportWidth: number, collapsed: boolean): number {
+    if (collapsed) return 0;
+    const viewport =
+        Number.isFinite(viewportWidth) && viewportWidth > 0
+            ? viewportWidth
+            : FALLBACK_VIEWPORT_WIDTH;
+    return Math.min(340, Math.max(220, viewport * 0.2));
 }
