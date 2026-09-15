@@ -1,4 +1,4 @@
-import type { TaskItem, WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type TaskItem, type WorkspaceId } from "@taco-ai/protocol";
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
@@ -153,7 +153,7 @@ function HistoryRow({
             setLoading(true);
             setError(null);
             client
-                .sessionTaskHistoryGet(cwd, sid, listId)
+                .sessionTaskHistoryGet(cwd, asSessionId(sid), listId)
                 .then((tasks) => {
                     dispatchWs({
                         type: "HISTORY_DETAIL_LOADED",

@@ -7,7 +7,12 @@
  * new checkpoint at the top.
  */
 
-import type { CheckpointsListResult, CheckpointsRestoreResult } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    type CheckpointsListResult,
+    type CheckpointsRestoreResult,
+} from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
@@ -44,7 +49,10 @@ export function useCheckpointsPane(
         setLoading(true);
         setError(null);
         void client
-            .checkpointsList(activeCwd, activeSessionId)
+            .checkpointsList(
+                asWorkspaceId(activeCwd),
+                activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
+            )
             .then((result) => {
                 if (seq !== refreshSeq.current) return;
                 setData(result);
@@ -71,9 +79,9 @@ export function useCheckpointsPane(
             setRestoringId(checkpointId);
             try {
                 const result: CheckpointsRestoreResult = await client.checkpointsRestore(
-                    activeCwd,
+                    asWorkspaceId(activeCwd),
                     checkpointId,
-                    activeSessionId,
+                    activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
                 );
                 if (result.failed.length > 0) {
                     showToast(

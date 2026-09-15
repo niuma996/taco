@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from "node:events";
-import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
 import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../../agents/types.ts";
@@ -328,7 +328,7 @@ export class AgentSpawner extends EventEmitter {
             taskState: childTaskState,
             systemPrompt: childSystemPrompt,
         } = await prepareChildAttach(this.childAttachDeps, {
-            sessionId: childSessionId,
+            sessionId: asSessionId(childSessionId),
             agentType: args.agentType,
             childDepth,
             allowedTools: args.tools,
@@ -347,7 +347,7 @@ export class AgentSpawner extends EventEmitter {
         let attached: AttachedSession;
         try {
             attached = await this.sessionRegistry.attachChild(
-                childSessionId,
+                asSessionId(childSessionId),
                 { thinkingLevel: "off", model: args.model } satisfies AttachOptions,
                 childTools,
                 childTaskState,
@@ -355,14 +355,14 @@ export class AgentSpawner extends EventEmitter {
             );
         } catch (e) {
             return {
-                subSessionId: childSessionId,
+                subSessionId: asSessionId(childSessionId),
                 resultText: e instanceof Error ? e.message : String(e),
                 isError: true,
             };
         }
 
         return runAttachedSubagent({
-            subSessionId: childSessionId,
+            subSessionId: asSessionId(childSessionId),
             attached,
             prompt: args.prompt,
             maxTurns: args.maxTurns,
@@ -698,7 +698,7 @@ export class AgentSpawner extends EventEmitter {
         }
 
         return this.runSkillSubagent({
-            parentSessionId: opts.parentSessionId,
+            parentSessionId: asSessionId(opts.parentSessionId),
             parentToolCallId: opts.parentToolCallId,
             skillName: opts.skillName,
             skillContent: opts.skillContent,

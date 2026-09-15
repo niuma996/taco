@@ -17,6 +17,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import {
     CompactionController,
     type CompactionLifecycleSignal,
@@ -26,8 +27,8 @@ import { type AgentHarness, LaneBusy, Result } from "../../src/runtime/pi/values
 import { CompactionPushAdapter } from "../../src/server/compactionPushAdapter.ts";
 import type { EmitPushFn } from "../../src/server/pushTypes.ts";
 
-const CWD = "/tmp/ws";
-const SESSION = "sess-1";
+const CWD = asWorkspaceId("/tmp/ws");
+const SESSION = asSessionId("sess-1");
 
 /** Records every push frame the adapter emits, in order. */
 function newAdapter(): {

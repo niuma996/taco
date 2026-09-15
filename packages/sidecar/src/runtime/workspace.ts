@@ -21,7 +21,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import { IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
 import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -411,15 +411,15 @@ export class WorkspaceRuntime extends EventEmitter {
         // workspaceKey is stored separately for push frame / parseImCwd routing.
         // sessionCwd is the storage identity and MUST NOT change once a session
         // exists — JsonlSessionRepo partitions by it (encodeCwd).
-        this.sessionCwd = isIm
-            ? (options.fsCwd ?? resolvePath(options.cwd))
-            : resolvePath(options.cwd);
+        this.sessionCwd = asWorkspaceId(
+            isIm ? (options.fsCwd ?? resolvePath(options.cwd)) : resolvePath(options.cwd),
+        );
         // executionCwd is a soft association: where shell/fs tools run. It may
         // be repointed by IM policy (local binding / per-chat scratch) without
         // affecting session storage.
-        this.executionCwd = options.executionCwd
-            ? resolvePath(options.executionCwd)
-            : this.sessionCwd;
+        this.executionCwd = asWorkspaceId(
+            options.executionCwd ? resolvePath(options.executionCwd) : this.sessionCwd,
+        );
         this.workspaceKey = options.workspaceKey ?? this.sessionCwd;
         this.sessionsRoot = defaultSessionsRoot(options.sessionsRoot);
         // executionCwd, not sessionCwd — defaultSkillDirs (inside
@@ -486,7 +486,8 @@ export class WorkspaceRuntime extends EventEmitter {
                 return { ...base, rules: Array.from(new Set([...base.rules, ...extRules])) };
             },
             {
-                resolveDisplayContext: (sid) => this.sessionRegistry.resolveDisplayContext(sid),
+                resolveDisplayContext: (sid) =>
+                    this.sessionRegistry.resolveDisplayContext(asSessionId(sid)),
                 // Read through the same thunk tool assembly uses (not the
                 // `imPolicy` const above) so a hand-edited `commands` block —
                 // `mode`, `allow` — reaches command evaluation on the next
@@ -730,7 +731,7 @@ export class WorkspaceRuntime extends EventEmitter {
               : undefined;
         return () => ({
             env: this.env,
-            workspace: this.workspaceKey,
+            workspace: asWorkspaceId(this.workspaceKey),
             ...(selfRpc ? { call: selfRpc } : {}),
             ...(actor ? { actor } : {}),
         });

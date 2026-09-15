@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
-import type { WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
@@ -71,12 +71,12 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
         resources: {},
         streamOptions: {},
         spawnSubagent: async () => ({
-            subSessionId: "stub-sub",
+            subSessionId: asSessionId("stub-sub"),
             resultText: "",
             isError: true,
         }),
         resumeSubagent: async () => ({
-            subSessionId: "stub-sub",
+            subSessionId: asSessionId("stub-sub"),
             resultText: "",
             isError: true,
         }),
@@ -141,7 +141,7 @@ describe("SessionRegistry", () => {
 
     it("openSession throws when session not found", async () => {
         const sr = makeRegistry();
-        await assert.rejects(() => sr.openSession("nonexistent"), /session not found/);
+        await assert.rejects(() => sr.openSession(asSessionId("nonexistent")), /session not found/);
     });
 
     it("openSession finds by exact id and by prefix", async () => {
@@ -149,9 +149,9 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        const exact = await sr.openSession(id);
+        const exact = await sr.openSession(asSessionId(id));
         assert.equal(exact.id, id);
-        const prefix = await sr.openSession(id.slice(0, 8));
+        const prefix = await sr.openSession(asSessionId(id.slice(0, 8)));
         assert.equal(prefix.id, id);
     });
 
@@ -165,7 +165,10 @@ describe("SessionRegistry", () => {
         await seedSession(sr.repo, idA);
         await seedSession(sr.repo, idB);
         sr.invalidateListCache();
-        await assert.rejects(() => sr.openSession(shared), /session id prefix is ambiguous/);
+        await assert.rejects(
+            () => sr.openSession(asSessionId(shared)),
+            /session id prefix is ambiguous/,
+        );
     });
 
     it("rename + getSessionName round-trip via cache", async () => {
@@ -173,8 +176,8 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        await sr.renameSession(id, "my-session");
-        const name = await sr.getSessionName(id);
+        await sr.renameSession(asSessionId(id), "my-session");
+        const name = await sr.getSessionName(asSessionId(id));
         assert.equal(name, "my-session");
     });
 
@@ -188,11 +191,11 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        await sr.renameSession(id, "first-title");
-        await sr.renameSession(id, "second-title");
+        await sr.renameSession(asSessionId(id), "first-title");
+        await sr.renameSession(asSessionId(id), "second-title");
         // Drop _nameCache so the answer must come from the file.
         sr.invalidateListCache();
-        assert.equal(await sr.getSessionName(id), "second-title");
+        assert.equal(await sr.getSessionName(asSessionId(id)), "second-title");
     });
 
     it("getSessionName returns undefined for a session that was never titled", async () => {
@@ -200,7 +203,7 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        assert.equal(await sr.getSessionName(id), undefined);
+        assert.equal(await sr.getSessionName(asSessionId(id)), undefined);
     });
 
     // pi commits a multi-write batch as a JSON array on one line. Only runtime
@@ -214,7 +217,7 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        const meta = await sr.openSession(id);
+        const meta = await sr.openSession(asSessionId(id));
         // Mirror pi's on-disk value-record shape; `seq` only has to be past the
         // seeded entries for "last write wins" to select it.
         await appendFile(
@@ -239,7 +242,7 @@ describe("SessionRegistry", () => {
             ])}\n`,
         );
         sr.invalidateListCache();
-        assert.equal(await sr.getSessionName(id), "batched-title");
+        assert.equal(await sr.getSessionName(asSessionId(id)), "batched-title");
     });
 
     it("rename updates _nameCache precisely without invalidating list cache", async () => {
@@ -248,7 +251,7 @@ describe("SessionRegistry", () => {
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
         const before = await sr.listSessions();
-        await sr.renameSession(id, "renamed");
+        await sr.renameSession(asSessionId(id), "renamed");
         const after = await sr.listSessions();
         assert.equal(after, before); // cache not invalidated
     });
@@ -258,7 +261,7 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        const { entries, leafEntryId } = await sr.getHistory(id);
+        const { entries, leafEntryId } = await sr.getHistory(asSessionId(id));
         assert.equal(entries.length, 0);
         assert.equal(leafEntryId, null);
     });
@@ -275,13 +278,13 @@ describe("SessionRegistry", () => {
         await created.close(harnessContext);
         sr.invalidateListCache();
 
-        await sr.getHistory(id);
-        await sr.getHistory(id);
-        await sr.getSessionFacts(id);
-        await sr.renameSession(id, "renamed");
+        await sr.getHistory(asSessionId(id));
+        await sr.getHistory(asSessionId(id));
+        await sr.getSessionFacts(asSessionId(id));
+        await sr.renameSession(asSessionId(id), "renamed");
 
         // The slot must still be free for a real consumer to take.
-        const reopened = await sr.repo.open(await sr.openSession(id), harnessContext);
+        const reopened = await sr.repo.open(await sr.openSession(asSessionId(id)), harnessContext);
         await reopened.close(harnessContext);
     });
 
@@ -299,17 +302,17 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        await sr.renameSession(id, "titled");
+        await sr.renameSession(asSessionId(id), "titled");
         // Drop both caches so the first getter must stream the file.
         sr.invalidateListCache();
 
-        const meta = await sr.openSession(id);
-        assert.equal(await sr.getSessionName(id), "titled");
+        const meta = await sr.openSession(asSessionId(id));
+        assert.equal(await sr.getSessionName(asSessionId(id)), "titled");
 
         // Any further disk read must now fail. _metadataCache still holds the
         // path, so openSession keeps succeeding — only the stream would break.
         rmSync(meta.path, { force: true });
-        assert.deepEqual(await sr.getSessionFacts(id), {});
+        assert.deepEqual(await sr.getSessionFacts(asSessionId(id)), {});
     });
 
     it("getSessionFacts warms the name cache — the pair costs one file read", async () => {
@@ -317,14 +320,14 @@ describe("SessionRegistry", () => {
         const id = uuidv7();
         await seedSession(sr.repo, id);
         sr.invalidateListCache();
-        await sr.renameSession(id, "titled");
+        await sr.renameSession(asSessionId(id), "titled");
         sr.invalidateListCache();
 
-        const meta = await sr.openSession(id);
-        assert.deepEqual(await sr.getSessionFacts(id), {});
+        const meta = await sr.openSession(asSessionId(id));
+        assert.deepEqual(await sr.getSessionFacts(asSessionId(id)), {});
 
         rmSync(meta.path, { force: true });
-        assert.equal(await sr.getSessionName(id), "titled");
+        assert.equal(await sr.getSessionName(asSessionId(id)), "titled");
     });
 
     // Facts written at spawn time must survive the round-trip through the
@@ -338,7 +341,7 @@ describe("SessionRegistry", () => {
         await created.close(harnessContext);
         sr.invalidateListCache();
 
-        const facts = await sr.getSessionFacts(id);
+        const facts = await sr.getSessionFacts(asSessionId(id));
         assert.equal(facts.kind, "subagent");
         assert.equal(facts.agentType, "explorer");
         assert.equal(facts.depth, 1);
@@ -353,7 +356,7 @@ describe("SessionRegistry", () => {
         sr.on("session.deleted", (e: { sessionId: string }) => {
             deleted = e.sessionId;
         });
-        await sr.deleteSession(id);
+        await sr.deleteSession(asSessionId(id));
         assert.equal(deleted, id);
         const list = await sr.listSessions();
         assert.equal(list.length, 0);
@@ -361,12 +364,12 @@ describe("SessionRegistry", () => {
 
     it("getAttached returns undefined for unattached session", () => {
         const sr = makeRegistry();
-        assert.equal(sr.getAttached("never-attached"), undefined);
+        assert.equal(sr.getAttached(asSessionId("never-attached")), undefined);
     });
 
     it("getSessionKind returns 'main' for unknown session (default)", () => {
         const sr = makeRegistry();
-        assert.equal(sr.getSessionKind("never-attached"), "main");
+        assert.equal(sr.getSessionKind(asSessionId("never-attached")), "main");
     });
 
     it("dispose does not throw on empty registry", async () => {
@@ -384,7 +387,7 @@ describe("SessionRegistry", () => {
                 return [fakeTool("fake-tool")];
             },
         });
-        const { tools, taskState } = await sr.toolsForChildSession(id);
+        const { tools, taskState } = await sr.toolsForChildSession(asSessionId(id));
         // The returned taskState must be the one whose store the tools close over —
         // otherwise attachChild builds a second independent TaskStore and the
         // tools' writes diverge from attached.taskStore.

@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { SessionId } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, type SessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
@@ -43,7 +43,7 @@ describe("WorkspaceRuntime subagent primitives", () => {
         sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-sub-"));
         ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd,
+            cwd: asWorkspaceId(cwd),
             sessionsRoot,
             agents: defs,
         });
@@ -109,7 +109,7 @@ describe("WorkspaceRuntime subagent primitives", () => {
         // Requires a real parent session (spawnSubagent calls openSession for depth).
         // unknown-type branch short-circuits before openSession, so no real parent is needed.
         const res = await ws.spawnSubagent({
-            parentSessionId: "does-not-matter",
+            parentSessionId: asSessionId("does-not-matter"),
             parentToolCallId: "tc0",
             agentType: "ghost",
             prompt: "hi",

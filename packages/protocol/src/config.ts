@@ -5,7 +5,7 @@
  */
 
 import type { ChannelInstanceConfig } from "./channels.js";
-import type { SessionId, WorkspaceId } from "./frames.js";
+import type { SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 import type { ThinkingLevel } from "./messages.js";
 
 /**
@@ -111,13 +111,13 @@ export interface CommandEvaluation {
 export interface CommandPermissionRequest {
     requestId: string;
     sessionId: SessionId;
-    toolCallId: string;
+    toolCallId: ToolCallId;
     command: string;
     evaluation: CommandEvaluation;
     /** Root session id for UI routing — == sessionId for main-session requests. */
     displaySessionId?: SessionId;
     /** Root agent toolCallId — == toolCallId for main-session requests. */
-    displayToolCallId?: string;
+    displayToolCallId?: ToolCallId;
 }
 export type CommandPermissionDenialReason = "user_denied" | "timeout" | "aborted";
 export interface CommandPermissionDecision {

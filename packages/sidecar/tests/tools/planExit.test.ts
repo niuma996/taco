@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { asSessionId } from "@taco-ai/protocol";
 import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createPlanExitTool, type PlanExitToolDetails } from "../../src/tools/planExit.ts";
@@ -23,7 +24,7 @@ describe("planExit tool", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.\n\nMore details.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         const result = await invokeTool(
             tool,
             { planSlug: "test-plan" },
@@ -45,7 +46,7 @@ describe("planExit tool", () => {
     });
 
     it("rejects if not in plan mode", async () => {
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         try {
             await invokeTool(
                 tool,
@@ -68,7 +69,7 @@ describe("planExit tool", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         const result = await invokeTool(
             tool,
             { planSlug: "test-plan", answers: { "Approve this plan?": "Approve" } },
@@ -90,7 +91,7 @@ describe("planExit tool", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         const result = await invokeTool(
             tool,
             { planSlug: "test-plan", answers: { "Approve this plan?": "Reject" } },
@@ -121,7 +122,7 @@ describe("planExit tool — schema robustness", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "stored-slug.md"), "# Plan from state\n\nBody.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         // No planSlug passed — relies entirely on state.currentSlug
         const result = await invokeTool(
             tool,
@@ -144,7 +145,7 @@ describe("planExit tool — schema robustness", () => {
         const mdPath = join(plansDir, "ephemeral.md");
         writeFileSync(mdPath, "# Ephemeral");
 
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         // Simulate user/system deleting the plan document while waiting
         rmSync(mdPath, { force: true });
 
@@ -169,7 +170,7 @@ describe("planExit tool — schema robustness", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "no-slug-2nd.md"), "# Body");
 
-        const tool = createPlanExitTool(state, testDir, undefined, "");
+        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
         // Delete .md — but because this is a second call (with answers), it still doesn't read the file
         rmSync(join(plansDir, "no-slug-2nd.md"), { force: true });
 

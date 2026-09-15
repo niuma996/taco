@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
-import type { WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Skill } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
@@ -67,8 +67,16 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
         tools: [],
         resources: {},
         streamOptions: {},
-        spawnSubagent: async () => ({ subSessionId: "stub-sub", resultText: "", isError: true }),
-        resumeSubagent: async () => ({ subSessionId: "stub-sub", resultText: "", isError: true }),
+        spawnSubagent: async () => ({
+            subSessionId: asSessionId("stub-sub"),
+            resultText: "",
+            isError: true,
+        }),
+        resumeSubagent: async () => ({
+            subSessionId: asSessionId("stub-sub"),
+            resultText: "",
+            isError: true,
+        }),
         spawnSkillSubagent: async () => ({
             subSessionId: "stub-sub",
             resultText: "",

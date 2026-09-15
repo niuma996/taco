@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
+import { asWorkspaceId, type SkillDiagnosticEntry } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
@@ -50,7 +50,7 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
     it("is a no-op when no reloadSkills callback was configured", async () => {
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             resources: { skills: [mkSkill("alpha")] },
         });
         const promptBefore = ws.systemPrompt;
@@ -68,7 +68,7 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
         let scanCount = 0;
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             resources: { skills: [mkSkill("alpha")] },
             skillDirs: [tmpDir],
             reloadSkills: async () => {
@@ -124,7 +124,7 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
         let scanCount = 0;
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             resources: { skills: [] },
             skillDirs: [tmpDir],
             reloadSkills: async () => {
@@ -159,7 +159,7 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
         };
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             resources: { skills: [] },
             skillDiagnostics: [stale],
             skillDirs: [tmpDir],

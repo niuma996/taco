@@ -16,6 +16,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
@@ -59,7 +60,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
         let scanResult: TacoSkill[] = [];
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             resources: { skills: [] },
             skillDirs: [skillsDir],
             // Stub scan: real directory scanning (loadSourcedSkills etc.) is
@@ -121,7 +122,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
         let scanResult: TacoSkill[] = [];
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             resources: { skills: [] },
             skillDirs: [freshSkillsDir],
             reloadSkills: async () => ({ skills: scanResult, diagnostics: [] }),

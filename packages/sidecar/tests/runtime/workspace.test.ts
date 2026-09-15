@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { activateExtensions } from "../../src/extensions/activation.ts";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
@@ -68,7 +69,7 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
         const extensions = await activateExtensions(registry, { cwd: tmpDir });
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             tools: [fakeTool("builtin-tool")],
             extensions,
         });
@@ -85,7 +86,7 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
         const extensions = await activateExtensions(registry, { cwd: tmpDir });
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             tools: [fakeTool("shared")],
             extensions,
         });
@@ -114,7 +115,7 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
         const extensions = await activateExtensions(r, { cwd: tmpDir });
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             tools: [fakeTool("builtin-only")],
             extensions,
         });
@@ -131,7 +132,7 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
         const extensions = await activateExtensions(registry, { cwd: tmpDir });
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             tools: [fakeTool("x")],
             extensions,
         });
@@ -144,7 +145,7 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
     it("without extensions, behaves identically to before (no contributors push)", () => {
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: tmpDir,
+            cwd: asWorkspaceId(tmpDir),
             tools: [fakeTool("only-builtin")],
             systemPrompt: "USER-PROMPT",
         });

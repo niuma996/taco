@@ -16,7 +16,7 @@
  * subagent's branch.
  */
 
-import type { AgentContinueToolDetails } from "@taco-ai/protocol";
+import { type AgentContinueToolDetails, asSessionId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { SubagentSpawnContext } from "../agents/types.ts";
@@ -68,7 +68,7 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
             const signal = piContext.abortSignal;
             const { subSessionId, resultText, isError } = await ctx.continue({
                 parentToolCallId: toolCallId,
-                subSessionId: params.subSessionId,
+                subSessionId: asSessionId(params.subSessionId),
                 prompt: params.prompt,
                 signal,
             });

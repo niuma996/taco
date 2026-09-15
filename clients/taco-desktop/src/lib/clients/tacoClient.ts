@@ -8,6 +8,7 @@
  */
 
 import {
+    asWorkspaceId,
     CURRENT_SESSION_FORMAT_VERSION,
     ErrorCodes,
     isCompatibleSidecarProtocol,
@@ -562,7 +563,7 @@ export class TacoClient extends TacoClientBase {
     ): void {
         for (const handler of this.sessionEpochChangeHandlers) {
             try {
-                handler({ workspace, sessionId, transition });
+                handler({ workspace: asWorkspaceId(workspace), sessionId, transition });
             } catch (err) {
                 console.error("[taco] session-epoch handler threw", err);
             }

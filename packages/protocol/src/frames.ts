@@ -5,14 +5,54 @@
 
 // Routing keys
 
-/** Workspace ID = normalized cwd (project directory absolute path). */
-export type WorkspaceId = string;
+// Branded identity strings. On the wire all three are plain strings (JSON has
+// no nominal types), but distinct types in code — passing a workspace id where
+// a session id is expected is a compile error instead of a silent cross-wire
+// mixup. Raw strings enter through the `as*Id` factories: the single choke
+// point, which also rejects empty strings.
+declare const idBrand: unique symbol;
+export type Brand<T, B extends string> = T & { readonly [idBrand]: B };
+
+/**
+ * Workspace ID = normalized cwd (project directory absolute path), or an
+ * `im://` URL for a virtual IM workspace.
+ *
+ * `"*"` is reserved: it marks a frame or dispatch with no workspace dimension
+ * (process-level pushes, RPCs that declare no `workspaceParam`). It is a valid
+ * `WorkspaceId` as far as {@link asWorkspaceId} is concerned but never names a
+ * real workspace, so do not pass it where a directory is expected.
+ */
+export type WorkspaceId = Brand<string, "WorkspaceId">;
+
+/** The no-workspace sentinel — see {@link WorkspaceId}. */
+export const WORKSPACE_ANY = "*" as WorkspaceId;
 
 /** Languages the desktop UI knows how to render. */
 export type SupportedLocale = "zh" | "en";
 
 /** Session ID, server-generated. Clients may pass an id to reuse one. */
-export type SessionId = string;
+export type SessionId = Brand<string, "SessionId">;
+
+/** Tool call correlation id — links tool_call_start/update/end pushes and `AssistantMessage.content[].id`. */
+export type ToolCallId = Brand<string, "ToolCallId">;
+
+/** Brand a raw string as a {@link WorkspaceId}. Throws on an empty string. */
+export function asWorkspaceId(raw: string): WorkspaceId {
+    if (raw.trim() === "") throw new TypeError("WorkspaceId must be a non-empty string");
+    return raw as WorkspaceId;
+}
+
+/** Brand a raw string as a {@link SessionId}. Throws on an empty string. */
+export function asSessionId(raw: string): SessionId {
+    if (raw.trim() === "") throw new TypeError("SessionId must be a non-empty string");
+    return raw as SessionId;
+}
+
+/** Brand a raw string as a {@link ToolCallId}. Throws on an empty string. */
+export function asToolCallId(raw: string): ToolCallId {
+    if (raw.trim() === "") throw new TypeError("ToolCallId must be a non-empty string");
+    return raw as ToolCallId;
+}
 
 /**
  * Why a compaction did not produce a summary. Shared by the `session.compact`

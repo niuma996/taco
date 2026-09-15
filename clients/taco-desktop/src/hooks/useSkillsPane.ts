@@ -1,4 +1,4 @@
-import type { SkillDiagnosticEntry, SkillEntry } from "@taco-ai/protocol";
+import { asWorkspaceId, type SkillDiagnosticEntry, type SkillEntry } from "@taco-ai/protocol";
 import { useEffect, useMemo, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
@@ -63,7 +63,7 @@ export function useSkillsPane(
         clearSkillContentError();
         clearSkillsError();
         void client
-            .skillsList(activeCwd)
+            .skillsList(asWorkspaceId(activeCwd))
             .then((r) => {
                 setAllSkills(r.skills);
                 setDiagnostics(r.diagnostics ?? []);
@@ -91,7 +91,7 @@ export function useSkillsPane(
         if (!known) return;
         setSkillContentLoading(true);
         void client
-            .skillContent(activeCwd, known.filePath)
+            .skillContent(asWorkspaceId(activeCwd), known.filePath)
             .then((r) => {
                 if (cancelled) return;
                 setSkillContent(r.content);

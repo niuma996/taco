@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
+    asWorkspaceId,
     type ChannelStatusEntry,
     type ClientCapabilities,
     type CustomProviderConfig,
@@ -30,6 +31,7 @@ import {
     type SidecarCapabilities,
     type SkillDiagnosticEntry,
     type SupportedLocale,
+    WORKSPACE_ANY,
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
@@ -878,7 +880,7 @@ export class SidecarServer implements ServerRpcSurface {
     ): Promise<RpcResponse> {
         try {
             let workspace: WorkspaceRuntime | undefined;
-            let cwd: WorkspaceId = "*";
+            let cwd: WorkspaceId = WORKSPACE_ANY;
             if (reg.options.workspaceParam) {
                 const params = (req.params ?? {}) as Record<string, unknown>;
                 const route = params[reg.options.workspaceParam];
@@ -889,7 +891,7 @@ export class SidecarServer implements ServerRpcSurface {
                         `missing required field: ${reg.options.workspaceParam}`,
                     );
                 }
-                cwd = route;
+                cwd = asWorkspaceId(route);
             }
             if (reg.ensureWorkspace) {
                 const params = (req.params ?? {}) as { workspace?: WorkspaceId };
@@ -948,7 +950,7 @@ export class SidecarServer implements ServerRpcSurface {
 
         if (isIm && parsedIm) {
             sessionsRoot = makeImSessionsRoot(tacoHome(), parsedIm.channelId);
-            fsCwd = join(sessionsRoot, "scratch");
+            fsCwd = asWorkspaceId(join(sessionsRoot, "scratch"));
             mkdirSync(fsCwd, { recursive: true });
             workspaceKey = cwd; // im:// URL for workspaceMap key + emitPush
             disableFsTools = true;
@@ -958,7 +960,7 @@ export class SidecarServer implements ServerRpcSurface {
             // Resolve the workspace policy and where its tools actually run.
             imPolicy = this.imPolicyStore.resolve(parsedIm);
             const exec = resolveImExecutionCwd({ sessionsRoot, route: parsedIm, policy: imPolicy });
-            executionCwd = exec.executionCwd;
+            executionCwd = asWorkspaceId(exec.executionCwd);
             if (exec.warning) {
                 log.warn(exec.warning);
             }
@@ -1160,7 +1162,7 @@ export class SidecarServer implements ServerRpcSurface {
         let ws: WorkspaceRuntime;
         try {
             ws = new WorkspaceRuntime({
-                cwd: paths.fsCwd,
+                cwd: asWorkspaceId(paths.fsCwd),
                 workspaceKey: paths.workspaceKey,
                 sessionsRoot: paths.sessionsRoot,
                 defaultModel: this.options.defaultModel,
@@ -1429,13 +1431,13 @@ export class SidecarServer implements ServerRpcSurface {
         // ever supports parallel turns per workspace, count from sessionEvents
         // or the router instead.
         for (const key of keys) {
-            this.emitPush(PushMethods.ImWorkspacesInvalidated, key, undefined, {
+            this.emitPush(PushMethods.ImWorkspacesInvalidated, asWorkspaceId(key), undefined, {
                 channelId,
                 interruptedCount: 1,
             });
         }
         for (const key of keys) {
-            await this.disposeWorkspace(key);
+            await this.disposeWorkspace(asWorkspaceId(key));
         }
     }
 

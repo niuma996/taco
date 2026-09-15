@@ -1,4 +1,4 @@
-import type { MemoryListResult } from "@taco-ai/protocol";
+import { asWorkspaceId, type MemoryListResult } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes.js";
@@ -46,7 +46,7 @@ export function useMemoryPane(
         setMemoryLoading(true);
         setMemoryError(null);
         void client
-            .memoryList(activeCwd)
+            .memoryList(asWorkspaceId(activeCwd))
             .then((r) => {
                 setMemoryData(r);
                 // Fall back to global after data loads (prevents stale topic selection from previous cwd).
@@ -69,7 +69,7 @@ export function useMemoryPane(
             if (!activeCwd) return { ok: false, conflict: { currentContent: "", currentHash: "" } };
             setMemorySaving(true);
             try {
-                await client.memoryWrite(activeCwd, content, baseHash);
+                await client.memoryWrite(asWorkspaceId(activeCwd), content, baseHash);
                 showToast(t("memory.savedToast"));
                 loadMemory();
                 return { ok: true };
@@ -93,7 +93,7 @@ export function useMemoryPane(
         async (id: string): Promise<void> => {
             if (!activeCwd) return;
             try {
-                await client.memoryDeleteTopic(activeCwd, id);
+                await client.memoryDeleteTopic(asWorkspaceId(activeCwd), id);
                 showToast(t("memory.deletedToast"));
                 loadMemory();
             } catch (e: unknown) {

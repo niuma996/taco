@@ -8,7 +8,7 @@
  * in the browser, so no `node:events` — a minimal pub/sub replaces EventEmitter.
  */
 
-import type { ServerPush } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, type ServerPush, WORKSPACE_ANY } from "@taco-ai/protocol";
 
 type Listener<T> = (value: T) => void;
 
@@ -135,8 +135,12 @@ export class FrameDispatcher {
                 const push: ServerPush = {
                     id: typeof f.id === "string" ? f.id : undefined,
                     method: f.method,
-                    workspace: typeof f.workspace === "string" ? f.workspace : "*",
-                    session: typeof f.session === "string" ? f.session : undefined,
+                    // A push with no workspace dimension is process-level.
+                    workspace:
+                        typeof f.workspace === "string"
+                            ? asWorkspaceId(f.workspace)
+                            : WORKSPACE_ANY,
+                    session: typeof f.session === "string" ? asSessionId(f.session) : undefined,
                     seq:
                         typeof f.seq === "number" && Number.isSafeInteger(f.seq)
                             ? f.seq

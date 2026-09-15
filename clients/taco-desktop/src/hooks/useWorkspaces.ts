@@ -8,7 +8,7 @@
  */
 
 import type { AgentMessage, ImageInput, ThinkingLevel } from "@taco-ai/protocol";
-import { ErrorCodes } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
@@ -242,8 +242,8 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     const toolName = payload.toolName ?? "askUser";
                     client
                         .sessionSubmitAnswers(
-                            activeCwd,
-                            ws.activeSession,
+                            asWorkspaceId(activeCwd),
+                            asSessionId(ws.activeSession),
                             toolCallId,
                             payload.answers,
                             toolName,
@@ -444,7 +444,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 // APPLY_EVENT guard (activeSession !== action.sid) lets push
                 // events through instead of dropping them.
                 const created = await client.sessionCreate({
-                    workspace: cwd,
+                    workspace: asWorkspaceId(cwd),
                     thinkingLevel: defaults.initialLevel,
                 });
                 settingsRef.current.adoptNewSession(created.sessionId, defaults);
@@ -464,8 +464,8 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 try {
                     reply = (
                         await client.sessionPrompt(
-                            cwd,
-                            created.sessionId,
+                            asWorkspaceId(cwd),
+                            asSessionId(created.sessionId),
                             trimmed,
                             images,
                             uiLocale,
@@ -478,7 +478,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     // runs repo.create). Best-effort cleanup so we don't leave
                     // a phantom session in the sidebar or on disk.
                     try {
-                        await client.sessionDelete(cwd, created.sessionId);
+                        await client.sessionDelete(asWorkspaceId(cwd), created.sessionId);
                     } catch (cleanupErr) {
                         console.error(
                             "[taco] cleanup after sessionPrompt failure failed",
@@ -550,7 +550,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         dispatchWs({ type: "SET_PENDING", cwd, sid: promptSid, pending: true });
         try {
             const reply = (
-                await client.sessionPrompt(cwd, ws.activeSession, trimmed, images, uiLocale)
+                await client.sessionPrompt(
+                    asWorkspaceId(cwd),
+                    asSessionId(ws.activeSession),
+                    trimmed,
+                    images,
+                    uiLocale,
+                )
             ).assistantMessage;
             // Auto-title is persisted inside server-side session.prompt and invalidateListCache'd,
             // so refreshing this workspace's session list now must read the latest name. List-only
@@ -633,7 +639,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         };
         dispatchWs({ type: "APPEND_QUEUED", cwd, sid: steerSid, item: queuedItem });
         try {
-            const result = await client.sessionSteer(cwd, steerSid, trimmed, images, uiLocale);
+            const result = await client.sessionSteer(
+                asWorkspaceId(cwd),
+                asSessionId(steerSid),
+                trimmed,
+                images,
+                uiLocale,
+            );
             if (result.mode !== "idle") return true;
             // The run ended between the composer's steer and the server's check,
             // so the entry would sit unconsumed until the next prompt. Hand back
@@ -667,7 +679,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         const item = (ws.queuedBySessionId[sid] ?? []).find((q) => q.id === entryId);
         dispatchWs({ type: "REMOVE_QUEUED", cwd, sid, id: entryId });
         try {
-            await client.sessionCancelQueued(cwd, sid, entryId);
+            await client.sessionCancelQueued(asWorkspaceId(cwd), asSessionId(sid), entryId);
         } catch (err) {
             console.error("[taco] sessionCancelQueued failed", err);
             setErrorBanner(`Cancel failed: ${(err as Error).message}`);
@@ -684,7 +696,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         // this abort was user-initiated.
         abortRequestedRef.current.add(ws.activeSession);
         try {
-            const result = await client.sessionAbort(cwd, ws.activeSession);
+            const result = await client.sessionAbort(
+                asWorkspaceId(cwd),
+                asSessionId(ws.activeSession),
+            );
             // Discard order isn't preserved across the two queues server-side;
             // steer went in first and reads more naturally restored first.
             return [...(result.discardedSteer ?? []), ...(result.discardedFollowUp ?? [])];
@@ -704,7 +719,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     async function loadSubagentHistory(subSessionId: string): Promise<void> {
         const cwd = activeCwd;
         try {
-            const hist = await client.sessionHistory(cwd, subSessionId);
+            const hist = await client.sessionHistory(asWorkspaceId(cwd), asSessionId(subSessionId));
             const msgs = historyToUiMessages(
                 hist.entries as Parameters<typeof historyToUiMessages>[0],
             );

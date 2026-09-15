@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
@@ -42,7 +43,7 @@ describe("AgentSpawner.spawnSkillSubagent — inlineOnly guard", () => {
         sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-skill-io-"));
         ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd,
+            cwd: asWorkspaceId(cwd),
             sessionsRoot,
             agents: defs,
         });

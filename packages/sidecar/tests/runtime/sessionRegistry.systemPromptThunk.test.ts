@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
-import type { WorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
@@ -84,8 +84,16 @@ describe("SessionRegistry system-prompt thunk", () => {
             tools: [fakeTool("fake-tool")],
             resources: {},
             streamOptions: {},
-            spawnSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
-            resumeSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
+            spawnSubagent: async () => ({
+                subSessionId: asSessionId("stub"),
+                resultText: "",
+                isError: true,
+            }),
+            resumeSubagent: async () => ({
+                subSessionId: asSessionId("stub"),
+                resultText: "",
+                isError: true,
+            }),
             spawnSkillSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
             availableAgentTypes: [],
             skills: [],
@@ -103,7 +111,7 @@ describe("SessionRegistry system-prompt thunk", () => {
         const id1 = uuidv7();
         await sr.repo.create({ id: id1, cwd }, harnessContext).then((s) => s.close(harnessContext));
         sr.invalidateListCache();
-        await assert.rejects(() => sr.attach(id1));
+        await assert.rejects(() => sr.attach(asSessionId(id1)));
         assert.equal(captured.at(-1), "prompt v1 (constructor time)");
 
         // The workspace rebuilds its prompt (a policy grant, a skill reload) —
@@ -113,7 +121,7 @@ describe("SessionRegistry system-prompt thunk", () => {
         const id2 = uuidv7();
         await sr.repo.create({ id: id2, cwd }, harnessContext).then((s) => s.close(harnessContext));
         sr.invalidateListCache();
-        await assert.rejects(() => sr.attach(id2));
+        await assert.rejects(() => sr.attach(asSessionId(id2)));
         assert.equal(
             captured.at(-1),
             "prompt v2 (rebuilt after a policy change)",

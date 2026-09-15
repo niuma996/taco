@@ -5,7 +5,7 @@
  */
 
 import type { ChannelStatusChangedParams } from "./channels.js";
-import type { CompactionFailureReason, SessionId, WorkspaceId } from "./frames.js";
+import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 
 // Push event payloads
 
@@ -242,7 +242,7 @@ export interface PlanStateUpdatedParams {
 export interface ToolCallStartParams {
     ts: number;
     /** Stable correlation id — `AssistantMessage.content[].id === ToolResultMessage.toolCallId`. */
-    toolCallId: string;
+    toolCallId: ToolCallId;
     toolName: string;
     args?: unknown;
 }
@@ -250,7 +250,7 @@ export interface ToolCallStartParams {
 /** `session.tool_call_update` params. */
 export interface ToolCallUpdateParams {
     ts: number;
-    toolCallId: string;
+    toolCallId: ToolCallId;
     /** Streaming partial result. */
     partialResult?: unknown;
 }
@@ -258,7 +258,7 @@ export interface ToolCallUpdateParams {
 /** `session.tool_call_end` params. */
 export interface ToolCallEndParams {
     ts: number;
-    toolCallId: string;
+    toolCallId: ToolCallId;
     /** Tool name from the harness — included on `_end` so the desktop can
      *  render the final row even if the matching `_start` was missed (e.g.
      *  client restarted mid-tool). `_start` already carries it; `_end`

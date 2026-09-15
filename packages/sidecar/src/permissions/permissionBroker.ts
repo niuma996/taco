@@ -7,6 +7,7 @@ import type {
     CommandPermissionRule,
     CommandPermissionScope,
 } from "@taco-ai/protocol";
+import { asSessionId, asToolCallId } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
 import { evaluateCommand, evaluateCommandForImWorkspace } from "./commandPolicy.ts";
 
@@ -110,12 +111,13 @@ export class PermissionBroker extends EventEmitter {
 
         const request: CommandPermissionRequest = {
             requestId: randomUUID(),
-            sessionId: args.sessionId,
-            toolCallId: args.toolCallId,
+            sessionId: asSessionId(args.sessionId),
+            toolCallId: asToolCallId(args.toolCallId),
             command: args.command,
             evaluation,
-            displaySessionId,
-            displayToolCallId,
+            displaySessionId: asSessionId(displaySessionId),
+            displayToolCallId:
+                displayToolCallId === undefined ? undefined : asToolCallId(displayToolCallId),
         };
         return await new Promise<CommandPermissionDecision>((resolve) => {
             const finish = (decision: CommandPermissionDecision) => {

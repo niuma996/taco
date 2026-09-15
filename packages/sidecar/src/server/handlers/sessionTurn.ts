@@ -19,6 +19,8 @@ import type {
     SubmitAnswersParams,
 } from "@taco-ai/protocol";
 import {
+    asSessionId,
+    asWorkspaceId,
     ErrorCodes,
     sessionAbortSchema,
     sessionCancelQueuedSchema,
@@ -70,7 +72,11 @@ async function requireCompactionSettled(
     workspace: string,
     sessionId: string,
 ): Promise<void> {
-    const settled = await server.awaitCompactionEnd(workspace, sessionId, COMPACTION_WAIT_MS);
+    const settled = await server.awaitCompactionEnd(
+        asWorkspaceId(workspace),
+        asSessionId(sessionId),
+        COMPACTION_WAIT_MS,
+    );
     if (!settled) {
         throw new RpcHandlerError(
             ErrorCodes.SessionBusy,

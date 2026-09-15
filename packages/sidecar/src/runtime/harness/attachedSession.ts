@@ -19,6 +19,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
+import { asSessionId } from "@taco-ai/protocol";
 import { CheckpointManager } from "../../checkpoints/manager.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
@@ -581,7 +582,7 @@ export class AttachedSession extends EventEmitter {
         if (open.length > 0) {
             attached.recovery = resumeOpenOperations({
                 lane,
-                sessionId: args.session.metadata.id,
+                sessionId: asSessionId(args.session.metadata.id),
                 open,
             })
                 .then((outcomes) => {

@@ -17,6 +17,8 @@ import type {
     SessionListParams,
 } from "@taco-ai/protocol";
 import {
+    asSessionId,
+    asWorkspaceId,
     ErrorCodes,
     SESSION_LIST_DEFAULT_LIMIT,
     SESSION_LIST_MAX_LIMIT,
@@ -128,7 +130,7 @@ export function registerSessionLifecycleHandlers(): void {
                 params.initialImages !== undefined && params.initialImages.length > 0;
             if (params.initialPrompt || hasInitialImages) {
                 try {
-                    const attached = await workspace.attach(meta.id, {
+                    const attached = await workspace.attach(asSessionId(meta.id), {
                         thinkingLevel: params.thinkingLevel,
                     });
                     const title = (params.initialPrompt ?? "")
@@ -150,7 +152,7 @@ export function registerSessionLifecycleHandlers(): void {
                     workspace.invalidateListCache();
                 } catch (e) {
                     try {
-                        await workspace.detach(meta.id);
+                        await workspace.detach(asSessionId(meta.id));
                         await workspace.repo.delete(meta, harnessContext);
                         workspace.invalidateListCache();
                     } catch {
@@ -240,8 +242,8 @@ async function buildSessionEntry(
             : m.createdAt;
     const updatedAt = new Date(updatedAtSource).toISOString();
     return {
-        id: m.id,
-        cwd: m.cwd,
+        id: asSessionId(m.id),
+        cwd: asWorkspaceId(m.cwd),
         filePath: m.path,
         createdAt: new Date(m.createdAt).toISOString(),
         updatedAt,
@@ -249,12 +251,17 @@ async function buildSessionEntry(
         agentType: md.agentType,
         // `parentSessionId` is standard 0.85 metadata; the fact is the fallback
         // for sessions written before it moved.
-        parentSessionId: m.parentSessionId ?? md.parentSessionId,
+        parentSessionId:
+            m.parentSessionId !== undefined
+                ? asSessionId(m.parentSessionId)
+                : md.parentSessionId !== undefined
+                  ? asSessionId(md.parentSessionId)
+                  : undefined,
         parentToolCallId: md.parentToolCallId,
         depth: md.depth,
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
-        name: await workspace.getSessionName(m.id).catch((err) => {
+        name: await workspace.getSessionName(asSessionId(m.id)).catch((err) => {
             log.error("getSessionName failed in session.list", m.id, err);
             return undefined;
         }),

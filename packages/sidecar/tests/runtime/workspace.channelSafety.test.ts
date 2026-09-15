@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 
 import { buildSystemPrompt } from "../../src/prompts/buildSystemPrompt.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
@@ -41,13 +42,13 @@ describe("IM workspace withholds the path from parent and children alike", () =>
         localCwd = mkdtempSync(join(tmpdir(), "taco-chansafe-local-"));
         im = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: "im://mock-1/u1/c1",
+            cwd: asWorkspaceId("im://mock-1/u1/c1"),
             workspaceKey: "im://mock-1/u1/c1",
             sessionsRoot,
         });
         local = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: localCwd,
+            cwd: asWorkspaceId(localCwd),
             sessionsRoot,
         });
     });

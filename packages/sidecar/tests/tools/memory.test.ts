@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { MemoryUpsertParams } from "@taco-ai/protocol";
-import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
+import { asWorkspaceId, MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import { createMemoryTool, type MemoryToolInput } from "../../src/tools/memory.ts";
@@ -136,7 +136,7 @@ describe("memory tool execute", () => {
         const tool = createMemoryTool();
         const ctx: TacoToolContext = {
             env: undefined as never,
-            workspace: "/tmp/ws",
+            workspace: asWorkspaceId("/tmp/ws"),
             call: async <P, R>(_method: string, _workspace: string, params: P): Promise<R> => {
                 captured = params as unknown as MemoryUpsertParams;
                 return { ok: true, outcome: "created" } as unknown as R;
@@ -148,7 +148,7 @@ describe("memory tool execute", () => {
         // Critical: the params handed to memory.upsert must be flat, with
         // `action` as a string — not nested under another `action` envelope.
         assert.deepEqual(captured, {
-            workspace: "/tmp/ws",
+            workspace: asWorkspaceId("/tmp/ws"),
             action: "add",
             id: "web-search-preference",
             name: "Web search default",
@@ -169,7 +169,7 @@ describe("memory tool execute", () => {
             () =>
                 invokeTool(tool, VALID, {
                     env: undefined as never,
-                    workspace: "/tmp/ws",
+                    workspace: asWorkspaceId("/tmp/ws"),
                 } as TacoToolContext),
             /no self-RPC dispatcher/,
         );

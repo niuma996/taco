@@ -1,4 +1,4 @@
-import type { ToolEntry } from "@taco-ai/protocol";
+import { asWorkspaceId, type ToolEntry } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
@@ -22,7 +22,7 @@ export function useToolsPane(
         if (!active || !activeCwd) return;
         clearError();
         void client
-            .toolsList(activeCwd)
+            .toolsList(asWorkspaceId(activeCwd))
             .then((r) => setTools(r.tools))
             .catch((e: unknown) => {
                 // Surface it: a swallowed failure renders an empty catalog that

@@ -19,6 +19,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { asSessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
@@ -90,7 +91,7 @@ describe("AgentSpawner parent-toolset inheritance", () => {
 
     async function spawnAndCapture(toolCallId: string): Promise<string[]> {
         const res = await ws.spawnSubagent({
-            parentSessionId: "parent-1",
+            parentSessionId: asSessionId("parent-1"),
             parentToolCallId: toolCallId,
             agentType: "coder",
             prompt: "go",

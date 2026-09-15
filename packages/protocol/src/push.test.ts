@@ -1,11 +1,16 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { type PlanStateUpdatedParams, PushMethods, type TasksUpdatedParams } from "./index.js";
+import {
+    asSessionId,
+    type PlanStateUpdatedParams,
+    PushMethods,
+    type TasksUpdatedParams,
+} from "./index.js";
 
 describe("TasksUpdatedParams shape", () => {
     it("carries active list and history meta", () => {
         const params: TasksUpdatedParams = {
-            sessionId: "s1",
+            sessionId: asSessionId("s1"),
             active: {
                 id: "list-1",
                 name: "深圳骑行规划",
@@ -26,7 +31,11 @@ describe("TasksUpdatedParams shape", () => {
     });
 
     it("allows null active (no active list)", () => {
-        const params: TasksUpdatedParams = { sessionId: "s1", active: null, history: [] };
+        const params: TasksUpdatedParams = {
+            sessionId: asSessionId("s1"),
+            active: null,
+            history: [],
+        };
         assert.equal(params.active, null);
     });
 });
@@ -38,11 +47,15 @@ describe("plan.state.updated", () => {
 
     it("PlanStateUpdatedParams carries active + currentSlug", () => {
         const on: PlanStateUpdatedParams = {
-            sessionId: "s1",
+            sessionId: asSessionId("s1"),
             active: true,
             currentSlug: "2026-07-28-ab12cd",
         };
-        const off: PlanStateUpdatedParams = { sessionId: "s1", active: false, currentSlug: null };
+        const off: PlanStateUpdatedParams = {
+            sessionId: asSessionId("s1"),
+            active: false,
+            currentSlug: null,
+        };
         assert.equal(on.active, true);
         assert.equal(off.currentSlug, null);
     });

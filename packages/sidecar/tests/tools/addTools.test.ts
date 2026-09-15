@@ -4,6 +4,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import {
     DefaultDeferredToolRegistry,
@@ -51,7 +52,7 @@ function makeTool(names: string[]): { tool: TacoTool; controller: DefaultSession
     return { tool: createAddToolsTool(controller), controller };
 }
 
-const ctx = { env: undefined as never, workspace: "/tmp/test" } as TacoToolContext;
+const ctx = { env: undefined as never, workspace: asWorkspaceId("/tmp/test") } as TacoToolContext;
 
 describe("addTools tool schema", () => {
     it("accepts comma-separated toolNames", () => {
