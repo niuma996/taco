@@ -16,6 +16,7 @@ export default defineConfig({
             "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",
             "tests/components/MemoryPane.test.tsx",
+            "tests/components/SubagentPanel.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",
             "tests/components/ui/Switch.test.tsx",
             "tests/components/ui/TextInput.test.tsx",

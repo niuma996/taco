@@ -55,7 +55,8 @@
     "noMessages": "该子代理没有消息。",
     "historyFailed": "历史记录加载失败",
     "retry": "重试",
-    "promptLabel": "提示词"
+    "promptLabel": "提示词",
+    "loading": "加载中…"
   },
   "rightPanel": {
     "resizeHandle": "拖动调整面板宽度"

@@ -55,7 +55,8 @@
     "noMessages": "This subagent has no messages.",
     "historyFailed": "Failed to load history",
     "retry": "Retry",
-    "promptLabel": "Prompt"
+    "promptLabel": "Prompt",
+    "loading": "Loading…"
   },
   "rightPanel": {
     "resizeHandle": "Drag to resize panel"
