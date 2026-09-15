@@ -37,12 +37,28 @@
     "sidebarHide": "Hide chat list",
     "sidebarLabel": "Chats",
     "taskPanel": "Task panel",
+    "subagentPanel": "Subagent panel",
     "noActiveSession": "No active session. Create one or pick one from the left.",
     "slogans": [
       "Turning your ideas into working code.",
       "Ask anything about your codebase.",
       "Ship faster, debug smarter."
     ]
+  },
+  "subagents": {
+    "title": "Subagents",
+    "empty": "No subagents in this conversation yet.",
+    "noMatch": "No subagents match your search.",
+    "detached": "Subagent detached (session interrupted); messages unavailable.",
+    "selectPrompt": "Select a subagent above.",
+    "starting": "Starting…",
+    "noMessages": "This subagent has no messages.",
+    "historyFailed": "Failed to load history",
+    "retry": "Retry",
+    "promptLabel": "Prompt"
+  },
+  "rightPanel": {
+    "resizeHandle": "Drag to resize panel"
   },
   "input": {
     "placeholderRunning": "Agent is running… type here to steer",

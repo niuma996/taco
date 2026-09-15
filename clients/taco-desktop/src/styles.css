@@ -3,6 +3,7 @@
 @import "./styles/theme.css";
 @import "./styles/ui.css";
 @import "./styles/layout.css";
+@import "./styles/subagentPanel.css";
 @import "./styles/chatChrome.css";
 @import "./styles/chatMessages.css";
 @import "./styles/chatToolCard.css";

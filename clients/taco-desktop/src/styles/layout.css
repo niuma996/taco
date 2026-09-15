@@ -542,6 +542,13 @@ button.topbar-context-indicator {
     margin-bottom: 8px;
 }
 
+/* SubagentPanel puts a whole PaneHeader (title + count + search) into
+   RightPanel's title slot, so it must claim the row's free space. */
+.right-panel-topbar > .pane-header {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 .right-panel-title {
     font-weight: 600;
     margin: 0;
