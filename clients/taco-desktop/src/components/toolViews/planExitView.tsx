@@ -13,4 +13,4 @@ export function PlanExitToolView(props: ToolViewProps) {
     return <AskUserToolView {...props} />;
 }
 
-toolViews.planExit = PlanExitToolView;
+toolViews.planExit = { summary: () => null, body: PlanExitToolView };

@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, it, vi } from "vitest";
 
 import { ToolCardShell } from "../../../src/components/ToolCardShell";
-import { ReadToolView } from "../../../src/components/toolViews/readView";
+import "../../../src/components/toolViews/index.ts";
 import { FilePreviewOpenerProvider } from "../../../src/hooks/useFilePreviewOpener";
 import * as useI18n from "../../../src/i18n/useI18n";
 import type { UiToolCall } from "../../../src/lib/chat/chatUtils";
@@ -51,12 +51,12 @@ function readTool(overrides: Partial<UiToolCall> = {}): UiToolCall {
     };
 }
 
+// The shell resolves read's body from the registry, so the view is not passed
+// in — importing the entry point is what wires it up.
 function renderCard(tool: UiToolCall) {
     return render(
         <FilePreviewOpenerProvider cwd="/proj">
-            <ToolCardShell tool={tool}>
-                <ReadToolView tool={tool} />
-            </ToolCardShell>
+            <ToolCardShell tool={tool} />
         </FilePreviewOpenerProvider>,
     );
 }

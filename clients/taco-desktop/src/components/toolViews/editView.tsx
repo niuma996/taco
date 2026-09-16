@@ -159,4 +159,6 @@ export function EditToolView({ tool }: ToolViewProps) {
     );
 }
 
-toolViews.edit = EditToolView;
+// Summary keeps the default: `path` is the useful digest and the diff body
+// never repeats it.
+toolViews.edit = { body: EditToolView };

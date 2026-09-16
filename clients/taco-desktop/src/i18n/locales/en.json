@@ -148,6 +148,7 @@
     "readLines_other": "Read {{count}} lines",
     "readImage": "Read image",
     "readOpenFile": "View file content",
+    "toolRawArgs": "Show raw input",
     "switchWorkspace": "Switch workspace",
     "openFolder": "Open folder",
     "contentLabel": "Content",

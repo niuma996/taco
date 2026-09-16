@@ -49,6 +49,57 @@
     color: var(--fg-dim);
     font-family: var(--mono, monospace);
     word-break: break-all;
+    /* Takes the slack so the raw-args toggle stays pinned right; min-width keeps
+       a long summary from pushing the button out of the card. */
+    flex: 1;
+    min-width: 0;
+}
+/* Raw-args disclosure — present on every card, so it must not compete with the
+   name or summary for attention until hovered. */
+.tool-card-raw-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    /* margin-left carries the pin when no summary claimed the free space. */
+    margin-left: auto;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-xs);
+    color: var(--fg-dim);
+    cursor: pointer;
+}
+.tool-card-raw-toggle:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+.tool-card-raw-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+.tool-card-raw-chevron {
+    transition: transform 0.12s ease;
+}
+.tool-card-raw-chevron--open {
+    transform: rotate(90deg);
+}
+/* Sits above the body: it belongs to the head's inputs, not the tool's output. */
+.tool-card-raw {
+    margin: 0.3rem 0 0 1.4rem;
+    padding: 0.3rem 0.5rem;
+    background: var(--tool-result-bg, var(--input-bg));
+    border: 1px solid var(--code-block-border);
+    border-radius: var(--radius-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    /* Bounded so a large args payload scrolls instead of burying the result. */
+    max-height: 320px;
+    overflow-y: auto;
+    font-size: 0.9em;
+    color: var(--fg-dim);
 }
 .tool-card-result {
     margin: 0.3rem 0 0 1.4rem;

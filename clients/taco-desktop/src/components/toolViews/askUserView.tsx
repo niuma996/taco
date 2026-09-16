@@ -212,4 +212,6 @@ export function AskUserToolView({ tool }: ToolViewProps) {
     );
 }
 
-toolViews.askUser = AskUserToolView;
+// The body renders every question; the default summary would put a JSON
+// fragment of the same array in the head.
+toolViews.askUser = { summary: () => null, body: AskUserToolView };

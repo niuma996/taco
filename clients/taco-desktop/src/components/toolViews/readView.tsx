@@ -73,4 +73,6 @@ export function ReadToolView({ tool }: ToolViewProps): ReactElement | null {
     );
 }
 
-toolViews.read = ReadToolView;
+// Summary keeps the default `path` digest — the body shows a line count, not
+// the path, so the two do not overlap.
+toolViews.read = { body: ReadToolView };

@@ -64,4 +64,6 @@ export function AgentToolView({ tool }: ToolViewProps): ReactElement {
     );
 }
 
-toolViews.agent = AgentToolView;
+// The body already shows agent type + description, so the default summary
+// would only repeat them as a JSON fragment.
+toolViews.agent = { summary: () => null, body: AgentToolView };

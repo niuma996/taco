@@ -15,21 +15,6 @@ import { useT } from "../i18n/useI18n";
 import type { UiMessage, UiThinkingBlock, UiToolCall } from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 import { ToolCardShell } from "./ToolCardShell";
-import { resolveToolView } from "./toolViews/registry";
-
-/**
- * Standard fallback body — used when a tool name doesn't match the
- * toolViews registry. The shell (status icon / tool name / border) is
- * provided by ToolCardShell; this component only renders the result text.
- */
-function ToolCardBody({ tool }: { tool: UiToolCall }) {
-    const isRunning = tool.status === "running";
-    if (!tool.resultText) return null;
-    const cap = isRunning ? 240 : 480;
-    const text =
-        tool.resultText.length > cap ? `${tool.resultText.slice(0, cap)}…` : tool.resultText;
-    return <pre className={`tool-card-result ${isRunning ? "streaming" : ""}`}>{text}</pre>;
-}
 
 /**
  * memo: applyEventToMessages emits a new reference only for the affected
@@ -88,15 +73,11 @@ export const Message = memo(function Message({
                 <ThinkingBlock key={`${m.id}-think-${i}`} block={b} />
             ))}
             {m.text && <AssistantMarkdown text={m.text} />}
-            {m.tools.map((tool) => {
-                const View = resolveToolView(tool.name);
-                return (
-                    <ToolCardShell key={`${m.id}-${tool.id}`} tool={tool}>
-                        {View ? <View tool={tool} /> : <ToolCardBody tool={tool} />}
-                        <CommandPermissionActions tool={tool} onResolve={onCommandPermission} />
-                    </ToolCardShell>
-                );
-            })}
+            {m.tools.map((tool) => (
+                <ToolCardShell key={`${m.id}-${tool.id}`} tool={tool}>
+                    <CommandPermissionActions tool={tool} onResolve={onCommandPermission} />
+                </ToolCardShell>
+            ))}
         </div>
     );
 });

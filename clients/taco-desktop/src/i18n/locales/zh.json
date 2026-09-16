@@ -148,6 +148,7 @@
     "readLines_other": "已读取 {{count}} 行",
     "readImage": "已读取图片",
     "readOpenFile": "查看文件内容",
+    "toolRawArgs": "查看原始入参",
     "switchWorkspace": "切换工作区",
     "openFolder": "打开文件夹",
     "contentLabel": "内容",
