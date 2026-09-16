@@ -22,7 +22,14 @@ export interface FsClient {
     sizeOf(relPath: string): Promise<number>;
 }
 
-/** POSIX root, Windows drive letter, or UNC share. */
+/**
+ * POSIX root, Windows drive letter, or UNC share.
+ *
+ * Recognising Windows forms is pure string work and is covered by tests on any
+ * platform, but whether a Windows `cwd` arrives as `C:\…` or `C:/…` depends on
+ * Tauri and has only been verified on POSIX. Both spellings resolve here; the
+ * untested part is upstream, not this function.
+ */
 const ABSOLUTE_PATH_RE = /^(?:\/|[a-zA-Z]:[\\/]|\\\\)/;
 
 /** True when the path already names a filesystem root — cwd must not be prepended. */
@@ -36,6 +43,12 @@ export function isAbsolutePath(p: string): boolean {
  * An already-absolute `relPath` passes through untouched: the file tree only
  * ever produces cwd-relative paths, but tool cards address files by the path
  * the model used, which is usually absolute and may sit outside the workspace.
+ *
+ * A relative path must therefore NOT start with "/". An earlier version
+ * stripped leading slashes, so `/src/a.ts` silently meant `<cwd>/src/a.ts`;
+ * it now names the filesystem root instead. Nothing relies on the old
+ * behaviour — tree paths are built by `readDir` below and never carry a leading
+ * slash — but a caller inventing paths by hand has to respect the distinction.
  */
 export function resolveFsPath(cwd: string, relPath: string): string {
     if (isAbsolutePath(relPath)) return relPath;

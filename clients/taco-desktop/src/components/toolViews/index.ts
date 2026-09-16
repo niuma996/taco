@@ -13,4 +13,5 @@ import "./planExitView";
 import "./readView";
 import "./searchView";
 import "./shellView";
+import "./skillView";
 import "./taskView";

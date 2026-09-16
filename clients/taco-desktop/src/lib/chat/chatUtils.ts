@@ -328,11 +328,24 @@ export function parseEntryTimestamp(
     return whenMissing;
 }
 
-/** Derive a one-line summary from `args` (for card headers). Prefer path/command/file_path; fall back to truncated JSON.stringify. */
-export function summarizeToolArgs(_name: string, args: unknown): string {
+/**
+ * Argument names conventional enough to summarise without knowing the tool.
+ * Probed in order; the first non-empty string wins.
+ */
+const KNOWN_ARG_FIELDS = ["path", "file_path", "filePath", "command"] as const;
+
+/**
+ * Derive a one-line summary from `args` for a card header, or "" when the
+ * arguments carry no conventional field.
+ *
+ * Returning "" leaves the header as just the tool name. There is deliberately
+ * no JSON fallback: the exact arguments belong in the card's raw-args
+ * disclosure, not spread across the one line meant to be scannable.
+ */
+export function summarizeKnownArgFields(args: unknown): string {
     if (!args || typeof args !== "object") return "";
     const a = args as Record<string, unknown>;
-    for (const k of ["path", "file_path", "filePath", "command"]) {
+    for (const k of KNOWN_ARG_FIELDS) {
         const v = a[k];
         if (typeof v === "string" && v.length > 0) {
             // Path-like tools show the short path; command-like tools show the command verbatim.
@@ -340,26 +353,7 @@ export function summarizeToolArgs(_name: string, args: unknown): string {
             return shortPath(v);
         }
     }
-    try {
-        const s = JSON.stringify(args);
-        if (s.length <= 80) return s;
-        // Snap the cut to the last token boundary so the JSON doesn't end
-        // mid-token (e.g. `"label":…`). A mid-token cut leaves no break
-        // opportunity under `word-break: break-all`, so the header wraps at
-        // an awkward point inside the args. lastIndexOf returns -1 when no
-        // match exists in the scanned range — fall back to a flat 80-char
-        // cut so we never slice from offset 0 and produce an empty header.
-        const boundary = Math.max(
-            s.lastIndexOf(",", 80),
-            s.lastIndexOf(":", 80),
-            s.lastIndexOf("{", 80),
-            s.lastIndexOf("[", 80),
-        );
-        const end = boundary > 40 ? boundary + 1 : 80;
-        return `${s.slice(0, Math.max(end, 1))}…`;
-    } catch {
-        return "";
-    }
+    return "";
 }
 
 /**

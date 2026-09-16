@@ -62,7 +62,11 @@
 }
 
 /* ── read tool card ── */
-/* One row: the line count on the left, the open-file button pinned right. */
+/* Two layouts, two class names. The completed card is a row (count left,
+   open-file button pinned right); the running card is a lone line of text and
+   owns the offsets the row would otherwise provide. Sharing one class and
+   resetting margins through a descendant selector made the same name mean two
+   different things depending on its parent. */
 .tool-card-read {
     display: flex;
     align-items: center;
@@ -71,16 +75,16 @@
     margin-left: 1.4rem;
 }
 .tool-card-read-status {
-    color: var(--fg-dim);
-    font-size: 0.9em;
-    margin-top: 0.3rem;
-    margin-left: 1.4rem;
-}
-/* Inside the row the status inherits the row's own offsets. */
-.tool-card-read .tool-card-read-status {
     flex: 1;
     min-width: 0;
-    margin: 0;
+    color: var(--fg-dim);
+    font-size: 0.9em;
+}
+.tool-card-read-pending {
+    margin-top: 0.3rem;
+    margin-left: 1.4rem;
+    color: var(--fg-dim);
+    font-size: 0.9em;
 }
 .tool-card-read-open {
     display: inline-flex;

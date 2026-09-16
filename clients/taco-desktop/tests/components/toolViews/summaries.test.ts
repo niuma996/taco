@@ -9,19 +9,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { defaultSummary } from "../../../src/components/toolViews/defaults.tsx";
 import "../../../src/components/toolViews/index.ts";
 import { resolveToolView } from "../../../src/components/toolViews/registry.ts";
 import type { UiToolCall } from "../../../src/lib/chat/chatUtils.ts";
 
-function call(name: string, args: unknown): UiToolCall {
-    return { id: "c1", name, args, status: "ok" };
+function call(name: string, args: unknown, rest: Partial<UiToolCall> = {}): UiToolCall {
+    return { id: "c1", name, args, status: "ok", ...rest };
 }
 
-/** Runs the registered summary for `name`, asserting one exists. */
-function summarize(name: string, args: unknown): unknown {
+/**
+ * Runs the registered summary for `name`, asserting one exists. `rest` carries
+ * the fields a summary may read besides args — `details` for tools whose
+ * resolved values only appear in the result, `status` for running cards.
+ */
+function summarize(name: string, args: unknown, rest: Partial<UiToolCall> = {}): unknown {
     const spec = resolveToolView(name);
     assert.ok(spec?.summary, `${name} should declare a summary`);
-    return spec.summary(call(name, args));
+    return spec.summary(call(name, args, rest));
 }
 
 describe("grep / glob summary", () => {
@@ -99,6 +104,96 @@ describe("taskCreate / taskUpdate summary", () => {
 
     it("taskUpdate 只改内容时显示 taskId", () => {
         assert.equal(summarize("taskUpdate", { taskId: "t-3", updates: { content: "x" } }), "t-3");
+    });
+});
+
+describe("skill summary", () => {
+    it("展示已加载的 skill 名称(来自 details)", () => {
+        const details = { skillName: "design-sync", found: true, runAs: "inline" };
+        assert.equal(summarize("skill", { skill: "design-sync" }, { details }), "design-sync");
+    });
+
+    it("details 优先于 args(以真正解析到的名字为准)", () => {
+        const details = { skillName: "resolved-name", found: true };
+        assert.equal(summarize("skill", { skill: "typed-name" }, { details }), "resolved-name");
+    });
+
+    it("running 态还没有 details 时回退到 args.skill", () => {
+        assert.equal(
+            summarize("skill", { skill: "design-sync" }, { status: "running" }),
+            "design-sync",
+        );
+    });
+
+    it("subagent skill 标注执行位置", () => {
+        const details = { skillName: "fan-out", found: true, runAs: "subagent" };
+        assert.equal(summarize("skill", { skill: "fan-out" }, { details }), "fan-out · subagent");
+    });
+
+    it("skill 未找到时仍显示请求的名字", () => {
+        const details = { skillName: "nope", found: false };
+        assert.equal(summarize("skill", { skill: "nope" }, { details }), "nope");
+    });
+
+    it("名字缺失 → 空(退回只显示工具名)", () => {
+        assert.equal(summarize("skill", {}), "");
+        assert.equal(summarize("skill", { skill: 42 }), "");
+    });
+});
+
+/**
+ * The default summary never dumps JSON. Tools with a conventional argument name
+ * get a digest for free; everything else shows just the tool name, and its exact
+ * arguments live in the card's raw-args disclosure.
+ *
+ * This is what makes per-tool summaries optional rather than mandatory: a new
+ * tool with no registry entry is already presentable.
+ */
+describe("default summary never dumps JSON", () => {
+    /** Tools with no registry entry at all, so they exercise the default. */
+    const UNREGISTERED = [
+        "memory",
+        "agentContinue",
+        "addTools",
+        "jobsCreate",
+        "jobsUpdate",
+        "jobsGet",
+        "jobsDelete",
+        "jobsRunNow",
+        "planEnter",
+        "taskList",
+        "jobsList",
+    ];
+
+    it("这些工具不注册 summary,走默认", () => {
+        for (const name of UNREGISTERED) {
+            assert.equal(resolveToolView(name)?.summary, undefined, name);
+        }
+    });
+
+    it("结构化入参 → 头部为空,而不是 JSON 片段", () => {
+        const cases: unknown[] = [
+            { action: "add", id: "my-topic" },
+            { job: { name: "nightly-sync", schedule: { kind: "cron", expr: "0 3 * * *" } } },
+            { toolNames: "grep, glob" },
+            { subSessionId: "s-1", prompt: "keep going" },
+            {},
+        ];
+        for (const args of cases) {
+            const out = defaultSummary(call("anyTool", args));
+            assert.equal(out, "", `expected no head digest, got: ${out}`);
+        }
+    });
+
+    it("入参含常规字段名时仍给出摘要", () => {
+        assert.equal(defaultSummary(call("x", { command: "ls -la" })), "ls -la");
+        assert.ok(defaultSummary(call("x", { path: "/a/b/c.ts" })).length > 0);
+        assert.ok(defaultSummary(call("x", { file_path: "/a/b/c.ts" })).length > 0);
+    });
+
+    it("args 不是对象 → 空", () => {
+        assert.equal(defaultSummary(call("x", null)), "");
+        assert.equal(defaultSummary(call("x", "raw")), "");
     });
 });
 

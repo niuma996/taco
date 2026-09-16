@@ -10,6 +10,10 @@
  * covers it.
  *
  * Shiki highlighting is async (`MarkdownHooks`), so assertions use waitFor.
+ * Loading real grammars takes seconds under parallel load, which is more than
+ * vitest's 5s default — without the explicit test timeout below the per-assertion
+ * waitFor budgets could never actually be spent, and these tests failed
+ * intermittently depending on what else was running.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,53 +21,72 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
 
+/** Must exceed the 15s waitFor budgets used in each test below. */
+const SHIKI_TEST_TIMEOUT_MS = 20_000;
+
 afterEach(cleanup);
 
 describe("AssistantMarkdown code blocks", () => {
-    it("renders the fenced block's language in the header", async () => {
-        render(<AssistantMarkdown text={"```python\nprint(1)\n```\n"} />);
-        await waitFor(
-            () => {
-                expect(screen.getByText("python")).toBeTruthy();
-            },
-            { timeout: 15000 },
-        );
-    });
+    it(
+        "renders the fenced block's language in the header",
+        async () => {
+            render(<AssistantMarkdown text={"```python\nprint(1)\n```\n"} />);
+            await waitFor(
+                () => {
+                    expect(screen.getByText("python")).toBeTruthy();
+                },
+                { timeout: 15000 },
+            );
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
 
-    it("falls back to a generic label for blocks without a language", async () => {
-        render(<AssistantMarkdown text={"```\nplain\n```\n"} />);
-        await waitFor(
-            () => {
-                expect(screen.getByText("code")).toBeTruthy();
-            },
-            { timeout: 15000 },
-        );
-    });
+    it(
+        "falls back to a generic label for blocks without a language",
+        async () => {
+            render(<AssistantMarkdown text={"```\nplain\n```\n"} />);
+            await waitFor(
+                () => {
+                    expect(screen.getByText("code")).toBeTruthy();
+                },
+                { timeout: 15000 },
+            );
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
 
-    it("offers a view toggle for mermaid blocks and flips it on click", async () => {
-        const user = userEvent.setup();
-        const { container } = render(
-            <AssistantMarkdown text={"```mermaid\ngraph TD\n  A-->B\n```\n"} />,
-        );
+    it(
+        "offers a view toggle for mermaid blocks and flips it on click",
+        async () => {
+            const user = userEvent.setup();
+            const { container } = render(
+                <AssistantMarkdown text={"```mermaid\ngraph TD\n  A-->B\n```\n"} />,
+            );
 
-        // The toggle's presence/label depend only on the language tag, not on
-        // whether mermaid can render in this environment (happy-dom render may
-        // fail, which correctly falls back to the source view).
-        const toggle = await screen.findByRole("button", { name: "View code" }, { timeout: 15000 });
-        expect(screen.getByText("mermaid")).toBeTruthy();
+            // The toggle's presence/label depend only on the language tag, not on
+            // whether mermaid can render in this environment (happy-dom render may
+            // fail, which correctly falls back to the source view).
+            const toggle = await screen.findByRole(
+                "button",
+                { name: "View code" },
+                { timeout: 15000 },
+            );
+            expect(screen.getByText("mermaid")).toBeTruthy();
 
-        await user.click(toggle);
-        expect(screen.getByRole("button", { name: "View diagram" })).toBeTruthy();
-        // Toggling to source view must actually show the mermaid source, not
-        // just flip the label — assert the fallback `<pre>` is present with
-        // the raw diagram text.
-        const pre = container.querySelector(".md-code-block pre");
-        expect(pre).toBeTruthy();
-        expect(pre?.textContent).toContain("graph TD");
-        expect(pre?.textContent).toContain("A-->B");
-        expect(container.querySelector(".md-mermaid")).toBeNull();
+            await user.click(toggle);
+            expect(screen.getByRole("button", { name: "View diagram" })).toBeTruthy();
+            // Toggling to source view must actually show the mermaid source, not
+            // just flip the label — assert the fallback `<pre>` is present with
+            // the raw diagram text.
+            const pre = container.querySelector(".md-code-block pre");
+            expect(pre).toBeTruthy();
+            expect(pre?.textContent).toContain("graph TD");
+            expect(pre?.textContent).toContain("A-->B");
+            expect(container.querySelector(".md-mermaid")).toBeNull();
 
-        await user.click(screen.getByRole("button", { name: "View diagram" }));
-        expect(screen.getByRole("button", { name: "View code" })).toBeTruthy();
-    });
+            await user.click(screen.getByRole("button", { name: "View diagram" }));
+            expect(screen.getByRole("button", { name: "View code" })).toBeTruthy();
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
 });

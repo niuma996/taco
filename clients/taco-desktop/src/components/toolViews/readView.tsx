@@ -14,8 +14,21 @@ import { useT } from "../../i18n/useI18n";
 import { truncate } from "./_util";
 import { type ToolViewProps, toolViews } from "./registry";
 
-/** `[Showing lines 1-2000 of 5000. …]` / `[Line 3 is 60KB, exceeds …]` — appended by the tool, not file content. */
-const TRUNCATION_NOTE_RE = /\n*\[(?:Showing lines |Line \d+ is |\d+ more lines in file)[^\]]*\]$/;
+/**
+ * The tool appends a bracketed note after a blank line when it truncates
+ * (`…\n\n[Showing lines 1-2000 of 5000. Use offset=2001 to continue.]`), or
+ * makes the note the entire payload when even the first line exceeds the byte
+ * limit.
+ *
+ * Matched on that shape rather than on the note's opening words: the wording
+ * belongs to pi-agent-core and can change on any upgrade, whereas "trailing
+ * bracketed line, set off by a blank line" is what makes it distinguishable
+ * from file content in the first place. The tradeoff is a file whose own last
+ * line is a bracketed token after a blank line, which would undercount by two —
+ * rarer than a dependency rewording its messages, and just as harmless.
+ */
+const TRUNCATION_NOTE_RE = /\n\n\[[^\]]*\]$/;
+const ONLY_NOTE_RE = /^\[[^\]]*\]$/;
 
 /** Text-part payload of a `read` whose target was an image. */
 const IMAGE_RESULT_RE = /^Read image file \[/;
@@ -26,6 +39,7 @@ const IMAGE_RESULT_RE = /^Read image file \[/;
  * a line of its own.
  */
 export function countReadLines(resultText: string): number {
+    if (ONLY_NOTE_RE.test(resultText)) return 0;
     const body = resultText.replace(TRUNCATION_NOTE_RE, "");
     if (body === "") return 0;
     const withoutTrailingNewline = body.endsWith("\n") ? body.slice(0, -1) : body;
@@ -47,7 +61,7 @@ export function ReadToolView({ tool }: ToolViewProps): ReactElement | null {
         return <pre className="tool-card-result">{truncate(resultText, 480)}</pre>;
     }
     if (tool.status === "running") {
-        return <div className="tool-card-read-status">{t("activity.readRunning")}</div>;
+        return <div className="tool-card-read-pending">{t("activity.readRunning")}</div>;
     }
 
     const isImage = IMAGE_RESULT_RE.test(resultText);

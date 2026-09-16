@@ -13,12 +13,12 @@
  * toggle resets on file switch.
  */
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useEffect, useState } from "react";
-import { codeToHtml } from "shiki";
+import { useState } from "react";
 import type { PreviewBlock } from "../hooks/useFilePreview";
 import { useT } from "../i18n/useI18n";
 import { getExtension, imageMimeFor, shikiLangFor } from "../lib/fileTypes";
 import { AssistantMarkdown } from "./AssistantMarkdown";
+import { HighlightedCode } from "./HighlightedCode";
 import { Button } from "./ui/Button";
 
 export interface FilesPreviewPaneProps {
@@ -129,36 +129,12 @@ function BlockedPreview({
 /**
  * Code body: shiki-highlighted HTML in one shot, or a plain <pre> for
  * text / as a fallback when the language grammar fails to load.
+ *
+ * The two class names differ by branch, so this stays a thin wrapper rather
+ * than passing one className into HighlightedCode.
  */
 function PreviewCode({ code, fileName }: { code: string; fileName: string }) {
     const lang = shikiLangFor(fileName);
-    // Pair html with the code it was generated from: switching files must not
-    // briefly render the previous file's highlighted html under the new name.
-    const [highlighted, setHighlighted] = useState<{ code: string; html: string } | null>(null);
-
-    useEffect(() => {
-        if (lang === "text") return;
-        let cancelled = false;
-        codeToHtml(code, {
-            lang,
-            themes: { light: "github-light", dark: "github-dark" },
-            defaultColor: false,
-        })
-            .then((h) => {
-                if (!cancelled) setHighlighted({ code, html: h });
-            })
-            .catch(() => {
-                // Unknown grammar in the shiki bundle — plain text fallback.
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [code, lang]);
-
-    const html = highlighted?.code === code ? highlighted.html : null;
-    if (lang === "text" || html === null) {
-        return <pre className="files-preview-plain">{code}</pre>;
-    }
-    // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki output is escaped token spans
-    return <div className="files-preview-code" dangerouslySetInnerHTML={{ __html: html }} />;
+    if (lang === "text") return <pre className="files-preview-plain">{code}</pre>;
+    return <HighlightedCode code={code} lang={lang} className="files-preview-code" />;
 }

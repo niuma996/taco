@@ -6,20 +6,28 @@
  * adding a default here and a field on ToolViewSpec, not editing the shell.
  */
 
-import { summarizeToolArgs, type UiToolCall } from "../../lib/chat/chatUtils";
+import { summarizeKnownArgFields, type UiToolCall } from "../../lib/chat/chatUtils";
 import type { ToolViewProps } from "./registry";
 
 /**
- * Default summary — a one-line digest guessed from well-known argument names
- * (path / command / …), falling back to truncated JSON.
+ * Default summary — a one-line digest read from well-known argument names
+ * (path / command / …), or nothing at all.
  *
- * Guessing is the right default precisely because it is name-agnostic: a tool
+ * Reading known names is the right default because it is tool-agnostic: a tool
  * this UI has never heard of, including one from an extension or MCP server,
- * still gets a readable head. Tools whose useful input is not one of those
- * fields declare a `summary` instead of widening the guess list.
+ * gets a readable head for free when its arguments happen to be conventional.
+ *
+ * When they are not, the head shows only the tool name. It deliberately does
+ * NOT fall back to dumping JSON: a truncated `{"listName":"x","tasks":[{"con…`
+ * costs the full width of the head and is unreadable at exactly the moment it
+ * matters, and the exact arguments now have a proper home — the raw-args
+ * disclosure in ToolCardShell, one click away on every card.
+ *
+ * A tool whose useful input is not a conventional field name should declare a
+ * `summary` in its registry entry rather than widen the list read here.
  */
 export function defaultSummary(tool: UiToolCall): string {
-    return summarizeToolArgs(tool.name, tool.args);
+    return summarizeKnownArgFields(tool.args);
 }
 
 /** Default body — the raw result text, truncated. Tighter while streaming. */

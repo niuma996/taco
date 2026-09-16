@@ -5,7 +5,7 @@
  *   pnpm --filter @taco-ai/desktop test:utils
  *
  * No new dependencies. Only covers pure functions in chatUtils.ts
- * (historyToUiMessages id-join + summarizeToolArgs). UI rendering is out of scope.
+ * (historyToUiMessages id-join + summarizeKnownArgFields). UI rendering is out of scope.
  */
 
 import { strict as assert } from "node:assert";
@@ -21,7 +21,7 @@ import {
     parseEntryTimestamp,
     queuedItemsFromEvent,
     stringifyResult,
-    summarizeToolArgs,
+    summarizeKnownArgFields,
     toolResultLine,
     type UiThinkingBlock,
 } from "../../../src/lib/chat/chatUtils";
@@ -365,49 +365,39 @@ describe("findPendingAskUserIds", () => {
     });
 });
 
-describe("summarizeToolArgs", () => {
+describe("summarizeKnownArgFields", () => {
     it("path 类字段用 shortPath", () => {
-        const s = summarizeToolArgs("read", { path: "/Users/me/projects/foo/bar.ts" });
+        const s = summarizeKnownArgFields({ path: "/Users/me/projects/foo/bar.ts" });
         assert.ok(s.length > 0);
         assert.ok(s.startsWith("…"));
     });
     it("command 字段原文显示(>80 字符截断)", () => {
         const cmd = "x".repeat(120);
-        const s = summarizeToolArgs("bash", { command: cmd });
+        const s = summarizeKnownArgFields({ command: cmd });
         assert.ok(s.endsWith("…"));
         assert.equal(s.length, 81);
     });
-    it("无匹配字段时 JSON.stringify 截断", () => {
-        const s = summarizeToolArgs("foo", { weird: "thing" });
-        assert.ok(s.includes("weird"));
+    it("字段探测顺序:path 优先于 command", () => {
+        assert.equal(summarizeKnownArgFields({ command: "ls", path: "a.ts" }), "a.ts");
     });
-    it("截断落在 token 边界(askUser 长入参不切在 label 中间)", () => {
-        const questions = [
-            {
-                question: "你想深入提示词注入的哪个方向?",
-                header: "方向选择",
-                options: [{ label: "扩展贡献者机制", description: "git-context 扩展如何被激活" }],
-            },
-        ];
-        const s = summarizeToolArgs("askUser", { questions });
-        assert.ok(s.endsWith("…"));
-        // Truncation boundary must land on a complete token — not mid-value within `"label":…`
-        const body = s.slice(0, -1);
-        assert.ok(
-            /[,:[{]$/.test(body),
-            `truncation should land on JSON boundary, got: …${body.slice(-12)}`,
-        );
+    it("file_path / filePath 同样识别", () => {
+        assert.equal(summarizeKnownArgFields({ file_path: "a.ts" }), "a.ts");
+        assert.equal(summarizeKnownArgFields({ filePath: "a.ts" }), "a.ts");
+    });
+    it("空字符串字段视为缺失", () => {
+        assert.equal(summarizeKnownArgFields({ path: "" }), "");
+    });
+    it("无匹配字段时返回空 — 不再 dump JSON", () => {
+        // The exact arguments belong in the card's raw-args disclosure; a
+        // truncated JSON fragment in the header was unreadable and consumed the
+        // whole line.
+        assert.equal(summarizeKnownArgFields({ weird: "thing" }), "");
+        assert.equal(summarizeKnownArgFields({ listName: "L", tasks: [{ content: "a" }] }), "");
+        assert.equal(summarizeKnownArgFields({ blob: "x".repeat(120) }), "");
     });
     it("args 不是对象时返回空", () => {
-        assert.equal(summarizeToolArgs("x", null), "");
-        assert.equal(summarizeToolArgs("x", "raw"), "");
-    });
-    it("截断点找不到合法边界时回退到 80 字符硬截断", () => {
-        // Single field, no ,:{[ boundary; JSON.stringify lands at exactly ≥80 with no punctuation before 80
-        const s = summarizeToolArgs("foo", { blob: "x".repeat(120) });
-        assert.ok(s.endsWith("…"));
-        // Must not produce an empty string head (regression: lastIndexOf returning -1 caused slice(0,0))
-        assert.ok(s.length > 1);
+        assert.equal(summarizeKnownArgFields(null), "");
+        assert.equal(summarizeKnownArgFields("raw"), "");
     });
 });
 

@@ -86,7 +86,9 @@
 .tool-card-raw-chevron--open {
     transform: rotate(90deg);
 }
-/* Sits above the body: it belongs to the head's inputs, not the tool's output. */
+/* Sits above the body: it belongs to the head's inputs, not the tool's output.
+   Shiki-highlighted, so this is the container and the inner <pre> is shiki's;
+   the plain-text fallback renders as this element itself being the <pre>. */
 .tool-card-raw {
     margin: 0.3rem 0 0 1.4rem;
     padding: 0.3rem 0.5rem;
@@ -100,6 +102,13 @@
     overflow-y: auto;
     font-size: 0.9em;
     color: var(--fg-dim);
+}
+.tool-card-raw .shiki {
+    margin: 0;
+    /* The card provides the surface; shiki's inline theme bg would clash. */
+    background: transparent !important;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 .tool-card-result {
     margin: 0.3rem 0 0 1.4rem;

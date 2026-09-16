@@ -12,6 +12,7 @@ import { CheckCircle2, ChevronRight, Loader2, XCircle } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useT } from "../i18n/useI18n";
 import type { UiToolCall } from "../lib/chat/chatUtils";
+import { HighlightedCode } from "./HighlightedCode";
 import { DefaultToolBody, defaultSummary } from "./toolViews/defaults";
 import { resolveToolView } from "./toolViews/registry";
 
@@ -88,7 +89,15 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
                     </button>
                 )}
             </div>
-            {rawOpen && rawArgs !== "" && <pre className="tool-card-raw">{rawArgs}</pre>}
+            {rawOpen && rawArgs !== "" && (
+                <HighlightedCode
+                    code={rawArgs}
+                    // Non-object args are shown verbatim and are not valid JSON,
+                    // so highlighting them as JSON would mis-tokenise.
+                    lang={typeof tool.args === "object" ? "json" : "text"}
+                    className="tool-card-raw"
+                />
+            )}
             <Body tool={tool} />
             {children}
         </div>

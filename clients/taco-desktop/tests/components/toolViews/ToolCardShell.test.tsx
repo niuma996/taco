@@ -8,13 +8,24 @@
  * actually renders (it was registered under a tool name that never existed).
  */
 import { strict as assert } from "node:assert";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 
 import { ToolCardShell } from "../../../src/components/ToolCardShell";
 import "../../../src/components/toolViews/index.ts";
 import type { UiToolCall } from "../../../src/lib/chat/chatUtils";
+
+// Echoes the source inside a .shiki pre, matching shiki's real wrapper shape
+// without pulling grammars into the test. The `lang` is captured so the JSON /
+// plain-text branch can be asserted.
+const highlightCalls: { code: string; lang: string }[] = [];
+vi.mock("shiki", () => ({
+    codeToHtml: vi.fn(async (code: string, opts: { lang: string }) => {
+        highlightCalls.push({ code, lang: opts.lang });
+        return `<pre class="shiki"><code>${code}</code></pre>`;
+    }),
+}));
 
 function call(overrides: Partial<UiToolCall> = {}): UiToolCall {
     return { id: "c1", name: "unregisteredTool", args: {}, status: "ok", ...overrides };
@@ -171,5 +182,29 @@ describe("ToolCardShell raw args", () => {
 
         // JSON.stringify throws on the cycle; the card must still show something.
         assert.ok((container.querySelector(".tool-card-raw")?.textContent ?? "").length > 0);
+    });
+
+    it("highlights object args as JSON", async () => {
+        highlightCalls.length = 0;
+        const { container } = render(<ToolCardShell tool={call({ args: { path: "a.ts" } })} />);
+        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+
+        await waitFor(() => {
+            assert.ok(container.querySelector(".tool-card-raw .shiki"), "expected shiki output");
+        });
+        assert.deepEqual(
+            highlightCalls.map((c) => c.lang),
+            ["json"],
+        );
+    });
+
+    it("does not highlight non-object args as JSON", async () => {
+        highlightCalls.length = 0;
+        // A string arg is shown verbatim and is not valid JSON.
+        const { container } = render(<ToolCardShell tool={call({ args: "raw string" })} />);
+        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+
+        assert.equal(container.querySelector(".tool-card-raw")?.textContent, "raw string");
+        assert.deepEqual(highlightCalls, [], "text lang must skip the highlighter");
     });
 });
