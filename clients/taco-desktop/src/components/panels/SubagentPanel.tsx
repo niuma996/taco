@@ -91,9 +91,14 @@ export function SubagentPanel({
             )}
             <div className="subagent-panel-detail">
                 {selected === null || selected.subSessionId === null ? (
-                    <div className="subagent-panel-select-prompt">
-                        {t("subagents.selectPrompt")}
-                    </div>
+                    // "Select one above" points at the list; with no subagents
+                    // at all its own empty message is the whole story, and the
+                    // two lines read as a contradiction.
+                    entries.length > 0 && (
+                        <div className="subagent-panel-select-prompt">
+                            {t("subagents.selectPrompt")}
+                        </div>
+                    )
                 ) : (
                     // Keyed by subSessionId so switching subagents resets the
                     // detail's own load / error state instead of carrying it over.

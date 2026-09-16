@@ -14,6 +14,7 @@ import { memo, useEffect, useState } from "react";
 import { useT } from "../i18n/useI18n";
 import type { UiMessage, UiThinkingBlock, UiToolCall } from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
+import { MessageMeta } from "./MessageMeta";
 import { ToolCardShell } from "./ToolCardShell";
 
 /**
@@ -25,15 +26,29 @@ import { ToolCardShell } from "./ToolCardShell";
  */
 export const Message = memo(function Message({
     m,
+    isLastInTurn = false,
+    isTurnInProgress = false,
     onCommandPermission,
 }: {
     m: UiMessage;
+    /**
+     * This message closes its turn (user row, or the final assistant of the
+     * chain the previous user triggered). Decides whether a meta row belongs.
+     */
+    isLastInTurn?: boolean;
+    /**
+     * The turn containing this message is still running (tool running, or the
+     * session is busy). When true the meta row is hidden even on a closing
+     * message — it shows up only after the turn actually settles.
+     */
+    isTurnInProgress?: boolean;
     onCommandPermission?: (
         requestId: string,
         approved: boolean,
         scope: CommandPermissionScope,
     ) => void;
 }) {
+    const showMeta = isLastInTurn && !isTurnInProgress;
     if (m.kind === "user") {
         return (
             <div className="message user">
@@ -50,6 +65,7 @@ export const Message = memo(function Message({
                     </div>
                 )}
                 <div className="message-text">{m.text}</div>
+                {showMeta && <MessageMeta ts={m.ts} text={m.text} />}
             </div>
         );
     }
@@ -78,6 +94,7 @@ export const Message = memo(function Message({
                     <CommandPermissionActions tool={tool} onResolve={onCommandPermission} />
                 </ToolCardShell>
             ))}
+            {showMeta && <MessageMeta ts={m.ts} text={m.text} />}
         </div>
     );
 });

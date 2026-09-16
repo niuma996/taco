@@ -21,6 +21,7 @@ export default defineConfig({
             "tests/components/MemoryPane.test.tsx",
             "tests/components/SubagentPanel.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",
+            "tests/components/LlmDumpPanel.test.tsx",
             "tests/components/toolViews/ReadToolCard.test.tsx",
             "tests/components/toolViews/ToolCardShell.test.tsx",
             "tests/components/ui/Switch.test.tsx",

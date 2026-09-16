@@ -13,6 +13,15 @@
     line-height: 1.4;
 }
 
+/* RightPanel's topbar has no gutter of its own — .task-panel and .files-drawer
+   supply one with their 12px padding. This panel keeps its list separator
+   edge-to-edge, so the gutter lives on the header row instead. Without it the
+   close button sits flush in the panel's top-right corner, alone among the
+   three panels. */
+.subagent-panel .right-panel-topbar {
+    padding: 12px 12px 0;
+}
+
 /* List area is capped so the detail stream always keeps usable height; it
    scrolls on its own once the session has many subagents. */
 .subagent-panel-list {

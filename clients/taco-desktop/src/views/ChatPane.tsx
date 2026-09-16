@@ -26,6 +26,7 @@ import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import type { QueuedUiItem } from "../lib/chat/chatUtils";
+import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import { MAX_ATTACHMENTS } from "../lib/imageAttachment";
 
@@ -259,9 +260,18 @@ export function ChatPane(props: ChatPaneProps) {
                 {isEmptyChat ? (
                     <EmptyChatState />
                 ) : (
-                    (ws?.messages ?? []).map((m) => (
-                        <Message key={m.id} m={m} onCommandPermission={onCommandPermission} />
-                    ))
+                    (() => {
+                        const messages = ws?.messages ?? [];
+                        return messages.map((m, i) => (
+                            <Message
+                                key={m.id}
+                                m={m}
+                                isLastInTurn={isLastInTurn(messages, i)}
+                                isTurnInProgress={isTurnInProgress(messages, i, busy)}
+                                onCommandPermission={onCommandPermission}
+                            />
+                        ));
+                    })()
                 )}
             </main>
             {/* Auto-compaction in progress: lock the input UI and surface the top status

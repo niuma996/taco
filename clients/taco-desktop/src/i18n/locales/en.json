@@ -544,6 +544,7 @@
     "llmRequestDump": "LLM request dump",
     "showLlmRequestDump": "Show LLM request dump",
     "showLlmRequestDumpWaiting": "Debug mode is on — dump entries will appear after the next LLM call",
+    "empty": "No requests captured yet. Send a message and each LLM call will show up here.",
     "panel": "LLM request dump",
     "copied": "Copied",
     "copyFailed": "Copy failed",
@@ -600,6 +601,11 @@
     "errorLoad": "Failed to load memory",
     "errorSave": "Save failed",
     "errorDelete": "Delete failed"
+  },
+  "message": {
+    "copy": "Copy message",
+    "copied": "Copied",
+    "copyFailed": "Copy failed"
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."

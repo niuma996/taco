@@ -335,6 +335,61 @@ export function parseEntryTimestamp(
 const KNOWN_ARG_FIELDS = ["path", "file_path", "filePath", "command"] as const;
 
 /**
+ * Whether the message at `index` is the last one in its turn.
+ *
+ * "Turn" = a user prompt and the assistant chain it triggers. user messages and
+ * the final assistant in each chain both qualify; middle-of-chain assistant
+ * messages and orphan tool / system rows do not — those never reach a visible
+ * end-of-turn by themselves.
+ *
+ * Used to decide where a message-meta row (timestamp + copy button) belongs.
+ * The row also requires the turn to have actually finished — see
+ * `isTurnInProgress` for the "still running" half of that check.
+ */
+export function isLastInTurn(messages: UiMessage[], index: number): boolean {
+    const m = messages[index];
+    if (!m) return false;
+    if (m.kind === "system" || m.kind === "tool") return false;
+    const next = messages[index + 1];
+    // user messages are always the tail of their chain (user rows do not
+    // stack, so the next row is always assistant or end-of-list). assistant
+    // messages are only last when the chain ends here.
+    if (m.kind === "user") return true;
+    return !next || next.kind === "user";
+}
+
+/**
+ * Whether the turn containing `messages[index]` is still in flight.
+ *
+ * Combines three signals:
+ *   - any running tool card on an assistant bubble (covers shell / agent)
+ *   - any askUser / planExit card whose `details.waiting === true` — live
+ *     path flips status to "ok" on the first tool_end but the card is still
+ *     waiting for user input, so status alone misses it
+ *   - the session-wide busy flag (covers the pure-text case where the model
+ *     is streaming without any tool)
+ *
+ * `sessionBusy` defaults to false so the helper stays usable without a
+ * caller that knows the session lifecycle.
+ */
+export function isTurnInProgress(
+    messages: UiMessage[],
+    index: number,
+    sessionBusy = false,
+): boolean {
+    const m = messages[index];
+    if (m?.kind !== "assistant") return false;
+    for (const t of m.tools) {
+        if (t.status === "running") return true;
+        if ((t.name === "askUser" || t.name === "planExit") && t.details !== undefined) {
+            const waiting = (t.details as { waiting?: unknown }).waiting;
+            if (waiting === true) return true;
+        }
+    }
+    return sessionBusy;
+}
+
+/**
  * Derive a one-line summary from `args` for a card header, or "" when the
  * arguments carry no conventional field.
  *

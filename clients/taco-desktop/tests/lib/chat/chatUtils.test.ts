@@ -17,13 +17,17 @@ import {
     foldContent,
     type HistoryEntryLike,
     historyToUiMessages,
+    isLastInTurn,
+    isTurnInProgress,
     type MessageLike,
     parseEntryTimestamp,
     queuedItemsFromEvent,
     stringifyResult,
     summarizeKnownArgFields,
     toolResultLine,
+    type UiMessage,
     type UiThinkingBlock,
+    type UiToolCall,
 } from "../../../src/lib/chat/chatUtils";
 
 describe("historyToUiMessages — id join", () => {
@@ -1012,5 +1016,221 @@ describe("queuedItemsFromEvent", () => {
     it("returns [] when queues is missing or not an array", () => {
         assert.deepEqual(queuedItemsFromEvent({}), []);
         assert.deepEqual(queuedItemsFromEvent({ queues: "nope" as never }), []);
+    });
+});
+
+/**
+ * Turn-geometry helpers — where a message meta row (timestamp + copy button)
+ * belongs, and whether the turn containing the message is still running.
+ *
+ * Decoupled from chat layout so they can be reasoned about and tested as pure
+ * array predicates. ChatPane composes them with `sessionBusy` for the render
+ * call.
+ */
+describe("isLastInTurn", () => {
+    const user = (ts = 1): UiMessage => ({ id: "u", kind: "user", text: "hi", ts });
+    const assistant = (ts = 2, tools: UiToolCall[] = []): UiMessage => ({
+        id: "a",
+        kind: "assistant",
+        text: "",
+        ts,
+        tools,
+        thinking: [],
+    });
+    const sys: UiMessage = { id: "s", kind: "system", text: "", ts: 0 };
+    const orphanTool: UiMessage = { id: "t", kind: "tool", text: "", ts: 0 };
+
+    it("user 永远是它所在 user 链的末尾(实际场景里 user 之间不连续)", () => {
+        const msgs = [user(), assistant()];
+        assert.equal(isLastInTurn(msgs, 0), true);
+    });
+
+    it("assistant 在 user 后接另一条 user 时,被标记为上一轮的末尾", () => {
+        const msgs = [user(), assistant(), user()];
+        assert.equal(isLastInTurn(msgs, 1), true);
+    });
+
+    it("assistant 后还有 assistant(同回合) → 不是末尾", () => {
+        const msgs = [user(), assistant(), assistant(), user()];
+        assert.equal(isLastInTurn(msgs, 1), false);
+        assert.equal(isLastInTurn(msgs, 2), true);
+    });
+
+    it("assistant 在数组末尾 → 末尾", () => {
+        const msgs = [user(), assistant()];
+        assert.equal(isLastInTurn(msgs, 1), true);
+    });
+
+    it("system / orphan tool 永不为末尾", () => {
+        assert.equal(isLastInTurn([sys], 0), false);
+        assert.equal(isLastInTurn([orphanTool], 0), false);
+    });
+
+    it("空数组 / 越界下标 → false", () => {
+        assert.equal(isLastInTurn([], 0), false);
+        const msgs = [user()];
+        assert.equal(isLastInTurn(msgs, 5), false);
+    });
+});
+
+describe("isTurnInProgress", () => {
+    it("user / system / tool 不视为 turn in progress", () => {
+        const msgs: UiMessage[] = [
+            { id: "u", kind: "user", text: "hi", ts: 1 },
+            { id: "s", kind: "system", text: "", ts: 0 },
+            { id: "t", kind: "tool", text: "", ts: 0 },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0), false);
+        assert.equal(isTurnInProgress(msgs, 1), false);
+        assert.equal(isTurnInProgress(msgs, 2), false);
+    });
+
+    it("assistant 的 tools 全是 ok/error → 不算 in progress", () => {
+        const msgs: UiMessage[] = [
+            {
+                id: "a",
+                kind: "assistant",
+                text: "",
+                ts: 1,
+                tools: [
+                    { id: "t1", name: "read", args: {}, status: "ok" },
+                    { id: "t2", name: "shell", args: {}, status: "error" },
+                ],
+                thinking: [],
+            },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0), false);
+    });
+
+    it("assistant 至少有一个 running tool → in progress(覆盖 shell / agent / askUser / planExit)", () => {
+        const msgs: UiMessage[] = [
+            {
+                id: "a",
+                kind: "assistant",
+                text: "",
+                ts: 1,
+                tools: [
+                    { id: "t1", name: "read", args: {}, status: "ok" },
+                    { id: "t2", name: "askUser", args: {}, status: "running" },
+                ],
+                thinking: [],
+            },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0), true);
+    });
+
+    it("sessionBusy 单独也能把 assistant 标 in progress(覆盖纯文本 streaming)", () => {
+        const msgs: UiMessage[] = [
+            {
+                id: "a",
+                kind: "assistant",
+                text: "thinking out loud…",
+                ts: 1,
+                tools: [],
+                thinking: [],
+            },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0, false), false);
+        assert.equal(isTurnInProgress(msgs, 0, true), true);
+    });
+
+    it("sessionBusy 对 user 消息没影响", () => {
+        const msgs: UiMessage[] = [{ id: "u", kind: "user", text: "hi", ts: 1 }];
+        assert.equal(isTurnInProgress(msgs, 0, true), false);
+    });
+
+    it("askUser 第一次 tool_end 后 status=ok 但 details.waiting=true → in progress", () => {
+        // live path: handleToolEnd sets status="ok" on tool_end regardless of
+        // waiting — but the card is still pending user input. Without the
+        // waiting check we'd flip the meta row on too early.
+        const msgs: UiMessage[] = [
+            {
+                id: "a",
+                kind: "assistant",
+                text: "",
+                ts: 1,
+                tools: [
+                    {
+                        id: "q1",
+                        name: "askUser",
+                        args: {},
+                        status: "ok",
+                        details: { questions: [{ question: "q" }], waiting: true },
+                    },
+                ],
+                thinking: [],
+            },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0), true);
+    });
+
+    it("planExit details.waiting=true 同样算 in progress", () => {
+        const msgs: UiMessage[] = [
+            {
+                id: "a",
+                kind: "assistant",
+                text: "",
+                ts: 1,
+                tools: [
+                    {
+                        id: "p1",
+                        name: "planExit",
+                        args: {},
+                        status: "ok",
+                        details: { waiting: true },
+                    },
+                ],
+                thinking: [],
+            },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0), true);
+    });
+
+    it("askUser waiting=false 后视为已完成", () => {
+        const msgs: UiMessage[] = [
+            {
+                id: "a",
+                kind: "assistant",
+                text: "",
+                ts: 1,
+                tools: [
+                    {
+                        id: "q1",
+                        name: "askUser",
+                        args: {},
+                        status: "ok",
+                        details: { waiting: false },
+                    },
+                ],
+                thinking: [],
+            },
+        ];
+        assert.equal(isTurnInProgress(msgs, 0), false);
+    });
+
+    it("details.waiting 是非 boolean 时不触发 in progress(防御性)", () => {
+        // unknown / null / 字符串 等非 boolean 都不应当成 true 处理。
+        const variants: unknown[] = [undefined, null, "yes", 1, {}];
+        for (const waiting of variants) {
+            const msgs: UiMessage[] = [
+                {
+                    id: "a",
+                    kind: "assistant",
+                    text: "",
+                    ts: 1,
+                    tools: [
+                        {
+                            id: "q1",
+                            name: "askUser",
+                            args: {},
+                            status: "ok",
+                            details: { waiting },
+                        },
+                    ],
+                    thinking: [],
+                },
+            ];
+            assert.equal(isTurnInProgress(msgs, 0), false, `waiting=${String(waiting)}`);
+        }
     });
 });

@@ -574,10 +574,15 @@ button.topbar-context-indicator {
 }
 
 /* SubagentPanel puts a whole PaneHeader (title + count + search) into
-   RightPanel's title slot, so it must claim the row's free space. */
+   RightPanel's title slot, so it must claim the row's free space. Its own
+   gutter and margins are dropped: the topbar owns the row's height and inset,
+   and the asymmetric margins would otherwise push the title below the close
+   button sharing the row. */
 .right-panel-topbar > .pane-header {
     flex: 1 1 auto;
     min-width: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .right-panel-title {

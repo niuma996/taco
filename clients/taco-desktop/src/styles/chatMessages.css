@@ -18,7 +18,11 @@
 .message.user {
     background: var(--user-msg-bg);
     color: var(--fg);
-    margin-top: 0.75rem;
+    /* Slightly larger vertical margin than the per-bubble padding alone would
+       give — reads as a clear turn boundary against adjacent assistant rows,
+       which only carry the default `.message` padding. */
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
     /* Consistent font size with .md-assistant (0.85em) for uniform reading rhythm. */
     font-size: 0.85rem;
     /* Adaptive width (main already set flex-direction: column), max 90% of chat area.
@@ -35,6 +39,50 @@
 .message.tool {
     background: var(--tool-bg);
     color: var(--fg-dim);
+}
+
+/* End-of-turn meta row: timestamp + copy button. Floats to the right so it
+   reads as an afterthought rather than a sibling of the message content.
+   Anchored to the bubble's bottom edge — the bubble's own border-radius
+   contains it visually without a wrapping container. */
+.message-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+.message-meta__time {
+    font-variant-numeric: tabular-nums;
+}
+.message-meta__copy {
+    /* Match the visual weight of the timestamp; size is governed by the
+       inner lucide icon (13px) so the button stays a hair smaller than the
+       surrounding text. */
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--radius-sm);
+}
+.message-meta__copy:hover {
+    color: var(--fg);
+}
+.message-meta__copy:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+.message-meta__copy[data-state="copied"] {
+    color: var(--success);
+}
+.message-meta__copy[data-state="failed"] {
+    color: var(--danger);
 }
 
 /* assistant thinking block + markdown rendering (originally L1455-1722) */

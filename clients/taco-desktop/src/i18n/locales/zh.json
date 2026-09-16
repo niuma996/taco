@@ -543,6 +543,7 @@
     "llmRequestDump": "LLM 请求转储",
     "showLlmRequestDump": "显示 LLM 请求转储",
     "showLlmRequestDumpWaiting": "调试模式已开启 —— 下一次 LLM 调用后将显示转储条目",
+    "empty": "暂无请求记录。发送一条消息后,每次 LLM 调用都会显示在这里。",
     "panel": "LLM 请求转储",
     "copied": "已复制",
     "copyFailed": "复制失败",
@@ -599,6 +600,11 @@
     "errorLoad": "加载记忆失败",
     "errorSave": "保存失败",
     "errorDelete": "删除失败"
+  },
+  "message": {
+    "copy": "复制消息",
+    "copied": "已复制",
+    "copyFailed": "复制失败"
   },
   "plan": {
     "modeTooltip": "Plan 模式:仅 plan 文档与只读 shell 命令可写;扩展贡献的工具不在约束范围内,使用前请人工核查其输出。"

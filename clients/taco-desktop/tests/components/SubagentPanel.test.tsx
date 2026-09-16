@@ -118,6 +118,11 @@ describe("SubagentPanel — 列表", () => {
         assert.ok(screen.getByText("subagents.empty"));
     });
 
+    it("无子代理时不显示「从上方选择」提示", () => {
+        renderPanel({ messages: [] });
+        assert.equal(screen.queryByText("subagents.selectPrompt"), null);
+    });
+
     it("点击行触发 onSelect", async () => {
         const onSelect = vi.fn();
         renderPanel({ onSelect });
