@@ -11,18 +11,16 @@
  *  - activeCwd change → refresh tree + clear preview
  *  - open change → loadRoot once
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { FolderOpen, X } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import type { DragHandleProps } from "../hooks/primitives/useDragResize";
 import { useFilePreview } from "../hooks/useFilePreview";
 import { useFileTree } from "../hooks/useFileTree";
 import { useT } from "../i18n/useI18n";
-import { createFsClient, type FsClient, resolveFsPath } from "../lib/clients/fsClient";
-import { lastSegment } from "../lib/workspaceStorage";
-import { FilesPreviewPane } from "./FilesPreviewPane";
+import { createFsClient, type FsClient } from "../lib/clients/fsClient";
+import { FilePreviewPopup } from "./FilePreviewPopup";
 import { FilesTreeView } from "./FilesTreeView";
 import { RightPanel } from "./panels/RightPanel";
 import { Switch } from "./ui/Switch.tsx";
@@ -146,49 +144,7 @@ export function FilesDrawer(props: FilesDrawerProps) {
                     </div>
                 )}
             </RightPanel>
-            {preview.selectedRelPath !== null && activeCwd !== null && (
-                <Dialog.Root
-                    open
-                    onOpenChange={(next) => {
-                        if (!next) preview.clear();
-                    }}
-                >
-                    <Dialog.Portal>
-                        <Dialog.Overlay className="files-preview-backdrop" />
-                        <Dialog.Content
-                            className="files-preview-popup"
-                            aria-label={preview.selectedRelPath}
-                        >
-                            <div className="right-panel-topbar">
-                                <Dialog.Title asChild>
-                                    <h3 className="right-panel-title">
-                                        {lastSegment(preview.selectedRelPath)}
-                                    </h3>
-                                </Dialog.Title>
-                                <button
-                                    type="button"
-                                    className="right-panel-close"
-                                    onClick={() => preview.clear()}
-                                    aria-label={t("app.dismiss")}
-                                    title={t("app.dismiss")}
-                                >
-                                    <X size={14} aria-hidden="true" />
-                                </button>
-                            </div>
-                            {/* Keyed by path: resets the markdown rendered/source toggle per file. */}
-                            <FilesPreviewPane
-                                key={preview.selectedRelPath}
-                                selectedRelPath={preview.selectedRelPath}
-                                content={preview.content}
-                                block={preview.block}
-                                error={preview.error}
-                                loading={preview.loading}
-                                absPath={resolveFsPath(activeCwd, preview.selectedRelPath)}
-                            />
-                        </Dialog.Content>
-                    </Dialog.Portal>
-                </Dialog.Root>
-            )}
+            {activeCwd !== null && <FilePreviewPopup preview={preview} cwd={activeCwd} />}
         </>
     );
 }

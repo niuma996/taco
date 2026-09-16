@@ -12,7 +12,8 @@ export interface ToolViewProps {
     tool: UiToolCall;
 }
 
-export type ToolView = (props: ToolViewProps) => React.ReactElement;
+/** null renders no body — the shell's head still carries name / status / summary. */
+export type ToolView = (props: ToolViewProps) => React.ReactElement | null;
 
 /** tool name → specialized view component. Unregistered tools fall through. */
 export const toolViews: Record<string, ToolView> = {};

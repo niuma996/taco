@@ -35,6 +35,7 @@ import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConversationsPane } from "./hooks/useConversationsPane";
+import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
 import { useLlmDump } from "./hooks/useLlmDump";
 import { useMemoryPane } from "./hooks/useMemoryPane";
 import { usePluginsPane } from "./hooks/usePluginsPane";
@@ -594,169 +595,176 @@ export default function App() {
                                     }}
                                 />
                             )}
-                            <SubagentProvider
-                                cwd={activeCwd}
-                                loadSubagentHistory={stableLoadSubagentHistory}
-                                liveMessagesFor={liveMessagesFor}
-                                historyMessagesFor={historyMessagesFor}
-                                openInPanel={openInPanel}
-                            >
-                                <AskUserProvider
+                            {/* Owns the one file-preview popup the chat's `read`
+                                cards open; the file tree has its own inside
+                                FilesDrawer. */}
+                            <FilePreviewOpenerProvider cwd={activeCwd}>
+                                <SubagentProvider
                                     cwd={activeCwd}
-                                    dispatchAskUser={dispatch}
-                                    setAskUserAnswers={wsApi.setAskUserAnswers}
+                                    loadSubagentHistory={stableLoadSubagentHistory}
+                                    liveMessagesFor={liveMessagesFor}
+                                    historyMessagesFor={historyMessagesFor}
+                                    openInPanel={openInPanel}
                                 >
-                                    <ChatPane
-                                        ws={ws}
-                                        sidebarCollapsed={sidebarCollapsed}
-                                        onToggleSidebar={() =>
-                                            setSidebarCollapsed((v) => {
-                                                const next = !v;
-                                                writePersistedSidebarCollapsed(next);
-                                                return next;
-                                            })
-                                        }
-                                        input={input}
-                                        attachments={attachments}
-                                        busy={busy}
-                                        runInFlight={runInFlight}
-                                        queuedItems={
-                                            activeSid
-                                                ? (ws?.queuedBySessionId[activeSid] ?? [])
-                                                : []
-                                        }
-                                        onCancelQueued={(item) => void cancelQueued(item.id)}
-                                        compacting={contextInfo.compacting}
-                                        contextIndicator={{
-                                            info: contextInfo.info,
-                                            loading: contextInfo.loading,
-                                            compacting: contextInfo.compacting,
-                                            threshold:
-                                                globalConfigState.global.compaction?.threshold,
-                                        }}
-                                        onInputChange={(v) => {
-                                            setInput(v);
-                                            autoResizeTextarea();
-                                        }}
-                                        onAttachmentsChange={setAttachments}
-                                        onSend={async () => {
-                                            const text = input;
-                                            const imgs = attachments;
-                                            setInput("");
-                                            setAttachments([]);
-                                            if (textareaRef.current) {
-                                                textareaRef.current.style.height = "auto";
+                                    <AskUserProvider
+                                        cwd={activeCwd}
+                                        dispatchAskUser={dispatch}
+                                        setAskUserAnswers={wsApi.setAskUserAnswers}
+                                    >
+                                        <ChatPane
+                                            ws={ws}
+                                            sidebarCollapsed={sidebarCollapsed}
+                                            onToggleSidebar={() =>
+                                                setSidebarCollapsed((v) => {
+                                                    const next = !v;
+                                                    writePersistedSidebarCollapsed(next);
+                                                    return next;
+                                                })
                                             }
-                                            const send = runInFlight ? steerPrompt : sendPrompt;
-                                            if (!(await send(text, imgs))) {
-                                                setInput(text);
-                                                setAttachments(imgs);
+                                            input={input}
+                                            attachments={attachments}
+                                            busy={busy}
+                                            runInFlight={runInFlight}
+                                            queuedItems={
+                                                activeSid
+                                                    ? (ws?.queuedBySessionId[activeSid] ?? [])
+                                                    : []
                                             }
-                                        }}
-                                        onAbort={() => {
-                                            void abortPrompt().then((texts) => {
-                                                if (texts.length === 0) return;
-                                                setInput((prev) => {
-                                                    const restored = texts.join("\n");
-                                                    // Append, never overwrite — the composer
-                                                    // may hold an unsent draft. Trim the
-                                                    // draft's trailing newlines so the join
-                                                    // doesn't leave a blank gap.
-                                                    const head = prev.replace(/\n+$/, "");
-                                                    return head ? `${head}\n${restored}` : restored;
-                                                });
+                                            onCancelQueued={(item) => void cancelQueued(item.id)}
+                                            compacting={contextInfo.compacting}
+                                            contextIndicator={{
+                                                info: contextInfo.info,
+                                                loading: contextInfo.loading,
+                                                compacting: contextInfo.compacting,
+                                                threshold:
+                                                    globalConfigState.global.compaction?.threshold,
+                                            }}
+                                            onInputChange={(v) => {
+                                                setInput(v);
                                                 autoResizeTextarea();
-                                            });
-                                        }}
-                                        activeLevel={activeLevel}
-                                        onLevelChange={(next) => void setSessionLevel(next)}
-                                        activeModel={activeModelWithFallback}
-                                        onModelChange={(next) => void setSessionModel(next)}
-                                        modelOptions={filteredOptions}
-                                        onRefreshModels={refreshModels}
-                                        textareaRef={textareaRef}
-                                        onEnter={async () => {
-                                            const text = input;
-                                            const imgs = attachments;
-                                            setInput("");
-                                            setAttachments([]);
-                                            if (textareaRef.current) {
-                                                textareaRef.current.style.height = "auto";
-                                            }
-                                            const send = runInFlight ? steerPrompt : sendPrompt;
-                                            if (!(await send(text, imgs))) {
-                                                setInput(text);
-                                                setAttachments(imgs);
-                                            }
-                                        }}
-                                        onCopySessionId={(sid) => void copySessionId(sid)}
-                                        copiedSessionId={copiedSessionId}
-                                        onToggleFiles={() => rightPanel.toggle("files")}
-                                        filesOpen={rightPanel.panel === "files"}
-                                        onToggleTasks={() => rightPanel.toggle("tasks")}
-                                        tasksOpen={rightPanel.panel === "tasks"}
-                                        onToggleSubagents={() => rightPanel.toggle("subagents")}
-                                        subagentsOpen={rightPanel.panel === "subagents"}
-                                        subagentDot={subagentDotState(subagentEntries)}
-                                        onNewSession={handleNewSession}
-                                        newSessionDisabled={
-                                            !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
-                                        }
-                                        isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
-                                        llmDumpDock={
-                                            <LlmDumpDock
-                                                key={llmDumpEpoch}
-                                                entries={llmDump.entries}
-                                                onClear={llmDump.clear}
-                                                debugMode={
-                                                    globalConfigState.client.debugMode ?? false
+                                            }}
+                                            onAttachmentsChange={setAttachments}
+                                            onSend={async () => {
+                                                const text = input;
+                                                const imgs = attachments;
+                                                setInput("");
+                                                setAttachments([]);
+                                                if (textareaRef.current) {
+                                                    textareaRef.current.style.height = "auto";
                                                 }
+                                                const send = runInFlight ? steerPrompt : sendPrompt;
+                                                if (!(await send(text, imgs))) {
+                                                    setInput(text);
+                                                    setAttachments(imgs);
+                                                }
+                                            }}
+                                            onAbort={() => {
+                                                void abortPrompt().then((texts) => {
+                                                    if (texts.length === 0) return;
+                                                    setInput((prev) => {
+                                                        const restored = texts.join("\n");
+                                                        // Append, never overwrite — the composer
+                                                        // may hold an unsent draft. Trim the
+                                                        // draft's trailing newlines so the join
+                                                        // doesn't leave a blank gap.
+                                                        const head = prev.replace(/\n+$/, "");
+                                                        return head
+                                                            ? `${head}\n${restored}`
+                                                            : restored;
+                                                    });
+                                                    autoResizeTextarea();
+                                                });
+                                            }}
+                                            activeLevel={activeLevel}
+                                            onLevelChange={(next) => void setSessionLevel(next)}
+                                            activeModel={activeModelWithFallback}
+                                            onModelChange={(next) => void setSessionModel(next)}
+                                            modelOptions={filteredOptions}
+                                            onRefreshModels={refreshModels}
+                                            textareaRef={textareaRef}
+                                            onEnter={async () => {
+                                                const text = input;
+                                                const imgs = attachments;
+                                                setInput("");
+                                                setAttachments([]);
+                                                if (textareaRef.current) {
+                                                    textareaRef.current.style.height = "auto";
+                                                }
+                                                const send = runInFlight ? steerPrompt : sendPrompt;
+                                                if (!(await send(text, imgs))) {
+                                                    setInput(text);
+                                                    setAttachments(imgs);
+                                                }
+                                            }}
+                                            onCopySessionId={(sid) => void copySessionId(sid)}
+                                            copiedSessionId={copiedSessionId}
+                                            onToggleFiles={() => rightPanel.toggle("files")}
+                                            filesOpen={rightPanel.panel === "files"}
+                                            onToggleTasks={() => rightPanel.toggle("tasks")}
+                                            tasksOpen={rightPanel.panel === "tasks"}
+                                            onToggleSubagents={() => rightPanel.toggle("subagents")}
+                                            subagentsOpen={rightPanel.panel === "subagents"}
+                                            subagentDot={subagentDotState(subagentEntries)}
+                                            onNewSession={handleNewSession}
+                                            newSessionDisabled={
+                                                !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
+                                            }
+                                            isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
+                                            llmDumpDock={
+                                                <LlmDumpDock
+                                                    key={llmDumpEpoch}
+                                                    entries={llmDump.entries}
+                                                    onClear={llmDump.clear}
+                                                    debugMode={
+                                                        globalConfigState.client.debugMode ?? false
+                                                    }
+                                                />
+                                            }
+                                            onCommandPermission={async (
+                                                requestId,
+                                                approved,
+                                                scope: CommandPermissionScope,
+                                            ) => {
+                                                if (!activeCwd) return;
+                                                await client.commandPermissionResolve(
+                                                    asWorkspaceId(activeCwd),
+                                                    {
+                                                        requestId,
+                                                        approved,
+                                                        scope,
+                                                    },
+                                                );
+                                            }}
+                                        />
+                                        {activeCwd && activeSid && (
+                                            <TaskPanel
+                                                cwd={asWorkspaceId(activeCwd)}
+                                                sid={activeSid}
+                                                workspaces={workspaces}
+                                                client={client}
+                                                dispatchWs={dispatchWs}
+                                                open={rightPanel.panel === "tasks"}
+                                                onClose={rightPanel.close}
+                                                resizeHandleProps={rightPanel.resizeHandleProps}
+                                                resizeLabel={t("rightPanel.resizeHandle")}
                                             />
-                                        }
-                                        onCommandPermission={async (
-                                            requestId,
-                                            approved,
-                                            scope: CommandPermissionScope,
-                                        ) => {
-                                            if (!activeCwd) return;
-                                            await client.commandPermissionResolve(
-                                                asWorkspaceId(activeCwd),
-                                                {
-                                                    requestId,
-                                                    approved,
-                                                    scope,
-                                                },
-                                            );
-                                        }}
-                                    />
-                                    {activeCwd && activeSid && (
-                                        <TaskPanel
-                                            cwd={asWorkspaceId(activeCwd)}
-                                            sid={activeSid}
-                                            workspaces={workspaces}
-                                            client={client}
-                                            dispatchWs={dispatchWs}
-                                            open={rightPanel.panel === "tasks"}
+                                        )}
+                                        {/* SubagentPanel mounts inside SubagentProvider (its
+                                        SubagentDetail consumes useSubagent) and alongside
+                                        TaskPanel in the chat view — both panels live in the
+                                        same right-side slot. */}
+                                        <SubagentPanel
+                                            messages={ws?.messages ?? []}
+                                            open={rightPanel.panel === "subagents"}
+                                            selectedSubSessionId={selectedSubSessionId}
+                                            onSelect={setSelectedSubSessionId}
                                             onClose={rightPanel.close}
                                             resizeHandleProps={rightPanel.resizeHandleProps}
                                             resizeLabel={t("rightPanel.resizeHandle")}
                                         />
-                                    )}
-                                    {/* SubagentPanel mounts inside SubagentProvider (its
-                                        SubagentDetail consumes useSubagent) and alongside
-                                        TaskPanel in the chat view — both panels live in the
-                                        same right-side slot. */}
-                                    <SubagentPanel
-                                        messages={ws?.messages ?? []}
-                                        open={rightPanel.panel === "subagents"}
-                                        selectedSubSessionId={selectedSubSessionId}
-                                        onSelect={setSelectedSubSessionId}
-                                        onClose={rightPanel.close}
-                                        resizeHandleProps={rightPanel.resizeHandleProps}
-                                        resizeLabel={t("rightPanel.resizeHandle")}
-                                    />
-                                </AskUserProvider>
-                            </SubagentProvider>
+                                    </AskUserProvider>
+                                </SubagentProvider>
+                            </FilePreviewOpenerProvider>
                         </>
                     ) : mainView === "tools" ? (
                         <ToolsPane tools={tools} error={toolsError} />

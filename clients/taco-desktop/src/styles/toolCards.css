@@ -61,6 +61,50 @@
     font-size: 0.8em;
 }
 
+/* ── read tool card ── */
+/* One row: the line count on the left, the open-file button pinned right. */
+.tool-card-read {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+    margin-left: 1.4rem;
+}
+.tool-card-read-status {
+    color: var(--fg-dim);
+    font-size: 0.9em;
+    margin-top: 0.3rem;
+    margin-left: 1.4rem;
+}
+/* Inside the row the status inherits the row's own offsets. */
+.tool-card-read .tool-card-read-status {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+}
+.tool-card-read-open {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--fg-dim);
+    cursor: pointer;
+}
+.tool-card-read-open:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+.tool-card-read-open:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 /* ── askUser tool card ── */
 .askuser-card {
     padding: 0.5rem 0.6rem;

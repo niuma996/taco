@@ -7,4 +7,5 @@ import "./agentView";
 import "./askUserView";
 import "./editView";
 import "./planExitView";
+import "./readView";
 import "./shellView";

@@ -22,12 +22,26 @@ export interface FsClient {
     sizeOf(relPath: string): Promise<number>;
 }
 
-/** Compose cwd + rel into an absolute path. Pure string handling, no fs calls. */
+/** POSIX root, Windows drive letter, or UNC share. */
+const ABSOLUTE_PATH_RE = /^(?:\/|[a-zA-Z]:[\\/]|\\\\)/;
+
+/** True when the path already names a filesystem root — cwd must not be prepended. */
+export function isAbsolutePath(p: string): boolean {
+    return ABSOLUTE_PATH_RE.test(p);
+}
+
+/**
+ * Compose cwd + rel into an absolute path. Pure string handling, no fs calls.
+ *
+ * An already-absolute `relPath` passes through untouched: the file tree only
+ * ever produces cwd-relative paths, but tool cards address files by the path
+ * the model used, which is usually absolute and may sit outside the workspace.
+ */
 export function resolveFsPath(cwd: string, relPath: string): string {
+    if (isAbsolutePath(relPath)) return relPath;
     const c = cwd.replace(/\/+$/, "");
-    const r = relPath.replace(/^\/+/, "");
-    if (r === "") return c || "/";
-    return `${c}/${r}`;
+    if (relPath === "") return c || "/";
+    return `${c}/${relPath}`;
 }
 
 export function createFsClient(cwd: string): FsClient {

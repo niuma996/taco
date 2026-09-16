@@ -19,10 +19,16 @@ describe("resolveFsPath", () => {
         assert.equal(resolveFsPath("/home/user/proj/", "src"), "/home/user/proj/src");
     });
 
-    it("preserves leading slash on relPath (joins cleanly anyway)", () => {
+    it("passes an absolute POSIX path through untouched", () => {
+        assert.equal(resolveFsPath("/home/user/proj", "/etc/hosts"), "/etc/hosts");
         assert.equal(
-            resolveFsPath("/home/user/proj", "/src/index.ts"),
+            resolveFsPath("/home/user/proj", "/home/user/proj/src/index.ts"),
             "/home/user/proj/src/index.ts",
         );
+    });
+
+    it("passes Windows drive and UNC paths through untouched", () => {
+        assert.equal(resolveFsPath("C:/proj", "C:\\other\\file.ts"), "C:\\other\\file.ts");
+        assert.equal(resolveFsPath("C:/proj", "\\\\share\\file.ts"), "\\\\share\\file.ts");
     });
 });
