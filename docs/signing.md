@@ -47,15 +47,31 @@ minisign -G -p taco-update.pub -s taco-update.key -W
 # 3. Inspect the public key.
 cat taco-update.pub
 # Two lines: a comment + a base64 string. The base64 string is what
-# tauri.conf.json wants.
+# 3. Inspect the public key.
+cat taco-update.pub
+# Two lines: a comment + a base64 string.
 ```
 
 ## Embed the public key
 
-Replace the `pubkey` placeholder in `clients/taco-desktop/src-tauri/tauri.conf.json`
-(the `plugins.updater.pubkey` field) with the base64 string from
-`taco-update.pub`. Commit that change to the repo so every shipped
-binary carries the matching key.
+`tauri.conf.json` wants the base64 of the **entire `.pub` file contents**
+(both lines, trailing newline included) — NOT the base64 string on the
+second line. The updater base64-decodes the field and hands the result to
+`minisign`'s `PublicKey::decode`, which expects the two-line file format.
+Embedding the raw key blob instead makes every update fail with
+`The signature <pubkey> could not be decoded ...` — the base64 decodes, but
+to binary that is not valid UTF-8, so the field is rejected before any
+signature is even looked at.
+
+```bash
+# base64 of the whole file, single line
+base64 -w0 taco-update.pub   # GNU coreutils
+base64 taco-update.pub       # macOS/BSD (already single-line)
+```
+
+Paste that into `clients/taco-desktop/src-tauri/tauri.conf.json`
+(`plugins.updater.pubkey`) and commit it, so every shipped binary carries
+the matching key. `tests/lib/updaterPubkey.test.ts` enforces the format.
 
 The `taco-update.pub` and `taco-update.key` files themselves are
 **never committed**. `.gitignore` covers `taco-update.key`,
