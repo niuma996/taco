@@ -6,7 +6,12 @@
 
 import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { escapeCmd, renderWindowsWrapper, SCHTASKS_NAME } from "../lib/installSchtasks.ts";
+import {
+    escapeCmd,
+    renderWindowsWrapper,
+    SCHTASKS_NAME,
+    schtasksCreateArgs,
+} from "../lib/installSchtasks.ts";
 
 test("escapeCmd neutralizes shell metacharacters in set-line values", () => {
     strictEqual(escapeCmd("a&b"), "a^&b");
@@ -70,12 +75,25 @@ test("renderWindowsWrapper escapes cmd metacharacters in baked-in paths", () => 
     ok(!cmd.includes("R&D\\"));
 });
 
-test("schtasks action uses a quoted wrapper path and starts on boot", () => {
-    // Pure rendering is covered above; the integration call is Windows-only.
-    // Keep the contract explicit in the source-level test fixture.
-    const source = 'ONSTART /TR \\"C:\\Users\\Alice Smith\\.taco\\bin\\taco-sidecar-daemon.cmd\\"';
-    ok(source.includes("ONSTART"));
-    ok(source.includes('\\"C:\\Users\\Alice Smith'));
+test("schtasksCreateArgs registers a per-user logon task the installer can kill", () => {
+    const args = schtasksCreateArgs("C:\\Users\\Alice Smith\\.taco\\bin\\taco-sidecar-daemon.cmd");
+
+    // ONLOGON without /RU: runs as the creating user at sign-in. ONSTART
+    // would run as SYSTEM, whose processes the per-user installer cannot
+    // terminate — upgrades then fail with "Error opening file for writing".
+    ok(args.includes("ONLOGON"));
+    ok(!args.includes("ONSTART"));
+    // No elevation: /RL HIGHEST would put the daemon behind a token the
+    // installer's KillProcessCurrentUser cannot reach.
+    ok(!args.includes("/RL"));
+    // Overwrite prior registration + quoted wrapper path (spaces in usernames).
+    ok(args.includes("/F"));
+    const trIndex = args.indexOf("/TR");
+    ok(trIndex >= 0);
+    strictEqual(args[trIndex + 1], '"C:\\Users\\Alice Smith\\.taco\\bin\\taco-sidecar-daemon.cmd"');
+    const tnIndex = args.indexOf("/TN");
+    ok(tnIndex >= 0);
+    strictEqual(args[tnIndex + 1], SCHTASKS_NAME);
 });
 test("SCHTASKS_NAME matches the install/uninstall contract", () => {
     // The same constant is imported in uninstallSchtasks.ts; a typo would

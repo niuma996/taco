@@ -1,6 +1,9 @@
-/** Windows service registration through Task Scheduler. `ONSTART` matches
- *  the boot-time daemon contract; the wrapper bakes in the per-user home and
- *  runtime paths because schtasks cannot define environment variables. */
+/** Windows service registration through Task Scheduler. The daemon is
+ *  per-user ($TACO_HOME lives under %USERPROFILE%), so the task runs as the
+ *  creating user at logon — ONLOGON without /RU — never elevated, so the
+ *  installer can terminate the process when upgrading over a live daemon.
+ *  The wrapper bakes in the per-user home and runtime paths because schtasks
+ *  cannot define environment variables. */
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -77,6 +80,20 @@ export interface InstallSchtasksInput {
     control: string;
 }
 
+/** Args for the `schtasks /Create` call. Pure so tests can pin the contract
+ *  that keeps the daemon killable by the installer:
+ *  - ONLOGON without /RU runs the task as the creating user at sign-in.
+ *    (ONSTART without /RU would run as SYSTEM, whose processes a per-user
+ *    installer cannot kill — the source of "Error opening file for writing"
+ *    on upgrade.)
+ *  - No /RL HIGHEST: the daemon is pure user-mode; elevation only breaks
+ *    the installer's ability to terminate it.
+ *  - /F overwrites any prior registration; re-running `taco install` is the
+ *    supported update path. */
+export function schtasksCreateArgs(wrapperPath: string): string[] {
+    return ["/Create", "/SC", "ONLOGON", "/TN", SCHTASKS_NAME, "/TR", `"${wrapperPath}"`, "/F"];
+}
+
 /** Run the Windows install: write the .cmd wrapper + create the scheduled
  *  task via schtasks. We don't wait for the daemon socket (Windows named
  *  pipes don't have a stable readiness signal without a probe round-trip
@@ -95,23 +112,7 @@ export async function installSchtasks(input: InstallSchtasksInput): Promise<Inst
     });
     writeFileSync(wrapperPath, wrapperContent, { mode: 0o755 });
 
-    // `/SC ONLOGON` so the daemon runs in the user's context — $TACO_HOME
-    // under %USERPROFILE%\.taco is a per-user path. `/RL HIGHEST` runs the
-    // task with the highest privileges available (still the user). `/F`
-    // overwrites any prior registration; re-running `taco install` is the
-    // supported update path.
-    await execFile("schtasks", [
-        "/Create",
-        "/SC",
-        "ONSTART",
-        "/TN",
-        SCHTASKS_NAME,
-        "/TR",
-        `"${wrapperPath}"`,
-        "/RL",
-        "HIGHEST",
-        "/F",
-    ]);
+    await execFile("schtasks", schtasksCreateArgs(wrapperPath));
 
     // Kick the task immediately so the user doesn't have to sign out + in
     // to see the install take effect. `/Run` returns once the task is

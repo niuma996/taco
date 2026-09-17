@@ -72,8 +72,9 @@ runs `taco install` to register a system-level daemon:
 
 - **macOS** — LaunchAgent in `~/Library/LaunchAgents/`, with `RunAtLoad`
   and `KeepAlive` (the daemon restarts after a crash).
-- **Windows** — Task Scheduler task running at system startup. **Crash
-  restart is not configured** in this release.
+- **Windows** — Task Scheduler task running at user sign-in (per-user,
+  unelevated, so the installer can stop the daemon when upgrading).
+  **Crash restart is not configured** in this release.
 - **Linux** — `taco install` returns `unsupported platform`. There is no
   auto-registration; use a systemd user unit if you need daemon-on-boot.
 
