@@ -17,7 +17,11 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import type { SubagentContextMode, SubagentSpawnContext } from "../../agents/types.ts";
+import type {
+    SubagentContextMode,
+    SubagentProgressSink,
+    SubagentSpawnContext,
+} from "../../agents/types.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
 import type { WorkspaceExtensionSet } from "../../extensions/index.ts";
@@ -109,6 +113,7 @@ export interface SessionRegistryOptions {
         prompt: string;
         context?: SubagentContextMode;
         signal?: AbortSignal;
+        onUpdate?: SubagentProgressSink;
     }) => Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }>;
     /**
      * Resume callback for the `agentContinue` tool. Same deferred-evaluation
@@ -123,6 +128,7 @@ export interface SessionRegistryOptions {
         subSessionId: SessionId;
         prompt: string;
         signal?: AbortSignal;
+        onUpdate?: SubagentProgressSink;
     }) => Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
     /** Skill subagent spawn callback (same deferred AgentSpawner pattern). */
     readonly spawnSkillSubagent: (
@@ -511,6 +517,7 @@ export class SessionRegistry extends EventEmitter {
                     prompt: args.prompt,
                     context: args.context,
                     signal: args.signal,
+                    onUpdate: args.onUpdate,
                 }),
             continue: (args) =>
                 this.resumeSubagent({
@@ -519,6 +526,7 @@ export class SessionRegistry extends EventEmitter {
                     subSessionId: args.subSessionId,
                     prompt: args.prompt,
                     signal: args.signal,
+                    onUpdate: args.onUpdate,
                 }),
         };
         // Mutable cell captured by SkillTool's getReinjector thunk — populated

@@ -196,14 +196,17 @@ export interface SubagentSpawnedPayload {
 }
 
 /**
- * Shape of the `details` field on the `agent` tool's result. `subSessionId` is
- * absent when the spawn failed before a child session existed (e.g. unknown
- * agentType) — consumers must treat it as optional rather than assuming a
- * string is always present.
+ * Shape of the `details` field on the `agent` tool's result, and of the live
+ * progress updates it emits while the child runs (same card, same fields).
+ * `subSessionId` is absent when the spawn failed before a child session existed
+ * (e.g. unknown agentType) — consumers must treat it as optional rather than
+ * assuming a string is always present.
  */
 export interface AgentToolDetails {
     subSessionId?: SessionId;
     agentType: string;
+    /** Completed turns in the current run, present on progress updates only. */
+    turns?: number;
 }
 
 /** Shape of the `details` field on the `agentContinue` tool's result. */

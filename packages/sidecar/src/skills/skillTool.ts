@@ -10,8 +10,10 @@
 
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import type { SubagentProgressSink } from "../agents/types.ts";
 import type {
     AgentHarnessTool,
+    AgentHarnessToolUpdateCallback,
     AgentToolResult,
     Context,
     ExecutionToolContext,
@@ -46,6 +48,8 @@ export interface SpawnSkillSubagentOptions {
     skillFrontmatter: SkillFrontmatter;
     args: string;
     signal?: AbortSignal;
+    /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
+    onUpdate?: SubagentProgressSink;
 }
 
 const skillSchema = Type.Object({
@@ -98,7 +102,7 @@ export function createSkillTool(
         async execute(
             toolCallId: string,
             params: SkillToolInput,
-            _onUpdate: unknown,
+            onUpdate: AgentHarnessToolUpdateCallback<SkillToolDetails>,
             _toolContext: unknown,
             _invocation: unknown,
             piContext: Context,
@@ -162,6 +166,7 @@ export function createSkillTool(
                     skillFrontmatter,
                     args: params.args ?? "",
                     signal,
+                    onUpdate,
                 });
 
                 const text = result.isError

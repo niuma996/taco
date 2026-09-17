@@ -18,6 +18,7 @@ export type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
     AgentHarnessTool,
+    AgentHarnessToolUpdateCallback,
     AgentLane,
     AgentMessage,
     AgentToolResult,

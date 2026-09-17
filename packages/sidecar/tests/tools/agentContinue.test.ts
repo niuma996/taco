@@ -16,6 +16,7 @@ describe("agentContinue tool", () => {
 
     it("forwards params to continue and wraps result into content+details", async () => {
         let captured: unknown;
+        const spyOnUpdate = (): void => {};
         const ctx: SubagentSpawnContext = {
             async spawn() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
@@ -34,13 +35,14 @@ describe("agentContinue tool", () => {
             tool,
             { subSessionId: "sub-1", prompt: "follow up please" },
             { env: mockEnv },
-            { toolCallId: "tc-parent" },
+            { toolCallId: "tc-parent", onUpdate: spyOnUpdate },
         );
         assert.deepEqual(captured, {
             parentToolCallId: "tc-parent",
             subSessionId: "sub-1",
             prompt: "follow up please",
             signal: undefined,
+            onUpdate: spyOnUpdate,
         });
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.equal(text, "continued");

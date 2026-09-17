@@ -5,6 +5,19 @@
  */
 
 import type { SessionId } from "@taco-ai/protocol";
+import type { AgentHarnessToolUpdateCallback } from "../runtime/pi/types.ts";
+
+/**
+ * Progress sink forwarded from a tool down to the subagent runner.
+ *
+ * Typed over `never`, not over a payload type: pi types a tool's updates as
+ * carrying that tool's own result details, but all three subagent-backed tools
+ * (`agent`, `agentContinue`, subagent-mode `skill`) share one runner and one
+ * payload shape, which is not assignable to each tool's own details type.
+ * Contravariance makes every tool callback assignable to this sink; the runner
+ * asserts the payload it publishes (see subagentRunner).
+ */
+export type SubagentProgressSink = AgentHarnessToolUpdateCallback<never>;
 
 /**
  * How a subagent receives context from its parent session.
@@ -64,6 +77,8 @@ export interface SubagentSpawnContext {
         /** Overrides the agent definition's `context` default when present. */
         context?: SubagentContextMode;
         signal?: AbortSignal;
+        /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
+        onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }>;
     /**
      * Resume an existing subagent by `subSessionId`. The caller MUST be the
@@ -76,5 +91,7 @@ export interface SubagentSpawnContext {
         subSessionId: SessionId;
         prompt: string;
         signal?: AbortSignal;
+        /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
+        onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
 }

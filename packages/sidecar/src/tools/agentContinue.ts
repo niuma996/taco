@@ -22,6 +22,7 @@ import { Type } from "typebox";
 import type { SubagentSpawnContext } from "../agents/types.ts";
 import type {
     AgentHarnessTool,
+    AgentHarnessToolUpdateCallback,
     Context,
     ExecutionToolContext,
     TextContent,
@@ -58,7 +59,7 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
         async execute(
             toolCallId: string,
             params: AgentContinueInput,
-            _onUpdate: unknown,
+            onUpdate: AgentHarnessToolUpdateCallback<AgentContinueToolDetails>,
             _context: ExecutionToolContext,
             _invocation: unknown,
             piContext: Context,
@@ -71,6 +72,7 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
                 subSessionId: asSessionId(params.subSessionId),
                 prompt: params.prompt,
                 signal,
+                onUpdate,
             });
             const text = isError ? `subagent continue error: ${resultText}` : resultText;
             return {

@@ -10,7 +10,12 @@ import { EventEmitter } from "node:events";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
-import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "../../agents/types.ts";
+import type {
+    AgentDefinition,
+    AgentFewShot,
+    SubagentContextMode,
+    SubagentProgressSink,
+} from "../../agents/types.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import type { SystemPromptContributor } from "../../prompts/buildSystemPrompt.ts";
 import { interpolateArgs } from "../../skills/skillMessages.ts";
@@ -136,6 +141,8 @@ export interface SubagentSessionArgs {
      * metadata so `agentContinue` resumes byte-identically.
      */
     forkedContext?: string;
+    /** Calling tool's `onUpdate` sink — see subagentRunner for what it emits. */
+    onUpdate?: SubagentProgressSink;
 }
 
 export class AgentSpawner extends EventEmitter {
@@ -365,8 +372,10 @@ export class AgentSpawner extends EventEmitter {
             subSessionId: asSessionId(childSessionId),
             attached,
             prompt: args.prompt,
+            agentType: args.agentType,
             maxTurns: args.maxTurns,
             signal: args.signal,
+            onUpdate: args.onUpdate,
             readLastAssistantText: (id) => this.extractLastAssistantText(id),
         });
     }
@@ -383,6 +392,7 @@ export class AgentSpawner extends EventEmitter {
         prompt: string;
         context?: SubagentContextMode;
         signal?: AbortSignal;
+        onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }> {
         const def = this.findAgent(args.agentType);
         if (!def) {
@@ -429,6 +439,7 @@ export class AgentSpawner extends EventEmitter {
             prompt: args.prompt,
             tools: childTools,
             signal: args.signal,
+            onUpdate: args.onUpdate,
             childDepth,
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
@@ -494,6 +505,7 @@ export class AgentSpawner extends EventEmitter {
         subSessionId: SessionId;
         prompt: string;
         signal?: AbortSignal;
+        onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
         // Single-flight: a second concurrent call with the same subSessionId
         // reuses the in-flight promise rather than racing to re-attach and
@@ -521,6 +533,7 @@ export class AgentSpawner extends EventEmitter {
         subSessionId: SessionId;
         prompt: string;
         signal?: AbortSignal;
+        onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
         // 1. Open the child session and read its facts. Verify it exists, is a
         //    subagent, and was spawned by the same parent that's now trying to
@@ -558,7 +571,7 @@ export class AgentSpawner extends EventEmitter {
 
         const agentType = typeof md.agentType === "string" ? md.agentType : undefined;
         const def = agentType ? this.findAgent(agentType) : undefined;
-        if (!def) {
+        if (agentType === undefined || !def) {
             // The original profile (agentType) is gone — either the file was
             // deleted, or the agentType string was renamed. Falling back to
             // the parent's full toolset here would grant the resumed subagent
@@ -634,8 +647,10 @@ export class AgentSpawner extends EventEmitter {
             subSessionId: args.subSessionId,
             attached,
             prompt: args.prompt,
+            agentType,
             maxTurns,
             signal: args.signal,
+            onUpdate: args.onUpdate,
             readLastAssistantText: (id) => this.extractLastAssistantText(id),
         });
     }
@@ -706,6 +721,7 @@ export class AgentSpawner extends EventEmitter {
             allowedTools: opts.skillFrontmatter.allowedTools,
             model: opts.skillFrontmatter.model,
             signal: opts.signal,
+            onUpdate: opts.onUpdate,
         });
     }
 
@@ -725,6 +741,7 @@ export class AgentSpawner extends EventEmitter {
         allowedTools?: readonly string[];
         model?: string;
         signal?: AbortSignal;
+        onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId?: string; resultText: string; isError: boolean }> {
         const pid = args.parentSessionId;
         if (!pid) {
@@ -770,6 +787,7 @@ export class AgentSpawner extends EventEmitter {
             tools: childTools,
             model: modelOverride,
             signal: args.signal,
+            onUpdate: args.onUpdate,
             childDepth,
         });
     }

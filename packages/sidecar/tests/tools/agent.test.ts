@@ -26,6 +26,7 @@ describe("agent tool", () => {
 
     it("forwards params to spawn and wraps result into content+details", async () => {
         let captured: unknown;
+        const spyOnUpdate = (): void => {};
         const ctx: SubagentSpawnContext = {
             async spawn(args) {
                 captured = args;
@@ -44,7 +45,7 @@ describe("agent tool", () => {
                 prompt: "locate the config loader",
             },
             { env: mockEnv },
-            { toolCallId: "tc-parent" },
+            { toolCallId: "tc-parent", onUpdate: spyOnUpdate },
         );
         assert.deepEqual(captured, {
             parentToolCallId: "tc-parent",
@@ -52,6 +53,7 @@ describe("agent tool", () => {
             prompt: "locate the config loader",
             context: undefined,
             signal: undefined,
+            onUpdate: spyOnUpdate,
         });
         assert.equal(res.content[0]?.type, "text");
         const text1 = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
@@ -61,6 +63,7 @@ describe("agent tool", () => {
 
     it("forwards an explicit context override to spawn", async () => {
         let captured: unknown;
+        const spyOnUpdate = (): void => {};
         const ctx: SubagentSpawnContext = {
             async spawn(args) {
                 captured = args;
@@ -80,7 +83,7 @@ describe("agent tool", () => {
                 context: "fork",
             },
             { env: mockEnv },
-            { toolCallId: "tc-parent" },
+            { toolCallId: "tc-parent", onUpdate: spyOnUpdate },
         );
         assert.deepEqual(captured, {
             parentToolCallId: "tc-parent",
@@ -88,6 +91,7 @@ describe("agent tool", () => {
             prompt: "review the change",
             context: "fork",
             signal: undefined,
+            onUpdate: spyOnUpdate,
         });
     });
 

@@ -2,7 +2,8 @@
  * agent tool — delegates a task to a subagent (independent session).
  * Thin shell: calls SubagentSpawnContext.spawn (injected per-session by
  * WorkspaceRuntime); returns the result text as `content` and
- * { subSessionId, agentType } as `details`.
+ * { subSessionId, agentType } as `details`. The tool's own `onUpdate` is
+ * forwarded so the spawn can publish progress before it returns.
  */
 
 import type { AgentToolDetails } from "@taco-ai/protocol";
@@ -11,6 +12,7 @@ import { Type } from "typebox";
 import type { SubagentSpawnContext } from "../agents/types.ts";
 import type {
     AgentHarnessTool,
+    AgentHarnessToolUpdateCallback,
     Context,
     ExecutionToolContext,
     TextContent,
@@ -113,7 +115,7 @@ export function createAgentTool(
         async execute(
             toolCallId: string,
             params: AgentToolInput,
-            _onUpdate: unknown,
+            onUpdate: AgentHarnessToolUpdateCallback<AgentToolDetails>,
             _context: ExecutionToolContext,
             _invocation: unknown,
             piContext: Context,
@@ -127,6 +129,7 @@ export function createAgentTool(
                 prompt: params.prompt,
                 context: params.context,
                 signal,
+                onUpdate,
             });
             const text = isError ? `subagent error: ${resultText}` : resultText;
             return {

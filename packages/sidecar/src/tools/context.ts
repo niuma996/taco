@@ -1,13 +1,18 @@
 /**
- * Shared tool context — what the harness injects into every tool's
- * `execute(toolCallId, params, signal, onUpdate, context)` so tools can read
- * per-turn state (workspace, call, optional actor) without taking it as a
- * constructor arg. Replaces the previous `MemoryToolDeps` /
- * `JobsToolDeps` closure pattern — the LLM no longer has to thread
- * workspace / actor / call through the schema.
+ * Shared tool context — what the harness injects as a tool's `toolContext`
+ * argument, so tools read per-turn state (workspace, self-RPC entry, optional
+ * actor) without taking it as a constructor arg. Replaces the previous
+ * `MemoryToolDeps` / `JobsToolDeps` closure pattern — the LLM no longer has to
+ * thread workspace / actor / call through the schema.
  *
  * `env` is pi's built-in `ExecutionToolContext.env`; merged in here so tools
  * that need the fs shell share one context with tools that need self-RPC.
+ *
+ * pi calls `execute(toolCallId, params, onUpdate, toolContext, invocation,
+ * context)`, and a tool declares only the parameters it consumes. Params 5/6
+ * are needed only for replay memos (`invocation`) or cancellation
+ * (`context.abortSignal` — pi strips the signal from `toolContext`); they are
+ * declared `unknown` when they exist only to reach a later position.
  */
 
 import type { WorkspaceId } from "@taco-ai/protocol";

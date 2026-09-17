@@ -6,14 +6,18 @@
  * needs from the spawner is a way to read the child's last assistant text.
  */
 
-import type { SessionId } from "@taco-ai/protocol";
+import type { AgentToolDetails, SessionId } from "@taco-ai/protocol";
+import type { SubagentProgressSink } from "../../agents/types.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
-import type { HarnessEvent } from "../pi/types.ts";
+import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
+import { subagentStartedResult, subagentTurnResult } from "./subagentProgress.ts";
 
 export interface RunAttachedSubagentArgs {
     readonly subSessionId: SessionId;
     readonly attached: AttachedSession;
     readonly prompt: string;
+    /** Metadata agentType / event agentType (must be consistent). Labels progress updates. */
+    readonly agentType: string;
     /**
      * The **remaining** turn budget for this run — callers are responsible for
      * subtracting already-consumed turns. Enforced by counting `turn_end` and
@@ -21,6 +25,12 @@ export interface RunAttachedSubagentArgs {
      */
     readonly maxTurns?: number;
     readonly signal?: AbortSignal;
+    /**
+     * Streaming-update sink. The started update is checkpointed so an
+     * interrupted call leaves the child's session id in the transcript; turn
+     * updates are live-only.
+     */
+    readonly onUpdate?: SubagentProgressSink;
     /** Read the child's current branch for its last assistant text. */
     readonly readLastAssistantText: (
         subSessionId: SessionId,
@@ -38,7 +48,23 @@ export interface RunAttachedSubagentArgs {
 export async function runAttachedSubagent(
     args: RunAttachedSubagentArgs,
 ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
-    const { subSessionId, attached, readLastAssistantText } = args;
+    const { subSessionId, attached, agentType, readLastAssistantText } = args;
+    const onUpdate = args.onUpdate;
+    // Single point where this runner asserts its payload shape onto the sink:
+    // the sink is typed over `never` so every tool callback is assignable to it
+    // (see SubagentProgressSink), which leaves the payload assertion here.
+    const publish = (
+        payload: AgentToolResult<AgentToolDetails>,
+        options?: { checkpoint: true },
+    ): void => {
+        onUpdate?.(payload as AgentToolResult<never>, options);
+    };
+
+    // Publish the recovery handle before the child does any work: if the process
+    // dies mid-run, pi folds this checkpoint's content into the interrupted tool
+    // result, and that session id is what lets the model resume instead of
+    // re-spawning. See subagentProgress.ts.
+    publish(subagentStartedResult({ subSessionId, agentType }), { checkpoint: true });
 
     // The turn cap is enforced here rather than by the harness, which takes
     // no turn limit: count completed turns and abort on the cap. Whatever
@@ -47,15 +73,36 @@ export async function runAttachedSubagent(
     const cap = args.maxTurns !== undefined && args.maxTurns > 0 ? args.maxTurns : undefined;
     let turnsUsed = 0;
     let hitCap = false;
+    let acceptingUpdates = true;
+    let progressSeq = 0;
     const onTurnEnd = (event: HarnessEvent): void => {
-        if (event.type !== "turn_end" || cap === undefined) return;
+        if (event.type !== "turn_end") return;
         turnsUsed++;
-        if (turnsUsed >= cap && !hitCap) {
+        if (cap !== undefined && turnsUsed >= cap && !hitCap) {
             hitCap = true;
             void attached.abort();
         }
+        if (!onUpdate) return;
+        // Reading the child's branch is async; drop the result if a newer turn
+        // already published, or if the run settled while the read was in flight.
+        const seq = ++progressSeq;
+        void readLastAssistantText(subSessionId)
+            .then(({ text }) => {
+                if (!acceptingUpdates || seq !== progressSeq) return;
+                publish(
+                    subagentTurnResult({
+                        subSessionId,
+                        agentType,
+                        turns: turnsUsed,
+                        lastText: text,
+                    }),
+                );
+            })
+            .catch(() => {
+                // Progress is best-effort; the run's own result path reports failures.
+            });
     };
-    if (cap !== undefined) attached.on("event", onTurnEnd);
+    attached.on("event", onTurnEnd);
 
     try {
         await attached.prompt(args.prompt);
@@ -78,7 +125,8 @@ export async function runAttachedSubagent(
             isError: true,
         };
     } finally {
-        if (cap !== undefined) attached.off("event", onTurnEnd);
+        acceptingUpdates = false;
+        attached.off("event", onTurnEnd);
     }
 
     // Extract last assistant text. An empty reply is a failure, not a

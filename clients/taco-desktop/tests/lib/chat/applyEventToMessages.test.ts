@@ -217,6 +217,73 @@ describe("applyEventToMessages — tool execution", () => {
         assert.equal(asst.tools[0]?.resultText, "partial data");
     });
 
+    it("tool_update（pi 形状：content + details）→ 取 content 文本并透传 details", () => {
+        const start = asEv({
+            type: "message_start",
+            message: { timestamp: "t1", role: "assistant" },
+        });
+        const started = applyEventToMessages([], start, baseOpts).messages;
+        const toolStart = asEv({
+            type: "tool_start",
+            toolCallId: "tc1",
+            toolName: "agent",
+        });
+        const after1 = applyEventToMessages(started, toolStart, baseOpts).messages;
+        const update = asEv({
+            type: "tool_update",
+            toolCallId: "tc1",
+            partialResult: {
+                content: [{ type: "text", text: "Subagent explorer: turn 2" }],
+                details: { subSessionId: "sub-1", agentType: "explorer", turns: 2 },
+            },
+        });
+        const { messages } = applyEventToMessages(after1, update, baseOpts);
+        const asst = messages[0] as Extract<UiMessage, { kind: "assistant" }>;
+        // 运行中的卡片显示 content 文本（不是被 stringify 的整个对象）
+        assert.equal(asst.tools[0]?.resultText, "Subagent explorer: turn 2");
+        // details 透传：agent 卡片在运行中即可拿到 subSessionId 点开子会话
+        assert.deepEqual(asst.tools[0]?.details, {
+            subSessionId: "sub-1",
+            agentType: "explorer",
+            turns: 2,
+        });
+    });
+
+    it("tool_update 无 details → 保留上一帧 details", () => {
+        const start = asEv({
+            type: "message_start",
+            message: { timestamp: "t1", role: "assistant" },
+        });
+        const started = applyEventToMessages([], start, baseOpts).messages;
+        const toolStart = asEv({
+            type: "tool_start",
+            toolCallId: "tc1",
+            toolName: "agent",
+        });
+        const after1 = applyEventToMessages(started, toolStart, baseOpts).messages;
+        const withDetails = asEv({
+            type: "tool_update",
+            toolCallId: "tc1",
+            partialResult: {
+                content: [{ type: "text", text: "turn 1" }],
+                details: { subSessionId: "sub-1", agentType: "explorer" },
+            },
+        });
+        const after2 = applyEventToMessages(after1, withDetails, baseOpts).messages;
+        const noDetails = asEv({
+            type: "tool_update",
+            toolCallId: "tc1",
+            partialResult: { content: [{ type: "text", text: "turn 2" }] },
+        });
+        const { messages } = applyEventToMessages(after2, noDetails, baseOpts);
+        const asst = messages[0] as Extract<UiMessage, { kind: "assistant" }>;
+        assert.equal(asst.tools[0]?.resultText, "turn 2");
+        assert.deepEqual(asst.tools[0]?.details, {
+            subSessionId: "sub-1",
+            agentType: "explorer",
+        });
+    });
+
     it("tool_end(isError=false) → status=ok + resultText", () => {
         const start = asEv({
             type: "message_start",
