@@ -8,9 +8,12 @@ import { describe, it } from "node:test";
 import type { SkillNameCollision } from "../../src/skills/dedupeSkills.ts";
 import {
     checkSkillFrontmatter,
+    formatSkillDiagnosticMessage,
     type LoaderSkillDiagnostic,
+    logSkillDiagnostics,
     mapDuplicateDiagnostics,
     mapLoaderDiagnostics,
+    type SkillDiagnosticLogger,
 } from "../../src/skills/skillDiagnostics.ts";
 import type { SkillFrontmatter } from "../../src/skills/skillFrontmatter.ts";
 
@@ -45,16 +48,9 @@ describe("mapLoaderDiagnostics", () => {
         assert.ok(!("source" in entry), "source key should be absent, not undefined");
     });
 
-    it("buckets an unrecognized future pi code into parse_failed but keeps it readable", () => {
-        // If pi adds a code, emitting it raw would make the protocol union a
-        // lie. Falling back must not lose the original name.
-        const [entry] = mapLoaderDiagnostics([
-            { code: "some_future_code", message: "details here", path: "/a", source: "user" },
-        ]);
-        assert.equal(entry.code, "parse_failed");
-        assert.ok(entry.message.includes("some_future_code"));
-        assert.ok(entry.message.includes("details here"));
-    });
+    // pi-side unknown codes are no longer reachable: LoaderSkillDiagnostic.code
+    // is the SkillDiagnosticCode union, so out-of-band values fail at compile
+    // time. Tests below exercise the in-union codes instead.
 
     it("maps an empty list to an empty list", () => {
         assert.deepEqual(mapLoaderDiagnostics([]), []);
@@ -140,5 +136,97 @@ describe("checkSkillFrontmatter", () => {
             "unknown_run_as",
             "invalid_allowed_tools",
         ]);
+    });
+});
+
+/** In-memory spy for SkillDiagnosticLogger — captures every call. */
+function makeSpyLogger(): SkillDiagnosticLogger & {
+    infoCalls: string[];
+    warnCalls: string[];
+} {
+    const infoCalls: string[] = [];
+    const warnCalls: string[] = [];
+    return {
+        info(msg) {
+            infoCalls.push(msg);
+        },
+        warn(msg) {
+            warnCalls.push(msg);
+        },
+        infoCalls,
+        warnCalls,
+    };
+}
+
+describe("logSkillDiagnostics", () => {
+    it("emits every diagnostic through `info` and never through `warn`", () => {
+        const logger = makeSpyLogger();
+        // One of each kind — loader, frontmatter, and a duplicate collision
+        // — to make sure the level contract holds for all three sources.
+        logSkillDiagnostics(
+            {
+                loader: mapLoaderDiagnostics([
+                    {
+                        code: "invalid_metadata",
+                        message: "description exceeds 1024 characters (1816)",
+                        path: "/Users/lewiiszhang/.claude/skills/zht-dt-cli/SKILL.md",
+                        source: "user",
+                    },
+                    {
+                        code: "read_failed",
+                        message: "EACCES",
+                        path: "/work/.taco/skills/private/SKILL.md",
+                    },
+                ]),
+                frontmatter: checkSkillFrontmatter(
+                    { runAs: "parallel" } as unknown as SkillFrontmatter,
+                    "/work/.taco/skills/bad-run-as/SKILL.md",
+                ),
+                duplicates: mapDuplicateDiagnostics([
+                    {
+                        name: "officecli",
+                        dropped: { name: "officecli", filePath: "/builtin/officecli/SKILL.md" },
+                        keptFrom: {
+                            name: "officecli",
+                            filePath: "/work/.taco/skills/officecli/SKILL.md",
+                        },
+                    } satisfies SkillNameCollision<{ name: string; filePath: string }>,
+                ]),
+            },
+            logger,
+        );
+
+        assert.deepEqual(
+            logger.warnCalls,
+            [],
+            "warn must never be called for skill diagnostics — the desktop forwards [warn] lines to a toast on every boot",
+        );
+        assert.equal(logger.infoCalls.length, 4, "one info line per diagnostic");
+        assert.ok(logger.infoCalls.some((m) => m.includes("invalid_metadata")));
+        assert.ok(logger.infoCalls.some((m) => m.includes("read_failed")));
+        assert.ok(logger.infoCalls.some((m) => m.includes("unknown_run_as")));
+        assert.ok(
+            logger.infoCalls.some((m) => m.includes("duplicate_name") && m.includes("officecli")),
+        );
+    });
+
+    it("emits nothing when no diagnostics were produced", () => {
+        const logger = makeSpyLogger();
+        logSkillDiagnostics({ loader: [], frontmatter: [], duplicates: [] }, logger);
+        assert.deepEqual(logger.infoCalls, []);
+        assert.deepEqual(logger.warnCalls, []);
+    });
+});
+
+describe("formatSkillDiagnosticMessage", () => {
+    it("renders a stable single-line shape: code + path + message", () => {
+        const line = formatSkillDiagnosticMessage({
+            code: "parse_failed",
+            message: "unexpected token",
+            path: "/work/x/SKILL.md",
+        });
+        // Pinned byte-for-byte so any change is deliberate. Changing the
+        // shape silently breaks log parsers downstream that grep on it.
+        assert.equal(line, "skill parse_failed at /work/x/SKILL.md: unexpected token");
     });
 });

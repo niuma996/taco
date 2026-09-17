@@ -12,61 +12,41 @@
  *
  * Pure functions, no I/O: `server.ts` does the loading, this file only reshapes,
  * which keeps it unit-testable without standing up a workspace.
+ *
+ * The loader `code` field is typed as `SkillDiagnosticCode` rather than
+ * `string`: the protocol enum already mirrors pi's `SkillDiagnosticCode`
+ * exactly (see `@taco-ai/protocol`'s `tools.ts`), so a future pi code would
+ * fail typecheck here and force a deliberate enum extension — no silent
+ * "fallback to parse_failed" masking unrecognized values.
  */
 
-import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
+import type { SkillDiagnosticCode, SkillDiagnosticEntry } from "@taco-ai/protocol";
 import type { SkillNameCollision } from "./dedupeSkills.ts";
 import type { SkillFrontmatter } from "./skillFrontmatter.ts";
 
 /**
  * The subset of pi's `SkillDiagnostic & { source }` this mapper needs. Declared
  * structurally rather than imported so a change to pi's optional fields does
- * not break the build here; `code` is intentionally `string` because pi's union
- * is its own and is validated by the switch in `toWireCode`.
+ * not break the build here; `code` is the protocol enum so an out-of-band
+ * pi code cannot sneak through unchecked.
  */
 export interface LoaderSkillDiagnostic {
-    code: string;
+    code: SkillDiagnosticCode;
     message: string;
     path: string;
     source?: "builtin" | "user";
-}
-
-/**
- * Narrow a loader code to the protocol union, falling back to `parse_failed`.
- *
- * pi could add a code in a future version; emitting an unknown string would
- * make `SkillDiagnosticCode` a lie on the wire. `parse_failed` is the honest
- * generic bucket — the original code is preserved in the message so nothing is
- * actually lost.
- */
-function toWireCode(code: string): { code: SkillDiagnosticEntry["code"]; unknown: boolean } {
-    switch (code) {
-        case "file_info_failed":
-        case "list_failed":
-        case "read_failed":
-        case "parse_failed":
-        case "invalid_metadata":
-            return { code, unknown: false };
-        default:
-            return { code: "parse_failed", unknown: true };
-    }
 }
 
 /** Map pi loader diagnostics to wire entries. */
 export function mapLoaderDiagnostics(
     diagnostics: ReadonlyArray<LoaderSkillDiagnostic>,
 ): SkillDiagnosticEntry[] {
-    return diagnostics.map((d) => {
-        const { code, unknown } = toWireCode(d.code);
-        return {
-            code,
-            // Keep the original code visible when it fell into the fallback
-            // bucket, so an unrecognized loader code is still diagnosable.
-            message: unknown ? `${d.code}: ${d.message}` : d.message,
-            path: d.path,
-            ...(d.source !== undefined ? { source: d.source } : {}),
-        };
-    });
+    return diagnostics.map((d) => ({
+        code: d.code,
+        message: d.message,
+        path: d.path,
+        ...(d.source !== undefined ? { source: d.source } : {}),
+    }));
 }
 
 /** Map dedupe collisions to `duplicate_name` wire entries. */
@@ -156,4 +136,62 @@ export function checkSkillFrontmatter(
     }
 
     return out;
+}
+
+/**
+ * Minimal logger shape this module needs. Narrower than `lib/logger.ts`'s
+ * `Logger` so tests can pass a tiny spy without faking the whole interface.
+ */
+export interface SkillDiagnosticLogger {
+    info(msg: string): void;
+    warn(msg: string): void;
+}
+
+export interface SkillDiagnosticsToLog {
+    /** Output of `mapLoaderDiagnostics(loaded.diagnostics)` (pi's warnings). */
+    loader: ReadonlyArray<SkillDiagnosticEntry>;
+    /** Output of `checkSkillFrontmatter(...)` (taco-private frontmatter lints). */
+    frontmatter: ReadonlyArray<SkillDiagnosticEntry>;
+    /** Output of `mapDuplicateDiagnostics(deduped.duplicates)`. */
+    duplicates: ReadonlyArray<SkillDiagnosticEntry>;
+}
+
+/**
+ * Format one diagnostic as a single-line message for the daemon log.
+ *
+ * Kept as a pure helper so tests can pin the message shape and so server.ts
+ * stays a thin caller.
+ */
+export function formatSkillDiagnosticMessage(d: SkillDiagnosticEntry): string {
+    return `skill ${d.code} at ${d.path}: ${d.message}`;
+}
+
+/**
+ * Emit the full set of diagnostics produced by one `loadSkills` pass.
+ *
+ * Everything routes through `info`, never `warn`: the desktop forwards
+ * `[warn]` stderr lines to a toast, and skill hygiene problems would otherwise
+ * toast on every boot and on every hot reload. Users still see them by opening
+ * the skills pane (`useSkillsPane` reads `diagnostics` from `skills.list`).
+ *
+ * Centralising the level choice here — rather than scattering `log.info` /
+ * `log.warn` across server.ts — makes the contract testable: a spy logger can
+ * assert that `warn` is never called and `info` sees every entry.
+ */
+export function logSkillDiagnostics(
+    diagnostics: SkillDiagnosticsToLog,
+    log: SkillDiagnosticLogger,
+): void {
+    for (const dup of diagnostics.duplicates) {
+        log.info(
+            `skill duplicate_name at ${dup.path}: "${dup.skillName ?? "<unknown>"}" ` +
+                `shadowed by ${dup.shadowedBy ?? "<unknown>"}`,
+        );
+    }
+    for (const d of diagnostics.loader) {
+        log.info(formatSkillDiagnosticMessage(d));
+    }
+    for (const d of diagnostics.frontmatter) {
+        log.info(formatSkillDiagnosticMessage(d));
+    }
 }

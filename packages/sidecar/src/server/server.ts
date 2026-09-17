@@ -86,6 +86,7 @@ import { WorkspaceRuntime } from "../runtime/workspace.ts";
 import { dedupeSkillsByNameWithDuplicates } from "../skills/dedupeSkills.ts";
 import {
     checkSkillFrontmatter,
+    logSkillDiagnostics,
     mapDuplicateDiagnostics,
     mapLoaderDiagnostics,
 } from "../skills/skillDiagnostics.ts";
@@ -1053,30 +1054,24 @@ export class SidecarServer implements ServerRpcSurface {
         }
         // Logs stay: they are the only channel for headless / IM runs with no
         // client to read `skills.list`. The returned copy is additional, not a
-        // replacement.
-        //
-        // `duplicate_name` is logged at info, not warn: a skill shadowed by a
-        // same-named skill in another directory is expected (e.g. the same
-        // skill under both ~/.claude/skills and ~/.taco/skills) and not a
-        // degradation. The desktop forwards `[warn]` stderr lines to a toast,
-        // so warn here would spam every boot. Loader/frontmatter diagnostics
-        // stay warn — they signal genuinely broken skills.
-        for (const dup of deduped.duplicates) {
-            log.info(
-                `skill duplicate_name at ${dup.dropped.filePath}: "${dup.name}" shadowed by ${dup.keptFrom.filePath}`,
-            );
-        }
-        for (const d of loaded.diagnostics) {
-            log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);
-        }
-        for (const d of frontmatterDiagnostics) {
-            log.warn(`skill ${d.code} at ${d.path}: ${d.message}`);
-        }
+        // replacement. The level contract — never warn, always info — lives in
+        // logSkillDiagnostics so a single test can guard the toast-surfacing
+        // contract: warn lines become desktop toasts on every boot and every
+        // hot reload, which we don't want for known-shape skill hygiene
+        // problems. Users still see them by opening the skills pane.
         const diagnostics = [
             ...mapLoaderDiagnostics(loaded.diagnostics),
             ...mapDuplicateDiagnostics(deduped.duplicates),
             ...frontmatterDiagnostics,
         ];
+        logSkillDiagnostics(
+            {
+                loader: diagnostics,
+                frontmatter: frontmatterDiagnostics,
+                duplicates: mapDuplicateDiagnostics(deduped.duplicates),
+            },
+            log,
+        );
         return { skills, diagnostics };
     }
 
