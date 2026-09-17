@@ -10,9 +10,13 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 
-import { withHookTimeout, wrapHook } from "../../src/runtime/harness/hookWiring.ts";
+import {
+    HOOK_TIMEOUT_MS,
+    withHookTimeout,
+    wrapHook,
+} from "../../src/runtime/harness/hookWiring.ts";
 
 describe("withHookTimeout", () => {
     it("resolves fast promises with the original value", async () => {
@@ -49,31 +53,45 @@ describe("wrapHook", () => {
     });
 
     it("times out a hung hook to undefined instead of blocking forever", async () => {
-        const wrapped = wrapHook(() => new Promise<never>(() => {}), "hanger");
-        const started = Date.now();
-        const result = await wrapped("x");
-        const elapsed = Date.now() - started;
-        assert.equal(result, undefined);
-        // Allow slack for timer scheduling, but the guard must fire well
-        // before an unbounded wait would.
-        assert.ok(elapsed < 5_000, `hung hook resolved after ${elapsed}ms, expected ~2s`);
+        // Mock setTimeout so the 2s deadline fires on a synthetic tick —
+        // eliminates the wall-clock sensitivity that made this case
+        // intermittently fail under full-suite event-loop pressure.
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const wrapped = wrapHook(() => new Promise<never>(() => {}), "hanger");
+            const hung = wrapped("x");
+            mock.timers.tick(HOOK_TIMEOUT_MS);
+            assert.equal(await hung, undefined);
+        } finally {
+            mock.timers.reset();
+        }
     });
 
     it("uses the onFailure fallback so tool_call can fail closed", async () => {
         // tool_call treats `undefined` as "allow", so a gatekeeper hook that
         // throws or hangs must fall back to blocking rather than permitting.
-        const failClosed = () => ({ block: true, reason: "failed closed" });
+        mock.timers.enable({ apis: ["setTimeout"] });
+        try {
+            const failClosed = (): { block: true; reason: string } => ({
+                block: true,
+                reason: "failed closed",
+            });
 
-        const thrower = wrapHook(
-            () => {
-                throw new Error("gatekeeper exploded");
-            },
-            "tool_call",
-            failClosed,
-        );
-        assert.deepEqual(await thrower("rm -rf /"), { block: true, reason: "failed closed" });
+            const thrower = wrapHook(
+                () => {
+                    throw new Error("gatekeeper exploded");
+                },
+                "tool_call",
+                failClosed,
+            );
+            assert.deepEqual(await thrower("rm -rf /"), { block: true, reason: "failed closed" });
 
-        const hanger = wrapHook(() => new Promise<never>(() => {}), "tool_call", failClosed);
-        assert.deepEqual(await hanger("rm -rf /"), { block: true, reason: "failed closed" });
+            const hanger = wrapHook(() => new Promise<never>(() => {}), "tool_call", failClosed);
+            const hung = hanger("rm -rf /");
+            mock.timers.tick(HOOK_TIMEOUT_MS);
+            assert.deepEqual(await hung, { block: true, reason: "failed closed" });
+        } finally {
+            mock.timers.reset();
+        }
     });
 });
