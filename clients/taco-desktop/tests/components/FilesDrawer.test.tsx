@@ -41,6 +41,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
     revealItemInDir: vi.fn(async () => {}),
+    openPath: vi.fn(async () => {}),
 }));
 
 // shiki's codeToHtml echoes the source wrapped in a .shiki pre — the test then

@@ -174,7 +174,14 @@ export const PREVIEW_LANGUAGES: Readonly<Record<string, string>> = {
     diff: "diff",
 };
 
-export type PreviewKind = "image" | "markdown" | "code" | "text" | "binary" | "unsupported";
+export type PreviewKind =
+    | "image"
+    | "markdown"
+    | "html"
+    | "code"
+    | "text"
+    | "binary"
+    | "unsupported";
 
 /** Classify a file for the preview popup. Extension-less files preview as plain text. */
 export function previewKindFor(name: string): PreviewKind {
@@ -185,6 +192,7 @@ export function previewKindFor(name: string): PreviewKind {
     const lang = PREVIEW_LANGUAGES[ext];
     if (lang === undefined) return "unsupported";
     if (lang === "markdown") return "markdown";
+    if (lang === "html") return "html";
     if (lang === "text") return "text";
     return "code";
 }

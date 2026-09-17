@@ -564,6 +564,7 @@
     "revealWorkspace": "Open workspace in file manager",
     "viewRendered": "Rendered",
     "viewSource": "Source",
+    "viewBrowser": "Open in browser",
     "loadError": "Can't read directory",
     "showHidden": "Show hidden files",
     "previewError": "Failed to read file"

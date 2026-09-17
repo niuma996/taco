@@ -6,13 +6,18 @@
  *  - block ("binary" | "unsupported" | "tooLarge") → hint + reveal-in-folder button
  *  - error → error message
  *  - markdown → rendered view (AssistantMarkdown) with a rendered/source toggle
+ *  - html → sandboxed iframe loaded via `convertFileSrc(absPath)` so relative
+ *    resources resolve against the file's own directory; sandbox=allow-scripts
+ *    to keep parity with browser rendering. Falls back to "Open in browser"
+ *    for files that need full browser privileges
  *  - code → shiki-highlighted, one innerHTML render (never per-line nodes)
  *  - plain text → unhighlighted <pre>
  *
  * The parent keys this component by selectedRelPath so the markdown view
  * toggle resets on file switch.
  */
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import type { PreviewBlock } from "../hooks/useFilePreview";
 import { useT } from "../i18n/useI18n";
@@ -35,8 +40,9 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
     const { t } = useT();
     const { selectedRelPath, content, block, error, loading, absPath } = props;
     const isMarkdown = shikiLangFor(selectedRelPath) === "markdown";
+    const isHtml = shikiLangFor(selectedRelPath) === "html";
     const isImage = imageMimeFor(selectedRelPath) !== null;
-    const [mdView, setMdView] = useState<"rendered" | "source">("rendered");
+    const [mdView, setMdView] = useState<"rendered" | "source">(isHtml ? "source" : "rendered");
 
     return (
         <div className="files-preview-pane">
@@ -44,7 +50,7 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                 <span className="files-preview-path" title={selectedRelPath}>
                     {selectedRelPath}
                 </span>
-                {isMarkdown && content !== null && (
+                {(isMarkdown || isHtml) && content !== null && (
                     <div className="files-preview-view-toggle">
                         <button
                             type="button"
@@ -60,6 +66,19 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                         >
                             {t("files.viewSource")}
                         </button>
+                        {isHtml && (
+                            <button
+                                type="button"
+                                className="files-preview-action"
+                                onClick={() => {
+                                    void openPath(absPath).catch((err: unknown) => {
+                                        console.error("[taco] open in browser failed", err);
+                                    });
+                                }}
+                            >
+                                {t("files.viewBrowser")}
+                            </button>
+                        )}
                     </div>
                 )}
             </div>
@@ -83,6 +102,13 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                         <AssistantMarkdown
                             text={content}
                             className="md-assistant files-preview-md"
+                        />
+                    ) : isHtml && mdView === "rendered" ? (
+                        <iframe
+                            src={convertFileSrc(absPath)}
+                            sandbox="allow-scripts"
+                            className="files-preview-html-frame"
+                            title={selectedRelPath}
                         />
                     ) : (
                         <PreviewCode code={content} fileName={selectedRelPath} />

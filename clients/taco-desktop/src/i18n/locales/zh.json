@@ -563,6 +563,7 @@
     "revealWorkspace": "打开工作目录",
     "viewRendered": "渲染",
     "viewSource": "源码",
+    "viewBrowser": "浏览器打开",
     "loadError": "无法读取目录",
     "showHidden": "显示隐藏文件",
     "previewError": "读取文件失败"

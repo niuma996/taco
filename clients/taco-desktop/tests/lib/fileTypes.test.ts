@@ -49,6 +49,10 @@ describe("previewKindFor", () => {
         assert.equal(previewKindFor("README.md"), "markdown");
         assert.equal(previewKindFor("notes.markdown"), "markdown");
     });
+    it("classifies html", () => {
+        assert.equal(previewKindFor("page.html"), "html");
+        assert.equal(previewKindFor("page.htm"), "html");
+    });
     it("classifies code files", () => {
         assert.equal(previewKindFor("index.ts"), "code");
         assert.equal(previewKindFor("main.py"), "code");
@@ -71,6 +75,7 @@ describe("shikiLangFor", () => {
         assert.equal(shikiLangFor("index.ts"), "typescript");
         assert.equal(shikiLangFor("main.py"), "python");
         assert.equal(shikiLangFor("README.md"), "markdown");
+        assert.equal(shikiLangFor("page.html"), "html");
     });
     it("falls back to text for unknown or missing extensions", () => {
         assert.equal(shikiLangFor("data.parquet"), "text");
