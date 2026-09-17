@@ -251,8 +251,18 @@ export interface ToolCallStartParams {
 export interface ToolCallUpdateParams {
     ts: number;
     toolCallId: ToolCallId;
-    /** Streaming partial result. */
-    partialResult?: unknown;
+    /**
+     * Streaming partial result — pi hands the tool's own `AgentToolResult`
+     * through untouched, so this carries the same `{ content, details }` shape
+     * as `ToolCallEndParams.result`. A bare string is tolerated because older
+     * sidecars sent one.
+     */
+    partialResult?:
+        | string
+        | {
+              content?: Array<{ type?: string; text?: string }>;
+              details?: unknown;
+          };
 }
 
 /** `session.tool_call_end` params. */

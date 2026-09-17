@@ -6,7 +6,11 @@
  *  - the started update is checkpointed and carries the child's session id in
  *    `content` — pi shows checkpoint content to the model only when the call is
  *    interrupted, and that id is the handle `agentContinue` needs.
- *  - each completed turn publishes a live (non-checkpointed) update.
+ *  - each completed turn publishes a live (non-checkpointed) update, sourced
+ *    from the `turn_end` event's own assistant message (no session read).
+ *  - the checkpoint's resume guidance follows `resumability`, so a skill
+ *    subagent is not told to call agentContinue on an agentType that the agent
+ *    registry cannot resolve.
  *  - a run that hits maxTurns aborts and degrades to a partial answer.
  */
 
@@ -89,6 +93,12 @@ function collect(): {
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
+/** A `turn_end` event carrying one assistant text part, as pi emits it. */
+const turnEnd = (text: string): unknown => ({
+    type: "turn_end",
+    message: { role: "assistant", content: [{ type: "text", text }] },
+});
+
 const finalText = async (): Promise<{ text: string; isEmpty: boolean }> => ({
     text: "final answer",
     isEmpty: false,
@@ -103,6 +113,7 @@ describe("runAttachedSubagent — progress", () => {
             attached: attached.asSession(),
             prompt: "go",
             agentType: "explorer",
+            resumability: "resumable",
             onUpdate,
             readLastAssistantText: finalText,
         });
@@ -116,36 +127,64 @@ describe("runAttachedSubagent — progress", () => {
         assert.equal(updates[0]?.checkpoint, true);
         assert.match(updates[0]?.text ?? "", /sub-1/);
         assert.deepEqual(updates[0]?.details, { subSessionId: "sub-1", agentType: "explorer" });
+        assert.match(updates[0]?.text ?? "", /agentContinue/);
         assert.equal(result.resultText, "final answer");
         assert.equal(result.isError, false);
     });
 
-    it("publishes one live update per completed turn, none after the run settles", async () => {
+    it("publishes one live update per completed turn, taken from the event itself", async () => {
         const attached = new FakeAttached();
         const { updates, onUpdate } = collect();
+        let reads = 0;
         const run = runAttachedSubagent({
             subSessionId: asSessionId("sub-2"),
             attached: attached.asSession(),
             prompt: "go",
             agentType: "coder",
+            resumability: "resumable",
             onUpdate,
-            readLastAssistantText: async () => ({ text: "still working on it", isEmpty: false }),
+            readLastAssistantText: async () => {
+                reads++;
+                return { text: "final answer", isEmpty: false };
+            },
         });
 
-        attached.emit({ type: "turn_end" });
-        await flush();
-        attached.emit({ type: "turn_end" });
-        await flush();
+        attached.emit(turnEnd("still working on it"));
+        attached.emit(turnEnd("second turn output"));
         attached.release();
         await run;
-        // A late read that resolves after the run settled must not publish.
         await flush();
 
         assert.equal(updates.length, 3);
         assert.equal(updates[1]?.checkpoint, false);
         assert.match(updates[1]?.text ?? "", /turn 1/);
         assert.match(updates[1]?.text ?? "", /still working on it/);
+        assert.match(updates[2]?.text ?? "", /second turn output/);
         assert.equal((updates[2]?.details as { turns?: number }).turns, 2);
+        // Progress must not read the child's session: only the settle path does.
+        assert.equal(reads, 1);
+    });
+
+    it("tells a non-resumable child to re-invoke instead of calling agentContinue", async () => {
+        const attached = new FakeAttached();
+        const { updates, onUpdate } = collect();
+        const run = runAttachedSubagent({
+            subSessionId: asSessionId("sub-4"),
+            attached: attached.asSession(),
+            prompt: "go",
+            // `skill:<name>` has no agent-registry entry, so runResume would fail closed.
+            agentType: "skill:refactor",
+            resumability: "not_resumable",
+            onUpdate,
+            readLastAssistantText: finalText,
+        });
+        attached.release();
+        await run;
+
+        assert.equal(updates[0]?.checkpoint, true);
+        assert.match(updates[0]?.text ?? "", /sub-4/);
+        assert.doesNotMatch(updates[0]?.text ?? "", /agentContinue/);
+        assert.match(updates[0]?.text ?? "", /cannot\s+be\s+resumed/);
     });
 
     it("aborts on the turn cap and returns the partial answer", async () => {
@@ -157,11 +196,12 @@ describe("runAttachedSubagent — progress", () => {
             prompt: "go",
             agentType: "coder",
             maxTurns: 1,
+            resumability: "resumable",
             onUpdate,
             readLastAssistantText: async () => ({ text: "half done", isEmpty: false }),
         });
 
-        attached.emit({ type: "turn_end" });
+        attached.emit(turnEnd("half done"));
         const result = await run;
 
         assert.equal(attached.aborted, true);

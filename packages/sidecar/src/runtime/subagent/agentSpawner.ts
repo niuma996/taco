@@ -36,6 +36,7 @@ import {
 } from "../session/sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.ts";
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
+import type { SubagentResumability } from "./subagentProgress.ts";
 import { runAttachedSubagent } from "./subagentRunner.ts";
 
 export interface AgentSpawnerOptions {
@@ -143,6 +144,13 @@ export interface SubagentSessionArgs {
     forkedContext?: string;
     /** Calling tool's `onUpdate` sink — see subagentRunner for what it emits. */
     onUpdate?: SubagentProgressSink;
+    /**
+     * Whether `agentContinue` can resume this child. `agent` spawns pass
+     * `resumable`; skill subagents must not, because their `skill:<name>`
+     * agentType has no entry in the agent registry and `runResume` fails closed
+     * on a missing definition.
+     */
+    resumability?: SubagentResumability;
 }
 
 export class AgentSpawner extends EventEmitter {
@@ -376,6 +384,7 @@ export class AgentSpawner extends EventEmitter {
             maxTurns: args.maxTurns,
             signal: args.signal,
             onUpdate: args.onUpdate,
+            resumability: args.resumability,
             readLastAssistantText: (id) => this.extractLastAssistantText(id),
         });
     }
@@ -440,6 +449,9 @@ export class AgentSpawner extends EventEmitter {
             tools: childTools,
             signal: args.signal,
             onUpdate: args.onUpdate,
+            // Spawned from a registry profile, so runResume can re-derive the
+            // child's toolset from its agentType.
+            resumability: "resumable",
             childDepth,
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
@@ -651,6 +663,8 @@ export class AgentSpawner extends EventEmitter {
             maxTurns,
             signal: args.signal,
             onUpdate: args.onUpdate,
+            // Reached here only after the profile resolved, so it can be resumed again.
+            resumability: "resumable",
             readLastAssistantText: (id) => this.extractLastAssistantText(id),
         });
     }
@@ -788,6 +802,9 @@ export class AgentSpawner extends EventEmitter {
             model: modelOverride,
             signal: args.signal,
             onUpdate: args.onUpdate,
+            // `skill:<name>` is not an agent-registry type, so agentContinue
+            // cannot resume this child — say so rather than defaulting silently.
+            resumability: "not_resumable",
             childDepth,
         });
     }

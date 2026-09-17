@@ -4,13 +4,23 @@
  * Split out of `AgentSpawner` because it is a self-contained sequence over one
  * already-attached session: the turn cap is local state, and the only thing it
  * needs from the spawner is a way to read the child's last assistant text.
+ *
+ * `readLastAssistantText` is used only on the settle paths (final answer, or the
+ * partial answer left by a capped run). Per-turn progress reads the assistant
+ * message off the `turn_end` event instead, so a running subagent adds no
+ * session reads.
  */
 
-import type { AgentToolDetails, SessionId } from "@taco-ai/protocol";
+import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
 import type { SubagentProgressSink } from "../../agents/types.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
-import { subagentStartedResult, subagentTurnResult } from "./subagentProgress.ts";
+import {
+    assistantText,
+    type SubagentResumability,
+    subagentStartedResult,
+    subagentTurnResult,
+} from "./subagentProgress.ts";
 
 export interface RunAttachedSubagentArgs {
     readonly subSessionId: SessionId;
@@ -18,6 +28,13 @@ export interface RunAttachedSubagentArgs {
     readonly prompt: string;
     /** Metadata agentType / event agentType (must be consistent). Labels progress updates. */
     readonly agentType: string;
+    /**
+     * Whether `agentContinue` can resume this child. Drives what the durable
+     * checkpoint tells the model to do after an interruption; see
+     * SubagentResumability. Defaults to `not_resumable` so a new caller has to
+     * opt in rather than inherit guidance that may not hold for it.
+     */
+    readonly resumability?: SubagentResumability;
     /**
      * The **remaining** turn budget for this run — callers are responsible for
      * subtracting already-consumed turns. Enforced by counting `turn_end` and
@@ -54,7 +71,7 @@ export async function runAttachedSubagent(
     // the sink is typed over `never` so every tool callback is assignable to it
     // (see SubagentProgressSink), which leaves the payload assertion here.
     const publish = (
-        payload: AgentToolResult<AgentToolDetails>,
+        payload: AgentToolResult<SubagentProgressDetails>,
         options?: { checkpoint: true },
     ): void => {
         onUpdate?.(payload as AgentToolResult<never>, options);
@@ -64,7 +81,14 @@ export async function runAttachedSubagent(
     // dies mid-run, pi folds this checkpoint's content into the interrupted tool
     // result, and that session id is what lets the model resume instead of
     // re-spawning. See subagentProgress.ts.
-    publish(subagentStartedResult({ subSessionId, agentType }), { checkpoint: true });
+    publish(
+        subagentStartedResult({
+            subSessionId,
+            agentType,
+            resumability: args.resumability ?? "not_resumable",
+        }),
+        { checkpoint: true },
+    );
 
     // The turn cap is enforced here rather than by the harness, which takes
     // no turn limit: count completed turns and abort on the cap. Whatever
@@ -74,7 +98,6 @@ export async function runAttachedSubagent(
     let turnsUsed = 0;
     let hitCap = false;
     let acceptingUpdates = true;
-    let progressSeq = 0;
     const onTurnEnd = (event: HarnessEvent): void => {
         if (event.type !== "turn_end") return;
         turnsUsed++;
@@ -82,25 +105,20 @@ export async function runAttachedSubagent(
             hitCap = true;
             void attached.abort();
         }
-        if (!onUpdate) return;
-        // Reading the child's branch is async; drop the result if a newer turn
-        // already published, or if the run settled while the read was in flight.
-        const seq = ++progressSeq;
-        void readLastAssistantText(subSessionId)
-            .then(({ text }) => {
-                if (!acceptingUpdates || seq !== progressSeq) return;
-                publish(
-                    subagentTurnResult({
-                        subSessionId,
-                        agentType,
-                        turns: turnsUsed,
-                        lastText: text,
-                    }),
-                );
-            })
-            .catch(() => {
-                // Progress is best-effort; the run's own result path reports failures.
-            });
+        if (!onUpdate || !acceptingUpdates) return;
+        // Progress text comes off the event itself, not off disk: `turn_end`
+        // already carries the assistant message that just completed, so this
+        // stays synchronous — no per-turn branch read, and no ordering window
+        // in which a slow read could publish after a newer turn or after the
+        // run settled.
+        publish(
+            subagentTurnResult({
+                subSessionId,
+                agentType,
+                turns: turnsUsed,
+                lastText: assistantText(event.message),
+            }),
+        );
     };
     attached.on("event", onTurnEnd);
 

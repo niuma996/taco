@@ -277,12 +277,14 @@ function handleToolUpdate(
     const clonedTool = cloned.tools.find((x) => x.id === toolCallId);
     if (!clonedTool) return { messages };
     clonedTool.resultText = stringifyResult(ev.partialResult);
-    // pi's partial is an AgentToolResult ({ content, details }) — the same shape
-    // tool_end carries. Pass structured details through so a *running* card has
-    // the fields its view needs (agent's subSessionId makes it openable before
-    // the child finishes); leave the previous value alone when an update has none.
-    const partial = ev.partialResult as { details?: unknown } | undefined;
-    if (partial?.details !== undefined) clonedTool.details = partial.details;
+    // Pass structured `details` through so a *running* card has the fields its
+    // view needs (agent's subSessionId makes it openable before the child
+    // finishes); leave the previous value alone when an update has none, which
+    // is what keeps the id across later turn frames.
+    const partial = ev.partialResult;
+    if (typeof partial === "object" && partial.details !== undefined) {
+        clonedTool.details = partial.details;
+    }
     const idx = messages.lastIndexOf(assistant);
     const next = messages.slice();
     next[idx] = cloned;

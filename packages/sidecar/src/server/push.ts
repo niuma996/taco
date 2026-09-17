@@ -124,7 +124,11 @@ export function toToolCallPush(event: unknown):
         ts?: number;
         toolName?: string;
         args?: unknown;
-        partialResult?: unknown;
+        // pi hands the tool's own AgentToolResult through, so a partial has the
+        // same `{ content, details }` shape as a final `result`.
+        partialResult?:
+            | string
+            | { content?: Array<{ type?: string; text?: string }>; details?: unknown };
         result?: { content?: Array<{ type?: string; text?: string }>; details?: unknown };
         isError?: boolean;
     };

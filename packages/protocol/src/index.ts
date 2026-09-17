@@ -260,6 +260,7 @@ export type {
     SkillEntry,
     SkillsListParams,
     SkillsListResult,
+    SubagentProgressDetails,
     SubagentSpawnedPayload,
     SubmitAnswersParams,
     ToolEntry,

@@ -196,16 +196,35 @@ export interface SubagentSpawnedPayload {
 }
 
 /**
- * Shape of the `details` field on the `agent` tool's result, and of the live
- * progress updates it emits while the child runs (same card, same fields).
+ * Shape of the `details` field on the `agent` tool's **final** result.
  * `subSessionId` is absent when the spawn failed before a child session existed
  * (e.g. unknown agentType) — consumers must treat it as optional rather than
  * assuming a string is always present.
+ *
+ * A final result never carries `turns`: that field belongs to
+ * {@link SubagentProgressDetails} and its absence here is what lets a consumer
+ * tell a finished card from a running one.
  */
 export interface AgentToolDetails {
     subSessionId?: SessionId;
     agentType: string;
-    /** Completed turns in the current run, present on progress updates only. */
+}
+
+/**
+ * Shape of the `details` field on a subagent tool's **live progress** update
+ * (`agent`, `agentContinue`, and subagent-mode `skill` all publish this).
+ *
+ * Deliberately separate from {@link AgentToolDetails}: progress and final
+ * results travel the same tool card but mean different things, and only
+ * progress has a turn counter. Structural compatibility is intentional — the
+ * desktop overwrites the card's details on each update, so a progress frame
+ * must still satisfy whatever the final shape's consumers read.
+ */
+export interface SubagentProgressDetails {
+    subSessionId: SessionId;
+    /** `explorer` / `reviewer` for the agent tool; `skill:<name>` for a skill subagent. */
+    agentType: string;
+    /** Completed turns so far. Absent on the first (pre-run) update. */
     turns?: number;
 }
 

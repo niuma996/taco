@@ -80,7 +80,18 @@ export type SessionEventLike =
     | {
           type: "tool_update";
           toolCallId?: string;
-          partialResult?: unknown;
+          /**
+           * pi's partial is an `AgentToolResult` — the same `{ content, details }`
+           * shape `tool_end.result` carries. Typed like `result` below (rather
+           * than `unknown`) so the update handler can read `details` without a
+           * cast; a bare string is still tolerated for older frames.
+           */
+          partialResult?:
+              | string
+              | {
+                    content?: Array<{ type?: string; text?: string }>;
+                    details?: unknown;
+                };
       }
     | {
           type: "tool_end";
