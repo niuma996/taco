@@ -63,6 +63,8 @@ export interface ChatPaneProps {
         loading: boolean;
         compacting?: boolean;
         threshold?: number;
+        onCompact?: () => void;
+        sessionBusy?: boolean;
     };
     onInputChange: (next: string) => void;
     onAttachmentsChange: (next: ImageInput[]) => void;
@@ -274,18 +276,17 @@ export function ChatPane(props: ChatPaneProps) {
                     })()
                 )}
             </main>
-            {/* Auto-compaction in progress: lock the input UI and surface the top status
-                bar. This is a belt-and-suspenders guard — the server's
-                awaitCompactionEnd already polls before the next send, so this
-                client-side lock mainly protects against rapid double-clicks
-                racing the server's wait window. */}
-            {compacting && !busy && (
-                <output className="input-status input-status--compacting">
-                    <span className="input-status__dot" aria-hidden="true" />
-                    <span>{t("input.compactingNotice")}</span>
-                </output>
-            )}
             <footer className="input">
+                {/* Same column as .input-card so the banner inherits the footer's
+                    padding (including the 10% reading gutter). Shown for both
+                    auto and manual compact; `busy` is not a gate — background
+                    agent-tool activity must not hide a parent-session compact. */}
+                {compacting && (
+                    <output className="input-status input-status--compacting">
+                        <span className="input-status__dot" aria-hidden="true" />
+                        <span>{t("input.compactingNotice")}</span>
+                    </output>
+                )}
                 <QueueBar items={queuedItems} onCancel={onCancelQueued} />
                 <div className="input-card">
                     {attachments.length > 0 && (
@@ -400,6 +401,8 @@ export function ChatPane(props: ChatPaneProps) {
                                     loading={contextIndicator.loading}
                                     compacting={contextIndicator.compacting}
                                     threshold={contextIndicator.threshold}
+                                    onCompact={contextIndicator.onCompact}
+                                    sessionBusy={contextIndicator.sessionBusy}
                                     className="input-context-indicator"
                                 />
                             )}

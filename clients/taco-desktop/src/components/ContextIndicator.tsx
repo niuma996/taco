@@ -2,13 +2,16 @@
  * ContextIndicator — topbar context-usage pill.
  *
  * Shows the current session's context usage, ratio, and color band. Click to
- * open a popover with modelId, last-compaction time, and cache-hit stats.
+ * open a popover with modelId, last-compaction time, cache-hit stats, and a
+ * manual compact action. The ring itself only toggles the popover — compacting
+ * from the ring click would hide the details the popover exists to show.
  *
  * Color band follows the compaction threshold:
  *   ratio < threshold → neutral; r ≥ threshold → warn; r > threshold + 0.15 → danger; r > 1 → overflow.
  */
 
 import type { SessionContextInfoResult } from "@taco-ai/protocol";
+import { Minimize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/useI18n.ts";
 
@@ -18,11 +21,22 @@ export interface ContextIndicatorProps {
     /** Current compaction threshold; defaults to 0.7. */
     threshold?: number;
     /**
-     * Auto-compaction in progress (set from the sidecar's compaction_started push;
-     * cleared when compaction finishes). While set, the pill shows a "Compacting"
-     * label and pauses numeric refresh to avoid flickering the color band.
+     * Compaction in progress (auto or manual). Set from the sidecar's
+     * compaction_started push; cleared when compaction finishes. While set, the
+     * pill shows a "Compacting" label and the Compact button is disabled.
      */
     compacting?: boolean;
+    /**
+     * Manual compact. The parent owns the RPC; this component closes the
+     * popover after firing so the ring can switch to the compacting state.
+     * Omitted when the parent has no session to compact.
+     */
+    onCompact?: () => void;
+    /**
+     * True while the session has a turn in flight. Manual compact does not
+     * wait for idle, so it would return `busy`; disable rather than toast.
+     */
+    sessionBusy?: boolean;
     className?: string;
 }
 
@@ -39,8 +53,31 @@ function formatTokens(t: number): string {
     return `${Math.round(t / 1000)}k`;
 }
 
+/**
+ * Compaction timestamps arrive as a millisecond epoch (`String(entry.timestamp)`).
+ * Older/other sources may already be ISO. Local time as `yyyy-MM-DD HH:mm:ss`.
+ */
+function pad2(n: number): string {
+    return String(n).padStart(2, "0");
+}
+
+function formatCompactionAt(raw: string): string {
+    const numeric = Number(raw);
+    const date = Number.isFinite(numeric) && numeric > 0 ? new Date(numeric) : new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
 export function ContextIndicator(props: ContextIndicatorProps) {
-    const { info, loading, threshold = 0.7, compacting = false, className } = props;
+    const {
+        info,
+        loading,
+        threshold = 0.7,
+        compacting = false,
+        onCompact,
+        sessionBusy = false,
+        className,
+    } = props;
     const { t } = useT();
     const [popoverOpen, setPopoverOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -157,7 +194,8 @@ export function ContextIndicator(props: ContextIndicatorProps) {
                     </div>
                     {info.lastCompactionAt && (
                         <div className="context-indicator-popover__row">
-                            {t("context.lastCompaction")}: {info.lastCompactionAt}
+                            {t("context.lastCompaction")}:{" "}
+                            {formatCompactionAt(info.lastCompactionAt)}
                         </div>
                     )}
                     <div className="context-indicator-popover__row context-indicator-popover__row--cache">
@@ -166,6 +204,22 @@ export function ContextIndicator(props: ContextIndicatorProps) {
                     {compacting && (
                         <div className="context-indicator-popover__row context-indicator-popover__row--warn">
                             {t("context.compactingInProgress")}
+                        </div>
+                    )}
+                    {onCompact && (
+                        <div className="context-indicator-popover__actions">
+                            <button
+                                type="button"
+                                className="context-indicator-popover__compact"
+                                disabled={compacting || sessionBusy}
+                                onClick={() => {
+                                    onCompact();
+                                    setPopoverOpen(false);
+                                }}
+                            >
+                                <Minimize2 size={12} aria-hidden="true" />
+                                {t("context.compactNow")}
+                            </button>
                         </div>
                     )}
                 </output>

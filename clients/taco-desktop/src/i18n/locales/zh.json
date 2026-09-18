@@ -205,7 +205,7 @@
     "compactionEnabledDesc": "达到阈值时自动压缩上下文。",
     "compactionThreshold": "触发阈值(模型上下文的 {{percent}})",
     "compactionThresholdHint": "数值越低,压缩越激进。建议保持在 95% 以下,为单次回复留出余量。",
-    "compactionManualHint": "可使用消息面板的 /compact 命令(或顶栏指示器)按需手动触发。",
+    "compactionManualHint": "打开输入框旁的上下文用量圆环，点「压缩」即可按需触发，不必等到阈值。",
     "contextTitle": "项目约定",
     "contextDesc": "TACO 会从工作区读取 CLAUDE.md / AGENTS.md / DESIGN.md 等约定文件,作为 <instructions> 注入到每次 LLM 调用的上下文。",
     "contextEnabled": "启用项目约定注入",
@@ -344,7 +344,7 @@
     "indicatorLabel": "上下文用量",
     "lastCompaction": "上次压缩",
     "compacting": "压缩中…",
-    "compactingInProgress": "正在自动压缩",
+    "compactingInProgress": "正在压缩",
     "compactDone": "上下文已压缩",
     "compactFailed": "压缩失败",
     "compactFailedAborted": "压缩已取消",
@@ -352,6 +352,8 @@
     "compactFailedCancelled": "钩子跳过了本次压缩",
     "compactFailedBusy": "会话繁忙，已跳过压缩",
     "compactFailedNothing": "没有可压缩的上下文",
+    "compactFailedNotAttached": "会话尚未连接",
+    "compactNow": "压缩",
     "cacheHit": "缓存命中率: {{pct}} · 已复用 {{read}}"
   },
   "tools": {

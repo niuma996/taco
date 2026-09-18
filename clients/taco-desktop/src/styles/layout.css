@@ -477,6 +477,43 @@ button.topbar-context-indicator {
     color: var(--warning, #ebcb8b);
 }
 
+.context-indicator-popover__actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid color-mix(in srgb, var(--tooltip-fg) 18%, transparent);
+}
+
+.context-indicator-popover__compact {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid color-mix(in srgb, var(--tooltip-fg) 22%, transparent);
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--tooltip-fg);
+    font: inherit;
+    font-size: var(--text-xs);
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.context-indicator-popover__compact:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--tooltip-fg) 12%, transparent);
+}
+
+.context-indicator-popover__compact:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.context-indicator-popover__compact:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 @keyframes topbar-context-indicator-pulse {
     0%,
     100% {

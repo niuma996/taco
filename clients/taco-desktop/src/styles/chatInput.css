@@ -11,15 +11,18 @@ footer.input {
     gap: 0.5rem;
 }
 
-/* In-progress status bar (same column as footer.input). The `output` element has role=status
-   so screen readers need no extra role attribute. Horizontal layout with yellow border + pulsing dot. */
+/* In-progress status bar. Lives inside footer.input so its width matches
+   .input-card (same content box, including the collapsed-sidebar 10% gutter).
+   The `output` element has role=status so screen readers need no extra role. */
 .input-status {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.4rem 0.6rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem 0.75rem;
     font-size: 0.82rem;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-lg);
     border: 1px solid var(--warning, #ebcb8b);
     color: var(--warning, #ebcb8b);
     background: color-mix(in srgb, var(--warning, #ebcb8b) 8%, transparent);

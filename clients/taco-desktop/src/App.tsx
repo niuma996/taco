@@ -7,7 +7,7 @@
  */
 
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
-import { asWorkspaceId, IM_CWD_PREFIX } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
@@ -125,6 +125,23 @@ export default function App() {
     const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
     const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
     const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
+
+    // Manual compact from the context-usage popover. Success/failure toasts
+    // come from the compaction_finished push; this only covers the RPC not
+    // starting (session not attached). Fire-and-forget so the popover can
+    // close immediately and the ring can switch to the compacting state.
+    const compactSession = useCallback(() => {
+        if (!activeCwd || !activeSid) return;
+        void client
+            .sessionCompact(asWorkspaceId(activeCwd), asSessionId(activeSid))
+            .catch((e: unknown) => {
+                if ((e as { code?: string } | null)?.code === ErrorCodes.InvalidState) {
+                    showToast(`❌ ${t("context.compactFailedNotAttached")}`, "error");
+                    return;
+                }
+                console.error("[taco] sessionCompact failed:", e);
+            });
+    }, [activeCwd, activeSid, client, showToast, t]);
 
     // Subagent list for the session-bar awareness dot. Derived here as well as
     // inside SubagentPanel because the dot must render while the panel is shut.
@@ -638,6 +655,8 @@ export default function App() {
                                                 compacting: contextInfo.compacting,
                                                 threshold:
                                                     globalConfigState.global.compaction?.threshold,
+                                                onCompact: compactSession,
+                                                sessionBusy: runInFlight,
                                             }}
                                             onInputChange={(v) => {
                                                 setInput(v);

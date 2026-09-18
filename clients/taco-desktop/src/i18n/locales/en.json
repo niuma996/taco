@@ -205,7 +205,7 @@
     "compactionEnabledDesc": "Compress context automatically once the threshold is reached.",
     "compactionThreshold": "Trigger threshold ({{percent}} of model context)",
     "compactionThresholdHint": "Lower = compress more aggressively. Keep under 95% so a single response still has room.",
-    "compactionManualHint": "Use the message panel's /compact command (or the top-bar indicator) to compress on demand.",
+    "compactionManualHint": "Open the context-usage ring next to the prompt and press Compact to compress on demand, even below the threshold.",
     "contextTitle": "Project Instructions",
     "contextDesc": "TACO reads CLAUDE.md / AGENTS.md / DESIGN.md from the workspace and injects them as <instructions> on every LLM call.",
     "contextEnabled": "Enable project instructions injection",
@@ -345,7 +345,7 @@
     "indicatorLabel": "Context usage",
     "lastCompaction": "Last compaction",
     "compacting": "Compacting…",
-    "compactingInProgress": "Automatic compaction in progress",
+    "compactingInProgress": "Compaction in progress",
     "compactDone": "Context compressed",
     "compactFailed": "Compaction failed",
     "compactFailedAborted": "Compaction cancelled",
@@ -353,6 +353,8 @@
     "compactFailedCancelled": "Compaction skipped by a hook",
     "compactFailedBusy": "Session was busy, compaction skipped",
     "compactFailedNothing": "No context to compact",
+    "compactFailedNotAttached": "Session is not attached",
+    "compactNow": "Compact",
     "cacheHit": "Cache hit rate: {{pct}} · {{read}} reused"
   },
   "tools": {
