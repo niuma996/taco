@@ -117,14 +117,6 @@ export interface HookWiringOptions {
      */
     getSkills?: () => readonly Skill[];
     /**
-     * Thunk that reads the current compaction threshold live (supplied by
-     * AttachedSession, same source as `effectiveCompaction`). The pin-aware
-     * compact hook uses it to recompute `keepRecentTokens` as
-     * `contextWindow × threshold × 0.5`, fixing pi's hard-coded 20000 which
-     * makes low-threshold compactions ineffective. Falls back to 0.7.
-     */
-    getCompactionThreshold?: () => number;
-    /**
      * Thunk reading the current thinking level. Supplied by AttachedSession,
      * which caches it — pi 0.85's `lane.getThinkingLevel()` is async but this
      * hook has to decide synchronously on every context build.
@@ -165,8 +157,8 @@ export interface HookWiringOptions {
      * PinOnceConsumer instance — drives skip logic for the `memory` pinOnce tag.
      * When provided, the memory context hook checks `consumer.isConsumed(instanceId)`
      * before injecting and skips already-consumed instances. CompactionController
-     * also subscribes to session_compact events so the consumed set grows as
-     * compressions complete.
+     * also refreshes the consumed set on pi's `compaction_end` event so it grows
+     * as compressions complete.
      */
     pinOnceConsumer?: PinOnceConsumer;
 }
@@ -415,8 +407,9 @@ export async function wireHarnessHooks(
     const pinAwareCompact = buildPinAwareCompactHook({
         models: opts.models,
         getModel: () => lane.getModel(harnessContext),
-        getBranchEntries: () => lane.findEntries({ order: "oldestFirst" }, harnessContext),
-        getThreshold: opts.getCompactionThreshold ?? (() => 0.7),
+        // The harness-level policy, which is the same source pi's default
+        // summarization path retries with.
+        getRetryPolicy: () => harness.getRetryPolicy(harnessContext),
     });
     disposers.push(
         harness.hooks.on("before_compaction", async (event) => {

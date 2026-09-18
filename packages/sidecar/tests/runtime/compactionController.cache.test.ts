@@ -14,13 +14,24 @@ import { DEFAULT_COMPACTION_ENABLED, DEFAULT_COMPACTION_THRESHOLD } from "@taco-
 import { type ResolvedCompaction, saveGlobalConfig } from "../../src/config/config.ts";
 import { CompactionController } from "../../src/runtime/compaction/compactionController.ts";
 
-/** Minimal fake harness — CompactionController.effectiveCompaction() doesn't touch it. */
+/**
+ * Minimal fake harness — CompactionController.effectiveCompaction() doesn't
+ * touch it. The settings pair is only reached by `invalidate()`'s
+ * fire-and-forget `syncSettings()`; it is present so that path degrades to a
+ * no-op instead of throwing into the guard's catch.
+ */
 const fakeHarness = {
     events: {
         on:
             (_type: string, _listener: (event: unknown) => void): (() => void) =>
             () => {},
     },
+    getCompactionSettings: async () => ({
+        enabled: true,
+        reserveTokens: 16384,
+        keepRecentTokens: 20000,
+    }),
+    setCompactionSettings: async () => {},
 } as unknown as ConstructorParameters<typeof CompactionController>[0]["harness"];
 /** Lane stub: every test here only exercises effectiveCompaction (no compact path). */
 const fakeLane = {
@@ -29,6 +40,7 @@ const fakeLane = {
         value: { compaction: { status: "completed" as const, entryId: undefined } },
     }),
     runWhenIdle: (cb: () => unknown): Promise<void> => Promise.resolve(cb()).then(() => undefined),
+    getModel: async () => undefined,
 } as unknown as ConstructorParameters<typeof CompactionController>[0]["lane"];
 /** getEntry stub: TTL/cache tests don't read compaction entries. */
 const fakeGetEntry = async () => undefined;

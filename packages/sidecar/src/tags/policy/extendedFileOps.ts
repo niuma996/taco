@@ -9,21 +9,25 @@
 
 import type { AgentMessage } from "../../runtime/pi/types.ts";
 
+/**
+ * pi's `ToolCall` block is `{ type: "toolCall", id, name, arguments }`. The
+ * shorthand below normalizes those onto the local `toolName` / `args` names the
+ * detectors read, so the field reads stay in one place.
+ */
 interface MaybeToolCallBlock {
     type?: unknown;
-    toolCallId?: unknown;
-    toolName?: unknown;
-    args?: unknown;
+    name?: unknown;
+    arguments?: unknown;
 }
 
 function isToolCallBlock(b: unknown): b is {
     type: "toolCall";
-    toolName: string;
-    args: unknown;
+    name: string;
+    arguments: unknown;
 } {
     if (!b || typeof b !== "object") return false;
     const o = b as MaybeToolCallBlock;
-    return o.type === "toolCall" && typeof o.toolName === "string";
+    return o.type === "toolCall" && typeof o.name === "string";
 }
 
 function collectAssistantBlocks(msg: AgentMessage): Array<{ toolName: string; args: unknown }> {
@@ -31,7 +35,7 @@ function collectAssistantBlocks(msg: AgentMessage): Array<{ toolName: string; ar
     if (Array.isArray(content)) {
         const out: Array<{ toolName: string; args: unknown }> = [];
         for (const b of content) {
-            if (isToolCallBlock(b)) out.push({ toolName: b.toolName, args: b.args });
+            if (isToolCallBlock(b)) out.push({ toolName: b.name, args: b.arguments });
         }
         return out;
     }
@@ -42,8 +46,8 @@ function collectAssistantBlocks(msg: AgentMessage): Array<{ toolName: string; ar
         typeof top === "object" &&
         isToolCallBlock({ ...(top as object), type: "toolCall" })
     ) {
-        const cast = top as { toolName: string; args: unknown };
-        return [{ toolName: cast.toolName, args: cast.args }];
+        const cast = top as { name: string; arguments: unknown };
+        return [{ toolName: cast.name, args: cast.arguments }];
     }
     return [];
 }

@@ -20,10 +20,13 @@ import { extractExtendedFileOps } from "../../src/tags/policy/extendedFileOps.ts
 // more fields the helper doesn't care about).
 const mk = (m: Record<string, unknown>): AgentMessage => m as unknown as AgentMessage;
 
+// Fixtures mirror pi's real `ToolCall` block shape (`name` / `arguments`, not
+// `toolName` / `args`) — an earlier revision of this file used the wrong field
+// names, which is exactly what let the extractor's matching bug go unnoticed.
 function assistantCall(toolName: string, args: unknown) {
     return mk({
         role: "assistant",
-        content: [{ type: "toolCall", toolName, args }],
+        content: [{ type: "toolCall", id: "call-1", name: toolName, arguments: args }],
     });
 }
 

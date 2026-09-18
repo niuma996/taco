@@ -108,10 +108,11 @@ function coerceFacts(raw: unknown): FactSet {
 // ─── serialization ───────────────────────────────────────────────────────────
 
 /**
- * Format messages into plain text for the extraction prompt. We don't reuse
- * pi's internal `serializeConversation` because it's a single-export taking
- * only `Message[]` from pi-ai; we accept `AgentMessage[]` and degrade
- * gracefully. Cost: at most `messagesToSummarize` per compaction call.
+ * Format messages into plain text for the extraction prompt. Deliberately not
+ * pi's `serializeConversation`: that one truncates tool results to 2000 chars,
+ * which is exactly where a fact's supporting evidence tends to live, and it
+ * requires pre-converting to LLM messages. This accepts `AgentMessage[]` and
+ * degrades gracefully. Cost: at most `messagesToSummarize` per compaction call.
  */
 export function serializeMessagesForFacts(messages: ReadonlyArray<AgentMessage>): string {
     const lines: string[] = [];
@@ -127,7 +128,8 @@ export function serializeMessagesForFacts(messages: ReadonlyArray<AgentMessage>)
                     if (!b || typeof b !== "object") return "";
                     const bb = b as Record<string, unknown>;
                     if (bb.type === "text" && typeof bb.text === "string") return bb.text;
-                    if (bb.type === "toolCall") return `[tool_call: ${String(bb.toolName)}]`;
+                    // pi's toolCall block names the tool in `name`.
+                    if (bb.type === "toolCall") return `[tool_call: ${String(bb.name)}]`;
                     return "";
                 })
                 .filter(Boolean)

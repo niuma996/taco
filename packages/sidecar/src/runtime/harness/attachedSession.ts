@@ -450,14 +450,19 @@ export class AttachedSession extends EventEmitter {
             getEntry: (id) => args.session.getEntry(id, harnessContext),
             // Publish the paired compaction lifecycle onto the same "event"
             // stream the harness feeds, so the push adapter's interlock sees a
-            // guaranteed start/end pair. pi's own session_before_compact never
-            // reaches subscribers (emitHook vs subscribe) — see the type doc.
+            // guaranteed start/end pair. The end signal carries `committed` —
+            // that, not a `session_compact` event, is how the push layer learns
+            // the compaction succeeded. pi 0.85 has no such event.
             onLifecycle: (signal) =>
                 attachedCell.current?.emit(
                     "event",
                     signal.phase === "start"
                         ? { type: COMPACTION_START_EVENT, tokensBefore: signal.tokensBefore }
-                        : { type: COMPACTION_END_EVENT, reason: signal.reason },
+                        : {
+                              type: COMPACTION_END_EVENT,
+                              reason: signal.reason,
+                              committed: signal.committed,
+                          },
                 ),
         });
 
@@ -516,9 +521,6 @@ export class AttachedSession extends EventEmitter {
                 models: args.models,
                 getThinkingLevel: () => attached.getThinkingLevel(),
                 getUiLocale: () => attached.uiLocale,
-                // Same source as maybeCompact: read the threshold from disk live so the
-                // pin-aware hook can recompute keepRecentTokens.
-                getCompactionThreshold: () => attached.effectiveCompaction().threshold,
                 // Lazy accessor — the workspace holds the resolved InstructionsConfig
                 // and re-reads `taco.json` on every settings.write, so the hook
                 // picks up hot-reload without re-attaching the session.
@@ -566,6 +568,11 @@ export class AttachedSession extends EventEmitter {
             getCheckpoints: () => attached.checkpoints,
             getExtractor: () => attached.memoryExtractor,
         });
+
+        // Push the derived settings onto pi before any run can start, so the
+        // first turn-boundary check already uses the user's threshold rather
+        // than pi's defaults. Awaited: a resumed run below may compact.
+        await compactionController.syncSettings();
 
         // Auto-compaction scheduling + PinOnceConsumer updates.
         disposers.push(...compactionController.subscribe());
@@ -703,6 +710,10 @@ export class AttachedSession extends EventEmitter {
         // pi 0.85 takes a ModelIdentity (provider + id) rather than the full
         // model record, and resolves it against the harness's Models registry.
         await this.lane.setModel({ provider: model.provider, modelId: model.id }, harnessContext);
+        // The trigger and retention are both fractions of the model window, so
+        // a model switch must re-derive them or the session keeps compacting
+        // against the previous model's window.
+        await this.compactionController.syncSettings();
     }
 
     /**

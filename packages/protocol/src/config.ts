@@ -43,10 +43,9 @@ export interface TacoGlobalConfigShape {
     disabledExtensions?: string[];
     /**
      * Auto-compaction policy. `enabled` defaults to true; `threshold` defaults
-     * to 0.7, meaning compaction triggers when context usage ratio crosses
-     * that value. Only affects trigger judgement; does not change pi's
-     * internal `prepareCompaction` retention settings (reserveTokens /
-     * keepRecentTokens).
+     * to 0.7. Both fields are ratios of the model's context window: the
+     * threshold sets when compaction triggers and how much recent context is
+     * retained afterwards. See `CompactionConfig`.
      */
     compaction?: CompactionConfig;
     /**
@@ -261,12 +260,18 @@ export interface McpDeleteConfigResult {
 /**
  * CompactionConfig — auto-compaction policy block in `taco.json`.
  *
- * Trigger: `usedTokens > model.contextWindow * threshold`. Equivalently,
- * `reserveTokens = ctx * (1 - threshold)`, the inverse of pi's built-in
- * `shouldCompact` formula `usedTokens > contextWindow - reserveTokens`.
+ * Trigger: `usedTokens > model.contextWindow * threshold`.
+ *
+ * The same threshold sizes how much recent context survives compaction:
+ * `keepRecentTokens` is derived as a fraction of `contextWindow * threshold`,
+ * so a higher threshold means both "compact later" and "keep more afterwards".
+ * `reserveTokens` is derived independently (capped at pi's default of 16384)
+ * and bounds the summary's output budget, which is why it is not simply
+ * `ctx * (1 - threshold)`. See `deriveCompactionSettings` in the sidecar.
  *
  * `threshold ∈ [0, 1]`, default 0.7. `enabled === false` suspends
- * auto-compaction; manual `session.compact` RPC still works.
+ * auto-compaction on both paths — the `run_end` check and pi's turn-boundary
+ * overflow check; manual `session.compact` RPC still works.
  */
 export interface CompactionConfig {
     enabled?: boolean;

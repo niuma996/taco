@@ -18,8 +18,15 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
-/** Event types that require a fresh indicator snapshot. */
-const REFRESH_EVENT_TYPES = new Set<string>(["session_compact", "model_update", "turn_end"]);
+/**
+ * Generic `session.event` types that require a fresh indicator snapshot.
+ *
+ * Only `turn_end` qualifies. A compaction refreshes through its own
+ * CompactionFinished push frame, and a model switch refreshes explicitly at its
+ * RPC call site — so the pre-0.85 `session_compact` / `model_update` names,
+ * which pi 0.85 no longer emits and the sidecar never re-emits, are gone.
+ */
+const REFRESH_EVENT_TYPES = new Set<string>(["turn_end"]);
 
 /** Watchdog window for a CompactionFinished frame. If the frame is lost
  *  (sidecar restart, push gap not recovered, bug), the input must not stay

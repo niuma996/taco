@@ -416,10 +416,11 @@ export class SidecarServer implements ServerRpcSurface {
         return this.transport ?? new StdioTransport();
     }
     /**
-     * Compaction state machine + push frame assembly — translates
-     * session_before_compact / session_compact into CompactionStarted /
-     * CompactionFinished named pushes. isCompressing / awaitCompactionEnd
-     * are forwarded to RPC handlers (session.prompt / steer). See adapter.
+     * Compaction state machine + push frame assembly — translates the
+     * CompactionController lifecycle pair (`taco_compaction_start` /
+     * `taco_compaction_end`) into CompactionStarted / CompactionFinished named
+     * pushes. isCompressing / awaitCompactionEnd are forwarded to RPC handlers
+     * (session.prompt / steer). See adapter.
      */
     private readonly compactionAdapter = new CompactionPushAdapter(
         (method, workspace, session, params) => this.emitPush(method, workspace, session, params),
@@ -1302,12 +1303,11 @@ export class SidecarServer implements ServerRpcSurface {
                 return;
             }
             // ── compaction status push ──
-            // session_before_compact / session_compact are a pair: the
-            // former records t0 + tokensBefore, the latter computes the
-            // duration and removes the in-flight record. The failure path
-            // (never finished) is covered by maybeCompact throwing and a
-            // timeout / Node-exit fallback; Desktop unfreezes and shows an
-            // error toast when the finished frame has `failed: true`.
+            // The controller's paired lifecycle signal arrives here: `start`
+            // records t0 + tokensBefore, `end` carries the committed summary (or
+            // the classified failure) and removes the in-flight record. Desktop
+            // unfreezes on the finished frame either way, and shows an error
+            // toast only when it carries `failed: true`.
             if (this.compactionAdapter.handleSessionEvent(workspaceKey, e.sessionId, e.event)) {
                 return; // adapter already emitted CompactionStarted/Finished, skip raw session.event
             }

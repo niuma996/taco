@@ -678,7 +678,15 @@ export default function App() {
                                             activeLevel={activeLevel}
                                             onLevelChange={(next) => void setSessionLevel(next)}
                                             activeModel={activeModelWithFallback}
-                                            onModelChange={(next) => void setSessionModel(next)}
+                                            onModelChange={(next) =>
+                                                // The context indicator's window and ratio are
+                                                // per-model, so a switch invalidates the snapshot.
+                                                // Refresh after the RPC settles (it resolves even on
+                                                // failure, which then shows the server's real state).
+                                                void setSessionModel(next).then(() =>
+                                                    contextInfo.refresh(),
+                                                )
+                                            }
                                             modelOptions={filteredOptions}
                                             onRefreshModels={refreshModels}
                                             textareaRef={textareaRef}

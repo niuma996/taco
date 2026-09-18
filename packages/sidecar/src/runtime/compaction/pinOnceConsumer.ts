@@ -48,8 +48,8 @@ export class PinOnceConsumer {
     }
 
     /**
-     * Merge consumed instanceIds from a CompactionEntry into the set.
-     * Called when a compaction completes (e.g. via session_compact event).
+     * Merge consumed instanceIds from the session's compaction entries into the
+     * set. Called when a compaction completes (off pi's `compaction_end` event).
      */
     mergeConsumed(entries: Entry[]): void {
         for (const entry of entries) {

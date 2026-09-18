@@ -4,9 +4,15 @@
  * cacheHitRatio = ΣcacheRead / Σ(input + cacheRead).
  * Denominator excludes `cacheWrite` (first-turn prefix is unavoidable) and
  * `output` (pi compaction uses `cacheRetention: "none"`; summary would dilute the
- * ratio). `getSessionStats()` only exposes merged `uncachedTokens = Σ(input +
- * cacheWrite)`, so we walk `session.findEntries()` ourselves for one-pass
- * accumulation.
+ * ratio).
+ *
+ * The aggregate is accumulated over session entries rather than read from
+ * `Session.getStats()`, even though the latter is one call: `getStats` folds in
+ * every usage row pi writes, including per-tool rows (`insertUsage` from
+ * `tool-placement`), while this ratio is defined over assistant turns and
+ * compaction summaries only. Same reason the whole-log scan is intentional
+ * rather than a branch walk — the metric is authoritative over abandoned
+ * branches too.
  */
 
 import type { SessionContextInfoResult } from "@taco-ai/protocol";
@@ -28,11 +34,11 @@ interface EntryUsage {
 }
 
 /**
- * Extract the usage record off one session entry, mirroring pi's
- * `getSessionStats` exactly: only assistant `message` entries and
- * `compaction` / `branch_summary` entries carry usage, and every numeric
- * field must be present (an entry with a partial usage record is skipped).
- * Returns null when the entry has no valid usage.
+ * Extract the usage record off one session entry. Only assistant `message`
+ * entries and `compaction` / `branch_summary` entries are counted — narrower
+ * than `Session.getStats()`, which also folds in per-tool usage rows. Every
+ * numeric field must be present (an entry with a partial usage record is
+ * skipped).
  */
 function extractEntryUsage(entry: Entry): EntryUsage | null {
     const usage =

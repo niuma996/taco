@@ -1,8 +1,13 @@
 /**
- * CompactionPushAdapter — translates compaction events into named push frames
- * (CompactionStarted / CompactionFinished). Extracted so SidecarServer stays
- * focused on routing + serialization.
- * State machine: session_before_compact → CompactionStarted; session_compact → CompactionFinished.
+ * CompactionPushAdapter — translates the compaction lifecycle into named push
+ * frames (CompactionStarted / CompactionFinished). Extracted so SidecarServer
+ * stays focused on routing + serialization.
+ *
+ * State machine: `taco_compaction_start` → CompactionStarted;
+ * `taco_compaction_end` → CompactionFinished. Both are emitted by
+ * CompactionController's paired lifecycle sink. pi 0.85 emits neither a
+ * `session_before_compact` nor a `session_compact` event onto the bus this
+ * adapter is fed from, so there is no pi-side pair to also accept.
  */
 
 import { EventEmitter } from "node:events";
@@ -77,16 +82,9 @@ export class CompactionPushAdapter {
         const evtType = (event as { type?: string } | undefined)?.type;
 
         // ── compaction start: record t0 + tokensBefore, emit CompactionStarted ──
-        // `COMPACTION_START_EVENT` is the load-bearing trigger, emitted by
-        // CompactionController around every harness.compact(). pi's own
-        // `session_before_compact` is also accepted, but never actually arrives:
-        // it is dispatched via emitHook (type-specific handlers only) and so
-        // never reaches the harness.subscribe stream that feeds session.event.
-        if (evtType === COMPACTION_START_EVENT || evtType === "session_before_compact") {
-            const e = event as
-                | { tokensBefore?: number; preparation?: { tokensBefore?: number } }
-                | undefined;
-            const tokensBefore = e?.tokensBefore ?? e?.preparation?.tokensBefore ?? 0;
+        if (evtType === COMPACTION_START_EVENT) {
+            const e = event as { tokensBefore?: number } | undefined;
+            const tokensBefore = e?.tokensBefore ?? 0;
             this.inflight.set(this.key(cwd, sessionId), {
                 tokensBefore,
                 t0: Date.now(),
@@ -100,26 +98,21 @@ export class CompactionPushAdapter {
             return true; // do not also emit the raw session.event — desktop would handle it twice
         }
 
-        // ── session_compact: the compaction committed — finish immediately ──
-        if (evtType === "session_compact") {
-            const key = this.key(cwd, sessionId);
-            const entry = (
-                event as { compactionEntry?: { summary?: string; fromHook?: boolean } } | undefined
-            )?.compactionEntry;
-            this.finish(cwd, sessionId, this.inflight.get(key), entry);
-            return true;
-        }
-
-        // ── compaction end: the unwind guarantee ──
+        // ── compaction end: the unwind guarantee and the success signal ──
         // Emitted from CompactionController's `finally`, so it arrives on every
-        // path out of harness.compact() — including hook cancel, summary
-        // failure and busy, none of which emit `session_compact`. On the success
-        // path the record is already gone and this is a no-op; otherwise it is
-        // what keeps `inflight` from latching and freezing the desktop input.
+        // path out of harness.compact() — including the admission failures
+        // (busy / nothing to compact) that never reach pi's drive and therefore
+        // produce no pi event at all. `committed` is how success is reported;
+        // there is no separate success event to wait for.
         if (evtType === COMPACTION_END_EVENT) {
             const start = this.inflight.get(this.key(cwd, sessionId));
-            const reason = (event as { reason?: CompactionFailureReason } | undefined)?.reason;
-            if (start) this.finish(cwd, sessionId, start, undefined, reason);
+            const e = event as
+                | {
+                      reason?: CompactionFailureReason;
+                      committed?: { summaryChars: number; fromHook: boolean };
+                  }
+                | undefined;
+            if (start) this.finish(cwd, sessionId, start, e?.committed, e?.reason);
             return true;
         }
 
@@ -128,31 +121,35 @@ export class CompactionPushAdapter {
 
     /**
      * Emit CompactionFinished + release any `awaitCompactionEnd` waiters.
-     * `failed` is derived from the absence of a compaction entry: no entry
-     * means `session_compact` never landed, i.e. the compaction did not commit.
+     *
+     * `failed` is derived from the absence of a committed summary. `committed`
+     * is populated only when the controller read a compaction entry back off
+     * the session, so its absence covers a throw, a hook decline, and an
+     * admission failure alike — none of which produce a separate signal.
      *
      * `reason` is only written when the controller explicitly classified the
-     * failure. An unclassified failure (no `reason` and no `entry`) keeps the
-     * generic `failureMessage` so the client knows the classification pipeline
-     * itself did not run, rather than misreporting it as `harness_error`.
+     * failure. An unclassified failure (no `reason` and no `committed`) keeps
+     * the generic `failureMessage` so the client knows the classification
+     * pipeline itself did not run, rather than misreporting it as
+     * `harness_error`.
      */
     private finish(
         cwd: WorkspaceId,
         sessionId: SessionId,
         start: InflightCompaction | undefined,
-        entry: { summary?: string; fromHook?: boolean } | undefined,
+        committed: { summaryChars: number; fromHook: boolean } | undefined,
         reason?: CompactionFailureReason,
     ): void {
         const key = this.key(cwd, sessionId);
         this.inflight.delete(key);
-        const failed = entry === undefined;
+        const failed = committed === undefined;
         const finished: SessionCompactionFinishedParams = {
             cwd,
             sessionId,
             tokensBefore: start?.tokensBefore ?? 0,
-            summaryChars: entry?.summary?.length ?? 0,
+            summaryChars: committed?.summaryChars ?? 0,
             durationMs: start ? Date.now() - start.t0 : 0,
-            fromHook: entry?.fromHook,
+            fromHook: committed?.fromHook,
             failed,
             ...(failed && reason ? { reason } : {}),
             ...(failed && !reason ? { failureMessage: "compaction did not commit a summary" } : {}),

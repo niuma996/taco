@@ -30,6 +30,7 @@
 export {
     AgentHarness,
     BACKGROUND_CONTEXT,
+    CompactionError,
     compact,
     createBranchSummaryMessage,
     createCompactionSummaryMessage,
@@ -44,6 +45,7 @@ export {
     laneConfig,
     loadSourcedSkills,
     NoActiveOperation,
+    NothingToCompact,
     NothingToResume,
     prepareCompaction,
     Result,

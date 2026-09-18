@@ -2,6 +2,10 @@
  * session_before_compact hook — pin-aware compression. Without this, `compression=pin`
  * tags are silently lost. Pipeline: extract+strip pin segments → inject directive →
  * call pi's compact() → layer in file ops, facts, pin tail. Each step is guarded.
+ *
+ * Retention is NOT decided here. It comes from the shared `CompactionSettings`
+ * that `CompactionController.syncSettings()` pushes onto the harness, so this
+ * hook cuts where pi's turn-boundary check cuts.
  */
 
 import { harnessContext } from "../../lib/harnessContext.ts";
@@ -10,16 +14,12 @@ import type {
     AgentMessage,
     CompactionPreparation,
     CompactResult,
-    Entry,
     JsonValue,
     Model,
     Models,
+    RetryPolicy,
 } from "../../runtime/pi/types.ts";
-import {
-    compact,
-    DEFAULT_COMPACTION_SETTINGS,
-    prepareCompaction,
-} from "../../runtime/pi/values.ts";
+import { compact } from "../../runtime/pi/values.ts";
 import { extractAndStripPinned } from "../extractors.ts";
 import { EMPTY_FACTS, extractFacts, type FactSet, mergeFacts } from "../factExtractor.ts";
 import { tagRegistry } from "../registry.ts";
@@ -158,41 +158,13 @@ export interface PinAwareCompactHookOptions {
     // biome-ignore lint/suspicious/noExplicitAny: pi's Model is generic over its Api.
     readonly getModel: () => Promise<Model<any> | undefined>;
     /**
-     * Branch entries for cut-point recomputation. pi 0.85's
-     * `before_compaction` event carries only the preparation, so the caller
-     * supplies the transcript.
+     * Retry policy for the summarization call. pi's own path retries with the
+     * lane's policy, so the hook must match it: without retries here, a single
+     * transient provider error makes this hook return `undefined`, and pi then
+     * regenerates the summary on its default path — silently without the pin
+     * directive, which is the whole reason this hook exists.
      */
-    readonly getBranchEntries: () => Promise<readonly Entry[]>;
-    /**
-     * Live read of the current compaction threshold (same source as
-     * AttachedSession.effectiveCompaction). Used to recompute
-     * keepRecentTokens — see recomputePreparation below.
-     */
-    readonly getThreshold: () => number;
-}
-
-/**
- * Recompute the compaction cut-point. `harness.compact()` uses a hard-coded
- * `keepRecentTokens=20000` disconnected from the trigger threshold, causing
- * ineffective re-trigger when near/below 20000. Re-run with threshold-scaled
- * keepRecentTokens = floor(contextWindow × threshold × 0.5). Returns null on
- * failure so caller falls back to pi's preparation.
- */
-function recomputePreparation(
-    branchEntries: readonly Entry[],
-    contextWindow: number,
-    threshold: number,
-): CompactionPreparation | null {
-    if (!contextWindow || contextWindow <= 0) return null;
-    const keepRecentTokens = Math.max(1, Math.floor(contextWindow * threshold * 0.5));
-    const settings = {
-        ...DEFAULT_COMPACTION_SETTINGS,
-        enabled: true,
-        keepRecentTokens,
-    };
-    const result = prepareCompaction([...branchEntries], settings);
-    if (!result.ok || !result.value) return null;
-    return result.value;
+    readonly getRetryPolicy: () => Promise<RetryPolicy>;
 }
 
 export function buildPinAwareCompactHook(
@@ -209,23 +181,9 @@ export function buildPinAwareCompactHook(
                 return undefined;
             }
 
-            // 0. Recompute the cut-point: pi's preparation uses a hard-coded
-            //    keepRecentTokens=20000, which barely compresses at low thresholds.
-            //    Re-derive keepRecentTokens from the threshold and override.
-            //    Falls back to pi's preparation if recompute fails.
-            const contextWindow = model.contextWindow ?? 0;
-            let recomputed: CompactionPreparation | null = null;
-            try {
-                const branchEntries = await opts.getBranchEntries();
-                recomputed = recomputePreparation(
-                    branchEntries,
-                    contextWindow,
-                    opts.getThreshold(),
-                );
-            } catch (e) {
-                log.error("could not recompute cut-point, using pi's preparation:", e);
-            }
-            const preparation = recomputed ?? event.preparation;
+            // pi's preparation already reflects the shared settings, so the
+            // cut-point is taken as-is rather than recomputed.
+            const preparation = event.preparation;
 
             // 1+2. Extract pin content from both message pools; strip from text.
             const { pinned, stripped } = applyPinExtraction(preparation);
@@ -238,13 +196,18 @@ export function buildPinAwareCompactHook(
             //    thinkingLevel left undefined — the pin directive is already
             //    injected via withPrefaceDirective above, so the default summary
             //    path runs unchanged. Cancellation rides on the context.
+            //    A retry-policy read failure is tolerated rather than fatal:
+            //    losing resilience is better than losing pin handling.
+            const retry: RetryPolicy | undefined = await opts
+                .getRetryPolicy()
+                .catch(() => undefined);
             const compactRes = await compact(
                 prepForCompact,
                 opts.models,
                 model,
                 event.customInstructions,
                 undefined,
-                undefined,
+                retry,
                 undefined,
                 harnessContext,
             );

@@ -23,6 +23,7 @@ export type {
     AgentMessage,
     AgentToolResult,
     CompactionPreparation,
+    CompactionSettings,
     CompactResult,
     Context,
     Entry,
@@ -48,6 +49,7 @@ export type {
     Models,
     MutableModels,
     Provider,
+    RetryPolicy,
     TextContent,
     Usage,
 } from "@earendil-works/pi-ai";
