@@ -89,6 +89,9 @@ describe("session.list kind filter", () => {
                 const row = fakeList.find((r: { id: string }) => r.id === id);
                 return row?.metadata ?? {};
             },
+            async getSessionActivityAt() {
+                return undefined;
+            },
         };
         const ctx = {
             id: "test-id",
@@ -129,6 +132,205 @@ describe("session.list kind filter", () => {
         assert.equal(legacy.parentSessionId, undefined);
         assert.equal(legacy.parentToolCallId, undefined);
         assert.equal(legacy.depth, undefined);
+    });
+
+    it("hides a facts-less session whose header already has parentSessionId", async () => {
+        // The create→writeSessionFacts window: repo.create stamps
+        // parentSessionId atomically, facts are still {}. Treating "no kind"
+        // as main would leak the child into the sidebar.
+        const fakeList = [
+            {
+                id: "main-1",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/main-1.jsonl",
+                createdAt: "2026-01-01T00:00:00Z",
+            },
+            {
+                id: "orphan-child",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/orphan-child.jsonl",
+                createdAt: "2026-01-02T00:00:00Z",
+                parentSessionId: "main-1",
+            },
+        ];
+        const workspace = {
+            async listSessions() {
+                return fakeList;
+            },
+            async getSessionName() {
+                return undefined;
+            },
+            async getSessionFacts() {
+                return {};
+            },
+            async getSessionActivityAt() {
+                return undefined;
+            },
+        };
+        const ctx = {
+            id: "test-id",
+            workspace,
+            cwd: "/tmp/ws",
+            server: {},
+            params: {},
+        } as unknown as Parameters<
+            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+        >[0];
+        const handler = getRegisteredMethod("session.list");
+        assert.ok(handler);
+        const result = (await handler.handler(ctx)) as {
+            sessions: Array<{ id: string }>;
+        };
+        assert.equal(result.sessions.length, 1);
+        assert.equal(result.sessions[0]?.id, "main-1");
+    });
+
+    it("hides a v3-restored session whose facts carry parentSessionId but no kind", async () => {
+        const fakeList = [
+            {
+                id: "main-1",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/main-1.jsonl",
+                createdAt: "2026-01-01T00:00:00Z",
+            },
+            {
+                id: "restored-child",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/restored-child.jsonl",
+                createdAt: "2026-01-02T00:00:00Z",
+            },
+        ];
+        const workspace = {
+            async listSessions() {
+                return fakeList;
+            },
+            async getSessionName() {
+                return undefined;
+            },
+            async getSessionFacts(id: string) {
+                if (id === "restored-child") return { parentSessionId: "main-1" };
+                return {};
+            },
+            async getSessionActivityAt() {
+                return undefined;
+            },
+        };
+        const ctx = {
+            id: "test-id",
+            workspace,
+            cwd: "/tmp/ws",
+            server: {},
+            params: {},
+        } as unknown as Parameters<
+            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+        >[0];
+        const handler = getRegisteredMethod("session.list");
+        assert.ok(handler);
+        const result = (await handler.handler(ctx)) as {
+            sessions: Array<{ id: string }>;
+        };
+        assert.equal(result.sessions.length, 1);
+        assert.equal(result.sessions[0]?.id, "main-1");
+    });
+});
+
+describe("session.list updatedAt", () => {
+    it("uses last-message time, not file mtime, and falls back to createdAt", async () => {
+        const activityMs = Date.UTC(2026, 7, 13, 16, 17, 40);
+        const createdMs = Date.UTC(2026, 0, 1);
+        const rewrittenMtime = Date.UTC(2026, 8, 18, 16, 52, 10);
+        const fakeList = [
+            {
+                id: "with-message",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/with-message.jsonl",
+                createdAt: createdMs,
+                modifiedAt: rewrittenMtime,
+            },
+            {
+                id: "empty",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/empty.jsonl",
+                createdAt: createdMs,
+                modifiedAt: Date.UTC(2026, 8, 18, 16, 52, 10),
+            },
+        ];
+        const workspace = {
+            async listSessions() {
+                return fakeList;
+            },
+            async getSessionName() {
+                return undefined;
+            },
+            async getSessionFacts() {
+                return {};
+            },
+            async getSessionActivityAt(id: string) {
+                return id === "with-message" ? activityMs : undefined;
+            },
+        };
+        const ctx = {
+            id: "test-id",
+            workspace,
+            cwd: "/tmp/ws",
+            server: {},
+            params: { full: true },
+        } as unknown as Parameters<
+            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+        >[0];
+        const handler = getRegisteredMethod("session.list");
+        assert.ok(handler);
+        const result = (await handler.handler(ctx)) as {
+            sessions: Array<{ id: string; updatedAt: string; createdAt: string }>;
+        };
+        const withMessage = result.sessions.find((s) => s.id === "with-message");
+        const empty = result.sessions.find((s) => s.id === "empty");
+        assert.ok(withMessage);
+        assert.ok(empty);
+        assert.equal(withMessage.updatedAt, new Date(activityMs).toISOString());
+        assert.equal(empty.updatedAt, new Date(createdMs).toISOString());
+        assert.notEqual(withMessage.updatedAt, new Date(rewrittenMtime).toISOString());
+    });
+
+    it("falls back to createdAt when getSessionActivityAt throws", async () => {
+        const createdMs = Date.UTC(2026, 0, 1);
+        const fakeList = [
+            {
+                id: "broken",
+                cwd: "/tmp/ws",
+                path: "/tmp/ws/broken.jsonl",
+                createdAt: createdMs,
+            },
+        ];
+        const workspace = {
+            async listSessions() {
+                return fakeList;
+            },
+            async getSessionName() {
+                return undefined;
+            },
+            async getSessionFacts() {
+                return {};
+            },
+            async getSessionActivityAt() {
+                throw new Error("stream failed");
+            },
+        };
+        const ctx = {
+            id: "test-id",
+            workspace,
+            cwd: "/tmp/ws",
+            server: {},
+            params: { full: true },
+        } as unknown as Parameters<
+            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+        >[0];
+        const handler = getRegisteredMethod("session.list");
+        assert.ok(handler);
+        const result = (await handler.handler(ctx)) as {
+            sessions: Array<{ id: string; updatedAt: string }>;
+        };
+        assert.equal(result.sessions[0]?.updatedAt, new Date(createdMs).toISOString());
     });
 });
 
@@ -241,8 +443,8 @@ describe("session.list pagination", () => {
             id: `s${String(i).padStart(3, "0")}`,
             cwd: "/tmp/ws",
             path: `/tmp/ws/s${i}.jsonl`,
-            // Descending createdAt so s000 is newest; statSync fails on these
-            // fake paths, so updatedAt stays undefined and createdAt is used.
+            // Descending createdAt so s000 is newest. No activityAt → list
+            // falls back to createdAt for sort and relative time.
             createdAt: new Date(Date.UTC(2026, 0, 1) - i * 86_400_000).toISOString(),
             metadata: { kind: "main" },
         }));
@@ -256,6 +458,9 @@ describe("session.list pagination", () => {
             async getSessionFacts(id: string) {
                 const row = fakeList.find((r: { id: string }) => r.id === id);
                 return row?.metadata ?? {};
+            },
+            async getSessionActivityAt() {
+                return undefined;
             },
         };
         return {

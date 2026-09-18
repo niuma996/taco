@@ -34,7 +34,7 @@ import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { JsonlSessionMetadata } from "../../runtime/pi/types.ts";
 import { uuidv7 } from "../../runtime/pi/values.ts";
-import type { SessionFacts } from "../../runtime/session/sessionFacts.ts";
+import { isHiddenSubagentSession, type SessionFacts } from "../../runtime/session/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -46,24 +46,31 @@ export function registerSessionLifecycleHandlers(): void {
         true,
         async ({ workspace, cwd, params }: MethodCtx<SessionListParams>) => {
             const list = await workspace.listSessions();
-            // Subagent sessions are hidden from the main list. The kind is a
-            // taco fact in the session's value store (pi 0.85 removed the
-            // free-form metadata bag), so it has to be read per session rather
-            // than filtered off the cheap repo.list() metadata.
+            // Subagent sessions are hidden from the main list. Kind lives in
+            // taco facts (pi 0.85 removed the free-form metadata bag), so it
+            // is read per session. Header parentSessionId is a second signal:
+            // repo.create stamps it atomically, covering the window before
+            // writeSessionFacts. A facts-read failure still yields {} so a
+            // pre-0.85 user session stays visible — but a header parent still
+            // hides the row.
             const entries = await Promise.all(
                 list.map(async (m) => ({
                     meta: m,
-                    facts: await workspace
-                        .getSessionFacts(m.id as SessionId)
-                        // A session whose facts cannot be read (deleted mid-list,
-                        // or written before this scheme existed) is treated as
-                        // "main" so it stays visible rather than vanishing.
-                        .catch(() => ({}) as Awaited<ReturnType<typeof workspace.getSessionFacts>>),
+                    facts: await workspace.getSessionFacts(m.id as SessionId).catch((err) => {
+                        log.error(
+                            "getSessionFacts failed in session.list; treating as unfacted",
+                            m.id,
+                            err,
+                        );
+                        return {} as Awaited<ReturnType<typeof workspace.getSessionFacts>>;
+                    }),
                 })),
             );
             const all = await Promise.all(
                 entries
-                    .filter(({ facts }) => facts.kind === undefined || facts.kind === "main")
+                    .filter(
+                        ({ facts, meta }) => !isHiddenSubagentSession(facts, meta.parentSessionId),
+                    )
                     .map(({ facts, meta }) => buildSessionEntry(workspace, meta, facts)),
             );
             // Sort by updatedAt desc with createdAt fallback, id desc tiebreaker.
@@ -230,16 +237,19 @@ async function buildSessionEntry(
     m: JsonlSessionMetadata,
     md: SessionFacts,
 ): Promise<SessionListEntry> {
-    // pi 0.85's `repo.list()` returns `modifiedAt` (epoch millis) on each
-    // metadata entry — reading it avoids one `stat()` per session over what
-    // can be hundreds of files in a real workspace. The wire contract is an
-    // ISO string; convert here so `sortSessionsDesc` parses consistently.
-    // Fall back to createdAt when modifiedAt is absent (test fixtures; older
-    // repos) so the list never carries an unparseable timestamp.
+    const activityAt = await workspace.getSessionActivityAt(asSessionId(m.id)).catch((err) => {
+        log.error(
+            "getSessionActivityAt failed in session.list; falling back to createdAt",
+            m.id,
+            err,
+        );
+        return undefined;
+    });
+    // Content time, not file mtime: a v3→v4 rewrite (or facts backfill)
+    // updates mtime without a new message and would otherwise cluster every
+    // upgraded session at "just now". No messages → createdAt.
     const updatedAtSource =
-        typeof m.modifiedAt === "number" && Number.isFinite(m.modifiedAt)
-            ? m.modifiedAt
-            : m.createdAt;
+        typeof activityAt === "number" && Number.isFinite(activityAt) ? activityAt : m.createdAt;
     const updatedAt = new Date(updatedAtSource).toISOString();
     return {
         id: asSessionId(m.id),
@@ -262,14 +272,14 @@ async function buildSessionEntry(
         // A corrupt/parse-failed session file must not bring down the whole
         // list — fall back to undefined.
         name: await workspace.getSessionName(asSessionId(m.id)).catch((err) => {
-            log.error("getSessionName failed in session.list", m.id, err);
+            log.error("getSessionName failed in session.list; leaving untitled", m.id, err);
             return undefined;
         }),
     };
 }
 
 /** Sort by (updatedAt ?? createdAt) desc; id desc tiebreaker for stability
- *  across mtime ties (same-second writes). */
+ *  across timestamp ties (same-second writes). */
 export function sortSessionsDesc(sessions: SessionListEntry[]): SessionListEntry[] {
     return [...sessions].sort((a, b) => {
         const aTime = new Date(a.updatedAt ?? a.createdAt).getTime();

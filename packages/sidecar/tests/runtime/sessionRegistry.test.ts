@@ -9,7 +9,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,7 @@ import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
-import { writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
+import { readSessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import {
     SessionRegistry,
     type SessionRegistryOptions,
@@ -313,6 +313,7 @@ describe("SessionRegistry", () => {
         // path, so openSession keeps succeeding — only the stream would break.
         rmSync(meta.path, { force: true });
         assert.deepEqual(await sr.getSessionFacts(asSessionId(id)), {});
+        assert.equal(await sr.getSessionActivityAt(asSessionId(id)), undefined);
     });
 
     it("getSessionFacts warms the name cache — the pair costs one file read", async () => {
@@ -328,6 +329,7 @@ describe("SessionRegistry", () => {
 
         rmSync(meta.path, { force: true });
         assert.equal(await sr.getSessionName(asSessionId(id)), "titled");
+        assert.equal(await sr.getSessionActivityAt(asSessionId(id)), undefined);
     });
 
     // Facts written at spawn time must survive the round-trip through the
@@ -345,6 +347,98 @@ describe("SessionRegistry", () => {
         assert.equal(facts.kind, "subagent");
         assert.equal(facts.agentType, "explorer");
         assert.equal(facts.depth, 1);
+    });
+
+    it("getSessionActivityAt reads the last message timestamp off disk", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        const created = await sr.repo.create({ id, cwd }, harnessContext);
+        const path = created.metadata.path;
+        await created.close(harnessContext);
+        await appendFile(
+            path,
+            `${JSON.stringify({
+                kind: "entry",
+                id: "e1",
+                parentId: null,
+                seq: 1,
+                timestamp: 1_700_000_000_000,
+                type: "message",
+                message: { role: "user", content: [{ type: "text", text: "hi" }] },
+            })}\n`,
+        );
+        sr.invalidateListCache();
+        assert.equal(await sr.getSessionActivityAt(asSessionId(id)), 1_700_000_000_000);
+        const meta = await sr.openSession(asSessionId(id));
+        rmSync(meta.path, { force: true });
+        assert.equal(await sr.getSessionActivityAt(asSessionId(id)), 1_700_000_000_000);
+    });
+
+    it("opening a v3 subagent session writes taco facts before the importer drops metadata", async () => {
+        const sr = makeRegistry();
+        const parentId = uuidv7();
+        const childId = uuidv7();
+        await seedSession(sr.repo, parentId);
+        const placeholder = await sr.repo.create({ id: childId, cwd }, harnessContext);
+        const childPath = placeholder.metadata.path;
+        await placeholder.close(harnessContext);
+        writeFileSync(
+            childPath,
+            `${JSON.stringify({
+                type: "session",
+                version: 3,
+                id: childId,
+                timestamp: "2026-08-13T16:17:40.770Z",
+                cwd,
+                metadata: {
+                    kind: "subagent",
+                    agentType: "explorer",
+                    parentSessionId: parentId,
+                    parentToolCallId: "call_1",
+                    depth: 1,
+                },
+            })}\n${JSON.stringify({
+                type: "message",
+                id: "m1",
+                parentId: null,
+                timestamp: "2026-08-13T16:17:40.795Z",
+                message: { role: "user", content: [{ type: "text", text: "explore" }] },
+            })}\n`,
+        );
+        sr.invalidateListCache();
+
+        const recovered = await sr.withSession(asSessionId(childId), (session) =>
+            readSessionFacts(session),
+        );
+        assert.equal(recovered.kind, "subagent");
+        assert.equal(recovered.agentType, "explorer");
+        assert.equal(recovered.parentSessionId, parentId);
+        assert.equal(recovered.parentToolCallId, "call_1");
+        assert.equal(recovered.depth, 1);
+
+        sr.invalidateListCache();
+        const again = await sr.getSessionFacts(asSessionId(childId));
+        assert.equal(again.kind, "subagent");
+        assert.equal(again.agentType, "explorer");
+    });
+
+    it("opening a 0.85 child with header parentSessionId but no facts backfills kind", async () => {
+        const sr = makeRegistry();
+        const parentId = uuidv7();
+        const childId = uuidv7();
+        await seedSession(sr.repo, parentId);
+        const child = await sr.repo.create(
+            { id: childId, cwd, parentSessionId: parentId },
+            harnessContext,
+        );
+        await child.close(harnessContext);
+        sr.invalidateListCache();
+
+        const facts = await sr.withSession(asSessionId(childId), (session) =>
+            readSessionFacts(session),
+        );
+        assert.equal(facts.kind, "subagent");
+        assert.equal(facts.parentSessionId, parentId);
     });
 
     it("deleteSession removes from list and emits session.deleted", async () => {

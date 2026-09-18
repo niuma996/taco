@@ -43,7 +43,9 @@ export interface SessionFacts {
 }
 
 /** Address of the session-facts record. One per session. */
-const FACTS = value<SessionFacts>("taco.session.facts");
+export const SESSION_FACTS = value<SessionFacts>("taco.session.facts");
+/** Namespace string baked into `SESSION_FACTS`. The JSONL scanner matches this. */
+export const SESSION_FACTS_NAMESPACE = SESSION_FACTS.namespace;
 
 /**
  * Read the sidecar's facts for a session.
@@ -54,7 +56,7 @@ export async function readSessionFacts(
     session: Session,
     context: Context = harnessContext,
 ): Promise<SessionFacts> {
-    const stored = await session.getValue(FACTS, context);
+    const stored = await session.getValue(SESSION_FACTS, context);
     return stored?.value ?? {};
 }
 
@@ -69,28 +71,62 @@ export async function writeSessionFacts(
     facts: SessionFacts,
     context: Context = harnessContext,
 ): Promise<void> {
-    await session.setValue(FACTS, facts, context);
+    await session.setValue(SESSION_FACTS, facts, context);
+}
+
+/**
+ * Persist facts only when the session has none yet.
+ *
+ * Used to backfill a v3 `metadata` bag (or a header `parentSessionId`) onto a
+ * session that pi just upgraded in place. Never overwrites a later, complete
+ * record — a concurrent spawn that already wrote `{kind:"subagent",…}` must
+ * win over a list-time reconstruction.
+ */
+export async function writeSessionFactsIfAbsent(
+    session: Session,
+    facts: SessionFacts,
+    context: Context = harnessContext,
+): Promise<boolean> {
+    const existing = await readSessionFacts(session, context);
+    if (existing.kind !== undefined || existing.parentSessionId !== undefined) return false;
+    await writeSessionFacts(session, facts, context);
+    return true;
+}
+
+/**
+ * True when this session must stay off the user-facing list.
+ *
+ * Hidden if facts.kind is "subagent", or — when kind is absent — if the
+ * header or facts carry a parentSessionId (create→writeSessionFacts window,
+ * and v3 metadata migrated onto the value store). kind "main" always stays
+ * visible. A facts-less session with no parent is a user session, including
+ * every pre-0.85 conversation that never wrote facts.
+ */
+export function isHiddenSubagentSession(
+    facts: SessionFacts,
+    headerParentSessionId?: string,
+): boolean {
+    if (facts.kind === "subagent") return true;
+    if (facts.kind === "main") return false;
+    return headerParentSessionId !== undefined || facts.parentSessionId !== undefined;
 }
 
 /**
  * Parent depth for the recursion guard, tolerating the non-atomic write.
  *
- * Depth lives in the value store, written *after* `repo.create()` — so a
- * session interrupted between the two steps reads back `{}`. Defaulting
- * silently would zero the guard and let a depth-1 subagent spawn depth-1
- * grandchildren, so this warns instead: a recurrence shows up in the log
- * rather than looking like a clean run.
- *
- * Shared by the Agent-tool and Skill-tool spawn paths, which must not disagree
- * about the depth they hand to `filterToolsForAgent`.
+ * A user session never writes facts, so `depth` is absent and the answer is
+ * 0 — that is the common path, not a failure. Warn only when the parent
+ * looks like a subagent (kind or parentSessionId present) yet still has no
+ * depth: that is the create→writeSessionFacts window, and defaulting to 0
+ * would let a depth-1 child spawn depth-1 grandchildren.
  */
 export function resolveParentDepth(facts: SessionFacts, context: Record<string, unknown>): number {
-    if (facts.depth === undefined) {
+    if (facts.depth !== undefined) return facts.depth;
+    if (facts.kind === "subagent" || facts.parentSessionId !== undefined) {
         log.warn(
             "parent session has no depth fact; defaulting to 0 — recursion guard may be inactive",
             context,
         );
-        return 0;
     }
-    return facts.depth;
+    return 0;
 }

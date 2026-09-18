@@ -53,9 +53,9 @@ import type {
     ThinkingLevel,
 } from "../pi/types.ts";
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
-import { readSessionFacts, type SessionFacts } from "./sessionFacts.ts";
+import { readSessionFacts, type SessionFacts, writeSessionFactsIfAbsent } from "./sessionFacts.ts";
 import { resolveSessionByPrefix } from "./sessionLookup.ts";
-import { readSessionMetadataFromDisk } from "./sessionMetadataReader.ts";
+import { readLegacyFactsFromPath, readSessionMetadataFromDisk } from "./sessionMetadataReader.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
 
 /** `attach()` per-call override parameters — same shape as WorkspaceRuntime.AttachOptions */
@@ -251,6 +251,13 @@ export class SessionRegistry extends EventEmitter {
      */
     private readonly _factsCache = new Map<SessionId, SessionFacts>();
 
+    /**
+     * sessionId → last user-visible message timestamp (epoch ms). Same scan
+     * as name/facts; the list sorts on this instead of file mtime, which a
+     * v3→v4 rewrite would otherwise bump.
+     */
+    private readonly _activityCache = new Map<SessionId, number | undefined>();
+
     /** Currently attached session map. */
     private readonly attached = new Map<SessionId, AttachedSession>();
 
@@ -359,6 +366,7 @@ export class SessionRegistry extends EventEmitter {
         this._metadataCache = null;
         this._nameCache.clear();
         this._factsCache.clear();
+        this._activityCache.clear();
     }
 
     /** Get an existing session instance by id. */
@@ -387,13 +395,42 @@ export class SessionRegistry extends EventEmitter {
     async withSession<T>(sessionId: SessionId, read: (session: Session) => Promise<T>): Promise<T> {
         const attached = this.attached.get(sessionId);
         if (attached) return read(attached.session);
-        const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta, harnessContext);
+        const session = await this.openPersistedSession(sessionId);
         try {
             return await read(session);
         } finally {
             await session.close(harnessContext);
         }
+    }
+
+    /**
+     * Open a session file, restoring taco facts that pi's v3→v4 importer drops.
+     *
+     * Must run *before* `repo.open()`: that call rewrites a v3 file in place and
+     * the free-form `metadata` bag is gone afterwards. Header `parentSessionId`
+     * (atomic with `repo.create()`) is the fallback for a 0.85 child whose facts
+     * write was interrupted.
+     *
+     * The extra first-line read is intentional and cheap relative to the full
+     * `repo.open()` that follows. There is no "already v4" skip: v4 files return
+     * undefined immediately after parsing the header. Destroy the first-line
+     * stream in `readFirstLine` so this cannot accumulate stranded FDs the way
+     * an earlier unclosed scanner once did.
+     */
+    private async openPersistedSession(sessionId: SessionId): Promise<Session> {
+        const meta = await this.openSession(sessionId);
+        const recovered = await readLegacyFactsFromPath(meta.path);
+        const session = await this.repo.open(meta, harnessContext);
+        const facts =
+            recovered ??
+            (meta.parentSessionId !== undefined
+                ? { kind: "subagent" as const, parentSessionId: meta.parentSessionId }
+                : undefined);
+        if (facts !== undefined) {
+            const wrote = await writeSessionFactsIfAbsent(session, facts);
+            this._factsCache.set(sessionId, wrote ? facts : await readSessionFacts(session));
+        }
+        return session;
     }
 
     /**
@@ -447,11 +484,8 @@ export class SessionRegistry extends EventEmitter {
         if (this._nameCache.has(sessionId)) {
             return this._nameCache.get(sessionId);
         }
-        const meta = await this.openSession(sessionId);
-        const { name, facts } = await readSessionMetadataFromDisk(meta.path);
-        this._nameCache.set(sessionId, name);
-        this._factsCache.set(sessionId, facts);
-        return name;
+        await this.hydrateSessionMetadata(sessionId);
+        return this._nameCache.get(sessionId);
     }
 
     /**
@@ -461,19 +495,38 @@ export class SessionRegistry extends EventEmitter {
      * pi 0.85 fixed the session metadata shape, so these live in the value
      * store on disk and are read via the same JSONL stream as the session
      * title. Both populate a per-session cache so a `session.list` that needs
-     * both pays one scan per session rather than two. Falls through to a full
-     * `repo.open()` only when the on-disk cache misses *and* the path-based
-     * scan would not see a name line (i.e. an uninitialised session).
+     * both pays one scan per session rather than two.
      */
     async getSessionFacts(sessionId: SessionId): Promise<SessionFacts> {
         if (this._factsCache.has(sessionId)) {
             return this._factsCache.get(sessionId) ?? {};
         }
+        await this.hydrateSessionMetadata(sessionId);
+        return this._factsCache.get(sessionId) ?? {};
+    }
+
+    /**
+     * Last user-visible message timestamp for a session, in epoch ms.
+     *
+     * Used as `updatedAt` on the session list so a format rewrite cannot
+     * masquerade as recent activity. `undefined` when the file has no
+     * messages — callers fall back to `createdAt`.
+     */
+    async getSessionActivityAt(sessionId: SessionId): Promise<number | undefined> {
+        if (this._activityCache.has(sessionId)) {
+            return this._activityCache.get(sessionId);
+        }
+        await this.hydrateSessionMetadata(sessionId);
+        return this._activityCache.get(sessionId);
+    }
+
+    /** One JSONL scan fills name, facts, and activity caches together. */
+    private async hydrateSessionMetadata(sessionId: SessionId): Promise<void> {
         const meta = await this.openSession(sessionId);
-        const { name, facts } = await readSessionMetadataFromDisk(meta.path);
+        const { name, facts, activityAt } = await readSessionMetadataFromDisk(meta.path);
         this._nameCache.set(sessionId, name);
         this._factsCache.set(sessionId, facts);
-        return facts;
+        this._activityCache.set(sessionId, activityAt);
     }
 
     /** Get the full chat tree history (from session leaf up to root). */
@@ -600,8 +653,7 @@ export class SessionRegistry extends EventEmitter {
         const resolvedTaskState =
             taskState ?? (await buildSessionTaskState(sessionId, this.sessionsRoot));
 
-        const meta = await this.openSession(sessionId);
-        const session = await this.repo.open(meta, harnessContext);
+        const session = await this.openPersistedSession(sessionId);
         const facts = await readSessionFacts(session);
         const sessionKind: "main" | "subagent" = facts.kind === "subagent" ? "subagent" : "main";
         const attached = await AttachedSession.create({

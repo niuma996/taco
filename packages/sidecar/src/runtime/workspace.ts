@@ -977,6 +977,14 @@ export class WorkspaceRuntime extends EventEmitter {
         return await this.sessionRegistry.getSessionFacts(sessionId);
     }
 
+    /**
+     * Last user-visible message timestamp (epoch ms), or undefined when the
+     * session has no messages. The session list uses this as `updatedAt`.
+     */
+    async getSessionActivityAt(sessionId: SessionId): Promise<number | undefined> {
+        return await this.sessionRegistry.getSessionActivityAt(sessionId);
+    }
+
     // ─────────── attach / detach (delegates to SessionRegistry) ───────────
 
     async attach(sessionId: SessionId, opts: AttachOptions = {}): Promise<AttachedSession> {
