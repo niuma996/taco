@@ -27,7 +27,7 @@ export function formatSkillsForSystemPrompt(skills: Skill[]): string {
     const lines = [
         "The following skills provide specialized instructions for specific tasks.",
         "Use the <skill> tool to invoke a skill when the task matches its description.",
-        "Skill body content is injected into context after the tool call — you will see <skill_body:NAME> blocks when a skill is active.",
+        'Skill body content is injected into context after the tool call — you will see <skill_body name="NAME"> blocks when a skill is active.',
         "When a skill file references a relative path, resolve it against the skill directory (parent of the skill file) and use that absolute path in tool commands.",
         "",
         "<available_skills>",

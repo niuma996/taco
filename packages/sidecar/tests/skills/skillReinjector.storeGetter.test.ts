@@ -45,7 +45,7 @@ describe("buildSkillReinjector store getter", () => {
         const { hook, handle } = buildSkillReinjector(store);
         handle.markInvoked("echo");
 
-        // Empty message list — no `<skill_body:echo>` in context, so the
+        // Empty message list — no `<skill_body name="echo">` in context, so the
         // reinjector tries to splice a body back in. With v1 in the store,
         // it should restore the v1 body.
         const before = hook({ messages: [] });

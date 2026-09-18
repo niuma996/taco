@@ -106,9 +106,9 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         const text = allText(final);
 
         assert.ok(text.includes("<instructions"), "must contain <instructions> tag");
-        assert.ok(text.includes("<env>"), "must contain <env> tag");
-        assert.ok(text.includes("<reply_language>"), "must contain <reply_language> tag");
-        assert.ok(text.includes("<im_channel>"), "must contain <im_channel> tag");
+        assert.ok(text.includes('<env as_of="'), "must contain <env> tag");
+        assert.ok(text.includes('<reply_language locale="'), "must contain <reply_language> tag");
+        assert.ok(text.includes('<im_channel type="'), "must contain <im_channel> tag");
         assert.ok(text.includes("type: wechat"), "im_channel exposes platform type");
         assert.ok(text.includes("channel_id: wechat-main"), "im_channel exposes channel id");
         assert.ok(text.includes("execute task"), "original user message must survive");
@@ -145,10 +145,10 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         // Expected: [<reply_language>, env is at tail（push）, original user msg]
         // reply unshifts → position 0. env pushes → at end.
         assert.ok(
-            texts[0].includes("<reply_language>"),
+            texts[0].includes('<reply_language locale="'),
             `msg[0] should be <reply_language>, got: ${texts[0]}`,
         );
-        assert.ok(texts[texts.length - 1].includes("<env>"), "last msg should be <env>");
+        assert.ok(texts[texts.length - 1].includes('<env as_of="'), "last msg should be <env>");
     });
 
     it("env hook pushes to tail (not unshift) — P2: stable prefix", () => {
@@ -164,7 +164,7 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
 
         assert.equal(final.length, 3);
         assert.ok(texts[0].includes("first"), `msg[0] should be original first, got: ${texts[0]}`);
-        assert.ok(texts[2].includes("<env>"), `msg[2] should be <env>, got: ${texts[2]}`);
+        assert.ok(texts[2].includes('<env as_of="'), `msg[2] should be <env>, got: ${texts[2]}`);
     });
 
     it("strip hooks mutate messages in-place with correct order", async () => {
@@ -197,8 +197,11 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         const text = allText(final);
 
         assert.ok(text.includes("<instructions"), "instructions survives reply → undefined");
-        assert.ok(text.includes("<env>"), "env survives even though reply returned undefined");
-        assert.ok(!text.includes("<reply_language>"), "reply_language should NOT appear");
+        assert.ok(
+            text.includes('<env as_of="'),
+            "env survives even though reply returned undefined",
+        );
+        assert.ok(!text.includes("<reply_language"), "reply_language should NOT appear");
     });
 
     it("all hooks return undefined → transformContext fallback keeps mutations", () => {
@@ -214,7 +217,7 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         const text = allText(final);
 
         assert.ok(
-            text.includes("<env>"),
+            text.includes('<env as_of="'),
             "env mutation survives even though earlier hooks returned undefined",
         );
     });

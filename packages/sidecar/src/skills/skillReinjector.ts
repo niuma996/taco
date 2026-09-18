@@ -9,6 +9,7 @@
  */
 
 import type { AgentMessage, Skill, TextContent } from "../runtime/pi/types.ts";
+import { findBalancedTagsSkippingFences } from "../tags/fenceAware.ts";
 
 import { createSkillBodyMessage } from "./skillMessages.ts";
 
@@ -28,13 +29,17 @@ function extractText(content: unknown): string {
         .join("\n");
 }
 
-/** Collect every `<skill_body:NAME>` skill name present in the message list. */
+/** Collect every `<skill_body name="…">` skill name present in the message list.
+ *  Colon-form `<skill_body:NAME>` is not a balanced tag and is ignored. */
 function findInjectedSkillNames(messages: readonly AgentMessage[]): Set<string> {
     const names = new Set<string>();
     for (const msg of messages) {
         const text = extractText((msg as { content?: unknown }).content);
-        const matches = text.matchAll(/<skill_body:([^>]+)>/g);
-        for (const m of matches) names.add(m[1]);
+        if (!text) continue;
+        for (const match of findBalancedTagsSkippingFences(text, "skill_body")) {
+            const name = match.attrs.name;
+            if (name) names.add(name);
+        }
     }
     return names;
 }

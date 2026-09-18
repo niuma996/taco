@@ -175,7 +175,9 @@ export function buildProjectManifestsHook(cwd: string): ContextHook {
         }
         if (manifests.length === 0) return undefined;
 
-        const tag: AgentMessage = createUserMessage(tagWrap(TAG_NAME, formatManifests(manifests)));
+        const tag: AgentMessage = createUserMessage(
+            tagWrap(TAG_NAME, formatManifests(manifests), { source: "workspace" }),
+        );
         return { messages: [tag, ...event.messages] };
     };
 }

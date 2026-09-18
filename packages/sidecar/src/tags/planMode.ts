@@ -45,8 +45,10 @@ export function buildPlanModeContextHook(
     return (event: ContextEvent): ContextResult | undefined => {
         const state = getPlanState();
         if (!state.active || !state.currentSlug) return undefined;
-        const body = `slug="${state.currentSlug}"\n${PLAN_MODE_BODY}`;
-        event.messages.unshift(createUserMessage(tagWrap("plan_mode", body)));
+        const body = PLAN_MODE_BODY;
+        event.messages.unshift(
+            createUserMessage(tagWrap("plan_mode", body, { slug: state.currentSlug })),
+        );
         return { messages: event.messages };
     };
 }

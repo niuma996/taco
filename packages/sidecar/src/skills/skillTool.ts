@@ -2,7 +2,7 @@
  * SkillTool — lets the LLM invoke a named skill by injecting its body into context.
  * Input: { skill: string (name), args?: string }
  *
- *  - inline skills: enqueue a `<skill_body:NAME>` message for the reinjector
+ *  - inline skills: enqueue a `<skill_body name="…">` message for the reinjector
  *    hook. Body is NOT in the tool result (avoids cache-key bloat and
  *    double-delivery with the pending queue).
  *  - subagent skills: calls spawnSkillSubagent to run in a sandboxed session.

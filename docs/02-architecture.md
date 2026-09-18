@@ -8,7 +8,7 @@
 What Taco adds on top of Pi's harness, from the code:
 
 - **`agent` tool — subagents with fan-out.** Per-type tool whitelist, `agent/<type>` namespace, depth-bounded recursion, `executionMode: "parallel"` for concurrent calls.
-- **`skill` tool — inline or subagent.** Loads by name; inline enqueues a `<skill_body:NAME>` message protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
+- **`skill` tool — inline or subagent.** Loads by name; inline enqueues a `<skill_body name="NAME">` message protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
 - **Plan mode with a hard gate.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
 - **Prompt tag system.** Each `<tag>` block carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`); the pin-aware compact hook reads that registry.
 - **Extension system.** Workspace activation builds a frozen `WorkspaceExtensionSet` from process + workspace contributions. Three built-ins: `projectManifests`, `gitContext`, `outputRedaction`. New tags via `registerExtensionTag`.

@@ -23,22 +23,22 @@ function textOf(messages: AgentMessage[]): string {
 }
 
 describe("buildEnvContextHook", () => {
-    it("appends an <env> tag carrying only local_time (no cwd/shell)", () => {
+    it("appends an <env as_of> tag with no cwd/shell and no duplicated local_time body", () => {
         const hook = buildEnvContextHook();
         const event = { messages: [] as AgentMessage[] };
         const result = hook(event);
         const text = textOf(result.messages);
-        assert.ok(text.includes("<env>"), "must inject <env>");
-        assert.match(text, /local_time:/);
+        assert.match(text, /<env as_of="/);
+        assert.ok(!text.includes("local_time:"), "time lives only on as_of");
         assert.ok(!text.includes("cwd:"), "cwd moved to the static system prompt");
         assert.ok(!text.includes("shell:"), "shell moved to the static system prompt");
     });
 
-    it("local_time carries the weekday so relative dates resolve", () => {
+    it("as_of carries the weekday so relative dates resolve", () => {
         const hook = buildEnvContextHook();
         const text = textOf(hook({ messages: [] as AgentMessage[] }).messages);
-        const stamp = /local_time: (.+)/.exec(text)?.[1];
-        assert.ok(stamp, "local_time must render a value");
+        const stamp = /as_of="([^"]+)"/.exec(text)?.[1];
+        assert.ok(stamp, "as_of must render a value");
 
         // Locale-agnostic: assert the weekday option took effect by diffing the
         // same instant formatted with and without it. Matching literal weekday
@@ -73,6 +73,6 @@ describe("buildEnvContextHook", () => {
         const result = hook(event);
         assert.equal(result.messages.length, 2);
         assert.ok(textOf([result.messages[0]]).includes("first"), "original stays at head");
-        assert.ok(textOf([result.messages[1]]).includes("<env>"), "env goes to the tail");
+        assert.ok(textOf([result.messages[1]]).includes('<env as_of="'), "env goes to the tail");
     });
 });

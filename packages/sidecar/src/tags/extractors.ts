@@ -1,8 +1,9 @@
 /**
  * Pinned segment extraction. Two modes: read-only `extractPinnedSegments` and
  * `extractAndStripPinned` (compression pipeline uses the latter to avoid pin content
- * appearing twice). Dedup: first-seen wins per name. `pinOnce` segments carry an
- * `instanceId` recorded in `CompactionEntry.details.consumedPinOnceInstances`.
+ * appearing twice). Dedup: first-seen wins per tag name, except `skill_body`
+ * which is first-seen per `name` attr (one pin per skill). `pinOnce` segments
+ * carry an `instanceId` recorded in `CompactionEntry.details.consumedPinOnceInstances`.
  */
 
 import { createHash } from "node:crypto";
@@ -40,25 +41,37 @@ function makeInstanceId(
 }
 
 /**
+ * Dedup key for pinned segments. Most tags are singleton (first-seen wins per
+ * name). `skill_body` is not — each `name` attr is a distinct skill, and collapsing
+ * them to one pin would drop every skill after the first on compact.
+ */
+function pinDedupKey(name: TagName, instanceId: string): string {
+    return name === "skill_body" ? instanceId : name;
+}
+
+/**
  * Extract pinned segments from messages (read-only).
  * Only processes string content — block[] content is skipped.
+ *
+ * Multiple `skill_body` tags come back as separate segments, one per
+ * `attrs.name`. `find(s => s.name === "skill_body")` only returns the first
+ * skill; look at `attrs.name` when you need a specific one. Other pin tags
+ * remain singleton (first-seen per tag name).
  */
 export function extractPinnedSegments(
     messages: ReadonlyArray<{ content: unknown }>,
 ): PinnedSegment[] {
     const pinNames = getPinNames();
-    const seen = new Map<TagName, PinnedSegment>();
+    const seen = new Map<string, PinnedSegment>();
     for (const msg of messages) {
         if (typeof msg.content !== "string") continue;
         for (const name of pinNames) {
-            if (seen.has(name)) continue;
             const matches = findBalancedTagsSkippingFences(msg.content, name);
-            if (matches.length > 0) {
-                const first = matches[0];
-                if (first) {
-                    const instanceId = makeInstanceId(name, first.inner, first.attrs);
-                    seen.set(name, { name, content: first.inner, attrs: first.attrs, instanceId });
-                }
+            for (const m of matches) {
+                const instanceId = makeInstanceId(name, m.inner, m.attrs);
+                const key = pinDedupKey(name, instanceId);
+                if (seen.has(key)) continue;
+                seen.set(key, { name, content: m.inner, attrs: m.attrs, instanceId });
             }
         }
     }
@@ -67,7 +80,8 @@ export function extractPinnedSegments(
 
 /** Result of `extractAndStripPinned`. */
 export interface ExtractAndStripResult<M> {
-    /** Deduplicated pinned segments (first-seen wins), in discovery order. */
+    /** Deduplicated pinned segments (first-seen wins), in discovery order.
+     *  `skill_body` may appear more than once — one entry per `attrs.name`. */
     pinned: PinnedSegment[];
     /** Messages with pin ranges stripped from their text content. */
     strippedMessages: M[];
@@ -82,7 +96,7 @@ export function extractAndStripPinned<M extends { content: unknown }>(
     messages: ReadonlyArray<M>,
 ): ExtractAndStripResult<M> {
     const pinNames = getPinNames();
-    const seen = new Map<TagName, PinnedSegment>();
+    const seen = new Map<string, PinnedSegment>();
     const strippedMessages = messages.map((msg) => {
         return mapMessageText(msg, (text) => {
             const ranges: Array<readonly [number, number]> = [];
@@ -90,10 +104,10 @@ export function extractAndStripPinned<M extends { content: unknown }>(
                 const matches = findBalancedTagsSkippingFences(text, name);
                 for (const m of matches) {
                     ranges.push(m.range);
-                    if (!seen.has(name)) {
-                        const instanceId = makeInstanceId(name, m.inner, m.attrs);
-                        seen.set(name, { name, content: m.inner, attrs: m.attrs, instanceId });
-                    }
+                    const instanceId = makeInstanceId(name, m.inner, m.attrs);
+                    const key = pinDedupKey(name, instanceId);
+                    if (seen.has(key)) continue;
+                    seen.set(key, { name, content: m.inner, attrs: m.attrs, instanceId });
                 }
             }
             if (ranges.length === 0) return text;

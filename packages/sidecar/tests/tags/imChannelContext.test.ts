@@ -52,7 +52,7 @@ describe("buildImChannelContextHook", () => {
         assert.equal(result.messages.length, 2);
         assert.equal(result.messages[1], event.messages[1], "tail-append, original first");
         const text = textOf(messageAt(result.messages, 1));
-        assert.match(text, /^<im_channel>/);
+        assert.match(text, /^<im_channel type="wechat" channel_id="wechat-work">/);
         assert.match(text, /type: wechat/);
         assert.match(text, /channel_id: wechat-work/);
         assert.match(text, /<\/im_channel>$/);

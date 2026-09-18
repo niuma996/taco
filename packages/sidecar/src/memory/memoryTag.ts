@@ -2,7 +2,7 @@
  * `memory` tag — context hook.
  *
  * Reads MEMORY.md on every LLM context build and injects it as a
- * `<memory>...</memory>` user message at the front.
+ * `<memory source="user">` user message at the front.
  *
  * With PinOnceConsumer, skips injection if the memory's instanceId was
  * already consumed by a prior compaction — the verbatim content is in the
@@ -44,7 +44,7 @@ export function buildMemoryContextHook(
             return undefined;
         }
 
-        const wrapped = tagWrap("memory", content);
+        const wrapped = tagWrap("memory", content, { source: "user" });
         event.messages.unshift(createUserMessage(wrapped));
         return { messages: event.messages };
     };

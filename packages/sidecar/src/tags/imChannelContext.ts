@@ -41,7 +41,11 @@ export function buildImChannelContextHook(
         const ctx = getContext();
         if (!ctx) return undefined;
         const body = `type: ${ctx.type}\nchannel_id: ${ctx.channelId}`;
-        event.messages.push(createUserMessage(tagWrap("im_channel", body)));
+        event.messages.push(
+            createUserMessage(
+                tagWrap("im_channel", body, { type: ctx.type, channel_id: ctx.channelId }),
+            ),
+        );
         return { messages: event.messages };
     };
 }

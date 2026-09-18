@@ -69,6 +69,11 @@ describe("findBalancedTags", () => {
         assert.equal(findBalancedTags(text, "request").length, 0);
     });
 
+    it("does not match colon-form skill_body:NAME as skill_body", () => {
+        const text = `${lt}skill_body:demo${gt}body${lt}/skill_body:demo${gt}`;
+        assert.equal(findBalancedTags(text, "skill_body").length, 0);
+    });
+
     it("nests multiple separate pairs", () => {
         const text = `${fooOpen}A${fooClose} middle ${fooOpen}B${fooClose}`;
         const ms = findBalancedTags(text, "foo");

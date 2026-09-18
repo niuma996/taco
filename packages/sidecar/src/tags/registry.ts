@@ -72,7 +72,8 @@ const BUILTIN_TAG_REGISTRY = {
         compression: { kind: "pin" },
         tuiVisibility: "hidden",
         parser: { kind: "xml-balanced" },
-        description: "Injected skill body content — pinned to survive context compaction",
+        description:
+            "Injected skill body — pinned per `name` attr so multiple skills survive compaction",
     }),
 
     /** User-level memory from ~/.taco/memory/MEMORY.md. */

@@ -269,11 +269,12 @@ export function buildGitContextHook(cwd: string): ContextHook {
         }
 
         const uncommittedFiles = await readUncommittedFiles(cwd);
+        const gitAttrs = { source: "workspace", n: String(commits.length) };
         const commitsTag =
-            commits.length > 0 ? tagWrap(TAG_NAME, formatCommits(commits)) : undefined;
+            commits.length > 0 ? tagWrap(TAG_NAME, formatCommits(commits), gitAttrs) : undefined;
         const uncommittedText = formatUncommittedFiles(uncommittedFiles);
         const uncommittedTag = uncommittedText
-            ? tagWrap(WORKING_TREE_TAG_NAME, uncommittedText)
+            ? tagWrap(WORKING_TREE_TAG_NAME, uncommittedText, { source: "workspace" })
             : undefined;
 
         if (!commitsTag && !uncommittedTag) return undefined;

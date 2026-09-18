@@ -163,7 +163,7 @@ describe("builtin project-manifest extension — hook", () => {
         assert.ok(messages.length >= 2, "tag prepended + original message");
         const first = messages[0] as { content: Array<{ text?: string }> };
         const tagText = first.content[0]?.text ?? "";
-        assert.match(tagText, /<project_manifests>/);
+        assert.match(tagText, /<project_manifests source="workspace">/);
         assert.match(tagText, /package\.json/);
         assert.match(tagText, /Do NOT fetch the files' contents unprompted/);
     });

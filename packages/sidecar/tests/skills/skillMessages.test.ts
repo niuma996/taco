@@ -55,10 +55,13 @@ describe("interpolateArgs", () => {
 });
 
 describe("createSkillBodyMessage", () => {
-    it("wraps the body in <skill_body:NAME> and interpolates args", () => {
+    it('wraps the body in <skill_body name="…"> and interpolates args', () => {
         const msg = createSkillBodyMessage({ name: "demo", content: "say $ARGUMENTS" }, "hi");
         assert.equal(msg.role, "user");
-        assert.equal((msg as SkillBodyMessage).content, "<skill_body:demo>\n\nsay hi");
+        assert.equal(
+            (msg as SkillBodyMessage).content,
+            '<skill_body name="demo">\nsay hi\n</skill_body>',
+        );
     });
 
     it("appends legacy 'Arguments: ...' when body has no placeholder", () => {
@@ -68,12 +71,15 @@ describe("createSkillBodyMessage", () => {
         );
         assert.equal(
             (msg as SkillBodyMessage).content,
-            "<skill_body:demo>\n\nno placeholder here\n\nArguments: the args",
+            '<skill_body name="demo">\nno placeholder here\n\nArguments: the args\n</skill_body>',
         );
     });
 
     it("does not append when args is empty", () => {
         const msg = createSkillBodyMessage({ name: "demo", content: "no placeholder here" }, "");
-        assert.equal((msg as SkillBodyMessage).content, "<skill_body:demo>\n\nno placeholder here");
+        assert.equal(
+            (msg as SkillBodyMessage).content,
+            '<skill_body name="demo">\nno placeholder here\n</skill_body>',
+        );
     });
 });

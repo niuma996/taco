@@ -36,7 +36,7 @@ describe("buildReplyLanguageContextHook", () => {
         const tagMsg = result.messages[0];
         assert.ok(tagMsg);
         const text = firstText(tagMsg);
-        assert.match(text, /^<reply_language>/);
+        assert.match(text, /^<reply_language locale="zh">/);
         assert.match(text, /Always reply in Chinese/);
         assert.match(text, /<\/reply_language>$/);
     });

@@ -105,7 +105,7 @@ describe("builtin git-context extension — hook", () => {
         } else {
             text = "";
         }
-        assert.match(text, /^<recent_git_commits>/);
+        assert.match(text, /^<recent_git_commits source="workspace" n="/);
         assert.match(text, /second commit/);
         assert.match(text, /first commit/);
         assert.match(text, /README\.md|src\.ts/);
@@ -134,9 +134,9 @@ describe("builtin git-context extension — hook", () => {
                 : ((secondContent as Array<{ text?: string }>)[0]?.text ?? "");
 
         // First tag is recent_git_commits
-        assert.match(firstText, /^<recent_git_commits>/);
+        assert.match(firstText, /^<recent_git_commits source="workspace" n="/);
         // Second tag is working_tree_changes
-        assert.match(secondText, /^<working_tree_changes>/);
+        assert.match(secondText, /^<working_tree_changes source="workspace">/);
         assert.match(secondText, /staged\.txt/);
         assert.match(secondText, /untracked\.txt/);
     });

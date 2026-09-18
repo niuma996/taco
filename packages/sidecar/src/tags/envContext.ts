@@ -1,10 +1,12 @@
 /**
  * `env` tag — context hook.
  *
- * Injects an `<env>` tag carrying the current local time into every LLM
- * context. `cwd` is not repeated here: the system prompt's `<project_context>`
- * already states the working directory, and `<platform>` already names the
- * shell — both inside the cacheable prefix.
+ * Injects an `<env as_of="…">` tag carrying the current local time into every
+ * LLM context. Time lives only on the attribute so the model can index
+ * freshness from the open tag; duplicating it in the body just spent tokens
+ * on a tag that already sits outside the cacheable prefix. `cwd` is not
+ * repeated here: the system prompt's `<project_context>` already states the
+ * working directory, and `<platform>` already names the shell.
  *
  * Integration: `harness.on("context", buildEnvContextHook())`
  */
@@ -30,19 +32,20 @@ function formatNow(): string {
 }
 
 /**
- * Build a `context` hook that injects an `<env>` tag carrying only the current
- * local time. Injected as the LAST user message so it does not grow the stable
- * conversation prefix turn-over-turn — keeping upstream prefix stable for
- * both pi's `estimateContextTokens` heuristic on prior turns and provider-side
- * prompt cache. The env tag at the very end sits outside the cacheable region;
- * the real reason env goes here is to keep the messages array's stable
- * portion stable.
+ * Build a `context` hook that injects an `<env as_of="…">` tag with the
+ * current local time. Injected as the LAST user message so it does not grow
+ * the stable conversation prefix turn-over-turn — keeping upstream prefix
+ * stable for both pi's `estimateContextTokens` heuristic on prior turns and
+ * provider-side prompt cache. The env tag at the very end sits outside the
+ * cacheable region; the real reason env goes here is to keep the messages
+ * array's stable portion stable.
  */
 export function buildEnvContextHook(): (event: { messages: AgentMessage[] }) => {
     messages: AgentMessage[];
 } {
     return (event: { messages: AgentMessage[] }): { messages: AgentMessage[] } => {
-        event.messages.push(createUserMessage(tagWrap("env", `local_time: ${formatNow()}`)));
+        const stamp = formatNow();
+        event.messages.push(createUserMessage(tagWrap("env", "", { as_of: stamp })));
         return { messages: event.messages };
     };
 }

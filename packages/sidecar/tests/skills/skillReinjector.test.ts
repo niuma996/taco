@@ -54,7 +54,7 @@ describe("buildSkillReinjector", () => {
 
         const hasBody = result.messages.some((m) => {
             const c = (m as { content?: unknown }).content;
-            return typeof c === "string" && c.includes("<skill_body:demo>");
+            return typeof c === "string" && c.includes('<skill_body name="demo">');
         });
         assert.ok(hasBody, "skill body should be reinjected before the last user message");
     });

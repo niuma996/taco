@@ -60,6 +60,33 @@ describe("extractAndStripPinned", () => {
         assert.equal(result.strippedMessages[1]?.content.includes("gamma"), true);
     });
 
+    it("pins two skill_body tags with different name attrs as distinct segments", () => {
+        const messages: TaggedMsg[] = [
+            {
+                role: "user",
+                content:
+                    '<skill_body name="alpha">A</skill_body>\n<skill_body name="beta">B</skill_body>',
+            },
+        ];
+        const result = extractAndStripPinned(messages);
+        assert.equal(result.pinned.length, 2);
+        const names = result.pinned.map((p) => p.attrs.name).sort();
+        assert.deepEqual(names, ["alpha", "beta"]);
+        assert.equal(result.strippedMessages[0]?.content.includes("skill_body"), false);
+    });
+
+    it("does not treat colon-form <skill_body:NAME> as a pin", () => {
+        const messages: TaggedMsg[] = [
+            { role: "user", content: "<skill_body:demo>\nstale colon form\n</skill_body:demo>" },
+        ];
+        const result = extractAndStripPinned(messages);
+        assert.equal(result.pinned.length, 0);
+        assert.equal(
+            result.strippedMessages[0]?.content,
+            "<skill_body:demo>\nstale colon form\n</skill_body:demo>",
+        );
+    });
+
     it("leaves non-pinned tags untouched", () => {
         const messages: TaggedMsg[] = [{ role: "user", content: "<not_a_pin>hello</not_a_pin>" }];
         const result = extractAndStripPinned(messages);

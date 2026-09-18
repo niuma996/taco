@@ -27,7 +27,7 @@ export function buildReplyLanguageContextHook(
         if (!locale) return undefined;
         const display = LOCALE_DISPLAY[locale];
         const body = `Always reply in ${display}, regardless of the language the user types in.`;
-        event.messages.unshift(createUserMessage(tagWrap("reply_language", body)));
+        event.messages.unshift(createUserMessage(tagWrap("reply_language", body, { locale })));
         return { messages: event.messages };
     };
 }

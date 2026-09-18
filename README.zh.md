@@ -13,7 +13,7 @@ Taco 是一个极简 sidecar 协议层 + 多客户端调试终端，基于 Pi �
 ## 项目特色
 
 - **`agent` 工具。** 按类型白名单隔离工具，`agent/<type>` 命名空间，深度限制递归，`executionMode: "parallel"` 并发调用。
-- **`skill` 工具。** 按名称加载；inline 模式入队 `<skill_body:NAME>` 受 `skillReinjector` 保护的消息，subagent 模式通过 `spawnSkillSubagent` 启动独立 session。
+- **`skill` 工具。** 按名称加载；inline 模式入队 `<skill_body name="NAME">` 受 `skillReinjector` 保护的消息，subagent 模式通过 `spawnSkillSubagent` 启动独立 session。
 - **Plan 模式。** `planEnter` 创建 `.taco/plans/<slug>.md`，期间只允许读 / askUser / 写方案；`planExit` 返回计划待审批。
 - **Prompt tag 系统。** 每个 `<tag>` 声明 `compression`（`pin` / `pinOnce` / `summarize` / `drop`）和 `tuiVisibility`（`visible` / `hidden` / `ephemeral`）。
 - **扩展系统。** workspace 激活时合并进程级 + workspace 级贡献为冻结的 `WorkspaceExtensionSet`；内置 `projectManifests` / `gitContext` / `outputRedaction`，通过 `registerExtensionTag` 注册新 tag。

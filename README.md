@@ -13,7 +13,7 @@ Taco ships four packages: the sidecar server (`@taco-ai/sidecar`), the typed Nod
 ## Project Highlights
 
 - **`agent` tool.** Per-type tool whitelist, `agent/<type>` namespace, depth-bounded recursion, `executionMode: "parallel"` for concurrent calls.
-- **`skill` tool.** Loads by name; inline enqueues `<skill_body:NAME>` protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
+- **`skill` tool.** Loads by name; inline enqueues `<skill_body name="NAME">` protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
 - **Plan mode.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
 - **Prompt tag system.** Each `<tag>` carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`).
 - **Extension system.** Workspace activation builds a frozen `WorkspaceExtensionSet` from process + workspace contributions. Built-ins: `projectManifests`, `gitContext`, `outputRedaction`. Register new tags via `registerExtensionTag`.

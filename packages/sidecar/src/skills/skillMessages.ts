@@ -19,6 +19,7 @@
  */
 
 import type { AgentMessage } from "../runtime/pi/types.ts";
+import { tagWrap } from "../tags/builder.ts";
 
 export function interpolateArgs(body: string, args: string): string {
     if (body.includes("$ARGUMENTS")) {
@@ -28,8 +29,10 @@ export function interpolateArgs(body: string, args: string): string {
 }
 
 /**
- * Build a user message wrapping the skill body with a `<skill_body:NAME>` tag.
+ * Build a user message wrapping the skill body as `<skill_body name="…">`.
  * Used for both one-shot activations (pending queue) and reinjection after compaction.
+ * The `name` attribute is the pin / TUI / reinjector identity — colon-form
+ * `<skill_body:NAME>` is not a balanced tag and is not parsed.
  */
 export function createSkillBodyMessage(
     skill: { name: string; content: string },
@@ -38,7 +41,7 @@ export function createSkillBodyMessage(
     const body = interpolateArgs(skill.content, args);
     return {
         role: "user",
-        content: `<skill_body:${skill.name}>\n\n${body}`,
+        content: tagWrap("skill_body", body, { name: skill.name }),
         timestamp: Date.now(),
     };
 }
