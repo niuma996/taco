@@ -15,7 +15,8 @@ import { createUserMessage, tagWrap } from "./builder.ts";
 const REMINDER_TEXT =
     "The conversation was just compacted. Older messages have been summarized. " +
     "Pinned content (skills, memory, git context) has been preserved verbatim " +
-    "at the end of the summary. Continue working as normal — no need to " +
+    "at the end of the summary. If the summary conflicts with a PINNED section, " +
+    "trust the PINNED text. Continue working as normal — no need to " +
     "re-establish context or re-read files that were already summarized.";
 
 /** A context hook plus the `notify` handle that arms it. */

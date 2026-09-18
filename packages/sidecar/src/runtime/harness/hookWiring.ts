@@ -394,10 +394,10 @@ export async function wireHarnessHooks(
     }
 
     // ── session_before_compact hook (trusted, not wrapped) ──
-    // 7. pin-aware compression: extractAndStripPinned + directive + pi's
-    //    default compact() + extended file ops + structured facts + verbatim
-    //    pin tail appended to summary. Throws fall back to the harness's
-    //    default compaction path (never blocks the call).
+    // 7. pin-aware compression: extractAndStripPinned + pi's default compact()
+    //    (pin handling on customInstructions) + extended file ops + verbatim
+    //    pin tail. One LLM call. Throws fall back to the harness's default
+    //    compaction path (never blocks the call).
     //    On success, arms the per-session compaction reminder (single
     //    `<compaction_reminder>` next context build). The reminder handle is
     //    created per wireHarnessHooks call so its flag is isolated to this

@@ -27,20 +27,7 @@ export {
     buildStripThinkingContextHook,
 } from "./convertToLlm.ts";
 export { buildEnvContextHook } from "./envContext.ts";
-export type {
-    EntityItem,
-    ExtractFactsOptions,
-    FactItem,
-    FactSet,
-} from "./factExtractor.ts";
-// Fact extraction is also called from the pin-aware compact hook; consumers
-// that only want the dedup helper can import `mergeFacts` directly.
-export {
-    EMPTY_FACTS,
-    extractFacts,
-    mergeFacts,
-    serializeMessagesForFacts,
-} from "./factExtractor.ts";
+export { serializeMessagesForFacts } from "./factExtractor.ts";
 export { findBalancedTagsSkippingFences } from "./fenceAware.ts";
 export {
     buildImChannelContextHook,

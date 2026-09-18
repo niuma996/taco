@@ -1,7 +1,8 @@
 /**
  * session_before_compact hook — pin-aware compression. Without this, `compression=pin`
- * tags are silently lost. Pipeline: extract+strip pin segments → inject directive →
- * call pi's compact() → layer in file ops, facts, pin tail. Each step is guarded.
+ * tags are silently lost. Pipeline: extract+strip pin segments → pi compact() with
+ * pin instructions on `customInstructions` → extended file ops + verbatim pin tail.
+ * One LLM call. Throws fall back to the harness default path.
  *
  * Retention is NOT decided here. It comes from the shared `CompactionSettings`
  * that `CompactionController.syncSettings()` pushes onto the harness, so this
@@ -19,19 +20,17 @@ import type {
     Models,
     RetryPolicy,
 } from "../../runtime/pi/types.ts";
-import { compact } from "../../runtime/pi/values.ts";
+import { compact as defaultCompact } from "../../runtime/pi/values.ts";
 import { extractAndStripPinned } from "../extractors.ts";
-import { EMPTY_FACTS, extractFacts, type FactSet, mergeFacts } from "../factExtractor.ts";
 import { tagRegistry } from "../registry.ts";
 import type { PinnedSegment } from "../types.ts";
-import { buildPinnedDirective, buildPinnedTail } from "./compression.ts";
+import { buildPinnedTail, mergeCompactionInstructions } from "./compression.ts";
 import { extractExtendedFileOps } from "./extendedFileOps.ts";
 
 const log = createLogger("taco:pin-aware-compact");
 
 /** Persisted details shape on a CompactionEntry. Extends pi's `details`. */
 export interface PinAwareCompactionDetails {
-    readonly facts: FactSet;
     readonly readFiles: string[];
     readonly modifiedFiles: string[];
     /** pinOnce instanceIds consumed in this compaction — prevents re-injection. */
@@ -63,24 +62,6 @@ function collectTextMessages(prep: CompactionPreparation): AgentMessage[] {
     return out;
 }
 
-/** Build a fresh preparation with `messagesToSummarize` augmented by a
- *  preamble user message — used to inject the pin directive. We clone only
- *  the field we change; everything else passes through. */
-function withPrefaceDirective(
-    prep: CompactionPreparation,
-    directive: string,
-): CompactionPreparation {
-    const preface: AgentMessage = {
-        role: "user",
-        content: directive,
-        timestamp: Date.now(),
-    } as AgentMessage;
-    return {
-        ...prep,
-        messagesToSummarize: [preface, ...prep.messagesToSummarize],
-    };
-}
-
 /** Merge two sorted-preferred lists, dedup keeping first occurrence. */
 function uniqueMerge(a: string[], b: string[]): string[] {
     const seen = new Set<string>();
@@ -98,19 +79,6 @@ function uniqueMerge(a: string[], b: string[]): string[] {
         }
     }
     return out;
-}
-
-/** Pull existing facts out of the previous compaction's `details`, if any. */
-function factsFromDetails(details: unknown): FactSet {
-    if (!details || typeof details !== "object") return EMPTY_FACTS;
-    const f = (details as { facts?: unknown }).facts;
-    if (!f || typeof f !== "object") return EMPTY_FACTS;
-    const o = f as Partial<FactSet>;
-    return {
-        decisions: Array.isArray(o.decisions) ? (o.decisions as FactSet["decisions"]) : [],
-        constraints: Array.isArray(o.constraints) ? (o.constraints as FactSet["constraints"]) : [],
-        entities: Array.isArray(o.entities) ? (o.entities as FactSet["entities"]) : [],
-    };
 }
 
 // ─── pin extraction over a preparation ──────────────────────────────────────
@@ -162,9 +130,15 @@ export interface PinAwareCompactHookOptions {
      * lane's policy, so the hook must match it: without retries here, a single
      * transient provider error makes this hook return `undefined`, and pi then
      * regenerates the summary on its default path — silently without the pin
-     * directive, which is the whole reason this hook exists.
+     * handling, which is the whole reason this hook exists.
      */
     readonly getRetryPolicy: () => Promise<RetryPolicy>;
+    /**
+     * Summarization entry. Production uses pi's `compact`; tests inject a
+     * stub so the `customInstructions` merge can be asserted without a
+     * provider round-trip.
+     */
+    readonly compact?: typeof defaultCompact;
 }
 
 export function buildPinAwareCompactHook(
@@ -185,27 +159,32 @@ export function buildPinAwareCompactHook(
             // cut-point is taken as-is rather than recomputed.
             const preparation = event.preparation;
 
-            // 1+2. Extract pin content from both message pools; strip from text.
+            // Extract pin content from both message pools; strip from text so
+            // the summarizer does not paraphrase bodies that will be appended.
             const { pinned, stripped } = applyPinExtraction(preparation);
 
-            // 3. Inject directive (only when there's something to protect).
-            const directive = buildPinnedDirective(pinned.map((p) => String(p.name)));
-            const prepForCompact = directive ? withPrefaceDirective(stripped, directive) : stripped;
+            // Pin handling rides on pi's `customInstructions` (`Additional
+            // focus:`), not a conversation preface — the latter is serialized
+            // as session content. Auto-compact and manual RPC share this path.
+            const customInstructions = mergeCompactionInstructions(
+                event.customInstructions,
+                pinned.map((p) => String(p.name)),
+            );
 
-            // 4. Reuse pi's default compaction (seven-section summary + fileOps).
-            //    thinkingLevel left undefined — the pin directive is already
-            //    injected via withPrefaceDirective above, so the default summary
-            //    path runs unchanged. Cancellation rides on the context.
-            //    A retry-policy read failure is tolerated rather than fatal:
-            //    losing resilience is better than losing pin handling.
+            // Reuse pi's default compaction (seven-section summary + fileOps).
+            // thinkingLevel left undefined — pin handling is in
+            // customInstructions, so the default summary path runs unchanged.
+            // A retry-policy read failure is tolerated rather than fatal:
+            // losing resilience is better than losing pin handling.
             const retry: RetryPolicy | undefined = await opts
                 .getRetryPolicy()
                 .catch(() => undefined);
-            const compactRes = await compact(
-                prepForCompact,
+            const runCompact = opts.compact ?? defaultCompact;
+            const compactRes = await runCompact(
+                stripped,
                 opts.models,
                 model,
-                event.customInstructions,
+                customInstructions,
                 undefined,
                 retry,
                 undefined,
@@ -217,19 +196,10 @@ export function buildPinAwareCompactHook(
             }
             const base = compactRes.value;
 
-            // 4a. Extended file ops from non-canonical tools.
-            // 4b. Structured facts from one extra LLM call (best-effort).
-            // 4c. Merge with previous compaction's facts (by key).
-            // 4d. Pin tail appended verbatim to the summary text.
-            // 4e. Record consumed pinOnce instanceIds so context hooks can skip re-injection.
             const textMessages = collectTextMessages(preparation);
             const extended = extractExtendedFileOps(textMessages);
-            const freshFacts = await extractFacts(textMessages, opts.models, model, {});
-            const priorFacts = factsFromDetails(base.details);
-            const mergedFacts = mergeFacts(priorFacts, freshFacts);
             const tail = buildPinnedTail(pinned);
 
-            // Collect pinOnce instanceIds — deduplicated across both message pools.
             const consumedPinOnceInstances = pinned
                 .filter(
                     (p) =>
@@ -238,7 +208,6 @@ export function buildPinAwareCompactHook(
                 .map((p) => p.instanceId);
 
             const details: PinAwareCompactionDetails = {
-                facts: mergedFacts,
                 readFiles: uniqueMerge(
                     detailList(base.details, "readFiles"),
                     extended.extraReadFiles,

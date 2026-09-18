@@ -17,10 +17,29 @@ export function buildPinnedTail(segments: ReadonlyArray<PinnedSegment>): string 
 }
 
 /**
- * Build a directive telling the summary LLM which tag bodies are pinned verbatim.
- * Injected as a user message before the summarization LLM call.
+ * Additional-focus text for pi's summarization prompt. Lands at the end of
+ * the seven-section template (`Additional focus: …`), not inside
+ * `<conversation>` — the latter is serialized as session content.
  */
 export function buildPinnedDirective(names: ReadonlyArray<string>): string | null {
     if (names.length === 0) return null;
-    return `The following tag bodies are pinned verbatim and will be appended to the window before the summary — do NOT quote or paraphrase their bodies: ${names.join(", ")}.`;
+    const listed = names.join(", ");
+    return (
+        `Pinned tag bodies (${listed}) are appended verbatim after this summary. ` +
+        "Name those tags if they matter; do not quote, paraphrase, or summarize their contents."
+    );
+}
+
+/**
+ * Combine a caller-supplied `customInstructions` string with the pin
+ * directive. Either side may be absent; undefined means pi skips
+ * `Additional focus` entirely.
+ */
+export function mergeCompactionInstructions(
+    customInstructions: string | undefined,
+    pinnedNames: ReadonlyArray<string>,
+): string | undefined {
+    const pin = buildPinnedDirective(pinnedNames);
+    if (customInstructions && pin) return `${customInstructions}\n\n${pin}`;
+    return customInstructions ?? pin ?? undefined;
 }

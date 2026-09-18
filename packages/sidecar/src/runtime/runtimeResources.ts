@@ -66,8 +66,6 @@ const UNKNOWN_VERSION = "0.0.0-unknown";
  *   - `performModelsRequest` (providerModels) — `/v1/models` probes.
  *   - `MemoryExtractorImpl.extract` — fire-and-forget extraction call
  *     at turn_end; bypasses harness streamOptions entirely.
- *   - `extractFacts` (factExtractor) — fact extraction in pin-aware
- *     compaction; also bypasses harness streamOptions.
  *
  * OAuth paths deliberately skip the tag (see `withTacoUserAgent`) so
  * Anthropic's `claude-cli/<version>` identity survives and keeps

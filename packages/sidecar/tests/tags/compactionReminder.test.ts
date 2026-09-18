@@ -37,6 +37,7 @@ describe("buildCompactionReminderHook", () => {
         assert.equal(injected.messages.length, 2);
         assert.match(firstText(injected.messages[0] as AgentMessage), /^<compaction_reminder>/);
         assert.match(firstText(injected.messages[0] as AgentMessage), /just compacted/);
+        assert.match(firstText(injected.messages[0] as AgentMessage), /trust the PINNED text/);
 
         // Second call without another notify → cleared.
         assert.equal(hook(ev), undefined, "fires only once per notify");
