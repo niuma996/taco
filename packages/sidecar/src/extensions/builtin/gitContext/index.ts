@@ -7,6 +7,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
+import { HIDDEN_WINDOWS_SPAWN } from "../../../lib/hiddenWindowsSpawn.ts";
 import { scrubbedProcessEnv } from "../../../runtime/models/providerKeyStore.ts";
 import { tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
@@ -97,6 +98,7 @@ async function probeGit(cwd: string): Promise<GitProbeResult> {
         await execFileAsync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {
             timeout: 2000,
             env: scrubbedProcessEnv(),
+            ...HIDDEN_WINDOWS_SPAWN,
         });
         setProbeCache(cwd, { ok: true, at: Date.now() });
         return { ok: true };
@@ -128,7 +130,12 @@ async function readRecentCommits(cwd: string, n: number): Promise<Commit[]> {
             "--shortstat",
             `--stat=${STAT_FILE_LIMIT}`,
         ],
-        { timeout: 5000, maxBuffer: 256 * 1024, env: scrubbedProcessEnv() },
+        {
+            timeout: 5000,
+            maxBuffer: 256 * 1024,
+            env: scrubbedProcessEnv(),
+            ...HIDDEN_WINDOWS_SPAWN,
+        },
     );
     const stdout = out.stdout.trim();
     if (!stdout) return [];
@@ -192,6 +199,7 @@ export async function readUncommittedFiles(cwd: string): Promise<UncommittedFile
             timeout: 3000,
             maxBuffer: 64 * 1024,
             env: scrubbedProcessEnv(),
+            ...HIDDEN_WINDOWS_SPAWN,
         })
             .then((out) => ({ code: 0, stdout: out.stdout }))
             .catch((e: unknown) => {

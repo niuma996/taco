@@ -77,6 +77,11 @@ pub async fn upgrade_apply(app: AppHandle) -> Result<String, String> {
     }
     cmd.arg("upgrade").arg("--apply");
     cmd.env("TACO_HOME", &taco_home);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     for (key, value) in &launcher.env {
         cmd.env(key, value);
     }

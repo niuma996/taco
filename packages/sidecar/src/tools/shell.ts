@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
 import { isInjectedEnvKey } from "../runtime/models/providerKeyStore.ts";
 import type { TextContent } from "../runtime/pi/types.ts";
 
@@ -53,8 +54,8 @@ export async function runShell(
 
     const child =
         spawnArgs === null
-            ? spawn(command, { cwd: opts.cwd, shell: true, env: childEnv })
-            : spawn(command, spawnArgs, { cwd: opts.cwd, env: childEnv });
+            ? spawn(command, { cwd: opts.cwd, shell: true, env: childEnv, ...HIDDEN_WINDOWS_SPAWN })
+            : spawn(command, spawnArgs, { cwd: opts.cwd, env: childEnv, ...HIDDEN_WINDOWS_SPAWN });
 
     let stdout = "";
     let stderr = "";

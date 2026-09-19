@@ -13,6 +13,7 @@ import fg from "fast-glob";
 import ignore from "ignore";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
 import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 import type {
     AgentHarnessTool,
@@ -52,7 +53,11 @@ let rgAvailable: boolean | null = null;
 function hasRipgrep(): boolean {
     if (rgAvailable !== null) return rgAvailable;
     try {
-        const r = spawnSync("rg", ["--version"], { stdio: "ignore", env: scrubbedProcessEnv() });
+        const r = spawnSync("rg", ["--version"], {
+            stdio: "ignore",
+            env: scrubbedProcessEnv(),
+            ...HIDDEN_WINDOWS_SPAWN,
+        });
         rgAvailable = r.status === 0;
     } catch {
         rgAvailable = false;
@@ -127,6 +132,7 @@ async function runRipgrep(
         maxBuffer: 8 * 1024 * 1024,
         input: ignoreContent,
         env: scrubbedProcessEnv(),
+        ...HIDDEN_WINDOWS_SPAWN,
     });
     if (r.status !== null && r.status > 1) throw new Error(r.stderr || "ripgrep failed");
     return (r.stdout ?? "").split("\n").filter((l) => l.length > 0);

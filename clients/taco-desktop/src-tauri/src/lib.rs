@@ -532,9 +532,14 @@ async fn workspace_ensure(
         cmd.current_dir(&repo_root);
     }
 
+    // Windows: hide the console that console-subsystem node.exe would
+    // otherwise flash when the debug-build TACO.exe (itself a console
+    // app) spawns `taco start`. Tokio's Command exposes creation_flags
+    // as an inherent method — std::os::windows::process::CommandExt is
+    // only for std::process::Command.
     #[cfg(windows)]
     {
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
     // PR2 daemon-mode spawn: stdin / stdout are unused by the daemon (the
@@ -1199,7 +1204,6 @@ fn reap_stale_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
         control_socket_path,
         own_install_id: &own_install_id,
         expected_sidecar_version: expected_version.as_deref(),
-        resources_root: std::path::PathBuf::from(&resources_root),
     };
     let outcome = reap_previous_daemon(&inputs, None);
     // Best-effort log only -- never block setup on a reap that finds
@@ -1242,7 +1246,6 @@ fn reap_force_at(runtime_dir: &std::path::Path, app: &tauri::AppHandle) {
         control_socket_path,
         own_install_id: &own_install_id,
         expected_sidecar_version: expected_version.as_deref(),
-        resources_root: std::path::PathBuf::from(&resources_root),
     };
     let outcome = force_reap(&inputs);
     eprintln!("taco-desktop: force_reap outcome = {:?}", outcome);
@@ -1388,6 +1391,14 @@ fn ensure_daemon_installed(app: &tauri::App) -> tauri::Result<()> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // Windows: the bundled node + `taco install` are console-subsystem.
+    // Hide the window so first-run registration doesn't flash a cmd.
+    // Compiled out of macOS/Linux — `creation_flags` is a Windows-only API.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     // Best-effort: surface the failure on stderr for `pnpm tauri:dev`
     // users but never block the setup hook on it.
     if let Err(e) = cmd.spawn() {

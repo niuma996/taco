@@ -39,6 +39,7 @@ import { homedir } from "node:os";
 import { dirname, resolve as resolvePath } from "node:path";
 import { tacoHome } from "../config/tacoHome.ts";
 import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
+import { HIDDEN_WINDOWS_SPAWN } from "./hiddenWindowsSpawn.ts";
 
 /** Marker that separates our echo from any MOTD / profile chatter the shell
  *  prints before running the command. We search for the last occurrence so a
@@ -126,6 +127,7 @@ export function resolveLoginShellPath(
             // emit job-control / no-tty warnings that are noise here.
             stdio: ["ignore", "pipe", "ignore"],
             env: scrubbedProcessEnv(),
+            ...HIDDEN_WINDOWS_SPAWN,
         });
     } catch {
         return undefined;

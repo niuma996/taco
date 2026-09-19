@@ -3,8 +3,12 @@
  *
  * Two launch modes:
  *   - dev (TACO_SIDECAR_DEV=1 or this file is in repo's packages/cli): spawn
- *     `tsx <repo>/packages/sidecar/src/index.ts` so the developer gets hot
- *     reload + TypeScript source.
+ *     `node --import tsx/dist/loader.mjs <repo>/packages/sidecar/src/index.ts`
+ *     so the developer gets TypeScript source in one process. Never spawn
+ *     `tsx/dist/cli.mjs` — that CLI re-forks node without inheriting
+ *     windowsHide, which is the console flash on Windows. Never spawn the
+ *     `node_modules/.bin/tsx` shim either: on Windows that file is
+ *     `tsx.cmd` and Node 22+ rejects it with `spawn EINVAL`.
  *   - prod: locate the platform-specific optional dep
  *     (`@taco-ai/sidecar-<platform>`) via `createRequire`, read its
  *     `manifest.json` to find the node binary + bundle, spawn them.
@@ -18,13 +22,13 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLATFORM_KEYS } from "./upgradePlatform.ts";
 
-interface LaunchedBundle {
+export interface LaunchedBundle {
     program: string;
     args: string[];
     cwd?: string;
@@ -69,20 +73,41 @@ export function isDevCheckout(repoRoot: string | null = findRepoRoot()): boolean
     return repoRoot !== null && process.env.TACO_SIDECAR_DEV !== "0";
 }
 
-/** When the CLI is launched from a development checkout (sibling of `packages/`),
- *  prefer `tsx <repo>/packages/sidecar/src/index.ts` over the bundled platform pkg
- *  so devs see hot-reload + line numbers in stack traces. */
-function devLauncher(repoRoot: string): LaunchedBundle {
-    const repoTsx = join(
-        repoRoot,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "tsx.cmd" : "tsx",
+/** Locate `tsx/dist/loader.mjs` so we can
+ *  `spawn(process.execPath, ["--import", loader, entry])`.
+ *
+ *  In-process loader instead of `tsx/dist/cli.mjs`: the CLI re-forks node
+ *  without inheriting windowsHide, which flashes a console on Windows.
+ *  Never spawn the `node_modules/.bin/tsx` shim either: on Windows that
+ *  file is `tsx.cmd`, and Node 22+ rejects `.cmd`/`.bat` with `spawn EINVAL`
+ *  (CVE-2024-27980). */
+export function locateTsxLoader(repoRoot: string): string {
+    const fromRepo = join(repoRoot, "node_modules", "tsx", "dist", "loader.mjs");
+    if (existsSync(fromRepo)) return fromRepo;
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 8; i++) {
+        const candidate = join(dir, "node_modules", "tsx", "dist", "loader.mjs");
+        if (existsSync(candidate)) return candidate;
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    throw new Error(
+        "tsx loader not found (node_modules/tsx/dist/loader.mjs). Run `pnpm install` in the taco checkout.",
     );
-    const program = existsSync(repoTsx) ? repoTsx : "tsx";
+}
+
+/** When the CLI is launched from a development checkout (sibling of `packages/`),
+ *  prefer TypeScript source over the bundled platform pkg so devs see line
+ *  numbers in stack traces. One process: `--import` the tsx loader rather
+ *  than spawning `tsx/dist/cli.mjs`, which re-forks node. */
+export function resolveDevLaunch(repoRoot: string): LaunchedBundle {
+    const loader = locateTsxLoader(repoRoot);
+    // file:// so Node's --import accepts a Windows path with drive letters.
+    const loaderUrl = pathToFileURL(loader).href;
     return {
-        program,
-        args: [join(repoRoot, "packages", "sidecar", "src", "index.ts")],
+        program: process.execPath,
+        args: ["--import", loaderUrl, join(repoRoot, "packages", "sidecar", "src", "index.ts")],
         cwd: repoRoot,
     };
 }
@@ -158,8 +183,9 @@ export interface LaunchResult {
  *  forward signals / wait for exit. The child is spawned detached: on POSIX it gets
  *  its own process group (terminal signals aimed at the launcher don't reach the
  *  daemon) and is reparented to init once the launcher exits; on Windows detaching
- *  releases it from the launcher's job object so it outlives the launcher (PR3 wraps
- *  the daemon in a service anyway). */
+ *  releases it from the launcher's job object so it outlives `taco start`.
+ *  Paired with `child.unref()` in start.ts. `windowsHide` still applies — the
+ *  leftover console was tsx/dist/cli.mjs re-forking node, not DETACHED_PROCESS. */
 export function launchSidecar(opts: LaunchOptions): LaunchResult {
     const repoRoot = findRepoRoot();
     const useDev = opts.forceDev === true || isDevCheckout(repoRoot);
@@ -168,7 +194,7 @@ export function launchSidecar(opts: LaunchOptions): LaunchResult {
     let resourcesRoot: string | undefined;
 
     if (useDev && repoRoot) {
-        bundle = devLauncher(repoRoot);
+        bundle = resolveDevLaunch(repoRoot);
         resourcesRoot = join(repoRoot, "packages", "sidecar", "src");
     } else {
         const prod = prodBundlePaths();
@@ -194,21 +220,53 @@ export function launchSidecar(opts: LaunchOptions): LaunchResult {
         TACO_SIDECAR_RESOURCES: resourcesRoot,
     };
 
+    // stdin/stdout stay "ignore" — NDJSON goes via the socket, not stdio.
+    //
+    // Windows: "inherit" is forbidden with `detached: true` (EINVAL), and a
+    // detached child whose stdio handles are all "ignore" does not outlive the
+    // launcher, so stderr goes to a file the daemon owns. That fd owns
+    // $TACO_HOME/logs/daemon.err.log, so drop TACO_STDERR_LOG too: the Tauri
+    // desktop sets it on every spawn path, and the sidecar would answer by
+    // installing its own stderr tee against the same file, appending every line
+    // twice. One writer owns the file.
+    //
+    // POSIX keeps the long-standing `inherit` — both the desktop's stderr
+    // reader (launch-failure tail, Debug tab, `[taco:llm]` → llm-dump.log) and
+    // the sidecar's own tee hang off it, so nothing there needs to move.
+    let stderr: "ignore" | "inherit" | number = "inherit";
+    if (process.platform === "win32") {
+        delete env.TACO_STDERR_LOG;
+        stderr = "ignore";
+        try {
+            const logDir = join(opts.tacoHome, "logs");
+            mkdirSync(logDir, { recursive: true });
+            stderr = openSync(join(logDir, "daemon.err.log"), "a");
+        } catch {
+            stderr = "ignore";
+        }
+    }
+
     const child = spawn(bundle.program, bundle.args, {
         cwd: bundle.cwd,
         env,
         // Detached daemon: own process group on POSIX, released from the
-        // launcher's job object on Windows. Paired with child.unref() in
-        // start.ts so the daemon's lifetime is fully decoupled from whoever
-        // ran `taco start`.
+        // launcher's job object on Windows. Without this on Windows, `taco
+        // start` exiting (or the desktop killing the launcher after the
+        // socket is ready) takes the sidecar with it — the follower then
+        // waits 20s on a pipe that never appears.
         detached: true,
-        // Daemon mode: NDJSON goes via the socket, stderr goes to the daemon's
-        // own log file (sidecar opens LogFiles at $TACO_HOME/logs/), stdin is
-        // ignored (control socket is the inbound path).
-        stdio: ["ignore", "ignore", "inherit"],
-        // Windows: don't pop a conhost window for the daemon.
+        stdio: ["ignore", "ignore", stderr],
+        // Windows: hide the console of this node process. The previous
+        // leftover flash was tsx/dist/cli.mjs re-forking a second node
+        // that did not inherit this flag — that path is gone (`--import`
+        // loader). DETACHED_PROCESS and CREATE_NO_WINDOW can coexist here
+        // because we never inherit stdio on Windows.
         ...(process.platform === "win32" ? { windowsHide: true } : {}),
     });
+
+    // libuv dups the fd into the child, so the parent's copy is dead weight the
+    // moment spawn returns — without this every launch on Windows leaks one fd.
+    if (typeof stderr === "number") closeSync(stderr);
 
     return { child, dev: useDev };
 }

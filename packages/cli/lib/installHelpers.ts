@@ -156,7 +156,13 @@ export function execFile(
     opts: { allowFailure?: boolean } = {},
 ): Promise<ExecResult> {
     return new Promise((resolve, reject) => {
-        const child = spawn(program, args, { stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(program, args, {
+            stdio: ["ignore", "pipe", "pipe"],
+            // Windows: schtasks.exe is a console binary. Hide its window so
+            // `taco install` / `taco uninstall` don't flash a cmd while
+            // registering the logon task. Ignored on POSIX.
+            windowsHide: true,
+        });
         const chunks: Buffer[] = [];
         const errChunks: Buffer[] = [];
         child.stdout.on("data", (c: Buffer) => chunks.push(c));
