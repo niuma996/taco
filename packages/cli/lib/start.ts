@@ -423,10 +423,14 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
             runtimeDir,
         });
 
-        // If the bundle exits before binding the socket, surface its stderr
-        // (already inherited) and a clear error rather than letting the caller
-        // hang on the ready timeout.
+        // If the bundle exits before binding the socket, surface the cause
+        // rather than letting the caller hang on the ready timeout.
         const exitedEarly = new Promise<never>((_, reject) => {
+            // Spawn failures (Windows EINVAL on a .cmd, ENOENT, …) emit `error`
+            // without a corresponding `exit`. Listen for both so the start.lock
+            // `finally` still runs; otherwise a failed spawn wedges every later
+            // `taco start` until the 15s TTL.
+            child.once("error", (err) => reject(err));
             child.once("exit", (code, sig) => {
                 reject(new Error(`sidecar exited before binding socket (code=${code} sig=${sig})`));
             });

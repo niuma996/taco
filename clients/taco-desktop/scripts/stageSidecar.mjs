@@ -39,6 +39,7 @@ function main() {
         const r = spawnSync("pnpm", pnpmArgs, {
             cwd: join(desktopDir, "..", ".."),
             stdio: "inherit",
+            shell: process.platform === "win32",
         });
         if (r.status !== 0) {
             // stdio:"inherit" on Windows runners inside Tauri's
@@ -50,6 +51,7 @@ function main() {
                 cwd: join(desktopDir, "..", ".."),
                 stdio: ["ignore", "pipe", "pipe"],
                 encoding: "utf8",
+                shell: process.platform === "win32",
             });
             const tail = (s) => (s ?? "").split("\n").slice(-20).join("\n");
             console.error(
@@ -89,6 +91,7 @@ function main() {
             {
                 cwd: repoRoot,
                 stdio: "inherit",
+                shell: process.platform === "win32",
             },
         );
         if (sync.status !== 0) {
@@ -126,6 +129,7 @@ function main() {
         const r = spawnSync("pnpm", ["--filter", "@taco-ai/cli", "build"], {
             cwd: repoRoot,
             stdio: "inherit",
+            shell: process.platform === "win32",
         });
         if (r.status !== 0 || !existsSync(cliDist)) {
             console.error(`[stageSidecar] CLI bundle missing after build: ${cliDist}`);

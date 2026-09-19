@@ -45,8 +45,8 @@ Taco supports two transport modes over the same NDJSON line abstraction:
   integration examples.
 - **daemon mode** — the sidecar runs as a long-lived process and accepts
   multiple clients over a Unix domain socket (`<runtime>/sidecar.sock`,
-  Windows: `\\.\pipe\taco-sidecar`) for NDJSON traffic, with a separate
-  control socket (`<runtime>/sidecar-ctl.sock`, Windows: `\\.\pipe\taco-sidecar-ctl`)
+  Windows: `\\.\pipe\taco-sidecar-<slug>`) for NDJSON traffic, with a separate
+  control socket (`<runtime>/sidecar-ctl.sock`, Windows: `\\.\pipe\taco-sidecar-ctl-<slug>`)
   for `start` / `status` / `stop`. The Tauri desktop and `taco start` use
   this mode. See §3.3 for the desktop side and §2.6 for tenant isolation
   semantics.
@@ -343,17 +343,14 @@ The runtime has two running modes, with different isolation semantics:
   bound to the parent. Tenant isolation = start another process.
 - **daemon mode** — the sidecar runs as a long-lived process bound to a
   single control socket (`<runtime>/sidecar-ctl.sock` on Unix,
-  `\\.\pipe\taco-sidecar-ctl` on Windows). The control socket also
+  `\\.\pipe\taco-sidecar-ctl-<slug>` on Windows). The control socket also
   serves as the single-instance lock: a second `taco start` against
   the same control endpoint reuses the existing daemon rather than
   spawning a new one. Tenant isolation in daemon mode is therefore
-  *another control endpoint*, not *another process*. On Unix, that
-  means exporting a different `TACO_RUNTIME_DIR` before each
-  `taco start` so the data + control sockets land in a different
-  directory. On Windows, the pipe names are fixed and do not change
-  with `TACO_RUNTIME_DIR` — there is no way to get a second daemon
-  through this CLI today; reach for a separate user account or
-  container if you need one.
+  *another control endpoint*, not *another process*. Export a different
+  `TACO_RUNTIME_DIR` before each `taco start` so the data + control
+  sockets land on a different path (Unix: a different directory;
+  Windows: a different pipe slug derived from that directory).
 
 Within a single daemon (daemon mode), the inner routing looks like:
 

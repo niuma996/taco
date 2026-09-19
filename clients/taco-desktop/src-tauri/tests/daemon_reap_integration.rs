@@ -72,7 +72,6 @@ impl TmpHome {
             // No expectation: these cases exercise liveness/ownership, not
             // the version freshness gate.
             expected_sidecar_version: None,
-            resources_root: PathBuf::from("/fake/install"),
         }
     }
 }
@@ -239,7 +238,6 @@ fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
         control_socket_path: ctl_path.clone(),
         own_install_id: &own_id,
         expected_sidecar_version: None,
-        resources_root: PathBuf::from("/fake/install"),
     };
 
     // reap will: ping (returns None because listener doesn't speak JSON),
@@ -336,7 +334,6 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
         control_socket_path: ctl_path.clone(),
         own_install_id: &own_id,
         expected_sidecar_version: None,
-        resources_root: PathBuf::from("/fake/install"),
     };
 
     // The launcher pid is different from the daemon pid, but that alone is
@@ -403,7 +400,6 @@ fn force_reap_kills_alive_own_daemon() {
         control_socket_path: ctl_path.clone(),
         own_install_id: &own_id,
         expected_sidecar_version: None,
-        resources_root: PathBuf::from("/fake/install"),
     };
 
     let outcome = force_reap(&inputs);
@@ -497,7 +493,6 @@ fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
         own_install_id: &own_id,
         // No expectation → liveness-only reuse, the pre-gate behavior.
         expected_sidecar_version: None,
-        resources_root: PathBuf::from("/fake/install"),
     };
     let outcome = reap_previous_daemon(&inputs, Some(launcher_pid));
 
@@ -564,7 +559,6 @@ fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
         control_socket_path: dir.join("run").join("sidecar-ctl.sock"),
         own_install_id: &own_id,
         expected_sidecar_version: None,
-        resources_root: PathBuf::from("/fake/install"),
     };
 
     let outcome = reap_previous_daemon(&inputs, None);
@@ -671,7 +665,6 @@ fn version_gate_fixture(
         // Tests are short-lived; a few leaked bytes are fine.
         own_install_id: Box::leak(own_id.into_boxed_str()),
         expected_sidecar_version: Some("0.1.2"),
-        resources_root: PathBuf::from("/fake/install"),
     };
     Some((dir, helper, inputs, responder))
 }

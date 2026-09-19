@@ -4,7 +4,7 @@
  * Shared user data lives under $TACO_HOME. Daemon coordination state lives
  * under $TACO_RUNTIME_DIR when it is set, otherwise $TACO_HOME/run:
  *   runtime/         # socket, control socket, pid, and start lock (Unix)
- *   bin/             # launcher wrapper scripts (taco-sidecar-daemon[.cmd])
+ *   bin/             # launcher wrapper scripts (taco-sidecar-daemon[.vbs])
  *   logs/            # service stdout/stderr targets
  *   staging/         # upgrade staging area
  *   jobs/            # scheduler job definitions
@@ -17,6 +17,7 @@
  *   2. $HOME/.taco
  */
 
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -50,18 +51,35 @@ export function resolveTacoRuntimeDir(
 export const RUNTIME_DIR = resolveTacoRuntimeDir();
 export const BIN_DIR = join(TACO_HOME, "bin");
 
-/** NDJSON socket path. Unix: filesystem path under the runtime directory. Windows: named pipe. */
+/** Normalize a runtime directory so debug/release/verbatim Windows paths hash
+ *  to the same pipe slug. Slash direction, a trailing separator, and the
+ *  `\\?\` prefix must not produce a second daemon for the same directory.
+ *  The step order and the ASCII-only case fold must match the Rust twin
+ *  (`paths.rs::windows_pipe_slug`) byte for byte — the desktop connects to the
+ *  pipe this slug names, so `toLowerCase()`'s Unicode folding would split
+ *  `C:\Users\Ü…` into two different pipes. */
+export function windowsPipeSlug(runtimeDir: string): string {
+    let normalized = runtimeDir.replace(/\//g, "\\");
+    if (normalized.startsWith("\\\\?\\")) normalized = normalized.slice(4);
+    normalized = normalized.replace(/\\+$/, "").replace(/[A-Z]/g, (c) => c.toLowerCase());
+    return createHash("sha256").update(normalized, "utf8").digest("hex").slice(0, 16);
+}
+
+/** NDJSON socket path. Unix: filesystem path under the runtime directory.
+ *  Windows: named pipe derived from the runtime directory so debug
+ *  (`~/.taco-dev/run`) and release (`~/.taco/run`) do not collide on the
+ *  previously-global `\\.\pipe\taco-sidecar`. */
 export function ndjsonSocketPath(runtimeDir: string = RUNTIME_DIR): string {
     if (process.platform === "win32") {
-        return "\\\\.\\pipe\\taco-sidecar";
+        return `\\\\.\\pipe\\taco-sidecar-${windowsPipeSlug(runtimeDir)}`;
     }
     return join(runtimeDir, "sidecar.sock");
 }
 
-/** Control socket path. Unix: filesystem path under the runtime directory. Windows: named pipe. */
+/** Control socket path. Same layout as {@link ndjsonSocketPath}. */
 export function controlSocketPath(runtimeDir: string = RUNTIME_DIR): string {
     if (process.platform === "win32") {
-        return "\\\\.\\pipe\\taco-sidecar-ctl";
+        return `\\\\.\\pipe\\taco-sidecar-ctl-${windowsPipeSlug(runtimeDir)}`;
     }
     return join(runtimeDir, "sidecar-ctl.sock");
 }

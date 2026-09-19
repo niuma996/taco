@@ -20,9 +20,9 @@ Taco 在同一 NDJSON `line` 抽象上支持两种传输模式：
   每个客户端独占一个 sidecar 进程，生命周期跟父进程绑定。`@taco-ai/shared`
   的 typed client 与各集成示例走的就是这条路径（见 §3.2）。
 - **daemon 模式** —— sidecar 作为常驻进程运行，通过 Unix domain socket
-  (`<runtime>/sidecar.sock`，Windows: `\\.\pipe\taco-sidecar`) 承载 NDJSON 流量，
+  (`<runtime>/sidecar.sock`，Windows: `\\.\pipe\taco-sidecar-<slug>`) 承载 NDJSON 流量，
   并用独立的 control socket (`<runtime>/sidecar-ctl.sock`,
-  Windows: `\\.\pipe\taco-sidecar-ctl`) 处理 `start` / `status` / `stop`。
+  Windows: `\\.\pipe\taco-sidecar-ctl-<slug>`) 处理 `start` / `status` / `stop`。
   Tauri 桌面端和 `taco start` 走这条路径；详见 §3.3 与 §2.8。
 
 两种模式对调用方是透明的 —— typed client 不需要知道自己在哪条 transport 上。模式由启动方式决定（CLI 通过环境变量、桌面端通过 Tauri 配置）。
@@ -305,14 +305,13 @@ sidecar 两种运行模式的隔离语义不同：
 - **stdio 模式** —— 每个客户端独占一个 sidecar 进程，生命周期跟父进程绑定。
   租户隔离 = 再起一个进程。
 - **daemon 模式** —— sidecar 作为常驻进程绑定到唯一的 control socket
-  （Unix: `<runtime>/sidecar-ctl.sock`，Windows: `\\.\pipe\taco-sidecar-ctl`）。
+  （Unix: `<runtime>/sidecar-ctl.sock`，Windows: `\\.\pipe\taco-sidecar-ctl-<slug>`）。
   control socket 同时也是单实例锁：在同一 control endpoint 上重复
   `taco start` 会复用既有 daemon，不会拉新进程。
   因此 daemon 模式下的租户隔离是「换 control endpoint」，不是「再起一个进程」。
-  Unix 上意味着在每次 `taco start` 之前 export 不同的 `TACO_RUNTIME_DIR`，
-  让 data + control socket 落在不同目录；Windows 上 pipe 名是固定的，
-  不会随 `TACO_RUNTIME_DIR` 改变 —— 目前 CLI 不能在同一台机器上拉起第二个
-  daemon，需要独立用户或容器。
+  每次 `taco start` 之前 export 不同的 `TACO_RUNTIME_DIR`，
+  Unix 上 data + control socket 落在不同目录，Windows 上 pipe slug
+  从该目录派生，debug / release 不会抢同一条全局 pipe。
 
 同一个 daemon（daemon 模式）内部的路由：
 

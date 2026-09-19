@@ -186,10 +186,6 @@ pub struct ReapInputs<'a> {
     /// pre-gate liveness-only behavior for callers that can't resolve an
     /// expectation.
     pub expected_sidecar_version: Option<&'a str>,
-    /// Resources root shipped with THIS desktop install (used only as a
-    /// diagnostic breadcrumb in error messages; the id comparison is the
-    /// source of truth).
-    pub resources_root: PathBuf,
 }
 
 /// The freshness gate, isolated for unit tests. `expected = None` means the
@@ -549,7 +545,10 @@ pub fn daemon_runtime_paths(runtime_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
 /// Test-only re-exports. The integration test under `tests/daemon_reap.rs`
 /// and `tests/daemon_reap_integration.rs` links against these via
 /// `taco_desktop_lib::daemon_reap_test::*`. None of these symbols are
-/// reachable from the public command surface.
+/// reachable from the public command surface. Unix-only because those
+/// integration tests (and the `daemon_reap_test` facade in `lib.rs`) are
+/// themselves `#[cfg(unix)]`.
+#[cfg(unix)]
 #[doc(hidden)]
 pub mod __test_only {
     pub use super::{

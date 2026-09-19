@@ -174,19 +174,20 @@ pub(crate) fn resolve_sidecar(app: &AppHandle) -> Result<SidecarResolution, Stri
     }
 
     if cfg!(debug_assertions) {
-        // (2) Debug goes through the @taco-ai/cli `start` subcommand. That command spawns
-        //     tsx + sidecar/src/index.ts and sets TACO_DAEMON_MODE / socket paths itself.
-        //     `launch_sidecar()` waits for the socket to be ready then exits, forwarding
-        //     socket paths over stdin/stdout.
+        // (2) Debug goes through the @taco-ai/cli `start` subcommand via
+        //     `node packages/cli/bin/taco.cjs start`. That command spawns the
+        //     sidecar (tsx + source in a checkout) and sets TACO_DAEMON_MODE /
+        //     socket paths itself. Do not spawn `tsx.cmd` here — Node 22+
+        //     rejects `.cmd` with EINVAL on Windows (CVE-2024-27980).
         let repo_root = find_repo_root();
-        let tsx = resolve_repo_source_program(&repo_root);
+        let node = resolve_repo_source_program();
         let cli_bin = repo_root
             .join("packages")
             .join("cli")
             .join("bin")
             .join("taco.cjs");
         return Ok(SidecarResolution {
-            program: tsx,
+            program: node,
             args: vec![cli_bin.to_string_lossy().into_owned(), "start".to_string()],
             // The CLI resolves the runtime paths and spawns the sidecar; desktop
             // forwards the shared home plus isolated runtime through extra_env.
@@ -254,14 +255,14 @@ pub(crate) struct InstallLauncherSpec {
     pub(crate) env: Vec<(String, String)>,
 }
 
-/// Resolve the bundled launcher. Development executes the TypeScript CLI via
-/// tsx; release executes the bundled `cli/taco.mjs` with the same sidecar Node
-/// binary shipped as Tauri externalBin, so first-run registration never relies
-/// on a global `taco` command.
+/// Resolve the bundled launcher. Development executes `node taco.cjs`
+/// (CJS shim, so no tsx); release executes the bundled `cli/taco.mjs`
+/// with the same sidecar Node binary shipped as Tauri externalBin, so
+/// first-run registration never relies on a global `taco` command.
 pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLauncherSpec> {
     if cfg!(debug_assertions) {
         let repo_root = find_repo_root();
-        let tsx = resolve_repo_source_program(&repo_root);
+        let node = resolve_repo_source_program();
         let cli_bin = repo_root
             .join("packages")
             .join("cli")
@@ -269,7 +270,7 @@ pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLaunch
             .join("taco.cjs");
         if cli_bin.exists() {
             return Some(InstallLauncherSpec {
-                program: tsx,
+                program: node,
                 prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
                 env: Vec::new(),
             });
@@ -320,7 +321,7 @@ pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLaunch
 pub(crate) fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<InstallLauncherSpec> {
     if cfg!(debug_assertions) {
         let repo_root = find_repo_root();
-        let tsx = resolve_repo_source_program(&repo_root);
+        let node = resolve_repo_source_program();
         let cli_bin = repo_root
             .join("packages")
             .join("cli")
@@ -328,7 +329,7 @@ pub(crate) fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<Ins
             .join("taco.cjs");
         if cli_bin.exists() {
             return Some(InstallLauncherSpec {
-                program: tsx,
+                program: node,
                 prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
                 env: Vec::new(),
             });

@@ -4,6 +4,7 @@
 //! separate from `lib.rs`'s Tauri command layer so the path logic can be
 //! reasoned about without the workspace-command noise.
 
+use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
@@ -20,13 +21,38 @@ pub(crate) fn strip_win_verbatim(p: &Path) -> PathBuf {
     }
 }
 
+/// Hash a runtime directory into the 16-hex slug used in Windows pipe names.
+///
+/// Must stay in lockstep with `packages/cli/lib/paths.ts::windowsPipeSlug` —
+/// the sidecar is a separate process that derives the same pipe name on its
+/// own: slash direction is folded first, then the `\\?\` prefix is dropped,
+/// then trailing separators are trimmed, then the case fold is **ASCII-only**
+/// (`make_ascii_lowercase`, *not* `str::to_lowercase`, which would split
+/// `C:\Users\Ü…` from the TS side's `[A-Z]`-only fold).
+pub(crate) fn windows_pipe_slug(runtime_dir: &Path) -> String {
+    let slashed = runtime_dir.to_string_lossy().replace('/', "\\");
+    let mut normalized = strip_win_verbatim(Path::new(&slashed))
+        .to_string_lossy()
+        .into_owned();
+    while normalized.ends_with('\\') {
+        normalized.pop();
+    }
+    normalized.make_ascii_lowercase();
+    let digest = Sha256::digest(normalized.as_bytes());
+    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
 /// NDJSON socket path. Unix: filesystem path under the resolved runtime
-/// directory. Windows: named pipe `\\.\pipe\taco-sidecar`. Mirrors
-/// `packages/cli/lib/paths.ts` so the @taco-ai/cli launcher and the desktop
-/// agree on the path without an IPC roundtrip.
+/// directory. Windows: named pipe derived from the runtime directory so
+/// debug (`~/.taco-dev/run`) and release (`~/.taco/run`) do not collide.
+/// Mirrors `packages/cli/lib/paths.ts` so the @taco-ai/cli launcher and the
+/// desktop agree on the path without an IPC roundtrip.
 pub(crate) fn ndjson_socket_path(runtime_dir: &Path) -> PathBuf {
     if cfg!(windows) {
-        return PathBuf::from(r"\\.\pipe\taco-sidecar");
+        return PathBuf::from(format!(
+            r"\\.\pipe\taco-sidecar-{}",
+            windows_pipe_slug(runtime_dir)
+        ));
     }
     runtime_dir.join("sidecar.sock")
 }
@@ -37,7 +63,10 @@ pub(crate) fn ndjson_socket_path(runtime_dir: &Path) -> PathBuf {
 /// channel.
 pub(crate) fn control_socket_path(runtime_dir: &Path) -> PathBuf {
     if cfg!(windows) {
-        return PathBuf::from(r"\\.\pipe\taco-sidecar-ctl");
+        return PathBuf::from(format!(
+            r"\\.\pipe\taco-sidecar-ctl-{}",
+            windows_pipe_slug(runtime_dir)
+        ));
     }
     runtime_dir.join("sidecar-ctl.sock")
 }
@@ -193,29 +222,62 @@ mod tests {
             Path::new("/repo/state/.run-dev")
         );
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_names_are_scoped_to_the_runtime_directory() {
+        use super::{control_socket_path, ndjson_socket_path, windows_pipe_slug};
+        let debug = Path::new(r"C:\Users\test\.taco-dev\run");
+        let release = Path::new(r"C:\Users\test\.taco\run");
+        assert_eq!(windows_pipe_slug(debug), "3046aa052e73dbd5");
+        assert_eq!(windows_pipe_slug(release), "09fab001c591f07f");
+        assert_ne!(ndjson_socket_path(debug), ndjson_socket_path(release));
+        assert_eq!(
+            ndjson_socket_path(debug),
+            Path::new(r"\\.\pipe\taco-sidecar-3046aa052e73dbd5")
+        );
+        assert_eq!(
+            control_socket_path(debug),
+            Path::new(r"\\.\pipe\taco-sidecar-ctl-3046aa052e73dbd5")
+        );
+        assert_eq!(
+            windows_pipe_slug(Path::new(r"c:/Users/test/.taco-dev/run")),
+            windows_pipe_slug(debug)
+        );
+        assert_eq!(
+            windows_pipe_slug(Path::new(r"\\?\C:\Users\test\.taco-dev\run")),
+            windows_pipe_slug(debug)
+        );
+        // The forward-slash verbatim form must fold to the backslash one —
+        // `windowsPipeSlug` replaces slashes before dropping the prefix.
+        assert_eq!(
+            windows_pipe_slug(Path::new(r"//?/C:/Users/test/.taco-dev/run")),
+            windows_pipe_slug(debug)
+        );
+        // Case fold is ASCII-only, matching the TS side's `[A-Z]` replace.
+        assert_eq!(
+            windows_pipe_slug(Path::new(r"C:\Users\ÜNDREA\.taco-dev\run")),
+            windows_pipe_slug(Path::new(r"c:\users\ÜNDREA\.taco-dev\run"))
+        );
+    }
 }
 
 #[cfg(windows)]
-const SIDECAR_PROGRAM_FILENAME: &str = "tsx.cmd";
+const NODE_PROGRAM_FILENAME: &str = "node.exe";
 #[cfg(not(windows))]
-const SIDECAR_PROGRAM_FILENAME: &str = "tsx";
+const NODE_PROGRAM_FILENAME: &str = "node";
 
-/// Resolve the sidecar launcher in repo-source (debug) mode.
+/// Resolve the program that runs `packages/cli/bin/taco.cjs` in repo-source
+/// (debug) mode.
 ///
-/// On Windows `Command::new("tsx")` does not consult PATHEXT, so a bare
-/// `tsx` lookup fails with "program not found" even when `tsx.cmd` sits
-/// right next to it in `node_modules/.bin`. Prefer the workspace-local
-/// copy pnpm installs; fall back to the bare name so a globally-installed
-/// tsx still works.
-pub(crate) fn resolve_repo_source_program(repo_root: &Path) -> String {
-    let local = repo_root
-        .join("node_modules")
-        .join(".bin")
-        .join(SIDECAR_PROGRAM_FILENAME);
-    if local.exists() {
-        return local.to_string_lossy().into_owned();
-    }
-    SIDECAR_PROGRAM_FILENAME.to_string()
+/// `taco.cjs` is CJS, so plain Node is enough — do not go through the
+/// `node_modules/.bin/tsx` shim. On Windows that shim is `tsx.cmd`, and
+/// Node 22+ rejects `.cmd`/`.bat` with `spawn EINVAL` (CVE-2024-27980).
+/// macOS/Linux hide this because their shim is a real executable with a
+/// shebang. `Command::new("node.exe")` searches PATH for the `.exe`; a
+/// bare `node` on Windows does not consult PATHEXT.
+pub(crate) fn resolve_repo_source_program() -> String {
+    NODE_PROGRAM_FILENAME.to_string()
 }
 
 /// 从当前可执行文件向上扫描,找到含 `pnpm-workspace.yaml` 的目录作为 repo root。

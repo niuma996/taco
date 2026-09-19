@@ -45,10 +45,10 @@ in stack traces.
 | Platform | Data socket | Control socket |
 |---|---|---|
 | Unix | `$TACO_RUNTIME_DIR/sidecar.sock` | `$TACO_RUNTIME_DIR/sidecar-ctl.sock` |
-| Windows | `\\.\pipe\taco-sidecar` | `\\.\pipe\taco-sidecar-ctl` |
+| Windows | `\\.\pipe\taco-sidecar-<slug>` | `\\.\pipe\taco-sidecar-ctl-<slug>` |
 
-The Windows pipe names are **fixed** and do not change with `TACO_RUNTIME_DIR`
-— so on Windows you cannot get a second daemon by pointing the CLI at a
-different runtime directory. The Unix layout follows the runtime directory,
-so Unix users can run isolated daemons by exporting a different
-`TACO_RUNTIME_DIR` before each `taco start`.
+`<slug>` is the first 16 hex chars of SHA-256 over a normalized
+`$TACO_RUNTIME_DIR` (slash direction, trailing separator, and the
+Windows `\\?\` prefix are stripped so equivalent paths hash the same).
+Debug (`~/.taco-dev/run`) and release (`~/.taco/run`) therefore get
+distinct pipes instead of colliding on a global `\\.\pipe\taco-sidecar`.

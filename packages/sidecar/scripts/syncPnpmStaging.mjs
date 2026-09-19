@@ -70,6 +70,7 @@ function main() {
         const r = spawnSync("pnpm", ["--filter", "@taco-ai/sidecar", "package:runtime"], {
             cwd: resolve(PKG_DIR, "..", ".."),
             stdio: "inherit",
+            shell: process.platform === "win32",
         });
         if (r.status !== 0) {
             process.exit(r.status ?? 1);
