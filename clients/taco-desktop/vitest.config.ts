@@ -22,6 +22,7 @@ export default defineConfig({
             "tests/components/SubagentPanel.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",
             "tests/components/ContextIndicator.test.tsx",
+            "tests/components/TopbarQuickActions.test.tsx",
             "tests/components/LlmDumpPanel.test.tsx",
             "tests/components/toolViews/ReadToolCard.test.tsx",
             "tests/components/toolViews/ToolCardShell.test.tsx",

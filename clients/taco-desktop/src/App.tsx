@@ -22,6 +22,7 @@ import { TaskPanel } from "./components/panels/TaskPanel";
 import { RenameModal } from "./components/RenameModal";
 import { McpSection } from "./components/settings/McpSection.tsx";
 import { SchedulesTab } from "./components/settings/SchedulesTab.tsx";
+import { TopbarQuickActions } from "./components/TopbarQuickActions";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspacePicker } from "./components/WorkspacePicker";
@@ -565,6 +566,7 @@ export default function App() {
                         />
                     )}
                     <div className="drag-spacer" data-tauri-drag-region />
+                    <TopbarQuickActions />
                     {errorBanner && (
                         <div
                             className="error-banner"

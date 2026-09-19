@@ -38,6 +38,14 @@ header.topbar {
     position: relative;
 }
 
+/* Windows / Linux: custom min/max/close is position:fixed at the window's
+   right edge (3 × 46px = 138px). Extra padding keeps TopbarQuickActions
+   from sitting under those buttons. macOS uses native overlay traffic
+   lights on the left, so the topbar's right edge is already clear. */
+:root:not([data-platform="macos"]) header.topbar {
+    padding-right: 146px; /* 138px controls + 8px gap */
+}
+
 /* Drag region in the topbar (header + drag-spacer via data-tauri-drag-region) enables window
    dragging + double-click maximize; interactive children omit the attribute so they don't interfere. */
 header.topbar .drag-spacer {
@@ -278,6 +286,59 @@ header.topbar .topbar-picker-group {
     height: 1px;
     background: var(--border);
     margin: 4px 0;
+}
+
+/* Language + theme shortcuts, pinned after the drag spacer so they sit
+   at the topbar's right edge (Windows: just left of the window controls
+   via the extra padding-right above). */
+.topbar-quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+}
+
+.topbar-quick-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+        color 0.12s ease,
+        background 0.12s ease;
+}
+
+.topbar-quick-btn:hover,
+.topbar-quick-btn[data-state="open"] {
+    color: var(--fg);
+    background: var(--accent-bg-active);
+}
+
+.topbar-quick-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Same chrome as .topbar-workspace-menu, but without the pane-width cap —
+   these menus are short labels (English / 中文 / Light / Dark / System). */
+.topbar-quick-menu {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 6px 18px var(--shadow-color);
+    z-index: 100;
+    overflow: hidden;
+    min-width: 140px;
+    padding: 4px 0;
 }
 
 /* .layout (second definition, originally L1083-1097) */
