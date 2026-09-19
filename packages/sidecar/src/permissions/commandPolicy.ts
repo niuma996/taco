@@ -64,15 +64,50 @@ const READ_ONLY = new Set([
     "git log",
     "git show",
     "git branch",
+    "git remote",
     "git remote -v",
+    "git remote get-url",
+    "git blame",
+    "git rev-parse",
+    "git ls-files",
+    "git ls-tree",
+    "git describe",
+    "git merge-base",
+    "git rev-list",
+    "git shortlog",
+    "git cat-file",
+    "git show-ref",
+    "git for-each-ref",
+    "git name-rev",
+    "git check-ignore",
+    "git version",
+    "git --version",
+    "git help",
+    "git reflog",
+    // Dual-use parents (`git stash`, `git config`, `git tag`, `git worktree`)
+    // stay out of the set except the listed read-only forms, so mutating
+    // siblings (`stash apply`, `config user.email x`, `tag v1`) keep asking.
+    // `git branch` is in the set so a bare listing auto-allows; extra
+    // positional args still create a branch and are rejected below.
+    "git stash list",
+    "git stash show",
+    "git config --get",
+    "git config --get-all",
+    "git config --get-regexp",
+    "git config --list",
+    "git config -l",
+    "git worktree list",
+    "git submodule status",
+    "git tag --list",
+    "git tag -l",
 ]);
 
 /**
  * Flags that mutate the filesystem or execute arbitrary commands. Listed
  * here (rather than per-base) because flag values like `-mtime -7` or
  * `-size +1k` legitimately start with `-`/`+` and a per-base whitelist
- * cannot distinguish them from flags. None of the read-only commands other
- * than `find` accept these flag names, so a global blacklist is safe.
+ * cannot distinguish them from flags. `find`'s mutating predicates and
+ * `git cat-file`'s filter/command-stream flags share this set.
  */
 const READ_ONLY_FORBIDDEN_FLAGS: ReadonlySet<string> = new Set([
     "-delete",
@@ -84,6 +119,67 @@ const READ_ONLY_FORBIDDEN_FLAGS: ReadonlySet<string> = new Set([
     "-fprint0",
     "-fls",
     "-fprintf",
+    // git cat-file: these spawn filters / read a command stream from stdin.
+    "--textconv",
+    "--filters",
+    "--batch-command",
+    // git diff/log: writes the diff to a file instead of stdout.
+    "--output",
+]);
+
+/**
+ * Dual-use git prefixes (`git branch`, `git stash show`, `git config --get`,
+ * …) auto-allow only while extra tokens stay non-mutating. Positional names
+ * after `git branch` create a branch, so that parent additionally requires
+ * remaining tokens to be flags.
+ *
+ * Matched against the token's stem (`--set-upstream-to=x` → `--set-upstream-to`)
+ * so an attached value cannot dodge the check.
+ */
+const GIT_DUAL_USE_MUTATING_TOKENS: ReadonlySet<string> = new Set([
+    "-D",
+    "-d",
+    "-m",
+    "-M",
+    "-f",
+    "-c",
+    "-C",
+    "--force",
+    "--delete",
+    "--edit",
+    "--unset",
+    "--unset-all",
+    "--replace-all",
+    "--add",
+    "--remove",
+    "--track",
+    "--copy",
+    "--move",
+    // `git branch` upstream/description flags write branch config or spawn $EDITOR.
+    "--set-upstream",
+    "--set-upstream-to",
+    "--unset-upstream",
+    "--edit-description",
+    // `git help -w` opens a browser. Scoped to the dual-use bases so plain
+    // `-w` (grep word-match, `git log -w` whitespace) is unaffected.
+    "-w",
+    "--web",
+    "expire",
+    "delete",
+    "apply",
+    "drop",
+    "pop",
+    "push",
+    "add",
+    "remove",
+    "update",
+    "prune",
+    "move",
+    "rename",
+    "edit",
+    "create",
+    "set-url",
+    "set-head",
 ]);
 
 const DESTRUCTIVE: Array<[RegExp, string]> = [
@@ -109,9 +205,30 @@ function normalize(command: string): string {
     return command.trim().replace(/\s+/g, " ");
 }
 
+/**
+ * Drop the common `git --no-pager` global so inspection commands still match
+ * the read-only set. Other globals (`-C`, `-c`, `--git-dir`) stay: they can
+ * retarget the repo or inject aliases.
+ */
+function stripSafeGitGlobals(command: string): string {
+    return command.replace(/^git --no-pager /, "git ");
+}
+
+/**
+ * `--output=/tmp/x` → `--output`; bare tokens unchanged. Flag checks match on
+ * the stem so an attached value cannot dodge them.
+ */
+function flagStem(token: string): string {
+    const eq = token.indexOf("=");
+    return eq === -1 ? token : token.slice(0, eq);
+}
+
 const SHELL_METACHARACTERS = /[<>|;&$`\n(){}[\]*?]/;
 
-const SAFE_LITERAL = /^--?[A-Za-z0-9_+/,+=-]+$|^[A-Za-z0-9_./,+=-]+$/;
+// Colon / tilde / caret / at / percent show up in git revisions
+// (`HEAD:path`, `HEAD~1`, `main^2`, `@`, `--pretty=format:%s`). None of
+// these are shell metacharacters, so they stay in the literal class.
+const SAFE_LITERAL = /^--?[A-Za-z0-9_+/,+=:@^~%-]+$|^[A-Za-z0-9_./,+=:@^~%-]+$/;
 
 function containsShellSyntax(command: string): boolean {
     return SHELL_METACHARACTERS.test(command);
@@ -125,6 +242,7 @@ function splitCommand(command: string): string[] {
 }
 
 function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason"> {
+    command = stripSafeGitGlobals(normalize(command));
     if (command.includes("$(") || command.includes("`")) {
         return {
             risk: "workspaceWrite",
@@ -182,8 +300,41 @@ function matchesRule(command: string, rules: CommandPermissionRule[]): boolean {
     });
 }
 
-/** Commands whose base form is read-only but whose arguments can change risk. */
-const READ_ONLY_BASES = new Set(["git branch", "git checkout"]);
+/**
+ * Commands whose base form is read-only but whose arguments can change risk.
+ * `git checkout` is not in {@link READ_ONLY}; it lives here so a future
+ * listing still cannot auto-allow `git checkout -- .`. `git branch` used to
+ * sit here too — it now auto-allows when remaining tokens are non-mutating
+ * flags (see {@link extraGitArgsAreSafe}).
+ */
+const READ_ONLY_BASES = new Set(["git checkout"]);
+
+function isGitDualUseBase(base: string): boolean {
+    return (
+        base.startsWith("git help") ||
+        base.startsWith("git branch") ||
+        base.startsWith("git tag") ||
+        base.startsWith("git config") ||
+        base.startsWith("git stash") ||
+        base.startsWith("git worktree") ||
+        base.startsWith("git submodule") ||
+        base.startsWith("git remote") ||
+        base.startsWith("git reflog")
+    );
+}
+
+function extraGitArgsAreSafe(base: string, remaining: readonly string[]): boolean {
+    if (!isGitDualUseBase(base)) return true;
+    for (const part of remaining) {
+        if (GIT_DUAL_USE_MUTATING_TOKENS.has(flagStem(part))) return false;
+    }
+    // `git branch newbranch` creates a branch; `git remote show` contacts the
+    // remote. Remaining tokens on those short parents must be flags.
+    if (base === "git branch" || base === "git remote") {
+        return remaining.every((part) => part.startsWith("-"));
+    }
+    return true;
+}
 
 /**
  * Returns true if the command is an exact, safe form of a known read-only
@@ -191,7 +342,7 @@ const READ_ONLY_BASES = new Set(["git branch", "git checkout"]);
  * the recognized base command.
  */
 export function isStrictReadOnly(command: string): boolean {
-    const normalized = normalize(command);
+    const normalized = stripSafeGitGlobals(normalize(command));
     if (containsShellSyntax(normalized)) return false;
 
     const parts = normalized.split(/\s+/);
@@ -200,27 +351,25 @@ export function isStrictReadOnly(command: string): boolean {
     const first = parts[0] ?? "";
     if (isShellWrapperCommand(first)) return false;
 
-    // Find the longest READ_ONLY prefix, e.g. "git remote -v".
-    let matchedTokens = 1;
-    while (matchedTokens <= parts.length) {
-        const token = parts.slice(0, matchedTokens).join(" ");
-        if (READ_ONLY.has(token)) break;
-        if (matchedTokens === parts.length) return false;
-        matchedTokens++;
+    // Longest READ_ONLY prefix, e.g. "git remote get-url" over "git remote".
+    let matchedTokens = 0;
+    for (let i = 1; i <= parts.length; i++) {
+        if (READ_ONLY.has(parts.slice(0, i).join(" "))) matchedTokens = i;
     }
+    if (matchedTokens === 0) return false;
 
     const base = parts.slice(0, matchedTokens).join(" ");
     // Read-only bases with mutating flags remain ask-only.
     if (READ_ONLY_BASES.has(base)) return false;
 
-    // Every remaining argument must be a simple literal flag/value with no
-    // shell metacharacters. A small blacklist blocks flags that mutate state
-    // (mostly find's -delete / -exec / -fprint family); other read-only
-    // commands do not accept these flag names.
-    for (let i = matchedTokens; i < parts.length; i++) {
-        const part = parts[i] ?? "";
+    const remaining = parts.slice(matchedTokens);
+    if (!extraGitArgsAreSafe(base, remaining)) return false;
+
+    // Remaining tokens must be simple literals. The blacklist covers find's
+    // mutating predicates and git cat-file's filter/command-stream flags.
+    for (const part of remaining) {
         if (containsShellSyntax(part)) return false;
-        if (READ_ONLY_FORBIDDEN_FLAGS.has(part)) return false;
+        if (READ_ONLY_FORBIDDEN_FLAGS.has(flagStem(part))) return false;
         if (!SAFE_LITERAL.test(part)) return false;
     }
     return true;

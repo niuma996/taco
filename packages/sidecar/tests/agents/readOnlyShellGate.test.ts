@@ -72,9 +72,9 @@ describe("read-only shell gate", () => {
         // base command must survive isStrictReadOnly, or the profile instructs
         // the model to run things the broker will deny — wasted turns and false
         // "cannot verify" reports. Extract the promised commands from the doc
-        // itself and bind them to the real allowlist. (`git branch` is excluded
-        // deliberately: it sits in READ_ONLY_BASES and is denied even bare,
-        // because it shares the mutating-flag escalation rule with checkout.)
+        // itself and bind them to the real allowlist. Mutating git siblings
+        // (`git branch -D`, `git checkout`) stay out of the promised list even
+        // though the `git branch` listing form now auto-allows.
         const agents = await loadAgents({ builtinDir: BUILTIN_DIR, userDirs: [] });
         const reviewer = agents.find((a) => a.agentType === "reviewer");
         assert.ok(reviewer, "expected the reviewer builtin");
@@ -82,10 +82,22 @@ describe("read-only shell gate", () => {
             .map((m) => m[1].trim())
             .filter((s) => /^(pwd|ls|which|git )/.test(s));
         // Sanity: the doc must promise exactly the base commands the gate accepts
-        // and nothing it denies (git branch is a READ_ONLY_BASE — denied bare).
+        // and nothing it denies.
         assert.deepEqual(
             [...promised].sort(),
-            ["git diff", "git log", "git show", "git status", "ls", "pwd", "which"],
+            [
+                "git blame",
+                "git branch",
+                "git diff",
+                "git log",
+                "git ls-files",
+                "git rev-parse",
+                "git show",
+                "git status",
+                "ls",
+                "pwd",
+                "which",
+            ],
             "reviewer.md's promised shell commands drifted from the read-only allowlist",
         );
         for (const cmd of promised) {

@@ -87,6 +87,113 @@ describe("evaluateCommand", () => {
         assert.equal(result.behavior, "ask");
     });
 
+    it("auto-allows common read-only git inspection commands in auto mode", () => {
+        for (const cmd of [
+            "git branch",
+            "git branch --show-current",
+            "git branch --list",
+            "git branch -a",
+            "git branch -r",
+            "git branch -v",
+            "git blame src/foo.ts",
+            "git blame -L 1,10 src/foo.ts",
+            "git rev-parse HEAD",
+            "git rev-parse --abbrev-ref HEAD",
+            "git rev-parse --show-toplevel",
+            "git ls-files",
+            "git ls-files src",
+            "git ls-tree HEAD",
+            "git describe --tags --always",
+            "git merge-base main HEAD",
+            "git rev-list --count HEAD",
+            "git shortlog -sn",
+            "git cat-file -t HEAD",
+            "git show-ref --heads",
+            "git for-each-ref refs/heads",
+            "git name-rev HEAD",
+            "git check-ignore src/foo.ts",
+            "git version",
+            "git --version",
+            "git help",
+            "git help status",
+            "git reflog",
+            "git stash list",
+            "git stash show",
+            "git stash show -p",
+            "git config --get user.email",
+            "git config --get-all remote.origin.url",
+            "git config --get-regexp user.",
+            "git config --list",
+            "git config -l",
+            "git remote",
+            "git remote -v",
+            "git remote get-url origin",
+            "git worktree list",
+            "git submodule status",
+            "git tag --list",
+            "git tag -l",
+            "git show HEAD:src/foo.ts",
+            "git log HEAD~1",
+            "git show main^2",
+            "git log --pretty=format:%s",
+            "git --no-pager status",
+            "git --no-pager log --oneline",
+            "git --no-pager diff --stat",
+        ]) {
+            const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
+            assert.equal(result.behavior, "allow", cmd);
+            assert.equal(result.risk, "readOnly", cmd);
+        }
+    });
+
+    it("does not auto-allow mutating siblings of read-only git prefixes", () => {
+        for (const cmd of [
+            "git branch newbranch",
+            "git branch --track foo",
+            "git stash push",
+            "git stash apply",
+            "git stash drop",
+            "git config user.email x",
+            "git config --unset user.email",
+            "git config --list --edit",
+            "git remote add origin url",
+            "git remote remove origin",
+            "git remote show origin",
+            "git worktree add ../other",
+            "git submodule update",
+            "git tag v1.0.0",
+            "git tag -d v1.0.0",
+            "git tag --list --delete v1.0.0",
+            "git reflog expire",
+            // Attached flag values must not dodge the mutating-token check.
+            "git branch --set-upstream-to=origin/main",
+            "git branch --unset-upstream",
+            "git branch --edit-description",
+            "git branch -c old new",
+            "git branch -C old new",
+            "git branch --copy old new",
+            "git branch --move old new",
+            "git config --get-regexp --unset-all user.",
+            // Writes the diff to a file instead of stdout.
+            "git diff --output=/tmp/out.patch",
+            "git log --output=/tmp/out.txt",
+            // Opens a browser.
+            "git help -w status",
+            "git help --web status",
+            "git cat-file --textconv HEAD",
+            "git cat-file --filters HEAD",
+            "git cat-file --batch-command",
+            "git checkout main",
+            "git -C /tmp status",
+            "git --git-dir=/tmp status",
+            "git --no-pager push origin main",
+            "git --no-pager reset --hard HEAD",
+        ]) {
+            const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
+            assert.equal(result.behavior, "ask", cmd);
+        }
+    });
+
     it("does not auto-allow commands with command substitution", () => {
         const result = evaluateCommand("ls $(pwd)", { mode: "auto", rules: [] });
 
