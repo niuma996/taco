@@ -70,7 +70,10 @@ impl LogFile {
         if self.bytes + added > MAX_BYTES && self.bytes > 0 {
             self.rotate()?;
         }
-        let writer = self.writer.as_mut().expect("writer present outside rotation");
+        let writer = self
+            .writer
+            .as_mut()
+            .expect("writer present outside rotation");
         writer.write_all(line.as_bytes())?;
         writer.write_all(b"\n")?;
         self.bytes += added;
@@ -151,10 +154,7 @@ pub fn ensure_logs_dir(taco_home: &Path) -> std::io::Result<PathBuf> {
 /// `$TACO_HOME/logs/llm-dump.log`. Lines without the marker are skipped
 /// without touching the file; rotation / permissions / capacity are
 /// inherited from `LogFile` and covered by the dedicated tests above.
-pub fn tee_llm_dump_lines<R: BufRead>(
-    reader: R,
-    llm: &mut LogFile,
-) -> std::io::Result<usize> {
+pub fn tee_llm_dump_lines<R: BufRead>(reader: R, llm: &mut LogFile) -> std::io::Result<usize> {
     let mut written = 0usize;
     for line in reader.lines() {
         let line = line?;

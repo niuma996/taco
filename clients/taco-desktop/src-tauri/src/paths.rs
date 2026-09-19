@@ -152,6 +152,87 @@ pub(crate) fn resolve_taco_runtime_dir(app: &AppHandle) -> Result<PathBuf, Strin
     Ok(runtime_dir)
 }
 
+#[cfg(windows)]
+const NODE_PROGRAM_FILENAME: &str = "node.exe";
+#[cfg(not(windows))]
+const NODE_PROGRAM_FILENAME: &str = "node";
+
+/// Resolve the program that runs `packages/cli/bin/taco.cjs` in repo-source
+/// (debug) mode.
+///
+/// `taco.cjs` is CJS, so plain Node is enough — do not go through the
+/// `node_modules/.bin/tsx` shim. On Windows that shim is `tsx.cmd`, and
+/// Node 22+ rejects `.cmd`/`.bat` with `spawn EINVAL` (CVE-2024-27980).
+/// macOS/Linux hide this because their shim is a real executable with a
+/// shebang. `Command::new("node.exe")` searches PATH for the `.exe`; a
+/// bare `node` on Windows does not consult PATHEXT.
+pub(crate) fn resolve_repo_source_program() -> String {
+    NODE_PROGRAM_FILENAME.to_string()
+}
+
+/// 从当前可执行文件向上扫描,找到含 `pnpm-workspace.yaml` 的目录作为 repo root。
+/// 跨 `cargo run` / `pnpm tauri:dev` / release `.app` bundle 都稳。
+pub(crate) fn find_repo_root() -> PathBuf {
+    let start = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    let mut current = start;
+    loop {
+        if current.join("pnpm-workspace.yaml").exists() {
+            return current;
+        }
+        match current.parent() {
+            Some(p) => current = p.to_path_buf(),
+            None => return current,
+        }
+    }
+}
+
+/// Lexically normalize: 解析 `.` / `..` 但不要求路径存在(无 fs 访问)。
+/// 与 Node 端 `path.resolve` 行为一致,这是 WorkspaceRuntime 用于 routing key 的语义。
+pub(crate) fn cleanpath(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {} // skip .
+            Component::ParentDir => {
+                // pop only if there's a real prefix / normal component to pop
+                if matches!(
+                    out.components().next_back(),
+                    Some(Component::Normal(_)) | Some(Component::Prefix(_))
+                ) {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        out
+    }
+}
+
+pub(crate) fn normalize_cwd(cwd: &str) -> String {
+    // 与 sidecar 端 WorkspaceRuntime 行为对齐:
+    //   1. trim 尾部 /
+    //   2. 相对路径以 current_dir 兜底拼成绝对路径
+    //   3. 解析 . / .. 段(无需路径存在,允许预先注册尚未创建的 workspace)
+    let trimmed = cwd.trim_end_matches('/');
+    let p = Path::new(trimmed);
+    let absolute: PathBuf = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(p),
+            Err(_) => p.to_path_buf(),
+        }
+    };
+    cleanpath(&absolute).to_string_lossy().into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{default_taco_home, resolve_taco_home_value, resolve_taco_runtime_dir_value};
@@ -260,85 +341,4 @@ mod tests {
             windows_pipe_slug(Path::new(r"c:\users\ÜNDREA\.taco-dev\run"))
         );
     }
-}
-
-#[cfg(windows)]
-const NODE_PROGRAM_FILENAME: &str = "node.exe";
-#[cfg(not(windows))]
-const NODE_PROGRAM_FILENAME: &str = "node";
-
-/// Resolve the program that runs `packages/cli/bin/taco.cjs` in repo-source
-/// (debug) mode.
-///
-/// `taco.cjs` is CJS, so plain Node is enough — do not go through the
-/// `node_modules/.bin/tsx` shim. On Windows that shim is `tsx.cmd`, and
-/// Node 22+ rejects `.cmd`/`.bat` with `spawn EINVAL` (CVE-2024-27980).
-/// macOS/Linux hide this because their shim is a real executable with a
-/// shebang. `Command::new("node.exe")` searches PATH for the `.exe`; a
-/// bare `node` on Windows does not consult PATHEXT.
-pub(crate) fn resolve_repo_source_program() -> String {
-    NODE_PROGRAM_FILENAME.to_string()
-}
-
-/// 从当前可执行文件向上扫描,找到含 `pnpm-workspace.yaml` 的目录作为 repo root。
-/// 跨 `cargo run` / `pnpm tauri:dev` / release `.app` bundle 都稳。
-pub(crate) fn find_repo_root() -> PathBuf {
-    let start = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_default();
-    let mut current = start;
-    loop {
-        if current.join("pnpm-workspace.yaml").exists() {
-            return current;
-        }
-        match current.parent() {
-            Some(p) => current = p.to_path_buf(),
-            None => return current,
-        }
-    }
-}
-
-/// Lexically normalize: 解析 `.` / `..` 但不要求路径存在(无 fs 访问)。
-/// 与 Node 端 `path.resolve` 行为一致,这是 WorkspaceRuntime 用于 routing key 的语义。
-pub(crate) fn cleanpath(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {} // skip .
-            Component::ParentDir => {
-                // pop only if there's a real prefix / normal component to pop
-                if matches!(
-                    out.components().next_back(),
-                    Some(Component::Normal(_)) | Some(Component::Prefix(_))
-                ) {
-                    out.pop();
-                }
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    if out.as_os_str().is_empty() {
-        PathBuf::from(".")
-    } else {
-        out
-    }
-}
-
-pub(crate) fn normalize_cwd(cwd: &str) -> String {
-    // 与 sidecar 端 WorkspaceRuntime 行为对齐:
-    //   1. trim 尾部 /
-    //   2. 相对路径以 current_dir 兜底拼成绝对路径
-    //   3. 解析 . / .. 段(无需路径存在,允许预先注册尚未创建的 workspace)
-    let trimmed = cwd.trim_end_matches('/');
-    let p = Path::new(trimmed);
-    let absolute: PathBuf = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(p),
-            Err(_) => p.to_path_buf(),
-        }
-    };
-    cleanpath(&absolute).to_string_lossy().into_owned()
 }

@@ -40,8 +40,8 @@ pub mod daemon_reap_test {
 pub mod upgrade_commands;
 
 use crate::paths::{
-    control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home, resolve_taco_runtime_dir,
-    strip_win_verbatim,
+    control_socket_path, find_repo_root, normalize_cwd, resolve_taco_home,
+    resolve_taco_runtime_dir, strip_win_verbatim,
 };
 #[cfg(debug_assertions)]
 use crate::sidecar_launcher::DEBUG_ONLY_PASSTHROUGH_ENV;
@@ -118,7 +118,10 @@ fn read_desktop_config_debug_mode(app: &tauri::AppHandle) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    parsed.get("debugMode").and_then(|v| v.as_bool()).unwrap_or(false)
+    parsed
+        .get("debugMode")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 /// Read `llmDumpToFile` from `~/.taco/desktop.json`. Same failure-path
@@ -140,7 +143,10 @@ fn read_desktop_config_llm_dump_to_file(app: &tauri::AppHandle) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    parsed.get("llmDumpToFile").and_then(|v| v.as_bool()).unwrap_or(false)
+    parsed
+        .get("llmDumpToFile")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -166,9 +172,6 @@ async fn desktop_config_write(app: AppHandle, contents: String) -> Result<(), St
         .map_err(|e| format!("failed to rename desktop.json.tmp: {e}"))?;
     Ok(())
 }
-
-/// (Implementation lives in `upgrade_commands.rs` so this Tauri-command
-///  layer stays focused on the workspace_* handlers.)
 
 pub struct AppState {
     /// The single shared sidecar process. Lock is held only across install / dispose;
@@ -660,7 +663,10 @@ async fn workspace_ensure(
     let mut launcher = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar launcher: {e}"))?;
-    boot_trace::mark_rust_detail("ensure.launcher_spawned", &format!("pid={:?}", launcher.id()));
+    boot_trace::mark_rust_detail(
+        "ensure.launcher_spawned",
+        &format!("pid={:?}", launcher.id()),
+    );
     let generation = state
         .next_process_generation
         .fetch_add(1, Ordering::Relaxed);
@@ -805,7 +811,10 @@ async fn workspace_ensure(
                 // Real failure: capture stderr and surface immediately.
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 let mut captured = stderr_buf.lock().unwrap().clone();
-                while captured.last().map_or(false, |b| b.is_ascii_whitespace() || *b == 0) {
+                while captured
+                    .last()
+                    .is_some_and(|b| b.is_ascii_whitespace() || *b == 0)
+                {
                     captured.pop();
                 }
                 let stderr_tail = String::from_utf8_lossy(&captured).into_owned();
@@ -870,8 +879,8 @@ async fn workspace_ensure(
         loop {
             match reader.next_line().await {
                 Ok(Some(line)) => {
-                    let _ = app_for_reader
-                        .emit("sidecar-event", serde_json::json!({ "line": line }));
+                    let _ =
+                        app_for_reader.emit("sidecar-event", serde_json::json!({ "line": line }));
                 }
                 Ok(None) => break,
                 Err(e) => {
@@ -1041,9 +1050,11 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
             // accepting connections before returning so the next ensure spawns
             // a fresh process.
             #[cfg(unix)]
-            let _ =
-                tokio::time::timeout(Duration::from_secs(3), wait_for_control_socket_gone(control))
-                    .await;
+            let _ = tokio::time::timeout(
+                Duration::from_secs(3),
+                wait_for_control_socket_gone(control),
+            )
+            .await;
         }
         #[cfg(unix)]
         {
@@ -1150,7 +1161,12 @@ fn expected_sidecar_version(app: &tauri::AppHandle) -> Option<String> {
         )
         .ok()?
     } else {
-        let manifest = app.path().resource_dir().ok()?.join("sidecar").join("manifest.json");
+        let manifest = app
+            .path()
+            .resource_dir()
+            .ok()?
+            .join("sidecar")
+            .join("manifest.json");
         std::fs::read_to_string(strip_win_verbatim(&manifest)).ok()?
     };
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
@@ -1759,7 +1775,10 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let result = super::wait_for_daemon_socket(&sock, std::time::Duration::from_secs(2)).await;
-        assert!(result.is_ok(), "a replying daemon must be seen as ready: {result:?}");
+        assert!(
+            result.is_ok(),
+            "a replying daemon must be seen as ready: {result:?}"
+        );
 
         listener.abort();
         let _ = std::fs::remove_dir_all(&dir);
@@ -1776,8 +1795,8 @@ mod tests {
 
         // Deadline below NDJSON_PROBE_TIMEOUT so the outer loop, not the
         // per-probe timeout, is what gives up — this is the cold-start shape.
-        let result = super::wait_for_daemon_socket(&sock, std::time::Duration::from_millis(300))
-            .await;
+        let result =
+            super::wait_for_daemon_socket(&sock, std::time::Duration::from_millis(300)).await;
         assert!(
             result.is_err(),
             "a daemon that accepts but never answers must NOT be reported ready"
@@ -1798,8 +1817,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let sock = dir.join("sidecar.sock");
 
-        let result = super::wait_for_daemon_socket(&sock, std::time::Duration::from_millis(200))
-            .await;
+        let result =
+            super::wait_for_daemon_socket(&sock, std::time::Duration::from_millis(200)).await;
         assert!(result.is_err(), "no listener at all must fail");
 
         let _ = std::fs::remove_dir_all(&dir);

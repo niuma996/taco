@@ -161,7 +161,11 @@ pub enum ReapOutcome {
     /// Daemon was alive but did not answer the health probe. We killed it
     /// (graceful → forced) and unlinked pid + sockets so a fresh bind
     /// succeeds.
-    Reaped { pid: u32, last_signal: &'static str, preserved_own: bool },
+    Reaped {
+        pid: u32,
+        last_signal: &'static str,
+        preserved_own: bool,
+    },
     /// Pid file pointed at a process that was already dead, OR alive but
     /// ghost-socket (no server). We unlinked pid + sockets so a fresh
     /// bind succeeds.
@@ -478,7 +482,9 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
     let mut stream = UnixStream::connect(path).ok()?;
     stream.set_read_timeout(Some(timeout)).ok()?;
     stream.set_write_timeout(Some(timeout)).ok()?;
-    stream.write_all(b"{\"method\":\"control.ping\",\"id\":1}\n").ok()?;
+    stream
+        .write_all(b"{\"method\":\"control.ping\",\"id\":1}\n")
+        .ok()?;
     stream.flush().ok()?;
     let mut buf = [0u8; 512];
     let _ = stream.shutdown(Shutdown::Write);
@@ -506,8 +512,13 @@ pub fn ping_control_socket(path: &Path, timeout: Duration) -> Option<Pong> {
     // Truly cancelling the read needs overlapped IO + `CancelIoEx` from
     // `windows-sys`; not worth a platform dependency for three threads that
     // exit on their own.
-    let mut pipe = std::fs::OpenOptions::new().read(true).write(true).open(path).ok()?;
-    pipe.write_all(b"{\"method\":\"control.ping\",\"id\":1}\n").ok()?;
+    let mut pipe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .ok()?;
+    pipe.write_all(b"{\"method\":\"control.ping\",\"id\":1}\n")
+        .ok()?;
     pipe.flush().ok()?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

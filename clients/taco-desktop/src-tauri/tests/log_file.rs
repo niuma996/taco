@@ -26,7 +26,10 @@ fn appends_and_reads_back() {
     f.write_line("world").unwrap();
     f.flush().unwrap();
     let mut s = String::new();
-    fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+    fs::File::open(&path)
+        .unwrap()
+        .read_to_string(&mut s)
+        .unwrap();
     assert_eq!(s, "hello\nworld\n");
 }
 
@@ -113,7 +116,10 @@ fn open_tightens_a_preexisting_permissive_file() {
     fs::write(&log, b"old\n").unwrap();
     fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
     let _files = taco_desktop_lib::log_file::LogFiles::open(&dir).unwrap();
-    assert_eq!(fs::metadata(&log).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 #[test]

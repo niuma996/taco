@@ -16,11 +16,20 @@ fn boot_trace_writes_lines_to_taco_home_logs() {
     let log = tmp.join("logs").join("boot.log");
     assert!(log.exists(), "boot.log must be created at {:?}", log);
     let body = std::fs::read_to_string(&log).unwrap();
-    for needle in ["=== boot", "smoke.alpha", "smoke.beta took=7ms",
-                   "smoke.phase.start", "smoke.phase.done took="] {
+    for needle in [
+        "=== boot",
+        "smoke.alpha",
+        "smoke.beta took=7ms",
+        "smoke.phase.start",
+        "smoke.phase.done took=",
+    ] {
         assert!(body.contains(needle), "missing {:?} in:\n{}", needle, body);
     }
     // Offsets must be present and monotonic-looking.
-    assert!(body.contains("ms [rust]"), "offset+source tag missing:\n{}", body);
+    assert!(
+        body.contains("ms [rust]"),
+        "offset+source tag missing:\n{}",
+        body
+    );
     let _ = std::fs::remove_dir_all(&tmp);
 }

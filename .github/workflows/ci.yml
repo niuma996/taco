@@ -116,6 +116,40 @@ jobs:
       - run: pnpm protocol:build && pnpm shared:build
       - run: pnpm --filter @taco-ai/desktop build
 
+  # ── Rust gate ─────────────────────────────────────────────────
+  # The desktop's Tauri shell used to be built only at release-tag time.
+  # That left the safety-critical daemon_reap / workspace_ensure / spawn-env
+  # code paths with zero CI coverage; the integration suite in
+  # tests/daemon_reap_integration.rs (#![cfg(unix)]) is the canonical
+  # defense against regressions there. Always runs: a job-level path
+  # filter cannot use hashFiles (runner-only), and src-tauri is always
+  # present after checkout anyway. rust-cache keeps JS-only PRs cheap.
+  rust:
+    name: rust (clippy + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install Tauri Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/taco-desktop/src-tauri -> target
+      - working-directory: clients/taco-desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - working-directory: clients/taco-desktop/src-tauri
+        run: cargo test --all-targets
+
   # ── Consumer pack-smoke ──────────────────────────────────────
   # Heavy: packs three tarballs into a fresh dir, installs them, exercises
   # the entry points. Gated on push to main so fork PRs don't pay the

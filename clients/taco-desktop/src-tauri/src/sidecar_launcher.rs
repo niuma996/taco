@@ -259,7 +259,13 @@ pub(crate) struct InstallLauncherSpec {
 /// (CJS shim, so no tsx); release executes the bundled `cli/taco.mjs`
 /// with the same sidecar Node binary shipped as Tauri externalBin, so
 /// first-run registration never relies on a global `taco` command.
-pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLauncherSpec> {
+///
+/// Both `tauri::App` (setup closure) and `AppHandle` (Tauri command) plug in
+/// via the shared `Manager` trait — `resource_dir()` is the only path we need
+/// and it's exposed on both surfaces.
+fn resolve_install_launcher_impl<M: Manager<R>, R: tauri::Runtime>(
+    manager: &M,
+) -> Option<InstallLauncherSpec> {
     if cfg!(debug_assertions) {
         let repo_root = find_repo_root();
         let node = resolve_repo_source_program();
@@ -277,8 +283,13 @@ pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLaunch
         }
         return None;
     }
-    let resources = app.path().resource_dir().ok()?.join("cli").join("taco.mjs");
-    let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
+    let resources = manager
+        .path()
+        .resource_dir()
+        .ok()?
+        .join("cli")
+        .join("taco.mjs");
+    let sidecar_root = manager.path().resource_dir().ok()?.join("sidecar");
     let bundle = sidecar_root.join("lib").join("index.mjs");
     let node = std::env::current_exe()
         .ok()?
@@ -311,63 +322,12 @@ pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLaunch
     })
 }
 
-/// Mirror of `resolve_install_launcher` that takes an `AppHandle`
-/// instead of `&tauri::App`. The two share a body, but the upgrade
-/// command is a Tauri command (so it gets `AppHandle`) while the
-/// install path runs inside the `.setup` closure (so it gets
-/// `&tauri::App`). Splitting them keeps each call site obvious about
-/// which API surface it's plugging into without paying for a generic
-/// wrapper that would erase the lifetime constraints Tauri imposes.
+pub(crate) fn resolve_install_launcher(app: &tauri::App) -> Option<InstallLauncherSpec> {
+    resolve_install_launcher_impl(app)
+}
+
 pub(crate) fn resolve_install_launcher_via_handle(app: &AppHandle) -> Option<InstallLauncherSpec> {
-    if cfg!(debug_assertions) {
-        let repo_root = find_repo_root();
-        let node = resolve_repo_source_program();
-        let cli_bin = repo_root
-            .join("packages")
-            .join("cli")
-            .join("bin")
-            .join("taco.cjs");
-        if cli_bin.exists() {
-            return Some(InstallLauncherSpec {
-                program: node,
-                prefix_args: vec![cli_bin.to_string_lossy().into_owned()],
-                env: Vec::new(),
-            });
-        }
-        return None;
-    }
-    let resources = app.path().resource_dir().ok()?.join("cli").join("taco.mjs");
-    let sidecar_root = app.path().resource_dir().ok()?.join("sidecar");
-    let bundle = sidecar_root.join("lib").join("index.mjs");
-    let node = std::env::current_exe()
-        .ok()?
-        .parent()?
-        .join(if cfg!(windows) {
-            "taco-sidecar-node.exe"
-        } else {
-            "taco-sidecar-node"
-        });
-    if !resources.exists() || !node.exists() || !bundle.exists() {
-        return None;
-    }
-    Some(InstallLauncherSpec {
-        program: node.to_string_lossy().into_owned(),
-        prefix_args: vec![resources.to_string_lossy().into_owned()],
-        env: vec![
-            (
-                "TACO_SIDECAR_NODE".into(),
-                node.to_string_lossy().into_owned(),
-            ),
-            (
-                "TACO_SIDECAR_BUNDLE".into(),
-                bundle.to_string_lossy().into_owned(),
-            ),
-            (
-                "TACO_SIDECAR_RESOURCES".into(),
-                sidecar_root.to_string_lossy().into_owned(),
-            ),
-        ],
-    })
+    resolve_install_launcher_impl(app)
 }
 
 #[cfg(test)]

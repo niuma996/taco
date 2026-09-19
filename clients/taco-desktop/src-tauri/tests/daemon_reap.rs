@@ -66,8 +66,10 @@ fn pong_version_current_gate_semantics() {
 
 #[test]
 fn parse_pong_extracts_pid_uptime_and_version() {
-    let pong = parse_pong(r#"{"id":1,"result":{"version":"0.1.2","protocol":1,"uptime_s":42,"pid":4242}}"#)
-        .expect("must parse");
+    let pong = parse_pong(
+        r#"{"id":1,"result":{"version":"0.1.2","protocol":1,"uptime_s":42,"pid":4242}}"#,
+    )
+    .expect("must parse");
     assert_eq!(pong.pid, 4242);
     assert_eq!(pong.uptime_s, 42);
     assert_eq!(pong.version.as_deref(), Some("0.1.2"));
@@ -105,7 +107,8 @@ fn parse_pid_file_rejects_unknown_schema_version() {
 
 #[test]
 fn parse_pid_file_rejects_missing_pid() {
-    let raw = r#"{"version":1,"install_id":"abcd1234ef567890","started_at":"2026-08-19T10:00:00.000Z"}"#;
+    let raw =
+        r#"{"version":1,"install_id":"abcd1234ef567890","started_at":"2026-08-19T10:00:00.000Z"}"#;
     assert!(parse_pid_file(raw).is_none());
 }
 

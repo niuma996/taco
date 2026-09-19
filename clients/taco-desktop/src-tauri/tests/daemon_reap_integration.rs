@@ -15,8 +15,8 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use taco_desktop_lib::daemon_reap_test::{
-    compute_install_id, daemon_runtime_paths, force_reap, reap_previous_daemon,
-    ReapInputs, ReapOutcome,
+    compute_install_id, daemon_runtime_paths, force_reap, reap_previous_daemon, ReapInputs,
+    ReapOutcome,
 };
 
 struct TmpHome {
@@ -103,11 +103,15 @@ fn reap_reaps_stale_json_pid_file_when_pid_is_dead() {
     let (sock, ctl) = tmp.touch_socket_files();
 
     let outcome = reap_previous_daemon(&tmp.build_inputs(&own_id), None);
-    assert!(matches!(
-        outcome,
-        taco_desktop_lib::daemon_reap_test::ReapOutcome::Reaped { pid: 999_999, .. }
-            | taco_desktop_lib::daemon_reap_test::ReapOutcome::Stale { pid: 999_999, .. }
-    ), "got {:?}", outcome);
+    assert!(
+        matches!(
+            outcome,
+            taco_desktop_lib::daemon_reap_test::ReapOutcome::Reaped { pid: 999_999, .. }
+                | taco_desktop_lib::daemon_reap_test::ReapOutcome::Stale { pid: 999_999, .. }
+        ),
+        "got {:?}",
+        outcome
+    );
     assert!(!pid_file.exists(), "pid file must be unlinked after reap");
     assert!(!sock.exists(), "ndjson socket must be unlinked after reap");
     assert!(!ctl.exists(), "control socket must be unlinked after reap");
@@ -143,11 +147,15 @@ fn reap_reaps_legacy_bare_int_pid_file_when_pid_is_dead() {
     let (sock, ctl) = tmp.touch_socket_files();
 
     let outcome = reap_previous_daemon(&tmp.build_inputs(&own_id), None);
-    assert!(matches!(
-        outcome,
-        taco_desktop_lib::daemon_reap_test::ReapOutcome::Reaped { pid: 999_997, .. }
-            | taco_desktop_lib::daemon_reap_test::ReapOutcome::Stale { pid: 999_997, .. }
-    ), "got {:?}", outcome);
+    assert!(
+        matches!(
+            outcome,
+            taco_desktop_lib::daemon_reap_test::ReapOutcome::Reaped { pid: 999_997, .. }
+                | taco_desktop_lib::daemon_reap_test::ReapOutcome::Stale { pid: 999_997, .. }
+        ),
+        "got {:?}",
+        outcome
+    );
     assert!(!pid_file.exists());
     assert!(!sock.exists());
     assert!(!ctl.exists());
@@ -183,10 +191,7 @@ fn reap_returns_unparseable_when_json_schema_version_is_unknown() {
 fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
     // Use a short tmp path so the Unix socket binding doesn't exceed
     // macOS's SUN_LEN=108 limit. /tmp is universally short.
-    let dir = std::path::PathBuf::from("/tmp").join(format!(
-        "taco-alive-{}",
-        std::process::id()
-    ));
+    let dir = std::path::PathBuf::from("/tmp").join(format!("taco-alive-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("run")).unwrap();
 
@@ -196,10 +201,14 @@ fn reap_does_not_panic_when_listener_is_bound_but_pid_matches() {
     let ctl_path = dir.join("run").join("sidecar-ctl.sock");
     let listener = match UnixListener::bind(&ctl_path) {
         Ok(l) => Some(l),
-        Err(_) => {
+        Err(e) => {
             let _ = fs::remove_dir_all(&dir);
-            eprintln!("taco reap test: skipping alive-listener case (bind denied)");
-            return;
+            panic!(
+                "reap test refused to run: control-socket bind({:?}) denied: {e}. \
+                 Run inside an unconfined shell (no sandbox/SIP) so reap's connect() \
+                 path is exercised end-to-end.",
+                ctl_path
+            );
         }
     };
     // Hold the listener alive so reap's `connect()` succeeds; we don't
@@ -278,29 +287,27 @@ fn reap_idempotent_when_called_twice() {
     );
 }
 
-
 // Tests for the new owned_pid semantics: a daemon whose pid matches the
 // owned pid we just spawned must be preserved even if alive.
 
 #[test]
 fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
-    
-
     // An alive process with a matching pid file but no usable control ping is
     // not healthy. It must be reaped so the next daemon can bind the runtime.
-    let dir = std::path::PathBuf::from("/tmp").join(format!(
-        "taco-leak-{}",
-        std::process::id()
-    ));
+    let dir = std::path::PathBuf::from("/tmp").join(format!("taco-leak-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("run")).unwrap();
 
     let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
 
     let ctl_path = dir.join("run").join("sidecar-ctl.sock");
-    if UnixListener::bind(&ctl_path).is_err() {
+    if let Err(e) = UnixListener::bind(&ctl_path) {
         let _ = fs::remove_dir_all(&dir);
-        return;
+        panic!(
+            "reap test refused to run: control-socket bind({:?}) denied: {e}. \
+             Run inside an unconfined shell (no sandbox/SIP).",
+            ctl_path
+        );
     }
     let mut helper = std::process::Command::new("/bin/sh")
         .arg("-c")
@@ -319,7 +326,8 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
             r#"{{"version":1,"pid":{},"install_id":"{}","started_at":"2026-08-19T10:00:00.000Z"}}"#,
             leaked_pid, own_id
         ),
-    ).unwrap();
+    )
+    .unwrap();
     // NDJSON socket entry must exist — an alive pid with NO socket entry is the
     // ghost-socket case (Stale), not the unresponsive-daemon case (Reaped).
     OpenOptions::new()
@@ -339,7 +347,11 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
     // The launcher pid is different from the daemon pid, but that alone is
     // not a reason to kill it; the unresponsive probe is the reason here.
     let outcome = reap_previous_daemon(&inputs, Some(999_999_999));
-    assert!(matches!(outcome, ReapOutcome::Reaped { .. }), "got {:?}", outcome);
+    assert!(
+        matches!(outcome, ReapOutcome::Reaped { .. }),
+        "got {:?}",
+        outcome
+    );
     // The leaked daemon must be dead after reap.
     std::thread::sleep(Duration::from_millis(200));
     let _ = force_kill(leaked_pid);
@@ -351,23 +363,22 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
 
 #[test]
 fn force_reap_kills_alive_own_daemon() {
-    
-
     // Same fixture as reap_preserves_alive_daemon_when_owned_pid_matches,
     // but using force_reap -- which must kill our own daemon because
     // force_reap is for the install path which doesn't preserve anything.
-    let dir = std::path::PathBuf::from("/tmp").join(format!(
-        "taco-force-{}",
-        std::process::id()
-    ));
+    let dir = std::path::PathBuf::from("/tmp").join(format!("taco-force-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("run")).unwrap();
 
     let own_id = compute_install_id("/fake/install", dir.to_str().unwrap());
     let ctl_path = dir.join("run").join("sidecar-ctl.sock");
-    if UnixListener::bind(&ctl_path).is_err() {
+    if let Err(e) = UnixListener::bind(&ctl_path) {
         let _ = fs::remove_dir_all(&dir);
-        return;
+        panic!(
+            "reap test refused to run: control-socket bind({:?}) denied: {e}. \
+             Run inside an unconfined shell (no sandbox/SIP).",
+            ctl_path
+        );
     }
     let mut helper = std::process::Command::new("/bin/sh")
         .arg("-c")
@@ -385,7 +396,8 @@ fn force_reap_kills_alive_own_daemon() {
             r#"{{"version":1,"pid":{},"install_id":"{}","started_at":"2026-08-19T10:00:00.000Z"}}"#,
             helper_pid, own_id
         ),
-    ).unwrap();
+    )
+    .unwrap();
     // Socket entry present so the reap path exercised is "alive but ping
     // fails" (Reaped), not the ghost-socket shortcut (Stale).
     OpenOptions::new()
@@ -403,7 +415,11 @@ fn force_reap_kills_alive_own_daemon() {
     };
 
     let outcome = force_reap(&inputs);
-    assert!(matches!(outcome, ReapOutcome::Reaped { .. }), "got {:?}", outcome);
+    assert!(
+        matches!(outcome, ReapOutcome::Reaped { .. }),
+        "got {:?}",
+        outcome
+    );
     std::thread::sleep(Duration::from_millis(200));
     let _ = force_kill(helper_pid);
     let _ = helper.wait();
@@ -412,12 +428,34 @@ fn force_reap_kills_alive_own_daemon() {
 
 /// Minimal POSIX kill helpers (avoid pulling in the `nix` crate as a dev-dep).
 fn is_alive(pid: u32) -> bool {
-    let status = std::process::Command::new("kill")
+    // `kill -0` exits 0 only when the process exists *and* the caller may
+    // signal it. ESRCH and EPERM both exit 1, so treating any non-zero as
+    // alive would let a reaped helper still pass the "must not be signaled"
+    // assertions. The helpers below are children of this test process, so
+    // EPERM cannot happen; success is the only honest "still running".
+    let signaled = std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
-        .status();
-    match status {
-        Ok(s) => s.success() || !matches!(s.code(), Some(0)),
-        Err(_) => false,
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !signaled {
+        return false;
+    }
+    // A child that was killed but not yet waited on lingers as a zombie, and
+    // `kill -0` still reports zombies as signalable — so the check above alone
+    // would let a wrongfully killed daemon pass. Empty `ps` output (pid gone)
+    // and the Z state both count as dead. If `ps` itself is missing, keep the
+    // `kill -0` verdict instead of failing the test for an unrelated environment.
+    match std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+    {
+        Ok(out) => {
+            let stat = String::from_utf8_lossy(&out.stdout);
+            let stat = stat.trim();
+            !stat.is_empty() && !stat.starts_with('Z')
+        }
+        Err(_) => true,
     }
 }
 
@@ -468,10 +506,13 @@ fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
 
     let listener = match UnixListener::bind(&control_path) {
         Ok(listener) => listener,
-        Err(_) => {
+        Err(e) => {
             let _ = fs::remove_dir_all(&dir);
-            eprintln!("taco reap test: skipping launcher-pid mismatch case (bind denied)");
-            return;
+            panic!(
+                "reap test refused to run: control-socket bind({:?}) denied: {e}. \
+                 Run inside an unconfined shell (no sandbox/SIP).",
+                control_path
+            );
         }
     };
     let responder = std::thread::spawn(move || {
@@ -480,8 +521,7 @@ fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
         let _ = std::io::Read::read(&mut stream, &mut request);
         std::io::Write::write_all(
             &mut stream,
-            format!(r#"{{"id":1,"result":{{"pid":{daemon_pid},"uptime_s":42}}}}\n"#)
-                .as_bytes(),
+            format!(r#"{{"id":1,"result":{{"pid":{daemon_pid},"uptime_s":42}}}}\n"#).as_bytes(),
         )
         .expect("write ping response");
     });
@@ -503,9 +543,18 @@ fn reap_preserves_healthy_daemon_when_launcher_pid_differs_from_daemon_pid() {
             uptime_s: 42,
         }
     );
-    assert!(pid_file.exists(), "healthy daemon pid file must be preserved");
-    assert!(socket_path.exists(), "healthy daemon socket must be preserved");
-    assert!(control_path.exists(), "healthy control socket must be preserved");
+    assert!(
+        pid_file.exists(),
+        "healthy daemon pid file must be preserved"
+    );
+    assert!(
+        socket_path.exists(),
+        "healthy daemon socket must be preserved"
+    );
+    assert!(
+        control_path.exists(),
+        "healthy control socket must be preserved"
+    );
     assert!(is_alive(daemon_pid), "healthy daemon must not be signaled");
 
     force_kill(daemon_pid);
@@ -521,10 +570,7 @@ fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
     // daemon, not just unlink the missing socket — otherwise the live inode
     // stays held via fd, the next spawn's bind() fails with EADDRINUSE, and
     // ghost daemons accumulate on every desktop restart.
-    let dir = std::path::PathBuf::from("/tmp").join(format!(
-        "taco-ghost-{}",
-        std::process::id()
-    ));
+    let dir = std::path::PathBuf::from("/tmp").join(format!("taco-ghost-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("run")).unwrap();
 
@@ -594,11 +640,17 @@ fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
 /// Shared fixture for the version-gate tests: a live helper process posing
 /// as the daemon, a pid file that owns it, a present NDJSON socket entry,
 /// and a control listener that answers pings with a configurable version.
-/// Returns None when the control socket can't be bound (sandboxed runs).
+/// Panics when the control socket can't be bound (sandboxed runs) — silent
+/// skips would let CI go green without exercising the connect/ping path.
 fn version_gate_fixture(
     tag: &str,
     pong_version: Option<&str>,
-) -> Option<(PathBuf, std::process::Child, ReapInputs<'static>, std::thread::JoinHandle<()>)> {
+) -> (
+    PathBuf,
+    std::process::Child,
+    ReapInputs<'static>,
+    std::thread::JoinHandle<()>,
+) {
     let dir = std::path::PathBuf::from("/tmp").join(format!("taco-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("run")).unwrap();
@@ -607,10 +659,13 @@ fn version_gate_fixture(
     let ctl_path = dir.join("run").join("sidecar-ctl.sock");
     let listener = match UnixListener::bind(&ctl_path) {
         Ok(l) => l,
-        Err(_) => {
+        Err(e) => {
             let _ = fs::remove_dir_all(&dir);
-            eprintln!("taco reap test: skipping {tag} case (bind denied)");
-            return None;
+            panic!(
+                "reap test refused to run ({tag}): control-socket bind({:?}) denied: {e}. \
+                 Run inside an unconfined shell (no sandbox/SIP).",
+                ctl_path
+            );
         }
     };
 
@@ -648,10 +703,8 @@ fn version_gate_fixture(
         let _ = std::io::Read::read(&mut stream, &mut request);
         std::io::Write::write_all(
             &mut stream,
-            format!(
-                r#"{{"id":1,"result":{{"pid":{daemon_pid},"uptime_s":7{version_field}}}}}"#
-            )
-            .as_bytes(),
+            format!(r#"{{"id":1,"result":{{"pid":{daemon_pid},"uptime_s":7{version_field}}}}}"#)
+                .as_bytes(),
         )
         .expect("write ping response");
     });
@@ -666,7 +719,7 @@ fn version_gate_fixture(
         own_install_id: Box::leak(own_id.into_boxed_str()),
         expected_sidecar_version: Some("0.1.2"),
     };
-    Some((dir, helper, inputs, responder))
+    (dir, helper, inputs, responder)
 }
 
 #[test]
@@ -674,11 +727,7 @@ fn reap_kills_daemon_running_a_stale_sidecar_version() {
     // The upgraded-desktop case: daemon is healthy (answers ping, socket
     // serving, install id ours) but reports the previous release's version.
     // Reusing it would attach the new desktop to old code forever.
-    let Some((dir, mut helper, inputs, responder)) =
-        version_gate_fixture("verstale", Some("0.1.0"))
-    else {
-        return;
-    };
+    let (dir, mut helper, inputs, responder) = version_gate_fixture("verstale", Some("0.1.0"));
     let daemon_pid = helper.id();
 
     let outcome = reap_previous_daemon(&inputs, None);
@@ -705,11 +754,7 @@ fn reap_kills_daemon_running_a_stale_sidecar_version() {
 
 #[test]
 fn reap_preserves_daemon_running_the_expected_version() {
-    let Some((dir, mut helper, inputs, responder)) =
-        version_gate_fixture("vercurrent", Some("0.1.2"))
-    else {
-        return;
-    };
+    let (dir, mut helper, inputs, responder) = version_gate_fixture("vercurrent", Some("0.1.2"));
     let daemon_pid = helper.id();
 
     let outcome = reap_previous_daemon(&inputs, None);
@@ -734,10 +779,7 @@ fn reap_treats_versionless_pong_as_stale_when_expecting_a_version() {
     // Pre-gate daemons answer control.ping without a version field (or a
     // bundle that resolved "0.0.0"); with an expectation set, that must reap
     // — otherwise the gate never applies to the daemons it exists to replace.
-    let Some((dir, mut helper, inputs, responder)) = version_gate_fixture("vernone", None)
-    else {
-        return;
-    };
+    let (dir, mut helper, inputs, responder) = version_gate_fixture("vernone", None);
     let daemon_pid = helper.id();
 
     let outcome = reap_previous_daemon(&inputs, None);
