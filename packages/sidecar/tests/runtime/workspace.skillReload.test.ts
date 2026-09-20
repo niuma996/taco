@@ -120,6 +120,35 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
         await ws.dispose();
     });
 
+    it("keeps the same systemPrompt string when a rescan finds no content change", async () => {
+        // Regression guard: a KV-cache-safe reload must not pay a rebuild
+        // (and thus a cache miss for the next attach) when the rescanned
+        // skill list renders to the exact same prompt as before.
+        let scanCount = 0;
+        const ws = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            cwd: asWorkspaceId(tmpDir),
+            resources: { skills: [mkSkill("alpha")] },
+            skillDirs: [tmpDir],
+            reloadSkills: async () => {
+                scanCount++;
+                return { skills: [mkSkill("alpha")], diagnostics: [] };
+            },
+        });
+
+        const promptBefore = ws.systemPrompt;
+        await ws.reloadSkillsNow();
+
+        assert.equal(scanCount, 1);
+        assert.equal(
+            ws.systemPrompt,
+            promptBefore,
+            "identical rescan content must not replace the systemPrompt string",
+        );
+
+        await ws.dispose();
+    });
+
     it("collapses concurrent reload calls into one scan (SingleFlight)", async () => {
         let scanCount = 0;
         const ws = new WorkspaceRuntime({

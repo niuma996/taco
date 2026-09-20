@@ -650,9 +650,14 @@ export class WorkspaceRuntime extends EventEmitter {
             reloadSkills: options.reloadSkills,
             initialDiagnostics: options.skillDiagnostics,
             applyScan: (skills) => {
+                // Guard by comparison, not by scan frequency: a no-op rescan
+                // (editor touch, unrelated skill dir) must not pay a KV-cache
+                // miss for every session attached after it.
+                const nextPrompt = this.rebuildSystemPrompt(skills);
                 this.resources = { ...this.resources, skills };
-                this.systemPrompt = this.rebuildSystemPrompt(skills);
                 this.sessionRegistry.updateSkills(skills);
+                if (nextPrompt === this.systemPrompt) return;
+                this.systemPrompt = nextPrompt;
             },
         });
     }
