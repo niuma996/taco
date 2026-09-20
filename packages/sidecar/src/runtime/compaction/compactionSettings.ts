@@ -36,6 +36,14 @@ const KEEP_RATIO = 0.5;
 /** Retaining more than this share of the trigger point cannot compact anything. */
 const KEEP_CEILING_RATIO = 0.8;
 
+/**
+ * Manual compact keeps this share of *current* usage, not of the auto-compact
+ * trigger. Auto keep is `0.5 * window * threshold` (350k on a 1M/0.7 model);
+ * applying that budget to a 112k conversation retains everything and commits
+ * an empty summary. 0.3 of current usage still leaves a usable tail.
+ */
+const MANUAL_KEEP_RATIO = 0.3;
+
 /** Context size at which auto-compaction fires — the user's threshold, verbatim. */
 export function triggerTokens(contextWindow: number, threshold: number): number {
     return Math.floor(contextWindow * threshold);
@@ -82,4 +90,19 @@ export function deriveCompactionSettings(
     );
 
     return { enabled, reserveTokens, keepRecentTokens };
+}
+
+/**
+ * Retention budget for a user-triggered compact. Auto keep is
+ * `0.5 * window * threshold` (367k on MiniMax-M3); applying that to a
+ * 112k conversation retains everything. Manual keep is a fraction of
+ * *current* usage so Compact always has a prefix to summarize.
+ *
+ * The auto 4096 floor is omitted: on a 900-token session it would win
+ * over 30% and keep 80% (the ceiling), which is the no-op we are
+ * avoiding. `keep < usedTokens` holds for usedTokens > 1.
+ */
+export function manualKeepRecentTokens(usedTokens: number): number {
+    if (usedTokens <= 1) return 1;
+    return Math.max(1, Math.floor(usedTokens * MANUAL_KEEP_RATIO));
 }

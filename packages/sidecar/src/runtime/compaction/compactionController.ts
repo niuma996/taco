@@ -14,8 +14,12 @@ import { createLogger } from "../../lib/logger.ts";
 import { isBusyError, toHarnessError } from "../harness/harnessErrors.ts";
 import type { AgentLane, Entry, ExecutionToolContext } from "../pi/types.ts";
 import type { AgentHarness } from "../pi/values.ts";
-import { CompactionError, NothingToCompact } from "../pi/values.ts";
-import { deriveCompactionSettings, triggerTokens } from "./compactionSettings.ts";
+import { CompactionError, NothingToCompact, prepareCompaction } from "../pi/values.ts";
+import {
+    deriveCompactionSettings,
+    manualKeepRecentTokens,
+    triggerTokens,
+} from "./compactionSettings.ts";
 import type { ContextUsage } from "./contextInfoService.ts";
 import type { PinOnceConsumer } from "./pinOnceConsumer.ts";
 
@@ -231,10 +235,17 @@ export class CompactionController {
      * LLM call itself aborts with the caller (pi passes `context.abortSignal`
      * to the provider request); pi then finishes the compaction with status
      * "aborted" or a thrown `CompactionError`.
+     *
+     * `retention`, when supplied, temporarily replaces `keepRecentTokens` for
+     * this call only and restores the previous budget afterwards. Manual
+     * compact uses a usage-relative budget; auto compact leaves the shared
+     * threshold-derived settings in place. An empty cut (no history and no
+     * split-turn prefix) is `nothing` — do not commit an empty summary.
      */
     private async runCompact(
         customInstructions?: string,
         signal?: AbortSignal,
+        retention?: { keepRecentTokens: number },
     ): Promise<{ ok: true } | { ok: false; reason: CompactionFailureReason; error: unknown }> {
         const tokensBefore = await this.readTokensBefore();
         try {
@@ -245,7 +256,36 @@ export class CompactionController {
         let reason: CompactionFailureReason | undefined;
         let committed: { summaryChars: number; fromHook: boolean } | undefined;
         let error: unknown;
+        let previousKeep: number | undefined;
         try {
+            if (retention !== undefined) {
+                const current = await this.harness.getCompactionSettings(harnessContext);
+                previousKeep = current.keepRecentTokens;
+                if (current.keepRecentTokens !== retention.keepRecentTokens) {
+                    await this.harness.setCompactionSettings(
+                        { ...current, keepRecentTokens: retention.keepRecentTokens },
+                        harnessContext,
+                    );
+                }
+                const prepared = prepareCompaction(await this.getSessionEntries(), {
+                    enabled: true,
+                    reserveTokens: current.reserveTokens,
+                    keepRecentTokens: retention.keepRecentTokens,
+                });
+                if (!prepared.ok) throw toHarnessError("compact", prepared.error);
+                // A split turn parks the prefix in `turnPrefixMessages` and
+                // leaves `messagesToSummarize` empty — that is still a cut
+                // (single-turn sessions). Only refuse when both pools are empty.
+                const toSummarize =
+                    (prepared.value?.messagesToSummarize.length ?? 0) +
+                    (prepared.value?.turnPrefixMessages.length ?? 0);
+                if (prepared.value === undefined || toSummarize === 0) {
+                    throw new NothingToCompact({
+                        lane: "main",
+                        message: "manual compact would retain the whole conversation",
+                    });
+                }
+            }
             const result = await this.lane.compact(
                 customInstructions === undefined ? undefined : { customInstructions },
                 signal ? contextFor(signal) : harnessContext,
@@ -281,6 +321,19 @@ export class CompactionController {
             reason = classifyCompactFailure(e);
             error = e;
         } finally {
+            if (previousKeep !== undefined) {
+                try {
+                    const current = await this.harness.getCompactionSettings(harnessContext);
+                    if (current.keepRecentTokens !== previousKeep) {
+                        await this.harness.setCompactionSettings(
+                            { ...current, keepRecentTokens: previousKeep },
+                            harnessContext,
+                        );
+                    }
+                } catch (e) {
+                    log.error("compaction failed to restore keepRecentTokens:", e);
+                }
+            }
             try {
                 this.onLifecycle?.({
                     phase: "end",
@@ -498,6 +551,11 @@ export class CompactionController {
      * `{ ok: false, reason }` — `reason` distinguishes them so callers do not
      * have to parse logs.
      *
+     * Retention is sized from current usage, not the auto-compact trigger, so
+     * Compact on a 1M-window session that is only 10% full still cuts history.
+     * If `prepareCompaction` would summarize nothing under that budget, the
+     * call returns `nothing` without committing an empty summary.
+     *
      * Cancellation: the caller's signal is threaded into pi's Context
      * (`contextFor`), so aborting cancels the in-flight summary LLM call —
      * pi hands `context.abortSignal` to the provider request. A cancelled
@@ -538,7 +596,7 @@ export class CompactionController {
             }
         }
         let failure: { reason: CompactionFailureReason; error: unknown } | undefined;
-        this.runCompact(customInstructions, signal)
+        this.runManualCompact(customInstructions, signal)
             .then((outcome) => {
                 if (outcome.ok) return;
                 // Record before cancelling so the failure path can tell a
@@ -579,6 +637,26 @@ export class CompactionController {
             tokensBefore: lastCompaction?.tokensBefore ?? 0,
             fromHook: lastCompaction?.fromHook ?? false,
         };
+    }
+
+    /**
+     * Manual compact: size keep from current usage, then run the shared path
+     * with that retention restored afterwards. Empty-cut refusal lives inside
+     * `runCompact` so the start/end lifecycle still fires.
+     */
+    private async runManualCompact(
+        customInstructions?: string,
+        signal?: AbortSignal,
+    ): Promise<{ ok: true } | { ok: false; reason: CompactionFailureReason; error: unknown }> {
+        let usedTokens = 0;
+        try {
+            usedTokens = (await this.getContextUsage()).usedTokens;
+        } catch (e) {
+            log.error("runManualCompact: failed to read context:", e);
+        }
+        return this.runCompact(customInstructions, signal, {
+            keepRecentTokens: manualKeepRecentTokens(usedTokens),
+        });
     }
 
     /**

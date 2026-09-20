@@ -25,6 +25,7 @@ import {
 import type {
     AgentLane,
     CompactionSettings,
+    Entry,
     ExecutionToolContext,
 } from "../../src/runtime/pi/types.ts";
 import {
@@ -44,6 +45,32 @@ const SESSION = asSessionId("sess-1");
 const COMPACTED_ENTRY_ID = "e1";
 /** Summary length the committed entry carries, asserted on the finished frame. */
 const COMPACTED_SUMMARY_CHARS = 1234;
+
+/**
+ * Prefix + tail whose tail exceeds the manual keep budget for a 900-token
+ * session (270 tokens = 30% of usage), so `prepareCompaction` has a
+ * prefix to summarize. An empty list is the "would retain everything" case.
+ */
+function compactableEntries(): Entry[] {
+    const user = (id: string, parentId: string | null, seq: number, text: string): Entry =>
+        ({
+            type: "message",
+            id,
+            parentId,
+            seq,
+            timestamp: seq,
+            message: {
+                role: "user",
+                content: [{ type: "text", text }],
+                timestamp: seq,
+            },
+        }) as unknown as Entry;
+    return [
+        user("m0", null, 1, `old ${"x".repeat(8000)}`),
+        user("m1", "m0", 2, `mid ${"x".repeat(8000)}`),
+        user("m2", "m1", 3, `recent ${"y".repeat(200)}`),
+    ];
+}
 
 /** Records every push frame the adapter emits, in order. */
 function newAdapter(): {
@@ -76,6 +103,12 @@ function newController(
      * does not serve (including `null`) is the completed-but-unreadable path.
      */
     tipId: string | null = COMPACTED_ENTRY_ID,
+    /**
+     * Branch entries for the manual-cut preview. Default is a conversation
+     * that `prepareCompaction` can actually cut; pass `[]` to exercise the
+     * empty-summary refusal.
+     */
+    sessionEntries: Entry[] = compactableEntries(),
 ): {
     controller: CompactionController;
     pushed: CompactionSettings[];
@@ -145,7 +178,11 @@ function newController(
             // Reaching here means compactImpl did not throw, so report the
             // committed-compaction shape the controller expects. `tipId` is the
             // committed entry — the controller reads it back for the toast
-            // figures the end signal has to carry.
+            // figures the end signal has to carry. Emit `compaction_end` the
+            // way pi does, so `controller.compact()`'s wait can resolve.
+            for (const listener of listeners.get("compaction_end") ?? []) {
+                listener({ status: "completed", entryId: tipId });
+            }
             return Result.ok({
                 compaction: {
                     operationId: "op-1",
@@ -166,7 +203,7 @@ function newController(
         compaction: { enabled: true, threshold: 0.7 },
         // 900 used of a 1000-token window, so the 0.7 threshold trips at 700.
         getContextUsage: async () => ({ usedTokens: 900, model: { contextWindow: 1000 } }) as never,
-        getSessionEntries: async () => [],
+        getSessionEntries: async () => sessionEntries,
         getEntry: async (id: string) =>
             id === COMPACTED_ENTRY_ID
                 ? ({
@@ -475,5 +512,99 @@ describe("session.compact failure classification", () => {
 
         assert.equal(result.ok, false);
         assert.equal(result.reason, "nothing");
+    });
+
+    it("temporarily sizes keep from current usage, then restores the auto budget", async () => {
+        const { adapter } = newAdapter();
+        const { controller, pushed } = newController(adapter, async () => {});
+        await controller.syncSettings();
+        const autoKeep = pushed.at(-1)?.keepRecentTokens;
+        assert.equal(autoKeep, 560); // 1000-token window at 0.7
+
+        const result = await controller.compact();
+        assert.equal(result.ok, true);
+        // Restore runs in runCompact's finally, after compaction_end unblocks
+        // compact() — yield so that write is observed.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        // Manual keep for 900 used tokens is 270; restored to the auto 560.
+        assert.deepEqual(
+            pushed.map((s) => s.keepRecentTokens),
+            [560, 270, 560],
+        );
+    });
+
+    it("reports nothing and restores keep when the cut would summarize zero messages", async () => {
+        const { adapter, frames } = newAdapter();
+        const { controller, pushed } = newController(
+            adapter,
+            async () => {
+                throw new Error("lane.compact must not run on an empty cut");
+            },
+            undefined,
+            COMPACTED_ENTRY_ID,
+            [],
+        );
+        await controller.syncSettings();
+
+        const result = await controller.compact();
+
+        assert.equal(result.ok, false);
+        assert.equal(result.reason, "nothing");
+        const finished = frames.find((f) => f.method === "session.compaction_finished")?.params as
+            | { failed?: boolean; reason?: string }
+            | undefined;
+        assert.equal(finished?.failed, true);
+        assert.equal(finished?.reason, "nothing");
+        assert.deepEqual(
+            pushed.map((s) => s.keepRecentTokens),
+            [560, 270, 560],
+        );
+    });
+
+    it("still compacts a single-turn session whose prefix lives in turnPrefixMessages", async () => {
+        // Session 01a0b563: one user turn, then a long assistant/toolResult
+        // chain. The cut splits that turn, so messagesToSummarize is empty and
+        // the prefix is in turnPrefixMessages. Refusing that is a false nothing.
+        const user = (
+            id: string,
+            parentId: string | null,
+            seq: number,
+            role: string,
+            text: string,
+        ) =>
+            ({
+                type: "message",
+                id,
+                parentId,
+                seq,
+                timestamp: seq,
+                message: {
+                    role,
+                    content: [{ type: "text", text }],
+                    timestamp: seq,
+                },
+            }) as unknown as Entry;
+        const entries = [
+            user("u0", null, 1, "user", "go"),
+            user("a0", "u0", 2, "assistant", `early ${"x".repeat(8000)}`),
+            user("a1", "a0", 3, "assistant", `kept ${"y".repeat(200)}`),
+        ];
+        const { adapter } = newAdapter();
+        const { controller, pushed } = newController(
+            adapter,
+            async () => {},
+            undefined,
+            COMPACTED_ENTRY_ID,
+            entries,
+        );
+        await controller.syncSettings();
+
+        const result = await controller.compact();
+        assert.equal(result.ok, true);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert.deepEqual(
+            pushed.map((s) => s.keepRecentTokens),
+            [560, 270, 560],
+        );
     });
 });

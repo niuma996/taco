@@ -13,6 +13,7 @@ import { describe, it } from "node:test";
 
 import {
     deriveCompactionSettings,
+    manualKeepRecentTokens,
     triggerTokens,
 } from "../../src/runtime/compaction/compactionSettings.ts";
 import { DEFAULT_COMPACTION_SETTINGS } from "../../src/runtime/pi/values.ts";
@@ -224,5 +225,27 @@ describe("triggerTokens", () => {
 
     it("floors rather than rounds, so the trigger never lands above budget", () => {
         assert.equal(triggerTokens(100_001, 0.7), 70_000);
+    });
+});
+
+describe("manualKeepRecentTokens", () => {
+    it("keeps 30% of current usage, not of the 1M-window auto trigger", () => {
+        // The bug: Compact at 112k on MiniMax-M3 (window ~1M, auto keep 367k)
+        // retained everything. Manual keep must be relative to usedTokens.
+        assert.equal(manualKeepRecentTokens(112_310), 33_693);
+    });
+
+    it("stays strictly under usedTokens so prepareCompaction can cut", () => {
+        for (const used of [1, 10, 100, 4_000, 32_000, 112_310, 1_000_000]) {
+            const keep = manualKeepRecentTokens(used);
+            assert.ok(keep > 0, `used=${used}`);
+            assert.ok(keep < used || used <= 1, `used=${used} keep=${keep}`);
+        }
+    });
+
+    it("uses 30% even on tiny conversations — the auto 4096 floor would no-op them", () => {
+        assert.equal(manualKeepRecentTokens(1_000), 300);
+        assert.equal(manualKeepRecentTokens(4_000), 1_200);
+        assert.equal(manualKeepRecentTokens(900), 270);
     });
 });
