@@ -2,7 +2,7 @@
  * Tests for the dynamic-tool (AddTools) system at the AttachedSession level,
  * using real AgentHarness + JsonlSession + minimal model stub:
  *   - always candidates are present in the initial active tool set;
- *   - addTools.execute returns the correct addedToolNames;
+ *   - addTools activates the named tool for subsequent turns;
  *   - the harness tool collection reflects the new tool after addTools;
  *   - repeated names within a single request are handled idempotently.
  */
@@ -132,7 +132,7 @@ describe("AttachedSession — dynamic tools", () => {
         await attached.abort();
     });
 
-    it("addTools adds the tool to the harness and returns addedToolNames", async () => {
+    it("addTools adds the tool to the harness active set", async () => {
         const registry = new DefaultDeferredToolRegistry({
             candidates: [makeToolCandidate("git-status", "deferred")],
         });
@@ -153,7 +153,7 @@ describe("AttachedSession — dynamic tools", () => {
         await attached.abort();
     });
 
-    it("addTools result includes addedToolNames for the pi deferred-tool protocol", async () => {
+    it("addTools reports the newly activated names in details.added", async () => {
         const registry = new DefaultDeferredToolRegistry({
             candidates: [makeToolCandidate("pg-query", "deferred")],
         });
@@ -162,7 +162,10 @@ describe("AttachedSession — dynamic tools", () => {
 
         const result = await attached.toolController.addTools(["pg-query"]);
         assert.deepEqual(result.added, ["pg-query"]);
-        assert.ok(result.added.length > 0, "added must be non-empty for pi protocol");
+        assert.ok(
+            (await attached.toolController.activeToolNames()).includes("pg-query"),
+            "pg-query must be active on the next turn",
+        );
 
         await attached.abort();
     });

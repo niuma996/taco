@@ -88,18 +88,17 @@ export function createAddToolsTool(controller: SessionToolController): TacoTool 
             params: AddToolsToolInput,
             _onUpdate: unknown,
             _context: ExecutionToolContext,
-        ): Promise<{ content: TextContent[]; details: AddToolsResult; addedToolNames?: string[] }> {
+        ): Promise<{ content: TextContent[]; details: AddToolsResult }> {
             const requested = params.toolNames
                 .split(",")
                 .map((s) => s.trim())
                 .filter(Boolean);
             const result = await controller.addTools(requested);
+            // pi 0.86 dropped `addedToolNames` on AgentToolResult. Visibility
+            // already rides on setTools / setActiveToolNames in the controller.
             return {
                 content: [{ type: "text", text: formatResult(result) }],
                 details: result,
-                // pi-agent-core writes this to the transcript; pi-ai picks it up to inject
-                // deferred tool schemas into the next provider request.
-                addedToolNames: result.added.length > 0 ? result.added : undefined,
             };
         },
     };

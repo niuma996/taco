@@ -101,7 +101,6 @@ describe("addTools description", () => {
 describe("addTools execute", () => {
     const details = (result: Awaited<ReturnType<TacoTool["execute"]>>): AddToolsResult =>
         result.details as AddToolsResult;
-    const addedNames = (result: Awaited<ReturnType<TacoTool["execute"]>>) => result.addedToolNames;
 
     it("adds tools and reports the result", async () => {
         const { tool, controller } = makeTool(["git-status"]);
@@ -112,18 +111,12 @@ describe("addTools execute", () => {
         assert.deepEqual(controller.loadedToolNames(), ["git-status"]);
     });
 
-    it("returns addedToolNames on success (pi deferred-tool protocol)", async () => {
+    it("reports added tools in details on success", async () => {
         const { tool } = makeTool(["git-status", "pg-query"]);
         const result = await invokeTool(tool, { toolNames: "git-status" }, ctx, {
             toolCallId: "tc1",
         });
-        assert.deepEqual(addedNames(result), ["git-status"]);
-    });
-
-    it("omits addedToolNames when nothing was added", async () => {
-        const { tool } = makeTool(["git-status"]);
-        const result = await invokeTool(tool, { toolNames: "nope" }, ctx, { toolCallId: "tc1" });
-        assert.deepEqual(addedNames(result), undefined);
+        assert.deepEqual(details(result).added, ["git-status"]);
     });
 
     it("reports unknown tools in the result", async () => {

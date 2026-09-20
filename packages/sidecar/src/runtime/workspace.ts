@@ -445,8 +445,10 @@ export class WorkspaceRuntime extends EventEmitter {
             // registration (registerProviders=false) when we did it here.
             applyBuiltinProviders(this.models, undefined, options.customProviders);
         }
-        // The harness falls back to getDefaultStreamFn(); without this registration the
-        // first prompt throws "No default stream function configured".
+        // AgentHarness generation uses `models.streamSimple` directly. This
+        // global default only feeds pi's standalone Agent loop; keep it registered
+        // so any leftover Agent-loop caller does not throw "no default stream
+        // function configured".
         setDefaultStreamFn(this.models.streamSimple);
 
         this.defaultModel = this.resolveDefaultModel(options);

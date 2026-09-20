@@ -76,7 +76,7 @@ function isContextMessage(message: AgentMessage): boolean {
  * Project one entry to the messages it contributes to model context.
  *
  * Mirrors pi's internal `sessionEntryToContextMessages`. pi does not export
- * that function (it is absent from the barrel in both 0.85.0 and 0.85.1), so
+ * that function (still absent from the public barrel through 0.86.1 — `./harness/session` omits `context.ts`), so
  * the projection is reproduced here from the public message builders. Custom
  * entries contribute nothing — sidecar tags inject their own text via context
  * hooks rather than through entry projection, unlike pi's own
