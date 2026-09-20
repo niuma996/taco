@@ -16,6 +16,7 @@ import type {
     AgentMessage as ProtocolAgentMessage,
     SessionCompactResult,
     SessionContextInfoResult,
+    SessionId,
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
@@ -65,6 +66,7 @@ import type {
 import { AgentHarness, laneConfig, NoActiveOperation } from "../pi/values.ts";
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
+import { TitleSummarizer } from "../session/titleSummarizer.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
@@ -153,8 +155,15 @@ export interface AttachedSessionOptions {
     getImChannelContext?: () => ImChannelContext | undefined;
     /** User-level memory store — drives extraction + context injection. */
     memoryStore?: MemoryStore;
-    /** True for IM workspaces; disables memory extraction regardless of store. */
+    /** True for IM workspaces; disables memory extraction and title summarization. */
     isIm?: boolean;
+    /**
+     * Write the one-shot LLM-summarized title (see sessionRegistry.ts). Absent
+     * disables title summarization outright (e.g. test doubles that don't
+     * exercise it) — distinct from a workspace that has it but where this
+     * session's `sessionKind`/`isIm` still gates it off, below.
+     */
+    setSummaryTitle?: (sessionId: SessionId, name: string) => Promise<boolean>;
     /**
      * Per-session task/plan state (built and hydrated at attach time). Assigned
      * onto the instance inside create() before wireHarnessHooks, so hook thunks
@@ -264,6 +273,8 @@ export class AttachedSession extends EventEmitter {
     skillReinjector: SkillReinjectorHandle | undefined;
     /** Fire-and-forget memory extractor (undefined when no memory store). */
     private memoryExtractor: MemoryExtractorImpl | undefined;
+    /** Fire-and-forget one-shot title summarizer (undefined for subagent/IM sessions). */
+    private titleSummarizer: TitleSummarizer | undefined;
     private readonly compactionController: CompactionController;
     private readonly contextInfo: ContextInfoService;
     /** Turn-scoped snapshot policy; undefined when checkpoints are disabled. */
@@ -559,14 +570,29 @@ export class AttachedSession extends EventEmitter {
                   )
                 : undefined;
 
+        // Build title summarizer: main sessions only (subagent titles are
+        // never shown — session.list hides them) and non-IM (IM sessions
+        // display the peer/chat identity, not `pi.session.name`).
+        attached.titleSummarizer =
+            args.setSummaryTitle && args.model && args.sessionKind === "main" && !args.isIm
+                ? new TitleSummarizer(
+                      args.models,
+                      args.model,
+                      asSessionId(args.session.metadata.id),
+                      args.setSummaryTitle,
+                  )
+                : undefined;
+
         // Republish the harness events the desktop consumes, plus per-turn
-        // bookkeeping (checkpoint window close, incremental memory extraction).
+        // bookkeeping (checkpoint window close, incremental memory extraction,
+        // one-shot title summarization).
         const disposers = wireTurnBookkeeping({
             harness,
             session: args.session,
             emitEvent: (event) => attached.emit("event", event),
             getCheckpoints: () => attached.checkpoints,
             getExtractor: () => attached.memoryExtractor,
+            getTitleSummarizer: () => attached.titleSummarizer,
         });
 
         // Push the derived settings onto pi before any run can start, so the

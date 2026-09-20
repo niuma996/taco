@@ -412,6 +412,47 @@ describe("workspacesReducer — sessions", () => {
         assert.equal(next, state);
     });
 
+    it("SESSION_RENAMED patches the target session's name without reordering", () => {
+        const state = {
+            "/ws": baseWs({
+                sessions: [
+                    { id: "a", createdAt: "2026-01-01T00:00:00Z", name: "old-a" },
+                    { id: "b", createdAt: "2026-03-01T00:00:00Z" },
+                ],
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "SESSION_RENAMED",
+            cwd: "/ws",
+            sid: "a",
+            name: "summarized-title",
+        });
+        assert.deepEqual(
+            next["/ws"]?.sessions.map((s: { id: string; name?: string }) => [s.id, s.name]),
+            [
+                ["a", "summarized-title"],
+                ["b", undefined],
+            ],
+        );
+        // Original state is not mutated
+        assert.equal(state["/ws"]?.sessions[0]?.name, "old-a");
+    });
+
+    it("SESSION_RENAMED ignores unknown sid", () => {
+        const state = {
+            "/ws": baseWs({
+                sessions: [{ id: "a", createdAt: "2026-01-01T00:00:00Z" }],
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "SESSION_RENAMED",
+            cwd: "/ws",
+            sid: "missing",
+            name: "summarized-title",
+        });
+        assert.equal(next, state);
+    });
+
     it("REMOVE_SESSION clears messages+activeSession when removing the active one", () => {
         const state = {
             "/ws": baseWs({

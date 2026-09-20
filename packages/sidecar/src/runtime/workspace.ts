@@ -628,7 +628,7 @@ export class WorkspaceRuntime extends EventEmitter {
         });
 
         // ── Event forwarding: components → facade ──
-        // SessionRegistry's five session.* events plus AgentSpawner's
+        // SessionRegistry's six session.* events plus AgentSpawner's
         // subagent.spawned. ModelRegistry emits nothing (it reacts to key changes).
         // Each component removes its own listeners on dispose, so the facade does
         // not manage the forwarding subscriptions' lifetime.
@@ -638,6 +638,7 @@ export class WorkspaceRuntime extends EventEmitter {
             "session.detached",
             "session.error",
             "session.deleted",
+            "session.renamed",
         ]);
         forwardEvents(this.agentSpawner, this, ["subagent.spawned"]);
 
@@ -952,9 +953,29 @@ export class WorkspaceRuntime extends EventEmitter {
     /**
      * Append a new title to the session (pi-agent-core name value, append-only).
      * Semantically a rename: reads take the last name value. No attach required.
+     * Marks the title as user-owned, so no auto-title write ever overwrites it.
      */
     async renameSession(sessionId: SessionId, name: string): Promise<void> {
         await this.sessionRegistry.renameSession(sessionId, name);
+    }
+
+    /**
+     * Write the truncation-placeholder title. No-ops once something better
+     * exists (a summary or a user rename). Returns whether the write happened.
+     */
+    async setPlaceholderTitle(sessionId: SessionId, name: string): Promise<boolean> {
+        return await this.sessionRegistry.setPlaceholderTitle(sessionId, name);
+    }
+
+    /**
+     * Write the one-shot LLM-summarized title. No-ops once the session
+     * already has a summary or a user rename. Returns whether the write
+     * happened. On a real write, pushes `session.renamed` — this fires long
+     * after the `session.prompt` RPC that started the run has already
+     * returned, so a push is the only way any client learns about it.
+     */
+    async setSummaryTitle(sessionId: SessionId, name: string): Promise<boolean> {
+        return await this.sessionRegistry.setSummaryTitle(sessionId, name);
     }
 
     /** Current title of a session (last name value), or undefined. */
@@ -1232,6 +1253,7 @@ export type WorkspaceEvent =
     | "session.attached"
     | "session.detached"
     | "session.deleted"
+    | "session.renamed"
     | "subagent.spawned";
 
 /**

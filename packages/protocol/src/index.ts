@@ -187,6 +187,7 @@ export type {
     SessionCompactionFinishedParams,
     SessionCompactionStartedParams,
     SessionDeletedParams,
+    SessionRenamedParams,
     SubagentSpawnedParams,
     TaskItem,
     TaskListMeta,

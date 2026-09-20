@@ -201,6 +201,7 @@ export type WorkspaceAction =
     | { type: "REMOVE_SESSION"; cwd: string; sid: string }
     | { type: "SET_PENDING"; cwd: string; sid: string; pending: boolean }
     | { type: "BUMP_SESSION_TIME"; cwd: string; sid: string; updatedAt: string }
+    | { type: "SESSION_RENAMED"; cwd: string; sid: string; name: string }
     | { type: "APPEND_SYSTEM"; cwd: string; sid: string; msg: UiMessage }
     | { type: "APPEND_ASSISTANT_FINAL"; cwd: string; sid: string; reply: AgentMessage }
     | {
@@ -488,6 +489,19 @@ export function workspacesReducer(
                 return {
                     sessions: sortSessionsByUpdatedDesc(
                         existing.sessions.map((s) => (s.id === action.sid ? updated : s)),
+                    ),
+                };
+            });
+        case "SESSION_RENAMED":
+            // Patches the sidebar title in place for an async rename (currently only the
+            // one-shot LLM title summary — see `session.renamed` push doc). No re-sort:
+            // a title change alone doesn't affect updatedAt-based ordering.
+            return updateWs(state, action.cwd, (existing) => {
+                const target = existing.sessions.find((s) => s.id === action.sid);
+                if (!target) return undefined;
+                return {
+                    sessions: existing.sessions.map((s) =>
+                        s.id === action.sid ? { ...s, name: action.name } : s,
                     ),
                 };
             });

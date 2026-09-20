@@ -11,6 +11,7 @@ import type {
     CommandPermissionRequest,
     PlanStateUpdatedParams,
     ServerPush,
+    SessionRenamedParams,
     SubagentSpawnedPayload,
     TaskListMeta,
     TasksUpdatedParams,
@@ -52,6 +53,7 @@ export type SidecarAction =
           request: CommandPermissionRequest;
       }
     | { type: "REMOVE_SESSION"; cwd: string; sid: string }
+    | { type: "SESSION_RENAMED"; cwd: string; sid: string; name: string }
     | { type: "SIDECAR_RESTARTED"; cwd: string }
     | { type: "ERROR"; cwd?: string; sid?: string; message: string }
     | {
@@ -130,6 +132,16 @@ function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void)
             return void dispatch({ type: "ATTACHED", cwd: p.workspace, sid: p.session });
         case PushMethods.SessionDeleted:
             return void dispatch({ type: "REMOVE_SESSION", cwd: p.workspace, sid: p.session });
+        case PushMethods.SessionRenamed: {
+            const params = (p.params ?? {}) as SessionRenamedParams;
+            if (!params.name) return;
+            return void dispatch({
+                type: "SESSION_RENAMED",
+                cwd: p.workspace,
+                sid: p.session,
+                name: params.name,
+            });
+        }
         case PushMethods.Error: {
             const errMsg =
                 (p.params as { error?: unknown } | undefined)?.error ?? "unknown sidecar error";

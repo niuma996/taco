@@ -2,11 +2,11 @@
  * Harness-event wiring for `AttachedSession` — republishes the event types the
  * desktop consumes onto the session's "event" stream, then runs the
  * turn-boundary bookkeeping (close the checkpoint window, coordinate
- * incremental memory extraction).
+ * incremental memory extraction, fire the once-per-attach title summary).
  *
  * Split out of `AttachedSession.create()` alongside `./hookWiring.ts`, which
  * does the same job for hooks: it is a self-contained subscriber set that reads
- * only the harness event bus, the session, and two getters.
+ * only the harness event bus, the session, and a handful of getters.
  */
 
 import type { CheckpointManager } from "../../checkpoints/manager.ts";
@@ -15,6 +15,7 @@ import { type MemoryExtractorImpl, sliceForExtraction } from "../../memory/index
 import type { TacoToolContext } from "../../tools/context.ts";
 import type { AgentHarness, HarnessEvent, Session } from "../pi/types.ts";
 import { buildBranchContext } from "../session/sessionBranch.ts";
+import type { TitleSummarizer } from "../session/titleSummarizer.ts";
 
 const log = createLogger("turnBookkeeping");
 
@@ -62,11 +63,12 @@ export interface TurnBookkeepingArgs {
     readonly emitEvent: (event: HarnessEvent) => void;
     readonly getCheckpoints: () => CheckpointManager | undefined;
     readonly getExtractor: () => MemoryExtractorImpl | undefined;
+    readonly getTitleSummarizer: () => TitleSummarizer | undefined;
 }
 
 /** Subscribe the republish + turn-boundary handlers; returns their disposers. */
 export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void> {
-    const { harness, session, emitEvent, getCheckpoints, getExtractor } = args;
+    const { harness, session, emitEvent, getCheckpoints, getExtractor, getTitleSummarizer } = args;
 
     const republish = (event: HarnessEvent): void => {
         try {
@@ -159,6 +161,40 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
                         "memory extraction after turn_end failed:",
                         error instanceof Error ? error.message : String(error),
                     );
+                });
+        }),
+    );
+
+    // Title summarization — re-runs on every completed run_end so the title
+    // tracks where the conversation actually went, not just its opening
+    // message. A user rename still wins permanently (setSummaryTitle refuses
+    // to overwrite titleSource "user").
+    //
+    // The guard is concurrency, not frequency: a summary's LLM call can still
+    // be in flight when the next turn ends, and two overlapping writes would
+    // race to set the name. Skipping while one is running drops the redundant
+    // attempt — the next run_end re-summarizes over a context that already
+    // includes the skipped turn.
+    let summarizing = false;
+    disposers.push(
+        harness.events.on("run_end", (event) => {
+            if (summarizing || event.status !== "completed") return;
+            const summarizer = getTitleSummarizer();
+            if (summarizer === undefined) return;
+            summarizing = true;
+            buildBranchContext(session)
+                .then((messages) => summarizer.onRunEnd(messages))
+                .catch((error) => {
+                    // The context build itself failing must never surface as an
+                    // unhandled rejection on this fire-and-forget chain.
+                    // TitleSummarizer.onRunEnd already catches its own errors.
+                    log.warn(
+                        "title summarization after run_end failed:",
+                        error instanceof Error ? error.message : String(error),
+                    );
+                })
+                .finally(() => {
+                    summarizing = false;
                 });
         }),
     );

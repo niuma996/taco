@@ -146,9 +146,9 @@ export function registerSessionLifecycleHandlers(): void {
                         .trim();
                     if (title) {
                         try {
-                            await attached.session.setName(title, harnessContext);
+                            await workspace.setPlaceholderTitle(asSessionId(meta.id), title);
                         } catch (e) {
-                            log.error("setName failed:", e);
+                            log.error("setPlaceholderTitle failed:", e);
                         }
                     }
                     assistantMessage = await attached.prompt(

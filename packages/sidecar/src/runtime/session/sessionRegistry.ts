@@ -57,6 +57,7 @@ import { readSessionFacts, type SessionFacts, writeSessionFactsIfAbsent } from "
 import { resolveSessionByPrefix } from "./sessionLookup.ts";
 import { readLegacyFactsFromPath, readSessionMetadataFromDisk } from "./sessionMetadataReader.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
+import { type TitleSource, writeTitleSource } from "./sessionTitleSource.ts";
 
 /** `attach()` per-call override parameters — same shape as WorkspaceRuntime.AttachOptions */
 export interface AttachOptions {
@@ -252,6 +253,15 @@ export class SessionRegistry extends EventEmitter {
     private readonly _factsCache = new Map<SessionId, SessionFacts>();
 
     /**
+     * sessionId → who last set the session's title ("auto" truncation/summary
+     * vs explicit "user" rename). Same single-pass scan as name/facts.
+     * `undefined` (cache miss aside) means no provenance was ever recorded —
+     * treated as "user" by callers so a pre-existing title from before this
+     * feature shipped is never silently overwritten.
+     */
+    private readonly _titleSourceCache = new Map<SessionId, TitleSource | undefined>();
+
+    /**
      * sessionId → last user-visible message timestamp (epoch ms). Same scan
      * as name/facts; the list sorts on this instead of file mtime, which a
      * v3→v4 rewrite would otherwise bump.
@@ -367,6 +377,7 @@ export class SessionRegistry extends EventEmitter {
         this._nameCache.clear();
         this._factsCache.clear();
         this._activityCache.clear();
+        this._titleSourceCache.clear();
     }
 
     /** Get an existing session instance by id. */
@@ -473,10 +484,98 @@ export class SessionRegistry extends EventEmitter {
      * append-only). Semantically a "rename": readers take the last
      * name value. Does not require attach. Updates _nameCache in place
      * after write, so callers don't need invalidateListCache (metadata unchanged).
+     *
+     * Always records provenance as "user" — this is the RPC an explicit
+     * rename goes through (desktop rename modal, `session.rename`). Callers
+     * that write an auto-generated title (truncation placeholder, LLM
+     * summary) must not go through this method; see `setPlaceholderTitle` /
+     * `setSummaryTitle`.
      */
     async renameSession(sessionId: SessionId, name: string): Promise<void> {
-        await this.withSession(sessionId, (session) => session.setName(name, harnessContext));
+        await this.writeTitle(sessionId, name, "user");
+    }
+
+    /**
+     * Write the truncation-placeholder title (first ~60 chars of the latest
+     * message), but only while nothing better exists yet.
+     *
+     * A session with no name yet has no titleSource either — that
+     * combination is "never titled," not "owned by someone else," and must
+     * accept the placeholder. What must block the write is an *existing
+     * name* with a source other than "placeholder": a user rename, an LLM
+     * summary (TitleSummarizer, strictly better than a raw truncation of
+     * whatever the user typed most recently), or a name written before this
+     * feature shipped (no titleSource recorded at all) — none of those may
+     * be silently overwritten by a later message's truncation.
+     *
+     * Returns whether the write happened, so callers can skip the
+     * `_nameCache` update / list invalidation on a no-op.
+     */
+    async setPlaceholderTitle(sessionId: SessionId, name: string): Promise<boolean> {
+        const [existingName, source] = await Promise.all([
+            this.getSessionName(sessionId),
+            this.getTitleSource(sessionId),
+        ]);
+        if (existingName !== undefined && source !== "placeholder") return false;
+        return await this.writeTitle(sessionId, name, "placeholder");
+    }
+
+    /**
+     * Write the LLM-generated summary title (TitleSummarizer, triggered on
+     * every completed `run_end`).
+     *
+     * Re-summarizing is the point: a title derived from the opening message
+     * stops describing a conversation that has moved on. So "summary" is an
+     * accepted prior source, unlike in `setPlaceholderTitle`. Only "user"
+     * refuses — an explicit rename is permanent, and re-deriving over it
+     * would discard a deliberate choice.
+     *
+     * An unchanged name short-circuits in `writeTitle`, so a stable topic
+     * costs no append and fires no push.
+     *
+     * Returns whether the write happened.
+     */
+    async setSummaryTitle(sessionId: SessionId, name: string): Promise<boolean> {
+        const source = await this.getTitleSource(sessionId);
+        if (source === "user") return false;
+        return await this.writeTitle(sessionId, name, "summary");
+    }
+
+    /**
+     * Shared write path for every title source.
+     *
+     * Skips the append when name and source both already hold — the session
+     * log is append-only, so re-running summarization on a conversation whose
+     * topic has not moved would otherwise add one record per turn and push a
+     * `session.renamed` frame that changes nothing. Reads go through
+     * `getSessionName` / `getTitleSource` rather than the caches directly, so
+     * a cold cache hydrates from disk instead of comparing against
+     * `undefined` and always writing.
+     *
+     * Returns whether the write happened.
+     */
+    private async writeTitle(
+        sessionId: SessionId,
+        name: string,
+        source: TitleSource,
+    ): Promise<boolean> {
+        const [currentName, currentSource] = await Promise.all([
+            this.getSessionName(sessionId),
+            this.getTitleSource(sessionId),
+        ]);
+        if (currentName === name && currentSource === source) return false;
+        await this.withSession(sessionId, async (session) => {
+            await session.setName(name, harnessContext);
+            await writeTitleSource(session, source, harnessContext);
+        });
         this._nameCache.set(sessionId, name);
+        this._titleSourceCache.set(sessionId, source);
+        // Same forward-to-facade path as the other session.* events: the server
+        // turns this into a `session.renamed` push. Emitted for every source,
+        // including "user" — a second client window did not make that rename
+        // and has no other way to learn about it.
+        this.emit("session.renamed", { sessionId, name });
+        return true;
     }
 
     /** Read the current title of a session (last name value), or undefined. Cache-hit avoids disk I/O. */
@@ -486,6 +585,15 @@ export class SessionRegistry extends EventEmitter {
         }
         await this.hydrateSessionMetadata(sessionId);
         return this._nameCache.get(sessionId);
+    }
+
+    /** Who last set this session's title — see `_titleSourceCache` for the `undefined` contract. */
+    async getTitleSource(sessionId: SessionId): Promise<TitleSource | undefined> {
+        if (this._titleSourceCache.has(sessionId)) {
+            return this._titleSourceCache.get(sessionId);
+        }
+        await this.hydrateSessionMetadata(sessionId);
+        return this._titleSourceCache.get(sessionId);
     }
 
     /**
@@ -520,13 +628,16 @@ export class SessionRegistry extends EventEmitter {
         return this._activityCache.get(sessionId);
     }
 
-    /** One JSONL scan fills name, facts, and activity caches together. */
+    /** One JSONL scan fills name, facts, activity, and title-source caches together. */
     private async hydrateSessionMetadata(sessionId: SessionId): Promise<void> {
         const meta = await this.openSession(sessionId);
-        const { name, facts, activityAt } = await readSessionMetadataFromDisk(meta.path);
+        const { name, facts, activityAt, titleSource } = await readSessionMetadataFromDisk(
+            meta.path,
+        );
         this._nameCache.set(sessionId, name);
         this._factsCache.set(sessionId, facts);
         this._activityCache.set(sessionId, activityAt);
+        this._titleSourceCache.set(sessionId, titleSource);
     }
 
     /** Get the full chat tree history (from session leaf up to root). */
@@ -674,6 +785,7 @@ export class SessionRegistry extends EventEmitter {
             getSkills: () => this.skills,
             memoryStore: this.memoryStore,
             isIm: this.isIm,
+            setSummaryTitle: (id, name) => this.setSummaryTitle(id, name),
             taskStore: resolvedTaskState.taskStore,
             planState: resolvedTaskState.planState,
             tasksDir: resolvedTaskState.tasksDir,

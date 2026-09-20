@@ -1373,6 +1373,11 @@ export class SidecarServer implements ServerRpcSurface {
                 TOMBSTONE_TTL_MS,
             ).unref();
         });
+        ws.on("session.renamed", (e: { sessionId: SessionId; name: string }) => {
+            this.emitPush(PushMethods.SessionRenamed, workspaceKey, e.sessionId, {
+                name: e.name,
+            });
+        });
         ws.on(
             "subagent.spawned",
             (e: {

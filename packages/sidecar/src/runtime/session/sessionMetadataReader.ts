@@ -12,6 +12,7 @@ import { createReadStream } from "node:fs";
 import * as readline from "node:readline";
 import { createLogger } from "../../lib/logger.ts";
 import { SESSION_FACTS_NAMESPACE, type SessionFacts } from "./sessionFacts.ts";
+import { SESSION_TITLE_SOURCE_NAMESPACE, type TitleSource } from "./sessionTitleSource.ts";
 
 const log = createLogger("sidecar.sessionMetadataReader");
 
@@ -152,6 +153,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
     name: string | undefined;
     facts: SessionFacts;
     activityAt: number | undefined;
+    titleSource: TitleSource | undefined;
 }> {
     // createReadStream + readline.createInterface is the standard streaming
     // pattern, but readline does NOT close the input stream on rl.close().
@@ -169,6 +171,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
     let name: string | undefined;
     let facts: SessionFacts = {};
     let activityAt: number | undefined;
+    let titleSource: TitleSource | undefined;
     let lineCount = 0;
     let headerFacts: SessionFacts | undefined;
     let sawFactsValue = false;
@@ -202,8 +205,9 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
             // them is exactly the cost this function exists to avoid.
             const maybeName = line.includes(SESSION_NAME_NAMESPACE);
             const maybeFacts = line.includes(SESSION_FACTS_NAMESPACE);
+            const maybeTitleSource = line.includes(SESSION_TITLE_SOURCE_NAMESPACE);
             const maybeMessage = line.includes('"type":"message"');
-            if (!maybeName && !maybeFacts && !maybeMessage) {
+            if (!maybeName && !maybeFacts && !maybeTitleSource && !maybeMessage) {
                 continue;
             }
             try {
@@ -222,7 +226,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
                         type?: unknown;
                         timestamp?: unknown;
                     };
-                    if (maybeName || maybeFacts) applyValueRecord(rec);
+                    if (maybeName || maybeFacts || maybeTitleSource) applyValueRecord(rec);
                     if (maybeMessage) {
                         const ts = messageTimestamp(rec);
                         if (ts !== undefined) {
@@ -264,6 +268,16 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
                 return;
             }
             facts = entry.value as SessionFacts;
+        } else if (entry.namespace === SESSION_TITLE_SOURCE_NAMESPACE) {
+            const isTitleSource =
+                entry.value === "placeholder" ||
+                entry.value === "summary" ||
+                entry.value === "user";
+            if (cleared || !isTitleSource) {
+                titleSource = undefined;
+                return;
+            }
+            titleSource = entry.value;
         }
     }
     // Only a *current-format* file with content but no namespaced value
@@ -297,7 +311,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
     if (!sawFactsValue && headerFacts !== undefined) {
         facts = headerFacts;
     }
-    return { name, facts, activityAt };
+    return { name, facts, activityAt, titleSource };
 }
 
 /**

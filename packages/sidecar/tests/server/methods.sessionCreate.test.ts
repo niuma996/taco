@@ -42,6 +42,7 @@ interface WorkspaceStub {
     invalidateListCache(): void;
     setSessionModel(id: SessionId, provider: string, modelId: string): Promise<void>;
     setSessionThinkingLevel(id: SessionId, level: string): Promise<void>;
+    setPlaceholderTitle(id: SessionId, name: string): Promise<boolean>;
     /** Stub already resolved its default model. */
     defaultModel?: unknown;
 }
@@ -122,6 +123,10 @@ function makeStub(): WorkspaceStub {
         },
         async setSessionThinkingLevel(id, level) {
             calls.push(`setSessionThinkingLevel(${id},${level})`);
+        },
+        async setPlaceholderTitle(id, name) {
+            calls.push(`setPlaceholderTitle(${id},${name})`);
+            return true;
         },
         // Placeholder so session.create's defaultModel guard passes.
         defaultModel: { id: "stub-model" },

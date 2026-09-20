@@ -256,6 +256,176 @@ describe("SessionRegistry", () => {
         assert.equal(after, before); // cache not invalidated
     });
 
+    it("renameSession marks the title as user-owned", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.renameSession(asSessionId(id), "my-session");
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "user");
+    });
+
+    it("setPlaceholderTitle writes the title and marks it placeholder-owned on a fresh session", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        const wrote = await sr.setPlaceholderTitle(asSessionId(id), "placeholder title");
+        assert.equal(wrote, true);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "placeholder title");
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "placeholder");
+    });
+
+    // This is the core guarantee the feature exists for: a follow-up prompt's
+    // truncation-placeholder call must not clobber a name the user just chose
+    // via the rename modal.
+    it("setPlaceholderTitle is a no-op once the session has been user-renamed", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.renameSession(asSessionId(id), "user chosen");
+        const wrote = await sr.setPlaceholderTitle(asSessionId(id), "next message truncated...");
+        assert.equal(wrote, false);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "user chosen");
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "user");
+    });
+
+    // A user rename that lands *between* two setPlaceholderTitle calls (the
+    // session.prompt placeholder path) must stick — later placeholders must
+    // keep deferring to it, not just the one immediately before the rename.
+    it("setPlaceholderTitle stays a no-op across multiple calls after a user rename", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setPlaceholderTitle(asSessionId(id), "first message truncated");
+        await sr.renameSession(asSessionId(id), "user chosen");
+        await sr.setPlaceholderTitle(asSessionId(id), "second message truncated");
+        await sr.setPlaceholderTitle(asSessionId(id), "third message truncated");
+        assert.equal(await sr.getSessionName(asSessionId(id)), "user chosen");
+    });
+
+    // A session titled before this feature shipped has no titleSource record
+    // at all. Treat that the same as owned-by-someone-else — an untagged
+    // title must not be silently overwritten by the next placeholder write.
+    it("setPlaceholderTitle is a no-op on a pre-existing name with no recorded titleSource", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        const created = await sr.repo.create({ id, cwd }, harnessContext);
+        await created.setName("legacy title", harnessContext);
+        await created.close(harnessContext);
+        sr.invalidateListCache();
+
+        assert.equal(await sr.getTitleSource(asSessionId(id)), undefined);
+        const wrote = await sr.setPlaceholderTitle(asSessionId(id), "placeholder title");
+        assert.equal(wrote, false);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "legacy title");
+    });
+
+    // The summary path takes the opposite call on the same state: an untagged
+    // title is not a user rename, and a summary is strictly better than
+    // whatever truncation left it there. Only a recorded "user" source blocks.
+    it("setSummaryTitle overwrites a pre-existing name with no recorded titleSource", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        const created = await sr.repo.create({ id, cwd }, harnessContext);
+        await created.setName("legacy title", harnessContext);
+        await created.close(harnessContext);
+        sr.invalidateListCache();
+
+        assert.equal(await sr.getTitleSource(asSessionId(id)), undefined);
+        const wrote = await sr.setSummaryTitle(asSessionId(id), "LLM summary");
+        assert.equal(wrote, true);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "LLM summary");
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "summary");
+    });
+
+    it("getTitleSource reads the newest value from disk on a cold cache", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setPlaceholderTitle(asSessionId(id), "placeholder title");
+        await sr.renameSession(asSessionId(id), "user title");
+        sr.invalidateListCache();
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "user");
+    });
+
+    it("setSummaryTitle replaces a placeholder title and marks it summary-owned", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setPlaceholderTitle(asSessionId(id), "placeholder title");
+        const wrote = await sr.setSummaryTitle(asSessionId(id), "Fix login redirect bug");
+        assert.equal(wrote, true);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "Fix login redirect bug");
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "summary");
+    });
+
+    it("setSummaryTitle writes on a never-titled session (never-titled ≠ owned)", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        const wrote = await sr.setSummaryTitle(asSessionId(id), "Fix login redirect bug");
+        assert.equal(wrote, true);
+        assert.equal(await sr.getTitleSource(asSessionId(id)), "summary");
+    });
+
+    // Core guarantee: every completed run_end re-derives the title, so a later
+    // summary replaces an earlier one. A title from the opening message stops
+    // describing a conversation that has moved on.
+    it("setSummaryTitle replaces an earlier summary", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setSummaryTitle(asSessionId(id), "first summary");
+        const wrote = await sr.setSummaryTitle(asSessionId(id), "second summary");
+        assert.equal(wrote, true);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "second summary");
+    });
+
+    // The dedupe guard in writeTitle: re-summarizing a conversation whose topic
+    // has not moved must not append a record or fire a session.renamed push.
+    it("setSummaryTitle short-circuits when the derived title is unchanged", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setSummaryTitle(asSessionId(id), "same topic");
+        const wrote = await sr.setSummaryTitle(asSessionId(id), "same topic");
+        assert.equal(wrote, false);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "same topic");
+    });
+
+    it("setSummaryTitle is a no-op once the session has been user-renamed", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.renameSession(asSessionId(id), "user chosen");
+        const wrote = await sr.setSummaryTitle(asSessionId(id), "LLM summary");
+        assert.equal(wrote, false);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "user chosen");
+    });
+
+    // A summary must win over a subsequent placeholder write too — a real
+    // summary is strictly better than a truncation of the next message.
+    it("setPlaceholderTitle is a no-op once the session has a summary", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setPlaceholderTitle(asSessionId(id), "first message truncated");
+        await sr.setSummaryTitle(asSessionId(id), "Fix login redirect bug");
+        const wrote = await sr.setPlaceholderTitle(asSessionId(id), "second message truncated");
+        assert.equal(wrote, false);
+        assert.equal(await sr.getSessionName(asSessionId(id)), "Fix login redirect bug");
+    });
+
     it("getHistory returns empty entries for fresh session", async () => {
         const sr = makeRegistry();
         const id = uuidv7();
@@ -454,6 +624,55 @@ describe("SessionRegistry", () => {
         assert.equal(deleted, id);
         const list = await sr.listSessions();
         assert.equal(list.length, 0);
+    });
+
+    // The event is what the server turns into a `session.renamed` push. Without
+    // it the summary reaches disk and `session.list`, but no attached client
+    // learns about it until it re-pulls the list — which it only does after a
+    // send or on startup, so the sidebar sits on a stale title.
+    it("setSummaryTitle emits session.renamed with the new name", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        const seen: Array<{ sessionId: string; name: string }> = [];
+        sr.on("session.renamed", (e: { sessionId: string; name: string }) => {
+            seen.push(e);
+        });
+        await sr.setSummaryTitle(asSessionId(id), "summarized title");
+        assert.deepEqual(seen, [{ sessionId: id, name: "summarized title" }]);
+    });
+
+    // A second client window did not issue the rename and has no other way to
+    // hear about it, so the push is not filtered by source.
+    it("renameSession emits session.renamed", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        const seen: string[] = [];
+        sr.on("session.renamed", (e: { name: string }) => {
+            seen.push(e.name);
+        });
+        await sr.renameSession(asSessionId(id), "user chosen");
+        assert.deepEqual(seen, ["user chosen"]);
+    });
+
+    // Re-summarizing a conversation whose topic has not moved must stay silent:
+    // the title is re-derived every completed run, so emitting unconditionally
+    // would push a no-change frame once per turn.
+    it("re-writing the same title emits nothing", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+        await sr.setSummaryTitle(asSessionId(id), "same topic");
+        const seen: string[] = [];
+        sr.on("session.renamed", (e: { name: string }) => {
+            seen.push(e.name);
+        });
+        await sr.setSummaryTitle(asSessionId(id), "same topic");
+        assert.deepEqual(seen, []);
     });
 
     it("getAttached returns undefined for unattached session", () => {

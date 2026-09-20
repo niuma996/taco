@@ -31,7 +31,6 @@ import {
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 
-import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
 import { textsFromAgentMessages } from "../../runtime/harness/messageText.ts";
@@ -123,12 +122,17 @@ export function registerSessionTurnHandlers(): void {
             }
             const attached = await ensureAttached(workspace, params.sessionId, attachOpts);
             await requireCompactionSettled(server, params.workspace, params.sessionId);
+            // Placeholder title from the latest message, truncated. No-ops once
+            // something better exists — a user rename (session.rename) or an
+            // LLM summary (TitleSummarizer, run_end-triggered) — otherwise every
+            // follow-up message would clobber a name the user chose, or a real
+            // summary, with a raw truncation of whatever was just typed.
             const title = params.text.slice(0, 60).replace(/\n+/g, " ").trim();
             if (title) {
                 try {
-                    await attached.session.setName(title, harnessContext);
+                    await workspace.setPlaceholderTitle(params.sessionId, title);
                 } catch (e) {
-                    log.error("setName failed:", e);
+                    log.error("setPlaceholderTitle failed:", e);
                 }
             }
             const assistantMessage = await attached

@@ -82,6 +82,19 @@ export const PushMethods = {
      */
     SessionDeleted: "session.deleted",
     /**
+     * Emitted whenever a session's title actually changes on disk, whatever
+     * set it: the LLM title summary (re-derived after each completed run, so
+     * it lands well after the `session.prompt` RPC has returned and no
+     * in-flight response can carry it), the truncation placeholder, or an
+     * explicit `session.rename`. A rename's own caller already knows the
+     * name, but a second client window on the same session does not — so the
+     * push is unconditional rather than filtered by source. A write that
+     * resolves to the name already stored emits nothing. Carries the new name
+     * so a client patches its session list in place instead of re-pulling
+     * `session.list`.
+     */
+    SessionRenamed: "session.renamed",
+    /**
      * Emitted on every IM channel binding transition (QR shown, scanned,
      * connected, error, ...). Workspace-dimensioned (no session): binding is a
      * config-time operation with no conversation attached. Desktop drives the
@@ -333,6 +346,13 @@ export type ModelsChangedParams = Record<string, never>;
  *  frame already carries workspace + sessionId. */
 export type SessionDeletedParams = Record<string, never>;
 
+/** `session.renamed` params — carries the new title so the desktop can patch
+ *  its session list without a round trip. The push frame already carries
+ *  workspace + sessionId, so only the name itself needs to ride along. */
+export interface SessionRenamedParams {
+    name: string;
+}
+
 /** `channels.conversations_changed` params — invalidate signal when
  *  ConversationRouter created a new IM session. Empty; desktop re-pulls
  *  `channels.listConversations`. */
@@ -382,6 +402,7 @@ export interface PushParamsByMethod {
     [PushMethods.PlanStateUpdated]: PlanStateUpdatedParams;
     [PushMethods.ModelsChanged]: ModelsChangedParams;
     [PushMethods.SessionDeleted]: SessionDeletedParams;
+    [PushMethods.SessionRenamed]: SessionRenamedParams;
     [PushMethods.ChannelStatusChanged]: ChannelStatusChangedParams;
     [PushMethods.ConversationsChanged]: ConversationsChangedParams;
     [PushMethods.ImToolsEnabled]: ImToolsEnabledParams;

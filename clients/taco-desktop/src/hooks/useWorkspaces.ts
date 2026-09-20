@@ -367,6 +367,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     active: action.active,
                     currentSlug: action.currentSlug,
                 });
+            } else if (action.type === "SESSION_RENAMED") {
+                dispatchWs({
+                    type: "SESSION_RENAMED",
+                    cwd: action.cwd,
+                    sid: action.sid,
+                    name: action.name,
+                });
             }
             // Note: answers only land in the ref, read by the useEffect.
         },
