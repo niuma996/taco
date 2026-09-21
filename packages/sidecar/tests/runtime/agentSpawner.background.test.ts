@@ -585,4 +585,37 @@ describe("AgentSpawner.spawnSubagent — background", () => {
         await Promise.all([first, second]);
         assert.deepEqual(order, ["first-start", "first-end", "second-start"]);
     });
+
+    // settledEmitted exists only to dedupe the .then/.catch double-emit for
+    // one spawn's own settle sequence; retaining entries past that would
+    // grow this set by one string per background spawn for the process's
+    // entire lifetime.
+    it("removes the parentToolCallId from settledEmitted once its settle sequence ends", async () => {
+        const restoreExecute = stubExecute(async (args) => ({
+            subSessionId: args.childSessionId ?? asSessionId("unused"),
+            resultText: "done",
+            isError: false,
+        }));
+        const parent = "bg-parent-settled-emitted-cleanup";
+        try {
+            await seedSession(parent);
+            await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-cleanup",
+                agentType: "explorer",
+                prompt: "do something",
+                background: true,
+            });
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            const settledEmitted = (ws.agentSpawner as unknown as { settledEmitted: Set<string> })
+                .settledEmitted;
+            assert.equal(
+                settledEmitted.has("tc-cleanup"),
+                false,
+                "entry must be removed once the settle chain's .finally runs",
+            );
+        } finally {
+            restoreExecute();
+        }
+    });
 });

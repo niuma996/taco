@@ -305,12 +305,17 @@ export class AgentSpawner extends EventEmitter {
     private readonly backgroundInFlight: Set<string>;
 
     /**
-     * `parentToolCallId`s that have already emitted `subagent.settled`.
+     * `parentToolCallId`s that have already emitted `subagent.settled`,
+     * for the background spawn currently settling.
      *
      * Both the delivery path and its error path emit, so this keeps the event
-     * at-most-once per background spawn. Not cleared on settle: tool call ids
-     * are unique per call, so retaining them only suppresses a genuine
-     * double-emit for the same spawn, never a later distinct one.
+     * at-most-once per background spawn while its settle sequence (persist,
+     * record, deliver, clear) is in flight — the `.then` and `.catch`
+     * branches for one spawn can both reach `emitSettled` (e.g. delivery
+     * itself throws after the success path already emitted). Entries are
+     * removed in the settle chain's `.finally`, once no later call for that
+     * `parentToolCallId` can still be in flight; tool call ids are never
+     * reused, so this is not a TTL or an LRU, just "done with this one".
      */
     private readonly settledEmitted: Set<string>;
 
@@ -905,6 +910,14 @@ export class AgentSpawner extends EventEmitter {
                 this.backgroundInFlight.delete(parentToolCallId);
                 this.backgroundRuns.delete(run);
                 this.subagentControllers.delete(childSessionId);
+                // Safe here, not in emitSettled: by the time this whole chain
+                // settles, both the `.then` and `.catch` branches (the only
+                // callers) have already run to completion, so no later call
+                // for this same parentToolCallId can still be in flight to
+                // race a fresh entry into existence. Without this the set
+                // holds one string per background spawn for the process's
+                // entire lifetime.
+                this.settledEmitted.delete(parentToolCallId);
             });
         // Deliberately not awaited or returned — see method doc. A rejection
         // from `run` is already handled by the `.catch` above, so there is no
