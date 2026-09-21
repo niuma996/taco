@@ -53,7 +53,7 @@ export type SidecarAction =
           parentToolCallId: string;
           subSessionId: string;
           agentType: string;
-          outcome: "completed" | "error";
+          outcome: "completed" | "error" | "aborted";
       }
     | { type: "ATTACHED"; cwd: string; sid: string }
     | {
@@ -133,8 +133,14 @@ const LLM_DUMP_PREFIX = "[taco:llm]";
 
 // ─── frame normalizer ─────────────────────────────────────────────────────────
 
-/** Normalizes a validated push frame into a workspace reducer action. */
-function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void): void {
+/**
+ * Normalizes a validated push frame into a workspace reducer action.
+ *
+ * Exported for `normalizePushFrame.test.ts` — the mapping from wire `outcome`
+ * strings to `SidecarAction` fields has no other test surface, and a bad
+ * mapping here silently reads a deliberate stop as a completed run.
+ */
+export function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void): void {
     if (!p.workspace || !p.session) return;
 
     switch (p.method) {
@@ -196,7 +202,16 @@ function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void)
                 parentToolCallId,
                 subSessionId,
                 agentType,
-                outcome: params.outcome === "error" ? "error" : "completed",
+                // Explicit allowlist, not a two-way fallback: an unrecognized
+                // value must not silently read as "completed" the way a
+                // ternary would — that is exactly the bug that made a
+                // deliberate stop render as a green checkmark.
+                outcome:
+                    params.outcome === "aborted"
+                        ? "aborted"
+                        : params.outcome === "error"
+                          ? "error"
+                          : "completed",
             });
         }
         case PushMethods.TasksUpdated: {

@@ -1385,7 +1385,7 @@ export class SidecarServer implements ServerRpcSurface {
                 parentToolCallId: string;
                 subSessionId: SessionId;
                 agentType: string;
-                outcome: "completed" | "error";
+                outcome: "completed" | "error" | "aborted";
             }) => {
                 this.emitPush(PushMethods.SubagentSettled, workspaceKey, e.parentSessionId, {
                     parentSessionId: e.parentSessionId,

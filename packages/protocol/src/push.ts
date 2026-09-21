@@ -6,6 +6,7 @@
 
 import type { ChannelStatusChangedParams } from "./channels.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
+import type { SubagentSettledPayload } from "./tools.js";
 
 // Push event payloads
 
@@ -337,16 +338,18 @@ export interface SubagentSpawnedParams {
     agentType: string;
 }
 
-/** `subagent.settled` params — runtime emits when a background subagent
- *  reaches a terminal state. `outcome` is what the parent will be told;
- *  the result text itself travels as an injected message, not here. */
-export interface SubagentSettledParams {
-    parentSessionId: SessionId;
-    parentToolCallId: string;
-    subSessionId: SessionId;
-    agentType: string;
-    outcome: "completed" | "error";
-}
+/**
+ * `subagent.settled` params — runtime emits when a background subagent
+ * reaches a terminal state. `outcome` is what the parent will be told; the
+ * result text itself travels as an injected message, not here.
+ *
+ * Alias, not a separate shape: this used to redeclare the same fields as
+ * `SubagentSettledPayload` (tools.ts) with a narrower `outcome` union that
+ * silently dropped `"aborted"` — the wire value passed through untyped
+ * because `EventEmitter.emit` doesn't check against either interface, so
+ * `pnpm typecheck` couldn't catch the mismatch. One definition now.
+ */
+export type SubagentSettledParams = SubagentSettledPayload;
 
 /** `session.error` params — terminal error frame for a session; the
  *  desktop surfaces a toast and freezes input until the user retries. */
