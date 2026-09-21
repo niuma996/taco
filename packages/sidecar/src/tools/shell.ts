@@ -3,7 +3,7 @@
  * Unified spawn + timeout + output truncation.
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
 import { isInjectedEnvKey } from "../runtime/models/providerKeyStore.ts";
@@ -11,6 +11,20 @@ import type { TextContent } from "../runtime/pi/types.ts";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB
+
+/**
+ * SIGKILL a child that ignored SIGTERM, unless it has already exited.
+ *
+ * `child.killed` is not "has this process exited" — Node sets it as soon as
+ * `kill()` successfully *delivers* a signal, regardless of whether the
+ * process acts on it. `if (!child.killed)` after already calling
+ * `child.kill("SIGTERM")` is therefore always false, and the SIGKILL escalation
+ * below it never fires. `exitCode`/`signalCode` are the pair that actually
+ * reflects termination: both stay `null` until the process has exited.
+ */
+function escalateToSigkill(child: ChildProcess): void {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+}
 
 function truncate(text: string, maxBytes: number): string {
     if (Buffer.byteLength(text, "utf-8") <= maxBytes) return text;
@@ -39,9 +53,20 @@ export interface ShellExecResult {
 export async function runShell(
     command: string,
     spawnArgs: string[] | null,
-    opts: { cwd: string; timeoutMs?: number; signal?: AbortSignal },
+    opts: {
+        cwd: string;
+        timeoutMs?: number;
+        signal?: AbortSignal;
+        /**
+         * Delay before escalating to SIGKILL after SIGTERM, in ms. Not part
+         * of the public tool surface — exists so a test can shrink the
+         * escalation window instead of waiting out the real 5s.
+         */
+        sigkillDelayMs?: number;
+    },
 ): Promise<ShellExecResult> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const sigkillDelayMs = opts.sigkillDelayMs ?? 5000;
     if (opts.signal?.aborted) throw new Error("Operation aborted");
 
     // Scrub provider API keys from the child env: shell runs model-generated
@@ -89,9 +114,7 @@ export async function runShell(
         // signal name, so the SIGTERM→SIGKILL escalation is a no-op there —
         // the first kill is already hard. The code is correct on both; the
         // delay is only meaningful on Unix.
-        sigkillTimer = setTimeout(() => {
-            if (!child.killed) child.kill("SIGKILL");
-        }, 5000);
+        sigkillTimer = setTimeout(() => escalateToSigkill(child), sigkillDelayMs);
     }, timeoutMs);
 
     const onAbort = () => {
@@ -99,10 +122,10 @@ export async function runShell(
         child.kill("SIGTERM");
         // Same backstop as the timeout path: a child that ignores SIGTERM
         // must not hold the tool — and the parent's abort, which awaits it —
-        // open forever.
-        sigkillTimer = setTimeout(() => {
-            if (!child.killed) child.kill("SIGKILL");
-        }, 5000);
+        // open forever. Clear any timer the timeout path already set so the
+        // two escalations do not stack.
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+        sigkillTimer = setTimeout(() => escalateToSigkill(child), sigkillDelayMs);
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
 
