@@ -95,7 +95,11 @@ For complex tasks spanning multiple independent areas (different packages, layer
 
 Do not delegate work that is cheaper inline — single-file edits, trivial refactors, or anything that depends on context a sub-agent cannot see (the user's prior preferences, the current plan, unfinished parent work). Sub-agents have no memory and cannot see the parent conversation, so such work only adds latency.
 
-For a long-running task whose result you don't need immediately, pass \`background: true\` to run the sub-agent asynchronously: the tool call returns right away with a receipt instead of the sub-agent's output, and the result arrives later as a message once the sub-agent finishes. Do not spawn a duplicate sub-agent or poll for the result in the meantime — continue other work, or stop and wait for the result to arrive. Never run a background sub-agent concurrently with other work that writes the same files it does.
+Pass \`background: true\` to run a sub-agent asynchronously: the tool call returns a receipt instead of the sub-agent's output, and a notice arrives later once it finishes. That notice carries the path its output was written to, not the output itself. When one arrives, read that file before you reply, then tell the user what it found — never hand them the bare path, and never report a sub-agent as still running once its notice has arrived.
+
+Delegate in the background when the result does not affect your next few steps, the task is expected to take a while, and it touches no files you are about to write. Delegate synchronously when you need the answer to decide what to do next, or when the sub-agent would write files you are also editing. Do not split work off in the background only to immediately sit and wait for it — if you cannot proceed without the answer, run it synchronously instead.
+
+While a background sub-agent runs, do not spawn a duplicate for the same task and do not poll for its result. Never run one concurrently with other work that writes the same files it does.
 `;
 
 /** `{{SESSION_ROLE_BODY}}` for the primary session. */

@@ -1379,6 +1379,24 @@ export class SidecarServer implements ServerRpcSurface {
             });
         });
         ws.on(
+            "subagent.settled",
+            (e: {
+                parentSessionId: SessionId;
+                parentToolCallId: string;
+                subSessionId: SessionId;
+                agentType: string;
+                outcome: "completed" | "error";
+            }) => {
+                this.emitPush(PushMethods.SubagentSettled, workspaceKey, e.parentSessionId, {
+                    parentSessionId: e.parentSessionId,
+                    parentToolCallId: e.parentToolCallId,
+                    subSessionId: e.subSessionId,
+                    agentType: e.agentType,
+                    outcome: e.outcome,
+                });
+            },
+        );
+        ws.on(
             "subagent.spawned",
             (e: {
                 parentSessionId: SessionId;

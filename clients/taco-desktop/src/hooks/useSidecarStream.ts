@@ -12,6 +12,7 @@ import type {
     PlanStateUpdatedParams,
     ServerPush,
     SessionRenamedParams,
+    SubagentSettledPayload,
     SubagentSpawnedPayload,
     TaskListMeta,
     TasksUpdatedParams,
@@ -44,6 +45,15 @@ export type SidecarAction =
           parentToolCallId: string;
           subSessionId: string;
           agentType: string;
+      }
+    | {
+          type: "SUBAGENT_SETTLED";
+          cwd: string;
+          parentSessionId: string;
+          parentToolCallId: string;
+          subSessionId: string;
+          agentType: string;
+          outcome: "completed" | "error";
       }
     | { type: "ATTACHED"; cwd: string; sid: string }
     | {
@@ -170,6 +180,23 @@ function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) => void)
                 parentToolCallId,
                 subSessionId,
                 agentType,
+            });
+        }
+        case PushMethods.SubagentSettled: {
+            const params = (p.params ?? {}) as Partial<SubagentSettledPayload>;
+            const parentToolCallId =
+                typeof params.parentToolCallId === "string" ? params.parentToolCallId : "";
+            const subSessionId = typeof params.subSessionId === "string" ? params.subSessionId : "";
+            const agentType = typeof params.agentType === "string" ? params.agentType : "";
+            if (!parentToolCallId || !subSessionId) return;
+            return void dispatch({
+                type: "SUBAGENT_SETTLED",
+                cwd: p.workspace,
+                parentSessionId: p.session,
+                parentToolCallId,
+                subSessionId,
+                agentType,
+                outcome: params.outcome === "error" ? "error" : "completed",
             });
         }
         case PushMethods.TasksUpdated: {

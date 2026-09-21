@@ -106,8 +106,24 @@ export interface WorkspaceState {
      * parentToolCallId → true tracks agent tool calls awaiting subagent results.
      * Written by SUBAGENT_SPAWNED; cleared by the corresponding tool_end (agent).
      * Used by UI to block sending: pending is false but a subagent running should still block.
+     *
+     * Background spawns are deliberately excluded — see `backgroundSubagents`.
      */
     agentToolPending: Record<string, true>;
+    /**
+     * parentToolCallId → true for `agent` calls launched with `background: true`.
+     *
+     * A background spawn's `tool_end` fires at launch, so it cannot mean "the
+     * child finished" the way a synchronous one does. Its `subagent.spawned`
+     * then arrives *after* that `tool_end`, which used to re-set
+     * `agentToolPending` with nothing left to clear it — leaving the composer
+     * idle but the Stop button stuck on screen forever.
+     *
+     * Recording the launch here lets SUBAGENT_SPAWNED skip the pending write:
+     * the whole point of a background spawn is that the parent keeps working,
+     * so it must not make the session look busy. Cleared on SUBAGENT_SETTLED.
+     */
+    backgroundSubagents: Record<string, true>;
     /**
      * Pagination cursor for "load more". Undefined = first page (or a refresh
      * reset the list to the first page). Sidebar uses this to enable/disable
@@ -156,6 +172,7 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         childHistoryLoaded: {},
         askUserPending: {},
         agentToolPending: {},
+        backgroundSubagents: {},
         pendingBySessionId: {},
         queuedBySessionId: {},
         taskSnapshotsBySessionId: {},
@@ -249,6 +266,7 @@ export type WorkspaceAction =
           subSessionId: string;
           agentType: string;
       }
+    | { type: "SUBAGENT_SETTLED"; cwd: string; parentToolCallId: string }
     | {
           type: "CHILD_MESSAGE_EVENT";
           cwd: string;
@@ -434,6 +452,7 @@ export function workspacesReducer(
                     childHistoryLoaded: {},
                     askUserPending: restoredPending,
                     agentToolPending: {},
+                    backgroundSubagents: {},
                 };
             });
         case "ATTACHED_PUSH":
@@ -641,6 +660,14 @@ export function workspacesReducer(
                 const clearsAgentPending =
                     action.ev.type === "tool_end" &&
                     (action.ev.toolName === "agent" || action.ev.toolName === "skill");
+                // `status: "launched"` means this tool_end is a background spawn's
+                // launch receipt, not a finished child. Record it so the
+                // SUBAGENT_SPAWNED that lands next does not mark the session busy.
+                const launchedDetails =
+                    action.ev.type === "tool_end" && action.ev.toolName === "agent"
+                        ? (action.ev.result?.details as { status?: string } | undefined)
+                        : undefined;
+                const isBackgroundLaunch = launchedDetails?.status === "launched";
                 return {
                     messages: result.messages,
                     pendingBySessionId,
@@ -648,6 +675,10 @@ export function workspacesReducer(
                     agentToolPending: clearsAgentPending
                         ? omitKey(existing.agentToolPending, endedToolCallId ?? "")
                         : existing.agentToolPending,
+                    backgroundSubagents:
+                        isBackgroundLaunch && endedToolCallId
+                            ? { ...existing.backgroundSubagents, [endedToolCallId]: true }
+                            : existing.backgroundSubagents,
                     queuedBySessionId,
                 };
             });
@@ -667,10 +698,22 @@ export function workspacesReducer(
                         parentToolCallId: action.parentToolCallId,
                     },
                 },
-                agentToolPending: {
-                    ...existing.agentToolPending,
-                    [action.parentToolCallId]: true,
-                },
+                // A background spawn's launch receipt already landed as tool_end
+                // before this frame, so writing pending here would strand it:
+                // nothing clears it, and the composer goes idle with the Stop
+                // button still showing. Background children keep the session
+                // usable by design.
+                agentToolPending: existing.backgroundSubagents[action.parentToolCallId]
+                    ? existing.agentToolPending
+                    : {
+                          ...existing.agentToolPending,
+                          [action.parentToolCallId]: true,
+                      },
+            }));
+        case "SUBAGENT_SETTLED":
+            return updateWs(state, action.cwd, (existing) => ({
+                agentToolPending: omitKey(existing.agentToolPending, action.parentToolCallId),
+                backgroundSubagents: omitKey(existing.backgroundSubagents, action.parentToolCallId),
             }));
         case "CHILD_MESSAGE_EVENT":
             return updateWs(state, action.cwd, (existing) => ({
@@ -765,6 +808,7 @@ export function workspacesReducer(
                 childHistoryLoaded: {},
                 askUserPending: {},
                 agentToolPending: {},
+                backgroundSubagents: {},
                 pendingBySessionId: {},
                 queuedBySessionId: {},
             }));

@@ -196,6 +196,22 @@ export interface SubagentSpawnedPayload {
 }
 
 /**
+ * `subagent.settled` push params — a `background: true` subagent reached a
+ * terminal state.
+ *
+ * Needed because a background spawn's `tool_call_end` fires at *launch*, not
+ * at completion: consumers that treated that event as "the child is done"
+ * (the pre-background invariant) have no other signal that it stopped.
+ */
+export interface SubagentSettledPayload {
+    parentSessionId: SessionId;
+    parentToolCallId: string;
+    subSessionId: SessionId;
+    agentType: string;
+    outcome: "completed" | "error";
+}
+
+/**
  * Shape of the `details` field on the `agent` tool's **final** result.
  *
  * Discriminated by `status`:

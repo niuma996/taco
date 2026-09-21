@@ -246,6 +246,52 @@ describe("visibility policy", () => {
     it("keeps a message with an image block", () => {
         assert.equal(isContentEmptyAfterVisibility([{ type: "image" }]), false);
     });
+
+    // A background subagent's completion notice is injected as a user message
+    // into the parent session. Its whole body is machine-facing (a path plus
+    // instructions to the model), so it must clean to empty — both the push
+    // path (server.ts) and history replay (sessionRead.ts) drop a message that
+    // does, which is what keeps it from rendering as a blank chat bubble.
+    it("hides a background subagent completion notice entirely", () => {
+        const notice = tagWrap(
+            "subagent_result",
+            "The explorer subagent you launched in the background has finished.\n" +
+                "Its full output is saved at: /tmp/sessions/p1/subagent-results/c1.md",
+            { "agent-type": "explorer", session: "c1", outcome: "completed" },
+        );
+        const cleaned = stripHiddenTagsInMarkdown(notice, [tagRegistry.subagent_result.name]);
+        assert.equal(
+            isContentEmptyAfterVisibility([{ type: "text", text: cleaned }]),
+            true,
+            "notice must leave nothing visible, or it renders as an empty bubble",
+        );
+    });
+
+    it("registers subagent_result as hidden but never dropped from context", () => {
+        assert.equal(tagRegistry.subagent_result.tuiVisibility, "hidden");
+        // `drop` is enforced by a context hook on every LLM call, not only at
+        // compaction, so it would erase this notice before the model read it:
+        // the parent wakes up to an empty delivery and reports the subagent as
+        // still running. Regression guard for exactly that.
+        assert.notEqual(
+            tagRegistry.subagent_result.compression.kind,
+            "drop",
+            "a drop-policy notice is stripped from context before the model sees it",
+        );
+    });
+
+    // The notice must survive the same context hook the harness installs for
+    // every LLM call — hidden from the user, intact for the model.
+    it("keeps a subagent_result notice in LLM context", () => {
+        const notice = tagWrap("subagent_result", "finished; output at /tmp/r.md", {
+            outcome: "completed",
+        });
+        const [msg] = stripDropTagsFromMessages([
+            { role: "user", content: [{ type: "text", text: notice }] },
+        ]);
+        const text = (msg as { content: { text?: string }[] }).content[0]?.text ?? "";
+        assert.match(text, /output at \/tmp\/r\.md/);
+    });
 });
 
 describe("askUser context parsing", () => {

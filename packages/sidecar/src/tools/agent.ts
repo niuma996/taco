@@ -111,11 +111,14 @@ export function createAgentTool(
                 description:
                     "Run this subagent in the background instead of waiting for it. Default false " +
                     "(wait for the result). Set true for long-running, independent work — you get back " +
-                    "a launch receipt immediately and can keep working; the subagent's actual result " +
-                    "arrives later as a message in this conversation. Do NOT call `agent` again for the " +
-                    "same task while it is running, and do not poll for it — you will be notified when " +
-                    "it finishes. Background subagents should not write to the same files as work you " +
-                    "or another subagent are doing concurrently: there is no locking, so the last write wins silently.",
+                    "a launch receipt immediately and can keep working. When it finishes you are " +
+                    "notified with the path its output was written to; read that file when you need " +
+                    "the detail. Use this only when the result does not affect your next few steps: " +
+                    "if you need the answer to decide what to do next, run it synchronously instead " +
+                    "rather than launching it and waiting. Do NOT call `agent` again for the same " +
+                    "task while it is running, and do not poll for it. Background subagents should " +
+                    "not write to the same files as work you or another subagent are doing " +
+                    "concurrently: there is no locking, so the last write wins silently.",
             }),
         ),
     });

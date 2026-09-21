@@ -7,6 +7,8 @@
  */
 
 import { EventEmitter } from "node:events";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
@@ -21,6 +23,7 @@ import { createLogger } from "../../lib/logger.ts";
 import type { SystemPromptContributor } from "../../prompts/buildSystemPrompt.ts";
 import { interpolateArgs } from "../../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
+import { tagWrap } from "../../tags/builder.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelRegistry.ts";
@@ -39,6 +42,7 @@ import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { deliverSubagentResult } from "./subagentDelivery.ts";
 import type { SubagentResumability } from "./subagentProgress.ts";
+import { subagentResultPath } from "./subagentResultsDir.ts";
 import { runAttachedSubagent } from "./subagentRunner.ts";
 
 const log = createLogger("sidecar.agentSpawner");
@@ -62,6 +66,12 @@ const DEFAULT_BACKGROUND_TIMEOUT_MS = 10 * 60_000;
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
+    /**
+     * Same root `JsonlSessionRepo` writes to. Background subagent results are
+     * written under it (`subagentResultsDir`), so a relative value would scatter
+     * them under the process cwd instead of beside the sessions.
+     */
+    readonly sessionsRoot: string;
     readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
@@ -183,6 +193,9 @@ export interface SubagentSessionArgs {
 
 export class AgentSpawner extends EventEmitter {
     readonly sessionCwd: WorkspaceId;
+
+    /** Root for sidecar-owned session-adjacent state; see `AgentSpawnerOptions`. */
+    private readonly sessionsRoot: string;
     readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
@@ -195,6 +208,7 @@ export class AgentSpawner extends EventEmitter {
     constructor(options: AgentSpawnerOptions) {
         super();
         this.sessionCwd = options.cwd;
+        this.sessionsRoot = options.sessionsRoot;
         this.repo = options.repo;
         this.env = options.env;
         this.models = options.models;
@@ -219,6 +233,7 @@ export class AgentSpawner extends EventEmitter {
         this.resumeInFlight = new Map();
         this.inFlight = new Map();
         this.backgroundInFlight = new Set();
+        this.settledEmitted = new Set();
     }
 
     /** Returns the parent default-model identity, used when `args.model` is omitted. */
@@ -267,6 +282,16 @@ export class AgentSpawner extends EventEmitter {
      * the concurrency gate — and removed from both on settle.
      */
     private readonly backgroundInFlight: Set<string>;
+
+    /**
+     * `parentToolCallId`s that have already emitted `subagent.settled`.
+     *
+     * Both the delivery path and its error path emit, so this keeps the event
+     * at-most-once per background spawn. Not cleared on settle: tool call ids
+     * are unique per call, so retaining them only suppresses a genuine
+     * double-emit for the same spawn, never a later distinct one.
+     */
+    private readonly settledEmitted: Set<string>;
 
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
@@ -637,11 +662,26 @@ export class AgentSpawner extends EventEmitter {
             childSessionId,
             signal: controller.signal,
         })
-            .then((result) => {
-                const notification = this.formatBackgroundNotification(
-                    sessionArgs.agentType,
-                    result,
+            .then(async (result) => {
+                // Emitted before delivery, not after: delivery starts a fresh
+                // parent run, and a consumer that keyed "this background child
+                // is still running" off the launch receipt must be able to
+                // clear that state before the new run's events arrive.
+                this.emitSettled(sessionArgs.agentType, {
+                    parentSessionId,
+                    parentToolCallId,
+                    subSessionId: childSessionId,
+                    isError: result.isError,
+                });
+                const path = await this.writeBackgroundResult(
+                    parentSessionId,
+                    childSessionId,
+                    result.resultText,
                 );
+                const notification = this.formatBackgroundNotification(sessionArgs.agentType, {
+                    ...result,
+                    path,
+                });
                 return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
             })
             .catch(async (e) => {
@@ -650,6 +690,16 @@ export class AgentSpawner extends EventEmitter {
                     parentToolCallId,
                     agentType: sessionArgs.agentType,
                     error: e instanceof Error ? e.message : String(e),
+                });
+                // The run itself never throws, so reaching here means the
+                // settled emit or the delivery failed. Emit again rather than
+                // risk never emitting: `emitSettled` is idempotent per
+                // parentToolCallId (see below).
+                this.emitSettled(sessionArgs.agentType, {
+                    parentSessionId,
+                    parentToolCallId,
+                    subSessionId: childSessionId,
+                    isError: true,
                 });
                 const fallback = this.formatBackgroundNotification(sessionArgs.agentType, {
                     subSessionId: childSessionId,
@@ -683,22 +733,102 @@ export class AgentSpawner extends EventEmitter {
         };
     }
 
-    /** Envelope injected into the parent session once a background subagent settles. */
+    /**
+     * Emit `subagent.settled` once per background spawn.
+     *
+     * Both the success and the failure path call this, so it deduplicates on
+     * `parentToolCallId` — a consumer that treats the event as "clear the
+     * running marker" must not see a second one after the marker is gone and
+     * a *new* spawn has reused nothing (ids are unique per tool call, so the
+     * dedupe set only ever suppresses a genuine double-emit).
+     */
+    private emitSettled(
+        agentType: string,
+        args: {
+            parentSessionId: SessionId;
+            parentToolCallId: string;
+            subSessionId: SessionId;
+            isError: boolean;
+        },
+    ): void {
+        if (this.settledEmitted.has(args.parentToolCallId)) return;
+        this.settledEmitted.add(args.parentToolCallId);
+        this.emit("subagent.settled", {
+            parentSessionId: args.parentSessionId,
+            parentToolCallId: args.parentToolCallId,
+            subSessionId: args.subSessionId,
+            agentType,
+            outcome: args.isError ? "error" : "completed",
+        });
+    }
+
+    /**
+     * Persist a background subagent's result text and return its path.
+     *
+     * Returns `undefined` when the write fails: a lost file degrades the
+     * notification to "it finished, outcome X, text unavailable", which is
+     * strictly better than dropping the notification altogether and leaving
+     * the parent waiting on a child that already stopped.
+     */
+    private async writeBackgroundResult(
+        parentSessionId: SessionId,
+        subSessionId: SessionId,
+        resultText: string,
+    ): Promise<string | undefined> {
+        const path = subagentResultPath(parentSessionId, subSessionId, this.sessionsRoot);
+        try {
+            await mkdir(dirname(path), { recursive: true });
+            await writeFile(path, resultText, "utf8");
+            return path;
+        } catch (e) {
+            log.error("failed to persist background subagent result", {
+                parentSessionId,
+                subSessionId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+            return undefined;
+        }
+    }
+
+    /**
+     * Envelope injected into the parent session once a background subagent
+     * settles.
+     *
+     * Carries a *pointer*, not the answer: the result text is on disk, so the
+     * parent's context pays for a path instead of an arbitrarily long transcript
+     * it may never need. The `subagent_result` tag is registered `hidden`, so
+     * none of this reaches the user's chat — which is why the body can afford to
+     * spell out what the model should do next, including asking it to open with
+     * a sentence acknowledging the result. Without that, the conversation would
+     * jump straight from unrelated work to a background finding with no bridge.
+     */
     private formatBackgroundNotification(
         agentType: string,
-        result: { subSessionId: SessionId; resultText: string; isError: boolean },
+        result: {
+            subSessionId: SessionId;
+            resultText: string;
+            isError: boolean;
+            path?: string;
+        },
     ): string {
         const status = result.isError ? "error" : "completed";
-        const body =
-            result.resultText.trim().length > 0
-                ? result.resultText
-                : result.isError
-                  ? "(background subagent failed with no error text)"
-                  : "(background subagent returned no text)";
-        return (
-            `<subagent_result agent-type="${agentType}" session="${result.subSessionId}" outcome="${status}">\n` +
-            `${body}\n` +
-            "</subagent_result>"
+        const located = result.path
+            ? `Its full output is saved at: ${result.path}\nThat text is NOT included here — the file is the only copy.`
+            : "Its output could not be saved to disk, so the detail is unavailable. Say so rather than guessing at it.";
+        const guidance = result.isError
+            ? "Tell the user in one sentence that this background task failed, then propose a next step. Do not present its output as a result."
+            : "Read that file with the read tool now, before you reply. Then tell the user, in your own words, that this background task came back and what it found — do not just hand them the path, and do not claim it is still running. If what you read changes what you were doing, say so.";
+        return tagWrap(
+            "subagent_result",
+            `The ${agentType} subagent you launched in the background has finished (outcome: ${status}).\n` +
+                `${located}\n\n` +
+                guidance,
+            {
+                "agent-type": agentType,
+                session: result.subSessionId,
+                outcome: status,
+                ...(result.path ? { path: result.path } : {}),
+            },
         );
     }
 

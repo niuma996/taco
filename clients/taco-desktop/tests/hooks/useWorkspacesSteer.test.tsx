@@ -50,6 +50,7 @@ function seedWorkspace(): WorkspaceState {
         childHistoryLoaded: {},
         askUserPending: {},
         agentToolPending: {},
+        backgroundSubagents: {},
         pendingBySessionId: {},
         queuedBySessionId: {},
         taskSnapshotsBySessionId: {},

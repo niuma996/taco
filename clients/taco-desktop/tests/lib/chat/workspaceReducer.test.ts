@@ -30,6 +30,7 @@ function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
         childHistoryLoaded: {},
         askUserPending: {},
         agentToolPending: {},
+        backgroundSubagents: {},
         pendingBySessionId: {},
         queuedBySessionId: {},
         taskSnapshotsBySessionId: {},
@@ -683,6 +684,71 @@ describe("subagent actions", () => {
         };
         const next = workspacesReducer(state, toolEndEvent("tc-1", "agent", true));
         assert.deepEqual(next["/ws"]?.agentToolPending, {});
+    });
+
+    // A background spawn's tool_end is a launch receipt, so the SUBAGENT_SPAWNED
+    // that follows it must not mark the session busy — nothing would clear that
+    // marker, leaving an idle composer with the Stop button stuck on screen.
+    it("does not mark the session busy for a background spawn", () => {
+        const launched = {
+            type: "APPLY_EVENT" as const,
+            cwd: "/ws",
+            sid: "main-1",
+            suppressedThinking: false,
+            now: 3,
+            ev: {
+                type: "tool_end" as const,
+                toolCallId: "tc-bg",
+                toolName: "agent",
+                isError: false,
+                result: { details: { status: "launched", agentType: "explorer" } },
+            },
+        };
+        const afterLaunch = workspacesReducer(
+            { "/ws": baseWs({ activeSession: "main-1" }) },
+            launched,
+        );
+        assert.deepEqual(afterLaunch["/ws"]?.backgroundSubagents, { "tc-bg": true });
+
+        // subagent.spawned lands after the receipt, not before.
+        const afterSpawn = workspacesReducer(afterLaunch, {
+            type: "SUBAGENT_SPAWNED",
+            cwd: "/ws",
+            parentSessionId: "main-1",
+            parentToolCallId: "tc-bg",
+            subSessionId: "sub-bg",
+            agentType: "explorer",
+        });
+        assert.deepEqual(
+            afterSpawn["/ws"]?.agentToolPending,
+            {},
+            "a background child must not make the parent look busy",
+        );
+
+        const afterSettle = workspacesReducer(afterSpawn, {
+            type: "SUBAGENT_SETTLED",
+            cwd: "/ws",
+            parentToolCallId: "tc-bg",
+        });
+        assert.deepEqual(afterSettle["/ws"]?.backgroundSubagents, {});
+        assert.deepEqual(afterSettle["/ws"]?.agentToolPending, {});
+    });
+
+    // The synchronous path is unchanged: its tool_end carries no "launched"
+    // status, so SUBAGENT_SPAWNED still gates the composer as before.
+    it("still marks the session busy for a synchronous spawn", () => {
+        const afterSpawn = workspacesReducer(
+            { "/ws": baseWs({ activeSession: "main-1" }) },
+            {
+                type: "SUBAGENT_SPAWNED",
+                cwd: "/ws",
+                parentSessionId: "main-1",
+                parentToolCallId: "tc-sync",
+                subSessionId: "sub-sync",
+                agentType: "explorer",
+            },
+        );
+        assert.deepEqual(afterSpawn["/ws"]?.agentToolPending, { "tc-sync": true });
     });
 
     it("clears agentToolPending when a skill-spawned subagent ends", () => {

@@ -43,6 +43,13 @@ export const PushMethods = {
     ToolCallEnd: "session.tool_call_end",
     CommandPermissionRequested: "command_permission.requested",
     SubagentSpawned: "subagent.spawned",
+    /**
+     * Emitted when a `background: true` subagent reaches a terminal state.
+     * Synchronous spawns do not need it: their `tool_call_end` already marks
+     * the end of the child's work. A background spawn's `tool_call_end` fires
+     * at launch, so this is the only signal that the child actually stopped.
+     */
+    SubagentSettled: "subagent.settled",
     Error: "session.error",
     /**
      * Emitted when a compaction starts — automatic or via the `session.compact`
@@ -330,6 +337,17 @@ export interface SubagentSpawnedParams {
     agentType: string;
 }
 
+/** `subagent.settled` params — runtime emits when a background subagent
+ *  reaches a terminal state. `outcome` is what the parent will be told;
+ *  the result text itself travels as an injected message, not here. */
+export interface SubagentSettledParams {
+    parentSessionId: SessionId;
+    parentToolCallId: string;
+    subSessionId: SessionId;
+    agentType: string;
+    outcome: "completed" | "error";
+}
+
 /** `session.error` params — terminal error frame for a session; the
  *  desktop surfaces a toast and freezes input until the user retries. */
 export interface ErrorParams {
@@ -395,6 +413,7 @@ export interface PushParamsByMethod {
     [PushMethods.ToolCallEnd]: ToolCallEndParams;
     [PushMethods.CommandPermissionRequested]: CommandPermissionRequestedParams;
     [PushMethods.SubagentSpawned]: SubagentSpawnedParams;
+    [PushMethods.SubagentSettled]: SubagentSettledParams;
     [PushMethods.Error]: ErrorParams;
     [PushMethods.CompactionStarted]: SessionCompactionStartedParams;
     [PushMethods.CompactionFinished]: SessionCompactionFinishedParams;

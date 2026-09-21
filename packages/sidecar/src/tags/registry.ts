@@ -115,6 +115,29 @@ const BUILTIN_TAG_REGISTRY = {
         parser: { kind: "xml-balanced" },
         description: "Reminder to update the task list via TodoWrite when it goes stale",
     }),
+
+    /** Injected into a parent session when one of its background subagents settles. */
+    subagent_result: defineTag({
+        name: "subagent_result",
+        scope: "user-context",
+        // NOT `drop`: that policy is applied by `buildDropPolicyContextHook` on
+        // every LLM call (hookWiring), not just at compaction time, so it would
+        // strip this notice out of the context before the model ever read it —
+        // the parent would be woken by a delivery whose content had vanished and
+        // would report the subagent as still running. `summarize` has no special
+        // handler, which is exactly right: the notice reaches the model as
+        // ordinary conversation content and is summarized like any other text.
+        compression: { kind: "summarize" },
+        // Hidden, not ephemeral: with the result text on disk the body is all
+        // machine-facing plumbing, so showing the stripped inner content would
+        // put a bare path and an instruction to the model in the user's chat.
+        // The user learns the task came back from the subagent card, and from
+        // the sentence the guidance asks the model to open with.
+        tuiVisibility: "hidden",
+        parser: { kind: "xml-balanced" },
+        description:
+            "Background subagent completion notice — carries the result's on-disk path, not its text",
+    }),
 } as const satisfies Record<string, TagSpec>;
 
 /** Public mutable registry — seed from the frozen builtin literal at module

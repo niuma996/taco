@@ -298,6 +298,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     subSessionId: action.subSessionId,
                     agentType: action.agentType,
                 });
+            } else if (action.type === "SUBAGENT_SETTLED") {
+                dispatchWs({
+                    type: "SUBAGENT_SETTLED",
+                    cwd: action.cwd,
+                    parentToolCallId: action.parentToolCallId,
+                });
             } else if (action.type === "ATTACHED") {
                 dispatchWs({ type: "ATTACHED_PUSH", cwd: action.cwd, sid: action.sid });
             } else if (action.type === "COMMAND_PERMISSION_REQUESTED") {

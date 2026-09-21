@@ -602,6 +602,7 @@ export class WorkspaceRuntime extends EventEmitter {
 
         this.agentSpawner = new AgentSpawner({
             cwd: this.sessionCwd,
+            sessionsRoot: this.sessionsRoot,
             repo: this.repo,
             env: this.env,
             models: this.models,
@@ -642,7 +643,7 @@ export class WorkspaceRuntime extends EventEmitter {
             "session.deleted",
             "session.renamed",
         ]);
-        forwardEvents(this.agentSpawner, this, ["subagent.spawned"]);
+        forwardEvents(this.agentSpawner, this, ["subagent.spawned", "subagent.settled"]);
 
         // Skill hot reload: watcher, debounce timer and the in-flight scan all
         // live in `SkillHotReloader`; the workspace only says what "apply the
@@ -1267,7 +1268,8 @@ export type WorkspaceEvent =
     | "session.detached"
     | "session.deleted"
     | "session.renamed"
-    | "subagent.spawned";
+    | "subagent.spawned"
+    | "subagent.settled";
 
 /**
  * Resolve the workspace's instructions against `config` and render them into

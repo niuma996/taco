@@ -16,6 +16,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -23,7 +24,13 @@ import { asSessionId, asWorkspaceId, type SessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import { subagentResultPath } from "../../src/runtime/subagent/subagentResultsDir.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+
+/** Escape a filesystem path for literal use inside a RegExp. */
+function escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 const defs: AgentDefinition[] = [
     {
@@ -149,8 +156,20 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             await new Promise((r) => setTimeout(r, 10));
             assert.ok(delivered, "deliverSubagentResult must be reached once the run settles");
             assert.equal(delivered?.parentSessionId, parent);
-            assert.match(delivered?.notification ?? "", /the subagent's answer/);
-            assert.match(delivered?.notification ?? "", /outcome="completed"/);
+            const notification = delivered?.notification ?? "";
+            assert.match(notification, /outcome="completed"/);
+            // The answer travels on disk, not in the parent's context.
+            assert.ok(
+                !notification.includes("the subagent's answer"),
+                "notification must carry a path, not the result text",
+            );
+            const path = subagentResultPath(
+                asSessionId(parent),
+                asSessionId(res.subSessionId ?? ""),
+                sessionsRoot,
+            );
+            assert.match(notification, new RegExp(escapeRegExp(path)));
+            assert.equal(await readFile(path, "utf8"), "the subagent's answer");
         } finally {
             registry.getAttached = originalGetAttached;
             restoreExecute();
@@ -186,7 +205,7 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             await new Promise((r) => setTimeout(r, 10));
             assert.ok(delivered);
             assert.match(delivered ?? "", /outcome="error"/);
-            assert.match(delivered ?? "", /failed with no error text/);
+            assert.match(delivered ?? "", /this background task failed/);
         } finally {
             registry.getAttached = originalGetAttached;
             restoreExecute();
