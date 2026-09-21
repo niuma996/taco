@@ -52,11 +52,13 @@ impl TmpHome {
         let ctl = self.run().join("sidecar-ctl.sock");
         OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&ndjson)
             .unwrap();
         OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&ctl)
             .unwrap();
@@ -332,6 +334,7 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
     // ghost-socket case (Stale), not the unresponsive-daemon case (Reaped).
     OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(dir.join("run").join("sidecar.sock"))
         .unwrap();
@@ -354,7 +357,7 @@ fn reap_kills_unresponsive_daemon_even_when_launcher_pid_differs() {
     );
     // The leaked daemon must be dead after reap.
     std::thread::sleep(Duration::from_millis(200));
-    let _ = force_kill(leaked_pid);
+    force_kill(leaked_pid);
     let _ = helper.wait();
     // Sockets + pid file should be unlinked.
     assert!(!dir.join("run").join("sidecar.pid").exists());
@@ -402,6 +405,7 @@ fn force_reap_kills_alive_own_daemon() {
     // fails" (Reaped), not the ghost-socket shortcut (Stale).
     OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(dir.join("run").join("sidecar.sock"))
         .unwrap();
@@ -421,7 +425,7 @@ fn force_reap_kills_alive_own_daemon() {
         outcome
     );
     std::thread::sleep(Duration::from_millis(200));
-    let _ = force_kill(helper_pid);
+    force_kill(helper_pid);
     let _ = helper.wait();
     let _ = fs::remove_dir_all(&dir);
 }
@@ -632,7 +636,7 @@ fn reap_kills_ghost_socket_daemon_and_unlinks_sockets() {
     // them immediately; the test helper is not detached. The last_signal
     // assertion above is the load-bearing check — it proves the reap walked
     // the kill branch, which is the regression we're guarding against.
-    let _ = force_kill(ghost_pid);
+    force_kill(ghost_pid);
     let _ = helper.wait();
     let _ = fs::remove_dir_all(&dir);
 }
@@ -690,6 +694,7 @@ fn version_gate_fixture(
     // branch, not the version-gate branch.
     OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(dir.join("run").join("sidecar.sock"))
         .unwrap();

@@ -1690,12 +1690,10 @@ pub fn run() {
         // unrecoverable. Bring the hidden window back.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen {
-            has_visible_windows,
+            has_visible_windows: false,
             ..
         } => {
-            if !has_visible_windows {
-                focus_main(app_handle);
-            }
+            focus_main(app_handle);
         }
         _ => {}
     });
