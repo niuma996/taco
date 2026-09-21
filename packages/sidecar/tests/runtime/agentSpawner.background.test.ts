@@ -24,6 +24,7 @@ import { asSessionId, asWorkspaceId, type SessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import { readPendingSubagentResults } from "../../src/runtime/subagent/subagentPending.ts";
 import { subagentResultPath } from "../../src/runtime/subagent/subagentResultsDir.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
@@ -114,8 +115,23 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             assert.equal(res.background, true);
             assert.ok(res.subSessionId, "receipt must carry the pre-generated child session id");
             assert.equal(res.resultText, "", "background receipt carries no result text yet");
+            // The receipt names the result file before it exists, so a lost
+            // completion notice does not strand the result: the model can read
+            // the path itself, and ENOENT is the "still running" answer.
+            assert.equal(
+                res.resultPath,
+                subagentResultPath(
+                    asSessionId(parent),
+                    asSessionId(res.subSessionId ?? ""),
+                    sessionsRoot,
+                ),
+            );
         } finally {
             resolveRun?.();
+            // Drain before returning: the settle sequence outlives the call that
+            // launched it, and a later test that swaps `getAttached` would
+            // otherwise receive this spawn's notice as if it were its own.
+            await ws.agentSpawner.whenBackgroundRunsSettle();
             restore();
         }
     });
@@ -153,7 +169,7 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             assert.equal(res.background, true);
             // The run is fire-and-forget; give the microtask queue a turn to
             // drain the .then() chain down to deliverSubagentResult.
-            await new Promise((r) => setTimeout(r, 10));
+            await ws.agentSpawner.whenBackgroundRunsSettle();
             assert.ok(delivered, "deliverSubagentResult must be reached once the run settles");
             assert.equal(delivered?.parentSessionId, parent);
             const notification = delivered?.notification ?? "";
@@ -202,7 +218,7 @@ describe("AgentSpawner.spawnSubagent — background", () => {
                 prompt: "do something",
                 background: true,
             });
-            await new Promise((r) => setTimeout(r, 10));
+            await ws.agentSpawner.whenBackgroundRunsSettle();
             assert.ok(delivered);
             assert.match(delivered ?? "", /outcome="error"/);
             assert.match(delivered ?? "", /this background task failed/);
@@ -261,6 +277,80 @@ describe("AgentSpawner.spawnSubagent — background", () => {
         }
     });
 
+    // Delivery needs the parent's live AttachedSession, and there are normal
+    // states where that route is closed (parent mid-compaction, process
+    // restarted). The notice is recorded before the attempt and cleared only
+    // once it lands, so a failed delivery leaves a record to retry from.
+    it("keeps a pending record when delivery fails, and clears it when it succeeds", async () => {
+        const registry = ws.sessionRegistry as unknown as {
+            getAttached: (id: unknown) => unknown;
+        };
+        const originalGetAttached = registry.getAttached;
+        // Reject as a non-busy error so deliverSubagentResult propagates rather
+        // than falling back to the followUp queue.
+        registry.getAttached = () => ({
+            prompt: async () => {
+                throw new Error("parent unreachable");
+            },
+        });
+        const restoreExecute = stubExecute(async (args) => ({
+            subSessionId: args.childSessionId ?? asSessionId("unused"),
+            resultText: "stranded answer",
+            isError: false,
+        }));
+        const parent = "bg-parent-pending";
+        try {
+            await seedSession(parent);
+            await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-pending",
+                agentType: "explorer",
+                prompt: "do something",
+                description: "scan packages tree",
+                background: true,
+            });
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            const pending = await ws.sessionRegistry.withSession(asSessionId(parent), (s) =>
+                readPendingSubagentResults(s),
+            );
+            assert.deepEqual(Object.keys(pending), ["tc-pending"]);
+            assert.equal(pending["tc-pending"]?.outcome, "completed");
+            assert.ok(pending["tc-pending"]?.resultPath, "pending record must point at the file");
+            assert.equal(pending["tc-pending"]?.description, "scan packages tree");
+        } finally {
+            registry.getAttached = originalGetAttached;
+            restoreExecute();
+        }
+
+        // Now the parent is reachable again: attaching flushes the backlog.
+        let delivered: string | undefined;
+        registry.getAttached = () => ({
+            prompt: async (text: string) => {
+                delivered = text;
+            },
+        });
+        try {
+            await (
+                ws.agentSpawner as unknown as {
+                    flushPendingSubagentResults: (id: unknown) => Promise<void>;
+                }
+            ).flushPendingSubagentResults(asSessionId(parent));
+            assert.ok(delivered, "flush must re-deliver the stranded notice");
+            assert.match(delivered ?? "", /late="true"/);
+            assert.match(delivered ?? "", /This notice is late/);
+            // A late notice must still say what the subagent was for: by now the
+            // conversation has moved on, and compaction may have collapsed the
+            // tool call that would otherwise identify it.
+            assert.match(delivered ?? "", /Its task was: scan packages tree/);
+            const after = await ws.sessionRegistry.withSession(asSessionId(parent), (s) =>
+                readPendingSubagentResults(s),
+            );
+            assert.deepEqual(after, {}, "a delivered notice must not be flushed twice");
+        } finally {
+            registry.getAttached = originalGetAttached;
+        }
+    });
+
     it("aborts the run's signal once the wall-clock timeout elapses", async () => {
         let capturedSignal: AbortSignal | undefined;
         const restoreExecute = stubExecute(
@@ -306,6 +396,11 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             assert.equal(capturedSignal?.aborted, true, "timeout must abort the background signal");
         } finally {
             globalThis.setTimeout = originalSetTimeout;
+            // The abort resolves the stubbed run, so the settle sequence still
+            // has to persist and record its result. Restore the real timer
+            // first — draining needs it — then wait, so this spawn's bookkeeping
+            // does not run against a workspace the `after` hook has torn down.
+            await ws.agentSpawner.whenBackgroundRunsSettle();
             restoreExecute();
         }
     });

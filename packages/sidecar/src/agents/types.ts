@@ -81,6 +81,13 @@ export interface SubagentSpawnContext {
         parentToolCallId: string;
         agentType: string;
         prompt: string;
+        /**
+         * The caller's short task summary. Used only on the background path, to
+         * label the completion notice — by the time that notice arrives the
+         * conversation may have moved on, and compaction may have collapsed the
+         * tool call that would otherwise say what the subagent was for.
+         */
+        description?: string;
         /** Overrides the agent definition's `context` default when present. */
         context?: SubagentContextMode;
         /**
@@ -103,6 +110,13 @@ export interface SubagentSpawnContext {
         isError: boolean;
         /** Echoes the effective `background` mode so the tool layer knows which `AgentToolDetails` variant to report. */
         background?: boolean;
+        /**
+         * Where a background spawn's result will be written. Present only for a
+         * launched background spawn, and known before the child produces
+         * anything — the receipt carries it so the model can recover the result
+         * by reading the file if the completion notice never arrives.
+         */
+        resultPath?: string;
     }>;
     /**
      * Resume an existing subagent by `subSessionId`. The caller MUST be the

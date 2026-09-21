@@ -113,7 +113,9 @@ export function createAgentTool(
                     "(wait for the result). Set true for long-running, independent work — you get back " +
                     "a launch receipt immediately and can keep working. When it finishes you are " +
                     "notified with the path its output was written to; read that file when you need " +
-                    "the detail. Use this only when the result does not affect your next few steps: " +
+                    "the detail. The launch receipt names that path up front, so you can also read " +
+                    "it yourself to check whether the subagent has finished — a missing file means " +
+                    "still running. Use this only when the result does not affect your next few steps: " +
                     "if you need the answer to decide what to do next, run it synchronously instead " +
                     "rather than launching it and waiting. Do NOT call `agent` again for the same " +
                     "task while it is running, and do not poll for it. Background subagents should " +
@@ -151,10 +153,16 @@ export function createAgentTool(
             // a background spawn gets its own timeout-driven AbortController
             // instead (see agentSpawner.ts), since it must outlive this call.
             const signal = piContext.abortSignal;
-            const { subSessionId, resultText, isError, background } = await ctx.spawn({
+            const { subSessionId, resultText, isError, background, resultPath } = await ctx.spawn({
                 parentToolCallId: toolCallId,
                 agentType: params.subagent_type,
                 prompt: params.prompt,
+                // Forwarded for the background path only, where the completion
+                // notice may arrive many turns after this call: by then the
+                // conversation has moved on, and a compaction may have replaced
+                // the tool call that would otherwise identify what the subagent
+                // was for. Echoing it back makes the notice self-describing.
+                description: params.description,
                 context: params.context,
                 background: params.background,
                 signal,
@@ -164,11 +172,24 @@ export function createAgentTool(
                 // subSessionId is always present here — a background spawn
                 // that failed before the child existed reports isError instead
                 // (unknown agentType, concurrency limit) and background=false.
+                // The receipt names the result file even though it does not
+                // exist yet. That is deliberate: it makes the result
+                // self-recoverable. If the completion notice never arrives (the
+                // parent was mid-compaction, the process restarted), the model
+                // still holds the exact path, and the file's absence is itself
+                // the answer to "has it finished yet?" — no polling tool needed.
                 const text = isError
                     ? `failed to launch background subagent: ${resultText}`
                     : `Subagent ${params.subagent_type} launched in background as session ${subSessionId}. ` +
                       "Its result will arrive as a message in this conversation once it finishes — do NOT " +
-                      "spawn it again or poll for it. Continue with other work now.";
+                      "spawn it again or poll for it. Continue with other work now." +
+                      (resultPath
+                          ? `\nWhen it finishes, its output will be at: ${resultPath}\n` +
+                            "That file does not exist yet. If you are ever asked whether this subagent " +
+                            "is done and no completion notice has arrived, read that path: if it reads, " +
+                            "the subagent finished and that is its result; if it does not exist, it is " +
+                            "still running."
+                          : "");
                 return {
                     content: [{ type: "text", text }],
                     details: subSessionId

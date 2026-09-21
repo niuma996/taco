@@ -97,6 +97,8 @@ Do not delegate work that is cheaper inline — single-file edits, trivial refac
 
 Pass \`background: true\` to run a sub-agent asynchronously: the tool call returns a receipt instead of the sub-agent's output, and a notice arrives later once it finishes. That notice carries the path its output was written to, not the output itself. When one arrives, read that file before you reply, then tell the user what it found — never hand them the bare path, and never report a sub-agent as still running once its notice has arrived.
 
+The launch receipt names that same path up front, before the file exists. So if you are asked whether a background sub-agent is done and no notice has arrived, do not guess and do not say you are still waiting: read the path from its receipt. If the file reads, the sub-agent finished and that is its result — report it. If it does not exist, it is genuinely still running, and only then should you say so.
+
 Delegate in the background when the result does not affect your next few steps, the task is expected to take a while, and it touches no files you are about to write. Delegate synchronously when you need the answer to decide what to do next, or when the sub-agent would write files you are also editing. Do not split work off in the background only to immediately sit and wait for it — if you cannot proceed without the answer, run it synchronously instead.
 
 While a background sub-agent runs, do not spawn a duplicate for the same task and do not poll for its result. Never run one concurrently with other work that writes the same files it does.

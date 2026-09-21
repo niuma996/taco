@@ -41,6 +41,11 @@ import {
 import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.ts";
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { deliverSubagentResult } from "./subagentDelivery.ts";
+import {
+    addPendingSubagentResult,
+    clearPendingSubagentResult,
+    readPendingSubagentResults,
+} from "./subagentPending.ts";
 import type { SubagentResumability } from "./subagentProgress.ts";
 import { subagentResultPath } from "./subagentResultsDir.ts";
 import { runAttachedSubagent } from "./subagentRunner.ts";
@@ -234,6 +239,14 @@ export class AgentSpawner extends EventEmitter {
         this.inFlight = new Map();
         this.backgroundInFlight = new Set();
         this.settledEmitted = new Set();
+        this.flushingParents = new Set();
+        this.backgroundRuns = new Set();
+        // Attach is the moment a previously unreachable parent becomes
+        // reachable, which is exactly what a stranded notice was waiting for.
+        // Fire-and-forget: a flush must never delay or fail an attach.
+        this.sessionRegistry.on("session.attached", ({ sessionId }: { sessionId: SessionId }) => {
+            void this.flushPendingSubagentResults(sessionId);
+        });
     }
 
     /** Returns the parent default-model identity, used when `args.model` is omitted. */
@@ -292,6 +305,24 @@ export class AgentSpawner extends EventEmitter {
      * double-emit for the same spawn, never a later distinct one.
      */
     private readonly settledEmitted: Set<string>;
+
+    /**
+     * Parent sessions with a flush in progress.
+     *
+     * Two attaches in quick succession would otherwise both read the same
+     * pending record and deliver every notice twice.
+     */
+    private readonly flushingParents: Set<SessionId>;
+
+    /**
+     * Settle sequences of launched background spawns that have not finished.
+     *
+     * Each entry covers everything after the child stops: persist the result,
+     * record it pending, deliver the notice, clear the record. Held only so
+     * `whenBackgroundRunsSettle` can await them — a spawn never waits on its own
+     * entry, and every rejection is already handled inside the chain.
+     */
+    private readonly backgroundRuns: Set<Promise<void>>;
 
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
@@ -481,6 +512,8 @@ export class AgentSpawner extends EventEmitter {
         parentToolCallId: string;
         agentType: string;
         prompt: string;
+        /** Short task label, echoed on the background completion notice. */
+        description?: string;
         context?: SubagentContextMode;
         background?: boolean;
         signal?: AbortSignal;
@@ -490,6 +523,8 @@ export class AgentSpawner extends EventEmitter {
         resultText: string;
         isError: boolean;
         background?: boolean;
+        /** Set only for a launched background spawn; see `SubagentSpawnContext`. */
+        resultPath?: string;
     }> {
         const def = this.findAgent(args.agentType);
         if (!def) {
@@ -554,6 +589,7 @@ export class AgentSpawner extends EventEmitter {
             parentToolCallId: string;
             agentType: string;
             prompt: string;
+            description?: string;
             context?: SubagentContextMode;
             background?: boolean;
             signal?: AbortSignal;
@@ -565,6 +601,7 @@ export class AgentSpawner extends EventEmitter {
         resultText: string;
         isError: boolean;
         background?: boolean;
+        resultPath?: string;
     }> {
         // Unlike childDepth there is a safe default, so an omitted value is not
         // a caller error — see resolveContextMode for the precedence rationale.
@@ -613,7 +650,7 @@ export class AgentSpawner extends EventEmitter {
             // run, and we await it to completion.
             return this.executeSubagentSession({ ...sessionArgs, signal: args.signal });
         }
-        return this.spawnBackgroundSubagent(sessionArgs, def);
+        return this.spawnBackgroundSubagent(sessionArgs, def, args.description);
     }
 
     /**
@@ -629,11 +666,13 @@ export class AgentSpawner extends EventEmitter {
     private async spawnBackgroundSubagent(
         sessionArgs: SubagentSessionArgs,
         def: AgentDefinition,
+        description?: string,
     ): Promise<{
         subSessionId: SessionId;
         resultText: string;
         isError: boolean;
         background: true;
+        resultPath: string;
     }> {
         const timeoutMs =
             def.timeoutMinutes !== undefined && def.timeoutMinutes > 0
@@ -651,6 +690,14 @@ export class AgentSpawner extends EventEmitter {
         // makes everywhere else. The background slot was reserved by
         // `spawnSubagent` before any await; this method must not add it again.
         const childSessionId = asSessionId(uuidv7());
+        // Computed at launch, not at settle: the receipt below carries it, so
+        // the model holds the exact path from the moment it delegates. That is
+        // what makes the result recoverable when the completion notice never
+        // lands (parent mid-compaction, process restarted) — the model can read
+        // the file on its own, and a missing file is itself the "still running"
+        // answer. Deriving it here also keeps the path a single source of truth
+        // shared by the receipt and the write.
+        const resultPath = subagentResultPath(parentSessionId, childSessionId, this.sessionsRoot);
 
         // executeSubagentSession never throws (errors are `{ isError: true }`),
         // so `.then` always fires with a result. `.catch` covers
@@ -673,16 +720,26 @@ export class AgentSpawner extends EventEmitter {
                     subSessionId: childSessionId,
                     isError: result.isError,
                 });
-                const path = await this.writeBackgroundResult(
-                    parentSessionId,
-                    childSessionId,
-                    result.resultText,
-                );
+                const path = await this.writeBackgroundResult(resultPath, result.resultText);
                 const notification = this.formatBackgroundNotification(sessionArgs.agentType, {
                     ...result,
                     path,
+                    description,
                 });
-                return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
+                // Recorded before the attempt, so a delivery that never returns
+                // (process killed mid-flight) still leaves a trace for the next
+                // attach to flush. Cleared only once delivery actually lands.
+                await this.recordPending({
+                    parentSessionId,
+                    parentToolCallId,
+                    subSessionId: childSessionId,
+                    agentType: sessionArgs.agentType,
+                    outcome: result.isError ? "error" : "completed",
+                    resultPath: path,
+                    description,
+                });
+                await deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
+                await this.dropPending(parentSessionId, parentToolCallId);
             })
             .catch(async (e) => {
                 log.error("background subagent delivery failed", {
@@ -705,6 +762,7 @@ export class AgentSpawner extends EventEmitter {
                     subSessionId: childSessionId,
                     resultText: e instanceof Error ? e.message : String(e),
                     isError: true,
+                    description,
                 });
                 try {
                     await deliverSubagentResult(this.sessionRegistry, parentSessionId, fallback);
@@ -719,10 +777,17 @@ export class AgentSpawner extends EventEmitter {
             .finally(() => {
                 clearTimeout(timer);
                 this.backgroundInFlight.delete(parentToolCallId);
+                this.backgroundRuns.delete(run);
             });
         // Deliberately not awaited or returned — see method doc. A rejection
         // from `run` is already handled by the `.catch` above, so there is no
         // unhandled-rejection risk in leaving it detached.
+        //
+        // Registered so the whole settle sequence — persist, record, deliver,
+        // clear — has an observable end. Nothing in production waits on it, but
+        // without a handle that sequence is only reachable by guessing how long
+        // it takes, and it has already grown once (pending bookkeeping).
+        this.backgroundRuns.add(run);
         void run;
 
         return {
@@ -730,7 +795,133 @@ export class AgentSpawner extends EventEmitter {
             resultText: "",
             isError: false,
             background: true,
+            resultPath,
         };
+    }
+
+    /**
+     * Resolve once every in-flight background settle sequence has finished.
+     *
+     * Exists for callers that need the sequence's effects to be observable —
+     * tests asserting on the pending record or the delivered notice, and any
+     * future shutdown path that would rather drain than abandon. Not a
+     * cancellation: a child still running is unaffected, this only waits for
+     * children that already stopped to finish being written down.
+     *
+     * Re-reads the set after awaiting, because a settle can register follow-on
+     * work; resolves when a pass adds nothing new.
+     */
+    async whenBackgroundRunsSettle(): Promise<void> {
+        while (this.backgroundRuns.size > 0) {
+            await Promise.allSettled([...this.backgroundRuns]);
+        }
+    }
+
+    /**
+     * Re-deliver notices this parent never received.
+     *
+     * Invoked on every `session.attached`. A session with nothing pending costs
+     * one value read, which is why there is no "is this a parent" test — that
+     * test would be a second source of truth about who can own pending entries.
+     *
+     * Delivery is sequential and each entry is cleared as it lands: a partial
+     * flush (the parent goes busy halfway through) leaves the rest pending for
+     * the next attach rather than dropping them.
+     */
+    private async flushPendingSubagentResults(parentSessionId: SessionId): Promise<void> {
+        if (this.flushingParents.has(parentSessionId)) return;
+        this.flushingParents.add(parentSessionId);
+        try {
+            const pending = await this.sessionRegistry.withSession(parentSessionId, (session) =>
+                readPendingSubagentResults(session),
+            );
+            const entries = Object.values(pending);
+            if (entries.length === 0) return;
+            log.info("flushing undelivered background subagent results", {
+                parentSessionId,
+                count: entries.length,
+            });
+            for (const entry of entries) {
+                const notification = this.formatBackgroundNotification(entry.agentType, {
+                    subSessionId: entry.subSessionId,
+                    resultText: "",
+                    isError: entry.outcome === "error",
+                    path: entry.resultPath,
+                    description: entry.description,
+                    late: true,
+                });
+                try {
+                    await deliverSubagentResult(
+                        this.sessionRegistry,
+                        parentSessionId,
+                        notification,
+                    );
+                } catch (e) {
+                    // Still unreachable. Keep the entry and stop: the remaining
+                    // ones would fail the same way, and a tight retry loop
+                    // against a busy parent buys nothing.
+                    log.warn("pending subagent result still undeliverable", {
+                        parentSessionId,
+                        parentToolCallId: entry.parentToolCallId,
+                        error: e instanceof Error ? e.message : String(e),
+                    });
+                    return;
+                }
+                await this.dropPending(parentSessionId, entry.parentToolCallId);
+            }
+        } catch (e) {
+            log.error("failed to flush pending subagent results", {
+                parentSessionId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        } finally {
+            this.flushingParents.delete(parentSessionId);
+        }
+    }
+
+    /**
+     * Note a settled child whose notice has not been delivered yet.
+     *
+     * Bookkeeping must never be the reason a result is lost, so a failure here
+     * is logged and swallowed: the delivery attempt that follows is the primary
+     * path, and this only exists to make the retry possible if it fails.
+     */
+    private async recordPending(entry: {
+        parentSessionId: SessionId;
+        parentToolCallId: string;
+        subSessionId: SessionId;
+        agentType: string;
+        outcome: "completed" | "error";
+        resultPath?: string;
+        description?: string;
+    }): Promise<void> {
+        const { parentSessionId, ...rest } = entry;
+        try {
+            await this.sessionRegistry.withSession(parentSessionId, (session) =>
+                addPendingSubagentResult(session, { ...rest, settledAt: Date.now() }),
+            );
+        } catch (e) {
+            log.error("failed to record pending subagent result", {
+                parentSessionId,
+                parentToolCallId: entry.parentToolCallId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        }
+    }
+
+    /** Clear a pending notice after it was delivered. Failures are logged, not raised. */
+    private async dropPending(parentSessionId: SessionId, parentToolCallId: string): Promise<void> {
+        try {
+            await this.sessionRegistry.withSession(parentSessionId, (session) =>
+                clearPendingSubagentResult(session, parentToolCallId),
+            );
+        } catch (e) {
+            log.error("failed to clear pending subagent result", {
+                parentSessionId,
+                parentToolCallId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        }
     }
 
     /**
@@ -771,19 +962,16 @@ export class AgentSpawner extends EventEmitter {
      * the parent waiting on a child that already stopped.
      */
     private async writeBackgroundResult(
-        parentSessionId: SessionId,
-        subSessionId: SessionId,
+        path: string,
         resultText: string,
     ): Promise<string | undefined> {
-        const path = subagentResultPath(parentSessionId, subSessionId, this.sessionsRoot);
         try {
             await mkdir(dirname(path), { recursive: true });
             await writeFile(path, resultText, "utf8");
             return path;
         } catch (e) {
             log.error("failed to persist background subagent result", {
-                parentSessionId,
-                subSessionId,
+                path,
                 error: e instanceof Error ? e.message : String(e),
             });
             return undefined;
@@ -809,6 +997,20 @@ export class AgentSpawner extends EventEmitter {
             resultText: string;
             isError: boolean;
             path?: string;
+            /**
+             * The task label from the original `agent` call. Repeated here
+             * because the notice can land many turns later: the conversation has
+             * moved on, and a compaction in between may have collapsed the tool
+             * call that would otherwise say what this subagent was for.
+             */
+            description?: string;
+            /**
+             * Re-delivery of a notice the parent missed while unreachable. Said
+             * out loud because the model may have already told the user this
+             * subagent was still running, and it needs to correct that rather
+             * than present stale news as fresh.
+             */
+            late?: boolean;
         },
     ): string {
         const status = result.isError ? "error" : "completed";
@@ -818,9 +1020,19 @@ export class AgentSpawner extends EventEmitter {
         const guidance = result.isError
             ? "Tell the user in one sentence that this background task failed, then propose a next step. Do not present its output as a result."
             : "Read that file with the read tool now, before you reply. Then tell the user, in your own words, that this background task came back and what it found — do not just hand them the path, and do not claim it is still running. If what you read changes what you were doing, say so.";
+        const lateness = result.late
+            ? " This notice is late — it could not be delivered when the subagent actually" +
+              " finished, so if you previously told the user it was still running, correct that."
+            : "";
+        // In the body, not an attribute: `tagWrap` escapes attribute values but
+        // not the body, and this is the one part of the envelope that is
+        // model-authored text. The body is safe because the balanced parser does
+        // not nest — a forged tag inside it stays inside it.
+        const task = result.description ? `\nIts task was: ${result.description}` : "";
         return tagWrap(
             "subagent_result",
-            `The ${agentType} subagent you launched in the background has finished (outcome: ${status}).\n` +
+            `The ${agentType} subagent you launched in the background has finished (outcome: ${status}).` +
+                `${lateness}${task}\n` +
                 `${located}\n\n` +
                 guidance,
             {
@@ -828,6 +1040,7 @@ export class AgentSpawner extends EventEmitter {
                 session: result.subSessionId,
                 outcome: status,
                 ...(result.path ? { path: result.path } : {}),
+                ...(result.late ? { late: "true" } : {}),
             },
         );
     }
