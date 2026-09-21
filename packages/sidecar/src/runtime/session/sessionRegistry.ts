@@ -277,6 +277,15 @@ export class SessionRegistry extends EventEmitter {
     /** Currently attached session map. */
     private readonly attached = new Map<SessionId, AttachedSession>();
 
+    /**
+     * Tail of the serialized read queue for each *detached* session id.
+     *
+     * Holds a rejection-swallowing promise, so it is a barrier only — never the
+     * value a caller awaits. Entries are removed as each queue drains; see
+     * `withSession` for why the detached path needs this at all.
+     */
+    private readonly detachedReads = new Map<SessionId, Promise<void>>();
+
     private readonly spawnSubagent: SessionRegistryOptions["spawnSubagent"];
     private readonly resumeSubagent: SessionRegistryOptions["resumeSubagent"];
     private readonly spawnSkillSubagent: SessionRegistryOptions["spawnSkillSubagent"];
@@ -408,10 +417,47 @@ export class SessionRegistry extends EventEmitter {
      * lifetime, so a one-shot reader must reuse the attached handle when there
      * is one and close its own handle when there isn't — otherwise the first
      * read permanently locks the id and the next `attach()` fails.
+     *
+     * Reads against a *detached* session are serialized per id, because that
+     * same "throws on second open" rule makes two concurrent readers a race
+     * rather than merely slow. Background subagents made this reachable: several
+     * children of one detached parent can settle at once, and each records its
+     * result here — without the queue one of them would throw and its
+     * bookkeeping would be lost, which is exactly what that record exists to
+     * prevent. The attached path is deliberately left unserialized: it opens
+     * nothing, and it is on the hot path of every spawn.
      */
     async withSession<T>(sessionId: SessionId, read: (session: Session) => Promise<T>): Promise<T> {
         const attached = this.attached.get(sessionId);
         if (attached) return read(attached.session);
+        // Chain onto any in-flight detached read for this id. `settled` swallows
+        // rejections so one failed read cannot poison the queue for the next
+        // caller; the real result is still awaited (and thrown) below.
+        const previous = this.detachedReads.get(sessionId);
+        const run = (previous ?? Promise.resolve()).then(() =>
+            this.readPersistedSession(sessionId, read),
+        );
+        const settled = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        this.detachedReads.set(sessionId, settled);
+        try {
+            return await run;
+        } finally {
+            // Only the last link clears the entry, or a queue that is still
+            // draining would lose its tail and let a new caller open in parallel.
+            if (this.detachedReads.get(sessionId) === settled) {
+                this.detachedReads.delete(sessionId);
+            }
+        }
+    }
+
+    /** `withSession`'s detached branch: open, read, always release the slot. */
+    private async readPersistedSession<T>(
+        sessionId: SessionId,
+        read: (session: Session) => Promise<T>,
+    ): Promise<T> {
         const session = await this.openPersistedSession(sessionId);
         try {
             return await read(session);

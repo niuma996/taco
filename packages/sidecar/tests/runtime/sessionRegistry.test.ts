@@ -592,6 +592,48 @@ describe("SessionRegistry", () => {
         assert.equal(again.agentType, "explorer");
     });
 
+    // pi's repo throws "Session is already open" on a second concurrent open of
+    // the same id, so parallel reads against a *detached* session have to queue.
+    // Reachable in production: several background subagents of one detached
+    // parent settle at once and each writes its bookkeeping through withSession.
+    // Before the queue, one of them threw and its record was lost — the exact
+    // loss that record exists to prevent.
+    it("serializes concurrent reads against a detached session", async () => {
+        const sr = makeRegistry();
+        const sid = uuidv7();
+        await seedSession(sr.repo, sid);
+        sr.invalidateListCache();
+
+        let concurrent = 0;
+        let maxConcurrent = 0;
+        const results = await Promise.all(
+            Array.from({ length: 6 }, (_, i) =>
+                sr.withSession(asSessionId(sid), async (session) => {
+                    concurrent++;
+                    maxConcurrent = Math.max(maxConcurrent, concurrent);
+                    await new Promise((r) => setTimeout(r, 5));
+                    const facts = await readSessionFacts(session);
+                    concurrent--;
+                    return `${i}:${facts.kind ?? "main"}`;
+                }),
+            ),
+        );
+        assert.equal(maxConcurrent, 1, "detached reads must not overlap");
+        assert.equal(results.length, 6, "every read must still run — queued, not deduped");
+
+        // A rejection must not poison the queue for later callers.
+        await assert.rejects(
+            sr.withSession(asSessionId(sid), async () => {
+                throw new Error("boom");
+            }),
+            /boom/,
+        );
+        const after = await sr.withSession(asSessionId(sid), (session) =>
+            readSessionFacts(session),
+        );
+        assert.ok(after, "queue must still serve reads after one rejects");
+    });
+
     it("opening a 0.85 child with header parentSessionId but no facts backfills kind", async () => {
         const sr = makeRegistry();
         const parentId = uuidv7();
