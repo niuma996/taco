@@ -176,7 +176,7 @@ function SubagentDetail({
             {!hasContent && error === null && (
                 <div className="subagent-detail-status">
                     {loading || !attempted
-                        ? entry.status === "running"
+                        ? entry.status === "running" || entry.status === "background"
                             ? t("subagents.starting")
                             : t("subagents.loading")
                         : t("subagents.noMessages")}

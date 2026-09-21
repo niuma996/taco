@@ -165,6 +165,14 @@ export interface TypedRpc {
          * orphaned by a previous process exit without touching live ones.
          */
         inFlightAgentToolCallIds?: string[];
+        /**
+         * Child session ids under this parent that already produced a result
+         * file. Unlike the list above this is read from disk, so it survives the
+         * process that ran them — which is what separates a background child
+         * that finished from one a previous process was killed mid-run. Absent
+         * on older sidecars.
+         */
+        settledBackgroundSubSessionIds?: string[];
     }>;
     sessionDetach(workspace: WorkspaceId, sessionId: SessionId): Promise<{ detached: true }>;
     sessionDelete(workspace: WorkspaceId, sessionId: SessionId): Promise<unknown>;

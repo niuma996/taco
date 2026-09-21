@@ -17,12 +17,51 @@
  * lifetime, and the child's id is already in the filename so nothing is lost.
  */
 
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionId } from "@taco-ai/protocol";
+import { createLogger } from "../../lib/logger.ts";
+
+const log = createLogger("subagent:results");
 
 /** `<sessionsRoot>/<parentSessionId>/subagent-results` */
 export function subagentResultsDir(parentSessionId: SessionId, sessionsRoot: string): string {
     return join(sessionsRoot, parentSessionId, "subagent-results");
+}
+
+/**
+ * Child session ids that already have a result file under this parent.
+ *
+ * A result file is written exactly when a background child settles, so its
+ * presence is a durable "this one finished" marker — the only one that survives
+ * a restart. The desktop needs it because a background spawn's tool call reports
+ * `ok` from launch: without this, a child killed mid-run and a child that
+ * finished normally are indistinguishable on history replay, and both would
+ * render as completed.
+ *
+ * Says nothing about the *outcome*: the file is written for an errored child too.
+ * "It finished" is what replay needs; the child's own session holds the detail.
+ *
+ * A missing directory is the normal case for a parent that never delegated in
+ * the background, so it reads as empty rather than throwing.
+ */
+export async function settledSubagentResultIds(
+    parentSessionId: SessionId,
+    sessionsRoot: string,
+): Promise<string[]> {
+    try {
+        const names = await readdir(subagentResultsDir(parentSessionId, sessionsRoot));
+        return names.filter((n) => n.endsWith(".md")).map((n) => n.slice(0, -".md".length));
+    } catch (err) {
+        // ENOENT is the normal case — see the doc comment. Anything else
+        // (EACCES, EMFILE, transient I/O) must be loud: downstream reads
+        // "no result file" as "never settled", so a swallowed error would
+        // mark every finished child of this parent as failed on replay.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+            log.error("readdir failed; treating as no settled results", parentSessionId, err);
+        }
+        return [];
+    }
 }
 
 /**

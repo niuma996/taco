@@ -21,6 +21,16 @@ function StatusIcon({ status }: { status: SubagentStatus }): ReactElement {
                     aria-hidden="true"
                 />
             );
+        // Same spinner as `running`: from the user's side both mean "still
+        // working". The distinction is only in where liveness came from.
+        case "background":
+            return (
+                <Loader2
+                    size={13}
+                    className="subagent-row-icon subagent-row-icon--running spin"
+                    aria-hidden="true"
+                />
+            );
         case "ok":
             return <CheckCircle2 size={13} className="subagent-row-icon" aria-hidden="true" />;
         case "error":

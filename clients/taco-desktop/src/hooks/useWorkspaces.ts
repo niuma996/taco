@@ -303,6 +303,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     type: "SUBAGENT_SETTLED",
                     cwd: action.cwd,
                     parentToolCallId: action.parentToolCallId,
+                    outcome: action.outcome,
                 });
             } else if (action.type === "ATTACHED") {
                 dispatchWs({ type: "ATTACHED_PUSH", cwd: action.cwd, sid: action.sid });

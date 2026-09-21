@@ -146,7 +146,10 @@ export default function App() {
 
     // Subagent list for the session-bar awareness dot. Derived here as well as
     // inside SubagentPanel because the dot must render while the panel is shut.
-    const subagentEntries = useMemo(() => deriveSubagents(ws?.messages ?? []), [ws?.messages]);
+    const subagentEntries = useMemo(
+        () => deriveSubagents(ws?.messages ?? [], ws?.backgroundSubagents ?? {}),
+        [ws?.messages, ws?.backgroundSubagents],
+    );
 
     // Drop the panel's selection when the session or workspace changes: the id
     // belongs to the session that produced it, and keeping it would silently

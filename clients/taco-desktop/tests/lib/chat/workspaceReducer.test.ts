@@ -708,7 +708,7 @@ describe("subagent actions", () => {
             { "/ws": baseWs({ activeSession: "main-1" }) },
             launched,
         );
-        assert.deepEqual(afterLaunch["/ws"]?.backgroundSubagents, { "tc-bg": true });
+        assert.deepEqual(afterLaunch["/ws"]?.backgroundSubagents, { "tc-bg": "running" });
 
         // subagent.spawned lands after the receipt, not before.
         const afterSpawn = workspacesReducer(afterLaunch, {
@@ -729,8 +729,11 @@ describe("subagent actions", () => {
             type: "SUBAGENT_SETTLED",
             cwd: "/ws",
             parentToolCallId: "tc-bg",
+            outcome: "completed",
         });
-        assert.deepEqual(afterSettle["/ws"]?.backgroundSubagents, {});
+        // Retained, not deleted: the panel still has to render this child, and
+        // its tool call has reported `ok` since launch.
+        assert.deepEqual(afterSettle["/ws"]?.backgroundSubagents, { "tc-bg": "completed" });
         assert.deepEqual(afterSettle["/ws"]?.agentToolPending, {});
     });
 
@@ -749,6 +752,51 @@ describe("subagent actions", () => {
             },
         );
         assert.deepEqual(afterSpawn["/ws"]?.agentToolPending, { "tc-sync": true });
+    });
+
+    // backgroundSubagents is in-memory, so history replay has to rebuild it.
+    // Without that every background spawn falls back to its tool call, which has
+    // reported `ok` since launch — including ones the sidecar was killed during.
+    it("rebuilds background state on ATTACH from in-flight and settled signals", () => {
+        const launched = (toolCallId: string, subSessionId: string) => ({
+            id: toolCallId,
+            name: "agent",
+            args: {},
+            status: "ok" as const,
+            details: { status: "launched", subSessionId, agentType: "explorer" },
+        });
+        const messages = [
+            {
+                id: "m1",
+                kind: "assistant" as const,
+                text: "",
+                ts: 0,
+                thinking: [],
+                tools: [
+                    launched("tc-live", "sub-live"),
+                    launched("tc-done", "sub-done"),
+                    launched("tc-killed", "sub-killed"),
+                ],
+            },
+        ];
+        const next = workspacesReducer(
+            { "/ws": baseWs({ activeSession: "other" }) },
+            {
+                type: "ATTACH",
+                cwd: "/ws",
+                sid: "main-1",
+                messages,
+                inFlightAgentToolCallIds: ["tc-live"],
+                settledBackgroundSubSessionIds: ["sub-done"],
+            },
+        );
+        assert.deepEqual(next["/ws"]?.backgroundSubagents, {
+            "tc-live": "running",
+            "tc-done": "completed",
+            // Neither live nor settled: the process that ran it exited mid-run,
+            // so it must not read as complete.
+            "tc-killed": "error",
+        });
     });
 
     it("clears agentToolPending when a skill-spawned subagent ends", () => {
@@ -996,6 +1044,52 @@ describe("subagent actions", () => {
             parentToolCallId: "tc-1",
         });
         assert.equal(next["/ws"]?.childMessagesBySubSessionId["sub-1"]?.length, 1);
+    });
+
+    it("ATTACH same session refreshes background state from fresh signals", () => {
+        // After a sidecar restart the same sid re-attaches, and the live map is
+        // stale: a child the old process ran is stuck on "running" forever. The
+        // attach response's in-flight + settled signals are the only correction.
+        const launched = (toolCallId: string, subSessionId: string) => ({
+            id: toolCallId,
+            name: "agent",
+            args: {},
+            status: "ok" as const,
+            details: { status: "launched", subSessionId, agentType: "explorer" },
+        });
+        const messages = [
+            {
+                id: "m1",
+                kind: "assistant" as const,
+                text: "",
+                ts: 0,
+                thinking: [],
+                tools: [launched("tc-stale", "sub-stale"), launched("tc-err", "sub-err")],
+            },
+        ];
+        const state = {
+            "/ws": baseWs({
+                activeSession: "main-1",
+                backgroundSubagents: { "tc-stale": "running", "tc-err": "error" },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "main-1",
+            messages,
+            inFlightAgentToolCallIds: [],
+            settledBackgroundSubSessionIds: ["sub-stale", "sub-err"],
+        });
+        assert.deepEqual(next["/ws"]?.backgroundSubagents, {
+            "tc-stale": "completed",
+            // A recorded terminal outcome wins: SUBAGENT_SETTLED knew the real
+            // outcome, while the rebuild can only say "completed" for any
+            // settled child.
+            "tc-err": "error",
+        });
+        // Messages are not replaced on a same-session re-attach.
+        assert.deepEqual(next["/ws"]?.messages, []);
     });
 
     it("ATTACH clears subagent state when switching session", () => {

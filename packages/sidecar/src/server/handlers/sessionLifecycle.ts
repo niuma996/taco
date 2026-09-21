@@ -193,6 +193,13 @@ export function registerSessionLifecycleHandlers(): void {
                 attached: true,
                 sessionId: params.sessionId,
                 inFlightAgentToolCallIds: workspace.inFlightAgentToolCallIds(params.sessionId),
+                // Background spawns need a second signal: their tool call says
+                // `ok` from launch, so "not in flight" alone cannot separate a
+                // child that finished from one this process never saw. The
+                // result files can, and they outlive the process.
+                settledBackgroundSubSessionIds: await workspace.settledBackgroundSubSessionIds(
+                    params.sessionId,
+                ),
             };
         },
         { command: true, schema: sessionAttachSchema },

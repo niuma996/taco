@@ -9,13 +9,23 @@
  */
 
 import type { ToolCallStatus, UiMessage, UiToolCall } from "./chatUtils";
+import { AGENT_TOOL_NAMES } from "./chatUtils";
+import type { BackgroundSubagentState } from "./workspaceReducer";
 
 /**
- * `detached` is the fourth state this module adds on top of ToolCallStatus:
- * an agent call whose toolResult never landed (sidecar killed mid-run) has no
- * persisted subSessionId, so its child session can no longer be opened.
+ * Two states here are not `ToolCallStatus` values.
+ *
+ * `detached` — an agent call whose toolResult never landed (sidecar killed
+ * mid-run) has no persisted subSessionId, so its child session can no longer be
+ * opened.
+ *
+ * `background` — a `background: true` spawn's tool call reports `ok` from the
+ * moment it launches, because its result is the launch receipt rather than the
+ * child's answer. Deriving liveness from the tool call would show such a child
+ * as finished while it is still working, so this state comes from the workspace's
+ * background-subagent record instead (see `deriveSubagents`).
  */
-export type SubagentStatus = "running" | "ok" | "error" | "detached";
+export type SubagentStatus = "running" | "background" | "ok" | "error" | "detached";
 
 export interface SubagentEntry {
     /** null means detached — no child session to bind. */
@@ -42,8 +52,6 @@ const FALLBACK_VIEWPORT_WIDTH = 1440;
  */
 const MAIN_CONTENT_MIN_WIDTH = 480;
 
-const AGENT_TOOL_NAMES = new Set(["agent", "agentContinue"]);
-
 const TOOL_CALL_STATUSES = new Set<ToolCallStatus>(["running", "ok", "error"]);
 
 function readString(source: unknown, key: string): string {
@@ -56,7 +64,10 @@ function readString(source: unknown, key: string): string {
  * Parse one tool call into an entry, or null when it is not a subagent call.
  * Throwing is left to the caller's try/catch — this keeps the happy path flat.
  */
-function entryFromTool(tool: UiToolCall): SubagentEntry | null {
+function entryFromTool(
+    tool: UiToolCall,
+    backgroundSubagents: Readonly<Record<string, BackgroundSubagentState>>,
+): SubagentEntry | null {
     if (!AGENT_TOOL_NAMES.has(tool.name)) return null;
     // A call without a real id or status is malformed — throw so the caller's
     // try/catch skips it instead of emitting a bogus panel row.
@@ -74,9 +85,36 @@ function entryFromTool(tool: UiToolCall): SubagentEntry | null {
         prompt: readString(tool.args, "prompt"),
         // No subSessionId means the child session is unreachable regardless of
         // what the tool call's own status says.
-        status: subSessionId === null ? "detached" : tool.status,
+        status:
+            subSessionId === null
+                ? "detached"
+                : backgroundStatus(tool.id, backgroundSubagents, tool.status),
         firstToolCallId: tool.id,
     };
+}
+
+/**
+ * Status for a tool call that may be a background launch.
+ *
+ * Falls through to the tool call's own status for every synchronous spawn. For a
+ * background one the tool call is useless as a liveness signal — it reports `ok`
+ * from launch — so the workspace record decides instead.
+ */
+function backgroundStatus(
+    toolCallId: string,
+    backgroundSubagents: Readonly<Record<string, BackgroundSubagentState>>,
+    fallback: ToolCallStatus,
+): SubagentStatus {
+    switch (backgroundSubagents[toolCallId]) {
+        case "running":
+            return "background";
+        case "completed":
+            return "ok";
+        case "error":
+            return "error";
+        default:
+            return fallback;
+    }
 }
 
 /**
@@ -86,8 +124,17 @@ function entryFromTool(tool: UiToolCall): SubagentEntry | null {
  * against an existing child session. First occurrence wins for the descriptive
  * fields (agentContinue's args carry no description); the last occurrence wins
  * for status, so a continued subagent reads as running again.
+ *
+ * `backgroundSubagents` is the one input that is not derivable from the message
+ * stream. A background spawn's tool call settles at launch, so the stream says
+ * `ok` for the whole time the child is actually working; only the workspace's
+ * record (fed by the `subagent.settled` push) knows the difference. Passing it
+ * in keeps this function pure while letting it correct that one status.
  */
-export function deriveSubagents(messages: readonly UiMessage[]): SubagentEntry[] {
+export function deriveSubagents(
+    messages: readonly UiMessage[],
+    backgroundSubagents: Readonly<Record<string, BackgroundSubagentState>> = {},
+): SubagentEntry[] {
     const out: SubagentEntry[] = [];
     const indexBySubSessionId = new Map<string, number>();
 
@@ -99,7 +146,7 @@ export function deriveSubagents(messages: readonly UiMessage[]): SubagentEntry[]
         for (const tool of tools) {
             let entry: SubagentEntry | null = null;
             try {
-                entry = entryFromTool(tool);
+                entry = entryFromTool(tool, backgroundSubagents);
             } catch {
                 continue;
             }
@@ -143,7 +190,11 @@ export function filterSubagents(entries: readonly SubagentEntry[], query: string
  */
 export function subagentDotState(entries: readonly SubagentEntry[]): "none" | "idle" | "active" {
     if (entries.length === 0) return "none";
-    return entries.some((e) => e.status === "running") ? "active" : "idle";
+    // `background` counts as running: the child is still working, which is
+    // exactly what this dot is for. Only its tool call has finished.
+    return entries.some((e) => e.status === "running" || e.status === "background")
+        ? "active"
+        : "idle";
 }
 
 /**
@@ -160,7 +211,11 @@ export function shouldAutoOpen(
 ): string | null {
     if (alreadyOpenedThisRun) return null;
     for (const entry of next) {
-        if (entry.status !== "running") continue;
+        // `background` is a running child too — only its tool call has
+        // finished. Before that status existed such an entry read as
+        // "running" here, so skipping it would be a regression (the dot
+        // lights but the panel never opens).
+        if (entry.status !== "running" && entry.status !== "background") continue;
         if (entry.subSessionId === null) continue;
         if (prevIds.has(entry.subSessionId)) continue;
         return entry.subSessionId;

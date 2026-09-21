@@ -170,12 +170,14 @@ export function useWorkspaceLifecycle({
     const attachSession = useCallback(
         async (cwd: string, sessionId: string): Promise<void> => {
             let inFlightAgentToolCallIds: string[] | undefined;
+            let settledBackgroundSubSessionIds: string[] | undefined;
             try {
                 const attachResult = await client.sessionAttach(
                     asWorkspaceId(cwd),
                     asSessionId(sessionId),
                 );
                 inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
+                settledBackgroundSubSessionIds = attachResult?.settledBackgroundSubSessionIds;
             } catch (err) {
                 const msg = `Cannot open session: ${(err as Error).message}`;
                 console.error("[taco] sessionAttach failed", cwd, sessionId, err);
@@ -220,6 +222,8 @@ export function useWorkspaceLifecycle({
                 sid: sessionId,
                 messages: msgs,
                 pendingAskUserIds: findPendingAskUserIds(msgs),
+                inFlightAgentToolCallIds,
+                settledBackgroundSubSessionIds,
             });
             // tasks / planState fallback — sidecar pushes on session.attached, but we proactively
             // pull once to cover push-channel drops. RPC reads sidecar memory directly.

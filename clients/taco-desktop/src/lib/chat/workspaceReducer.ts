@@ -17,7 +17,7 @@ import type {
 } from "@taco-ai/protocol";
 import { applyEventToMessages } from "./applyEventToMessages";
 import type { QueuedUiItem, SessionEventLike, UiMessage } from "./chatUtils";
-import { queuedItemsFromEvent } from "./chatUtils";
+import { AGENT_TOOL_NAMES, isBackgroundLaunchDetails, queuedItemsFromEvent } from "./chatUtils";
 import {
     attachAskUserAnswers,
     attachCommandPermission,
@@ -43,6 +43,12 @@ export interface SubagentSpawnedEntry {
     /** Key for agentToolPending; not consumed by UI, only used for reverse lookup on end. */
     parentToolCallId: string;
 }
+
+/**
+ * Lifecycle of an `agent` call launched with `background: true`. Named because
+ * the subagent panel derives from it too — see `WorkspaceState.backgroundSubagents`.
+ */
+export type BackgroundSubagentState = "running" | "completed" | "error";
 
 export interface WorkspaceState {
     cwd: string;
@@ -111,19 +117,26 @@ export interface WorkspaceState {
      */
     agentToolPending: Record<string, true>;
     /**
-     * parentToolCallId → true for `agent` calls launched with `background: true`.
+     * parentToolCallId → lifecycle of an `agent` call launched with
+     * `background: true`.
      *
      * A background spawn's `tool_end` fires at launch, so it cannot mean "the
-     * child finished" the way a synchronous one does. Its `subagent.spawned`
-     * then arrives *after* that `tool_end`, which used to re-set
-     * `agentToolPending` with nothing left to clear it — leaving the composer
-     * idle but the Stop button stuck on screen forever.
+     * child finished" the way a synchronous one does. Two things follow.
      *
-     * Recording the launch here lets SUBAGENT_SPAWNED skip the pending write:
-     * the whole point of a background spawn is that the parent keeps working,
-     * so it must not make the session look busy. Cleared on SUBAGENT_SETTLED.
+     * First, its `subagent.spawned` arrives *after* that `tool_end`, which used
+     * to re-set `agentToolPending` with nothing left to clear it — leaving the
+     * composer idle but the Stop button stuck on screen forever. Recording the
+     * launch here lets SUBAGENT_SPAWNED skip the pending write: the whole point
+     * of a background spawn is that the parent keeps working, so it must not
+     * make the session look busy.
+     *
+     * Second, the tool call's own status is `ok` from the moment it launches, so
+     * the subagent panel cannot derive liveness from it. `"running"` here is
+     * what tells the panel the child is still working; SUBAGENT_SETTLED replaces
+     * it with the real outcome rather than deleting it, because the panel still
+     * has to render a finished background child.
      */
-    backgroundSubagents: Record<string, true>;
+    backgroundSubagents: Record<string, BackgroundSubagentState>;
     /**
      * Pagination cursor for "load more". Undefined = first page (or a refresh
      * reset the list to the first page). Sidebar uses this to enable/disable
@@ -207,6 +220,10 @@ export type WorkspaceAction =
           messages: UiMessage[];
           /** askUser toolCallIds still waiting in history — restore pending so selection can resume the turn */
           pendingAskUserIds?: string[];
+          /** Background spawns still running, from the attach response. */
+          inFlightAgentToolCallIds?: readonly string[];
+          /** Child session ids that already produced a result file. */
+          settledBackgroundSubSessionIds?: readonly string[];
       }
     | { type: "ATTACHED_PUSH"; cwd: string; sid: string }
     | {
@@ -266,7 +283,12 @@ export type WorkspaceAction =
           subSessionId: string;
           agentType: string;
       }
-    | { type: "SUBAGENT_SETTLED"; cwd: string; parentToolCallId: string }
+    | {
+          type: "SUBAGENT_SETTLED";
+          cwd: string;
+          parentToolCallId: string;
+          outcome: Exclude<BackgroundSubagentState, "running">;
+      }
     | {
           type: "CHILD_MESSAGE_EVENT";
           cwd: string;
@@ -355,6 +377,59 @@ function omitKey<V>(map: Record<string, V>, key: string): Record<string, V> {
 }
 
 /**
+ * Rebuild `backgroundSubagents` from a freshly loaded history.
+ *
+ * The live map is in-memory, so switching sessions or restarting loses it —
+ * and without it every background spawn falls back to its tool call, which has
+ * reported `ok` since launch. Three signals put each one back:
+ *
+ *  - `details.status === "launched"` (persisted) says it was a background spawn
+ *  - the attach response's in-flight list says it is still running *now*
+ *  - a result file for its child session says it settled at some point, which
+ *    is the only evidence that survives the process that ran it
+ *
+ * Neither running nor settled means the child stopped without finishing — the
+ * sidecar exited mid-run — so it is reported as an error rather than silently
+ * reading as complete. The result file cannot say *which* outcome, so a settled
+ * child reads as `completed`; its own session holds the detail.
+ */
+function rebuildBackgroundSubagents(
+    messages: readonly UiMessage[],
+    inFlightAgentToolCallIds: readonly string[] | undefined,
+    settledBackgroundSubSessionIds: readonly string[] | undefined,
+): Record<string, BackgroundSubagentState> {
+    const inFlight = new Set(inFlightAgentToolCallIds ?? []);
+    const settled = new Set(settledBackgroundSubSessionIds ?? []);
+    const out: Record<string, BackgroundSubagentState> = {};
+    for (const message of messages) {
+        if (message.kind !== "assistant") continue;
+        for (const tool of message.tools ?? []) {
+            if (!AGENT_TOOL_NAMES.has(tool.name) || typeof tool.id !== "string") continue;
+            if (!isBackgroundLaunchDetails(tool.details)) continue;
+            const subSessionId = (tool.details as { subSessionId?: unknown }).subSessionId;
+            if (inFlight.has(tool.id)) {
+                out[tool.id] = "running";
+            } else if (typeof subSessionId === "string" && settled.has(subSessionId)) {
+                out[tool.id] = "completed";
+            } else {
+                out[tool.id] = "error";
+            }
+        }
+    }
+    return out;
+}
+
+/** Shallow equality for backgroundSubagents, so a no-change refresh keeps
+ *  the no-op identity (updateWs hands the original state back). */
+function sameBackgroundStates(
+    a: Record<string, BackgroundSubagentState>,
+    b: Record<string, BackgroundSubagentState>,
+): boolean {
+    const aKeys = Object.keys(a);
+    return aKeys.length === Object.keys(b).length && aKeys.every((k) => a[k] === b[k]);
+}
+
+/**
  * Guard + merge for the "patch exactly one workspace" shape nearly every action
  * shares. `patch` returning undefined means "no-op": the original `state`
  * reference is handed back, which is load-bearing — useReducer only skips the
@@ -435,10 +510,35 @@ export function workspacesReducer(
             }));
         case "ATTACH":
             return updateWs(state, action.cwd, (existing) => {
-                // Same-session re-attach: keep the in-flight subagent live stream intact.
-                // Only clear on switch to a different session (parent-child relation only
-                // applies to the current parent session).
-                if (existing.activeSession === action.sid) return undefined;
+                // Same-session re-attach: keep the in-flight subagent live stream
+                // intact. The one piece worth refreshing is backgroundSubagents —
+                // after a sidecar restart the live map is stale (a child the old
+                // process ran shows "running" forever), and the attach response's
+                // fresh in-flight + settled signals are the only correction.
+                if (existing.activeSession === action.sid) {
+                    if (
+                        action.inFlightAgentToolCallIds === undefined &&
+                        action.settledBackgroundSubSessionIds === undefined
+                    ) {
+                        return undefined;
+                    }
+                    const rebuilt = rebuildBackgroundSubagents(
+                        action.messages,
+                        action.inFlightAgentToolCallIds,
+                        action.settledBackgroundSubSessionIds,
+                    );
+                    // Existing terminal outcomes win: they came from
+                    // SUBAGENT_SETTLED, which knows the real outcome, while the
+                    // rebuild can only say "completed" for any settled child.
+                    // Entries missing from the rebuild keep their value.
+                    const merged = { ...existing.backgroundSubagents, ...rebuilt };
+                    for (const [id, s] of Object.entries(existing.backgroundSubagents)) {
+                        if (s !== "running") merged[id] = s;
+                    }
+                    return sameBackgroundStates(merged, existing.backgroundSubagents)
+                        ? undefined
+                        : { backgroundSubagents: merged };
+                }
                 // Restore pending for askUser toolCallIds still waiting in history so card
                 // selection can resume the turn. The injection trigger is the pending
                 // "true → false" transition; without restore, historical askUser clicks are dead.
@@ -452,7 +552,11 @@ export function workspacesReducer(
                     childHistoryLoaded: {},
                     askUserPending: restoredPending,
                     agentToolPending: {},
-                    backgroundSubagents: {},
+                    backgroundSubagents: rebuildBackgroundSubagents(
+                        action.messages,
+                        action.inFlightAgentToolCallIds,
+                        action.settledBackgroundSubSessionIds,
+                    ),
                 };
             });
         case "ATTACHED_PUSH":
@@ -663,11 +767,10 @@ export function workspacesReducer(
                 // `status: "launched"` means this tool_end is a background spawn's
                 // launch receipt, not a finished child. Record it so the
                 // SUBAGENT_SPAWNED that lands next does not mark the session busy.
-                const launchedDetails =
-                    action.ev.type === "tool_end" && action.ev.toolName === "agent"
-                        ? (action.ev.result?.details as { status?: string } | undefined)
-                        : undefined;
-                const isBackgroundLaunch = launchedDetails?.status === "launched";
+                const isBackgroundLaunch =
+                    action.ev.type === "tool_end" &&
+                    action.ev.toolName === "agent" &&
+                    isBackgroundLaunchDetails(action.ev.result?.details);
                 return {
                     messages: result.messages,
                     pendingBySessionId,
@@ -677,7 +780,7 @@ export function workspacesReducer(
                         : existing.agentToolPending,
                     backgroundSubagents:
                         isBackgroundLaunch && endedToolCallId
-                            ? { ...existing.backgroundSubagents, [endedToolCallId]: true }
+                            ? { ...existing.backgroundSubagents, [endedToolCallId]: "running" }
                             : existing.backgroundSubagents,
                     queuedBySessionId,
                 };
@@ -703,17 +806,24 @@ export function workspacesReducer(
                 // nothing clears it, and the composer goes idle with the Stop
                 // button still showing. Background children keep the session
                 // usable by design.
-                agentToolPending: existing.backgroundSubagents[action.parentToolCallId]
-                    ? existing.agentToolPending
-                    : {
-                          ...existing.agentToolPending,
-                          [action.parentToolCallId]: true,
-                      },
+                agentToolPending:
+                    existing.backgroundSubagents[action.parentToolCallId] !== undefined
+                        ? existing.agentToolPending
+                        : {
+                              ...existing.agentToolPending,
+                              [action.parentToolCallId]: true,
+                          },
             }));
         case "SUBAGENT_SETTLED":
             return updateWs(state, action.cwd, (existing) => ({
                 agentToolPending: omitKey(existing.agentToolPending, action.parentToolCallId),
-                backgroundSubagents: omitKey(existing.backgroundSubagents, action.parentToolCallId),
+                // Outcome recorded, not deleted: the panel still renders this
+                // child, and its tool call has said `ok` since launch, so this
+                // is the only place the real result is known.
+                backgroundSubagents: {
+                    ...existing.backgroundSubagents,
+                    [action.parentToolCallId]: action.outcome,
+                },
             }));
         case "CHILD_MESSAGE_EVENT":
             return updateWs(state, action.cwd, (existing) => ({

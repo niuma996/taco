@@ -226,6 +226,22 @@ export interface UiToolCall {
     details?: unknown;
 }
 
+/** Tool names that spawn (or continue) a subagent child session. */
+export const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(["agent", "agentContinue"]);
+
+/**
+ * True when an agent tool call's details mark a background launch receipt
+ * (`AgentToolDetails.status === "launched"`) rather than a finished run.
+ * Duck-typed on purpose: `details` crosses the wire untyped.
+ */
+export function isBackgroundLaunchDetails(details: unknown): boolean {
+    return (
+        typeof details === "object" &&
+        details !== null &&
+        (details as { status?: unknown }).status === "launched"
+    );
+}
+
 export interface UiThinkingBlock {
     /** Accumulated thinking text. */
     thinking: string;

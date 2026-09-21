@@ -92,6 +92,7 @@ import { type AttachOptions, SessionRegistry } from "./session/sessionRegistry.t
 import type { SessionTaskState } from "./session/sessionTaskState.ts";
 import { SkillHotReloader } from "./skillHotReload.ts";
 import { AgentSpawner } from "./subagent/agentSpawner.ts";
+import { settledSubagentResultIds } from "./subagent/subagentResultsDir.ts";
 import { dedupOverride, filterToolsForImPolicy } from "./toolAssembly.ts";
 
 const log = createLogger("workspace");
@@ -1214,6 +1215,15 @@ export class WorkspaceRuntime extends EventEmitter {
      */
     inFlightAgentToolCallIds(parentSessionId: SessionId): string[] {
         return this.agentSpawner.inFlightAgentToolCallIds(parentSessionId);
+    }
+
+    /**
+     * Child session ids under `parentSessionId` that already produced a result
+     * file — i.e. background children known to have settled at some point,
+     * including before this process started. See `settledSubagentResultIds`.
+     */
+    async settledBackgroundSubSessionIds(parentSessionId: SessionId): Promise<string[]> {
+        return settledSubagentResultIds(parentSessionId, this.sessionsRoot);
     }
 
     /**

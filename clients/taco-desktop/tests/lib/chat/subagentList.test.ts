@@ -50,6 +50,31 @@ describe("deriveSubagents — 基本抽取", () => {
         });
     });
 
+    // 后台 spawn 的工具调用在启动那一刻就是 ok（结果是收据而非答案），
+    // 所以不能从工具状态推断存活；只有 workspace 的后台记录知道真相。
+    it("后台子代理运行中显示为 background，而非 ok", () => {
+        const launched = agentTool({ status: "ok" });
+        const out = deriveSubagents([asst("m1", [launched])], { "call-1": "running" });
+        assert.equal(out[0]?.status, "background");
+    });
+
+    it("后台子代理结束后显示真实结果", () => {
+        const launched = agentTool({ status: "ok" });
+        assert.equal(
+            deriveSubagents([asst("m1", [launched])], { "call-1": "completed" })[0]?.status,
+            "ok",
+        );
+        assert.equal(
+            deriveSubagents([asst("m1", [launched])], { "call-1": "error" })[0]?.status,
+            "error",
+        );
+    });
+
+    it("同步子代理不受后台记录影响", () => {
+        const out = deriveSubagents([asst("m1", [agentTool({ status: "running" })])], {});
+        assert.equal(out[0]?.status, "running");
+    });
+
     it("忽略非 agent 工具", () => {
         const shell: UiToolCall = { id: "c2", name: "shell", args: {}, status: "ok" };
         assert.equal(deriveSubagents([asst("m1", [shell])]).length, 0);
@@ -299,6 +324,7 @@ describe("shouldAutoOpen", () => {
         firstToolCallId: `c-${id}`,
     });
     const done = (id: string): SubagentEntry => ({ ...running(id), status: "ok" });
+    const background = (id: string): SubagentEntry => ({ ...running(id), status: "background" });
     const detached: SubagentEntry = {
         subSessionId: null,
         agentType: "Explore",
@@ -310,6 +336,10 @@ describe("shouldAutoOpen", () => {
 
     it("新出现的 running 子代理 → 返回其 id", () => {
         assert.equal(shouldAutoOpen(new Set(), [running("s1")], false), "s1");
+    });
+
+    it("新出现的 background 子代理同样触发（子代理仍在跑，只是工具调用已回执）", () => {
+        assert.equal(shouldAutoOpen(new Set(), [background("s1")], false), "s1");
     });
 
     it("已在上一次集合里的 running 不触发", () => {
