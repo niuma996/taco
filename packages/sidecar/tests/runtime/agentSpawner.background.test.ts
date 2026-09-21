@@ -458,4 +458,131 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             restoreExecute();
         }
     });
+
+    // deliverSubagentResult returns `false` (not a throw) when the parent
+    // has no live AttachedSession — the normal state for a parent that was
+    // never attached in this process. dropPending must not run in that case,
+    // or the notice is stranded with no record to retry from.
+    it("keeps the pending record when the parent was never attached (no throw, just unreachable)", async () => {
+        const restoreExecute = stubExecute(async (args) => ({
+            subSessionId: args.childSessionId ?? asSessionId("unused"),
+            resultText: "an answer nobody is around to receive",
+            isError: false,
+        }));
+        const parent = "bg-parent-never-attached";
+        try {
+            await seedSession(parent);
+            assert.equal(
+                ws.sessionRegistry.getAttached(asSessionId(parent)),
+                undefined,
+                "this test only means something if the parent truly has no AttachedSession",
+            );
+            await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-never-attached",
+                agentType: "explorer",
+                prompt: "do something",
+                background: true,
+            });
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            const pending = await ws.sessionRegistry.withSession(asSessionId(parent), (s) =>
+                readPendingSubagentResults(s),
+            );
+            assert.deepEqual(Object.keys(pending), ["tc-never-attached"]);
+            assert.equal(pending["tc-never-attached"]?.outcome, "completed");
+        } finally {
+            restoreExecute();
+        }
+    });
+
+    // Up to MAX_CONCURRENT_BACKGROUND_SUBAGENTS children of the same parent
+    // can settle within the same tick. End-to-end regression: SessionRegistry
+    // .withSession also serializes detached reads for the same session id
+    // (see sessionRegistry.ts), so this passing does not by itself prove
+    // AgentSpawner.withPendingQueue is pulling weight — see
+    // "withPendingQueue serializes two overlapping writers" below for that.
+    // This test exists to catch a regression in the full call path, should
+    // that other layer's guarantee ever narrow.
+    it("keeps both records when two children of the same parent settle concurrently", async () => {
+        const registry = ws.sessionRegistry as unknown as {
+            getAttached: (id: unknown) => unknown;
+        };
+        const originalGetAttached = registry.getAttached;
+        // Unreachable parent, so both settles fall through to recordPending
+        // without either being cleared by a successful delivery.
+        registry.getAttached = () => undefined;
+        const resolvers: Array<() => void> = [];
+        const restoreExecute = stubExecute(
+            (args) =>
+                new Promise((resolve) => {
+                    resolvers.push(() =>
+                        resolve({
+                            subSessionId: args.childSessionId ?? asSessionId("unused"),
+                            resultText: `answer for ${args.parentToolCallId}`,
+                            isError: false,
+                        }),
+                    );
+                }),
+        );
+        const parent = "bg-parent-concurrent";
+        try {
+            await seedSession(parent);
+            await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-concurrent-1",
+                agentType: "explorer",
+                prompt: "do something",
+                background: true,
+            });
+            await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-concurrent-2",
+                agentType: "explorer",
+                prompt: "do something else",
+                background: true,
+            });
+            // Resolve both stubbed runs in the same tick so their settle
+            // sequences' recordPending calls actually overlap.
+            for (const resolve of resolvers) resolve();
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            const pending = await ws.sessionRegistry.withSession(asSessionId(parent), (s) =>
+                readPendingSubagentResults(s),
+            );
+            assert.deepEqual(
+                new Set(Object.keys(pending)),
+                new Set(["tc-concurrent-1", "tc-concurrent-2"]),
+                "both concurrent settles must leave their own pending record",
+            );
+        } finally {
+            registry.getAttached = originalGetAttached;
+            restoreExecute();
+        }
+    });
+
+    it("withPendingQueue serializes two overlapping writers for the same parent", async () => {
+        const spawner = ws.agentSpawner as unknown as {
+            withPendingQueue: <T>(parentSessionId: SessionId, run: () => Promise<T>) => Promise<T>;
+        };
+        const parent = asSessionId("bg-parent-queue-unit");
+        const order: string[] = [];
+        let releaseFirst: (() => void) | undefined;
+        const first = spawner.withPendingQueue(parent, async () => {
+            order.push("first-start");
+            await new Promise<void>((resolve) => {
+                releaseFirst = resolve;
+            });
+            order.push("first-end");
+        });
+        const second = spawner.withPendingQueue(parent, async () => {
+            order.push("second-start");
+        });
+        // Give the second call every chance to run before the first
+        // releases — if the queue were a no-op, "second-start" would land
+        // between "first-start" and "first-end".
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(order, ["first-start"], "second must not start before first finishes");
+        releaseFirst?.();
+        await Promise.all([first, second]);
+        assert.deepEqual(order, ["first-start", "first-end", "second-start"]);
+    });
 });

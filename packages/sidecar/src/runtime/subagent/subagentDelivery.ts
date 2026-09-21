@@ -16,10 +16,13 @@
  *
  *   prompt() -> busy? -> enqueue("followUp") -> idle? -> retry prompt() once
  *
- * PR1 scope: in-memory only. If the parent session is not currently attached
- * (process restarted, workspace disposed) the result is dropped — this is the
- * same loss a synchronous subagent suffers if the process dies mid-run.
- * Durable cross-restart delivery is deferred to a later PR.
+ * This function itself is in-memory only — if the parent session is not
+ * currently attached (process restarted, workspace disposed), there is no
+ * `AttachedSession` to prompt and the notice cannot land here. That is not a
+ * lost result, though: `deliverSubagentResult` reports it via its boolean
+ * return, and `subagentPending.ts` is the durable half of this pair — it
+ * records the notice before this function is called and only clears the
+ * record once this function reports success, so the next attach can retry.
  */
 
 import { isBusyError } from "../harness/harnessErrors.ts";
@@ -29,28 +32,33 @@ import type { SessionRegistry } from "../session/sessionRegistry.ts";
  * Send `notificationText` to `parentSessionId`, retrying through the
  * steer/followUp queue if the parent is mid-turn.
  *
- * Never throws for the "parent isn't around" case — a missing or dead
- * `AttachedSession` is a normal outcome (see module doc), not a caller error.
- * Genuine harness faults (anything that isn't a busy-lane rejection) still
- * propagate so the caller's `.catch()` can log them.
+ * Returns whether the notice actually reached the parent. `false` (not a
+ * throw) for the "parent isn't around" case — a missing or dead
+ * `AttachedSession` is a normal outcome (see module doc), not a caller error;
+ * the caller must not treat this the same as a delivered notice, or it will
+ * clear the pending record for a notice nobody received. Genuine harness
+ * faults (anything that isn't a busy-lane rejection) still throw so the
+ * caller's `.catch()` can log them — those are unexpected, not the
+ * "unreachable parent" case this return value exists to distinguish.
  */
 export async function deliverSubagentResult(
     sessionRegistry: SessionRegistry,
     parentSessionId: Parameters<SessionRegistry["getAttached"]>[0],
     notificationText: string,
-): Promise<void> {
+): Promise<boolean> {
     const attached = sessionRegistry.getAttached(parentSessionId);
-    if (!attached) return;
+    if (!attached) return false;
     try {
         await attached.prompt(notificationText);
-        return;
+        return true;
     } catch (e) {
         if (!isBusyError(e)) throw e;
     }
     const queued = await attached.enqueue("followUp", notificationText);
-    if (queued.mode !== "idle") return;
+    if (queued.mode !== "idle") return true;
     // The run ended between the busy rejection and the enqueue — the
     // followUp would sit unconsumed forever. Retry once, mirroring
     // `promptWithBusyFallback`'s same-shaped retry.
     await attached.prompt(notificationText);
+    return true;
 }

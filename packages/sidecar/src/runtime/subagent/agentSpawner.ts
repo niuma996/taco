@@ -246,6 +246,7 @@ export class AgentSpawner extends EventEmitter {
         this.backgroundInFlight = new Set();
         this.settledEmitted = new Set();
         this.flushingParents = new Set();
+        this.pendingWriteQueues = new Map();
         this.backgroundRuns = new Set();
         this.subagentControllers = new Map();
         // Attach is the moment a previously unreachable parent becomes
@@ -320,6 +321,21 @@ export class AgentSpawner extends EventEmitter {
      * pending record and deliver every notice twice.
      */
     private readonly flushingParents: Set<SessionId>;
+
+    /**
+     * Tail of the serialized pending-record queue for each parent session.
+     *
+     * `recordPending` / `dropPending` / `flushPendingSubagentResults` each do
+     * a read-modify-write of the same per-parent value (the whole
+     * `PendingMap`, see `subagentPending.ts`). Up to
+     * `MAX_CONCURRENT_BACKGROUND_SUBAGENTS` children of one parent can settle
+     * within the same tick, so without this queue two concurrent
+     * `recordPending` calls race: both read the map before either writes,
+     * and the second write clobbers the first entry — exactly the record
+     * this module exists to not lose. Same swallow-then-await shape as
+     * `SessionRegistry.withSession`'s `detachedReads`.
+     */
+    private readonly pendingWriteQueues: Map<SessionId, Promise<void>>;
 
     /**
      * Settle sequences of launched background spawns that have not finished.
@@ -817,8 +833,19 @@ export class AgentSpawner extends EventEmitter {
                     resultPath: path,
                     description,
                 });
-                await deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
-                await this.dropPending(parentSessionId, parentToolCallId);
+                // Only clear the pending record if the notice actually
+                // reached the parent. A parent that is not currently attached
+                // (process restarted, workspace disposed) returns `false`
+                // here, not a throw — dropping the record in that case would
+                // strand the notice forever: the record is the only thing
+                // that makes `flushPendingSubagentResults` retry it on the
+                // next attach.
+                const delivered = await deliverSubagentResult(
+                    this.sessionRegistry,
+                    parentSessionId,
+                    notification,
+                );
+                if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
             })
             .catch(async (e) => {
                 log.error("background subagent delivery failed", {
@@ -843,8 +870,28 @@ export class AgentSpawner extends EventEmitter {
                     outcome: "error",
                     description,
                 });
+                // Only back-fill a pending record if `.then` never got to
+                // write one — reaching here after `deliverSubagentResult`
+                // itself threw means `.then` already recorded the *real*
+                // outcome (e.g. "completed" with a resultPath) before the
+                // throw; overwriting it with this fallback's "error" would
+                // discard that in favor of a strictly worse record for the
+                // exact case (a later flush) it exists to serve.
+                await this.recordPendingIfAbsent({
+                    parentSessionId,
+                    parentToolCallId,
+                    subSessionId: childSessionId,
+                    agentType: sessionArgs.agentType,
+                    outcome: "error",
+                    description,
+                });
                 try {
-                    await deliverSubagentResult(this.sessionRegistry, parentSessionId, fallback);
+                    const delivered = await deliverSubagentResult(
+                        this.sessionRegistry,
+                        parentSessionId,
+                        fallback,
+                    );
+                    if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
                 } catch (e2) {
                     log.error("background subagent fallback delivery failed", {
                         parentSessionId,
@@ -912,8 +959,13 @@ export class AgentSpawner extends EventEmitter {
         if (this.flushingParents.has(parentSessionId)) return;
         this.flushingParents.add(parentSessionId);
         try {
-            const pending = await this.sessionRegistry.withSession(parentSessionId, (session) =>
-                readPendingSubagentResults(session),
+            // Queued behind any in-flight recordPending/dropPending for this
+            // parent, so this reads a consistent snapshot rather than racing
+            // a concurrent settle's write.
+            const pending = await this.withPendingQueue(parentSessionId, () =>
+                this.sessionRegistry.withSession(parentSessionId, (session) =>
+                    readPendingSubagentResults(session),
+                ),
             );
             const entries = Object.values(pending);
             if (entries.length === 0) return;
@@ -930,8 +982,9 @@ export class AgentSpawner extends EventEmitter {
                     description: entry.description,
                     late: true,
                 });
+                let delivered: boolean;
                 try {
-                    await deliverSubagentResult(
+                    delivered = await deliverSubagentResult(
                         this.sessionRegistry,
                         parentSessionId,
                         notification,
@@ -947,6 +1000,17 @@ export class AgentSpawner extends EventEmitter {
                     });
                     return;
                 }
+                // `false` (not a throw) means the parent still is not
+                // attached — same "stop here, keep the rest pending" outcome
+                // as the caught-exception branch above, just via the normal
+                // return path instead of an error.
+                if (!delivered) {
+                    log.warn("pending subagent result still undeliverable: parent not attached", {
+                        parentSessionId,
+                        parentToolCallId: entry.parentToolCallId,
+                    });
+                    return;
+                }
                 await this.dropPending(parentSessionId, entry.parentToolCallId);
             }
         } catch (e) {
@@ -956,6 +1020,36 @@ export class AgentSpawner extends EventEmitter {
             });
         } finally {
             this.flushingParents.delete(parentSessionId);
+        }
+    }
+
+    /**
+     * Chain `run` onto this parent's pending-record queue and wait for it.
+     *
+     * `settled` swallows rejections so one failed link cannot poison the
+     * queue for the next caller — the real result (and any throw) is still
+     * awaited and surfaced below. Only the last-scheduled link clears the map
+     * entry, or a queue still draining would lose its tail and let a later
+     * caller run in parallel with an earlier one. Same shape as
+     * `SessionRegistry.withSession`'s `detachedReads`.
+     */
+    private async withPendingQueue<T>(
+        parentSessionId: SessionId,
+        run: () => Promise<T>,
+    ): Promise<T> {
+        const previous = this.pendingWriteQueues.get(parentSessionId);
+        const chained = (previous ?? Promise.resolve()).then(run);
+        const settled = chained.then(
+            () => undefined,
+            () => undefined,
+        );
+        this.pendingWriteQueues.set(parentSessionId, settled);
+        try {
+            return await chained;
+        } finally {
+            if (this.pendingWriteQueues.get(parentSessionId) === settled) {
+                this.pendingWriteQueues.delete(parentSessionId);
+            }
         }
     }
 
@@ -977,8 +1071,48 @@ export class AgentSpawner extends EventEmitter {
     }): Promise<void> {
         const { parentSessionId, ...rest } = entry;
         try {
-            await this.sessionRegistry.withSession(parentSessionId, (session) =>
-                addPendingSubagentResult(session, { ...rest, settledAt: Date.now() }),
+            await this.withPendingQueue(parentSessionId, () =>
+                this.sessionRegistry.withSession(parentSessionId, (session) =>
+                    addPendingSubagentResult(session, { ...rest, settledAt: Date.now() }),
+                ),
+            );
+        } catch (e) {
+            log.error("failed to record pending subagent result", {
+                parentSessionId,
+                parentToolCallId: entry.parentToolCallId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        }
+    }
+
+    /**
+     * Same as `recordPending`, but only writes when no record for this
+     * `parentToolCallId` exists yet.
+     *
+     * Used by the `.catch` fallback path: reaching there after
+     * `deliverSubagentResult` itself threw means the `.then` branch already
+     * wrote the real outcome before the throw, and this must not clobber it
+     * with a worse one. The read-then-write is inside `withPendingQueue` so
+     * it cannot race the `.then` branch's own `recordPending` for the same
+     * parent.
+     */
+    private async recordPendingIfAbsent(entry: {
+        parentSessionId: SessionId;
+        parentToolCallId: string;
+        subSessionId: SessionId;
+        agentType: string;
+        outcome: "completed" | "error" | "aborted";
+        resultPath?: string;
+        description?: string;
+    }): Promise<void> {
+        const { parentSessionId, ...rest } = entry;
+        try {
+            await this.withPendingQueue(parentSessionId, () =>
+                this.sessionRegistry.withSession(parentSessionId, async (session) => {
+                    const existing = await readPendingSubagentResults(session);
+                    if (entry.parentToolCallId in existing) return;
+                    await addPendingSubagentResult(session, { ...rest, settledAt: Date.now() });
+                }),
             );
         } catch (e) {
             log.error("failed to record pending subagent result", {
@@ -992,8 +1126,10 @@ export class AgentSpawner extends EventEmitter {
     /** Clear a pending notice after it was delivered. Failures are logged, not raised. */
     private async dropPending(parentSessionId: SessionId, parentToolCallId: string): Promise<void> {
         try {
-            await this.sessionRegistry.withSession(parentSessionId, (session) =>
-                clearPendingSubagentResult(session, parentToolCallId),
+            await this.withPendingQueue(parentSessionId, () =>
+                this.sessionRegistry.withSession(parentSessionId, (session) =>
+                    clearPendingSubagentResult(session, parentToolCallId),
+                ),
             );
         } catch (e) {
             log.error("failed to clear pending subagent result", {
