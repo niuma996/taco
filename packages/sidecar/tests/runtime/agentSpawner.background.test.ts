@@ -281,6 +281,12 @@ describe("AgentSpawner.spawnSubagent — background", () => {
     // states where that route is closed (parent mid-compaction, process
     // restarted). The notice is recorded before the attempt and cleared only
     // once it lands, so a failed delivery leaves a record to retry from.
+    // Also covers the fix for the outer .catch previously treating any
+    // deliverSubagentResult throw as "the run failed": outcome/resultPath/
+    // description here can only come from the .then branch's own
+    // recordPending — the outer .catch's fallback always writes outcome
+    // "error" with no resultPath, so seeing "completed" + a real path proves
+    // delivery failures no longer fall through to that fallback.
     it("keeps a pending record when delivery fails, and clears it when it succeeds", async () => {
         const registry = ws.sessionRegistry as unknown as {
             getAttached: (id: unknown) => unknown;
@@ -348,6 +354,49 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             assert.deepEqual(after, {}, "a delivered notice must not be flushed twice");
         } finally {
             registry.getAttached = originalGetAttached;
+        }
+    });
+
+    // The outer .catch still has a real job: a failure *before* the .then
+    // branch could make its own pending record (here, a "subagent.settled"
+    // listener throwing synchronously inside emitSettled's `this.emit`) must
+    // still leave a retryable record — just this time with the fallback's
+    // outcome "error" and no resultPath, since there is no successful run to
+    // report.
+    it("falls back to an error record when settling itself throws before recordPending runs", async () => {
+        const restoreExecute = stubExecute(async (args) => ({
+            subSessionId: args.childSessionId ?? asSessionId("unused"),
+            resultText: "would have been the answer",
+            isError: false,
+        }));
+        const parent = "bg-parent-settle-throws";
+        const boom = new Error("listener exploded");
+        const onSettled = () => {
+            throw boom;
+        };
+        ws.agentSpawner.on("subagent.settled", onSettled);
+        try {
+            await seedSession(parent);
+            await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-settle-throws",
+                agentType: "explorer",
+                prompt: "do something",
+                background: true,
+            });
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            const pending = await ws.sessionRegistry.withSession(asSessionId(parent), (s) =>
+                readPendingSubagentResults(s),
+            );
+            assert.equal(pending["tc-settle-throws"]?.outcome, "error");
+            assert.equal(
+                pending["tc-settle-throws"]?.resultPath,
+                undefined,
+                "the fallback record has no file to point at — the run's own result never reached writeBackgroundResult",
+            );
+        } finally {
+            ws.agentSpawner.off("subagent.settled", onSettled);
+            restoreExecute();
         }
     });
 

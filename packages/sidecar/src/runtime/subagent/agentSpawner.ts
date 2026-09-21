@@ -845,24 +845,45 @@ export class AgentSpawner extends EventEmitter {
                 // strand the notice forever: the record is the only thing
                 // that makes `flushPendingSubagentResults` retry it on the
                 // next attach.
-                const delivered = await deliverSubagentResult(
-                    this.sessionRegistry,
-                    parentSessionId,
-                    notification,
-                );
-                if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
+                //
+                // Caught locally, not left to the outer `.catch`: the pending
+                // record above already has the *real* outcome and result
+                // path (e.g. "completed" with `path` pointing at the file
+                // that was just written). Reaching the outer `.catch` from
+                // here would have it fabricate a fallback "failed, output
+                // unavailable" notice for a run that actually succeeded —
+                // strictly worse than the record already made, which flush
+                // will retry delivery from.
+                try {
+                    const delivered = await deliverSubagentResult(
+                        this.sessionRegistry,
+                        parentSessionId,
+                        notification,
+                    );
+                    if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
+                } catch (e) {
+                    log.error("background subagent delivery failed, will retry on next attach", {
+                        parentSessionId,
+                        parentToolCallId,
+                        agentType: sessionArgs.agentType,
+                        error: e instanceof Error ? e.message : String(e),
+                    });
+                }
             })
             .catch(async (e) => {
-                log.error("background subagent delivery failed", {
+                log.error("background subagent settling failed", {
                     parentSessionId,
                     parentToolCallId,
                     agentType: sessionArgs.agentType,
                     error: e instanceof Error ? e.message : String(e),
                 });
-                // The run itself never throws, so reaching here means the
-                // settled emit or the delivery failed. Emit again rather than
-                // risk never emitting: `emitSettled` is idempotent per
-                // parentToolCallId (see below).
+                // Reaching here means the run itself, emitSettled, or
+                // writeBackgroundResult threw before a pending record could
+                // be made — delivery failures are now caught locally above
+                // and never reach this branch. There is no result text or
+                // path to report here, only that the task did not complete
+                // normally. `emitSettled` is idempotent per parentToolCallId,
+                // so this is safe even if it already fired for this spawn.
                 this.emitSettled(sessionArgs.agentType, {
                     parentSessionId,
                     parentToolCallId,
@@ -875,13 +896,10 @@ export class AgentSpawner extends EventEmitter {
                     outcome: "error",
                     description,
                 });
-                // Only back-fill a pending record if `.then` never got to
-                // write one — reaching here after `deliverSubagentResult`
-                // itself threw means `.then` already recorded the *real*
-                // outcome (e.g. "completed" with a resultPath) before the
-                // throw; overwriting it with this fallback's "error" would
-                // discard that in favor of a strictly worse record for the
-                // exact case (a later flush) it exists to serve.
+                // recordPendingIfAbsent, not recordPending: guards against
+                // this racing a `.then` recordPending call for the same
+                // parentToolCallId — that record, if it exists, is always
+                // at least as good as this fallback.
                 await this.recordPendingIfAbsent({
                     parentSessionId,
                     parentToolCallId,
