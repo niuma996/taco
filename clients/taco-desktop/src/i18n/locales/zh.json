@@ -568,7 +568,10 @@
     "viewBrowser": "浏览器打开",
     "loadError": "无法读取目录",
     "showHidden": "显示隐藏文件",
-    "previewError": "读取文件失败"
+    "previewError": "读取文件失败",
+    "forbiddenTitle": "该文件不在 Taco 可读取的目录范围内",
+    "forbiddenHint": "授权后即可预览。授权仅对该文件生效，重启 Taco 后失效。",
+    "grantAccess": "授权并打开"
   },
   "memory": {
     "title": "记忆",

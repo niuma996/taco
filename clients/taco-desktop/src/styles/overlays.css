@@ -952,6 +952,18 @@
 .files-preview-blocked-message {
     font-size: 0.85rem;
 }
+.files-preview-blocked-hint {
+    max-width: 28rem;
+    text-align: center;
+    color: var(--fg-dim);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+.files-preview-blocked-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
 .files-preview-error {
     color: var(--error);
     padding: 0.6rem 0.4rem;

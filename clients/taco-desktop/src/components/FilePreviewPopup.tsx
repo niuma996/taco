@@ -5,6 +5,7 @@
  * the same preview surface. It renders nothing when no file is selected.
  */
 import * as Dialog from "@radix-ui/react-dialog";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { X } from "lucide-react";
 import type { UseFilePreviewApi } from "../hooks/useFilePreview";
 import { useT } from "../i18n/useI18n";
@@ -22,6 +23,17 @@ export function FilePreviewPopup({ preview, cwd }: FilePreviewPopupProps) {
     const { t } = useT();
     const path = preview.selectedRelPath;
     if (path === null) return null;
+    const absPath = resolveFsPath(cwd, path);
+
+    // The grant is file-granular and lasts until the app restarts; the user's
+    // click on the button in ForbiddenPreview is the authorization.
+    const grantAccess = () => {
+        void tauriInvoke("allow_fs_file", { path: absPath })
+            .then(() => preview.retry())
+            .catch((e: unknown) => {
+                console.error("[taco] allow_fs_file failed", e);
+            });
+    };
 
     return (
         <Dialog.Root
@@ -55,7 +67,9 @@ export function FilePreviewPopup({ preview, cwd }: FilePreviewPopupProps) {
                         block={preview.block}
                         error={preview.error}
                         loading={preview.loading}
-                        absPath={resolveFsPath(cwd, path)}
+                        absPath={absPath}
+                        forbidden={preview.forbidden}
+                        onGrantAccess={grantAccess}
                     />
                 </Dialog.Content>
             </Dialog.Portal>

@@ -569,7 +569,10 @@
     "viewBrowser": "Open in browser",
     "loadError": "Can't read directory",
     "showHidden": "Show hidden files",
-    "previewError": "Failed to read file"
+    "previewError": "Failed to read file",
+    "forbiddenTitle": "This file is outside the folders Taco can read",
+    "forbiddenHint": "Grant access to preview it. Access covers this file only, until Taco restarts.",
+    "grantAccess": "Grant access and open"
   },
   "memory": {
     "title": "Memory",

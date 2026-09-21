@@ -18,6 +18,7 @@ export default defineConfig({
             "tests/hooks/useRightPanel.test.tsx",
             "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",
+            "tests/components/FilePreviewGrant.test.tsx",
             "tests/components/MemoryPane.test.tsx",
             "tests/components/SubagentPanel.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",

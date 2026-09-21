@@ -4,6 +4,7 @@
  * Render rules:
  *  - loading → "…"
  *  - block ("binary" | "unsupported" | "tooLarge") → hint + reveal-in-folder button
+ *  - forbidden → grant-access prompt (path outside the FS scope)
  *  - error → error message
  *  - markdown → rendered view (AssistantMarkdown) with a rendered/source toggle
  *  - html → sandboxed iframe loaded via `convertFileSrc(absPath)` so relative
@@ -34,11 +35,16 @@ export interface FilesPreviewPaneProps {
     loading: boolean;
     /** Absolute path, used by the reveal-in-folder button on blocked states. */
     absPath: string;
+    /** Read failed because the path is outside the FS scope. */
+    forbidden: boolean;
+    /** Grant access to absPath, then re-read. */
+    onGrantAccess: () => void;
 }
 
 export function FilesPreviewPane(props: FilesPreviewPaneProps) {
     const { t } = useT();
     const { selectedRelPath, content, block, error, loading, absPath } = props;
+    const { forbidden, onGrantAccess } = props;
     const isMarkdown = shikiLangFor(selectedRelPath) === "markdown";
     const isHtml = shikiLangFor(selectedRelPath) === "html";
     const isImage = imageMimeFor(selectedRelPath) !== null;
@@ -87,7 +93,10 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                 {!loading && block !== null && (
                     <BlockedPreview block={block} fileName={selectedRelPath} absPath={absPath} />
                 )}
-                {!loading && block === null && error && (
+                {!loading && block === null && error && forbidden && (
+                    <ForbiddenPreview absPath={absPath} onGrantAccess={onGrantAccess} />
+                )}
+                {!loading && block === null && error && !forbidden && (
                     <div className="files-preview-error">
                         {t("files.previewError")}: {error}
                     </div>
@@ -113,6 +122,43 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                     ) : (
                         <PreviewCode code={content} fileName={selectedRelPath} />
                     ))}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Out-of-scope file: offer a one-file grant instead of the raw
+ * "forbidden path" error. The click is the authorization, so this only
+ * renders on an explicit user action path.
+ */
+function ForbiddenPreview({
+    absPath,
+    onGrantAccess,
+}: {
+    absPath: string;
+    onGrantAccess: () => void;
+}) {
+    const { t } = useT();
+    return (
+        <div className="files-preview-blocked">
+            <div className="files-preview-blocked-message">{t("files.forbiddenTitle")}</div>
+            <div className="files-preview-blocked-hint">{t("files.forbiddenHint")}</div>
+            <div className="files-preview-blocked-actions">
+                <Button size="sm" onClick={onGrantAccess}>
+                    {t("files.grantAccess")}
+                </Button>
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                        void revealItemInDir(absPath).catch((err: unknown) => {
+                            console.error("[taco] reveal file failed", err);
+                        });
+                    }}
+                >
+                    {t("files.revealInFolder")}
+                </Button>
             </div>
         </div>
     );

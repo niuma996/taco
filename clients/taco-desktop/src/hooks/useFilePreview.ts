@@ -30,7 +30,11 @@ export interface UseFilePreviewApi {
     content: string | null;
     block: PreviewBlock | null;
     error: string | null;
+    /** True when the read failed because the path is outside the FS scope. */
+    forbidden: boolean;
     select(relPath: string): Promise<void>;
+    /** Re-read the current file. Call after the user grants access. */
+    retry(): Promise<void>;
     clear(): void;
 }
 
@@ -40,6 +44,7 @@ export function useFilePreview(api: FsClient): UseFilePreviewApi {
     const [content, setContent] = useState<string | null>(null);
     const [block, setBlock] = useState<PreviewBlock | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [forbidden, setForbidden] = useState(false);
     const nonceRef = useRef(0);
 
     const clear = useCallback(() => {
@@ -49,9 +54,10 @@ export function useFilePreview(api: FsClient): UseFilePreviewApi {
         setContent(null);
         setBlock(null);
         setError(null);
+        setForbidden(false);
     }, []);
 
-    const select = useCallback(
+    const load = useCallback(
         async (relPath: string) => {
             const myNonce = ++nonceRef.current;
             setSelected(relPath);
@@ -59,6 +65,7 @@ export function useFilePreview(api: FsClient): UseFilePreviewApi {
             setError(null);
             setContent(null);
             setBlock(null);
+            setForbidden(false);
 
             const name = lastSegment(relPath);
             const imageMime = imageMimeFor(name);
@@ -90,12 +97,18 @@ export function useFilePreview(api: FsClient): UseFilePreviewApi {
                 setLoading(false);
             } catch (e) {
                 if (myNonce !== nonceRef.current) return;
-                setError((e as Error).message);
+                setError(errorText(e));
+                setForbidden(isForbiddenPath(e));
                 setLoading(false);
             }
         },
         [api],
     );
+
+    const retry = useCallback(async () => {
+        if (selectedRelPath === null) return;
+        await load(selectedRelPath);
+    }, [load, selectedRelPath]);
 
     return {
         selectedRelPath,
@@ -103,9 +116,32 @@ export function useFilePreview(api: FsClient): UseFilePreviewApi {
         content,
         block,
         error,
-        select,
+        forbidden,
+        select: load,
+        retry,
         clear,
     };
+}
+
+/**
+ * Whether the rejection is tauri-plugin-fs refusing a path outside the
+ * allowed scope (`Error::PathForbidden`), as opposed to a real IO failure.
+ * Matched on the message because the plugin serializes its error to a string
+ * across the IPC boundary, discarding the variant.
+ */
+function isForbiddenPath(e: unknown): boolean {
+    return errorText(e).toLowerCase().includes("forbidden path");
+}
+
+/**
+ * Tauri's `invoke` rejects with a plain string, not an Error — reading
+ * `.message` off it yields undefined, which the pane renders as a blank body
+ * instead of an error. Never return "" for a non-empty rejection.
+ */
+function errorText(e: unknown): string {
+    if (e instanceof Error && e.message) return e.message;
+    const s = String(e);
+    return s === "" || s === "[object Object]" ? "unknown error" : s;
 }
 
 /** Bytes → base64 `data:` URL. Chunked so a large image doesn't overflow the argument limit of `String.fromCharCode(...)`. */

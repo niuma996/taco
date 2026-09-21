@@ -136,6 +136,79 @@ describe("useFilePreview — read error", () => {
 
         assert.match(result.current.error ?? "", /EACCES/);
         assert.equal(result.current.content, null);
+        assert.equal(result.current.forbidden, false);
+    });
+
+    // Tauri's invoke rejects with a bare string, so `(e as Error).message` was
+    // undefined and the pane's `error &&` guard rendered an empty body.
+    it("keeps a message when the rejection is a bare string, not an Error", async () => {
+        const api = makeApi();
+        api.sizeOf = vi.fn(async () => {
+            throw "forbidden path: /Users/x/.taco/sessions/a.md";
+        });
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("/Users/x/.taco/sessions/a.md");
+        });
+
+        assert.match(result.current.error ?? "", /forbidden path/);
+        assert.equal(result.current.forbidden, true);
+    });
+
+    it("does not flag an ordinary IO failure as forbidden", async () => {
+        const api = makeApi();
+        api.sizeOf = vi.fn(async () => {
+            throw new Error("ENOENT: no such file");
+        });
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("gone.md");
+        });
+
+        assert.equal(result.current.forbidden, false);
+    });
+});
+
+describe("useFilePreview — retry after grant", () => {
+    it("re-reads the same path and clears forbidden on success", async () => {
+        let allowed = false;
+        const api = makeApi();
+        api.sizeOf = vi.fn(async () => {
+            if (!allowed) throw "forbidden path: /out/of/scope.md";
+            return 10;
+        });
+        api.readText = vi.fn(async () => "# granted");
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.select("/out/of/scope.md");
+        });
+        assert.equal(result.current.forbidden, true);
+        assert.equal(result.current.content, null);
+
+        allowed = true;
+        await act(async () => {
+            await result.current.retry();
+        });
+
+        assert.equal(result.current.forbidden, false);
+        assert.equal(result.current.error, null);
+        assert.equal(result.current.content, "# granted");
+        assert.equal(result.current.selectedRelPath, "/out/of/scope.md");
+    });
+
+    it("is a no-op with no file selected", async () => {
+        const api = makeApi();
+        const { result } = renderHook(() => useFilePreview(api));
+
+        await act(async () => {
+            await result.current.retry();
+        });
+
+        assert.equal(result.current.selectedRelPath, null);
+        assert.equal((api.sizeOf as ReturnType<typeof vi.fn>).mock.calls.length, 0);
     });
 });
 

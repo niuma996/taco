@@ -1144,6 +1144,23 @@ async fn set_fs_scope(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Grant the FS plugin access to a single file, for a user-initiated retry
+/// after a preview was refused by the scope. File-granular on purpose: a
+/// blocked preview only needs the one file, so this never widens access to
+/// the directory around it the way `set_fs_scope` does.
+///
+/// The user's click IS the authorization, so there is no separate prompt —
+/// which also means the caller must only reach this from an explicit action,
+/// never from an automatic retry.
+#[tauri::command]
+async fn allow_fs_file(app: AppHandle, path: String) -> Result<(), String> {
+    let normalized = normalize_cwd(&path);
+    app.fs_scope()
+        .allow_file(&normalized)
+        .map_err(|e| format!("allow_file failed: {e}"))?;
+    Ok(())
+}
+
 /// The sidecar version this desktop would spawn — the expectation for the
 /// reap freshness gate. Debug reads the repo's `packages/sidecar/package.json`;
 /// release reads the staged bundle's `manifest.json` (`sidecarVersion`,
@@ -1599,6 +1616,19 @@ pub fn run() {
                 ensure_daemon_installed(app)?;
             }
             {
+                // TACO_HOME holds session transcripts, subagent results, and
+                // logs — files the UI previews by absolute path, outside any
+                // workspace root. Granting it here rather than from the
+                // frontend keeps the path resolution (TACO_HOME override,
+                // `~/.taco` fallback) in one place.
+                let _p = boot_trace::Phase::new("setup.allow_taco_home_fs");
+                if let Ok(taco_home) = resolve_taco_home(app.handle()) {
+                    if let Err(e) = app.fs_scope().allow_directory(&taco_home, true) {
+                        eprintln!("taco-desktop: failed to grant fs scope for TACO_HOME: {e}");
+                    }
+                }
+            }
+            {
                 // Reap BEFORE the prewarm dispatch, not in the spawn path
                 // it shares with the UI. A stale daemon's SIGTERM grace
                 // (≤3s) plus the unlink race used to land on the critical
@@ -1622,6 +1652,7 @@ pub fn run() {
             workspace_send,
             workspace_dispose_all,
             set_fs_scope,
+            allow_fs_file,
             desktop_config_read,
             desktop_config_write,
             default_workspace_dir,
