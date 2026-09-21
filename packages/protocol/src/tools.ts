@@ -197,18 +197,25 @@ export interface SubagentSpawnedPayload {
 
 /**
  * Shape of the `details` field on the `agent` tool's **final** result.
- * `subSessionId` is absent when the spawn failed before a child session existed
- * (e.g. unknown agentType) — consumers must treat it as optional rather than
- * assuming a string is always present.
+ *
+ * Discriminated by `status`:
+ *  - `"completed"` — the subagent ran to completion (or failed) synchronously,
+ *    and `content` carries its final answer. `subSessionId` is absent when the
+ *    spawn failed before a child session existed (e.g. unknown agentType) —
+ *    consumers must treat it as optional rather than assuming a string is
+ *    always present.
+ *  - `"launched"` — `background: true` was requested; the child session was
+ *    created and is running, but `content` is a receipt, not an answer. The
+ *    real result arrives later as an injected message in the parent session
+ *    (see `subagentDelivery.ts`), not through this tool result.
  *
  * A final result never carries `turns`: that field belongs to
  * {@link SubagentProgressDetails} and its absence here is what lets a consumer
  * tell a finished card from a running one.
  */
-export interface AgentToolDetails {
-    subSessionId?: SessionId;
-    agentType: string;
-}
+export type AgentToolDetails =
+    | { status: "completed"; subSessionId?: SessionId; agentType: string }
+    | { status: "launched"; subSessionId: SessionId; agentType: string };
 
 /**
  * Shape of the `details` field on a subagent tool's **live progress** update

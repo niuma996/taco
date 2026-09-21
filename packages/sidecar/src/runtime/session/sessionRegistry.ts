@@ -113,9 +113,15 @@ export interface SessionRegistryOptions {
         agentType: string;
         prompt: string;
         context?: SubagentContextMode;
+        background?: boolean;
         signal?: AbortSignal;
         onUpdate?: SubagentProgressSink;
-    }) => Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }>;
+    }) => Promise<{
+        subSessionId?: SessionId;
+        resultText: string;
+        isError: boolean;
+        background?: boolean;
+    }>;
     /**
      * Resume callback for the `agentContinue` tool. Same deferred-evaluation
      * pattern as `spawnSubagent`. The facade supplies an arrow that calls
@@ -680,6 +686,7 @@ export class SessionRegistry extends EventEmitter {
                     agentType: args.agentType,
                     prompt: args.prompt,
                     context: args.context,
+                    background: args.background,
                     signal: args.signal,
                     onUpdate: args.onUpdate,
                 }),

@@ -16,6 +16,7 @@ interface AgentFrontmatter {
     whenToUse?: string;
     tools?: unknown;
     maxTurns?: unknown;
+    timeoutMinutes?: unknown;
     fewShots?: unknown;
     context?: unknown;
     [key: string]: unknown;
@@ -46,6 +47,12 @@ export function parseAgentMarkdown(
             : typeof frontmatter.maxTurns === "string"
               ? Number.parseInt(frontmatter.maxTurns, 10)
               : undefined;
+    const timeoutMinutes =
+        typeof frontmatter.timeoutMinutes === "number"
+            ? frontmatter.timeoutMinutes
+            : typeof frontmatter.timeoutMinutes === "string"
+              ? Number.parseFloat(frontmatter.timeoutMinutes)
+              : undefined;
     return {
         agentType: name,
         description: typeof frontmatter.description === "string" ? frontmatter.description : "",
@@ -53,6 +60,10 @@ export function parseAgentMarkdown(
         systemPrompt: body,
         tools,
         maxTurns: Number.isFinite(maxTurns) ? maxTurns : undefined,
+        timeoutMinutes:
+            timeoutMinutes !== undefined && Number.isFinite(timeoutMinutes) && timeoutMinutes > 0
+                ? timeoutMinutes
+                : undefined,
         fewShots: parseFewShots(frontmatter.fewShots),
         context: parseContext(frontmatter.context),
         source,

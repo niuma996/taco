@@ -17,6 +17,7 @@ import type { AttachedSession } from "../harness/attachedSession.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
 import {
     assistantText,
+    neutralizeControlTags,
     type SubagentResumability,
     subagentStartedResult,
     subagentTurnResult,
@@ -127,7 +128,11 @@ export async function runAttachedSubagent(
     } catch (e) {
         // hitCap before signal.aborted: keep partial answer instead of discarding it.
         if (hitCap) {
-            const { text } = await readLastAssistantText(subSessionId);
+            const { text: rawText } = await readLastAssistantText(subSessionId);
+            // The child's own text reaches the parent verbatim from here — scrub
+            // any control-tag shape it might contain before it does (see
+            // subagentProgress.ts's neutralizeControlTags for why).
+            const { text } = neutralizeControlTags(rawText);
             return {
                 subSessionId,
                 resultText: partialResult(text, cap ?? turnsUsed),
@@ -149,7 +154,7 @@ export async function runAttachedSubagent(
 
     // Extract last assistant text. An empty reply is a failure, not a
     // success whose text happens to be the literal string below.
-    const { text, isEmpty } = await readLastAssistantText(subSessionId);
+    const { text: rawText, isEmpty } = await readLastAssistantText(subSessionId);
     if (isEmpty) {
         return {
             subSessionId,
@@ -157,6 +162,9 @@ export async function runAttachedSubagent(
             isError: true,
         };
     }
+    // Scrub before this reaches the parent — same reasoning as the
+    // partial-cap branch above.
+    const { text } = neutralizeControlTags(rawText);
     return { subSessionId, resultText: text, isError: false };
 }
 

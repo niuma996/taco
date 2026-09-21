@@ -1193,8 +1193,14 @@ export class WorkspaceRuntime extends EventEmitter {
         agentType: string;
         prompt: string;
         context?: SubagentContextMode;
+        background?: boolean;
         signal?: AbortSignal;
-    }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }> {
+    }): Promise<{
+        subSessionId?: SessionId;
+        resultText: string;
+        isError: boolean;
+        background?: boolean;
+    }> {
         return await this.agentSpawner.spawnSubagent(args);
     }
 

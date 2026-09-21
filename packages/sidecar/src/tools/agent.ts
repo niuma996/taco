@@ -1,9 +1,20 @@
 /**
  * agent tool — delegates a task to a subagent (independent session).
  * Thin shell: calls SubagentSpawnContext.spawn (injected per-session by
- * WorkspaceRuntime); returns the result text as `content` and
- * { subSessionId, agentType } as `details`. The tool's own `onUpdate` is
- * forwarded so the spawn can publish progress before it returns.
+ * WorkspaceRuntime).
+ *
+ * Two result shapes, discriminated by `details.status`:
+ *  - synchronous (default, `background` omitted or `false`): blocks until the
+ *    child finishes; `content` is the child's final answer, `details.status`
+ *    is `"completed"`.
+ *  - background (`background: true`): returns as soon as the child session
+ *    exists; `content` is a receipt, not an answer — the real result arrives
+ *    later as an injected message in this session (see `subagentDelivery.ts`
+ *    on the sidecar side). `details.status` is `"launched"`.
+ *
+ * The tool's own `onUpdate` is forwarded so the spawn can publish progress
+ * before it returns (synchronous path only — a launched background spawn has
+ * no more progress to report on this call).
  */
 
 import type { AgentToolDetails } from "@taco-ai/protocol";
@@ -95,6 +106,18 @@ export function createAgentTool(
                     'Context mode. Omit to use the agent type\'s configured default. "fork" additionally gives the subagent a transcript of this conversation up to now — use it when the task depends on what was already discussed or discovered.',
             }),
         ),
+        background: Type.Optional(
+            Type.Boolean({
+                description:
+                    "Run this subagent in the background instead of waiting for it. Default false " +
+                    "(wait for the result). Set true for long-running, independent work — you get back " +
+                    "a launch receipt immediately and can keep working; the subagent's actual result " +
+                    "arrives later as a message in this conversation. Do NOT call `agent` again for the " +
+                    "same task while it is running, and do not poll for it — you will be notified when " +
+                    "it finishes. Background subagents should not write to the same files as work you " +
+                    "or another subagent are doing concurrently: there is no locking, so the last write wins silently.",
+            }),
+        ),
     });
 
     type AgentToolInput = Static<typeof agentSchema>;
@@ -104,12 +127,12 @@ export function createAgentTool(
         label: "agent",
         // The trailing prose starts on its own line: hint bullets are newline-led,
         // so joining directly would run the last bullet into this sentence.
-        description: `Delegate a task to a subagent that runs in its own session with a constrained toolset. Available types: ${typeList}.${SUBAGENT_TYPE_HINTS}\nThe subagent returns a text result when done. Safe to issue multiple \`agent\` calls in the same turn — each runs in its own session and they execute concurrently.`,
+        description: `Delegate a task to a subagent that runs in its own session with a constrained toolset. Available types: ${typeList}.${SUBAGENT_TYPE_HINTS}\nThe subagent returns a text result when done. Safe to issue multiple \`agent\` calls in the same turn — each runs in its own session and they execute concurrently. Pass \`background: true\` to launch a long-running subagent without waiting — its result arrives later as a message in this conversation instead of in this tool's result.`,
         parameters: agentSchema,
         executionMode: "parallel",
         taco: {
             promptSummary:
-                "Delegate to a subagent in its own session. Returns the subagent's last assistant text only — intermediate tool calls do not bubble back. Safe to issue multiple `agent` calls in the same turn: each spawns an independent sub-session and they run concurrently. Pick the subagent type by capability, not by tool overlap.",
+                "Delegate to a subagent in its own session. Returns the subagent's last assistant text only — intermediate tool calls do not bubble back. Safe to issue multiple `agent` calls in the same turn: each spawns an independent sub-session and they run concurrently. Pick the subagent type by capability, not by tool overlap. `background: true` launches without waiting; the result arrives later as a message in this session, not in the tool result. Do not launch a background subagent whose task overlaps files another running background subagent is editing.",
             mutates: true,
         },
         async execute(
@@ -121,20 +144,40 @@ export function createAgentTool(
             piContext: Context,
         ): Promise<{ content: TextContent[]; details: AgentToolDetails }> {
             // pi 0.85 carries cancellation on the Context rather than a
-            // dedicated parameter.
+            // dedicated parameter. Only meaningful for the synchronous path —
+            // a background spawn gets its own timeout-driven AbortController
+            // instead (see agentSpawner.ts), since it must outlive this call.
             const signal = piContext.abortSignal;
-            const { subSessionId, resultText, isError } = await ctx.spawn({
+            const { subSessionId, resultText, isError, background } = await ctx.spawn({
                 parentToolCallId: toolCallId,
                 agentType: params.subagent_type,
                 prompt: params.prompt,
                 context: params.context,
+                background: params.background,
                 signal,
                 onUpdate,
             });
+            if (background) {
+                // subSessionId is always present here — a background spawn
+                // that failed before the child existed reports isError instead
+                // (unknown agentType, concurrency limit) and background=false.
+                const text = isError
+                    ? `failed to launch background subagent: ${resultText}`
+                    : `Subagent ${params.subagent_type} launched in background as session ${subSessionId}. ` +
+                      "Its result will arrive as a message in this conversation once it finishes — do NOT " +
+                      "spawn it again or poll for it. Continue with other work now.";
+                return {
+                    content: [{ type: "text", text }],
+                    details: subSessionId
+                        ? { status: "launched", subSessionId, agentType: params.subagent_type }
+                        : { status: "completed", agentType: params.subagent_type },
+                };
+            }
             const text = isError ? `subagent error: ${resultText}` : resultText;
             return {
                 content: [{ type: "text", text }],
                 details: {
+                    status: "completed",
                     agentType: params.subagent_type,
                     ...(subSessionId ? { subSessionId } : {}),
                 },

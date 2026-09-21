@@ -52,13 +52,18 @@ describe("agent tool", () => {
             agentType: "explorer",
             prompt: "locate the config loader",
             context: undefined,
+            background: undefined,
             signal: undefined,
             onUpdate: spyOnUpdate,
         });
         assert.equal(res.content[0]?.type, "text");
         const text1 = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.equal(text1, "done");
-        assert.deepEqual(res.details, { subSessionId: "sub-1", agentType: "explorer" });
+        assert.deepEqual(res.details, {
+            status: "completed",
+            subSessionId: "sub-1",
+            agentType: "explorer",
+        });
     });
 
     it("forwards an explicit context override to spawn", async () => {
@@ -90,9 +95,79 @@ describe("agent tool", () => {
             agentType: "reviewer",
             prompt: "review the change",
             context: "fork",
+            background: undefined,
             signal: undefined,
             onUpdate: spyOnUpdate,
         });
+    });
+
+    it("launches a background subagent and returns a receipt instead of its output", async () => {
+        let captured: unknown;
+        const ctx: SubagentSpawnContext = {
+            async spawn(args) {
+                captured = args;
+                return {
+                    subSessionId: asSessionId("sub-bg"),
+                    resultText: "",
+                    isError: false,
+                    background: true,
+                };
+            },
+            async continue() {
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
+            },
+        };
+        const tool = createAgentTool(ctx, [{ agentType: "explorer" }]);
+        const res = await invokeTool(
+            tool,
+            {
+                subagent_type: "explorer",
+                description: "long task",
+                prompt: "do something slow",
+                background: true,
+            },
+            { env: mockEnv },
+            { toolCallId: "tc-parent" },
+        );
+        assert.equal((captured as { background?: boolean }).background, true);
+        assert.deepEqual(res.details, {
+            status: "launched",
+            subSessionId: "sub-bg",
+            agentType: "explorer",
+        });
+        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+        assert.ok(text.includes("launched in background"));
+        assert.ok(!text.includes("done"), "receipt must not contain the child's eventual output");
+    });
+
+    it("reports a background launch failure without a session id", async () => {
+        const ctx: SubagentSpawnContext = {
+            async spawn() {
+                return {
+                    resultText: "concurrency limit reached",
+                    isError: true,
+                    background: true,
+                };
+            },
+            async continue() {
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
+            },
+        };
+        const tool = createAgentTool(ctx, [{ agentType: "explorer" }]);
+        const res = await invokeTool(
+            tool,
+            {
+                subagent_type: "explorer",
+                description: "long task",
+                prompt: "do something slow",
+                background: true,
+            },
+            { env: mockEnv },
+            { toolCallId: "tc-parent" },
+        );
+        assert.deepEqual(res.details, { status: "completed", agentType: "explorer" });
+        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+        assert.ok(text.startsWith("failed to launch background subagent:"));
     });
 
     it("lists available agent types in the description", () => {

@@ -22,6 +22,42 @@ import type { AgentMessage, AgentToolResult } from "../pi/types.ts";
 const LAST_TEXT_MAX = 400;
 
 /**
+ * Control-tag markers a subagent's own text must not be able to forge. Every
+ * subagent's final text reaches its parent verbatim — the synchronous path as
+ * this tool call's `content`, the background path as an injected message
+ * (`subagentDelivery.ts`) — and a parent session treats these tag shapes as
+ * carrying system authority (system reminders, its own delivery envelope).
+ * Neither path scans for prompt injection generally; this closes the one gap
+ * that lets a subagent's output impersonate the harness or forge a delivery
+ * envelope around itself.
+ */
+const CONTROL_TAG_MARKERS = ["system-reminder", "subagent_result", "subagent_notification"];
+
+/**
+ * Neutralize known control-tag shapes in subagent-produced text before it
+ * reaches the parent. Replaces the opening `<` of a matched tag with `<\`
+ * (still human-readable, no longer a real tag to a markdown/XML-ish reader),
+ * case-insensitively, and reports whether anything matched so the caller can
+ * annotate the text as having been scrubbed.
+ *
+ * Deliberately narrow: this is not a general prompt-injection scanner (the
+ * module doc for why one is out of scope). It only targets the specific tag
+ * names taco's own harness treats as authoritative.
+ */
+export function neutralizeControlTags(text: string): { text: string; neutralized: boolean } {
+    let neutralized = false;
+    let result = text;
+    for (const marker of CONTROL_TAG_MARKERS) {
+        const pattern = new RegExp(`<(/?${marker})`, "gi");
+        result = result.replace(pattern, (_match, tag: string) => {
+            neutralized = true;
+            return `<\\${tag}`;
+        });
+    }
+    return { text: result, neutralized };
+}
+
+/**
  * Text parts of one assistant message, joined.
  *
  * `turn_end` hands over the message that just completed, so progress needs no

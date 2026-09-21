@@ -21,6 +21,32 @@ describe("parseAgentMarkdown", () => {
         assert.deepEqual(def.tools, ["read", "grep"]);
         assert.equal(def.maxTurns, 30);
         assert.equal(def.systemPrompt, "You are an explorer.");
+        assert.equal(def.timeoutMinutes, undefined);
+    });
+
+    it("parses timeoutMinutes from frontmatter", () => {
+        const md = "---\nname: explorer\ntimeoutMinutes: 15\n---\nbody";
+        const def = parseAgentMarkdown(md, "/x/explorer.md", "builtin");
+        assert.ok(def);
+        assert.equal(def.timeoutMinutes, 15);
+    });
+
+    it("drops non-positive or non-numeric timeoutMinutes", () => {
+        assert.equal(
+            parseAgentMarkdown("---\nname: a\ntimeoutMinutes: 0\n---\nbody", "/x/a.md", "user")
+                ?.timeoutMinutes,
+            undefined,
+        );
+        assert.equal(
+            parseAgentMarkdown("---\nname: a\ntimeoutMinutes: -2\n---\nbody", "/x/a.md", "user")
+                ?.timeoutMinutes,
+            undefined,
+        );
+        assert.equal(
+            parseAgentMarkdown("---\nname: a\ntimeoutMinutes: nope\n---\nbody", "/x/a.md", "user")
+                ?.timeoutMinutes,
+            undefined,
+        );
     });
 
     it("returns null when name missing", () => {

@@ -54,6 +54,13 @@ export interface AgentDefinition {
     tools?: string[];
     maxTurns?: number;
     /**
+     * Wall-clock budget for a `background: true` spawn of this agent type, in
+     * minutes. Ignored for synchronous spawns — those are already bounded by
+     * the parent turn. Defaults to `DEFAULT_BACKGROUND_TIMEOUT_MS` (see
+     * `agentSpawner.ts`) when omitted.
+     */
+    timeoutMinutes?: number;
+    /**
      * Context mode for this agent type. Omitted in frontmatter = "independent".
      * The `agent` tool's `context` param overrides this per-spawn.
      */
@@ -76,10 +83,27 @@ export interface SubagentSpawnContext {
         prompt: string;
         /** Overrides the agent definition's `context` default when present. */
         context?: SubagentContextMode;
+        /**
+         * Run the child without blocking this call. Defaults to `false`
+         * (today's behavior: await the child to completion). When `true`,
+         * `spawn` resolves as soon as the child session exists — `resultText`
+         * is empty and the real result is delivered later as an injected
+         * message in the parent session (see `subagentDelivery.ts`). The
+         * `signal` passed in this case is NOT used to cancel the child; the
+         * child gets its own timeout-driven `AbortController` instead, since
+         * a background run must outlive the parent turn that launched it.
+         */
+        background?: boolean;
         signal?: AbortSignal;
         /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
         onUpdate?: SubagentProgressSink;
-    }): Promise<{ subSessionId?: SessionId; resultText: string; isError: boolean }>;
+    }): Promise<{
+        subSessionId?: SessionId;
+        resultText: string;
+        isError: boolean;
+        /** Echoes the effective `background` mode so the tool layer knows which `AgentToolDetails` variant to report. */
+        background?: boolean;
+    }>;
     /**
      * Resume an existing subagent by `subSessionId`. The caller MUST be the
      * same parent session that originally spawned it (verified via JSONL

@@ -94,6 +94,8 @@ For complex tasks spanning multiple independent areas (different packages, layer
 - Verify in parallel: check each result independently.
 
 Do not delegate work that is cheaper inline — single-file edits, trivial refactors, or anything that depends on context a sub-agent cannot see (the user's prior preferences, the current plan, unfinished parent work). Sub-agents have no memory and cannot see the parent conversation, so such work only adds latency.
+
+For a long-running task whose result you don't need immediately, pass \`background: true\` to run the sub-agent asynchronously: the tool call returns right away with a receipt instead of the sub-agent's output, and the result arrives later as a message once the sub-agent finishes. Do not spawn a duplicate sub-agent or poll for the result in the meantime — continue other work, or stop and wait for the result to arrive. Never run a background sub-agent concurrently with other work that writes the same files it does.
 `;
 
 /** `{{SESSION_ROLE_BODY}}` for the primary session. */
