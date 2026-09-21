@@ -208,7 +208,11 @@ export interface SubagentSettledPayload {
     parentToolCallId: string;
     subSessionId: SessionId;
     agentType: string;
-    outcome: "completed" | "error";
+    /**
+     * `aborted` — the run was stopped deliberately (user stop via the panel /
+     * `agentAbort`, or its own wall-clock timeout), which is not a failure.
+     */
+    outcome: "completed" | "error" | "aborted";
 }
 
 /**

@@ -240,6 +240,8 @@ export type {
     SetModelParams,
     SteerParams,
     SteerResult,
+    SubagentAbortParams,
+    SubagentAbortResult,
 } from "./session.js";
 export { SESSION_LIST_DEFAULT_LIMIT, SESSION_LIST_MAX_LIMIT } from "./session.js";
 // Tools / skills / agents / askUser / subagent RPC types.

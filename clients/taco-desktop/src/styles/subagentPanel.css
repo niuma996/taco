@@ -52,6 +52,10 @@
 }
 
 /* ── List row ── */
+.subagent-row-item {
+    position: relative;
+}
+
 .subagent-row {
     display: flex;
     align-items: center;
@@ -99,6 +103,42 @@
 
 .subagent-row-icon--detached {
     color: var(--fg-dim);
+}
+
+.subagent-row-icon--stopped {
+    color: var(--fg-dim);
+}
+
+/* Room for the stop button so it never covers the description text. */
+.subagent-row--stoppable {
+    padding-right: 28px;
+}
+
+/* Stop one subagent (not the session). Sits over the row's right gutter as a
+   sibling — a button cannot nest inside the row's own <button>. */
+.subagent-row-stop {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    padding: 3px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+}
+
+.subagent-row-stop:hover {
+    color: var(--danger);
+    background: var(--accent-bg-hover);
+}
+
+.subagent-row-stop:focus-visible {
+    outline: 1px solid var(--accent-border);
+    outline-offset: -1px;
 }
 
 .subagent-row-type {

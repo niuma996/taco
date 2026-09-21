@@ -24,6 +24,7 @@ import { registerSessionRuntimeHandlers } from "./handlers/sessionRuntime.ts";
 import { registerSessionTurnHandlers } from "./handlers/sessionTurn.ts";
 import { registerSettingsHandlers } from "./handlers/settings.ts";
 import { registerSkillsHandlers } from "./handlers/skills.ts";
+import { registerSubagentHandlers } from "./handlers/subagent.ts";
 import { registerToolsHandlers } from "./handlers/tools.ts";
 import { registerWorkspaceHandlers } from "./handlers/workspace.ts";
 
@@ -41,6 +42,7 @@ export function registerBuiltinMethods(): void {
     registerSessionReadHandlers();
     registerSessionTurnHandlers();
     registerSessionRuntimeHandlers();
+    registerSubagentHandlers();
     registerCatalogHandlers();
     registerSettingsHandlers();
     registerExtensionsHandlers();

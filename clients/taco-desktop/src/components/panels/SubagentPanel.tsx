@@ -31,25 +31,35 @@ function trimPrompt(s: string): string {
 
 export function SubagentPanel({
     messages,
+    backgroundSubagents,
     open,
     selectedSubSessionId,
     onSelect,
     onClose,
+    onStopSubagent,
     resizeHandleProps,
     resizeLabel,
 }: {
     messages: readonly UiMessage[];
+    /** Live background-spawn record; without it a background child reads as
+     *  finished from launch (its tool call says `ok` from the receipt). */
+    backgroundSubagents?: Parameters<typeof deriveSubagents>[1];
     open: boolean;
     selectedSubSessionId: string | null;
     onSelect: (subSessionId: string) => void;
     onClose: () => void;
+    /** Stop one running subagent (subagent.abort); rows hide the button without it. */
+    onStopSubagent?: (subSessionId: string) => void;
     resizeHandleProps?: DragHandleProps;
     resizeLabel?: string;
 }): ReactElement | null {
     const { t } = useT();
     const [query, setQuery] = useState("");
 
-    const entries = useMemo(() => deriveSubagents(messages), [messages]);
+    const entries = useMemo(
+        () => deriveSubagents(messages, backgroundSubagents),
+        [messages, backgroundSubagents],
+    );
     const shown = useMemo(() => filterSubagents(entries, query), [entries, query]);
     const selected: SubagentEntry | null =
         entries.find((e) => e.subSessionId === selectedSubSessionId) ?? null;
@@ -85,6 +95,7 @@ export function SubagentPanel({
                             entry={entry}
                             selected={entry.subSessionId === selectedSubSessionId}
                             onSelect={onSelect}
+                            onStop={onStopSubagent}
                         />
                     ))}
                 </ul>

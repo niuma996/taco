@@ -33,7 +33,7 @@ export interface PendingSubagentResult {
     readonly subSessionId: SessionId;
     readonly parentToolCallId: string;
     readonly agentType: string;
-    readonly outcome: "completed" | "error";
+    readonly outcome: "completed" | "error" | "aborted";
     /** Epoch millis the child settled — lets a flush report how stale the notice is. */
     readonly settledAt: number;
     /** Where the result text was written, absent if that write failed. */

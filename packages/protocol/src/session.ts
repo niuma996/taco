@@ -309,6 +309,24 @@ export interface AbortResult {
     discardedFollowUp?: string[];
 }
 
+/** `subagent.abort` params — stop one running subagent without touching its parent's turn. */
+export interface SubagentAbortParams {
+    workspace: WorkspaceId;
+    /** The child session to stop (the panel entry / receipt's subSessionId). */
+    subSessionId: SessionId;
+}
+
+/** Explicit outcome for an idempotent subagent-stop request. */
+export interface SubagentAbortResult {
+    /**
+     * `not_running` means the child already settled (or never ran in this
+     * process) — there was nothing to stop. The stop itself is asynchronous:
+     * the sync caller's tool result or the background notification carries
+     * the outcome through the normal settle path.
+     */
+    status: "aborted" | "not_running";
+}
+
 export interface DeleteSessionParams {
     workspace: WorkspaceId;
     sessionId: SessionId;

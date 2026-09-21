@@ -33,6 +33,7 @@ import { createSkillTool } from "../../skills/skillTool.ts";
 import type { TacoSkill } from "../../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../../tags/index.ts";
 import { type AgentTypeDescriptor, createAgentTool } from "../../tools/agent.ts";
+import { createAgentAbortTool } from "../../tools/agentAbort.ts";
 import { createAgentContinueTool } from "../../tools/agentContinue.ts";
 import type { TacoToolContext } from "../../tools/context.ts";
 import type { TacoTool } from "../../tools/index.ts";
@@ -112,6 +113,8 @@ export interface SessionRegistryOptions {
         parentToolCallId: string;
         agentType: string;
         prompt: string;
+        /** Task label echoed on the background completion notice. */
+        description?: string;
         context?: SubagentContextMode;
         background?: boolean;
         signal?: AbortSignal;
@@ -141,6 +144,14 @@ export interface SessionRegistryOptions {
     readonly spawnSkillSubagent: (
         opts: SpawnSkillSubagentOptions,
     ) => Promise<{ subSessionId?: string; resultText: string; isError: boolean }>;
+    /**
+     * Stop a running subagent by child session id. Same deferred AgentSpawner
+     * pattern as the spawn callbacks; `forParentSessionId` restricts the
+     * `agentAbort` tool to stopping the calling session's own children.
+     * Optional so test harnesses that never abort can omit it (the tool then
+     * reports "not running").
+     */
+    readonly abortSubagentRun?: (subSessionId: string, forParentSessionId?: SessionId) => boolean;
     /**
      * Available agent types — which agentTypes the agent tool can invoke, plus
      * the frontmatter the model needs to choose between them. Descriptors, not
@@ -288,6 +299,10 @@ export class SessionRegistry extends EventEmitter {
 
     private readonly spawnSubagent: SessionRegistryOptions["spawnSubagent"];
     private readonly resumeSubagent: SessionRegistryOptions["resumeSubagent"];
+    private readonly abortSubagentRun: (
+        subSessionId: string,
+        forParentSessionId?: SessionId,
+    ) => boolean;
     private readonly spawnSkillSubagent: SessionRegistryOptions["spawnSkillSubagent"];
     private readonly availableAgentTypes: readonly AgentTypeDescriptor[];
     /**
@@ -335,6 +350,7 @@ export class SessionRegistry extends EventEmitter {
         this.getToolContext = options.getToolContext;
         this.spawnSubagent = options.spawnSubagent;
         this.resumeSubagent = options.resumeSubagent;
+        this.abortSubagentRun = options.abortSubagentRun ?? (() => false);
         this.spawnSkillSubagent = options.spawnSkillSubagent;
         this.availableAgentTypes = options.availableAgentTypes;
         this.skills = options.skills;
@@ -350,9 +366,11 @@ export class SessionRegistry extends EventEmitter {
         const listingCtx: SubagentSpawnContext = {
             spawn: () => Promise.reject(new Error("tools.list stub: not executable")),
             continue: () => Promise.reject(new Error("tools.list stub: not executable")),
+            abortSubagent: () => ({ stopped: false }),
         };
         listing.push(createAgentTool(listingCtx, [...this.availableAgentTypes]));
         listing.push(createAgentContinueTool(listingCtx));
+        listing.push(createAgentAbortTool(listingCtx));
         listing.push(
             createSkillTool(() => this.skills, {
                 parentSessionId: "",
@@ -731,6 +749,10 @@ export class SessionRegistry extends EventEmitter {
                     parentToolCallId: args.parentToolCallId,
                     agentType: args.agentType,
                     prompt: args.prompt,
+                    // Dropping this silently stripped the background completion
+                    // notice of its task label — forward everything the context
+                    // type declares.
+                    description: args.description,
                     context: args.context,
                     background: args.background,
                     signal: args.signal,
@@ -745,6 +767,12 @@ export class SessionRegistry extends EventEmitter {
                     signal: args.signal,
                     onUpdate: args.onUpdate,
                 }),
+            // Restricted to this session's own children: the model knows only
+            // its own subagent ids, but a guessed id must not stop another
+            // session's run.
+            abortSubagent: (args) => ({
+                stopped: this.abortSubagentRun(args.subSessionId, sessionId),
+            }),
         };
         // Mutable cell captured by SkillTool's getReinjector thunk — populated
         // after attachChild wires harness hooks and exposes skillReinjector.
@@ -755,6 +783,7 @@ export class SessionRegistry extends EventEmitter {
             ...baseTools,
             createAgentTool(spawnContext, [...this.availableAgentTypes]),
             createAgentContinueTool(spawnContext),
+            createAgentAbortTool(spawnContext),
             createSkillTool(() => this.skills, {
                 parentSessionId: sessionId,
                 getReinjector: () => reinjectorCell.current,

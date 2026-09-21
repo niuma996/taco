@@ -6,7 +6,7 @@
  * lead nowhere.
  */
 
-import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Square, XCircle } from "lucide-react";
 import type { ReactElement } from "react";
 import { useT } from "../../i18n/useI18n";
 import type { SubagentEntry, SubagentStatus } from "../../lib/chat/subagentList";
@@ -49,6 +49,16 @@ function StatusIcon({ status }: { status: SubagentStatus }): ReactElement {
                     aria-hidden="true"
                 />
             );
+        // A deliberate stop renders neutral like `detached`, not red like
+        // `error`: the user asked for this.
+        case "aborted":
+            return (
+                <Square
+                    size={13}
+                    className="subagent-row-icon subagent-row-icon--stopped"
+                    aria-hidden="true"
+                />
+            );
     }
 }
 
@@ -56,23 +66,28 @@ export function SubagentRow({
     entry,
     selected,
     onSelect,
+    onStop,
 }: {
     entry: SubagentEntry;
     selected: boolean;
     onSelect: (subSessionId: string) => void;
+    /** Stop this subagent without aborting the whole session (subagent.abort). */
+    onStop?: (subSessionId: string) => void;
 }): ReactElement {
     const { t } = useT();
     const detached = entry.subSessionId === null;
+    const stoppable = (entry.status === "running" || entry.status === "background") && !detached;
     const className = [
         "subagent-row",
         selected ? "selected" : "",
         detached ? "subagent-row--detached" : "",
+        stoppable ? "subagent-row--stoppable" : "",
     ]
         .filter(Boolean)
         .join(" ");
 
     return (
-        <li>
+        <li className="subagent-row-item">
             <button
                 type="button"
                 className={className}
@@ -89,6 +104,17 @@ export function SubagentRow({
                     <span className="subagent-row-desc">{entry.description}</span>
                 )}
             </button>
+            {stoppable && entry.subSessionId !== null && onStop !== undefined && (
+                <button
+                    type="button"
+                    className="subagent-row-stop"
+                    title={t("subagents.stop")}
+                    aria-label={t("subagents.stop")}
+                    onClick={() => onStop(entry.subSessionId as string)}
+                >
+                    <Square size={11} aria-hidden="true" />
+                </button>
+            )}
         </li>
     );
 }

@@ -22,6 +22,7 @@ describe("agent tool", () => {
             resultText: "",
             isError: true,
         }),
+        abortSubagent: () => ({ stopped: false }),
     });
 
     it("forwards params to spawn and wraps result into content+details", async () => {
@@ -35,6 +36,7 @@ describe("agent tool", () => {
             async continue() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
+            abortSubagent: () => ({ stopped: false }),
         };
         const tool = createAgentTool(ctx, [{ agentType: "explorer" }, { agentType: "coder" }]);
         const res = await invokeTool(
@@ -78,6 +80,7 @@ describe("agent tool", () => {
             async continue() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
+            abortSubagent: () => ({ stopped: false }),
         };
         const tool = createAgentTool(ctx, [{ agentType: "reviewer" }]);
         await invokeTool(
@@ -118,6 +121,7 @@ describe("agent tool", () => {
             async continue() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
+            abortSubagent: () => ({ stopped: false }),
         };
         const tool = createAgentTool(ctx, [{ agentType: "explorer" }]);
         const res = await invokeTool(
@@ -154,6 +158,7 @@ describe("agent tool", () => {
             async continue() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
+            abortSubagent: () => ({ stopped: false }),
         };
         const tool = createAgentTool(ctx, [{ agentType: "explorer" }]);
         const res = await invokeTool(
@@ -185,6 +190,7 @@ describe("agent tool", () => {
                     resultText: "",
                     isError: true,
                 }),
+                abortSubagent: () => ({ stopped: false }),
             },
             [{ agentType: "explorer" }, { agentType: "coder" }],
         );
@@ -283,6 +289,7 @@ describe("agent tool", () => {
                     resultText: "",
                     isError: true,
                 }),
+                abortSubagent: () => ({ stopped: false }),
             },
             [{ agentType: "explorer" }],
         );
@@ -317,6 +324,7 @@ describe("agent tool", () => {
                     resultText: "",
                     isError: true,
                 }),
+                abortSubagent: () => ({ stopped: false }),
             },
             [{ agentType: "explorer" }],
         );
@@ -348,6 +356,7 @@ describe("agent tool", () => {
                     resultText: "",
                     isError: true,
                 }),
+                abortSubagent: () => ({ stopped: false }),
             },
             [{ agentType: "explorer" }],
         );

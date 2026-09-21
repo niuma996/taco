@@ -132,4 +132,12 @@ export interface SubagentSpawnContext {
         /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
         onUpdate?: SubagentProgressSink;
     }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
+    /**
+     * Stop a running subagent by `subSessionId` without aborting the parent
+     * turn. Implementations restrict this to the calling session's own
+     * children. `stopped: false` means it already settled (or the id is not a
+     * running child of this session). The stop is asynchronous — the outcome
+     * reaches the subagent's own call through the normal settle path.
+     */
+    abortSubagent(args: { subSessionId: SessionId }): { stopped: boolean };
 }

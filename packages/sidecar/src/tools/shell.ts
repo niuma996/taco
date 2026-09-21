@@ -97,6 +97,12 @@ export async function runShell(
     const onAbort = () => {
         interrupted = true;
         child.kill("SIGTERM");
+        // Same backstop as the timeout path: a child that ignores SIGTERM
+        // must not hold the tool — and the parent's abort, which awaits it —
+        // open forever.
+        sigkillTimer = setTimeout(() => {
+            if (!child.killed) child.kill("SIGKILL");
+        }, 5000);
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
 

@@ -145,6 +145,12 @@ export interface SubagentSessionArgs {
     model?: Model<Api>;
     signal?: AbortSignal;
     /**
+     * Controller behind `signal`, registered under the child session id while
+     * the run executes so `abortSubagentRun` can stop this child alone.
+     * Callers that only pass `signal` get no external-stop handle.
+     */
+    abortController?: AbortController;
+    /**
      * Profile body from the agent definition's markdown, appended to the
      * child's system prompt so the role, stop condition and reporting
      * contract actually reach the model. Skill subagents pass nothing —
@@ -241,6 +247,7 @@ export class AgentSpawner extends EventEmitter {
         this.settledEmitted = new Set();
         this.flushingParents = new Set();
         this.backgroundRuns = new Set();
+        this.subagentControllers = new Map();
         // Attach is the moment a previously unreachable parent becomes
         // reachable, which is exactly what a stranded notice was waiting for.
         // Fire-and-forget: a flush must never delay or fail an attach.
@@ -324,6 +331,19 @@ export class AgentSpawner extends EventEmitter {
      */
     private readonly backgroundRuns: Set<Promise<void>>;
 
+    /**
+     * subSessionId → controller that stops that child's run, for every run
+     * currently executing (sync, resume, or background). `abortSubagentRun`
+     * fires it; the runner's signal listener does the rest. Entries live only
+     * while the child harness runs — outside that window there is nothing to
+     * stop and `abortSubagentRun` says so. The owning parent is stored so a
+     * caller can be restricted to stopping its own children.
+     */
+    private readonly subagentControllers: Map<
+        string,
+        { controller: AbortController; parentSessionId: SessionId }
+    >;
+
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
         return this.agents.find((a) => a.agentType === type);
@@ -332,6 +352,24 @@ export class AgentSpawner extends EventEmitter {
     /** parentToolCallIds with a live subagent under `parentSessionId`. */
     inFlightAgentToolCallIds(parentSessionId: SessionId): string[] {
         return [...(this.inFlight.get(parentSessionId) ?? [])];
+    }
+
+    /**
+     * Stop one running subagent without touching its parent's turn.
+     *
+     * False means "no such run right now" — it already settled, or never ran
+     * in this process. The stop itself is asynchronous: firing the controller
+     * aborts the child harness, and the sync caller (or the background
+     * notification) learns the outcome through the normal settle path.
+     */
+    abortSubagentRun(subSessionId: string, forParentSessionId?: SessionId): boolean {
+        const entry = this.subagentControllers.get(subSessionId);
+        if (!entry || entry.controller.signal.aborted) return false;
+        if (forParentSessionId !== undefined && entry.parentSessionId !== forParentSessionId) {
+            return false;
+        }
+        entry.controller.abort();
+        return true;
     }
 
     /** Child-attach inputs this spawner owns — one definition so spawn and resume agree. */
@@ -489,17 +527,30 @@ export class AgentSpawner extends EventEmitter {
             };
         }
 
-        return runAttachedSubagent({
-            subSessionId: asSessionId(childSessionId),
-            attached,
-            prompt: args.prompt,
-            agentType: args.agentType,
-            maxTurns: args.maxTurns,
-            signal: args.signal,
-            onUpdate: args.onUpdate,
-            resumability: args.resumability,
-            readLastAssistantText: (id) => this.extractLastAssistantText(id),
-        });
+        // Registered only while the child harness runs: before this there is
+        // nothing to stop, after it the run has settled — `abortSubagentRun`
+        // reporting "not running" outside the window is the truth.
+        if (args.abortController) {
+            this.subagentControllers.set(childSessionId, {
+                controller: args.abortController,
+                parentSessionId: args.parentSessionId,
+            });
+        }
+        try {
+            return await runAttachedSubagent({
+                subSessionId: asSessionId(childSessionId),
+                attached,
+                prompt: args.prompt,
+                agentType: args.agentType,
+                maxTurns: args.maxTurns,
+                signal: args.signal,
+                onUpdate: args.onUpdate,
+                resumability: args.resumability,
+                readLastAssistantText: (id) => this.extractLastAssistantText(id),
+            });
+        } finally {
+            if (args.abortController) this.subagentControllers.delete(childSessionId);
+        }
     }
 
     /**
@@ -646,9 +697,23 @@ export class AgentSpawner extends EventEmitter {
             forkedContext,
         };
         if (!args.background) {
-            // Synchronous path, unchanged: the caller's own signal bounds this
-            // run, and we await it to completion.
-            return this.executeSubagentSession({ ...sessionArgs, signal: args.signal });
+            // Synchronous path: still bounded by the caller's signal, but
+            // linked into a per-child controller so `abortSubagentRun` can
+            // stop this child alone — aborting the parent's signal directly
+            // would tear down the whole parent turn.
+            const controller = new AbortController();
+            if (args.signal?.aborted) controller.abort();
+            const link = (): void => controller.abort();
+            args.signal?.addEventListener("abort", link, { once: true });
+            try {
+                return await this.executeSubagentSession({
+                    ...sessionArgs,
+                    signal: controller.signal,
+                    abortController: controller,
+                });
+            } finally {
+                args.signal?.removeEventListener("abort", link);
+            }
         }
         return this.spawnBackgroundSubagent(sessionArgs, def, args.description);
     }
@@ -698,6 +763,10 @@ export class AgentSpawner extends EventEmitter {
         // answer. Deriving it here also keeps the path a single source of truth
         // shared by the receipt and the write.
         const resultPath = subagentResultPath(parentSessionId, childSessionId, this.sessionsRoot);
+        // Registered at launch (not when the run starts) so a stop request
+        // that arrives during setup still reaches the run: the runner's
+        // pre-aborted check turns it into an immediate interruption.
+        this.subagentControllers.set(childSessionId, { controller, parentSessionId });
 
         // executeSubagentSession never throws (errors are `{ isError: true }`),
         // so `.then` always fires with a result. `.catch` covers
@@ -708,8 +777,17 @@ export class AgentSpawner extends EventEmitter {
             ...sessionArgs,
             childSessionId,
             signal: controller.signal,
+            abortController: controller,
         })
             .then(async (result) => {
+                // The timeout and `abortSubagentRun` fire the same controller,
+                // so an aborted run reads as "aborted" here regardless of
+                // which one stopped it — a deliberate stop, not a failure.
+                const outcome = controller.signal.aborted
+                    ? ("aborted" as const)
+                    : result.isError
+                      ? ("error" as const)
+                      : ("completed" as const);
                 // Emitted before delivery, not after: delivery starts a fresh
                 // parent run, and a consumer that keyed "this background child
                 // is still running" off the launch receipt must be able to
@@ -718,11 +796,12 @@ export class AgentSpawner extends EventEmitter {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
-                    isError: result.isError,
+                    outcome,
                 });
                 const path = await this.writeBackgroundResult(resultPath, result.resultText);
                 const notification = this.formatBackgroundNotification(sessionArgs.agentType, {
                     ...result,
+                    outcome,
                     path,
                     description,
                 });
@@ -734,7 +813,7 @@ export class AgentSpawner extends EventEmitter {
                     parentToolCallId,
                     subSessionId: childSessionId,
                     agentType: sessionArgs.agentType,
-                    outcome: result.isError ? "error" : "completed",
+                    outcome,
                     resultPath: path,
                     description,
                 });
@@ -756,12 +835,12 @@ export class AgentSpawner extends EventEmitter {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
-                    isError: true,
+                    outcome: "error",
                 });
                 const fallback = this.formatBackgroundNotification(sessionArgs.agentType, {
                     subSessionId: childSessionId,
                     resultText: e instanceof Error ? e.message : String(e),
-                    isError: true,
+                    outcome: "error",
                     description,
                 });
                 try {
@@ -778,6 +857,7 @@ export class AgentSpawner extends EventEmitter {
                 clearTimeout(timer);
                 this.backgroundInFlight.delete(parentToolCallId);
                 this.backgroundRuns.delete(run);
+                this.subagentControllers.delete(childSessionId);
             });
         // Deliberately not awaited or returned — see method doc. A rejection
         // from `run` is already handled by the `.catch` above, so there is no
@@ -845,7 +925,7 @@ export class AgentSpawner extends EventEmitter {
                 const notification = this.formatBackgroundNotification(entry.agentType, {
                     subSessionId: entry.subSessionId,
                     resultText: "",
-                    isError: entry.outcome === "error",
+                    outcome: entry.outcome,
                     path: entry.resultPath,
                     description: entry.description,
                     late: true,
@@ -891,7 +971,7 @@ export class AgentSpawner extends EventEmitter {
         parentToolCallId: string;
         subSessionId: SessionId;
         agentType: string;
-        outcome: "completed" | "error";
+        outcome: "completed" | "error" | "aborted";
         resultPath?: string;
         description?: string;
     }): Promise<void> {
@@ -939,7 +1019,7 @@ export class AgentSpawner extends EventEmitter {
             parentSessionId: SessionId;
             parentToolCallId: string;
             subSessionId: SessionId;
-            isError: boolean;
+            outcome: "completed" | "error" | "aborted";
         },
     ): void {
         if (this.settledEmitted.has(args.parentToolCallId)) return;
@@ -949,7 +1029,7 @@ export class AgentSpawner extends EventEmitter {
             parentToolCallId: args.parentToolCallId,
             subSessionId: args.subSessionId,
             agentType,
-            outcome: args.isError ? "error" : "completed",
+            outcome: args.outcome,
         });
     }
 
@@ -995,7 +1075,7 @@ export class AgentSpawner extends EventEmitter {
         result: {
             subSessionId: SessionId;
             resultText: string;
-            isError: boolean;
+            outcome: "completed" | "error" | "aborted";
             path?: string;
             /**
              * The task label from the original `agent` call. Repeated here
@@ -1013,13 +1093,16 @@ export class AgentSpawner extends EventEmitter {
             late?: boolean;
         },
     ): string {
-        const status = result.isError ? "error" : "completed";
+        const status = result.outcome;
         const located = result.path
             ? `Its full output is saved at: ${result.path}\nThat text is NOT included here — the file is the only copy.`
             : "Its output could not be saved to disk, so the detail is unavailable. Say so rather than guessing at it.";
-        const guidance = result.isError
-            ? "Tell the user in one sentence that this background task failed, then propose a next step. Do not present its output as a result."
-            : "Read that file with the read tool now, before you reply. Then tell the user, in your own words, that this background task came back and what it found — do not just hand them the path, and do not claim it is still running. If what you read changes what you were doing, say so.";
+        const guidance =
+            result.outcome === "aborted"
+                ? "This task was stopped deliberately — by the user or by its own time limit. Tell the user in one sentence that it was stopped, and do not restart or respawn it unless they ask."
+                : result.outcome === "error"
+                  ? "Tell the user in one sentence that this background task failed, then propose a next step. Do not present its output as a result."
+                  : "Read that file with the read tool now, before you reply. Then tell the user, in your own words, that this background task came back and what it found — do not just hand them the path, and do not claim it is still running. If what you read changes what you were doing, say so.";
         const lateness = result.late
             ? " This notice is late — it could not be delivered when the subagent actually" +
               " finished, so if you previously told the user it was still running, correct that."
@@ -1240,18 +1323,34 @@ export class AgentSpawner extends EventEmitter {
             };
         }
 
-        return runAttachedSubagent({
-            subSessionId: args.subSessionId,
-            attached,
-            prompt: args.prompt,
-            agentType,
-            maxTurns,
-            signal: args.signal,
-            onUpdate: args.onUpdate,
-            // Reached here only after the profile resolved, so it can be resumed again.
-            resumability: "resumable",
-            readLastAssistantText: (id) => this.extractLastAssistantText(id),
+        // Same per-child controller as the fresh-spawn sync path: the caller's
+        // signal bounds the run, and the registry entry lets `abortSubagentRun`
+        // stop this child without aborting the parent's turn.
+        const controller = new AbortController();
+        if (args.signal?.aborted) controller.abort();
+        const link = (): void => controller.abort();
+        args.signal?.addEventListener("abort", link, { once: true });
+        this.subagentControllers.set(args.subSessionId, {
+            controller,
+            parentSessionId: args.parentSessionId,
         });
+        try {
+            return await runAttachedSubagent({
+                subSessionId: args.subSessionId,
+                attached,
+                prompt: args.prompt,
+                agentType,
+                maxTurns,
+                signal: controller.signal,
+                onUpdate: args.onUpdate,
+                // Reached here only after the profile resolved, so it can be resumed again.
+                resumability: "resumable",
+                readLastAssistantText: (id) => this.extractLastAssistantText(id),
+            });
+        } finally {
+            args.signal?.removeEventListener("abort", link);
+            this.subagentControllers.delete(args.subSessionId);
+        }
     }
 
     /**

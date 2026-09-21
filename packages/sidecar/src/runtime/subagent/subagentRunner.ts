@@ -123,6 +123,16 @@ export async function runAttachedSubagent(
     };
     attached.on("event", onTurnEnd);
 
+    // Propagate cancellation into the child harness. `args.signal?.aborted`
+    // below only covers a signal that fired before the prompt; without this
+    // listener nothing tells the child to stop, and pi's abort awaits this
+    // tool's execute() — so a parent abort (or a background run's own
+    // timeout controller) could not actually stop a running subagent.
+    const onAbortSignal = (): void => {
+        void attached.abort();
+    };
+    args.signal?.addEventListener("abort", onAbortSignal, { once: true });
+
     try {
         await attached.prompt(args.prompt);
     } catch (e) {
@@ -140,7 +150,14 @@ export async function runAttachedSubagent(
             };
         }
         if (args.signal?.aborted) {
-            return { subSessionId, resultText: "(aborted)", isError: true };
+            return {
+                subSessionId,
+                resultText:
+                    "Subagent was stopped before it finished: the user aborted the parent " +
+                    "session (or the run's own timeout fired). This is a deliberate " +
+                    "interruption, not a failure — do not retry or respawn unless the user asks.",
+                isError: true,
+            };
         }
         return {
             subSessionId,
@@ -150,6 +167,7 @@ export async function runAttachedSubagent(
     } finally {
         acceptingUpdates = false;
         attached.off("event", onTurnEnd);
+        args.signal?.removeEventListener("abort", onAbortSignal);
     }
 
     // Extract last assistant text. An empty reply is a failure, not a

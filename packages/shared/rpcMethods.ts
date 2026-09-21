@@ -34,6 +34,8 @@ export const RPC = {
     /** Remove one not-yet-consumed queue entry (steer/followUp/nextRun). */
     sessionCancelQueued: "session.cancelQueued",
     sessionAbort: "session.abort",
+    /** Stop one running subagent (by child session id) without aborting the parent's turn. */
+    subagentAbort: "subagent.abort",
     commandPermissionResolve: "commandPermission.resolve",
     sessionSetModel: "session.setModel",
     sessionListModels: "session.listModels",

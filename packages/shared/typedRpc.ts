@@ -97,6 +97,8 @@ import type {
     SkillsListResult,
     SteerParams,
     SteerResult,
+    SubagentAbortParams,
+    SubagentAbortResult,
     SubmitAnswersParams,
     SupportedLocale,
     TaskItem,
@@ -260,6 +262,11 @@ export interface TypedRpc {
         toolName?: string,
     ): Promise<null>;
     sessionAbort(workspace: WorkspaceId, sessionId: SessionId): Promise<AbortResult>;
+    /**
+     * Stop one running subagent (by child session id) without aborting the
+     * parent's turn. `not_running` is a normal outcome, not an error.
+     */
+    subagentAbort(workspace: WorkspaceId, subSessionId: SessionId): Promise<SubagentAbortResult>;
     sessionSetModel(
         workspace: WorkspaceId,
         sessionId: SessionId,
@@ -581,6 +588,13 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             }),
 
         sessionAbort: wsSession<AbortResult>(call, RPC.sessionAbort),
+
+        // subagentAbort: workspace + subSessionId (child session, not the parent's)
+        subagentAbort: (workspace, subSessionId) =>
+            call<SubagentAbortParams, SubagentAbortResult>(RPC.subagentAbort, workspace, {
+                workspace,
+                subSessionId,
+            }),
 
         // sessionSetModel: workspace + sessionId + provider + modelId
         sessionSetModel: (workspace, sessionId, provider, modelId) =>

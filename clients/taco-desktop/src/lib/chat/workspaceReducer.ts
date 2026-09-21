@@ -47,8 +47,10 @@ export interface SubagentSpawnedEntry {
 /**
  * Lifecycle of an `agent` call launched with `background: true`. Named because
  * the subagent panel derives from it too — see `WorkspaceState.backgroundSubagents`.
+ * `aborted` is a deliberate stop (panel stop button / `agentAbort` / wall-clock
+ * timeout), deliberately distinct from `error`.
  */
-export type BackgroundSubagentState = "running" | "completed" | "error";
+export type BackgroundSubagentState = "running" | "completed" | "error" | "aborted";
 
 export interface WorkspaceState {
     cwd: string;

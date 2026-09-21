@@ -562,6 +562,8 @@ export class WorkspaceRuntime extends EventEmitter {
             spawnSubagent: (args) => this.agentSpawner.spawnSubagent(args),
             resumeSubagent: (args) => this.agentSpawner.resumeSubagent(args),
             spawnSkillSubagent: (opts) => this.agentSpawner.spawnSkillSubagent(opts),
+            abortSubagentRun: (subSessionId, forParentSessionId) =>
+                this.agentSpawner.abortSubagentRun(subSessionId, forParentSessionId),
             // Descriptors, not names: the agent tool's description is the only
             // surface where the model learns what each type is for, so pass the
             // frontmatter through rather than re-describing builtins in a

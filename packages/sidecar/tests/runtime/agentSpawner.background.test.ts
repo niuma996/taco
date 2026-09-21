@@ -351,6 +351,60 @@ describe("AgentSpawner.spawnSubagent — background", () => {
         }
     });
 
+    it("abortSubagentRun stops a background run and settles it with outcome aborted", async () => {
+        let delivered: string | undefined;
+        const registry = ws.sessionRegistry as unknown as {
+            getAttached: (id: unknown) => unknown;
+        };
+        const originalGetAttached = registry.getAttached;
+        registry.getAttached = () => ({
+            prompt: async (text: string) => {
+                delivered = text;
+            },
+        });
+        // The stub settles only when the signal fires — the same shape the
+        // real runner has now that it listens for the abort signal.
+        const restoreExecute = stubExecute(
+            (args) =>
+                new Promise((resolve) => {
+                    args.signal?.addEventListener("abort", () => {
+                        resolve({
+                            subSessionId: args.childSessionId ?? asSessionId("unused"),
+                            resultText: "Subagent was stopped before it finished.",
+                            isError: true,
+                        });
+                    });
+                }),
+        );
+        try {
+            const parent = "bg-parent-abort";
+            await seedSession(parent);
+            const res = await ws.agentSpawner.spawnSubagent({
+                parentSessionId: asSessionId(parent),
+                parentToolCallId: "tc-bg-abort",
+                agentType: "explorer",
+                prompt: "do something slow",
+                background: true,
+            });
+            const subId = res.subSessionId ?? "";
+            assert.ok(subId, "receipt must carry the child session id");
+            // Scoped to the owning parent: another session must not stop it.
+            assert.equal(
+                ws.agentSpawner.abortSubagentRun(subId, asSessionId("someone-else")),
+                false,
+            );
+            assert.equal(ws.agentSpawner.abortSubagentRun(subId, asSessionId(parent)), true);
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            assert.match(delivered ?? "", /outcome="aborted"/);
+            assert.match(delivered ?? "", /stopped deliberately/);
+            // Once settled there is nothing left to stop.
+            assert.equal(ws.agentSpawner.abortSubagentRun(subId), false);
+        } finally {
+            registry.getAttached = originalGetAttached;
+            restoreExecute();
+        }
+    });
+
     it("aborts the run's signal once the wall-clock timeout elapses", async () => {
         let capturedSignal: AbortSignal | undefined;
         const restoreExecute = stubExecute(

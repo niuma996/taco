@@ -36,6 +36,7 @@ const NAMESPACES = [
     "settings",
     "extensions",
     "channels",
+    "subagent",
     // PR4: jobs.* lives in the scheduler module rather than `@taco-ai/shared`
     // (the package's import surface is intentionally narrow). The namespace
     // closure test allows it here; UI-side drift is caught by an integration

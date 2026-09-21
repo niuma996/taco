@@ -68,6 +68,11 @@ describe("deriveSubagents — 基本抽取", () => {
             deriveSubagents([asst("m1", [launched])], { "call-1": "error" })[0]?.status,
             "error",
         );
+        // 用户主动停止不是失败：独立的 aborted 态，不渲染成 error。
+        assert.equal(
+            deriveSubagents([asst("m1", [launched])], { "call-1": "aborted" })[0]?.status,
+            "aborted",
+        );
     });
 
     it("同步子代理不受后台记录影响", () => {

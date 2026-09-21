@@ -139,6 +139,12 @@ export interface UseWorkspacesApi {
      * Writes to `childHistoryLoaded[subSessionId]` via reducer; UI renders immediately.
      */
     loadSubagentHistory: (subSessionId: string) => Promise<void>;
+    /**
+     * Stop one running subagent (subagent.abort) without aborting the session's
+     * turn. The settled outcome arrives through the normal paths (tool_end for a
+     * sync child, SUBAGENT_SETTLED with outcome "aborted" for a background one).
+     */
+    abortSubagent: (subSessionId: string) => Promise<void>;
 
     /** Write askUser user-selected answers + questions, read by sendPrompt at injection time. */
     setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => void;
@@ -744,6 +750,17 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         }
     }
 
+    async function abortSubagent(subSessionId: string): Promise<void> {
+        try {
+            // "not_running" needs no surface: the child already settled, and
+            // its terminal state renders through the normal paths.
+            await client.subagentAbort(asWorkspaceId(activeCwd), asSessionId(subSessionId));
+        } catch (err) {
+            console.error("[taco] subagentAbort failed", subSessionId, err);
+            setErrorBanner(`Stop subagent failed: ${(err as Error).message}`);
+        }
+    }
+
     return {
         workspaces,
         activeCwd,
@@ -775,6 +792,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         activeModel: settings.activeModel,
         activeLevel: settings.activeLevel,
         loadSubagentHistory,
+        abortSubagent,
         setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => {
             askUserAnswersRef.current[toolCallId] = payload;
         },

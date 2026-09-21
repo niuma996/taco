@@ -23,6 +23,8 @@ export const sessionCancelQueuedSchema = Type.Any();
 
 export const sessionAbortSchema = Type.Any();
 
+export const subagentAbortSchema = Type.Any();
+
 export const sessionSetModelSchema = Type.Any();
 
 export const sessionSetThinkingLevelSchema = Type.Any();

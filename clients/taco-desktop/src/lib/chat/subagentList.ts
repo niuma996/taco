@@ -24,8 +24,12 @@ import type { BackgroundSubagentState } from "./workspaceReducer";
  * child's answer. Deriving liveness from the tool call would show such a child
  * as finished while it is still working, so this state comes from the workspace's
  * background-subagent record instead (see `deriveSubagents`).
+ *
+ * `aborted` — a background child stopped deliberately (panel stop button,
+ * `agentAbort`, or its wall-clock timeout). Kept distinct from `error`: a stop
+ * the user asked for is not a failure.
  */
-export type SubagentStatus = "running" | "background" | "ok" | "error" | "detached";
+export type SubagentStatus = "running" | "background" | "ok" | "error" | "detached" | "aborted";
 
 export interface SubagentEntry {
     /** null means detached — no child session to bind. */
@@ -112,6 +116,8 @@ function backgroundStatus(
             return "ok";
         case "error":
             return "error";
+        case "aborted":
+            return "aborted";
         default:
             return fallback;
     }

@@ -787,10 +787,14 @@ export default function App() {
                                         same right-side slot. */}
                                         <SubagentPanel
                                             messages={ws?.messages ?? []}
+                                            backgroundSubagents={ws?.backgroundSubagents ?? {}}
                                             open={rightPanel.panel === "subagents"}
                                             selectedSubSessionId={selectedSubSessionId}
                                             onSelect={setSelectedSubSessionId}
                                             onClose={rightPanel.close}
+                                            onStopSubagent={(subSessionId) => {
+                                                void wsApi.abortSubagent(subSessionId);
+                                            }}
                                             resizeHandleProps={rightPanel.resizeHandleProps}
                                             resizeLabel={t("rightPanel.resizeHandle")}
                                         />

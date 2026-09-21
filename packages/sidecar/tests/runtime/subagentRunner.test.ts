@@ -212,4 +212,27 @@ describe("runAttachedSubagent — progress", () => {
         assert.equal(updates.filter((u) => u.checkpoint).length, 1);
         assert.equal(updates[0]?.checkpoint, true);
     });
+
+    it("aborts the child harness when the caller's signal fires mid-run", async () => {
+        const attached = new FakeAttached();
+        const controller = new AbortController();
+        const run = runAttachedSubagent({
+            subSessionId: asSessionId("sub-5"),
+            attached: attached.asSession(),
+            prompt: "go",
+            agentType: "explorer",
+            resumability: "resumable",
+            signal: controller.signal,
+            readLastAssistantText: finalText,
+        });
+
+        controller.abort();
+        const result = await run;
+
+        // The whole point of the listener: the parent's stop actually reaches
+        // the child instead of waiting out its full run.
+        assert.equal(attached.aborted, true);
+        assert.equal(result.isError, true);
+        assert.match(result.resultText, /deliberate\s+interruption, not a failure/);
+    });
 });

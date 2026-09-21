@@ -56,7 +56,8 @@
     "historyFailed": "Failed to load history",
     "retry": "Retry",
     "promptLabel": "Prompt",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "stop": "Stop subagent"
   },
   "rightPanel": {
     "resizeHandle": "Drag to resize panel"

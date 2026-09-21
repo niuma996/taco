@@ -29,6 +29,7 @@ describe("agentContinue tool", () => {
                     isError: false,
                 };
             },
+            abortSubagent: () => ({ stopped: false }),
         };
         const tool = createAgentContinueTool(ctx);
         const res = await invokeTool(
@@ -61,6 +62,7 @@ describe("agentContinue tool", () => {
                     isError: true,
                 };
             },
+            abortSubagent: () => ({ stopped: false }),
         });
         const res = await invokeTool(
             tool,
@@ -81,6 +83,7 @@ describe("agentContinue tool", () => {
             async continue() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
+            abortSubagent: () => ({ stopped: false }),
         });
         assert.equal(tool.name, "agentContinue");
         assert.equal(tool.taco?.mutates, true);
@@ -101,6 +104,7 @@ describe("agentContinue tool", () => {
             async continue() {
                 return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
             },
+            abortSubagent: () => ({ stopped: false }),
         });
         assert.equal(tool.executionMode, "parallel");
     });
