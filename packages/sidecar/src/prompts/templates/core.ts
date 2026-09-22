@@ -3,8 +3,13 @@
  *
  * Placeholders filled at build time: `{{TOOL_NAMES}}` (session tool names),
  * `{{MODEL_IDENTITY_SECTION}}` (empty when the model identity is unknown),
- * `{{SUBAGENT_DELEGATION}}` (main sessions only), `{{SESSION_ROLE}}`,
- * `{{DEPTH_LINE}}`, `{{SESSION_ROLE_BODY}}` (per-role), `{{PATH_SEMANTICS}}`.
+ * `{{SESSION_ROLE}}`, `{{DEPTH_LINE}}`, `{{SESSION_ROLE_BODY}}` (per-role),
+ * `{{PATH_SEMANTICS}}`.
+ *
+ * The delegation guidance is NOT a placeholder: `buildSystemPrompt` appends
+ * `SUBAGENT_DELEGATION_BLOCK` as a tail section for main sessions, so the
+ * core template stays role-agnostic and the guidance sits next to the
+ * `<available_agents>` catalog it references.
  */
 
 export const CORE_TEMPLATE = `You are TACO, an AI coding assistant. Never claim to be any other assistant.
@@ -30,7 +35,7 @@ Work in an analyze → act → verify loop:
 3. Verify — check your work (re-read the edited region, run a command when applicable) before reporting done.
 
 Producing no tool call is not the same as finishing the task. If work remains, continue; only stop when the request is actually satisfied.
-{{SUBAGENT_DELEGATION}}</workflow>
+</workflow>
 
 <session_role>
 You are running as a {{SESSION_ROLE}} session.{{DEPTH_LINE}}
@@ -80,20 +85,24 @@ A permission denial is a decision, not a mechanical failure. Do not route around
 </git_safety>`;
 
 /**
- * Delegation guidance — substituted into `{{SUBAGENT_DELEGATION}}` for the
- * main session only. A subagent must not be told to spawn further subagents
- * (its `<session_role>` body says the opposite), so `buildSystemPrompt`
- * substitutes the empty string when `role !== "main"`. The leading and
- * trailing newlines are load-bearing: present, they give the block a blank
- * line on each side; absent, the surrounding text closes up cleanly.
+ * Delegation guidance — appended by `buildSystemPrompt` as a tail section for
+ * the main session only. A subagent must not be told to spawn further
+ * subagents (its `<session_role>` body says the opposite), so the append is
+ * skipped when `role !== "main"`. The section lives in the tail, right before
+ * the contributors' `<available_agents>` catalog, so the "how to delegate"
+ * guidance sits next to the "who to delegate to" listing.
  */
-export const SUBAGENT_DELEGATION_BLOCK = `
+export const SUBAGENT_DELEGATION_BLOCK = `<subagent_delegation>
 For complex tasks spanning multiple independent areas (different packages, layers, or concerns), decompose and delegate to sub-agents with the agent tool rather than working sequentially:
 - Explore in parallel: locate all relevant code before changing it.
 - Act in parallel: implement changes in independent areas simultaneously.
 - Verify in parallel: check each result independently.
 
 Do not delegate work that is cheaper inline — single-file edits, trivial refactors, or anything that depends on context a sub-agent cannot see (the user's prior preferences, the current plan, unfinished parent work). Sub-agents have no memory and cannot see the parent conversation, so such work only adds latency.
+
+Typical calls, both ways:
+- Delegate, in parallel: map every caller of \`foo()\` across packages while you keep editing; run two independent test suites as background sub-agents; review a finished diff while you start the next task.
+- Keep inline: a one-file rename; a fix whose next step depends on the result; work that needs this conversation's context (the plan, the user's stated preferences).
 
 Pass \`background: true\` to run a sub-agent asynchronously: the tool call returns a receipt instead of the sub-agent's output, and a notice arrives later once it finishes. That notice carries the path its output was written to, not the output itself. When one arrives, read that file before you reply, then tell the user what it found — never hand them the bare path, and never report a sub-agent as still running once its notice has arrived.
 
@@ -102,7 +111,7 @@ The launch receipt names that same path up front, before the file exists. So if 
 Delegate in the background when the result does not affect your next few steps, the task is expected to take a while, and it touches no files you are about to write. Delegate synchronously when you need the answer to decide what to do next, or when the sub-agent would write files you are also editing. Do not split work off in the background only to immediately sit and wait for it — if you cannot proceed without the answer, run it synchronously instead.
 
 While a background sub-agent runs, do not spawn a duplicate for the same task and do not poll for its result. Never run one concurrently with other work that writes the same files it does.
-`;
+</subagent_delegation>`;
 
 /** `{{SESSION_ROLE_BODY}}` for the primary session. */
 export const SESSION_ROLE_MAIN =

@@ -128,9 +128,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         MODEL_IDENTITY_SECTION: options.modelIdentity
             ? `\n<model_identity>${options.modelIdentity}</model_identity>\n\n`
             : "\n",
-        // Delegation guidance is main-only: a subagent's `<session_role>` body forbids
-        // spawning further subagents, so it must not read the opposite instruction.
-        SUBAGENT_DELEGATION: sessionKind.role === "main" ? SUBAGENT_DELEGATION_BLOCK : "",
         SESSION_ROLE: sessionKind.role,
         SESSION_ROLE_BODY: sessionKind.role === "main" ? SESSION_ROLE_MAIN : SESSION_ROLE_SUBAGENT,
         DEPTH_LINE: sessionKind.depth > 0 ? ` Depth: ${sessionKind.depth}.` : "",
@@ -155,6 +152,15 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
             ].join("\n"),
         );
     }
+
+    // Delegation guidance is a main-only tail section, ahead of the
+    // contributors' `<available_agents>` catalog it references. Rendering it
+    // here (not as a core placeholder) keeps the core template role-agnostic
+    // and gives every caller — workspace rebuild and subagent fork alike —
+    // the same single rendering. Main-only because a subagent's
+    // `<session_role>` body forbids spawning further subagents, so it must not
+    // read the opposite instruction.
+    if (sessionKind.role === "main") parts.push(SUBAGENT_DELEGATION_BLOCK);
 
     for (const contributor of options.contributors ?? []) {
         if (contributor.prepend) parts.unshift(contributor.prepend);

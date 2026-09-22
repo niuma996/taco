@@ -168,6 +168,26 @@ describe("buildSystemPrompt", () => {
         }
     });
 
+    it("appends the delegation section after the core template, before contributor appends", () => {
+        const out = buildSystemPrompt({
+            tools: [stubTool("read"), stubTool("agent")],
+            contributors: [{ append: "<available_agents>fake</available_agents>" }],
+        });
+        const delegationIdx = out.indexOf("<subagent_delegation>");
+        assert.ok(delegationIdx > out.indexOf("</workflow>"), "delegation sits past the core");
+        assert.ok(
+            delegationIdx < out.indexOf("<available_agents>"),
+            "delegation guidance precedes the agents catalog it references",
+        );
+
+        const sub = buildSystemPrompt({
+            tools: [stubTool("read")],
+            sessionKind: { role: "subagent", depth: 1 },
+            contributors: [{ append: "<available_agents>fake</available_agents>" }],
+        });
+        assert.ok(!sub.includes("<subagent_delegation>"), "subagent tail stays clean");
+    });
+
     it("frames a permission denial as a stop-and-ask, not a retry cue", () => {
         const out = buildSystemPrompt({ tools: [stubTool("read")] });
         assert.match(out, /A permission denial is a decision, not a mechanical failure/);
