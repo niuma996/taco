@@ -154,11 +154,16 @@ export interface HookWiringOptions {
      */
     checkpointManager?: CheckpointManager;
     /**
-     * PinOnceConsumer instance — drives skip logic for the `memory` pinOnce tag.
-     * When provided, the memory context hook checks `consumer.isConsumed(instanceId)`
-     * before injecting and skips already-consumed instances. CompactionController
-     * also refreshes the consumed set on pi's `compaction_end` event so it grows
-     * as compressions complete.
+     * Wiring point for `pinOnce` tags: a tag whose content is injected ONCE as
+     * persisted conversation content, folded verbatim into the summary by the
+     * first compaction, and not re-injected afterwards. A hook for such a tag
+     * takes this consumer and checks `isConsumed(instanceId)` before injecting.
+     *
+     * Currently unused — no tag registers `pinOnce`. `memory` used to, but it
+     * is a per-request overlay that never persists, so compaction never saw it
+     * and the check was always false; it is `drop`/resident now. The consumer
+     * is still constructed and refreshed (see CompactionController) so the next
+     * genuine pinOnce tenant only has to read this option.
      */
     pinOnceConsumer?: PinOnceConsumer;
     /**
@@ -415,12 +420,13 @@ export async function wireHarnessHooks(
         }),
     );
 
-    // ── memory context hook — injects <memory> tag; skips if already consumed.
+    // ── memory context hook — injects the <memory> tag on every context build.
     // Runs after protocol hooks so memory is the outermost user-context layer.
-    // Appended at the tail (see appendUserTag) so a content-stable skip cannot
-    // rewrite messages[0]. Injected every call until PinOnceConsumer consumes it.
+    // Appended at the tail (see appendUserTag) so injection never rewrites
+    // messages[0] and busts the prompt-cache prefix. Resident by design: the
+    // tag is a per-request overlay, so it survives compaction for free.
     if (opts.memoryStore) {
-        disposers.push(onContext(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)));
+        disposers.push(onContext(buildMemoryContextHook(opts.memoryStore)));
     }
 
     // ── task-driven context hooks (both gated on getActiveTasksState) ──

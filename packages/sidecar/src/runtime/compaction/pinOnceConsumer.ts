@@ -5,6 +5,10 @@
  * The consumed set is reconstructed from session history on construction,
  * merged from past `CompactionEntry.details.consumedPinOnceInstances`. This
  * means the consumer is accurate even after an AttachedSession restart.
+ *
+ * No tag registers `pinOnce` today, so nothing reads `isConsumed()` yet: the
+ * set is maintained for the next tenant, which must inject persisted content
+ * (compaction only sees persisted entries) for consumption to ever fire.
  */
 
 import type { Entry } from "../pi/types.ts";

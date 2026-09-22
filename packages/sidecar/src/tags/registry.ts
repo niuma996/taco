@@ -80,7 +80,14 @@ const BUILTIN_TAG_REGISTRY = {
     memory: defineTag({
         name: "memory",
         scope: "user-context",
-        compression: { kind: "pinOnce" },
+        // Resident, not pinOnce: the hook injects at the tail on every context
+        // build, the tag never persists into history, so compaction never sees
+        // it — and never needs to. This is what keeps memory present across
+        // compactions in long IM sessions that roll forever and only ever
+        // compact. `drop` matches the sibling transform-injected tags: if a
+        // stale copy ever lands in history, the drop policy strips it and the
+        // fresh injection wins.
+        compression: { kind: "drop" },
         tuiVisibility: "hidden",
         parser: { kind: "xml-balanced" },
         description: "User-level memory context — appended from ~/.taco/memory/MEMORY.md",

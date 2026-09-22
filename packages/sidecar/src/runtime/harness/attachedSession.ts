@@ -553,6 +553,8 @@ export class AttachedSession extends EventEmitter {
                 // inside it, and plan mode refuses mutations at dispatch.
                 mutationGateRoot: args.env.cwd,
                 checkpointManager: attached.checkpoints,
+                // Passed through, not currently read: keeps the pinOnce wiring
+                // live end-to-end so a future pinOnce tag only touches its hook.
                 pinOnceConsumer,
                 fingerprintKey: `${args.session.metadata.id}:${lane.name}`,
             },
@@ -601,7 +603,8 @@ export class AttachedSession extends EventEmitter {
         // than pi's defaults. Awaited: a resumed run below may compact.
         await compactionController.syncSettings();
 
-        // Auto-compaction scheduling + PinOnceConsumer updates.
+        // Auto-compaction scheduling, plus maintaining the pinOnce consumed set
+        // for pinOnce tenants (currently none — see wireHooks.pinOnceConsumer).
         disposers.push(...compactionController.subscribe());
 
         attached.unsubscribe = () => {

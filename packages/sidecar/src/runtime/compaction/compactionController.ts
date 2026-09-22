@@ -452,7 +452,8 @@ export class CompactionController {
      *  - `run_end` → schedule an auto-compaction check (deferred via
      *    `lane.runWhenIdle` so it cannot race a queued steer / follow-up
      *    turn, and also covers compaction and navigation operations)
-     *  - `compaction_end` → refresh PinOnceConsumer
+     *  - `compaction_end` → maintain the pinOnce consumed set for pinOnce
+     *    tenants (currently none; see `wireHooks.pinOnceConsumer`)
      */
     subscribe(): Array<() => void> {
         const disposers: Array<() => void> = [];
@@ -465,7 +466,10 @@ export class CompactionController {
 
         disposers.push(
             this.harness.events.on("compaction_end", () => {
-                // Update PinOnceConsumer consumed set so context hooks skip re-injection.
+                // Maintain the consumed set for pinOnce tenants: a pinOnce tag's
+                // hook skips re-injection once its instance lands here. No tag
+                // registers pinOnce today, so this keeps the set warm rather
+                // than feeding a live consumer.
                 if (!this.pinOnceConsumer) return;
                 const consumer = this.pinOnceConsumer;
                 this.getSessionEntries()

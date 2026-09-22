@@ -4,15 +4,19 @@
  * Reads MEMORY.md on every LLM context build and injects it as a
  * `<memory source="user">` user message at the tail.
  *
- * With PinOnceConsumer, skips injection if the memory's instanceId was
- * already consumed by a prior compaction — the verbatim content is in the
- * CompactionEntry summary. A failing read MUST NOT fail the LLM call.
+ * Memory is RESIDENT, not pinOnce: pi's `transform_context` hands hooks a
+ * per-request copy of the message list, so the tag never persists into
+ * session history and compaction never sees it (preparations are built from
+ * persisted entries). Re-injection on every build is what keeps memory
+ * present across compactions in long IM sessions that roll forever with
+ * compaction as the only context management. The registry's `drop` policy
+ * records this: no preservation machinery applies.
+ *
+ * A failing read MUST NOT fail the LLM call.
  */
 
-import { createHash } from "node:crypto";
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import { createLogger } from "../lib/logger.ts";
-import type { PinOnceConsumer } from "../runtime/compaction/pinOnceConsumer.ts";
 import { appendUserTag } from "../tags/appendUserTag.ts";
 import { tagWrap } from "../tags/builder.ts";
 import type { MemoryStore } from "./types.ts";
@@ -21,15 +25,13 @@ const log = createLogger("memory:hook");
 
 /**
  * Build a `context` hook that appends a `<memory>` user message to every
- * LLM call's context window, unless a PinOnceConsumer reports the instance
- * has already been consumed. Append (not unshift) so a skip does not
+ * LLM call's context window. Append (not unshift) so a skip does not
  * rewrite `messages[0]` and bust the prompt-cache prefix.
  *
  * Returns an empty function when MEMORY.md is empty or unreadable.
  */
 export function buildMemoryContextHook(
     store: MemoryStore,
-    pinOnceConsumer?: PinOnceConsumer,
 ): (event: ContextEvent) => Promise<ContextResult | undefined> {
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
         let content: string;
@@ -40,11 +42,6 @@ export function buildMemoryContextHook(
             return undefined;
         }
         if (!content) return undefined;
-
-        const instanceId = `memory:${createHash("sha256").update(content).digest("hex").slice(0, 16)}`;
-        if (pinOnceConsumer?.isConsumed(instanceId)) {
-            return undefined;
-        }
 
         const wrapped = tagWrap("memory", content, { source: "user" });
         appendUserTag(event.messages, wrapped);
