@@ -113,7 +113,64 @@
     color: var(--fg-dim);
     font-style: italic;
     font-size: 12px;
+    /* Explicit so the preview cap below can be expressed as exactly 10 lines
+       (15em at 12px). Applies to both preview and expanded so expanding never
+       reflows the text the user was already reading. */
+    line-height: 1.5;
     white-space: pre-wrap;
+    /* Long unbroken tokens (URLs, base64) must not widen the message bubble. */
+    overflow-wrap: anywhere;
+}
+
+/* Preview mode: cap the body at 10 lines and scroll internally; the newest
+   line stays pinned into view while streaming. 15em = 10 × 1.5em line box;
+   content-box sizing keeps the 4px vertical padding outside the cap. */
+.thinking-viewport {
+    position: relative;
+}
+.thinking-body--preview {
+    max-height: 15em;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+/* Frosted gradient over the preview's top edge: thinking content scrolled
+   above the fold blurs away under it while the newest lines at the bottom
+   stay crisp. Rendered only when there is content above (scrollTop > 0).
+   Prefixed variants are required by the WKWebView runtime. */
+.thinking-fade {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    /* 2 lines of the 12px/1.5 thinking text — enough to read as a gradient,
+       small enough to not eat the 10-line preview. */
+    height: 36px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    mask-image: linear-gradient(to bottom, black, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+}
+
+.thinking-expand {
+    display: inline-flex;
+    margin: 2px 0 2px 14px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 11px;
+    font-style: italic;
+    font-family: inherit;
+    cursor: pointer;
+}
+.thinking-expand:hover {
+    color: var(--fg);
+}
+.thinking-expand:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
 }
 
 .thinking-chevron {

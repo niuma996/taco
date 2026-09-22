@@ -10,7 +10,7 @@
 
 import type { CommandPermissionScope } from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/useI18n";
 import type { UiMessage, UiThinkingBlock, UiToolCall } from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
@@ -204,6 +204,7 @@ function CommandPermissionActions({
 }
 
 function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
+    const { t } = useT();
     // Streaming blocks default open; historical / completed blocks default
     // closed. We layer a `userOverridden` flag on top so manual clicks always
     // win — until the block's default flips (e.g. streaming → completed), at
@@ -211,15 +212,57 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
     // useState would freeze the initial default and never auto-collapse when
     // the block finishes.
     const [userOverridden, setUserOverridden] = useState(false);
+    // An open block renders capped at ~10 lines with internal scroll (newest
+    // line visible) until the user explicitly expands it to full height.
+    const [expanded, setExpanded] = useState(false);
+    const [overflowing, setOverflowing] = useState(false);
+    const [showFade, setShowFade] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    // True while the user is pinned to the newest line; scrolling up unpins so
+    // streaming chunks stop yanking the viewport back down.
+    const pinnedRef = useRef(true);
     const isHistorical = block.isHistorical === true;
     const isStreaming = !isHistorical && block.endedAt === undefined;
     const defaultOpen = isStreaming;
     // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — effect must re-run when the block transitions from streaming to completed so the user override resets and the block auto-collapses.
     useEffect(() => {
         setUserOverridden(false);
+        setExpanded(false);
     }, [block.endedAt]);
     const open = userOverridden ? !defaultOpen : defaultOpen;
-    const toggle = () => setUserOverridden((prev) => !prev);
+    const preview = open && !expanded;
+    const toggle = () => {
+        setUserOverridden((prev) => !prev);
+        setExpanded(false);
+        pinnedRef.current = true;
+    };
+
+    // Keep the preview scrolled to the newest line: on open, and on every
+    // streaming chunk while the user hasn't scrolled away.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: block.thinking is the trigger — the effect re-measures scrollHeight after each streaming chunk without reading the string itself.
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el || !preview) return;
+        if (!isStreaming || pinnedRef.current) {
+            el.scrollTop = el.scrollHeight;
+        }
+    }, [block.thinking, preview, isStreaming]);
+
+    // The expand affordance only exists when the content actually exceeds the
+    // preview cap; short blocks read in full without it.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: block.thinking is the trigger — growing content can cross the cap and must re-measure overflow.
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el || !preview) return;
+        setOverflowing(el.scrollHeight > el.clientHeight + 1);
+    }, [block.thinking, preview]);
+
+    const handleScroll = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+        setShowFade(el.scrollTop > 0);
+    };
 
     const label = (() => {
         if (block.redacted) return "Thinking (redacted)";
@@ -240,9 +283,32 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
                 />
                 <span>{label}</span>
             </button>
-            {open && !block.redacted && block.thinking.length > 0 && (
-                <div className="thinking-body">{block.thinking}</div>
-            )}
+            {open &&
+                !block.redacted &&
+                block.thinking.length > 0 &&
+                (preview ? (
+                    <div className="thinking-viewport">
+                        <div
+                            ref={scrollRef}
+                            className="thinking-body thinking-body--preview"
+                            onScroll={handleScroll}
+                        >
+                            {block.thinking}
+                        </div>
+                        {showFade && <div className="thinking-fade" aria-hidden="true" />}
+                        {overflowing && (
+                            <button
+                                type="button"
+                                className="thinking-expand"
+                                onClick={() => setExpanded(true)}
+                            >
+                                {t("message.thinkingShowAll")}
+                            </button>
+                        )}
+                    </div>
+                ) : (
+                    <div className="thinking-body">{block.thinking}</div>
+                ))}
         </div>
     );
 }
