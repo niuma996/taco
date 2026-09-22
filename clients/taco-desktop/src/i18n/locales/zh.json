@@ -355,7 +355,8 @@
     "compactFailedNothing": "没有可压缩的上下文",
     "compactFailedNotAttached": "会话尚未连接",
     "compactNow": "压缩",
-    "cacheHit": "缓存命中率: {{pct}} · 已复用 {{read}}"
+    "cacheHit": "缓存命中率: {{pct}} · 已复用 {{read}}",
+    "cacheHitTurns": "仅对话回合: {{pct}}"
   },
   "tools": {
     "builtinHeader": "内置工具({{count}})",

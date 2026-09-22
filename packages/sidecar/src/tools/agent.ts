@@ -50,53 +50,14 @@ export interface AgentTypeDescriptor {
     context?: "independent" | "fork";
 }
 
-/** Collapse whitespace so a multi-line frontmatter string stays one bullet. */
-function oneLine(text: string): string {
-    return text.replace(/\s+/g, " ").trim();
-}
-
-/**
- * Render the per-type hint bullets from the loaded definitions.
- *
- * `whenToUse` wins over `description` because it is written to answer "should I
- * pick this one", which is exactly the decision being made here. Types with
- * neither still get a bullet — a bare name is worse, but omitting the type
- * entirely would hide that it is callable.
- */
-function buildTypeHints(types: readonly AgentTypeDescriptor[]): string {
-    if (types.length === 0) return "";
-    const bullets = types.map((t) => {
-        const summary = oneLine(t.whenToUse ?? t.description ?? "");
-        const forkNote =
-            t.context === "fork"
-                ? " (defaults to forked context: it sees this conversation, which costs more than an independent spawn)"
-                : "";
-        return summary.length > 0
-            ? `\n- ${t.agentType} — ${summary}${forkNote}`
-            : `\n- ${t.agentType}${forkNote}`;
-    });
-    return bullets.join("");
-}
-
 export function createAgentTool(
     ctx: SubagentSpawnContext,
-    availableTypes: readonly AgentTypeDescriptor[],
+    _availableTypes: readonly AgentTypeDescriptor[],
 ): AgentTool {
-    const MAX_TYPES_IN_DESCRIPTION = 20;
-    const displayTypes = availableTypes.slice(0, MAX_TYPES_IN_DESCRIPTION);
-    const overflow = availableTypes.length - displayTypes.length;
-    const names = displayTypes.map((t) => t.agentType);
-    const typeList =
-        names.length > 0
-            ? overflow > 0
-                ? `${names.join(", ")} (${overflow} more, see agents.list)`
-                : names.join(", ")
-            : "(none configured)";
-    const SUBAGENT_TYPE_HINTS = buildTypeHints(displayTypes);
-
     const agentSchema = Type.Object({
         subagent_type: Type.String({
-            description: `Which agent type to delegate to. Available types: ${typeList}.${SUBAGENT_TYPE_HINTS}`,
+            description:
+                "Name of a registered agent type. Types are listed in the system prompt's <available_agents> section.",
         }),
         description: Type.String({ description: "3-5 word task summary (for display)." }),
         prompt: Type.String({ description: "The task for the subagent to perform." }),
@@ -130,9 +91,13 @@ export function createAgentTool(
     return {
         name: "agent",
         label: "agent",
-        // The trailing prose starts on its own line: hint bullets are newline-led,
-        // so joining directly would run the last bullet into this sentence.
-        description: `Delegate a task to a subagent that runs in its own session with a constrained toolset. Available types: ${typeList}.${SUBAGENT_TYPE_HINTS}\nThe subagent returns a text result when done. Safe to issue multiple \`agent\` calls in the same turn — each runs in its own session and they execute concurrently. Pass \`background: true\` to launch a long-running subagent without waiting — its result arrives later as a message in this conversation instead of in this tool's result.`,
+        description:
+            "Delegate a task to a subagent that runs in its own session with a constrained toolset. " +
+            "Pick `subagent_type` from the system prompt's <available_agents> section. " +
+            "The subagent returns a text result when done. Safe to issue multiple `agent` calls in the same turn — " +
+            "each runs in its own session and they execute concurrently. Pass `background: true` to launch a " +
+            "long-running subagent without waiting — its result arrives later as a message in this conversation " +
+            "instead of in this tool's result.",
         parameters: agentSchema,
         executionMode: "parallel",
         taco: {

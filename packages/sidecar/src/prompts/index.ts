@@ -12,6 +12,10 @@ export type {
     SystemPromptContributorTag,
 } from "./buildSystemPrompt.ts";
 export { buildSystemPrompt, filterContributorsForTools } from "./buildSystemPrompt.ts";
+export {
+    formatAgentsForSystemPrompt,
+    formatDeferredToolsForSystemPrompt,
+} from "./formatCatalogForSystemPrompt.ts";
 export { formatSkillsForSystemPrompt } from "./formatSkillsForSystemPrompt.ts";
 export {
     DEFAULT_PROJECT_CONTEXT_MAX_CHARS,

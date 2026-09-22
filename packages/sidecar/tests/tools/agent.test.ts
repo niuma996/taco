@@ -177,103 +177,25 @@ describe("agent tool", () => {
         assert.ok(text.startsWith("failed to launch background subagent:"));
     });
 
-    it("lists available agent types in the description", () => {
-        const tool = createAgentTool(
-            {
-                spawn: async () => ({
-                    subSessionId: asSessionId("stub"),
-                    resultText: "",
-                    isError: false,
-                }),
-                continue: async () => ({
-                    subSessionId: asSessionId("stub"),
-                    resultText: "",
-                    isError: true,
-                }),
-                abortSubagent: () => ({ stopped: false }),
-            },
-            [{ agentType: "explorer" }, { agentType: "coder" }],
-        );
-        assert.ok(tool.description.includes("explorer"));
-        assert.ok(tool.description.includes("coder"));
+    it("keeps a frozen description that does not embed the type catalog", () => {
+        const withTypes = createAgentTool(stubCtx(), [
+            { agentType: "explorer" },
+            { agentType: "coder" },
+        ]);
+        const empty = createAgentTool(stubCtx(), []);
+        assert.equal(withTypes.description, empty.description);
+        assert.ok(withTypes.description.includes("<available_agents>"));
+        assert.ok(!withTypes.description.includes("explorer"));
+        assert.ok(!withTypes.description.includes("coder"));
     });
 
-    it("derives per-type hints from frontmatter, including user-defined agents", () => {
-        // The regression this guards: hints used to be a hardcoded blurb naming
-        // only the builtins, so a user-defined agent reached the model as a bare
-        // name with no capability description at all.
+    it("does not embed frontmatter hints in the tool JSON", () => {
         const tool = createAgentTool(stubCtx(), [
             { agentType: "explorer", description: "read-only search specialist" },
             { agentType: "my-migrator", description: "runs schema migrations" },
         ]);
-        assert.ok(
-            tool.description.includes("read-only search specialist"),
-            "builtin description must reach the model",
-        );
-        assert.ok(
-            tool.description.includes("runs schema migrations"),
-            "user-defined agent description must reach the model too",
-        );
-    });
-
-    it("prefers whenToUse over description for selection guidance", () => {
-        const tool = createAgentTool(stubCtx(), [
-            {
-                agentType: "reviewer",
-                description: "short blurb",
-                whenToUse: "pick me when reviewing a finished change",
-            },
-        ]);
-        assert.ok(tool.description.includes("pick me when reviewing a finished change"));
-        assert.ok(
-            !tool.description.includes("short blurb"),
-            "whenToUse answers the selection question, so it replaces description",
-        );
-    });
-
-    it("flags fork-defaulting types and stays silent for independent ones", () => {
-        const tool = createAgentTool(stubCtx(), [
-            { agentType: "reviewer", description: "review", context: "fork" },
-            { agentType: "explorer", description: "search", context: "independent" },
-        ]);
-        const forkNotes = tool.description.match(/defaults to forked context/g) ?? [];
-        assert.equal(forkNotes.length, 1, "only the fork-defaulting type gets the cost note");
-        const reviewerIdx = tool.description.indexOf("reviewer");
-        const noteIdx = tool.description.indexOf("defaults to forked context");
-        assert.ok(noteIdx > reviewerIdx, "the note must attach to the reviewer bullet");
-    });
-
-    it("collapses multi-line frontmatter into a single bullet", () => {
-        const tool = createAgentTool(stubCtx(), [
-            { agentType: "wrapped", whenToUse: "line one\n  line two\n\nline three" },
-        ]);
-        assert.ok(tool.description.includes("line one line two line three"));
-    });
-
-    it("still lists a type that has no description at all", () => {
-        const tool = createAgentTool(stubCtx(), [{ agentType: "bare" }]);
-        assert.ok(
-            tool.description.includes("bare"),
-            "omitting the type entirely would hide that it is callable",
-        );
-    });
-
-    it("reports none-configured when no agent types exist", () => {
-        const tool = createAgentTool(stubCtx(), []);
-        assert.ok(tool.description.includes("(none configured)"));
-        // With no bullets the description must still read as prose, not have a
-        // stray blank line where the hint block would have been.
-        assert.ok(!tool.description.includes("\n\n"));
-    });
-
-    it("keeps the last hint bullet from running into the trailing prose", () => {
-        const tool = createAgentTool(stubCtx(), [
-            { agentType: "verification", description: "produce a PASS/FAIL verdict" },
-        ]);
-        assert.ok(
-            tool.description.includes("verdict\nThe subagent returns"),
-            "trailing prose must start on its own line after the final bullet",
-        );
+        assert.ok(!tool.description.includes("read-only search specialist"));
+        assert.ok(!tool.description.includes("runs schema migrations"));
     });
 
     it("prefixes subagent error result when isError", async () => {

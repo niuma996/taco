@@ -128,7 +128,7 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         assert.ok(text.includes("fs workspace message"), "original message survives");
     });
 
-    it("unshift order matches registration order (last hook → position 0)", async () => {
+    it("live tags append to the tail so messages[0] stays the original user", async () => {
         const drop = buildDropPolicyContextHook();
         const reply = buildReplyLanguageContextHook(() => "en");
         const env = buildEnvContextHook();
@@ -138,15 +138,17 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         const texts = final.map((m) => {
             const c = (m as { content?: unknown }).content;
             if (Array.isArray(c))
-                return (c as Array<{ text?: string }>)[0]?.text?.slice(0, 30) ?? "";
-            return String(c).slice(0, 30);
+                return (c as Array<{ text?: string }>)[0]?.text?.slice(0, 40) ?? "";
+            return String(c).slice(0, 40);
         });
 
-        // Expected: [<reply_language>, env is at tail（push）, original user msg]
-        // reply unshifts → position 0. env pushes → at end.
         assert.ok(
-            texts[0].includes('<reply_language locale="'),
-            `msg[0] should be <reply_language>, got: ${texts[0]}`,
+            texts[0].includes("test"),
+            `msg[0] should be the original user, got: ${texts[0]}`,
+        );
+        assert.ok(
+            texts.some((t) => t.includes('<reply_language locale="')),
+            "reply_language must still be injected",
         );
         assert.ok(texts[texts.length - 1].includes('<env as_of="'), "last msg should be <env>");
     });

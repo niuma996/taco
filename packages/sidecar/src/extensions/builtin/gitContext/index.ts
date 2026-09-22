@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
 import { HIDDEN_WINDOWS_SPAWN } from "../../../lib/hiddenWindowsSpawn.ts";
 import { scrubbedProcessEnv } from "../../../runtime/models/providerKeyStore.ts";
+import { appendUserTag } from "../../../tags/appendUserTag.ts";
 import { tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
@@ -260,6 +261,14 @@ function formatUncommittedFiles(files: UncommittedFiles): string | undefined {
 export function buildGitContextHook(cwd: string): ContextHook {
     let probed = false;
     let probeResult: GitProbeResult | undefined;
+    /**
+     * Last rendered tag bodies. Skip the push when the *text the model would
+     * see* is unchanged — hash / subject / stat / working-tree paths, not
+     * git mtime. An amend that rewrites the subject changes the tag; a
+     * no-op status refresh does not, and must not rewrite the cache prefix.
+     */
+    let lastCommitsTag: string | undefined;
+    let lastUncommittedTag: string | undefined;
 
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
         if (!probed) {
@@ -286,17 +295,18 @@ export function buildGitContextHook(cwd: string): ContextHook {
             : undefined;
 
         if (!commitsTag && !uncommittedTag) return undefined;
+        if (commitsTag === lastCommitsTag && uncommittedTag === lastUncommittedTag) {
+            return undefined;
+        }
+        lastCommitsTag = commitsTag;
+        lastUncommittedTag = uncommittedTag;
 
-        const messages = [
-            ...(commitsTag
-                ? [{ role: "user" as const, content: commitsTag, timestamp: Date.now() }]
-                : []),
-            ...(uncommittedTag
-                ? [{ role: "user" as const, content: uncommittedTag, timestamp: Date.now() }]
-                : []),
-            ...event.messages,
-        ];
-        return { messages };
+        // Append (in-place) so `messages[0]` stays the original user turn. A
+        // fresh array prepend used to sit in front of every other hook and
+        // rewrite the prompt-cache prefix on every working-tree change.
+        if (commitsTag) appendUserTag(event.messages, commitsTag);
+        if (uncommittedTag) appendUserTag(event.messages, uncommittedTag);
+        return { messages: event.messages };
     };
 }
 

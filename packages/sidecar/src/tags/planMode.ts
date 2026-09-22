@@ -8,7 +8,8 @@
 
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
-import { createUserMessage, tagWrap } from "./builder.ts";
+import { appendUserTag } from "./appendUserTag.ts";
+import { tagWrap } from "./builder.ts";
 
 const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any project files. Your only outputs are:
 - Reading files
@@ -46,9 +47,7 @@ export function buildPlanModeContextHook(
         const state = getPlanState();
         if (!state.active || !state.currentSlug) return undefined;
         const body = PLAN_MODE_BODY;
-        event.messages.unshift(
-            createUserMessage(tagWrap("plan_mode", body, { slug: state.currentSlug })),
-        );
+        appendUserTag(event.messages, tagWrap("plan_mode", body, { slug: state.currentSlug }));
         return { messages: event.messages };
     };
 }

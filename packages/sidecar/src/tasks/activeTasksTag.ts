@@ -1,6 +1,7 @@
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
-import { createUserMessage, tagWrap } from "../tags/builder.ts";
+import { appendUserTag } from "../tags/appendUserTag.ts";
+import { tagWrap } from "../tags/builder.ts";
 import { findActiveListId } from "./activeList.ts";
 import type { TaskStore } from "./taskTypes.ts";
 import { isUnfinishedStatus } from "./taskTypes.ts";
@@ -31,7 +32,7 @@ export function buildActiveTasksContextHook(
         if (unfinished.length === 0) return undefined;
         const lines = unfinished.map((t) => `- id=${t.id} (${t.status}) ${t.content}`);
         const body = `Active task list "${list.name}" has ${unfinished.length} unfinished task(s):\n${lines.join("\n")}\n\nIf the user's message continues this work (e.g. '继续', 'go on'), resume the next unfinished task and taskUpdate each to completed as you finish it. If the user changed topic, first taskUpdate the remaining tasks to failed (终止), then proceed.`;
-        event.messages.unshift(createUserMessage(tagWrap("active_tasks", body)));
+        appendUserTag(event.messages, tagWrap("active_tasks", body));
         return { messages: event.messages };
     };
 }

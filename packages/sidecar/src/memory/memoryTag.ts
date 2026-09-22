@@ -2,7 +2,7 @@
  * `memory` tag — context hook.
  *
  * Reads MEMORY.md on every LLM context build and injects it as a
- * `<memory source="user">` user message at the front.
+ * `<memory source="user">` user message at the tail.
  *
  * With PinOnceConsumer, skips injection if the memory's instanceId was
  * already consumed by a prior compaction — the verbatim content is in the
@@ -13,15 +13,17 @@ import { createHash } from "node:crypto";
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { PinOnceConsumer } from "../runtime/compaction/pinOnceConsumer.ts";
-import { createUserMessage, tagWrap } from "../tags/builder.ts";
+import { appendUserTag } from "../tags/appendUserTag.ts";
+import { tagWrap } from "../tags/builder.ts";
 import type { MemoryStore } from "./types.ts";
 
 const log = createLogger("memory:hook");
 
 /**
- * Build a `context` hook that prepends a `<memory>` user message to every
+ * Build a `context` hook that appends a `<memory>` user message to every
  * LLM call's context window, unless a PinOnceConsumer reports the instance
- * has already been consumed.
+ * has already been consumed. Append (not unshift) so a skip does not
+ * rewrite `messages[0]` and bust the prompt-cache prefix.
  *
  * Returns an empty function when MEMORY.md is empty or unreadable.
  */
@@ -45,7 +47,7 @@ export function buildMemoryContextHook(
         }
 
         const wrapped = tagWrap("memory", content, { source: "user" });
-        event.messages.unshift(createUserMessage(wrapped));
+        appendUserTag(event.messages, wrapped);
         return { messages: event.messages };
     };
 }

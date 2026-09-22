@@ -1,6 +1,6 @@
 /**
  * `reply_language` tag — context hook. Each LLM context build calls `getUiLocale()`
- * and prepends a `<reply_language>` tag if set; otherwise pass-through.
+ * and appends a `<reply_language>` tag if set; otherwise pass-through.
  * Locale is held by AttachedSession; per-turn handlers update it so language
  * switches take effect without re-attaching.
  */
@@ -8,7 +8,8 @@
 import type { SupportedLocale } from "@taco-ai/protocol";
 import type { AgentMessage } from "../runtime/pi/types.ts";
 
-import { createUserMessage, tagWrap } from "./builder.ts";
+import { appendUserTag } from "./appendUserTag.ts";
+import { tagWrap } from "./builder.ts";
 
 const LOCALE_DISPLAY: Record<SupportedLocale, string> = {
     zh: "Chinese",
@@ -27,7 +28,7 @@ export function buildReplyLanguageContextHook(
         if (!locale) return undefined;
         const display = LOCALE_DISPLAY[locale];
         const body = `Always reply in ${display}, regardless of the language the user types in.`;
-        event.messages.unshift(createUserMessage(tagWrap("reply_language", body, { locale })));
+        appendUserTag(event.messages, tagWrap("reply_language", body, { locale }));
         return { messages: event.messages };
     };
 }

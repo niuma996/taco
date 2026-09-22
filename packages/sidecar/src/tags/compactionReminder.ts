@@ -10,7 +10,8 @@
  */
 
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
-import { createUserMessage, tagWrap } from "./builder.ts";
+import { appendUserTag } from "./appendUserTag.ts";
+import { tagWrap } from "./builder.ts";
 
 const REMINDER_TEXT =
     "The conversation was just compacted. Older messages have been summarized. " +
@@ -40,7 +41,7 @@ export function buildCompactionReminderHook(): CompactionReminderHandle {
         hook: (event: ContextEvent): ContextResult | undefined => {
             if (!compactionJustHappened) return undefined;
             compactionJustHappened = false;
-            event.messages.unshift(createUserMessage(wrapped));
+            appendUserTag(event.messages, wrapped);
             return { messages: event.messages };
         },
         notify: () => {

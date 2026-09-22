@@ -554,6 +554,7 @@ export class AttachedSession extends EventEmitter {
                 mutationGateRoot: args.env.cwd,
                 checkpointManager: attached.checkpoints,
                 pinOnceConsumer,
+                fingerprintKey: `${args.session.metadata.id}:${lane.name}`,
             },
         );
         attached.skillReinjector = skillReinjector;

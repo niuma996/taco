@@ -456,6 +456,15 @@ export interface SessionContextInfoResult {
     /** Prompt-cache hit / reuse ratio = ΣcacheRead / Σ(input + cacheRead). Range 0..1;
      *  omitted when there are no cacheable input records. The denominator excludes
      *  cacheWrite (the unavoidable first-turn write cost) and output, which is the
-     *  Anthropic prompt-cache convention. See ContextInfoService notes. */
+     *  Anthropic prompt-cache convention. See ContextInfoService notes. Compaction
+     *  and branch_summary entries (cacheRead=0) are included, so a more-aggressive
+     *  compaction policy will pull this number down even when assistant turns hit. */
     cacheHitRatio?: number;
+    /**
+     * Same formula as `cacheHitRatio`, but counted over assistant `message`
+     * entries only — compaction / branch_summary rows are left out. Lets the
+     * UI tell "the metric was diluted by summarization" from "the prefix
+     * actually missed". Omitted when there are no assistant usage records.
+     */
+    cacheHitRatioTurns?: number;
 }

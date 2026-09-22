@@ -33,6 +33,7 @@ import { createTaskCreateTool } from "./taskCreate.ts";
 import { createTaskListTool } from "./taskList.ts";
 import { createTaskUpdateTool } from "./taskUpdate.ts";
 import { createTodoWriteTool } from "./todoWrite.ts";
+import { orderTools } from "./toolOrder.ts";
 
 export type TacoTool = AgentHarnessTool<TacoToolContext>;
 
@@ -119,18 +120,16 @@ export function defaultTools(opts?: {
     tools.push(createShellTool(opts));
     tools.push(createMemoryTool());
     const disabled = new Set(opts?.disabledTools ?? []);
-    return disabled.size > 0 ? tools.filter((t) => !disabled.has(t.name)) : tools;
+    const filtered = disabled.size > 0 ? tools.filter((t) => !disabled.has(t.name)) : tools;
+    return orderTools(filtered);
 }
 
 /**
  * Base tools + 5 task-management tools + 2 plan-mode tools + memory + jobs.
  * AttachedSession calls this on attach.
  *
- * Tool order is the system-prompt order — `toolSummaryForPrompt` reads the
- * returned array as-is and renders one line per tool in that sequence. If
- * you reorder the `push` calls below, update the prompt-tested order in
- * `tests/prompts/prompts.test.ts` and re-read each tool's `promptSummary`
- * to make sure the rendered sequence still makes sense to a model.
+ * Tool order is the system-prompt order — `orderTools` sorts by name so the
+ * harness array and `TOOL_NAMES` stay aligned (plugins included).
  */
 export function defaultToolsWithTasks(
     store: TaskStore,
@@ -151,5 +150,5 @@ export function defaultToolsWithTasks(
     tools.push(createPlanEnterTool(planState, projectDir, planPublisher, sessionId));
     tools.push(createPlanExitTool(planState, projectDir, planPublisher, sessionId));
     tools.push(...createJobsTools());
-    return tools;
+    return orderTools(tools);
 }

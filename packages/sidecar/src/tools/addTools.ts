@@ -1,9 +1,10 @@
 /**
  * addTools — enables the model to load deferred tools on demand.
  *
- * This tool is always present: its schema is in the initial system prompt.
- * The description is a getter so it reflects the current registry state
- * (deferred candidates minus already-loaded tools) without rebuilding the tool object.
+ * This tool is always present. Its description is a frozen string so the
+ * tools JSON (a prompt-cache breakpoint) does not change when a candidate
+ * is loaded. The live catalog lives in the system prompt's `<deferred_tools>`
+ * section instead.
  *
  * When the model calls addTools("nameA,nameB"), those tools are active from the
  * next turn onward. Already-loaded tools are idempotent no-ops.
@@ -23,27 +24,16 @@ import type { TacoTool } from "./index.ts";
 export const addToolsSchema = Type.Object({
     toolNames: Type.String({
         description:
-            "Comma-separated tool names from the Available deferred tools list below. Already-loaded tools are no-ops.",
+            "Comma-separated tool names from the system prompt's <deferred_tools> list. Already-loaded tools are no-ops.",
     }),
 });
 
 export type AddToolsToolInput = Static<typeof addToolsSchema>;
 
-function buildDescription(controller: SessionToolController): string {
-    // Subtract tools already loaded in this session — model must only see candidates
-    // that are not yet active.
-    const loaded = new Set(controller.loadedToolNames());
-    const deferred = controller.registry.listDeferred().filter((c) => !loaded.has(c.name));
-    if (deferred.length === 0) {
-        return "Load additional tools by name. (No deferred tools available in this session.)";
-    }
-    return [
-        "Load additional tools by name. Already-loaded tools are no-ops.",
-        "",
-        "Available deferred tools:",
-        ...deferred.map((c) => `  - ${c.name}: ${c.summary}`),
-    ].join("\n");
-}
+const ADD_TOOLS_DESCRIPTION =
+    "Load additional tools by name from the deferred registry. " +
+    "Call with a comma-separated list of names from the system prompt's <deferred_tools> section. " +
+    "Already-loaded names are no-ops. Unknown names are reported in the result.";
 
 function formatResult(result: AddToolsResult): string {
     const lines: string[] = [];
@@ -58,7 +48,7 @@ function formatResult(result: AddToolsResult): string {
     if (result.unknown.length > 0) {
         lines.push(
             `Unknown tools (not in the available list): ${result.unknown.join(", ")}. ` +
-                "Retry with a name from the Available deferred tools list.",
+                "Retry with a name from the system prompt's <deferred_tools> list.",
         );
     }
     if (result.failed.length > 0) {
@@ -73,14 +63,12 @@ export function createAddToolsTool(controller: SessionToolController): TacoTool 
     return {
         name: "addTools",
         label: "addTools",
-        get description(): string {
-            return buildDescription(controller);
-        },
+        description: ADD_TOOLS_DESCRIPTION,
         parameters: addToolsSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Load additional tools by name on demand from the deferred registry. Only invoke for tools listed under 'Available deferred tools' in this tool's description.",
+                "Load additional tools by name on demand from the deferred registry. Only invoke for names listed in the system prompt's <deferred_tools> section.",
             mutates: true,
         },
         async execute(

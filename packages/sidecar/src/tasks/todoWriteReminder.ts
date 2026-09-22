@@ -10,7 +10,8 @@
  */
 
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
-import { createUserMessage, tagWrap } from "../tags/builder.ts";
+import { appendUserTag } from "../tags/appendUserTag.ts";
+import { tagWrap } from "../tags/builder.ts";
 import { findActiveListId } from "./activeList.ts";
 import type { TaskStore } from "./taskTypes.ts";
 import { isUnfinishedStatus } from "./taskTypes.ts";
@@ -80,7 +81,7 @@ export function buildTodoWriteReminderContextHook(
         const streak = countConsecutiveTurnsWithoutTodoWrite(event.messages);
         if (streak < TURNS_BETWEEN_REMINDERS) return undefined;
 
-        event.messages.unshift(createUserMessage(wrapped));
+        appendUserTag(event.messages, wrapped);
         return { messages: event.messages };
     };
 }

@@ -35,9 +35,9 @@ describe("buildCompactionReminderHook", () => {
         const injected = hook(ev);
         assert.ok(injected?.messages, "fires after notify");
         assert.equal(injected.messages.length, 2);
-        assert.match(firstText(injected.messages[0] as AgentMessage), /^<compaction_reminder>/);
-        assert.match(firstText(injected.messages[0] as AgentMessage), /just compacted/);
-        assert.match(firstText(injected.messages[0] as AgentMessage), /trust the PINNED text/);
+        assert.match(firstText(injected.messages[1] as AgentMessage), /^<compaction_reminder>/);
+        assert.match(firstText(injected.messages[1] as AgentMessage), /just compacted/);
+        assert.match(firstText(injected.messages[1] as AgentMessage), /trust the PINNED text/);
 
         // Second call without another notify → cleared.
         assert.equal(hook(ev), undefined, "fires only once per notify");
@@ -67,18 +67,15 @@ describe("buildCompactionReminderHook", () => {
         assert.ok(a.hook(ev), "A still fires its own reminder");
     });
 
-    it("places the tag before the original messages AND mutates the input array in place", () => {
+    it("places the tag after the original messages AND mutates the input array in place", () => {
         const { hook, notify } = buildCompactionReminderHook();
         const userMsgRef = userMsg("real");
         const original = [userMsgRef];
         notify();
         const res = hook({ messages: original } as ContextEvent);
         assert.ok(res);
-        // New contract: hook mutates `event.messages` in place (required by
-        // pi-agent-core's last-writer-wins emitHook semantics) and returns
-        // the same array reference.
         assert.equal(res.messages, original, "result.messages must be the same reference");
         assert.equal(original.length, 2, "input array must be mutated to length 2");
-        assert.equal(original[1], userMsgRef);
+        assert.equal(original[0], userMsgRef);
     });
 });

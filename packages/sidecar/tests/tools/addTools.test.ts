@@ -68,33 +68,26 @@ describe("addTools tool schema", () => {
 });
 
 describe("addTools description", () => {
-    it("lists deferred candidates with name and summary", () => {
+    it("is a frozen string that does not list deferred candidates", () => {
         const { tool } = makeTool(["git-status", "pg-query"]);
-        assert.ok(tool.description.includes("git-status"));
-        assert.ok(tool.description.includes("summary:git-status"));
-        assert.ok(tool.description.includes("pg-query"));
-        assert.ok(tool.description.includes("summary:pg-query"));
+        assert.ok(tool.description.includes("<deferred_tools>"));
+        assert.ok(!tool.description.includes("git-status"));
+        assert.ok(!tool.description.includes("pg-query"));
     });
 
-    it("reflects registry changes after loading (description is a getter)", async () => {
+    it("does not change after loading a deferred tool", async () => {
         const registry = makeRegistry(["git-status", "pg-query"]);
         const controller = new DefaultSessionToolController(registry);
         controller.bindHarness(new FakeToolCollection([]));
         const tool = createAddToolsTool(controller);
-        assert.ok(tool.description.includes("pg-query"));
-
-        // After loading, the tool leaves the deferred list.
+        const before = tool.description;
         await controller.addTools(["git-status"]);
-        assert.ok(
-            !tool.description.includes("git-status"),
-            "loaded tool must leave the deferred list",
-        );
-        assert.ok(tool.description.includes("pg-query"));
+        assert.equal(tool.description, before);
     });
 
-    it("says none available when no deferred candidates", () => {
+    it("still describes the tool when no deferred candidates exist", () => {
         const { tool } = makeTool([]);
-        assert.ok(tool.description.includes("No deferred tools available"));
+        assert.ok(tool.description.includes("Load additional tools"));
     });
 });
 

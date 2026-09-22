@@ -91,12 +91,19 @@ describe("builtin git-context extension — hook", () => {
 
     it("injects a <recent_git_commits> tag with inline guidance when cwd is a git repo", async () => {
         const hook = buildGitContextHook(gitDir);
-        const result = await hook({ messages: makeMessages() } as ContextEvent);
+        const original = makeMessages();
+        const result = await hook({ messages: original } as ContextEvent);
         assert.ok(result?.messages, "hook should return messages");
         assert.ok(Array.isArray(result.messages));
-        const first = result.messages[0];
-        assert.ok(first);
-        const content = (first as { content?: unknown }).content;
+        assert.equal(result.messages[0], original[0], "original user stays at messages[0]");
+        // Commits then working-tree: commits is the penultimate message when
+        // both tags fire (this fixture has uncommitted files).
+        const commitsMsg =
+            result.messages.length >= 3
+                ? result.messages[result.messages.length - 2]
+                : result.messages[result.messages.length - 1];
+        assert.ok(commitsMsg);
+        const content = (commitsMsg as { content?: unknown }).content;
         let text: string;
         if (typeof content === "string") {
             text = content;
@@ -105,7 +112,7 @@ describe("builtin git-context extension — hook", () => {
         } else {
             text = "";
         }
-        assert.match(text, /^<recent_git_commits source="workspace" n="/);
+        assert.match(text, /<recent_git_commits source="workspace" n="/);
         assert.match(text, /second commit/);
         assert.match(text, /first commit/);
         assert.match(text, /README\.md|src\.ts/);
@@ -118,10 +125,10 @@ describe("builtin git-context extension — hook", () => {
         const hook = buildGitContextHook(gitDir);
         const result = await hook({ messages: makeMessages() } as ContextEvent);
         assert.ok(result?.messages, "hook should return messages");
-        // Two leading messages: <recent_git_commits> then <working_tree_changes>
-        assert.equal(result.messages.length >= 2, true, "expected at least 2 leading messages");
-        const first = result.messages[0];
-        const second = result.messages[1];
+        // Original user stays at [0]; tags append at the tail.
+        assert.equal(result.messages.length >= 3, true, "expected original + 2 git tags");
+        const first = result.messages[result.messages.length - 2];
+        const second = result.messages[result.messages.length - 1];
         const firstContent = (first as { content?: unknown }).content;
         const secondContent = (second as { content?: unknown }).content;
         const firstText =

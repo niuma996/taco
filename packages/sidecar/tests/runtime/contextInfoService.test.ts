@@ -130,6 +130,7 @@ describe("ContextInfoService", () => {
         // but no cache hits" from `undefined` ("fresh session, no calls yet").
         assert.equal(result.cacheRead, 0);
         assert.equal(result.cacheHitRatio, 0);
+        assert.equal(result.cacheHitRatioTurns, 0);
     });
 
     it("hit rate = ΣcacheRead / Σ(input + cacheRead); cacheWrite + output excluded", async () => {
@@ -155,6 +156,7 @@ describe("ContextInfoService", () => {
             Math.abs((result.cacheHitRatio ?? 0) - 0.75) < 1e-9,
             `expected 0.75, got ${result.cacheHitRatio}`,
         );
+        assert.equal(result.cacheHitRatioTurns, result.cacheHitRatio);
     });
 
     it("input=0 (all-cached prefix) → hit rate 100%", async () => {
@@ -200,6 +202,29 @@ describe("ContextInfoService", () => {
             Math.abs((result.cacheHitRatio ?? 0) - 40_000 / 60_000) < 1e-9,
             `expected 0.667, got ${result.cacheHitRatio}`,
         );
+        // Turns-only excludes the compaction row, so the assistant turn is a
+        // perfect hit.
+        assert.equal(result.cacheHitRatioTurns, 1);
+    });
+
+    it("a compaction-only log omits cacheHitRatioTurns (summary is not a turn)", async () => {
+        const svc = new ContextInfoService({
+            session: makeSessionStub({
+                entries: [
+                    compactionEntry({
+                        input: 20_000,
+                        output: 8_000,
+                        cacheRead: 0,
+                        cacheWrite: 0,
+                    }),
+                ],
+            }),
+            lane: makeLaneStub(fakeModel),
+        });
+        const result = await svc.getContextInfo();
+        assert.equal(result.cacheRead, 0);
+        assert.equal(result.cacheHitRatio, 0);
+        assert.equal(result.cacheHitRatioTurns, undefined);
     });
 
     it("partial usage records are skipped (missing cost.total)", async () => {

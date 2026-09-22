@@ -42,7 +42,6 @@ import {
     buildStripThinkingContextHook,
     type ImChannelContext,
 } from "../../tags/index.ts";
-import { throttleByContent } from "../../tags/throttle.ts";
 import { type ActiveTasksState, buildActiveTasksContextHook } from "../../tasks/activeTasksTag.ts";
 import { buildTodoWriteReminderContextHook } from "../../tasks/todoWriteReminder.ts";
 import type { PinOnceConsumer } from "../compaction/pinOnceConsumer.ts";
@@ -57,6 +56,7 @@ import type {
     Skill,
     ThinkingLevel,
 } from "../pi/types.ts";
+import { recordPromptCacheFingerprint } from "./promptCacheFingerprint.ts";
 
 const log = createLogger("taco-ext");
 
@@ -161,6 +161,12 @@ export interface HookWiringOptions {
      * as compressions complete.
      */
     pinOnceConsumer?: PinOnceConsumer;
+    /**
+     * Stable key for prompt-cache fingerprints (`sessionId:lane`). Without it
+     * the tracker falls back to the lane name, which collides across sessions
+     * in one sidecar.
+     */
+    fingerprintKey?: string;
 }
 
 /**
@@ -325,22 +331,19 @@ export async function wireHarnessHooks(
     // ── protocol context hooks (trusted, not wrapped) ──
     // 1. strip `drop` policy tags before LLM conversion
     disposers.push(onContext(buildDropPolicyContextHook()));
-    // 2. prepend `<instructions>` (CLAUDE.md), throttled so unchanged content
-    //    is only re-injected every 20 turns at most. After compaction the old
-    //    copy is gone (instructions is a `drop` tag), so the skip cap ensures
-    //    the model periodically re-receives CLAUDE.md.
+    // 2. append `<instructions>` (CLAUDE.md) when missing or changed. The tag
+    //    is `drop` at compaction, so the next call after a compact re-injects.
+    //    Append, not unshift: putting this at messages[0] and then skipping it
+    //    on later turns rewrote the prompt-cache prefix every 20 calls.
     disposers.push(
         onContext(
-            throttleByContent(
-                buildInstructionsContextHook({
-                    cwd: opts.cwd,
-                    // Fall back to "no config" (= defaults) when the caller did
-                    // not supply a thunk — preserves the documented behavior
-                    // for tests / older call sites that don't pass it through.
-                    getConfig: opts.getInstructionsConfig ?? (() => undefined),
-                }),
-                { maxConsecutiveSkips: 20 },
-            ),
+            buildInstructionsContextHook({
+                cwd: opts.cwd,
+                // Fall back to "no config" (= defaults) when the caller did
+                // not supply a thunk — preserves the documented behavior
+                // for tests / older call sites that don't pass it through.
+                getConfig: opts.getInstructionsConfig ?? (() => undefined),
+            }),
         ),
     );
     // 3. append `<env>` (current local time) to every LLM context.
@@ -350,17 +353,10 @@ export async function wireHarnessHooks(
     if (opts.getImChannelContext) {
         disposers.push(onContext(buildImChannelContextHook(opts.getImChannelContext)));
     }
-    // 4. prepend `<reply_language>` whenever getUiLocale() returns a value —
-    //    content is stable across turns unless the user switches UI language
-    //    (rare), so wrap in throttleByContent to skip redundant re-injection.
+    // 4. append `<reply_language>` whenever getUiLocale() returns a value.
+    //    Tail placement keeps messages[0] stable across locale-stable turns.
     if (opts.getUiLocale) {
-        disposers.push(
-            onContext(
-                throttleByContent(buildReplyLanguageContextHook(opts.getUiLocale), {
-                    maxConsecutiveSkips: 50,
-                }),
-            ),
-        );
+        disposers.push(onContext(buildReplyLanguageContextHook(opts.getUiLocale)));
     }
     // 5. strip signature-bearing ThinkingContent blocks when thinkingLevel === "off",
     //    preventing Anthropic from triggering signature replay with
@@ -421,15 +417,10 @@ export async function wireHarnessHooks(
 
     // ── memory context hook — injects <memory> tag; skips if already consumed.
     // Runs after protocol hooks so memory is the outermost user-context layer.
-    // Throttled — MEMORY.md content is stable for long stretches, so don't
-    // repeat the same user message verbatim each turn. Throttle hashes the
-    // resulting messages and skips when content is unchanged.
+    // Appended at the tail (see appendUserTag) so a content-stable skip cannot
+    // rewrite messages[0]. Injected every call until PinOnceConsumer consumes it.
     if (opts.memoryStore) {
-        disposers.push(
-            onContext(
-                throttleByContent(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)),
-            ),
-        );
+        disposers.push(onContext(buildMemoryContextHook(opts.memoryStore, opts.pinOnceConsumer)));
     }
 
     // ── task-driven context hooks (both gated on getActiveTasksState) ──
@@ -452,9 +443,8 @@ export async function wireHarnessHooks(
     }
 
     // ── compaction_reminder context hook — fires once after each compaction.
-    //    Registered LAST so its unshift lands on top of every other hook's
-    //    output: `transform_context` chains, so the last handler sees the fully
-    //    transformed message list.
+    //    Registered LAST so it sees the fully transformed message list, then
+    //    appends at the tail (does not rewrite messages[0]).
     disposers.push(onContext(compactionReminder.hook));
 
     // ── extension tool_call / tool_result hooks (wrapped) ──
@@ -515,6 +505,17 @@ export async function wireHarnessHooks(
     for (const hook of extToolResultHooks.external) {
         disposers.push(onToolResult(wrapHook(hook, "tool_result:external")));
     }
+
+    // ── prompt-cache fingerprint (always on; hashes only, no payload body) ──
+    // Logs system / tools / messages[0] hashes so a later cacheRead≈128 miss
+    // can name which field moved. Does not rewrite the payload.
+    disposers.push(
+        harness.hooks.on("before_payload", (event) => {
+            const key = opts.fingerprintKey ?? event.lane;
+            recordPromptCacheFingerprint(key, event.payload);
+            return undefined;
+        }),
+    );
 
     // ── debug hook (gated by TACO_DEBUG_LLM_PAYLOAD=1) ──
     // stderr → sidecar-log event → desktop Console / LLM Dump panel. Off by

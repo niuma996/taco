@@ -128,6 +128,10 @@ export function ContextIndicator(props: ContextIndicatorProps) {
 
     const hitPct =
         info.cacheHitRatio !== undefined ? `${Math.round(info.cacheHitRatio * 100)}%` : "—";
+    const turnsPct =
+        info.cacheHitRatioTurns !== undefined
+            ? `${Math.round(info.cacheHitRatioTurns * 100)}%`
+            : undefined;
     const read = info.cacheRead !== undefined ? formatTokens(info.cacheRead) : "—";
 
     return (
@@ -201,6 +205,11 @@ export function ContextIndicator(props: ContextIndicatorProps) {
                     <div className="context-indicator-popover__row context-indicator-popover__row--cache">
                         {t("context.cacheHit", { pct: hitPct, read })}
                     </div>
+                    {turnsPct !== undefined && turnsPct !== hitPct && (
+                        <div className="context-indicator-popover__row context-indicator-popover__row--cache">
+                            {t("context.cacheHitTurns", { pct: turnsPct })}
+                        </div>
+                    )}
                     {compacting && (
                         <div className="context-indicator-popover__row context-indicator-popover__row--warn">
                             {t("context.compactingInProgress")}

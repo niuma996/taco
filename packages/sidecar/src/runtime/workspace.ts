@@ -48,6 +48,10 @@ import {
     type PlanSnapshotPublisher,
 } from "../plan/planPushAdapter.ts";
 import {
+    formatAgentsForSystemPrompt,
+    formatDeferredToolsForSystemPrompt,
+} from "../prompts/formatCatalogForSystemPrompt.ts";
+import {
     buildSystemPrompt,
     formatSkillsForSystemPrompt,
     projectContextForPrompt,
@@ -75,6 +79,7 @@ import {
 } from "../tasks/taskPushAdapter.ts";
 import type { SelfRpcCall, TacoToolContext } from "../tools/context.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
+import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
 import { DefaultDeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
@@ -336,6 +341,12 @@ export class WorkspaceRuntime extends EventEmitter {
      * config and AttachedSession uses its own default (true / 0.7).
      */
     readonly compaction?: ResolvedCompaction;
+    /**
+     * Agent-type catalog captured at construction. `rebuildSystemPrompt` runs
+     * before `agentSpawner` is assigned, so the getter `this.agents` is not
+     * safe there — this snapshot is.
+     */
+    private readonly agentCatalog: ReadonlyArray<AgentDefinition>;
     /** User-level memory store. */
     readonly memoryStore: MemoryStore;
     /** Pre-write snapshots for this workspace; undefined when FS tools are off. */
@@ -511,6 +522,7 @@ export class WorkspaceRuntime extends EventEmitter {
         this.projectContextSnapshot = promptSnapshots.projectContext;
         this.parentInstructionsBlock = promptSnapshots.parentInstructionsBlock;
         this.instructionsConfig = options.instructionsConfig;
+        this.agentCatalog = options.agents ?? [];
         this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
         this.streamOptions = options.streamOptions ?? {};
         this.defaultThinkingLevel = options.defaultThinkingLevel;
@@ -787,7 +799,8 @@ export class WorkspaceRuntime extends EventEmitter {
             // Re-resolved per build, not captured: a grant or revocation edited
             // after construction must reach the next turn's assembly.
             const policy = this.resolveImPolicy();
-            return policy ? filterToolsForImPolicy(merged, policy) : merged;
+            const filtered = policy ? filterToolsForImPolicy(merged, policy) : merged;
+            return orderTools(filtered);
         };
         const ephemeralTaskState: SessionTaskState = {
             taskStore: { currentListId: null, lists: new Map() },
@@ -881,8 +894,21 @@ export class WorkspaceRuntime extends EventEmitter {
         // listing would be noise (visible to the model but unreachable).
         const skillsPrompt = formatSkillsForSystemPrompt([...skills]);
         if (skillsPrompt) contributors.push({ append: skillsPrompt, requires: ["skills"] });
+        const deferredPrompt = formatDeferredToolsForSystemPrompt(
+            this.toolRegistry.listDeferred().map((c) => ({ name: c.name, summary: c.summary })),
+        );
+        if (deferredPrompt) contributors.push({ append: deferredPrompt });
+        const agentsPrompt = formatAgentsForSystemPrompt(
+            this.agentCatalog.map((a) => ({
+                agentType: a.agentType,
+                description: a.description,
+                whenToUse: a.whenToUse,
+                context: a.context,
+            })),
+        );
+        if (agentsPrompt) contributors.push({ append: agentsPrompt });
         return buildSystemPrompt({
-            tools: this.tools,
+            tools: orderTools(this.tools),
             modelIdentity: this.modelIdentitySnapshot,
             projectContext: this.projectContextSnapshot,
             contributors: contributors.length > 0 ? contributors : undefined,
@@ -928,10 +954,10 @@ export class WorkspaceRuntime extends EventEmitter {
         taskState: SessionTaskState,
     ): { tools: TacoTool[]; removed: string[] } | undefined {
         const next = this.toolsBuilder(sessionId, taskState);
-        const before = this.tools.map((t) => t.name).join("\u0000");
-        const after = next.map((t) => t.name).join("\u0000");
+        const before = toolNamesKey(this.tools);
+        const after = toolNamesKey(next);
         if (before === after) return undefined;
-        this.tools = next;
+        this.tools = orderTools(next);
         this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
         const added = after.split("\u0000").filter((n) => n && !before.split("\u0000").includes(n));
         const removed = before
@@ -942,7 +968,7 @@ export class WorkspaceRuntime extends EventEmitter {
             added,
             removed,
         });
-        return { tools: next, removed };
+        return { tools: this.tools, removed };
     }
 
     // ─────────── session list / history (delegates to SessionRegistry) ───────────

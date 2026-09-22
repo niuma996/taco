@@ -10,6 +10,7 @@
 import { harnessContext } from "../../lib/harnessContext.ts";
 import type { TacoToolContext } from "../../tools/context.ts";
 import type { TacoTool } from "../../tools/index.ts";
+import { orderTools } from "../../tools/toolOrder.ts";
 import type { AgentHarness, AgentLane } from "../pi/types.ts";
 
 export interface ToolsetRefreshArgs {
@@ -44,11 +45,11 @@ export function createToolsetRefresher(args: ToolsetRefreshArgs): () => Promise<
         // workspace retired and leave the rest alone.
         const current = await harness.getTools(harnessContext);
         const kept = current.filter((t) => !retired.has(t.name) && !nextNames.has(t.name));
-        const merged = [...next.tools, ...kept];
+        const merged = orderTools([...next.tools, ...kept]);
         const active = (await lane.getActiveTools(harnessContext)).filter(
             (name) => !retired.has(name),
         );
-        for (const name of nextNames) {
+        for (const name of merged.map((t) => t.name)) {
             if (!active.includes(name)) active.push(name);
         }
         setSystemPrompt(next.systemPrompt);

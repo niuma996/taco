@@ -356,7 +356,8 @@
     "compactFailedNothing": "No context to compact",
     "compactFailedNotAttached": "Session is not attached",
     "compactNow": "Compact",
-    "cacheHit": "Cache hit rate: {{pct}} · {{read}} reused"
+    "cacheHit": "Cache hit rate: {{pct}} · {{read}} reused",
+    "cacheHitTurns": "Turns only: {{pct}}"
   },
   "tools": {
     "builtinHeader": "Built-in tools ({{count}})",

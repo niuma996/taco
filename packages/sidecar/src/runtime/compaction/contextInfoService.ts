@@ -1,7 +1,11 @@
 /**
  * ContextInfoService — session context-usage queries + context-info assembly.
  *
- * cacheHitRatio = ΣcacheRead / Σ(input + cacheRead).
+ * cacheHitRatio = ΣcacheRead / Σ(input + cacheRead) over assistant turns
+ * **and** compaction / branch_summary entries.
+ * cacheHitRatioTurns = the same formula over assistant turns only — compaction
+ * rows (`cacheRead=0`) no longer dilute the number, so a policy change that
+ * summarises more often cannot look like a prefix-cache regression.
  * Denominator excludes `cacheWrite` (first-turn prefix is unavoidable) and
  * `output` (pi compaction uses `cacheRetention: "none"`; summary would dilute the
  * ratio).
@@ -125,11 +129,14 @@ export class ContextInfoService {
     /**
      * Read cache-hit metrics by walking `session.findEntries()`. Returns empty
      * object on a fresh session.
-     * cacheRead = Σ usage.cacheRead; cacheHitRatio = Σ cacheRead / Σ (input + cacheRead).
+     * cacheRead = Σ usage.cacheRead (all counted entries);
+     * cacheHitRatio includes compaction / branch_summary;
+     * cacheHitRatioTurns is assistant messages only.
      */
     private async readCacheMetrics(): Promise<{
         cacheRead?: number;
         cacheHitRatio?: number;
+        cacheHitRatioTurns?: number;
     }> {
         try {
             // Whole-log scan, not a branch walk: the cache aggregate is
@@ -137,19 +144,27 @@ export class ContextInfoService {
             const entries = await this.session.findEntries(undefined, harnessContext);
             let cacheRead = 0;
             let input = 0;
+            let turnCacheRead = 0;
+            let turnInput = 0;
             for (const entry of entries) {
                 const usage = extractEntryUsage(entry);
                 if (!usage) continue;
                 cacheRead += usage.cacheRead;
                 input += usage.input;
+                if (entry.type === "message") {
+                    turnCacheRead += usage.cacheRead;
+                    turnInput += usage.input;
+                }
             }
             const cacheable = input + cacheRead;
             if (cacheable === 0) {
                 return {};
             }
+            const turnCacheable = turnInput + turnCacheRead;
             return {
                 cacheRead,
                 cacheHitRatio: cacheRead / cacheable,
+                ...(turnCacheable > 0 ? { cacheHitRatioTurns: turnCacheRead / turnCacheable } : {}),
             };
         } catch (e) {
             log.error("readCacheMetrics:", e);
