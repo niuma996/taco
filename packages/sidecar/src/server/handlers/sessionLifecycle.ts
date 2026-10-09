@@ -5,6 +5,8 @@
  * metadata; they do not interact with the harness turn loop.
  */
 
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import type {
     AgentMessage,
     AttachParams,
@@ -220,7 +222,7 @@ export function registerSessionLifecycleHandlers(): void {
         RPC.sessionDelete,
         true,
         async ({ workspace, params }: MethodCtx<DeleteSessionParams>) => {
-            await workspace.deleteSession(params.sessionId);
+            await deleteSessionTree(workspace, params.sessionId);
             return { deleted: true };
         },
         { command: true, schema: sessionDeleteSchema },
@@ -238,6 +240,78 @@ export function registerSessionLifecycleHandlers(): void {
 }
 
 // ───────── helpers (module-local; not exported) ─────────
+
+/**
+ * How long a delete waits for each subagent it aborts to unwind before giving
+ * up on that child.
+ */
+const STOP_CHILD_TIMEOUT_MS = 5_000;
+
+/**
+ * Delete a session, everything spawned beneath it, and its sidecar-owned
+ * auxiliary directory.
+ *
+ * Three separate stores have to go, and no single call covers them:
+ *
+ *  - The transcript itself (`workspace.deleteSession` → `repo.delete`), which
+ *    for a subagent is a `.jsonl` in pi's cwd directory.
+ *  - The transcripts of its descendants. pi records `parentSessionId` in each
+ *    session's storage header, so the tree is walkable from `listSessions()`
+ *    without opening a single file. Nothing else removes them: the parent's
+ *    deletion does not cascade, and `session.list` hides subagent sessions from
+ *    the user, so an orphan would be invisible and unreachable.
+ *  - `<sessionsRoot>/<sid>/` — the `tasks/` and `subagent-results/`
+ *    directories. `repo.delete` removes one file by path and these are siblings
+ *    of the cwd directory rather than children of the transcript, so they sit
+ *    outside its reach entirely.
+ *
+ * Children are removed before the parent so a failure mid-way never leaves a
+ * transcript pointing at a parent that is already gone.
+ *
+ * A child that will not stop within `STOP_CHILD_TIMEOUT_MS` is skipped, not
+ * fatal. pi refuses to delete a session that is still open, and a subagent
+ * stuck on a long tool call would otherwise make the whole session undeletable
+ * — a worse outcome than the one leftover transcript, which the user never
+ * sees listed and which the next stop settles on its own.
+ */
+async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: SessionId): Promise<void> {
+    // Post-order list of every descendant: children before their own children.
+    const ordered: SessionId[] = [];
+    const collect = async (id: SessionId): Promise<void> => {
+        const children = (await workspace.listSessions())
+            .filter((meta) => meta.parentSessionId === id)
+            .map((meta) => asSessionId(meta.id));
+        for (const child of children) await collect(child);
+        ordered.push(id);
+    };
+    await collect(sessionId);
+
+    // Abort down the whole tree, not just the root: a grandchild is registered
+    // against its own parent, so stopping only the direct children would leave
+    // the innermost runs going.
+    const stuck = new Set<SessionId>();
+    for (const id of ordered) {
+        for (const running of await workspace.agentSpawner.stopChildrenOf(
+            id,
+            STOP_CHILD_TIMEOUT_MS,
+        )) {
+            stuck.add(running);
+        }
+    }
+
+    for (const id of ordered) {
+        if (stuck.has(id)) continue;
+        const attached = workspace.getAttached(id);
+        if (attached) await workspace.detach(id);
+        await workspace.repo.delete(await workspace.openSession(id), harnessContext);
+        workspace.invalidateListCache();
+    }
+
+    // Last: a child that settles after this point re-creates the directory in
+    // its settle path, which is why the abort wait above has to come first.
+    // Session ids are uuidv7, so the join needs no escaping.
+    await rm(join(workspace.sessionsRoot, sessionId), { recursive: true, force: true });
+}
 
 async function buildSessionEntry(
     workspace: WorkspaceRuntime,

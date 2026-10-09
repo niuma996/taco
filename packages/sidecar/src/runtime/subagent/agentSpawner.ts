@@ -249,6 +249,7 @@ export class AgentSpawner extends EventEmitter {
         this.pendingWriteQueues = new Map();
         this.backgroundRuns = new Set();
         this.subagentControllers = new Map();
+        this.controllerWaiters = new Map();
         // Attach is the moment a previously unreachable parent becomes
         // reachable, which is exactly what a stranded notice was waiting for.
         // Fire-and-forget: a flush must never delay or fail an attach.
@@ -364,6 +365,68 @@ export class AgentSpawner extends EventEmitter {
         string,
         { controller: AbortController; parentSessionId: SessionId }
     >;
+
+    /**
+     * Resolvers parked by `stopChildrenOf`, keyed by the subSessionId they are
+     * waiting on. Released from `releaseController`, so a waiter observes the
+     * same moment the controller entry disappears — no polling.
+     */
+    private readonly controllerWaiters: Map<string, Set<() => void>>;
+
+    /**
+     * Drop a child's controller entry and release anyone waiting on it.
+     *
+     * Every removal goes through here so `stopChildrenOf` cannot wait forever
+     * on a child that has in fact finished: an entry that vanished without
+     * resolving its waiter would strand the caller until its own timeout.
+     */
+    private releaseController(subSessionId: string): void {
+        this.subagentControllers.delete(subSessionId);
+        const waiters = this.controllerWaiters.get(subSessionId);
+        if (!waiters) return;
+        this.controllerWaiters.delete(subSessionId);
+        for (const resolve of waiters) resolve();
+    }
+
+    /**
+     * Abort every running child of `parentSessionId` and wait for them to stop,
+     * giving up after `timeoutMs`.
+     *
+     * Aborting only fires the signal — the child harness unwinds asynchronously,
+     * and its session stays open until it does. A caller that goes on to delete
+     * the parent (and therefore the children's transcripts) has to wait for that
+     * window or pi's repo rejects the delete with "Session is open".
+     *
+     * Returns the children still running when the wait ended, so the caller can
+     * skip them rather than fail the whole operation over one slow child. On
+     * timeout this list is non-empty; on a clean stop it is empty.
+     */
+    async stopChildrenOf(parentSessionId: SessionId, timeoutMs = 5_000): Promise<SessionId[]> {
+        const running = [...this.subagentControllers.entries()]
+            .filter(([, entry]) => entry.parentSessionId === parentSessionId)
+            .map(([subSessionId]) => asSessionId(subSessionId));
+        if (running.length === 0) return [];
+
+        const stopped = running.map(
+            (subSessionId) =>
+                new Promise<void>((resolve) => {
+                    let waiters = this.controllerWaiters.get(subSessionId);
+                    if (!waiters) {
+                        waiters = new Set();
+                        this.controllerWaiters.set(subSessionId, waiters);
+                    }
+                    waiters.add(resolve);
+                }),
+        );
+        for (const subSessionId of running) this.abortSubagentRun(subSessionId, parentSessionId);
+
+        await Promise.race([
+            Promise.all(stopped),
+            new Promise<void>((r) => setTimeout(r, timeoutMs)),
+        ]);
+
+        return running.filter((subSessionId) => this.subagentControllers.has(subSessionId));
+    }
 
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
@@ -570,7 +633,7 @@ export class AgentSpawner extends EventEmitter {
                 readLastAssistantText: (id) => this.extractLastAssistantText(id),
             });
         } finally {
-            if (args.abortController) this.subagentControllers.delete(childSessionId);
+            if (args.abortController) this.releaseController(childSessionId);
         }
     }
 
@@ -927,7 +990,7 @@ export class AgentSpawner extends EventEmitter {
                 clearTimeout(timer);
                 this.backgroundInFlight.delete(parentToolCallId);
                 this.backgroundRuns.delete(run);
-                this.subagentControllers.delete(childSessionId);
+                this.releaseController(childSessionId);
                 // Safe here, not in emitSettled: by the time this whole chain
                 // settles, both the `.then` and `.catch` branches (the only
                 // callers) have already run to completion, so no later call
@@ -1516,7 +1579,7 @@ export class AgentSpawner extends EventEmitter {
             });
         } finally {
             args.signal?.removeEventListener("abort", link);
-            this.subagentControllers.delete(args.subSessionId);
+            this.releaseController(args.subSessionId);
         }
     }
 
