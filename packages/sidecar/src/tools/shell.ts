@@ -23,7 +23,44 @@ export const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB
  * reflects termination: both stay `null` until the process has exited.
  */
 function escalateToSigkill(child: ChildProcess): void {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null && child.signalCode === null) killProcessTree(child, "SIGKILL");
+}
+
+/**
+ * Signal a spawned command and everything it started.
+ *
+ * `spawn(..., { shell: true })` puts `/bin/sh` between us and the real command.
+ * For a single simple command sh `exec`s itself away, so `child.kill()` would
+ * land on the right process — but for anything compound (`a && b`, `a; b`,
+ * `a | b`, `a & wait`) sh stays alive as the group leader and the command runs
+ * as its child. Signalling only the leader leaves that grandchild running: it
+ * keeps its inherited stdout/stderr pipes open, so the `close` event this
+ * module awaits never fires and the tool call hangs until the grandchild exits
+ * on its own. A timed-out or aborted `pnpm build && pnpm test` is the common
+ * case, not an edge one.
+ *
+ * `detached: true` (set at spawn) makes the child a process-group leader, so
+ * the negative pid addresses the whole group rather than one member. Killing
+ * the group also reaches grandchildren the child spawned itself.
+ *
+ * POSIX-only, and deliberately so: on Windows `detached` gives the child its
+ * own console window, which is exactly what `HIDDEN_WINDOWS_SPAWN` exists to
+ * prevent, and negative pids are not a thing there either. Windows therefore
+ * still terminates only the direct child — see `killProcessTree`'s Windows
+ * branch for what that leaves behind.
+ */
+function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+    if (process.platform === "win32" || child.pid === undefined) {
+        child.kill(signal);
+        return;
+    }
+    // ESRCH just means the group is already gone — the normal race when a short
+    // command finishes between the timeout firing and this call.
+    try {
+        process.kill(-child.pid, signal);
+    } catch {
+        child.kill(signal);
+    }
 }
 
 function truncate(text: string, maxBytes: number): string {
@@ -77,9 +114,18 @@ export async function runShell(
         Object.entries(process.env).filter(([k]) => !isInjectedEnvKey(k)),
     );
 
+    // POSIX: the command runs under its own process group so `killProcessTree`
+    // can reach every process it starts. Windows: `detached` would pop a console
+    // window, so the tree kill there is limited to the direct child.
     const child =
         spawnArgs === null
-            ? spawn(command, { cwd: opts.cwd, shell: true, env: childEnv, ...HIDDEN_WINDOWS_SPAWN })
+            ? spawn(command, {
+                  cwd: opts.cwd,
+                  shell: true,
+                  env: childEnv,
+                  detached: process.platform !== "win32",
+                  ...HIDDEN_WINDOWS_SPAWN,
+              })
             : spawn(command, spawnArgs, { cwd: opts.cwd, env: childEnv, ...HIDDEN_WINDOWS_SPAWN });
 
     let stdout = "";
@@ -108,7 +154,7 @@ export async function runShell(
     let sigkillTimer: ReturnType<typeof setTimeout> | null = null;
     const timer = setTimeout(() => {
         interrupted = true;
-        child.kill("SIGTERM");
+        killProcessTree(child, "SIGTERM");
         // POSIX: SIGTERM gives the child a chance to flush; SIGKILL after 5s is
         // the hard backstop. Windows: kill() maps to TerminateProcess for any
         // signal name, so the SIGTERM→SIGKILL escalation is a no-op there —
@@ -119,7 +165,7 @@ export async function runShell(
 
     const onAbort = () => {
         interrupted = true;
-        child.kill("SIGTERM");
+        killProcessTree(child, "SIGTERM");
         // Same backstop as the timeout path: a child that ignores SIGTERM
         // must not hold the tool — and the parent's abort, which awaits it —
         // open forever. Clear any timer the timeout path already set so the
