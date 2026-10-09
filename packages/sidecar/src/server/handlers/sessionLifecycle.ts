@@ -6,7 +6,7 @@
  */
 
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, resolve } from "node:path";
 import type {
     AgentMessage,
     AttachParams,
@@ -309,8 +309,27 @@ async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: Session
 
     // Last: a child that settles after this point re-creates the directory in
     // its settle path, which is why the abort wait above has to come first.
-    // Session ids are uuidv7, so the join needs no escaping.
-    await rm(join(workspace.sessionsRoot, sessionId), { recursive: true, force: true });
+    await rm(sessionAuxDir(workspace.sessionsRoot, sessionId), { recursive: true, force: true });
+}
+
+/**
+ * `<sessionsRoot>/<sid>` — the one place a path is built from an RPC parameter.
+ *
+ * `sessionDeleteSchema` is `Type.Any()` and `asSessionId` only rejects the
+ * empty string, so `sessionId` is whatever the caller sent. Every other delete
+ * path goes through metadata resolved from the session list and never joins a
+ * raw input onto a root; this one does, so the segment is checked to be a
+ * single path component before it can reach a recursive delete. Without it a
+ * `../..` id would escape `sessionsRoot`.
+ */
+function sessionAuxDir(sessionsRoot: string, sessionId: SessionId): string {
+    const root = resolve(sessionsRoot);
+    const dir = resolve(root, sessionId);
+    // A single-segment id resolves to a direct child of root; anything with a
+    // separator, a `..`, or a leading `/` lands elsewhere and is rejected here.
+    if (dirname(dir) !== root)
+        throw new Error(`refusing to delete outside sessionsRoot: ${sessionId}`);
+    return dir;
 }
 
 async function buildSessionEntry(

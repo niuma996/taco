@@ -10,7 +10,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { before, describe, it } from "node:test";
@@ -37,7 +37,11 @@ interface DeleteStub {
     };
 }
 
-function makeStub(sessionsRoot: string, parents: Record<string, string | undefined>): DeleteStub {
+function makeStub(
+    sessionsRoot: string,
+    parents: Record<string, string | undefined>,
+    opts: { resolveAnyId?: boolean } = {},
+): DeleteStub {
     const calls: string[] = [];
     const stuck = new Set<string>();
     const makeMeta = (id: string): JsonlSessionMetadata => {
@@ -61,7 +65,7 @@ function makeStub(sessionsRoot: string, parents: Record<string, string | undefin
         listSessions: () => Promise.resolve(Object.keys(parents).map(makeMeta)),
         async openSession(id: SessionId) {
             calls.push(`openSession(${id})`);
-            if (!(id in parents)) throw new Error(`session not found: ${id}`);
+            if (!(id in parents) && !opts.resolveAnyId) throw new Error(`session not found: ${id}`);
             return makeMeta(id);
         },
         getAttached: () => undefined,
@@ -189,5 +193,33 @@ describe("session.delete cascade", () => {
         await deleteWith(stub, "parent");
 
         assert.deepEqual(await readdir(root), ["sibling"]);
+    });
+
+    // sessionDeleteSchema is Type.Any() and asSessionId only rejects "", so this
+    // id is whatever a caller sent. Today `openSession` would already reject a
+    // `../..` id, since it resolves against the real session list — so the stub
+    // is told to resolve anything, to exercise the containment check on its own
+    // rather than relying on that incidental guard.
+    it("refuses a session id that escapes sessionsRoot", async () => {
+        const root = await mkdtemp(join(tmpdir(), "taco-del-"));
+        const outside = join(root, "..", `taco-del-outside-${process.pid}`);
+        await mkdir(outside, { recursive: true });
+        await writeFile(join(outside, "precious.txt"), "keep me", "utf8");
+        try {
+            const stub = makeStub(root, {}, { resolveAnyId: true });
+
+            await assert.rejects(
+                () => deleteWith(stub, `../${outside.split("/").pop()}`),
+                /refusing to delete outside sessionsRoot/,
+            );
+
+            assert.deepEqual(
+                await readdir(outside),
+                ["precious.txt"],
+                "a traversal id must not reach the recursive delete",
+            );
+        } finally {
+            await rm(outside, { recursive: true, force: true });
+        }
     });
 });
