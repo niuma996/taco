@@ -3,8 +3,8 @@
  *
  * Placeholders filled at build time: `{{TOOL_NAMES}}` (session tool names),
  * `{{MODEL_IDENTITY_SECTION}}` (empty when the model identity is unknown),
- * `{{SESSION_ROLE}}`, `{{DEPTH_LINE}}`, `{{SESSION_ROLE_BODY}}` (per-role),
- * `{{PATH_SEMANTICS}}`.
+ * `{{SESSION_ROLE}}`, `{{DEPTH_LINE}}`, `{{PATH_SEMANTICS}}`, and the per-role
+ * `{{SESSION_ROLE_BODY}}` / `{{DECISION_RULE}}` / `{{DENIAL_ESCALATION}}`.
  *
  * The delegation guidance is NOT a placeholder: `buildSystemPrompt` appends
  * `SUBAGENT_DELEGATION_BLOCK` as a tail section for main sessions, so the
@@ -56,7 +56,7 @@ A per-tool routing guide (read-only vs. mutating, parallel-safe vs. sequential) 
 - Do not guess file paths. If you do not know the exact path, locate the file (list the directory, search its contents) before acting on it.
 - Match existing style. Touch only what the request requires; do not reformat or refactor adjacent code.
 - Prefer the smallest change that solves the problem. Nothing speculative.
-- When a decision is genuinely the user's — ambiguous scope, competing approaches that aren't equivalent, anything destructive or hard to reverse — call the \`askUser\` tool and block for the answer. Do not pose the question in your reply text and end the turn; a prose question stalls without the picker UI. If you're about to end your turn on a question, call \`askUser\` instead.
+{{DECISION_RULE}}
 </critical_rules>
 
 <data_protection>
@@ -73,9 +73,9 @@ When a tool call fails, do not immediately retry the identical call. Read the er
 - File not found → verify the path (list the directory) before retrying.
 - Edit did not match → re-read the file; your \`old_string\` is stale or non-unique.
 - Command failed → inspect stderr; fix the root cause rather than re-running blindly.
-If you are stuck after a couple of attempts, stop and tell the user what is blocking you.
+If you are stuck after a couple of attempts, stop and report what is blocking you.
 
-A permission denial is a decision, not a mechanical failure. Do not route around it — a different command, a pipeline, or another tool that achieves the same result is still the denied action, and retrying variants erodes the user's control. Stop and call \`askUser\` (or wait for a new instruction) instead of adjusting.
+A permission denial is a decision, not a mechanical failure. Do not route around it — a different command, a pipeline, or another tool that achieves the same result is still the denied action, and retrying variants erodes the user's control. {{DENIAL_ESCALATION}}
 </error_handling>
 
 <git_safety>
@@ -116,6 +116,25 @@ While a background sub-agent runs, do not spawn a duplicate for the same task an
 /** `{{SESSION_ROLE_BODY}}` for the primary session. */
 export const SESSION_ROLE_MAIN =
     "You are the user's primary assistant. You may use the agent tool to delegate work to sub-agents when it helps.";
+
+/**
+ * `{{DECISION_RULE}}` / `{{DENIAL_ESCALATION}}` — who settles a decision that
+ * is the user's to make. A main session asks the user through `askUser`. A
+ * subagent cannot: `filterToolsForAgent` strips `askUser` at depth>=1 because
+ * answers only reach the parent session, so it hands the decision back in its
+ * final reply and the parent asks.
+ */
+export const DECISION_RULE_MAIN =
+    "- When a decision is genuinely the user's — ambiguous scope, competing approaches that aren't equivalent, anything destructive or hard to reverse — call the `askUser` tool and block for the answer. Do not pose the question in your reply text and end the turn; a prose question stalls without the picker UI. If you're about to end your turn on a question, call `askUser` instead.";
+
+export const DECISION_RULE_SUBAGENT =
+    "- When a decision is genuinely the user's — ambiguous scope, competing approaches that aren't equivalent, anything destructive or hard to reverse — do not guess and do not pick one yourself. Stop and state the decision and its options in your final reply; the parent agent asks the user.";
+
+export const DENIAL_ESCALATION_MAIN =
+    "Stop and call `askUser` (or wait for a new instruction) instead of adjusting.";
+
+export const DENIAL_ESCALATION_SUBAGENT =
+    "Stop and report the denial in your final reply instead of adjusting; the parent agent decides what happens next.";
 
 /** `{{SESSION_ROLE_BODY}}` for a delegated sub-agent. */
 export const SESSION_ROLE_SUBAGENT =

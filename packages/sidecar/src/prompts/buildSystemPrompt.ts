@@ -12,6 +12,10 @@ import { buildPlatformPrompt } from "./buildPlatformPrompt.ts";
 import { fillPlaceholders } from "./fillPlaceholders.ts";
 import {
     CORE_TEMPLATE,
+    DECISION_RULE_MAIN,
+    DECISION_RULE_SUBAGENT,
+    DENIAL_ESCALATION_MAIN,
+    DENIAL_ESCALATION_SUBAGENT,
     PATH_SEMANTICS_DEFAULT,
     PATH_SEMANTICS_HIDDEN,
     SESSION_ROLE_MAIN,
@@ -120,6 +124,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     const toolNames = options.tools.map((t) => t.name);
     const toolNamesText = toolNames.join(", ");
     const sessionKind = options.sessionKind ?? { role: "main", depth: 0 };
+    const isMain = sessionKind.role === "main";
 
     const core = fillPlaceholders(CORE_TEMPLATE, {
         TOOL_NAMES: toolNamesText,
@@ -129,7 +134,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
             ? `\n<model_identity>${options.modelIdentity}</model_identity>\n\n`
             : "\n",
         SESSION_ROLE: sessionKind.role,
-        SESSION_ROLE_BODY: sessionKind.role === "main" ? SESSION_ROLE_MAIN : SESSION_ROLE_SUBAGENT,
+        SESSION_ROLE_BODY: isMain ? SESSION_ROLE_MAIN : SESSION_ROLE_SUBAGENT,
+        // A subagent has no `askUser` (stripped at depth>=1), so user-owned
+        // decisions and permission denials go back to the parent instead.
+        DECISION_RULE: isMain ? DECISION_RULE_MAIN : DECISION_RULE_SUBAGENT,
+        DENIAL_ESCALATION: isMain ? DENIAL_ESCALATION_MAIN : DENIAL_ESCALATION_SUBAGENT,
         DEPTH_LINE: sessionKind.depth > 0 ? ` Depth: ${sessionKind.depth}.` : "",
         PATH_SEMANTICS: options.hideWorkspacePath ? PATH_SEMANTICS_HIDDEN : PATH_SEMANTICS_DEFAULT,
     });

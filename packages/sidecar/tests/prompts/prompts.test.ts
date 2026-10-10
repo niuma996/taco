@@ -168,6 +168,27 @@ describe("buildSystemPrompt", () => {
         }
     });
 
+    it("routes user-owned decisions per role: askUser for main, the parent for a subagent", () => {
+        const main = buildSystemPrompt({ tools: [stubTool("read"), stubTool("askUser")] });
+        assert.match(main, /call the `askUser` tool and block for the answer/);
+        assert.match(main, /Stop and call `askUser` \(or wait for a new instruction\)/);
+
+        // Regression: a subagent has no askUser (filterToolsForAgent strips it at
+        // depth>=1), so telling it to call one contradicts its own tool list.
+        const sub = buildSystemPrompt({
+            tools: [stubTool("read")],
+            sessionKind: { role: "subagent", depth: 1 },
+        });
+        assert.ok(!sub.includes("askUser"), "subagent prompt must not reference askUser");
+        assert.match(sub, /state the decision and its options in your final reply/);
+        assert.match(sub, /report the denial in your final reply/);
+
+        for (const out of [main, sub]) {
+            assert.match(out, /stop and report what is blocking you/);
+            assert.ok(!out.includes("{{"), "no unfilled placeholder may remain");
+        }
+    });
+
     it("appends the delegation section after the core template, before contributor appends", () => {
         const out = buildSystemPrompt({
             tools: [stubTool("read"), stubTool("agent")],
@@ -193,6 +214,14 @@ describe("buildSystemPrompt", () => {
         assert.match(out, /A permission denial is a decision, not a mechanical failure/);
         assert.match(out, /Do not route around it/);
         assert.match(out, /Stop and call `askUser`/);
+
+        // The no-route-around framing is shared; only the escalation target differs.
+        const sub = buildSystemPrompt({
+            tools: [stubTool("read")],
+            sessionKind: { role: "subagent", depth: 1 },
+        });
+        assert.match(sub, /A permission denial is a decision, not a mechanical failure/);
+        assert.match(sub, /Do not route around it/);
     });
 
     it("renders the platform section including the shell block when shell is available", () => {
