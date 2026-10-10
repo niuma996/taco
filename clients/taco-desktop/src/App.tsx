@@ -59,6 +59,7 @@ import { TacoClient } from "./lib/clients/tacoClient.ts";
 import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig.js";
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
+import { type AppNotification, toastsOnArrival } from "./lib/notifications";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
@@ -94,11 +95,13 @@ export default function App() {
         activeWs: ws,
         activeModel,
         activeLevel,
-        errorBanner,
+        notifications,
         defaultCwdSettled,
         dispatch,
         dispatchWs,
-        setErrorBanner,
+        pushNotification,
+        dismissNotification,
+        clearNotifications,
         initFromStorage,
         reloadAllWorkspaces,
         loadMoreSessions,
@@ -118,6 +121,16 @@ export default function App() {
         loadSubagentHistory,
     } = wsApi;
 
+    // The bell hands over every new row; only replies to a user action get the
+    // toast (see `toastsOnArrival`). Stable so the bell's arrival effect does
+    // not re-run on every App render.
+    const toastNewNotification = useCallback(
+        (n: AppNotification) => {
+            if (toastsOnArrival(n)) showToast(n.text, n.level);
+        },
+        [showToast],
+    );
+
     const activeSid = ws?.activeSession;
     // runInFlight = the active session has a turn in flight (run_start without
     // its run_end). busy additionally covers agent-tool cards streaming from
@@ -127,9 +140,9 @@ export default function App() {
     const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
     const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
 
-    // Manual compact from the context-usage popover. Success/failure toasts
-    // come from the compaction_finished push; this only covers the RPC not
-    // starting (session not attached). Fire-and-forget so the popover can
+    // Manual compact from the context-usage popover. The outcome comes from the
+    // compaction_finished push; this only covers the RPC not starting (session
+    // not attached). Fire-and-forget so the popover can
     // close immediately and the ring can switch to the compacting state.
     const compactSession = useCallback(() => {
         if (!activeCwd || !activeSid) return;
@@ -137,12 +150,12 @@ export default function App() {
             .sessionCompact(asWorkspaceId(activeCwd), asSessionId(activeSid))
             .catch((e: unknown) => {
                 if ((e as { code?: string } | null)?.code === ErrorCodes.InvalidState) {
-                    showToast(`❌ ${t("context.compactFailedNotAttached")}`, "error");
+                    pushNotification(t("context.compactFailedNotAttached"));
                     return;
                 }
                 console.error("[taco] sessionCompact failed:", e);
             });
-    }, [activeCwd, activeSid, client, showToast, t]);
+    }, [activeCwd, activeSid, client, pushNotification, t]);
 
     // Subagent list for the session-bar awareness dot. Derived here as well as
     // inside SubagentPanel because the dot must render while the panel is shut.
@@ -186,7 +199,11 @@ export default function App() {
         [rightPanel.show],
     );
 
-    // Compaction-finished push → toast + refresh ratio + clear one-shot state.
+    // Compaction-finished push → refresh ratio + clear one-shot state, and
+    // report a failure. Input is frozen while compaction runs, so the user is
+    // waiting on the outcome either way (auto or manual); a failure is reported
+    // as a client notification so it toasts. Success needs no toast: the ring
+    // drops and the input unfreezes in front of the user.
     // See useSessionContextInfo.lastCompactionFinished.
     const lastReportedCompactionIdRef = useRef<number | undefined>(undefined);
     useEffect(() => {
@@ -196,8 +213,8 @@ export default function App() {
         lastReportedCompactionIdRef.current = tagged.id;
 
         const finished = tagged.result;
-        const seconds = (finished.durationMs / 1000).toFixed(1);
         if (finished.failed) {
+            const seconds = (finished.durationMs / 1000).toFixed(1);
             // Prefer the localized copy keyed off `reason`; `failureMessage` is
             // English-only diagnostic text and only appears when there is no
             // classified reason to render instead.
@@ -212,17 +229,13 @@ export default function App() {
             const headline = reasonKey ? t(reasonKey) : t("context.compactFailed");
             const detail =
                 !reasonKey && finished.failureMessage ? `: ${finished.failureMessage}` : "";
-            showToast(`❌ ${headline}${detail} (${seconds}s)`, "error");
-        } else {
-            showToast(
-                `${t("context.compactDone")} · ${(finished.summaryChars / 1).toString().replace(/(\d)(?=(\d{3})+$)/g, "$1,")} chars · ${seconds}s`,
-            );
+            pushNotification(`${headline}${detail} (${seconds}s)`);
         }
         void contextInfo.refresh();
         contextInfo.clearCompactionToast();
     }, [
         contextInfo.lastCompactionFinished,
-        showToast,
+        pushNotification,
         t,
         contextInfo.refresh,
         contextInfo.clearCompactionToast,
@@ -339,10 +352,12 @@ export default function App() {
     const { clearCursors } = useSidecarStream(client, {
         onAction: dispatch,
         onSnapshotRequired: wsApi.restoreSessionSnapshot,
-        onLogLine: setErrorBanner,
-        // Warns are degradations, not failures — a transient toast instead of
-        // the persistent banner, so they don't interrupt what the user is doing.
-        onWarningLine: (line) => showToast(line, "warn"),
+        // The sidecar's own stream: it arrives unprompted, so it goes to the
+        // bell without a toast — a daemon retrying a dead channel would
+        // otherwise toast every tick. Warns are degradations, kept apart by
+        // level so the list can tell them from failures.
+        onLogLine: (line) => pushNotification(line, { source: "sidecar" }),
+        onWarningLine: (line) => pushNotification(line, { source: "sidecar", level: "warn" }),
         onLlmDumpLine: llmDump.push,
         onModelsChanged: (cwd) => {
             // Only refresh if the push is for the currently active workspace —
@@ -415,7 +430,9 @@ export default function App() {
         }
         await reloadAllWorkspaces();
         llmDump.clear();
-        showToast(t("settings.debugModeToast"));
+        // No success toast: every caller (Debug / Updates / MCP / Plugins /
+        // Channels) already shows its own "restarting…" state inline, which
+        // clears right here in front of the user.
     };
 
     // Secondary pane state + domain logic live in dedicated hooks. Each hook
@@ -493,14 +510,14 @@ export default function App() {
         loadMemory,
         handleSaveMemory,
         handleDeleteTopic,
-    } = useMemoryPane(client, mainView === "memory", activeCwd, t, showToast);
+    } = useMemoryPane(client, mainView === "memory", activeCwd, t, pushNotification);
 
     const checkpoints = useCheckpointsPane(
         client,
         mainView === "checkpoints",
         activeCwd,
         activeSid,
-        showToast,
+        pushNotification,
     );
 
     // Chat auto-scroll lives in ChatPane: observer + scroll listener lifecycles
@@ -516,7 +533,7 @@ export default function App() {
             }, 1200);
         } catch (err) {
             console.error("[taco] copy session id failed", err);
-            setErrorBanner(`Copy failed: ${(err as Error).message}`);
+            pushNotification(`Copy failed: ${(err as Error).message}`);
         }
     }
 
@@ -569,17 +586,12 @@ export default function App() {
                         />
                     )}
                     <div className="drag-spacer" data-tauri-drag-region />
-                    <TopbarQuickActions />
-                    {errorBanner && (
-                        <div
-                            className="error-banner"
-                            role="alert"
-                            onClick={() => setErrorBanner(null)}
-                            title={t("copy.clickToDismiss")}
-                        >
-                            {errorBanner}
-                        </div>
-                    )}
+                    <TopbarQuickActions
+                        notifications={notifications}
+                        onDismissNotification={dismissNotification}
+                        onClearNotifications={clearNotifications}
+                        onNewNotification={toastNewNotification}
+                    />
                 </header>
                 <div
                     className="layout"
@@ -596,7 +608,7 @@ export default function App() {
                                         try {
                                             await attachSession(activeCwd, sid);
                                         } catch (err) {
-                                            setErrorBanner(
+                                            pushNotification(
                                                 `Cannot open session: ${(err as Error).message}`,
                                             );
                                         }

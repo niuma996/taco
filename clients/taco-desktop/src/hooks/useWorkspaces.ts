@@ -2,7 +2,7 @@
  * useWorkspaces — workspace / session state machine, persistence, and CRUD.
  *
  * Domain state lives in the workspaces reducer; per-session thinking level and
- * model are delegated to useSessionSettings. errorBanner is a plain useState,
+ * model are delegated to useSessionSettings. notifications is a plain useState,
  * kept out of the reducer so error display does not pollute business state.
  * input / pendingDeleteSession / confirmNewSession stay in App.tsx (UI state).
  */
@@ -19,8 +19,8 @@ import {
 } from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../lib/globalConfig";
+import type { AppNotification, PushNotificationOptions } from "../lib/notifications";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
-import { useToast } from "./primitives/useToast";
 import type { AskUserPayload } from "./useAskUser";
 import { useSessionSettings } from "./useSessionSettings";
 import type { SidecarAction } from "./useSidecarStream";
@@ -38,7 +38,8 @@ export interface UseWorkspacesApi {
     activeCwd: string;
     activeWs: WorkspaceState | undefined;
     sessionLevels: Record<string, ThinkingLevel>;
-    errorBanner: string | null;
+    /** Newest first. Backs the topbar notification bell. */
+    notifications: AppNotification[];
     /** See `UseWorkspaceLifecycleApi.defaultCwdSettled`. */
     defaultCwdSettled: boolean;
 
@@ -47,8 +48,18 @@ export interface UseWorkspacesApi {
     dispatch: (action: SidecarAction) => void;
     /** Dispatch WorkspaceAction directly (for view components to fire non-push actions, e.g. history expand fetch). */
     dispatchWs: (action: WorkspaceAction) => void;
-    /** Error banner setter (kept out of workspaces reducer — error display is not business state). */
-    setErrorBanner: (msg: string | null) => void;
+    /**
+     * Notification setter (kept out of workspaces reducer — error display is not
+     * business state). Defaults to a `client`-sourced error, which is what every
+     * caller replying to a user action wants; sidecar-stream callers pass
+     * `source: "sidecar"` so the row lands in the bell without a toast. `kind`
+     * lets a consumer filter the list; repeats of the same text coalesce.
+     */
+    pushNotification: (msg: string, opts?: PushNotificationOptions) => void;
+    /** Drop one notification by id. */
+    dismissNotification: (id: number) => void;
+    /** Drop every notification — used by the bell's "clear all". */
+    clearNotifications: () => void;
 
     // ── workspace CRUD ──
     initFromStorage: () => Promise<void>;
@@ -59,8 +70,8 @@ export interface UseWorkspacesApi {
     /**
      * Resolve `true` when the workspace was ensured on the sidecar and is
      * now the active one; `false` if validation failed or the load/switch
-     * step threw. Errors are already surfaced via toast + error banner — the
-     * boolean is for callers (e.g. onboarding) that need to gate the next
+     * step threw. Errors are already surfaced via toast + the notification bell —
+     * the boolean is for callers (e.g. onboarding) that need to gate the next
      * UI step on actual success. The previous fire-and-forget signature is
      * intentionally tightened; the only other caller (`browseAndOpen`)
      * ignores the return value.
@@ -163,6 +174,15 @@ export interface UseWorkspacesApi {
  */
 type SteerHandoff = "allowed" | "exhausted";
 
+/** A chatty sidecar must not grow the list without bound; the oldest fall off. */
+const MAX_NOTIFICATIONS = 50;
+/**
+ * Identical text arriving within this window merges into the head row instead of
+ * appending a new one. The old error banner showed only the latest message, so
+ * without this a per-tick `[error]` line would fill the whole list with copies.
+ */
+const COALESCE_WINDOW_MS = 10_000;
+
 export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const [workspaces, dispatchWs] = useReducer(workspacesReducer, {});
     // Active cwd is read from desktop.json (via the IPC) inside initFromStorage;
@@ -172,10 +192,42 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     // runs in a mount effect so React commits the real value before the user
     // can interact with the workspace selector.
     const [activeCwd, setActiveCwd] = useState<string>("");
-    const [errorBanner, setErrorBanner] = useState<string | null>(null);
-    // showToast is used for non-blocking errors on paths like openWorkspace, replacing window.alert.
-    // ToastProvider wraps the whole App in main.tsx, so useWorkspaces always runs inside the provider.
-    const { show: showToast } = useToast();
+    const [notifications, setNotifications] = useState<AppNotification[]>([]);
+    // Per-instance id source. A module-level counter would be shared by every
+    // mounted hook (and survive HMR), so two lists could hand out the same id.
+    const notificationSeqRef = useRef(0);
+    const pushNotification = useCallback((text: string, opts: PushNotificationOptions = {}) => {
+        const { kind = "generic", source = "client", level = "error" } = opts;
+        const at = Date.now();
+        // Allocated eagerly so the state updater stays pure — React may invoke
+        // it more than once per dispatch (StrictMode double-render).
+        notificationSeqRef.current += 1;
+        const id = notificationSeqRef.current;
+        setNotifications((prev) => {
+            const head = prev[0];
+            if (
+                head &&
+                head.text === text &&
+                head.kind === kind &&
+                head.source === source &&
+                head.level === level &&
+                at - head.at < COALESCE_WINDOW_MS
+            ) {
+                // Same message, still repeating: bump the head row instead of
+                // appending a duplicate. `at` moves so the row's clock reads as
+                // "still happening", and a stream that keeps repeating stays one
+                // row for as long as it does. The id is kept, so the bell treats
+                // a repeat as the row it already announced, not a new arrival.
+                return [{ ...head, at, count: head.count + 1 }, ...prev.slice(1)];
+            }
+            const entry: AppNotification = { id, text, at, count: 1, kind, source, level };
+            return [entry, ...prev].slice(0, MAX_NOTIFICATIONS);
+        });
+    }, []);
+    const dismissNotification = useCallback((id: number) => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+    }, []);
+    const clearNotifications = useCallback(() => setNotifications([]), []);
 
     // workspacesRef — for read-after-write paths (attachSession / switchWorkspace, etc.).
     const workspacesRef = useRef<Record<string, WorkspaceState>>(workspaces);
@@ -193,7 +245,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
      * Session ids the user aborted via abortPrompt. The in-flight sessionPrompt
      * RPC rejects once the abort lands ("session.prompt aborted") — that
      * rejection is the expected outcome of the user's own Stop click, so
-     * sendPrompt's catch suppresses the error banner for it. Keyed by sid: the
+     * sendPrompt's catch suppresses the notification for it. Keyed by sid: the
      * user may switch sessions between abort and rejection.
      */
     const abortRequestedRef = useRef<Set<string>>(new Set());
@@ -205,7 +257,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         client,
         activeCwd,
         activeSession: workspaces[activeCwd]?.activeSession,
-        setErrorBanner,
+        pushNotification,
     });
     // sendPrompt's lazy-create branch awaits sessionCreate before recording the
     // new session's level/model, so it must read the settings API as of
@@ -222,8 +274,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         workspacesRef,
         activeCwd,
         setActiveCwd,
-        setErrorBanner,
-        showToast,
+        pushNotification,
     });
     const { refreshSessionList, attachSessionRef } = lifecycle;
 
@@ -259,7 +310,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                             // silent failure loses the user's input with no signal at
                             // all. Surface it — they can retype into the composer.
                             console.error("[taco] submitAnswers failed", err);
-                            setErrorBanner(
+                            pushNotification(
                                 `Submitting your answer failed: ${(err as Error).message}`,
                             );
                         });
@@ -268,7 +319,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             }
         }
         prevAskUserPendingRef.current = pending;
-    }, [workspaces, activeCwd, client]);
+    }, [workspaces, activeCwd, client, pushNotification]);
 
     const activeWs = workspaces[activeCwd];
 
@@ -339,7 +390,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     });
                 }
             } else if (action.type === "ERROR") {
-                setErrorBanner(action.message);
+                // A `session.error` push — the sidecar's own report, not the
+                // reply to a click, so it goes to the bell without a toast.
+                pushNotification(action.message, { source: "sidecar" });
                 if (action.cwd && action.sid) {
                     const sysMsg: UiMessage = {
                         id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -392,7 +445,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         // attachSessionRef is a stable ref object; its .current is read at call
         // time on purpose, so it must not be a dependency.
-        [settings, attachSessionRef],
+        [settings, attachSessionRef, pushNotification],
     );
 
     const beginPendingNewSession = useCallback((cwd: string): void => {
@@ -541,7 +594,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     createdSessionId !== undefined &&
                     abortRequestedRef.current.delete(createdSessionId);
                 if (!abortedByUser) {
-                    setErrorBanner(`Prompt failed: ${(err as Error).message}`);
+                    pushNotification(`Prompt failed: ${(err as Error).message}`);
                 }
                 // sessionCreate may already have set this session's pending slot
                 // before the failure. Nothing else will ever clear it — the run
@@ -589,7 +642,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // Dropping the marker here is what keeps it from outliving this turn:
             // an abort that lands just as the run finishes resolves the RPC
             // instead of rejecting it, and a marker left behind would swallow the
-            // error banner for this session's next genuine prompt failure.
+            // notification for this session's next genuine prompt failure.
             abortRequestedRef.current.delete(promptSid);
             if (reply) {
                 dispatchWs({
@@ -609,7 +662,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         } catch (err) {
             console.error("[taco] sessionPrompt failed", err);
             // User-initiated abort rejects the in-flight prompt RPC — that is
-            // the expected Stop outcome, not a failure to banner. (Checked
+            // the expected Stop outcome, not a failure to report. (Checked
             // first: a session_busy from a concurrent turn should not consume
             // the marker.)
             if (abortRequestedRef.current.delete(promptSid)) {
@@ -624,10 +677,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // in flight, and its run_end is what clears the slot.
             if ((err as { code?: string }).code === ErrorCodes.SessionBusy) {
                 if (handoff === "allowed") return steerPrompt(text, images, "exhausted");
-                setErrorBanner("Prompt failed: the session is busy; try again");
+                pushNotification("Prompt failed: the session is busy; try again");
                 return false;
             }
-            setErrorBanner(`Prompt failed: ${(err as Error).message}`);
+            pushNotification(`Prompt failed: ${(err as Error).message}`);
             dispatchWs({ type: "SET_PENDING", cwd, sid: promptSid, pending: false });
             return false;
         }
@@ -671,13 +724,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // so the entry would sit unconsumed until the next prompt. Hand back
             // to the prompt path — but only once, see SteerHandoff.
             if (handoff === "exhausted") {
-                setErrorBanner("Steer failed: the session stopped accepting input; try again");
+                pushNotification("Steer failed: the session stopped accepting input; try again");
                 return false;
             }
             return sendPrompt(text, images, "exhausted");
         } catch (err) {
             console.error("[taco] sessionSteer failed", err);
-            setErrorBanner(`Steer failed: ${(err as Error).message}`);
+            pushNotification(`Steer failed: ${(err as Error).message}`);
             return false;
         } finally {
             // The optimistic row's job ends when the RPC settles: on success the
@@ -702,7 +755,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             await client.sessionCancelQueued(asWorkspaceId(cwd), asSessionId(sid), entryId);
         } catch (err) {
             console.error("[taco] sessionCancelQueued failed", err);
-            setErrorBanner(`Cancel failed: ${(err as Error).message}`);
+            pushNotification(`Cancel failed: ${(err as Error).message}`);
             if (item) dispatchWs({ type: "APPEND_QUEUED", cwd, sid, item });
         }
     }
@@ -729,7 +782,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // coming — drop the marker or a later genuine failure would be
             // misclassified as user-initiated.
             abortRequestedRef.current.delete(ws.activeSession);
-            setErrorBanner(`Abort failed: ${(err as Error).message}`);
+            pushNotification(`Abort failed: ${(err as Error).message}`);
             return [];
         } finally {
             dispatchWs({ type: "SET_PENDING", cwd, sid: ws.activeSession, pending: false });
@@ -746,7 +799,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             dispatchWs({ type: "LOAD_SUBAGENT_HISTORY", cwd, subSessionId, messages: msgs });
         } catch (err) {
             console.error("[taco] subagent history pull failed", subSessionId, err);
-            setErrorBanner(`Subagent history failed: ${(err as Error).message}`);
+            pushNotification(`Subagent history failed: ${(err as Error).message}`);
         }
     }
 
@@ -757,7 +810,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             await client.subagentAbort(asWorkspaceId(activeCwd), asSessionId(subSessionId));
         } catch (err) {
             console.error("[taco] subagentAbort failed", subSessionId, err);
-            setErrorBanner(`Stop subagent failed: ${(err as Error).message}`);
+            pushNotification(`Stop subagent failed: ${(err as Error).message}`);
         }
     }
 
@@ -766,11 +819,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         activeCwd,
         activeWs,
         sessionLevels: settings.sessionLevels,
-        errorBanner,
+        notifications,
         defaultCwdSettled: lifecycle.defaultCwdSettled,
         dispatch,
         dispatchWs,
-        setErrorBanner,
+        pushNotification,
+        dismissNotification,
+        clearNotifications,
         initFromStorage: lifecycle.initFromStorage,
         reloadAllWorkspaces: lifecycle.reloadAllWorkspaces,
         loadMoreSessions: lifecycle.loadMoreSessions,

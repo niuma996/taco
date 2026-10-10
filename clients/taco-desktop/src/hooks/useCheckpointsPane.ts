@@ -32,7 +32,8 @@ export function useCheckpointsPane(
     active: boolean,
     activeCwd: string | undefined,
     activeSessionId: string | undefined,
-    showToast: (msg: string) => void,
+    /** Failure sink (the notification bell). A clean restore is visible in the pane itself. */
+    notify: (msg: string) => void,
 ): UseCheckpointsPaneResult {
     const [data, setData] = useState<CheckpointsListResult | null>(null);
     const [loading, setLoading] = useState(false);
@@ -84,20 +85,21 @@ export function useCheckpointsPane(
                     activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
                 );
                 if (result.failed.length > 0) {
-                    showToast(
-                        `Restore completed with ${result.failed.length} failure(s) — see pane`,
+                    // The pane does not list per-file failures, so name them
+                    // here — a bare count would leave nothing to act on.
+                    const paths = result.failed.map((f) => f.path);
+                    const shown = paths.slice(0, 3).join(", ");
+                    const more = paths.length > 3 ? ` (+${paths.length - 3})` : "";
+                    notify(
+                        `Restore incomplete: ${paths.length} file(s) not restored — ${shown}${more}`,
                     );
-                    return { ok: true, protectionId: result.protectionId };
                 }
-                showToast(
-                    result.protectionId
-                        ? `Restored — undo with checkpoint ${result.protectionId.slice(0, 8)}`
-                        : "Restore complete",
-                );
+                // No toast on a clean restore: the pane refreshes below, and the
+                // protection checkpoint to undo with appears at the top of it.
                 return { ok: true, protectionId: result.protectionId };
             } catch (e: unknown) {
                 const reason = e instanceof Error ? e.message : String(e);
-                showToast(`Restore failed: ${reason}`);
+                notify(`Restore failed: ${reason}`);
                 return { ok: false, reason };
             } finally {
                 // Refresh on every path, including the throw. A rejected RPC
@@ -108,7 +110,7 @@ export function useCheckpointsPane(
                 setRestoringId(null);
             }
         },
-        [activeCwd, activeSessionId, client, refresh, showToast],
+        [activeCwd, activeSessionId, client, refresh, notify],
     );
 
     return { data, loading, error, restoringId, refresh, restore };

@@ -24,7 +24,6 @@
     /* Semantic tokens — consolidates scattered hardcoded colors, overridden per theme. */
     --error: #bf616a;
     --error-bg: rgba(191, 97, 106, 0.25);
-    --error-fg: #f4d4d6;
     --warning: #ebcb8b; /* Same as --tool, used for ContextIndicator warn tier */
     --code-block-border: #3a3530; /* Terminal/code block border, matches --terminal-bg */
     --accent-contrast-fg: #eceff4;
@@ -168,7 +167,6 @@
 
     --error: #c0392b;
     --error-bg: rgba(192, 57, 43, 0.12);
-    --error-fg: #8a241a;
     --warning: #a8760a; /* Same as --tool, used for ContextIndicator warn tier */
     --code-block-border: #d4c9b0; /* Warm border for terminal/code block, matches warm paper bg */
     --accent-contrast-fg: #2b2620;

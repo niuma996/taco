@@ -1,18 +1,23 @@
 /**
- * TopbarQuickActions — language / theme shortcut menus.
+ * TopbarQuickActions — notification bell + language / theme shortcut menus.
  *
  * Locks the write path: picking a language or theme calls writeClientSettings
  * with the matching client-settings patch, and the current value is marked
- * with a check in the open menu.
+ * with a check in the open menu. Plus the bell's contract with App: a
+ * notification that lands while the bell is closed is forwarded to
+ * `onNewNotification`, which is the only reason a failure stays visible now
+ * that the banner is gone.
  */
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopbarQuickActions } from "../../src/components/TopbarQuickActions";
 import * as useGlobalConfig from "../../src/hooks/primitives/useGlobalConfig";
 import * as useI18n from "../../src/i18n/useI18n";
 import * as globalConfig from "../../src/lib/globalConfig";
+import type { AppNotification } from "../../src/lib/notifications";
 
 vi.spyOn(useI18n, "useT").mockReturnValue({
     t: (key: string) => key,
@@ -36,10 +41,17 @@ beforeEach(() => {
     writeClientSettings.mockClear();
 });
 
+// Most of these tests only cover the two menus, so the bell renders empty.
+const noNotifications = {
+    notifications: [],
+    onDismissNotification: () => {},
+    onClearNotifications: () => {},
+};
+
 describe("TopbarQuickActions", () => {
     it("writes uiLanguage when a language option is picked", async () => {
         const user = userEvent.setup();
-        render(<TopbarQuickActions />);
+        render(<TopbarQuickActions {...noNotifications} />);
 
         await user.click(screen.getByRole("button", { name: "app.language" }));
         await user.click(
@@ -51,7 +63,7 @@ describe("TopbarQuickActions", () => {
 
     it("writes theme when a theme option is picked", async () => {
         const user = userEvent.setup();
-        render(<TopbarQuickActions />);
+        render(<TopbarQuickActions {...noNotifications} />);
 
         await user.click(screen.getByRole("button", { name: "app.theme" }));
         await user.click(await screen.findByRole("menuitem", { name: /settings.themeOptionDark/ }));
@@ -61,7 +73,7 @@ describe("TopbarQuickActions", () => {
 
     it("marks the current language and theme in their menus", async () => {
         const user = userEvent.setup();
-        render(<TopbarQuickActions />);
+        render(<TopbarQuickActions {...noNotifications} />);
 
         await user.click(screen.getByRole("button", { name: "app.language" }));
         const enItem = await screen.findByRole("menuitem", {
@@ -79,5 +91,49 @@ describe("TopbarQuickActions", () => {
             name: /settings.themeOptionDark/,
         });
         expect(darkItem.querySelector("svg")).toBeNull();
+    });
+    it("badges a pending notification and forwards it while the bell is closed", async () => {
+        const user = userEvent.setup();
+        const onNewNotification = vi.fn();
+        function Harness() {
+            const [rows, setRows] = useState<AppNotification[]>([]);
+            return (
+                <>
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setRows((p) => [
+                                {
+                                    id: 1,
+                                    text: "Prompt failed: boom",
+                                    at: Date.now(),
+                                    count: 1,
+                                    kind: "generic",
+                                    source: "client",
+                                    level: "error",
+                                },
+                                ...p,
+                            ])
+                        }
+                    >
+                        fail
+                    </button>
+                    <TopbarQuickActions
+                        notifications={rows}
+                        onDismissNotification={() => {}}
+                        onClearNotifications={() => {}}
+                        onNewNotification={onNewNotification}
+                    />
+                </>
+            );
+        }
+        render(<Harness />);
+
+        await user.click(screen.getByRole("button", { name: "fail" }));
+
+        expect(document.querySelector(".notification-bell__badge")?.textContent).toBe("1");
+        expect(onNewNotification).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 1, text: "Prompt failed: boom" }),
+        );
     });
 });

@@ -97,14 +97,15 @@ export interface UseSidecarStreamOpts {
         sessionKind: "main" | "subagent",
     ) => Promise<SnapshotRecovery>;
     /**
-     * Receives sidecar failures that warrant interrupting the user — `[error]`
-     * lines plus unformatted stderr that looks like a crash.
+     * Receives sidecar failures — `[error]` lines plus unformatted stderr that
+     * looks like a crash.
      */
     onLogLine: (line: string) => void;
     /**
      * Receives `[warn]` lines. These are degradations, not failures (a skipped
-     * corrupt file, a rebuilt cache, an extension override), so they must not
-     * take over the global error banner. Unset means warns are dropped.
+     * corrupt file, a rebuilt cache, an extension override), so the caller
+     * should keep them distinguishable from `onLogLine`. Unset means warns are
+     * dropped.
      */
     onWarningLine?: (line: string) => void;
     /** Receives `[taco:llm]` stderr lines when debug dumping is enabled. */
