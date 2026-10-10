@@ -3,6 +3,11 @@
     "settings": "设置",
     "theme": "主题",
     "language": "语言",
+    "notifications": "消息通知",
+    "notificationsEmpty": "暂无通知",
+    "notificationsClearAll": "全部清除",
+    "notificationsUnread_other": "{{count}} 条未读",
+    "notificationsRepeated_other": "重复 {{count}} 次",
     "saving": "保存中…",
     "dismiss": "关闭",
     "errorBoundaryTitle": "出错了",
@@ -220,7 +225,6 @@
     "debugModeToggleDesc": "开启内存中的 LLM Dump 面板,把每个请求打到 stderr。",
     "llmDumpToFileEnabled": "写入磁盘",
     "llmDumpToFileDesc": "同时将 LLM dump 追加到 $TACO_HOME/logs/llm-dump.log。需先启用调试模式。",
-    "debugModeToast": "✅ Sidecar 已重启 — 调试模式已生效",
     "languageOptionEn": "English",
     "languageOptionZh": "中文",
     "defaultModelTitle": "默认模型",
@@ -346,7 +350,6 @@
     "lastCompaction": "上次压缩",
     "compacting": "压缩中…",
     "compactingInProgress": "正在压缩",
-    "compactDone": "上下文已压缩",
     "compactFailed": "压缩失败",
     "compactFailedAborted": "压缩已取消",
     "compactFailedTimeout": "压缩超时",
@@ -537,9 +540,6 @@
     "saveConfirmInterrupt": "保存该策略会立即生效，并可能中断正在进行的对话。确定继续？",
     "loading": "加载中…"
   },
-  "copy": {
-    "clickToDismiss": "点击关闭"
-  },
   "drawer": {
     "savingInline": "保存中…"
   },
@@ -599,8 +599,6 @@
     "discardMine": "放弃我的修改",
     "discardUnsavedTitle": "放弃未保存的修改?",
     "discardUnsavedBody": "当前编辑内容尚未保存,取消将丢失。",
-    "savedToast": "记忆已保存",
-    "deletedToast": "已删除",
     "typeLabel": "类型",
     "createdLabel": "创建于",
     "updatedLabel": "上次更新",

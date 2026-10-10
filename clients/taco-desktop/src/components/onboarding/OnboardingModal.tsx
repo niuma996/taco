@@ -37,12 +37,18 @@ export function OnboardingModal(props: OnboardingModalProps) {
     const [selectedModel, setSelectedModel] = useState<ModelSelection | undefined>(undefined);
     // Disables footer Next + workspace step's "Use default" while openWorkspace is in flight.
     const [goingNext, setGoingNext] = useState(false);
-    // Mirrors `useWorkspaces.errorBanner` so workspace-open failures (e.g.
-    // sidecar RPC errors) render inside the modal. `openWorkspace` shows a
-    // toast on the catch path, but the toast sits at z-index 2000 and the
-    // onboarding scrim visually competes with it — the only feedback the
-    // user can rely on while this overlay is up is an in-modal banner.
-    const openError = props.wsApi.errorBanner;
+    // The newest workspace-open failure from `useWorkspaces.notifications`, so
+    // it renders inside the modal. The failure also toasts (it replies to the
+    // user's click), but the toast sits at z-index 2000 and the onboarding scrim
+    // visually competes with it — and the bell it lands in is behind the scrim
+    // too. The only feedback the user can rely on while this overlay is up is an
+    // in-modal banner.
+    //
+    // Filtered by kind rather than reading the head of the list: the store is
+    // global, so an unrelated RPC failure in another workspace would otherwise
+    // be presented to the user as "this directory would not open".
+    const openFailure = props.wsApi.notifications.find((n) => n.kind === "workspace-open");
+    const openError = openFailure?.text;
     // `asWorkspaceId` throws on an empty string, so brand once here rather than
     // at each use site: a bare call inside the JSX below would take down the
     // whole modal via the error boundary if `defaultCwd` never resolved (the
@@ -97,14 +103,14 @@ export function OnboardingModal(props: OnboardingModalProps) {
     // Opens the given cwd and only advances to the provider step on success. The cwd is
     // passed explicitly so the workspace step's onConfirm (which calls setWorkspaceCwd in
     // the same handler) doesn't suffer from a stale closure of `workspaceCwd`.
-    // `openWorkspace` already calls `setErrorBanner(msg)` on its catch path with
-    // the real failure reason ("Failed to open C:\…: <rpc error>"). That update
-    // bubbles back through `useWorkspaces` → App.tsx → this modal as a new
-    // `wsApi` prop, so the modal's `openError` (read from `props.wsApi.errorBanner`)
-    // will render the real message on the next render. We intentionally do NOT
-    // add a fallback here — the previous "无法打开工作目录: …" string was
-    // computed from a stale-closure read and overwrote the real error, leaving
-    // the wizard with a misleading empty banner.
+    // `openWorkspace` already calls `pushNotification(msg, { kind: "workspace-open" })`
+    // on its catch path with the real failure reason ("Failed to open C:\…: <rpc
+    // error>"). That update bubbles back through `useWorkspaces` → App.tsx → this
+    // modal as a new `wsApi` prop, so the modal's `openError` (read from the
+    // newest `workspace-open` entry) renders the real message on the next render.
+    // We intentionally do NOT add a fallback here — the previous "无法打开工作目录:
+    // …" string was computed from a stale-closure read and overwrote the real
+    // error, leaving the wizard with a misleading empty banner.
     //
     // `openWorkspace` never rejects — every path resolves to a boolean (false on
     // invalid/failed, true on success) — so a `.catch` here would be dead code.
@@ -114,13 +120,16 @@ export function OnboardingModal(props: OnboardingModalProps) {
         (cwd: string) => {
             if (goingNext) return;
             setGoingNext(true);
-            props.wsApi.setErrorBanner(null);
+            // Retire just the banner this modal is showing. `clearNotifications`
+            // would also drop every unrelated message the user has not opened
+            // the bell to read yet.
+            if (openFailure) props.wsApi.dismissNotification(openFailure.id);
             void props.wsApi.openWorkspace(cwd).then((ok) => {
                 setGoingNext(false);
                 if (ok) setStep("provider");
             });
         },
-        [goingNext, props.wsApi],
+        [goingNext, openFailure, props.wsApi],
     );
 
     const goNext = () => {

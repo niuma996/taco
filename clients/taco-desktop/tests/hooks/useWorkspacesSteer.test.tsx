@@ -119,7 +119,7 @@ describe("useWorkspaces — steer degrade chain", () => {
         assert.equal(ok, true);
         assert.equal(client.sessionSteer.mock.calls.length, 1);
         assert.deepEqual(client.sessionSteer.mock.calls[0]?.slice(0, 3), [CWD, SID, "hello"]);
-        assert.equal(result.current.errorBanner, null);
+        assert.deepEqual(result.current.notifications, []);
     });
 
     it("busy → steer idle banners instead of re-prompting", async () => {
@@ -139,7 +139,7 @@ describe("useWorkspaces — steer degrade chain", () => {
         // handoff is already exhausted, so no second prompt fires.
         assert.equal(client.sessionPrompt.mock.calls.length, 1);
         assert.equal(client.sessionSteer.mock.calls.length, 1);
-        assert.match(result.current.errorBanner ?? "", /stopped accepting input/);
+        assert.match(result.current.notifications[0]?.text ?? "", /stopped accepting input/);
     });
 
     it("steer idle hands back to sendPrompt once", async () => {
@@ -153,7 +153,7 @@ describe("useWorkspaces — steer degrade chain", () => {
         });
         assert.equal(ok, true);
         assert.equal(client.sessionPrompt.mock.calls.length, 1);
-        assert.equal(result.current.errorBanner, null);
+        assert.deepEqual(result.current.notifications, []);
     });
 
     it("steer → idle → prompt → busy stops after one full round-trip", async () => {
@@ -172,7 +172,7 @@ describe("useWorkspaces — steer degrade chain", () => {
         // steer (idle) → prompt (busy, handoff already exhausted) → banner.
         assert.equal(client.sessionSteer.mock.calls.length, 1);
         assert.equal(client.sessionPrompt.mock.calls.length, 1);
-        assert.match(result.current.errorBanner ?? "", /busy/);
+        assert.match(result.current.notifications[0]?.text ?? "", /busy/);
     });
 
     it("the optimistic queue row is retired once the steer RPC settles", async () => {
@@ -224,7 +224,7 @@ describe("useWorkspaces — abort marker lifecycle", () => {
             ok = await sendResult;
         });
         assert.equal(ok, false);
-        assert.equal(result.current.errorBanner, null);
+        assert.deepEqual(result.current.notifications, []);
     });
 
     it("a successful prompt clears the marker, so a later genuine failure banners", async () => {
@@ -247,6 +247,6 @@ describe("useWorkspaces — abort marker lifecycle", () => {
             ok = await result.current.sendPrompt("again");
         });
         assert.equal(ok, false);
-        assert.match(result.current.errorBanner ?? "", /boom/);
+        assert.match(result.current.notifications[0]?.text ?? "", /boom/);
     });
 });

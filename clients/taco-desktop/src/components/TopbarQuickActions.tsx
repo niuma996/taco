@@ -1,9 +1,16 @@
 /**
- * TopbarQuickActions — language + theme shortcuts in the title bar.
+ * TopbarQuickActions — notification bell + language / theme shortcuts in the
+ * title bar.
  *
- * Two icon buttons, each opening a Radix dropdown (same pattern as
- * WorkspacePicker). Writes go through `writeClientSettings` so AppearanceTab,
- * useTheme, and i18n subscribers update in place — no sidecar RPC.
+ * The bell and the two icon buttons share one topbar flex row, so the bell
+ * renders first (left of the language switch). Language and theme each open a
+ * Radix dropdown (same pattern as WorkspacePicker) and write through
+ * `writeClientSettings`, so AppearanceTab, useTheme, and i18n subscribers
+ * update in place — no sidecar RPC.
+ *
+ * The bell forwards each newly arrived notification to `onNewNotification` so
+ * App can decide whether it is worth a toast; the bell itself stays a passive
+ * reader of the store.
  *
  * Placement is the topbar flex flow (after the drag spacer). Windows/Linux
  * keep them left of the fixed min/max/close cluster via extra topbar
@@ -19,6 +26,8 @@ import { SUPPORTED_UI_LANGUAGES, type SupportedUiLanguage } from "../i18n/index.
 import { useT, useUiLanguage } from "../i18n/useI18n.ts";
 import type { ThemePreference } from "../lib/clientSettings.ts";
 import { writeClientSettings } from "../lib/globalConfig.ts";
+import type { AppNotification } from "../lib/notifications.ts";
+import { NotificationBell } from "./NotificationBell.tsx";
 
 const THEME_OPTIONS: ReadonlyArray<{
     value: ThemePreference;
@@ -76,13 +85,35 @@ function QuickMenu({
     );
 }
 
-export function TopbarQuickActions() {
+export interface TopbarQuickActionsProps {
+    notifications: AppNotification[];
+    onDismissNotification: (id: number) => void;
+    onClearNotifications: () => void;
+    /**
+     * Receives each row that lands while the bell is closed. App toasts the
+     * ones `toastsOnArrival` selects; the rest are left to the badge.
+     */
+    onNewNotification?: (notification: AppNotification) => void;
+}
+
+export function TopbarQuickActions({
+    notifications,
+    onDismissNotification,
+    onClearNotifications,
+    onNewNotification,
+}: TopbarQuickActionsProps) {
     const { t } = useT();
     const uiLanguage = useUiLanguage();
     const theme: ThemePreference = useGlobalConfig().client.theme ?? "system";
 
     return (
         <div className="topbar-quick-actions">
+            <NotificationBell
+                notifications={notifications}
+                onDismiss={onDismissNotification}
+                onClearAll={onClearNotifications}
+                onNewArrival={onNewNotification}
+            />
             <QuickMenu
                 label={t("app.language")}
                 icon={<Languages size={14} aria-hidden="true" />}

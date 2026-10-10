@@ -15,6 +15,7 @@ import { type Dispatch, type SetStateAction, useCallback, useState } from "react
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
+import type { PushNotificationOptions } from "../lib/notifications";
 
 /**
  * Optimistic per-session setter: write `next` under `sid`, await `rpc`, and on
@@ -78,14 +79,14 @@ export interface UseSessionSettingsOptions {
     activeCwd: string;
     /** Currently attached session, or undefined on a fresh pre-send workspace. */
     activeSession: string | undefined;
-    setErrorBanner: (msg: string | null) => void;
+    pushNotification: (msg: string, opts?: PushNotificationOptions) => void;
 }
 
 export function useSessionSettings({
     client,
     activeCwd,
     activeSession,
-    setErrorBanner,
+    pushNotification,
 }: UseSessionSettingsOptions): UseSessionSettingsApi {
     const [sessionLevels, setSessionLevels] = useState<Record<string, ThinkingLevel>>({});
     const [sessionModels, setSessionModels] = useState<Record<string, ModelSelection>>({});
@@ -118,7 +119,7 @@ export function useSessionSettings({
                 "sessionSetThinkingLevel",
             );
         } catch (err) {
-            setErrorBanner(`Thinking level change failed: ${(err as Error).message}`);
+            pushNotification(`Thinking level change failed: ${(err as Error).message}`);
         }
     }
 
@@ -145,7 +146,7 @@ export function useSessionSettings({
                 "sessionSetModel",
             );
         } catch (err) {
-            setErrorBanner(`Model change failed: ${(err as Error).message}`);
+            pushNotification(`Model change failed: ${(err as Error).message}`);
         }
     }
 

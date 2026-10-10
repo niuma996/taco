@@ -3,6 +3,12 @@
     "settings": "Settings",
     "theme": "Theme",
     "language": "Language",
+    "notifications": "Notifications",
+    "notificationsEmpty": "No notifications",
+    "notificationsClearAll": "Clear all",
+    "notificationsUnread_one": "{{count}} unread",
+    "notificationsUnread_other": "{{count}} unread",
+    "notificationsRepeated_other": "repeated {{count}} times",
     "saving": "Saving…",
     "dismiss": "Dismiss",
     "errorBoundaryTitle": "Something went wrong",
@@ -220,7 +226,6 @@
     "debugModeToggleDesc": "Turn on the in-memory LLM Dump panel and log each request to stderr.",
     "llmDumpToFileEnabled": "Write to disk",
     "llmDumpToFileDesc": "Also append LLM dump lines to $TACO_HOME/logs/llm-dump.log. Requires debug mode.",
-    "debugModeToast": "✅ Sidecar restarted — debug mode is now in effect",
     "languageOptionEn": "English",
     "languageOptionZh": "中文",
     "defaultModelTitle": "Default model",
@@ -347,7 +352,6 @@
     "lastCompaction": "Last compaction",
     "compacting": "Compacting…",
     "compactingInProgress": "Compaction in progress",
-    "compactDone": "Context compressed",
     "compactFailed": "Compaction failed",
     "compactFailedAborted": "Compaction cancelled",
     "compactFailedTimeout": "Compaction timed out",
@@ -538,9 +542,6 @@
     "saveConfirmInterrupt": "Saving this policy will immediately apply it and may interrupt in-progress conversations. Continue?",
     "loading": "Loading…"
   },
-  "copy": {
-    "clickToDismiss": "click to dismiss"
-  },
   "drawer": {
     "savingInline": "Saving…"
   },
@@ -600,8 +601,6 @@
     "discardMine": "Discard mine",
     "discardUnsavedTitle": "Discard unsaved changes?",
     "discardUnsavedBody": "Your edits will be lost.",
-    "savedToast": "Memory saved",
-    "deletedToast": "Deleted",
     "typeLabel": "Type",
     "createdLabel": "Created",
     "updatedLabel": "Last updated",

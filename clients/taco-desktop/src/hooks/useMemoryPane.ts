@@ -28,7 +28,8 @@ export function useMemoryPane(
     active: boolean,
     activeCwd: string | undefined,
     t: (key: string) => string,
-    showToast: (msg: string) => void,
+    /** Failure sink (the notification bell). Success is visible in the pane itself. */
+    notify: (msg: string) => void,
 ): UseMemoryPaneResult {
     const [memoryData, setMemoryData] = useState<MemoryListResult | null>(null);
     const [memoryLoading, setMemoryLoading] = useState(false);
@@ -70,7 +71,8 @@ export function useMemoryPane(
             setMemorySaving(true);
             try {
                 await client.memoryWrite(asWorkspaceId(activeCwd), content, baseHash);
-                showToast(t("memory.savedToast"));
+                // No success toast: the editor closes on `ok` and the refreshed
+                // content renders in its place.
                 loadMemory();
                 return { ok: true };
             } catch (e: unknown) {
@@ -80,13 +82,13 @@ export function useMemoryPane(
                     return { ok: false, conflict: data };
                 }
                 console.error("[useMemoryPane] memory.write failed:", e);
-                showToast(t("memory.errorSave"));
+                notify(t("memory.errorSave"));
                 return { ok: false, conflict: { currentContent: "", currentHash: "" } };
             } finally {
                 setMemorySaving(false);
             }
         },
-        [activeCwd, client, loadMemory, showToast, t],
+        [activeCwd, client, loadMemory, notify, t],
     );
 
     const handleDeleteTopic = useCallback(
@@ -94,14 +96,14 @@ export function useMemoryPane(
             if (!activeCwd) return;
             try {
                 await client.memoryDeleteTopic(asWorkspaceId(activeCwd), id);
-                showToast(t("memory.deletedToast"));
+                // No success toast: the topic drops out of the refreshed list.
                 loadMemory();
             } catch (e: unknown) {
                 console.error("[useMemoryPane] memoryDeleteTopic failed:", e);
-                showToast(t("memory.errorDelete"));
+                notify(t("memory.errorDelete"));
             }
         },
-        [activeCwd, client, loadMemory, showToast, t],
+        [activeCwd, client, loadMemory, notify, t],
     );
 
     return {

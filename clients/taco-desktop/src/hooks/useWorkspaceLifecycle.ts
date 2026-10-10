@@ -6,7 +6,7 @@
  * (sendPrompt / abortPrompt) stays in useWorkspaces: it owns the composer's
  * pending semantics and the lazy-create race guard, which have nothing to
  * do with lifecycle. State this hook does not own — the workspaces
- * reducer, activeCwd, error banner — is passed in, so useWorkspaces
+ * reducer, activeCwd, the notification list — is passed in, so useWorkspaces
  * remains the single place those are declared.
  */
 
@@ -24,6 +24,7 @@ import {
 } from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { loadGlobalConfig } from "../lib/globalConfig";
+import type { PushNotificationOptions } from "../lib/notifications";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
 import {
     initDefaultCwd,
@@ -88,8 +89,7 @@ export interface UseWorkspaceLifecycleOptions {
     workspacesRef: MutableRefObject<Record<string, WorkspaceState>>;
     activeCwd: string;
     setActiveCwd: (cwd: string) => void;
-    setErrorBanner: (msg: string | null) => void;
-    showToast: (msg: string, kind: "error") => void;
+    pushNotification: (msg: string, opts?: PushNotificationOptions) => void;
 }
 
 export function useWorkspaceLifecycle({
@@ -98,8 +98,7 @@ export function useWorkspaceLifecycle({
     workspacesRef,
     activeCwd,
     setActiveCwd,
-    setErrorBanner,
-    showToast,
+    pushNotification,
 }: UseWorkspaceLifecycleOptions): UseWorkspaceLifecycleApi {
     /** StrictMode double-run guard — see initFromStorage top. */
     const initStartedRef = useRef(false);
@@ -181,8 +180,7 @@ export function useWorkspaceLifecycle({
             } catch (err) {
                 const msg = `Cannot open session: ${(err as Error).message}`;
                 console.error("[taco] sessionAttach failed", cwd, sessionId, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
+                pushNotification(msg);
                 // The session is gone from the server — prune it from the local list
                 // so the sidebar no longer shows a dead entry. REMOVE_SESSION's
                 // reducer strips this sid's pendingBySessionId slot in the same
@@ -201,8 +199,7 @@ export function useWorkspaceLifecycle({
                 // silent (Unahandled Promise Rejection escape route from F1).
                 const msg = `Cannot load session history: ${(err as Error).message}`;
                 console.error("[taco] sessionHistory failed", cwd, sessionId, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
+                pushNotification(msg);
                 dispatchWs({
                     type: "ATTACH",
                     cwd,
@@ -262,7 +259,7 @@ export function useWorkspaceLifecycle({
                 /* Same as above. */
             }
         },
-        [client, dispatchWs, setErrorBanner, showToast],
+        [client, dispatchWs, pushNotification],
     );
 
     const attachSessionRef = useRef(attachSession);
@@ -551,8 +548,7 @@ export function useWorkspaceLifecycle({
             if (!isValidWorkspaceCwd(cwd)) {
                 const msg = `Invalid workspace path: ${JSON.stringify(cwd)} (contains glob or shell metacharacters; use a real directory path)`;
                 console.error("[taco] openWorkspace rejected", cwd);
-                setErrorBanner(msg);
-                showToast(msg, "error");
+                pushNotification(msg, { kind: "workspace-open" });
                 return false;
             }
             if (!workspacesRef.current[cwd]) {
@@ -576,19 +572,13 @@ export function useWorkspaceLifecycle({
             } catch (err) {
                 const msg = `Failed to open ${cwd}: ${(err as Error).message}`;
                 console.error("[taco] openWorkspace failed", cwd, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
+                // Tagged so the onboarding modal can show *this* failure instead
+                // of whatever unrelated message happens to be newest.
+                pushNotification(msg, { kind: "workspace-open" });
                 return false;
             }
         },
-        [
-            dispatchWs,
-            loadWorkspaceSessions,
-            setErrorBanner,
-            showToast,
-            switchWorkspace,
-            workspacesRef,
-        ],
+        [dispatchWs, loadWorkspaceSessions, pushNotification, switchWorkspace, workspacesRef],
     );
 
     const browseAndOpen = useCallback(async () => {
@@ -600,9 +590,9 @@ export function useWorkspaceLifecycle({
         } catch (err) {
             const msg = `Failed to open folder picker: ${(err as Error).message}`;
             console.error("[taco] browse failed", err);
-            setErrorBanner(msg);
+            pushNotification(msg);
         }
-    }, [openWorkspace, setErrorBanner]);
+    }, [openWorkspace, pushNotification]);
 
     const openImConversation = useCallback(
         async (cwd: string, sid: string): Promise<void> => {
@@ -640,8 +630,7 @@ export function useWorkspaceLifecycle({
             } catch (err) {
                 const msg = `Failed to open IM conversation: ${(err as Error).message}`;
                 console.error("[taco] openImConversation failed", cwd, err);
-                setErrorBanner(msg);
-                showToast(msg, "error");
+                pushNotification(msg);
                 // Roll back the half-opened workspace so a later retry starts
                 // from a clean state instead of a dangling empty entry.
                 if (addedNew) {
@@ -659,8 +648,7 @@ export function useWorkspaceLifecycle({
             dispatchWs,
             loadWorkspaceSessions,
             setActiveCwd,
-            setErrorBanner,
-            showToast,
+            pushNotification,
             workspacesRef,
         ],
     );
@@ -711,11 +699,14 @@ export function useWorkspaceLifecycle({
                 return { recovered: true, snapshotSeq: snapshot.snapshotSeq };
             } catch (err) {
                 console.error("[taco] session snapshot recovery failed", cwd, sessionId, err);
-                setErrorBanner(`Session recovery failed: ${(err as Error).message}`);
+                // Push-driven (a seq gap in the sidecar's stream), not a click.
+                pushNotification(`Session recovery failed: ${(err as Error).message}`, {
+                    source: "sidecar",
+                });
                 return { recovered: false };
             }
         },
-        [client, dispatchWs, setErrorBanner],
+        [client, dispatchWs, pushNotification],
     );
 
     const deleteSession = useCallback(
@@ -725,7 +716,7 @@ export function useWorkspaceLifecycle({
             } catch (err) {
                 const msg = `Failed to delete session: ${(err as Error).message}`;
                 console.error("[taco] deleteSession failed", cwd, sessionId, err);
-                setErrorBanner(msg);
+                pushNotification(msg);
                 return;
             }
             // workspacesRef is still stale after dispatchWs (sync happens on next render's useEffect),
@@ -738,7 +729,7 @@ export function useWorkspaceLifecycle({
                 await attachSession(cwd, remaining[0].id);
             }
         },
-        [client, attachSession, dispatchWs, setErrorBanner, workspacesRef],
+        [client, attachSession, dispatchWs, pushNotification, workspacesRef],
     );
 
     /** Sidebar "load more" handler. Reads the cursor from reducer state and
@@ -773,7 +764,7 @@ export function useWorkspaceLifecycle({
             } catch (err) {
                 const msg = `Failed to rename session: ${(err as Error).message}`;
                 console.error("[taco] renameSession failed", cwd, sessionId, err);
-                setErrorBanner(msg);
+                pushNotification(msg);
                 return;
             }
             // Reload only the current workspace's session list so the sidebar sees the new name.
@@ -782,7 +773,7 @@ export function useWorkspaceLifecycle({
             // precisely updated by rename, so this list call won't hit disk.
             await refreshSessionList(cwd);
         },
-        [client, refreshSessionList, setErrorBanner],
+        [client, refreshSessionList, pushNotification],
     );
 
     return {
