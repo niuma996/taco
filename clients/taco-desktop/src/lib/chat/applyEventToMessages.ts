@@ -22,11 +22,20 @@
  */
 
 import type { AgentMessage } from "@taco-ai/protocol";
-import type { AssistantSubEvent, SessionEventLike, UiMessage, UiToolCall } from "./chatUtils.ts";
+import type {
+    AssistantSubEvent,
+    MessageLike,
+    SessionEventLike,
+    UiMessage,
+    UiToolCall,
+} from "./chatUtils.ts";
 import {
+    appendAssistantError,
+    assistantFailureText,
     extractAssistantTextAndThinking,
     extractImageParts,
     findLastAssistant,
+    isEmptyAssistant,
     stringifyResult,
     textFromMessage,
     toolResultLine,
@@ -204,12 +213,15 @@ function handleMessageEnd(
             // We narrowed m.role === "assistant" above; the function internally
             // checks role again, so the wider MessageLike is safe here.
             const { text, thinking } = extractAssistantTextAndThinking(m as AgentMessage);
-            return {
-                messages: [
-                    ...messages,
-                    { id, kind: "assistant", text, ts: opts.now, tools: [], thinking },
-                ],
+            const bubble: AssistantMessage = {
+                id,
+                kind: "assistant",
+                text,
+                ts: opts.now,
+                tools: [],
+                thinking,
             };
+            return { messages: settleAssistant(messages, bubble, m, opts.now) };
         }
         const target = messages[idx];
         if (target?.kind !== "assistant") return { messages };
@@ -223,11 +235,28 @@ function handleMessageEnd(
                 block.thinking = "";
             }
         }
-        const next = messages.slice();
-        next[idx] = cloned;
-        return { messages: next };
+        const settled = settleAssistant(messages.slice(0, idx), cloned, m, opts.now);
+        return { messages: [...settled, ...messages.slice(idx + 1)] };
     }
     return { messages };
+}
+
+/**
+ * Place a finished assistant bubble. A failed turn that produced nothing
+ * renders as one ⚠ row instead of an empty bubble — pi emits message_end
+ * without message_start when the request fails before connecting, once per
+ * retry attempt. An empty aborted turn renders nothing; the user stopped it.
+ */
+function settleAssistant(
+    before: UiMessage[],
+    bubble: AssistantMessage,
+    m: MessageLike,
+    now: number,
+): UiMessage[] {
+    const failure = assistantFailureText(m);
+    const failed = failure !== null || m.stopReason === "aborted";
+    const placed = failed && isEmptyAssistant(bubble) ? before : [...before, bubble];
+    return failure === null ? placed : appendAssistantError(placed, bubble.id, failure, now);
 }
 
 function handleToolStart(

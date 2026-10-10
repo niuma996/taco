@@ -1234,3 +1234,44 @@ describe("isTurnInProgress", () => {
         }
     });
 });
+
+describe("historyToUiMessages — failed assistant turns", () => {
+    const failed = (id: string) => ({
+        id,
+        type: "message",
+        timestamp: 2,
+        payload: {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: "fetch failed",
+        },
+    });
+
+    it("persisted retry failures reload as one error row, no empty bubbles", () => {
+        const ui = historyToUiMessages([
+            { id: "u1", type: "message", timestamp: 1, payload: { role: "user", content: "hi" } },
+            failed("a1"),
+            failed("a2"),
+            failed("a3"),
+            failed("a4"),
+        ]);
+        assert.deepEqual(
+            ui.map((m) => m.kind),
+            ["user", "system"],
+        );
+        assert.match(ui[1]?.text ?? "", /fetch failed/);
+    });
+
+    it("empty aborted turn is skipped", () => {
+        const ui = historyToUiMessages([
+            {
+                id: "a1",
+                type: "message",
+                timestamp: 2,
+                payload: { role: "assistant", content: [], stopReason: "aborted" },
+            },
+        ]);
+        assert.equal(ui.length, 0);
+    });
+});

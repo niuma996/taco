@@ -568,3 +568,80 @@ describe("applyEventToMessages — 非消息事件不动 messages", () => {
         }
     });
 });
+
+describe("applyEventToMessages — failed assistant turns", () => {
+    const failedEnd = (ts: number, extra: object = {}) =>
+        asEv({
+            type: "message_end",
+            message: {
+                role: "assistant",
+                content: [],
+                stopReason: "error",
+                errorMessage: "fetch failed",
+                timestamp: ts,
+                ...extra,
+            },
+        });
+    const user: UiMessage = { id: "live-user-1", kind: "user", text: "hi", ts: 1 };
+
+    it("message_end(error) without message_start → one error row, no empty bubble", () => {
+        const { messages } = applyEventToMessages([user], failedEnd(10), baseOpts);
+        assert.equal(messages.length, 2);
+        assert.equal(messages[1]?.kind, "system");
+        assert.match(messages[1]?.text ?? "", /fetch failed/);
+    });
+
+    it("retry attempts with distinct timestamps collapse to one error row", () => {
+        let messages: UiMessage[] = [user];
+        for (const ts of [10, 11, 13, 17]) {
+            messages = applyEventToMessages(messages, failedEnd(ts), baseOpts).messages;
+        }
+        assert.equal(messages.length, 2);
+        assert.equal(messages.filter((m) => m.kind === "assistant").length, 0);
+        assert.equal(messages.filter((m) => m.kind === "system").length, 1);
+    });
+
+    it("message_start then empty message_end(error) → placeholder removed, error row kept", () => {
+        const start = asEv({
+            type: "message_start",
+            message: { role: "assistant", timestamp: 10 },
+        });
+        const started = applyEventToMessages([user], start, baseOpts).messages;
+        const { messages } = applyEventToMessages(started, failedEnd(10), baseOpts);
+        assert.deepEqual(
+            messages.map((m) => m.kind),
+            ["user", "system"],
+        );
+    });
+
+    it("partial text then message_end(error) → bubble keeps text, error row follows", () => {
+        const start = asEv({
+            type: "message_start",
+            message: { role: "assistant", timestamp: 10 },
+        });
+        const started = applyEventToMessages([user], start, baseOpts).messages;
+        const end = failedEnd(10, { content: [{ type: "text", text: "partial" }] });
+        const { messages } = applyEventToMessages(started, end, baseOpts);
+        assert.deepEqual(
+            messages.map((m) => m.kind),
+            ["user", "assistant", "system"],
+        );
+        assert.equal(messages[1]?.text, "partial");
+    });
+
+    it("empty message_end(aborted) → nothing appended", () => {
+        const end = asEv({
+            type: "message_end",
+            message: { role: "assistant", content: [], stopReason: "aborted", timestamp: 10 },
+        });
+        const { messages } = applyEventToMessages([user], end, baseOpts);
+        assert.deepEqual(messages, [user]);
+    });
+
+    it("failures in separate turns are not merged", () => {
+        let messages = applyEventToMessages([user], failedEnd(10), baseOpts).messages;
+        messages = [...messages, { id: "live-user-2", kind: "user", text: "again", ts: 20 }];
+        messages = applyEventToMessages(messages, failedEnd(30), baseOpts).messages;
+        assert.equal(messages.filter((m) => m.kind === "system").length, 2);
+    });
+});

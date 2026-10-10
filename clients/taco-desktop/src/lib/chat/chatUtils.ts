@@ -26,6 +26,8 @@ export interface MessageLike {
     toolCallId?: string;
     isError?: boolean;
     args?: unknown;
+    stopReason?: string;
+    errorMessage?: string;
 }
 
 /** Sub-event shape inside message_update — protocol doesn't expose this field,
@@ -483,14 +485,17 @@ export function historyToUiMessages(
             });
         } else if (role === "assistant") {
             const { text, tools, thinking } = splitAssistantContent(content);
-            out.push({
-                id: entryId || `assistant-${ts}`,
-                kind: "assistant",
-                text,
-                ts,
-                tools,
-                thinking,
-            });
+            const id = entryId || `assistant-${ts}`;
+            const bubble: UiMessage = { id, kind: "assistant", text, ts, tools, thinking };
+            const failure = assistantFailureText(m as { stopReason?: string });
+            const stopReason = (m as { stopReason?: string }).stopReason;
+            // Failed / aborted turns are persisted for the transcript; without
+            // this a reload resurrects them as empty bubbles.
+            const failed = failure !== null || stopReason === "aborted";
+            if (!(failed && isEmptyAssistant(bubble))) out.push(bubble);
+            if (failure !== null) {
+                out.splice(0, out.length, ...appendAssistantError(out, id, failure, ts));
+            }
         } else if (role === "toolResult") {
             const tm = m as {
                 toolCallId: string;
@@ -695,6 +700,45 @@ export function extractAssistantTextAndThinking(m: AgentMessage | undefined): {
     }
     const { text, thinking } = splitAssistantContent((m as { content?: unknown }).content);
     return { text, thinking };
+}
+
+const ASSISTANT_ERROR_ROW_PREFIX = "asst-err-";
+
+/** Error text for a failed assistant turn; null when the turn did not fail. */
+export function assistantFailureText(
+    m: { stopReason?: string; errorMessage?: string } | undefined,
+): string | null {
+    if (m?.stopReason !== "error") return null;
+    return m.errorMessage || "Assistant request failed";
+}
+
+/** An assistant bubble with nothing to render. */
+export function isEmptyAssistant(m: UiMessage): boolean {
+    return m.kind === "assistant" && !m.text && m.thinking.length === 0 && m.tools.length === 0;
+}
+
+/**
+ * Append the ⚠ row for a failed assistant attempt. pi retries a failed request
+ * inside one run and each attempt ends with its own message_end, with no user
+ * row in between — so a trailing error row is replaced instead of stacked.
+ */
+export function appendAssistantError(
+    messages: UiMessage[],
+    key: string,
+    text: string,
+    ts: number,
+): UiMessage[] {
+    const row: UiMessage = {
+        id: `${ASSISTANT_ERROR_ROW_PREFIX}${key}`,
+        kind: "system",
+        text: `⚠ ${text}`,
+        ts,
+    };
+    const tail = messages[messages.length - 1];
+    if (tail?.kind === "system" && tail.id.startsWith(ASSISTANT_ERROR_ROW_PREFIX)) {
+        return [...messages.slice(0, -1), row];
+    }
+    return [...messages, row];
 }
 
 /** Extract image parts from user message.content — no base64 validation;

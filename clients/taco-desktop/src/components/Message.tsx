@@ -12,7 +12,12 @@ import type { CommandPermissionScope } from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/useI18n";
-import type { UiMessage, UiThinkingBlock, UiToolCall } from "../lib/chat/chatUtils";
+import {
+    isEmptyAssistant,
+    type UiMessage,
+    type UiThinkingBlock,
+    type UiToolCall,
+} from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 import { MessageMeta } from "./MessageMeta";
 import { ToolCardShell } from "./ToolCardShell";
@@ -83,6 +88,9 @@ export const Message = memo(function Message({
             </div>
         );
     }
+    // A settled turn with nothing to show must not leave an empty frame; while
+    // in flight the empty bubble is the streaming placeholder.
+    if (isEmptyAssistant(m) && !isTurnInProgress) return null;
     return (
         <div className="message assistant">
             {m.thinking.map((b, i) => (

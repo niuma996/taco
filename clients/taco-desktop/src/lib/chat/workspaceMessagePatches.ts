@@ -11,7 +11,13 @@
  */
 
 import type { AgentMessage, CommandPermissionRequest } from "@taco-ai/protocol";
-import { extractAssistantTextAndThinking, type UiMessage } from "./chatUtils";
+import {
+    appendAssistantError,
+    assistantFailureText,
+    extractAssistantTextAndThinking,
+    isEmptyAssistant,
+    type UiMessage,
+} from "./chatUtils";
 
 type AssistantMessage = Extract<UiMessage, { kind: "assistant" }>;
 type AssistantTool = AssistantMessage["tools"][number];
@@ -119,28 +125,38 @@ export function attachAskUserAnswers(
 /**
  * Fold the final assistant message returned synchronously by sessionCreate /
  * sessionPrompt into the message list. When message_start already created a
- * same-timestamp live bubble, overwrite it in place; otherwise append. An
- * `stopReason === "error"` reply also appends a system bubble carrying
- * errorMessage — without it an immediate LLM error rendered an empty bubble.
+ * same-timestamp live bubble, overwrite it in place; otherwise append. A
+ * `stopReason === "error"` reply renders as a ⚠ row, and an error with no
+ * content drops the bubble — same rule as the message_end push path.
  */
 export function mergeAssistantFinal(messages: UiMessage[], reply: AgentMessage): UiMessage[] {
     const m = reply as AgentMessage & { stopReason?: string; errorMessage?: string };
     const { text, thinking } = extractAssistantTextAndThinking(m);
-    const errorText = m.stopReason === "error" ? (m.errorMessage ?? "Assistant error") : null;
+    const errorText = assistantFailureText(m);
     const ts = String((m as { timestamp?: unknown }).timestamp ?? Date.now());
     const id = `final-asst-${ts}`;
-    const next: UiMessage[] = [...messages];
+    let next: UiMessage[] = [...messages];
     const liveIdx = next.findIndex((x) => x.kind === "assistant" && x.id === `live-asst-${ts}`);
     if (liveIdx >= 0) {
         // Shallow-clone before overwriting — the element shares its reference
         // with the input array, so direct assignment would pollute reducer input.
         const live = next[liveIdx] as AssistantMessage;
-        next[liveIdx] = { ...live, text, thinking };
+        const merged: AssistantMessage = { ...live, text, thinking };
+        if (errorText !== null && isEmptyAssistant(merged)) next.splice(liveIdx, 1);
+        else next[liveIdx] = merged;
     } else {
-        next.push({ id, kind: "assistant", text, ts: Date.now(), tools: [], thinking });
+        const bubble: AssistantMessage = {
+            id,
+            kind: "assistant",
+            text,
+            ts: Date.now(),
+            tools: [],
+            thinking,
+        };
+        if (errorText === null || !isEmptyAssistant(bubble)) next.push(bubble);
     }
-    if (errorText) {
-        next.push({ id: `${id}-err`, kind: "system", text: `⚠ ${errorText}`, ts: Date.now() });
+    if (errorText !== null) {
+        next = appendAssistantError(next, id, errorText, Date.now());
     }
     return next;
 }

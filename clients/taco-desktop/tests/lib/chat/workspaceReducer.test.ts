@@ -590,7 +590,7 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
         assert.equal(next["/ws"]?.pendingBySessionId.s1, true);
     });
 
-    it("appends a new assistant bubble + error system message on stopReason=error", () => {
+    it("renders an empty stopReason=error reply as a single error row, no empty bubble", () => {
         const state = { "/ws": baseWs({ activeSession: "s1" }) };
         const next = workspacesReducer(state, {
             type: "APPEND_ASSISTANT_FINAL",
@@ -605,10 +605,9 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
             } as never,
         });
         const msgs = next["/ws"]?.messages ?? [];
-        assert.equal(msgs.length, 2);
-        assert.equal(msgs[0]?.kind, "assistant");
-        assert.equal(msgs[1]?.kind, "system");
-        assert.match((msgs[1] as Extract<UiMessage, { kind: "system" }>).text, /API key missing/);
+        assert.equal(msgs.length, 1);
+        assert.equal(msgs[0]?.kind, "system");
+        assert.match((msgs[0] as Extract<UiMessage, { kind: "system" }>).text, /API key missing/);
         assert.equal(next["/ws"]?.pendingBySessionId.s1, false);
     });
 
