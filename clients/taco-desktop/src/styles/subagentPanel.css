@@ -214,7 +214,8 @@
     max-width: 100%;
 }
 
-.subagent-detail-stream .message-text,
+/* Narrow panel, so even assistant markdown needs the stronger `anywhere` the
+   main chat gets from chatMarkdown.css's `break-word`. */
 .subagent-detail-stream .md-assistant {
     overflow-wrap: anywhere;
 }

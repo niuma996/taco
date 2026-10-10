@@ -13,6 +13,9 @@
 
 .message-text {
     white-space: pre-wrap;
+    /* Long unbroken tokens (paths, URLs, base64) must not overflow the bubble —
+       `normal` wrapping has no break opportunity inside them. */
+    overflow-wrap: anywhere;
 }
 
 .message.user {
