@@ -1,13 +1,11 @@
 /**
- * RenameModal — session rename dialog backed by Radix Dialog (focus trap,
- * Escape to close, focus restoration).
- *
- * Mirrors ConfirmModal with a controlled input. Submits after trimming;
- * newlines are folded to spaces before submit. Close routes through onCancel.
+ * RenameModal — session rename dialog with a controlled input. Submits after
+ * trimming; newlines are folded to spaces before submit. Close routes through
+ * onCancel.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./ui/Button.tsx";
+import { Modal } from "./ui/Modal.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
 
 export interface RenameModalProps {
@@ -41,51 +39,44 @@ export function RenameModal(props: RenameModalProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open={open}
-            onOpenChange={(next) => {
-                if (!next) onCancel();
+            onClose={onCancel}
+            title={title}
+            // Focus the input and select the existing name on open so users can
+            // overwrite in one keystroke. Use onOpenAutoFocus instead of
+            // JSX autoFocus (the latter is rejected by biome's noAutoFocus rule).
+            onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                inputRef.current?.focus();
+                inputRef.current?.select();
             }}
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content
-                    className="modal"
-                    // Focus the input and select the existing name on open so users can
-                    // overwrite in one keystroke. Use onOpenAutoFocus instead of
-                    // JSX autoFocus (the latter is rejected by biome's noAutoFocus rule).
-                    onOpenAutoFocus={(e) => {
-                        e.preventDefault();
-                        inputRef.current?.focus();
-                        inputRef.current?.select();
-                    }}
-                >
-                    <Dialog.Title className="modal-title">{title}</Dialog.Title>
-                    <form
-                        className="rename-modal-form"
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            submit();
-                        }}
-                    >
-                        <TextInput
-                            ref={inputRef}
-                            type="text"
-                            value={value}
-                            placeholder={placeholder}
-                            onChange={(e) => setValue(e.target.value)}
-                        />
-                        <div className="modal-actions">
-                            <Button variant="ghost" onClick={onCancel}>
-                                {cancelLabel ?? "Cancel"}
-                            </Button>
-                            <Button type="submit" variant="primary" disabled={!canSubmit}>
-                                {confirmLabel ?? "Save"}
-                            </Button>
-                        </div>
-                    </form>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            <form
+                className="rename-modal-form"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    submit();
+                }}
+            >
+                <TextInput
+                    ref={inputRef}
+                    type="text"
+                    value={value}
+                    placeholder={placeholder}
+                    onChange={(e) => setValue(e.target.value)}
+                />
+                {/* Actions stay inside the form so Enter submits; the Modal
+                    actions slot would render them outside it. */}
+                <div className="ui-modal-actions">
+                    <Button variant="ghost" onClick={onCancel}>
+                        {cancelLabel ?? "Cancel"}
+                    </Button>
+                    <Button type="submit" variant="primary" disabled={!canSubmit}>
+                        {confirmLabel ?? "Save"}
+                    </Button>
+                </div>
+            </form>
+        </Modal>
     );
 }

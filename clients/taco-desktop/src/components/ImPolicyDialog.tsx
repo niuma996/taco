@@ -15,7 +15,6 @@
  * (live + orphan) with a two-step Clear affordance.
  */
 
-import * as Dialog from "@radix-ui/react-dialog";
 import type { ImPolicyChatOverrideEntry, ImRoute, ImWorkspacePolicyPatch } from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useImPolicy } from "../hooks/useImPolicy.ts";
@@ -28,6 +27,7 @@ import { ConfirmModal } from "./ConfirmModal.tsx";
 import { ImPolicyRuleListField } from "./ImPolicyRuleListField.tsx";
 import { Button } from "./ui/Button.tsx";
 import { FormField } from "./ui/FormField.tsx";
+import { Modal } from "./ui/Modal.tsx";
 import { Select } from "./ui/Select.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
 export interface ImPolicyDialogProps {
@@ -260,201 +260,190 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     if (!scope) return null;
 
     return (
-        <Dialog.Root
+        <Modal
             open={open}
-            onOpenChange={(next) => {
-                if (!next) onClose();
-            }}
+            onClose={onClose}
+            title={
+                isChannelScope
+                    ? t("imPolicy.titleChannel", { channel: scope.channelId })
+                    : t("imPolicy.titleChat")
+            }
+            className="im-policy-modal"
+            actions={
+                <>
+                    <Button variant="ghost" onClick={onClose} disabled={formDisabled}>
+                        {t("imPolicy.cancel")}
+                    </Button>
+                    <Button
+                        variant="primary"
+                        onClick={() => setConfirmingSave(true)}
+                        disabled={formDisabled}
+                    >
+                        {t("imPolicy.save")}
+                    </Button>
+                </>
+            }
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content className="modal im-policy-modal">
-                    <Dialog.Title className="modal-title">
-                        {isChannelScope
-                            ? t("imPolicy.titleChannel", { channel: scope.channelId })
-                            : t("imPolicy.titleChat")}
-                    </Dialog.Title>
-                    <p className="im-policy-desc">{t("imPolicy.desc")}</p>
-                    {visibleError && <div className="error-banner">{visibleError}</div>}
-                    {policy.loading && <div className="pane-loading">{t("imPolicy.loading")}</div>}
+            <p className="im-policy-desc">{t("imPolicy.desc")}</p>
+            {visibleError && <div className="error-banner">{visibleError}</div>}
+            {policy.loading && <div className="pane-loading">{t("imPolicy.loading")}</div>}
 
-                    {/* fsTools */}
-                    <FormField label={t("imPolicy.fsTools")}>
-                        <Select
-                            value={fsTools}
-                            onValueChange={(v) => setFsTools(v as TriString)}
-                            disabled={formDisabled}
-                            options={[
-                                {
-                                    value: INHERIT,
-                                    label: t("imPolicy.inherit", { value: resolvedFsTools }),
-                                },
-                                { value: "deny", label: t("imPolicy.deny") },
-                                { value: "allow", label: t("imPolicy.allow") },
-                            ]}
-                            label={t("imPolicy.fsTools")}
-                        />
-                    </FormField>
+            {/* fsTools */}
+            <FormField label={t("imPolicy.fsTools")}>
+                <Select
+                    value={fsTools}
+                    onValueChange={(v) => setFsTools(v as TriString)}
+                    disabled={formDisabled}
+                    options={[
+                        {
+                            value: INHERIT,
+                            label: t("imPolicy.inherit", { value: resolvedFsTools }),
+                        },
+                        { value: "deny", label: t("imPolicy.deny") },
+                        { value: "allow", label: t("imPolicy.allow") },
+                    ]}
+                    label={t("imPolicy.fsTools")}
+                />
+            </FormField>
 
-                    {/* shell */}
-                    <FormField label={t("imPolicy.shell")}>
-                        <Select
-                            value={shell}
-                            onValueChange={(v) => setShell(v as TriString)}
-                            disabled={formDisabled}
-                            options={[
-                                {
-                                    value: INHERIT,
-                                    label: t("imPolicy.inherit", { value: resolvedShell }),
-                                },
-                                { value: "deny", label: t("imPolicy.deny") },
-                                { value: "allow", label: t("imPolicy.allow") },
-                            ]}
-                            label={t("imPolicy.shell")}
-                        />
-                    </FormField>
+            {/* shell */}
+            <FormField label={t("imPolicy.shell")}>
+                <Select
+                    value={shell}
+                    onValueChange={(v) => setShell(v as TriString)}
+                    disabled={formDisabled}
+                    options={[
+                        {
+                            value: INHERIT,
+                            label: t("imPolicy.inherit", { value: resolvedShell }),
+                        },
+                        { value: "deny", label: t("imPolicy.deny") },
+                        { value: "allow", label: t("imPolicy.allow") },
+                    ]}
+                    label={t("imPolicy.shell")}
+                />
+            </FormField>
 
-                    {/* commands.mode */}
-                    <FormField label={t("imPolicy.commandMode")}>
-                        <Select
-                            value={mode}
-                            onValueChange={(v) => setMode(v as TriString)}
-                            disabled={formDisabled}
-                            options={[
-                                {
-                                    value: INHERIT,
-                                    label: t("imPolicy.inherit", { value: resolvedMode }),
-                                },
-                                { value: "ask", label: t("imPolicy.ask") },
-                                { value: "auto", label: t("imPolicy.auto") },
-                            ]}
-                            label={t("imPolicy.commandMode")}
-                        />
-                    </FormField>
+            {/* commands.mode */}
+            <FormField label={t("imPolicy.commandMode")}>
+                <Select
+                    value={mode}
+                    onValueChange={(v) => setMode(v as TriString)}
+                    disabled={formDisabled}
+                    options={[
+                        {
+                            value: INHERIT,
+                            label: t("imPolicy.inherit", { value: resolvedMode }),
+                        },
+                        { value: "ask", label: t("imPolicy.ask") },
+                        { value: "auto", label: t("imPolicy.auto") },
+                    ]}
+                    label={t("imPolicy.commandMode")}
+                />
+            </FormField>
 
-                    {/* allow rules */}
-                    <ImPolicyRuleListField
-                        title={t("imPolicy.allowRules")}
-                        enabled={allowEnabled}
-                        onEnabledChange={setAllowEnabled}
-                        rules={allow}
-                        input={newAllowRule}
-                        onInputChange={setNewAllowRule}
-                        onAdd={() => addRule("allow")}
-                        onRemove={(r: string) => removeRule("allow", r)}
-                        error={allowRuleError}
-                        disabled={formDisabled}
-                        addLabel={t("imPolicy.addRule")}
-                        removeLabel={t("imPolicy.removeRule")}
-                        inputPlaceholder={t("imPolicy.rulePlaceholder")}
-                        emptyLabel={t("imPolicy.noRules")}
-                    />
+            {/* allow rules */}
+            <ImPolicyRuleListField
+                title={t("imPolicy.allowRules")}
+                enabled={allowEnabled}
+                onEnabledChange={setAllowEnabled}
+                rules={allow}
+                input={newAllowRule}
+                onInputChange={setNewAllowRule}
+                onAdd={() => addRule("allow")}
+                onRemove={(r: string) => removeRule("allow", r)}
+                error={allowRuleError}
+                disabled={formDisabled}
+                addLabel={t("imPolicy.addRule")}
+                removeLabel={t("imPolicy.removeRule")}
+                inputPlaceholder={t("imPolicy.rulePlaceholder")}
+                emptyLabel={t("imPolicy.noRules")}
+            />
 
-                    {/* deny rules */}
-                    <ImPolicyRuleListField
-                        title={t("imPolicy.denyRules")}
-                        enabled={denyEnabled}
-                        onEnabledChange={setDenyEnabled}
-                        rules={deny}
-                        input={newDenyRule}
-                        onInputChange={setNewDenyRule}
-                        onAdd={() => addRule("deny")}
-                        onRemove={(r: string) => removeRule("deny", r)}
-                        error={denyRuleError}
-                        disabled={formDisabled}
-                        addLabel={t("imPolicy.addRule")}
-                        removeLabel={t("imPolicy.removeRule")}
-                        inputPlaceholder={t("imPolicy.rulePlaceholder")}
-                        emptyLabel={t("imPolicy.noRules")}
-                    />
+            {/* deny rules */}
+            <ImPolicyRuleListField
+                title={t("imPolicy.denyRules")}
+                enabled={denyEnabled}
+                onEnabledChange={setDenyEnabled}
+                rules={deny}
+                input={newDenyRule}
+                onInputChange={setNewDenyRule}
+                onAdd={() => addRule("deny")}
+                onRemove={(r: string) => removeRule("deny", r)}
+                error={denyRuleError}
+                disabled={formDisabled}
+                addLabel={t("imPolicy.addRule")}
+                removeLabel={t("imPolicy.removeRule")}
+                inputPlaceholder={t("imPolicy.rulePlaceholder")}
+                emptyLabel={t("imPolicy.noRules")}
+            />
 
-                    {/* binding.executionCwd */}
-                    <FormField label={t("imPolicy.executionCwd")}>
-                        <TextInput
-                            type="text"
-                            value={cwd}
-                            disabled={formDisabled}
-                            placeholder={t("imPolicy.executionCwdPlaceholder")}
-                            onChange={(e) => setCwd(e.target.value)}
-                        />
-                    </FormField>
+            {/* binding.executionCwd */}
+            <FormField label={t("imPolicy.executionCwd")}>
+                <TextInput
+                    type="text"
+                    value={cwd}
+                    disabled={formDisabled}
+                    placeholder={t("imPolicy.executionCwdPlaceholder")}
+                    onChange={(e) => setCwd(e.target.value)}
+                />
+            </FormField>
 
-                    {/* perChatScratch */}
-                    <FormField label={t("imPolicy.perChatScratch")}>
-                        <Select
-                            value={perChatScratch}
-                            onValueChange={(v) => setPerChatScratch(v as TriString)}
-                            disabled={formDisabled}
-                            options={[
-                                {
-                                    value: INHERIT,
-                                    label: t("imPolicy.inherit", { value: resolvedScratch }),
-                                },
-                                { value: "on", label: t("imPolicy.on") },
-                                { value: "off", label: t("imPolicy.off") },
-                            ]}
-                            label={t("imPolicy.perChatScratch")}
-                        />
-                    </FormField>
+            {/* perChatScratch */}
+            <FormField label={t("imPolicy.perChatScratch")}>
+                <Select
+                    value={perChatScratch}
+                    onValueChange={(v) => setPerChatScratch(v as TriString)}
+                    disabled={formDisabled}
+                    options={[
+                        {
+                            value: INHERIT,
+                            label: t("imPolicy.inherit", { value: resolvedScratch }),
+                        },
+                        { value: "on", label: t("imPolicy.on") },
+                        { value: "off", label: t("imPolicy.off") },
+                    ]}
+                    label={t("imPolicy.perChatScratch")}
+                />
+            </FormField>
 
-                    {/* Channel-scope only: list every chat override so the
+            {/* Channel-scope only: list every chat override so the
                         admin can see and clear orphan grants. */}
-                    {isChannelScope && data && data.overrides.length > 0 && (
-                        <div className="im-policy-overrides">
-                            <h4 className="im-policy-overrides-title">
-                                {t("imPolicy.overridesTitle")}
-                            </h4>
-                            <ul className="im-policy-overrides-list">
-                                {data.overrides.map((entry) => {
-                                    const label = entry.route
-                                        ? entry.route.peerId
-                                        : t("imPolicy.orphan");
-                                    const confirming = confirmingKey === entry.key;
-                                    return (
-                                        <li key={entry.key} className="im-policy-overrides-row">
-                                            <span
-                                                className="im-policy-overrides-label"
-                                                title={entry.key}
-                                            >
-                                                {label}
-                                            </span>
-                                            <Button
-                                                size="sm"
-                                                variant={confirming ? "danger" : "ghost"}
-                                                disabled={formDisabled}
-                                                onClick={() => {
-                                                    if (confirming) {
-                                                        void clearOverrideEntry(entry);
-                                                    } else {
-                                                        setConfirmingKey(entry.key);
-                                                    }
-                                                }}
-                                            >
-                                                {confirming
-                                                    ? t("imPolicy.confirmClear")
-                                                    : t("imPolicy.clearOverride")}
-                                            </Button>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        </div>
-                    )}
+            {isChannelScope && data && data.overrides.length > 0 && (
+                <div className="im-policy-overrides">
+                    <h4 className="im-policy-overrides-title">{t("imPolicy.overridesTitle")}</h4>
+                    <ul className="im-policy-overrides-list">
+                        {data.overrides.map((entry) => {
+                            const label = entry.route ? entry.route.peerId : t("imPolicy.orphan");
+                            const confirming = confirmingKey === entry.key;
+                            return (
+                                <li key={entry.key} className="im-policy-overrides-row">
+                                    <span className="im-policy-overrides-label" title={entry.key}>
+                                        {label}
+                                    </span>
+                                    <Button
+                                        size="sm"
+                                        variant={confirming ? "danger" : "ghost"}
+                                        disabled={formDisabled}
+                                        onClick={() => {
+                                            if (confirming) {
+                                                void clearOverrideEntry(entry);
+                                            } else {
+                                                setConfirmingKey(entry.key);
+                                            }
+                                        }}
+                                    >
+                                        {confirming
+                                            ? t("imPolicy.confirmClear")
+                                            : t("imPolicy.clearOverride")}
+                                    </Button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+            )}
 
-                    <div className="modal-actions">
-                        <Button variant="ghost" onClick={onClose} disabled={formDisabled}>
-                            {t("imPolicy.cancel")}
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={() => setConfirmingSave(true)}
-                            disabled={formDisabled}
-                        >
-                            {t("imPolicy.save")}
-                        </Button>
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
             <ConfirmModal
                 open={confirmingSave}
                 title={t("imPolicy.saveConfirmTitle")}
@@ -467,6 +456,6 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                 }}
                 onCancel={() => setConfirmingSave(false)}
             />
-        </Dialog.Root>
+        </Modal>
     );
 }

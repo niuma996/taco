@@ -1,47 +1,9 @@
-/* overlays.css — error banner, modal, drawer, toast, debug tab, llm dump panel, global scrollbar — split from styles.css on 2026-07-20 */
+/* overlays.css — error banner, drawer, toast, debug tab, llm dump panel, global scrollbar — split from styles.css on 2026-07-20.
+   The shared modal shell (.ui-modal*) lives in ui.css with the ui/Modal component. */
 
-/* ── confirm modal ── */
-.modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: var(--overlay-scrim);
-    z-index: 1000;
-}
-.modal {
-    /* Radix Dialog: Overlay and Content are siblings (not children of a backdrop),
-       so the modal positions itself at the screen center and sits above z-index:1000. */
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1001;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 1.2rem 1.4rem;
-    min-width: 320px;
-    max-width: 420px;
-    box-shadow: 0 8px 24px var(--shadow-color-strong);
-}
-.modal-title {
-    margin: 0 0 0.6rem 0;
-    font-size: 1rem;
-    font-weight: 600;
-}
-.modal-message {
-    margin: 0 0 1.2rem 0;
-    font-size: 0.9rem;
-    color: var(--fg-dim);
-    line-height: 1.4;
-}
 /* Rename modal: spacing between the input and the bottom buttons (formerly .modal-input margin-bottom). */
 .rename-modal-form .ui-input {
     margin-bottom: 1rem;
-}
-.modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
 }
 
 /* ── update dialog progress bar (PR5) ── */

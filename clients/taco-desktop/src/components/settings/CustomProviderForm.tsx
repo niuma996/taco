@@ -4,7 +4,6 @@
  * Submission replaces the full `customProviders` array via one atomic
  * settings.write — callers upsert/edit before calling onSave.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import type { CustomModelEntry, CustomProviderApi, CustomProviderConfig } from "@taco-ai/protocol";
 import { CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
 import { useState } from "react";
@@ -12,6 +11,7 @@ import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
@@ -126,115 +126,105 @@ export function CustomProviderForm(props: CustomProviderFormProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open
-            onOpenChange={(next) => {
-                if (!next) props.onCancel();
-            }}
+            onClose={props.onCancel}
+            title={isEdit ? t("settings.customProviderEdit") : t("settings.customProviderAdd")}
+            className="custom-provider-modal"
+            actions={
+                <>
+                    <Button variant="ghost" onClick={props.onCancel}>
+                        {t("settings.customProviderCancel")}
+                    </Button>
+                    <Button variant="primary" disabled={!canSave} onClick={save}>
+                        {t("settings.customProviderSave")}
+                    </Button>
+                </>
+            }
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content className="modal custom-provider-modal">
-                    <Dialog.Title className="modal-title">
-                        {isEdit
-                            ? t("settings.customProviderEdit")
-                            : t("settings.customProviderAdd")}
-                    </Dialog.Title>
+            <FormField label={t("settings.customProviderName")}>
+                <TextInput
+                    type="text"
+                    value={name}
+                    placeholder={t("settings.customProviderNamePlaceholder")}
+                    disabled={isEdit}
+                    onChange={(e) => setName(e.target.value)}
+                />
+            </FormField>
 
-                    <FormField label={t("settings.customProviderName")}>
-                        <TextInput
-                            type="text"
-                            value={name}
-                            placeholder={t("settings.customProviderNamePlaceholder")}
-                            disabled={isEdit}
-                            onChange={(e) => setName(e.target.value)}
-                        />
-                    </FormField>
+            <FormField
+                label={t("settings.customProviderId")}
+                error={idClash ? t("settings.customProviderIdClash") : undefined}
+            >
+                <TextInput
+                    type="text"
+                    value={id}
+                    disabled={isEdit}
+                    onChange={(e) => setId(e.target.value)}
+                />
+            </FormField>
 
-                    <FormField
-                        label={t("settings.customProviderId")}
-                        error={idClash ? t("settings.customProviderIdClash") : undefined}
-                    >
-                        <TextInput
-                            type="text"
-                            value={id}
-                            disabled={isEdit}
-                            onChange={(e) => setId(e.target.value)}
-                        />
-                    </FormField>
+            <FormField label={t("settings.customProviderApi")}>
+                <Select
+                    value={api}
+                    disabled={isEdit}
+                    onValueChange={(v) => setApi(v as CustomProviderApi)}
+                    options={PROTOCOL_OPTIONS.map((opt) => ({
+                        value: opt.value,
+                        label: t(opt.labelKey),
+                    }))}
+                    label={t("settings.customProviderApi")}
+                />
+            </FormField>
 
-                    <FormField label={t("settings.customProviderApi")}>
-                        <Select
-                            value={api}
-                            disabled={isEdit}
-                            onValueChange={(v) => setApi(v as CustomProviderApi)}
-                            options={PROTOCOL_OPTIONS.map((opt) => ({
-                                value: opt.value,
-                                label: t(opt.labelKey),
-                            }))}
-                            label={t("settings.customProviderApi")}
-                        />
-                    </FormField>
+            <FormField label={t("settings.customProviderBaseUrl")}>
+                <TextInput
+                    type="text"
+                    value={baseUrl}
+                    placeholder={t("settings.customProviderBaseUrlPlaceholder")}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                />
+            </FormField>
 
-                    <FormField label={t("settings.customProviderBaseUrl")}>
-                        <TextInput
-                            type="text"
-                            value={baseUrl}
-                            placeholder={t("settings.customProviderBaseUrlPlaceholder")}
-                            onChange={(e) => setBaseUrl(e.target.value)}
-                        />
-                    </FormField>
+            <FormField
+                label={t("settings.customProviderModelsLabel")}
+                action={
+                    api === MODEL_FETCH_API ? (
+                        <button
+                            type="button"
+                            className="custom-provider-fetch-btn"
+                            disabled={!canFetchModels}
+                            onClick={() => void fetchModels()}
+                        >
+                            {fetching
+                                ? t("settings.customProviderFetching")
+                                : t("settings.customProviderFetch")}
+                        </button>
+                    ) : (
+                        <span className="custom-provider-fetch-hint">
+                            {t("settings.customProviderFetchUnsupported")}
+                        </span>
+                    )
+                }
+                error={fetchError ?? undefined}
+            >
+                <Textarea
+                    value={modelsText}
+                    rows={4}
+                    placeholder={t("settings.customProviderModelsPlaceholder")}
+                    onChange={(e) => setModelsText(e.target.value)}
+                />
+            </FormField>
 
-                    <FormField
-                        label={t("settings.customProviderModelsLabel")}
-                        action={
-                            api === MODEL_FETCH_API ? (
-                                <button
-                                    type="button"
-                                    className="custom-provider-fetch-btn"
-                                    disabled={!canFetchModels}
-                                    onClick={() => void fetchModels()}
-                                >
-                                    {fetching
-                                        ? t("settings.customProviderFetching")
-                                        : t("settings.customProviderFetch")}
-                                </button>
-                            ) : (
-                                <span className="custom-provider-fetch-hint">
-                                    {t("settings.customProviderFetchUnsupported")}
-                                </span>
-                            )
-                        }
-                        error={fetchError ?? undefined}
-                    >
-                        <Textarea
-                            value={modelsText}
-                            rows={4}
-                            placeholder={t("settings.customProviderModelsPlaceholder")}
-                            onChange={(e) => setModelsText(e.target.value)}
-                        />
-                    </FormField>
-
-                    <FormField label={t("settings.customProviderKeyLabel")}>
-                        <TextInput
-                            type="password"
-                            value={apiKey}
-                            placeholder={t("settings.customProviderKeyPlaceholder")}
-                            autoComplete="off"
-                            onChange={(e) => setApiKey(e.target.value)}
-                        />
-                    </FormField>
-
-                    <div className="modal-actions">
-                        <Button variant="ghost" onClick={props.onCancel}>
-                            {t("settings.customProviderCancel")}
-                        </Button>
-                        <Button variant="primary" disabled={!canSave} onClick={save}>
-                            {t("settings.customProviderSave")}
-                        </Button>
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            <FormField label={t("settings.customProviderKeyLabel")}>
+                <TextInput
+                    type="password"
+                    value={apiKey}
+                    placeholder={t("settings.customProviderKeyPlaceholder")}
+                    autoComplete="off"
+                    onChange={(e) => setApiKey(e.target.value)}
+                />
+            </FormField>
+        </Modal>
     );
 }

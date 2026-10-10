@@ -3,11 +3,11 @@
  * built-in and custom provider rows. Submitting calls onSave with the trimmed
  * key; the caller performs the settings.write + refresh.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
 export interface ProviderKeyDialogProps {
@@ -38,59 +38,53 @@ export function ProviderKeyDialog(props: ProviderKeyDialogProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open
-            onOpenChange={(next) => {
-                if (!next) props.onCancel();
-            }}
+            onClose={props.onCancel}
+            title={
+                props.configured ? t("settings.providerReplaceKey") : t("settings.providerSetKey")
+            }
+            className="provider-key-modal"
+            actions={
+                <>
+                    <Button variant="ghost" onClick={props.onCancel}>
+                        {t("settings.providerCancel")}
+                    </Button>
+                    <Button
+                        variant="primary"
+                        disabled={saving || !key.trim()}
+                        onClick={() => void submit()}
+                    >
+                        {t("settings.providerSaveKey")}
+                    </Button>
+                </>
+            }
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content className="modal provider-key-modal">
-                    <Dialog.Title className="modal-title">
-                        {props.configured
-                            ? t("settings.providerReplaceKey")
-                            : t("settings.providerSetKey")}
-                    </Dialog.Title>
-                    {props.configured && props.currentMask && (
-                        <FormField label={t("settings.providerCurrentKey")}>
-                            <TextInput
-                                type="text"
-                                className="provider-key-mask"
-                                value={props.currentMask}
-                                readOnly
-                                aria-readonly="true"
-                            />
-                        </FormField>
-                    )}
-                    <FormField label={props.providerName}>
-                        {/* Radix Dialog auto-focuses the first focusable element (this input). */}
-                        <TextInput
-                            type="password"
-                            value={key}
-                            placeholder={t("settings.providerKeyPlaceholder")}
-                            autoComplete="off"
-                            disabled={saving}
-                            onChange={(e) => setKey(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") void submit();
-                            }}
-                        />
-                    </FormField>
-                    <div className="modal-actions">
-                        <Button variant="ghost" onClick={props.onCancel}>
-                            {t("settings.providerCancel")}
-                        </Button>
-                        <Button
-                            variant="primary"
-                            disabled={saving || !key.trim()}
-                            onClick={() => void submit()}
-                        >
-                            {t("settings.providerSaveKey")}
-                        </Button>
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            {props.configured && props.currentMask && (
+                <FormField label={t("settings.providerCurrentKey")}>
+                    <TextInput
+                        type="text"
+                        className="provider-key-mask"
+                        value={props.currentMask}
+                        readOnly
+                        aria-readonly="true"
+                    />
+                </FormField>
+            )}
+            <FormField label={props.providerName}>
+                {/* Radix Dialog auto-focuses the first focusable element (this input). */}
+                <TextInput
+                    type="password"
+                    value={key}
+                    placeholder={t("settings.providerKeyPlaceholder")}
+                    autoComplete="off"
+                    disabled={saving}
+                    onChange={(e) => setKey(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") void submit();
+                    }}
+                />
+            </FormField>
+        </Modal>
     );
 }

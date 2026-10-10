@@ -353,11 +353,11 @@
 }
 
 /* custom-provider-modal — CustomProviderForm's own Radix Dialog, wider than
-   the base .modal (420px) so its 6 fields and the "fetch models" action aren't
+   the base .ui-modal (420px) so its 6 fields and the "fetch models" action aren't
    cramped, and so the API Select's long option labels (e.g. "OpenAI
    /chat/completions (chatcomplete)") fit inside the modal. */
 .custom-provider-modal {
-    /* Base .modal sets only max-width, so width is content-driven; without an
+    /* Base .ui-modal sets only max-width, so width is content-driven; without an
        explicit width the box stays narrow regardless of max-width. */
     width: 600px;
     max-width: calc(100vw - 4rem);
@@ -563,7 +563,7 @@
     word-break: break-word;
 }
 
-/* MCP server modal — wider than the default .modal so the multi-line env /
+/* MCP server modal — wider than the default .ui-modal so the multi-line env /
    headers / always-loaded textareas are comfortable. */
 .mcp-server-modal {
     width: 600px;
@@ -785,7 +785,7 @@
 }
 
 /* ── Schedule form dialog ── */
-/* Wider than the default .modal (420px) so the cron expression, JSON
+/* Wider than the default .ui-modal (420px) so the cron expression, JSON
    args textarea, and toggle row all sit on one comfortable column.
    `max-height` + `overflow-y` keeps the dialog within the viewport on
    small windows. */

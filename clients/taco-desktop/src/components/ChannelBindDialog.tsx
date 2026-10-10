@@ -5,13 +5,13 @@
  * `awaiting_verify_code` swaps in the code input, and `connected` closes. The
  * dialog holds no polling of its own.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import type { ChannelStatusEntry, ChannelsBindCreds } from "@taco-ai/protocol";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
 import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane";
 import { useT } from "../i18n/useI18n";
 import { Button } from "./ui/Button.tsx";
+import { Modal } from "./ui/Modal.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
 
 export interface ChannelBindDialogProps {
@@ -99,146 +99,136 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open={open}
-            onOpenChange={(next) => {
-                if (!next) onCancel();
+            onClose={onCancel}
+            title={t("channels.bindTitle")}
+            className="channel-bind-modal"
+            onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                inputRef.current?.focus();
             }}
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content
-                    className="modal channel-bind-modal"
-                    onOpenAutoFocus={(e) => {
+            {error && <p className="channel-bind-error">{error}</p>}
+
+            {state === "awaiting_scan" &&
+                (channel?.qrUrl ? (
+                    <div className="channel-bind-qr">
+                        <QRCodeSVG
+                            value={channel.qrUrl}
+                            size={200}
+                            level="M"
+                            role="img"
+                            aria-label={t("channels.scanHint")}
+                        />
+                        <p className="channel-bind-hint">{t("channels.scanHint")}</p>
+                    </div>
+                ) : (
+                    <p className="channel-bind-hint">{t("channels.connectingHint")}</p>
+                ))}
+
+            {state === "scanned" && (
+                <p className="channel-bind-hint">{t("channels.scannedHint")}</p>
+            )}
+
+            {wecomCredsMode && (
+                <form
+                    className="channel-bind-form"
+                    onSubmit={(e) => {
                         e.preventDefault();
-                        inputRef.current?.focus();
+                        submitWecomCreds();
                     }}
                 >
-                    <Dialog.Title className="modal-title">{t("channels.bindTitle")}</Dialog.Title>
-
-                    {error && <p className="channel-bind-error">{error}</p>}
-
-                    {state === "awaiting_scan" &&
-                        (channel?.qrUrl ? (
-                            <div className="channel-bind-qr">
-                                <QRCodeSVG
-                                    value={channel.qrUrl}
-                                    size={200}
-                                    level="M"
-                                    role="img"
-                                    aria-label={t("channels.scanHint")}
-                                />
-                                <p className="channel-bind-hint">{t("channels.scanHint")}</p>
-                            </div>
-                        ) : (
-                            <p className="channel-bind-hint">{t("channels.connectingHint")}</p>
-                        ))}
-
-                    {state === "scanned" && (
-                        <p className="channel-bind-hint">{t("channels.scannedHint")}</p>
-                    )}
-
-                    {wecomCredsMode && (
-                        <form
-                            className="channel-bind-form"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                submitWecomCreds();
-                            }}
+                    <p className="channel-bind-hint">{t("channels.wecomHint")}</p>
+                    <TextInput
+                        ref={inputRef}
+                        type="text"
+                        value={wecomBotId}
+                        placeholder={t("channels.wecomBotIdPlaceholder")}
+                        aria-label={t("channels.wecomBotId")}
+                        onChange={(e) => setWecomBotId(e.target.value)}
+                    />
+                    <TextInput
+                        type="password"
+                        value={wecomSecret}
+                        placeholder={t("channels.wecomSecretPlaceholder")}
+                        aria-label={t("channels.wecomSecret")}
+                        onChange={(e) => setWecomSecret(e.target.value)}
+                    />
+                    <div className="ui-modal-actions">
+                        <Button variant="ghost" onClick={onCancel}>
+                            {t("channels.cancel")}
+                        </Button>
+                        <Button
+                            type="submit"
+                            variant="primary"
+                            disabled={!wecomBotId.trim() || !wecomSecret.trim()}
                         >
-                            <p className="channel-bind-hint">{t("channels.wecomHint")}</p>
-                            <TextInput
-                                ref={inputRef}
-                                type="text"
-                                value={wecomBotId}
-                                placeholder={t("channels.wecomBotIdPlaceholder")}
-                                aria-label={t("channels.wecomBotId")}
-                                onChange={(e) => setWecomBotId(e.target.value)}
-                            />
-                            <TextInput
-                                type="password"
-                                value={wecomSecret}
-                                placeholder={t("channels.wecomSecretPlaceholder")}
-                                aria-label={t("channels.wecomSecret")}
-                                onChange={(e) => setWecomSecret(e.target.value)}
-                            />
-                            <div className="modal-actions">
-                                <Button variant="ghost" onClick={onCancel}>
-                                    {t("channels.cancel")}
-                                </Button>
-                                <Button
-                                    type="submit"
-                                    variant="primary"
-                                    disabled={!wecomBotId.trim() || !wecomSecret.trim()}
-                                >
-                                    {t("channels.connect")}
-                                </Button>
-                            </div>
-                        </form>
-                    )}
+                            {t("channels.connect")}
+                        </Button>
+                    </div>
+                </form>
+            )}
 
-                    {state === "awaiting_verify_code" && (
-                        <form
-                            className="channel-bind-form"
-                            onSubmit={(e) => {
-                                e.preventDefault();
-                                void submit();
-                            }}
-                        >
-                            <p className="channel-bind-hint">
-                                {channel?.retry
-                                    ? t("channels.verifyCodeRetry")
-                                    : t("channels.verifyCodeHint")}
-                            </p>
-                            <TextInput
-                                ref={inputRef}
-                                type="text"
-                                value={code}
-                                inputMode="numeric"
-                                placeholder={t("channels.verifyCodePlaceholder")}
-                                onChange={(e) => setCode(e.target.value)}
-                            />
-                            <div className="modal-actions">
-                                <Button variant="ghost" onClick={onCancel}>
-                                    {t("channels.cancel")}
-                                </Button>
-                                <Button type="submit" variant="primary" disabled={!canSubmit}>
-                                    {t("channels.submitCode")}
-                                </Button>
-                            </div>
-                        </form>
-                    )}
+            {state === "awaiting_verify_code" && (
+                <form
+                    className="channel-bind-form"
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        void submit();
+                    }}
+                >
+                    <p className="channel-bind-hint">
+                        {channel?.retry
+                            ? t("channels.verifyCodeRetry")
+                            : t("channels.verifyCodeHint")}
+                    </p>
+                    <TextInput
+                        ref={inputRef}
+                        type="text"
+                        value={code}
+                        inputMode="numeric"
+                        placeholder={t("channels.verifyCodePlaceholder")}
+                        onChange={(e) => setCode(e.target.value)}
+                    />
+                    <div className="ui-modal-actions">
+                        <Button variant="ghost" onClick={onCancel}>
+                            {t("channels.cancel")}
+                        </Button>
+                        <Button type="submit" variant="primary" disabled={!canSubmit}>
+                            {t("channels.submitCode")}
+                        </Button>
+                    </div>
+                </form>
+            )}
 
-                    {/* `connecting` covers the gap between channels.bind resolving
+            {/* `connecting` covers the gap between channels.bind resolving
                         and the first awaiting_scan push carrying the QR payload;
                         without this the dialog would render empty. `unbound` is
                         the same gap when the push has not landed at all yet. */}
-                    {!error &&
-                        (state === "connecting" || state === "unbound" || state === undefined) && (
-                            <p className="channel-bind-hint">{t("channels.connectingHint")}</p>
-                        )}
+            {!error && (state === "connecting" || state === "unbound" || state === undefined) && (
+                <p className="channel-bind-hint">{t("channels.connectingHint")}</p>
+            )}
 
-                    {state === "expired" && (
-                        <p className="channel-bind-error">{t("channels.expiredHint")}</p>
-                    )}
+            {state === "expired" && (
+                <p className="channel-bind-error">{t("channels.expiredHint")}</p>
+            )}
 
-                    {state === "error" && (
-                        <p className="channel-bind-error">
-                            {channel?.message ?? t("channels.genericError")}
-                        </p>
-                    )}
+            {state === "error" && (
+                <p className="channel-bind-error">
+                    {channel?.message ?? t("channels.genericError")}
+                </p>
+            )}
 
-                    {state === "connected" && (
-                        <p className="channel-bind-hint">{t("channels.boundHint")}</p>
-                    )}
+            {state === "connected" && (
+                <p className="channel-bind-hint">{t("channels.boundHint")}</p>
+            )}
 
-                    {state !== "awaiting_verify_code" && (
-                        <div className="modal-actions">
-                            <Button onClick={onCancel}>{t("channels.close")}</Button>
-                        </div>
-                    )}
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            {state !== "awaiting_verify_code" && (
+                <div className="ui-modal-actions">
+                    <Button onClick={onCancel}>{t("channels.close")}</Button>
+                </div>
+            )}
+        </Modal>
     );
 }

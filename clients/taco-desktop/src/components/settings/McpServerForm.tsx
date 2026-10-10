@@ -7,12 +7,12 @@
  * server with it (mcp.createConfig) or sends it as a field-wise update patch
  * (mcp.updateConfig; the server merges, so untouched fields survive).
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import type { McpServerConfig, McpTransportKind } from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
@@ -148,174 +148,160 @@ export function McpServerForm(props: McpServerFormProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open
-            onOpenChange={(next) => {
-                if (!next) props.onCancel();
-            }}
+            onClose={props.onCancel}
+            title={isEdit ? t("settings.mcpServerEdit") : t("settings.mcpServerAdd")}
+            className="mcp-server-modal"
+            actions={
+                <>
+                    <Button variant="ghost" onClick={props.onCancel} disabled={props.saving}>
+                        {t("settings.mcpServerCancel")}
+                    </Button>
+                    <Button variant="primary" disabled={!canSave || props.saving} onClick={save}>
+                        {props.saving ? t("settings.mcpServerSaving") : t("settings.mcpServerSave")}
+                    </Button>
+                </>
+            }
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content className="modal mcp-server-modal">
-                    <Dialog.Title className="modal-title">
-                        {isEdit ? t("settings.mcpServerEdit") : t("settings.mcpServerAdd")}
-                    </Dialog.Title>
+            <FormField
+                label={t("settings.mcpServerId")}
+                error={
+                    idClash
+                        ? t("settings.mcpServerIdClash")
+                        : idValid
+                          ? undefined
+                          : t("settings.mcpServerIdInvalid")
+                }
+            >
+                <TextInput
+                    type="text"
+                    value={id}
+                    placeholder="e.g. github, filesystem"
+                    disabled={isEdit}
+                    onChange={(e) => setId(e.target.value)}
+                />
+            </FormField>
 
+            <FormField label={t("settings.mcpServerTransport")}>
+                <Select
+                    value={transport}
+                    onValueChange={(v) => setTransport(v as McpTransportKind)}
+                    options={TRANSPORT_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: t(o.labelKey),
+                    }))}
+                    label={t("settings.mcpServerTransport")}
+                />
+            </FormField>
+
+            {transport === "stdio" && (
+                <>
                     <FormField
-                        label={t("settings.mcpServerId")}
-                        error={
-                            idClash
-                                ? t("settings.mcpServerIdClash")
-                                : idValid
-                                  ? undefined
-                                  : t("settings.mcpServerIdInvalid")
-                        }
+                        label={t("settings.mcpServerCommand")}
+                        hint={t("settings.mcpServerCommandHint")}
                     >
                         <TextInput
                             type="text"
-                            value={id}
-                            placeholder="e.g. github, filesystem"
-                            disabled={isEdit}
-                            onChange={(e) => setId(e.target.value)}
-                        />
-                    </FormField>
-
-                    <FormField label={t("settings.mcpServerTransport")}>
-                        <Select
-                            value={transport}
-                            onValueChange={(v) => setTransport(v as McpTransportKind)}
-                            options={TRANSPORT_OPTIONS.map((o) => ({
-                                value: o.value,
-                                label: t(o.labelKey),
-                            }))}
-                            label={t("settings.mcpServerTransport")}
-                        />
-                    </FormField>
-
-                    {transport === "stdio" && (
-                        <>
-                            <FormField
-                                label={t("settings.mcpServerCommand")}
-                                hint={t("settings.mcpServerCommandHint")}
-                            >
-                                <TextInput
-                                    type="text"
-                                    value={command}
-                                    placeholder="npx, /usr/local/bin/my-server, …"
-                                    onChange={(e) => setCommand(e.target.value)}
-                                />
-                            </FormField>
-
-                            <FormField
-                                label={t("settings.mcpServerArgs")}
-                                hint={t("settings.mcpServerArgsHint")}
-                            >
-                                <textarea
-                                    className="ui-input ui-textarea"
-                                    value={args}
-                                    rows={3}
-                                    placeholder="--flag value\n--option key=value"
-                                    onChange={(e) => setArgs(e.target.value)}
-                                />
-                            </FormField>
-
-                            <FormField
-                                label={t("settings.mcpServerEnv")}
-                                hint={t("settings.mcpServerEnvHint")}
-                            >
-                                <textarea
-                                    className="ui-input ui-textarea"
-                                    value={env}
-                                    rows={3}
-                                    placeholder="API_KEY=sk-…\nDEBUG=true"
-                                    onChange={(e) => setEnv(e.target.value)}
-                                />
-                            </FormField>
-
-                            <FormField
-                                label={t("settings.mcpServerCwd")}
-                                hint={t("settings.mcpServerCwdHint")}
-                            >
-                                <TextInput
-                                    type="text"
-                                    value={cwd}
-                                    placeholder={t("settings.mcpServerCwdPlaceholder")}
-                                    onChange={(e) => setCwd(e.target.value)}
-                                />
-                            </FormField>
-                        </>
-                    )}
-
-                    {transport === "http" && (
-                        <>
-                            <FormField
-                                label={t("settings.mcpServerUrl")}
-                                error={urlValid ? undefined : t("settings.mcpServerUrlInvalid")}
-                            >
-                                <TextInput
-                                    type="text"
-                                    value={url}
-                                    placeholder="https://my-mcp-server.example.com/mcp"
-                                    onChange={(e) => setUrl(e.target.value)}
-                                />
-                            </FormField>
-
-                            <FormField
-                                label={t("settings.mcpServerHeaders")}
-                                hint={t("settings.mcpServerHeadersHint")}
-                            >
-                                <textarea
-                                    className="ui-input ui-textarea"
-                                    value={headers}
-                                    rows={3}
-                                    placeholder="Authorization: Bearer sk-…\nX-Custom-Header: value"
-                                    onChange={(e) => setHeaders(e.target.value)}
-                                />
-                            </FormField>
-                        </>
-                    )}
-
-                    <FormField
-                        label={t("settings.mcpServerTimeout")}
-                        hint={t("settings.mcpServerTimeoutHint")}
-                    >
-                        <TextInput
-                            type="text"
-                            value={timeoutMs}
-                            placeholder="15000"
-                            onChange={(e) => setTimeoutMs(e.target.value)}
+                            value={command}
+                            placeholder="npx, /usr/local/bin/my-server, …"
+                            onChange={(e) => setCommand(e.target.value)}
                         />
                     </FormField>
 
                     <FormField
-                        label={t("settings.mcpServerAlwaysLoaded")}
-                        hint={t("settings.mcpServerAlwaysLoadedHint")}
+                        label={t("settings.mcpServerArgs")}
+                        hint={t("settings.mcpServerArgsHint")}
                     >
                         <textarea
                             className="ui-input ui-textarea"
-                            value={alwaysLoaded}
+                            value={args}
                             rows={3}
-                            placeholder={t("settings.mcpServerAlwaysLoadedPlaceholder")}
-                            onChange={(e) => setAlwaysLoaded(e.target.value)}
+                            placeholder="--flag value\n--option key=value"
+                            onChange={(e) => setArgs(e.target.value)}
                         />
                     </FormField>
 
-                    <div className="modal-actions">
-                        <Button variant="ghost" onClick={props.onCancel} disabled={props.saving}>
-                            {t("settings.mcpServerCancel")}
-                        </Button>
-                        <Button
-                            variant="primary"
-                            disabled={!canSave || props.saving}
-                            onClick={save}
-                        >
-                            {props.saving
-                                ? t("settings.mcpServerSaving")
-                                : t("settings.mcpServerSave")}
-                        </Button>
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+                    <FormField
+                        label={t("settings.mcpServerEnv")}
+                        hint={t("settings.mcpServerEnvHint")}
+                    >
+                        <textarea
+                            className="ui-input ui-textarea"
+                            value={env}
+                            rows={3}
+                            placeholder="API_KEY=sk-…\nDEBUG=true"
+                            onChange={(e) => setEnv(e.target.value)}
+                        />
+                    </FormField>
+
+                    <FormField
+                        label={t("settings.mcpServerCwd")}
+                        hint={t("settings.mcpServerCwdHint")}
+                    >
+                        <TextInput
+                            type="text"
+                            value={cwd}
+                            placeholder={t("settings.mcpServerCwdPlaceholder")}
+                            onChange={(e) => setCwd(e.target.value)}
+                        />
+                    </FormField>
+                </>
+            )}
+
+            {transport === "http" && (
+                <>
+                    <FormField
+                        label={t("settings.mcpServerUrl")}
+                        error={urlValid ? undefined : t("settings.mcpServerUrlInvalid")}
+                    >
+                        <TextInput
+                            type="text"
+                            value={url}
+                            placeholder="https://my-mcp-server.example.com/mcp"
+                            onChange={(e) => setUrl(e.target.value)}
+                        />
+                    </FormField>
+
+                    <FormField
+                        label={t("settings.mcpServerHeaders")}
+                        hint={t("settings.mcpServerHeadersHint")}
+                    >
+                        <textarea
+                            className="ui-input ui-textarea"
+                            value={headers}
+                            rows={3}
+                            placeholder="Authorization: Bearer sk-…\nX-Custom-Header: value"
+                            onChange={(e) => setHeaders(e.target.value)}
+                        />
+                    </FormField>
+                </>
+            )}
+
+            <FormField
+                label={t("settings.mcpServerTimeout")}
+                hint={t("settings.mcpServerTimeoutHint")}
+            >
+                <TextInput
+                    type="text"
+                    value={timeoutMs}
+                    placeholder="15000"
+                    onChange={(e) => setTimeoutMs(e.target.value)}
+                />
+            </FormField>
+
+            <FormField
+                label={t("settings.mcpServerAlwaysLoaded")}
+                hint={t("settings.mcpServerAlwaysLoadedHint")}
+            >
+                <textarea
+                    className="ui-input ui-textarea"
+                    value={alwaysLoaded}
+                    rows={3}
+                    placeholder={t("settings.mcpServerAlwaysLoadedPlaceholder")}
+                    onChange={(e) => setAlwaysLoaded(e.target.value)}
+                />
+            </FormField>
+        </Modal>
     );
 }

@@ -249,10 +249,8 @@
 }
 
 /* ── IM policy dialog ── */
-/* Double-class selector is required: this file is imported before overlays.css in styles.css;
-   at equal specificity, the latter's .modal{max-width:420px} would override our width. */
-.modal.im-policy-modal {
-    /* .modal only sets max-width; without an explicit width the dialog stays narrow. */
+/* Base .ui-modal only sets max-width; without an explicit width the dialog stays narrow. */
+.im-policy-modal {
     width: 560px;
     max-width: calc(100vw - 4rem);
     max-height: 86vh;

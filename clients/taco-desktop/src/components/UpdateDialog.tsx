@@ -21,10 +21,10 @@
  *   presentation-only — all side effects go through `./lib/updater`
  *   so tests can stub the wrapper.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { applyUpdate, checkForUpdate, relaunchDesktop, type UpdateStatus } from "../lib/updater.ts";
 import { Button } from "./ui/Button.tsx";
+import { Modal } from "./ui/Modal.tsx";
 
 export interface UpdateDialogProps {
     /** Controlled open state from App.tsx. */
@@ -132,45 +132,44 @@ export function UpdateDialog(props: UpdateDialogProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open={open}
-            onOpenChange={(next) => {
-                if (!next && canCancel) onDismiss();
-            }}
+            onClose={onDismiss}
+            // While downloading or ready-to-relaunch, Escape/scrim must not
+            // dismiss — mid-install dismissal would orphan the progress state.
+            dismissible={canCancel}
+            title={title}
+            description={body}
+            className="update-dialog"
+            actions={
+                <>
+                    <Button variant="ghost" disabled={!canCancel} onClick={onDismiss}>
+                        Later
+                    </Button>
+                    <Button
+                        variant="primary"
+                        disabled={!canUpgrade && !canRelaunch}
+                        onClick={onPrimary}
+                    >
+                        {primaryLabel}
+                    </Button>
+                </>
+            }
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content className="modal update-dialog">
-                    <Dialog.Title className="modal-title">{title}</Dialog.Title>
-                    <Dialog.Description className="modal-message">{body}</Dialog.Description>
-                    {status.state === "downloading" ? (
-                        <div
-                            className="update-progress"
-                            role="progressbar"
-                            aria-valuenow={Math.round(progress * 100)}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                        >
-                            <div
-                                className="update-progress-bar"
-                                style={{ width: `${Math.round(progress * 100)}%` }}
-                            />
-                        </div>
-                    ) : null}
-                    <div className="modal-actions">
-                        <Button variant="ghost" disabled={!canCancel} onClick={onDismiss}>
-                            Later
-                        </Button>
-                        <Button
-                            variant="primary"
-                            disabled={!canUpgrade && !canRelaunch}
-                            onClick={onPrimary}
-                        >
-                            {primaryLabel}
-                        </Button>
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            {status.state === "downloading" ? (
+                <div
+                    className="update-progress"
+                    role="progressbar"
+                    aria-valuenow={Math.round(progress * 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                >
+                    <div
+                        className="update-progress-bar"
+                        style={{ width: `${Math.round(progress * 100)}%` }}
+                    />
+                </div>
+            ) : null}
+        </Modal>
     );
 }

@@ -7,18 +7,18 @@
  * both call into it so a missing / wrong-shape check shows up the same
  * way in the disabled-button state and the inline error.
  *
- * Wider than the base `.modal` (see `.schedules-modal` in settings.css)
+ * Wider than the base `.ui-modal` (see `.schedules-modal` in settings.css)
  * so the cron expression, JSON args, and the action row sit on a
  * comfortable single column. The inline form that lived at the bottom
  * of SchedulesTab was getting squeezed by the 720px content cap and the
  * tables stacking underneath it; a dialog keeps the list scannable.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import type { Job, JobScheduleSpec, SessionStrategy } from "../../lib/clients/jobsClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
@@ -286,225 +286,202 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
     );
 
     return (
-        <Dialog.Root
+        <Modal
             open={open}
-            onOpenChange={(next) => {
-                if (!next) onCancel();
-            }}
+            onClose={onCancel}
+            title={
+                isEdit
+                    ? t("schedules.editTitle", "Edit schedule")
+                    : t("schedules.newTitle", "New schedule")
+            }
+            description={
+                isEdit
+                    ? t("schedules.editDescription", "修改这条定时任务的参数；保存后立即生效。")
+                    : t("schedules.newDescription", "填好下面这几项就可以把任务挂到调度器上。")
+            }
+            className="schedules-modal"
+            actions={
+                <>
+                    <Button variant="ghost" onClick={onCancel} disabled={saving}>
+                        {t("schedules.actionCancel", "Cancel")}
+                    </Button>
+                    <Button
+                        variant="primary"
+                        disabled={!canSubmit || saving}
+                        onClick={handleSubmit}
+                    >
+                        {isEdit
+                            ? t("schedules.actionSave", "Save")
+                            : t("schedules.actionCreate", "Create")}
+                    </Button>
+                </>
+            }
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="modal-backdrop" />
-                <Dialog.Content className="modal schedules-modal">
-                    <Dialog.Title className="modal-title">
-                        {isEdit
-                            ? t("schedules.editTitle", "Edit schedule")
-                            : t("schedules.newTitle", "New schedule")}
-                    </Dialog.Title>
-                    <Dialog.Description className="modal-message">
-                        {isEdit
-                            ? t(
-                                  "schedules.editDescription",
-                                  "修改这条定时任务的参数；保存后立即生效。",
-                              )
-                            : t(
-                                  "schedules.newDescription",
-                                  "填好下面这几项就可以把任务挂到调度器上。",
-                              )}
-                    </Dialog.Description>
+            <FormField label={t("schedules.fieldName", "Name")}>
+                <TextInput
+                    id="schedules-form-name"
+                    type="text"
+                    value={draft.name}
+                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+            </FormField>
 
-                    <FormField label={t("schedules.fieldName", "Name")}>
-                        <TextInput
-                            id="schedules-form-name"
-                            type="text"
-                            value={draft.name}
-                            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                        />
-                    </FormField>
+            <FormField label={t("schedules.fieldScheduleKind", "Kind")}>
+                <Select
+                    value={draft.schedule.kind}
+                    onValueChange={(v) => updateScheduleKind(v as JobScheduleSpec["kind"])}
+                    options={SCHEDULE_KIND_OPTIONS}
+                    label={t("schedules.fieldScheduleKind", "Kind")}
+                />
+            </FormField>
 
-                    <FormField label={t("schedules.fieldScheduleKind", "Kind")}>
-                        <Select
-                            value={draft.schedule.kind}
-                            onValueChange={(v) => updateScheduleKind(v as JobScheduleSpec["kind"])}
-                            options={SCHEDULE_KIND_OPTIONS}
-                            label={t("schedules.fieldScheduleKind", "Kind")}
-                        />
-                    </FormField>
-
-                    {draft.schedule.kind === "interval" ? (
-                        <FormField
-                            label={t("schedules.fieldIntervalMs", "Interval (ms)")}
-                            hint={t(
-                                "schedules.fieldIntervalMsHint",
-                                "触发间隔（毫秒）。需为正整数。",
-                            )}
-                            error={
-                                errorFor("intervalMs")
-                                    ? t("schedules.errorIntervalMs", "Interval (ms) 必须是正整数。")
-                                    : undefined
-                            }
-                        >
-                            <TextInput
-                                id="schedules-form-interval-ms"
-                                type="number"
-                                min={1}
-                                value={String(draft.schedule.ms)}
-                                onChange={(e) => updateIntervalMs(e.target.value)}
-                            />
-                        </FormField>
-                    ) : (
-                        <>
-                            <FormField
-                                label={t("schedules.fieldCronExpr", "Cron expression")}
-                                hint={t(
-                                    "schedules.fieldCronExprHint",
-                                    "标准 5 段 cron 表达式，例如 30 22 * * *。",
-                                )}
-                                error={
-                                    errorFor("cronExpr")
-                                        ? t("schedules.errorCronExpr", "Cron 表达式不能为空。")
-                                        : undefined
-                                }
-                            >
-                                <TextInput
-                                    id="schedules-form-cron-expr"
-                                    type="text"
-                                    value={
-                                        draft.schedule.kind === "cron" ? draft.schedule.expr : ""
-                                    }
-                                    onChange={(e) => updateCronExpr(e.target.value)}
-                                />
-                            </FormField>
-                            <FormField
-                                label={t("schedules.fieldCronTz", "Timezone (optional)")}
-                                hint={t(
-                                    "schedules.fieldCronTzHint",
-                                    "留空则使用宿主本地时区，例如 Asia/Shanghai。",
-                                )}
-                            >
-                                <TextInput
-                                    id="schedules-form-cron-tz"
-                                    type="text"
-                                    value={
-                                        draft.schedule.kind === "cron"
-                                            ? (draft.schedule.tz ?? "")
-                                            : ""
-                                    }
-                                    onChange={(e) => updateCronTz(e.target.value)}
-                                />
-                            </FormField>
-                        </>
-                    )}
-
-                    <FormField label={t("schedules.fieldCommand", "Command")}>
-                        <TextInput
-                            id="schedules-form-command"
-                            type="text"
-                            value={draft.command}
-                            onChange={(e) => setDraft({ ...draft, command: e.target.value })}
-                        />
-                    </FormField>
-
+            {draft.schedule.kind === "interval" ? (
+                <FormField
+                    label={t("schedules.fieldIntervalMs", "Interval (ms)")}
+                    hint={t("schedules.fieldIntervalMsHint", "触发间隔（毫秒）。需为正整数。")}
+                    error={
+                        errorFor("intervalMs")
+                            ? t("schedules.errorIntervalMs", "Interval (ms) 必须是正整数。")
+                            : undefined
+                    }
+                >
+                    <TextInput
+                        id="schedules-form-interval-ms"
+                        type="number"
+                        min={1}
+                        value={String(draft.schedule.ms)}
+                        onChange={(e) => updateIntervalMs(e.target.value)}
+                    />
+                </FormField>
+            ) : (
+                <>
                     <FormField
-                        label={t("schedules.fieldArgs", "Args (JSON object)")}
+                        label={t("schedules.fieldCronExpr", "Cron expression")}
                         hint={t(
-                            "schedules.fieldArgsHint",
-                            "传递给命令的 JSON 对象，例如 { workspace, prompt }。",
-                        )}
-                        error={errorFor("argsJson")}
-                    >
-                        <Textarea
-                            id="schedules-form-args"
-                            rows={4}
-                            value={draft.argsJson}
-                            placeholder={ARGS_PLACEHOLDER}
-                            onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
-                        />
-                    </FormField>
-
-                    <FormField
-                        label={t("schedules.fieldSessionStrategy", "Session strategy")}
-                        hint={
-                            isImWorkspace
-                                ? t(
-                                      "schedules.sessionStrategyImHint",
-                                      "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
-                                  )
-                                : undefined
-                        }
-                    >
-                        <Select
-                            value={effectiveStrategy}
-                            onValueChange={(v) => setStrategy(v as SessionStrategy)}
-                            options={SESSION_STRATEGY_OPTIONS}
-                            disabled={isImWorkspace}
-                            label={t("schedules.fieldSessionStrategy", "Session strategy")}
-                        />
-                    </FormField>
-
-                    <FormField
-                        label={t("schedules.fieldMaxRuns", "Max runs")}
-                        hint={t(
-                            "schedules.fieldMaxRunsHint",
-                            "达到该成功运行次数后任务自动停用（记录保留）。留空表示不限次数。",
+                            "schedules.fieldCronExprHint",
+                            "标准 5 段 cron 表达式，例如 30 22 * * *。",
                         )}
                         error={
-                            errorFor("maxRuns")
-                                ? t("schedules.errorMaxRuns", "最大运行次数必须是正整数。")
+                            errorFor("cronExpr")
+                                ? t("schedules.errorCronExpr", "Cron 表达式不能为空。")
                                 : undefined
                         }
                     >
                         <TextInput
-                            id="schedules-form-max-runs"
-                            type="number"
-                            min={1}
-                            value={draft.maxRunsInput}
-                            onChange={(e) => setDraft({ ...draft, maxRunsInput: e.target.value })}
+                            id="schedules-form-cron-expr"
+                            type="text"
+                            value={draft.schedule.kind === "cron" ? draft.schedule.expr : ""}
+                            onChange={(e) => updateCronExpr(e.target.value)}
                         />
                     </FormField>
+                    <FormField
+                        label={t("schedules.fieldCronTz", "Timezone (optional)")}
+                        hint={t(
+                            "schedules.fieldCronTzHint",
+                            "留空则使用宿主本地时区，例如 Asia/Shanghai。",
+                        )}
+                    >
+                        <TextInput
+                            id="schedules-form-cron-tz"
+                            type="text"
+                            value={draft.schedule.kind === "cron" ? (draft.schedule.tz ?? "") : ""}
+                            onChange={(e) => updateCronTz(e.target.value)}
+                        />
+                    </FormField>
+                </>
+            )}
 
-                    <div className="schedules-modal-toggles">
-                        <label className="schedules-modal-toggle">
-                            <input
-                                type="checkbox"
-                                checked={draft.enabled}
-                                onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
-                            />
-                            <span>{t("schedules.fieldEnabled", "Enabled")}</span>
-                        </label>
-                        <label className="schedules-modal-toggle">
-                            <input
-                                type="checkbox"
-                                checked={draft.run_on_startup}
-                                onChange={(e) =>
-                                    setDraft({ ...draft, run_on_startup: e.target.checked })
-                                }
-                            />
-                            <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
-                        </label>
-                    </div>
+            <FormField label={t("schedules.fieldCommand", "Command")}>
+                <TextInput
+                    id="schedules-form-command"
+                    type="text"
+                    value={draft.command}
+                    onChange={(e) => setDraft({ ...draft, command: e.target.value })}
+                />
+            </FormField>
 
-                    {errorMessage ? (
-                        <p className="schedules-error" role="alert">
-                            {errorMessage}
-                        </p>
-                    ) : null}
+            <FormField
+                label={t("schedules.fieldArgs", "Args (JSON object)")}
+                hint={t(
+                    "schedules.fieldArgsHint",
+                    "传递给命令的 JSON 对象，例如 { workspace, prompt }。",
+                )}
+                error={errorFor("argsJson")}
+            >
+                <Textarea
+                    id="schedules-form-args"
+                    rows={4}
+                    value={draft.argsJson}
+                    placeholder={ARGS_PLACEHOLDER}
+                    onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
+                />
+            </FormField>
 
-                    <div className="modal-actions">
-                        <Button variant="ghost" onClick={onCancel} disabled={saving}>
-                            {t("schedules.actionCancel", "Cancel")}
-                        </Button>
-                        <Button
-                            variant="primary"
-                            disabled={!canSubmit || saving}
-                            onClick={handleSubmit}
-                        >
-                            {isEdit
-                                ? t("schedules.actionSave", "Save")
-                                : t("schedules.actionCreate", "Create")}
-                        </Button>
-                    </div>
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            <FormField
+                label={t("schedules.fieldSessionStrategy", "Session strategy")}
+                hint={
+                    isImWorkspace
+                        ? t(
+                              "schedules.sessionStrategyImHint",
+                              "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
+                          )
+                        : undefined
+                }
+            >
+                <Select
+                    value={effectiveStrategy}
+                    onValueChange={(v) => setStrategy(v as SessionStrategy)}
+                    options={SESSION_STRATEGY_OPTIONS}
+                    disabled={isImWorkspace}
+                    label={t("schedules.fieldSessionStrategy", "Session strategy")}
+                />
+            </FormField>
+
+            <FormField
+                label={t("schedules.fieldMaxRuns", "Max runs")}
+                hint={t(
+                    "schedules.fieldMaxRunsHint",
+                    "达到该成功运行次数后任务自动停用（记录保留）。留空表示不限次数。",
+                )}
+                error={
+                    errorFor("maxRuns")
+                        ? t("schedules.errorMaxRuns", "最大运行次数必须是正整数。")
+                        : undefined
+                }
+            >
+                <TextInput
+                    id="schedules-form-max-runs"
+                    type="number"
+                    min={1}
+                    value={draft.maxRunsInput}
+                    onChange={(e) => setDraft({ ...draft, maxRunsInput: e.target.value })}
+                />
+            </FormField>
+
+            <div className="schedules-modal-toggles">
+                <label className="schedules-modal-toggle">
+                    <input
+                        type="checkbox"
+                        checked={draft.enabled}
+                        onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+                    />
+                    <span>{t("schedules.fieldEnabled", "Enabled")}</span>
+                </label>
+                <label className="schedules-modal-toggle">
+                    <input
+                        type="checkbox"
+                        checked={draft.run_on_startup}
+                        onChange={(e) => setDraft({ ...draft, run_on_startup: e.target.checked })}
+                    />
+                    <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
+                </label>
+            </div>
+
+            {errorMessage ? (
+                <p className="schedules-error" role="alert">
+                    {errorMessage}
+                </p>
+            ) : null}
+        </Modal>
     );
 }
