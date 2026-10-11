@@ -89,7 +89,7 @@ State what is out of scope too. A reviewer told only "review the auth change" wi
 
 ### 5. Dispatch in one turn
 
-Issue every `agent` call in the same assistant message. The `agent` tool is `executionMode: parallel`, so the harness runs the batch concurrently:
+Issue every `agent` call in the same assistant message. The harness runs every tool call in one turn concurrently:
 
 ```text
 agent(subagent_type=reviewer, context=fork,        description="architecture lens", prompt="...")
@@ -98,7 +98,7 @@ agent(subagent_type=reviewer, context=independent, description="ripple lens",   
 agent(subagent_type=reviewer, context=fork,        description="UX lens",           prompt="...")
 ```
 
-> **Keep the batch pure.** If any call in the turn is a sequential tool (most write tools, `askUser`, `planEnter`/`planExit`), the harness degrades the **whole batch** to sequential and you lose the concurrency. Do sequential prerequisites — including the Step 1 `git diff` — in an earlier turn.
+> **Prerequisites go in an earlier turn.** Calls in the same turn start together with no ordering between them, so a prerequisite placed here races the reviewers it was meant to feed. Do them — including the Step 1 `git diff` — in an earlier turn.
 
 > **Reviewers cannot fan out further.** The `agent` tool is removed at depth ≥ 1, so a reviewer cannot spawn sub-reviewers. All dispatch happens from here.
 

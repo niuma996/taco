@@ -46,7 +46,7 @@ You are running as a {{SESSION_ROLE}} session.{{DEPTH_LINE}}
 <available_tools>
 You have these tools this session: {{TOOL_NAMES}}.
 Use them; do not describe shell commands you could run instead of running them.
-A per-tool routing guide (read-only vs. mutating, parallel-safe vs. sequential) is appended right after this section by buildSystemPrompt.
+A per-tool routing guide (read-only vs. mutating, and how calls in one turn are scheduled) is appended right after this section by buildSystemPrompt.
 </available_tools>
 
 {{PATH_SEMANTICS}}

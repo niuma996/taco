@@ -79,7 +79,7 @@ Each subagent gets:
 
 ### 4. Dispatch in One Turn
 
-Issue all `agent` calls in the same assistant message. The harness detects every call's `executionMode` and runs `Promise.all` over the batch when none are `sequential`:
+Issue all `agent` calls in the same assistant message. The harness runs every tool call in one turn concurrently:
 
 ```text
 agent(subagent_type=explorer, description="...", prompt="...")   # tc-1
@@ -88,7 +88,7 @@ agent(subagent_type=explorer, description="...", prompt="...")   # tc-3
 # All three spawn concurrently. Your turn does not serialise them.
 ```
 
-> **Important — keep the batch pure.** If even one call in the same turn is a `sequential` tool (most write tools, askUser, planEnter/planExit), the harness degrades the **entire batch** to sequential. If you need a sequential prerequisite, do it in the **previous** turn so the fan-out batch stays pure.
+> **Important — prerequisites go in an earlier turn.** Calls in the same turn start together with no ordering between them. If the subagents need something done first (a `git diff` to paste in, a file written), do it in the **previous** turn — a prerequisite placed in the fan-out turn races the agents it was meant to feed.
 
 > **Important — `parentToolCallId` is unique per call.** Each `agent` invocation carries a different `toolCallId`, so the harness routes every subagent's `subagent.spawned` push and live `session.event` stream to the right card on the desktop. You do not need to coordinate IDs.
 
@@ -143,7 +143,7 @@ Return: a short summary of root cause and the changes you made (file paths + one
 **❌ Vague output:** "Fix it" — you do not know what changed.
 **✅ Specific:** "Return summary of root cause and changes" — concrete deliverable.
 
-**❌ Mixing execution modes in one batch:** adding one `edit` (sequential) call alongside three `agent` (parallel) calls makes the whole batch sequential — you lose the speedup. Keep parallel-only batches together.
+**❌ Putting a prerequisite in the fan-out turn:** an `edit` or `shell` call issued alongside three `agent` calls does not run first — all four start together, so the agents may read the file before the edit lands. Do the prerequisite in an earlier turn.
 
 ## When NOT to Use
 

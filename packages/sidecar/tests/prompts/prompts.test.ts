@@ -421,6 +421,16 @@ describe("toolSummaryForPrompt", () => {
         assert.match(out, /- read \[read-only\] — Read a file\./);
         assert.match(out, /- novel-tool \[mutates\] — See the tool's schema/);
     });
+
+    // Regression: the footer used to promise that [mutates] tools run one at a
+    // time. The harness runs a whole turn's calls concurrently and never reads
+    // `executionMode`, so the rule the model gets must be about dependencies.
+    it("describes same-turn calls as concurrent, not as serialised by tool kind", () => {
+        const out = toolSummaryForPrompt([{ name: "read", taco: { mutates: false } }]);
+        assert.match(out, /run concurrently, in no guaranteed order/);
+        assert.match(out, /depends on another's result or effect, put it in the next turn/);
+        assert.ok(!out.includes("one at a time"), "must not imply per-tool serialisation");
+    });
 });
 
 describe("projectContextForPrompt", () => {

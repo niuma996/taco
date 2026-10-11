@@ -66,9 +66,14 @@ export function toolSummaryForPrompt(tools: ReadonlyArray<NamedTool>): string {
         lines.push(`- ${entry.name} ${tag} — ${entry.summary}`);
     }
     lines.push("");
+    // The harness runs every tool call in one turn concurrently — it does not
+    // read a tool's `executionMode` (only pi's legacy agent loop does), and
+    // pi serialises nothing beyond edit/write on the same file. So the rule
+    // the model needs is about dependencies, not about tool kinds.
     lines.push(
-        "Tools marked [read-only] can be issued in parallel within the same turn. " +
-            "Tools marked [mutates] should generally be issued one at a time so failures are recoverable.",
+        "All tool calls you issue in one turn run concurrently, in no guaranteed order. " +
+            "Batch independent calls together; when a step depends on another's result or effect, " +
+            "put it in the next turn (or chain shell commands with `&&` in one call).",
     );
     return lines.join("\n");
 }

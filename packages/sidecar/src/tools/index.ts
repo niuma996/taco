@@ -50,10 +50,10 @@ export interface TacoToolMetadata {
      *  tool vs. a sibling, not re-state the schema description verbatim. */
     readonly promptSummary?: string;
     /** Whether this tool mutates workspace state. Drives the
-     *  `[read-only]` / `[mutates]` tag in the system prompt and the
-     *  parallel-vs-sequential guidance. Defaults to `true` when omitted —
-     *  failure mode is conservative (model treats unknown tools as mutating
-     *  and serialises them). */
+     *  `[read-only]` / `[mutates]` tag in the system prompt. Defaults to
+     *  `true` when omitted — failure mode is conservative (model treats
+     *  unknown tools as mutating). It does not affect scheduling: every call
+     *  in one turn runs concurrently regardless (see `toolSummaryForPrompt`). */
     readonly mutates?: boolean;
 }
 
