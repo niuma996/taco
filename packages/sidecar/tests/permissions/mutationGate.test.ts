@@ -59,6 +59,36 @@ describe("mutation gate", () => {
             assert.equal(result?.block, true);
         });
 
+        // Regression: pi's write/edit expand `~/`, strip a leading `@` and
+        // decode `file://` before writing. The gate used to check the raw
+        // string, so all of these resolved "inside" the root and were allowed
+        // while the tool wrote to $HOME or /etc.
+        it("blocks ~, @ and file:// paths that pi resolves outside the root", async () => {
+            for (const path of [
+                "~",
+                "~/.taco/taco.json",
+                "~/.zshrc",
+                `@${join(outside, "a.ts")}`,
+                `file://${join(outside, "a.ts")}`,
+            ]) {
+                for (const toolName of ["write", "edit"]) {
+                    const result = await gate({ toolName, input: { path } });
+                    assert.equal(result?.block, true, `${toolName} ${path} must be blocked`);
+                }
+            }
+        });
+
+        it("still allows @ and file:// paths that pi resolves inside the root", async () => {
+            for (const path of [
+                `@${join(root, "a.ts")}`,
+                `file://${join(root, "a.ts")}`,
+                "@src/a.ts",
+            ]) {
+                const result = await gate({ toolName: "write", input: { path } });
+                assert.equal(result, undefined, `${path} should be allowed`);
+            }
+        });
+
         it("blocks a mutating call with a non-string path", async () => {
             const result = await gate({ toolName: "write", input: { path: 42 } });
             assert.equal(result?.block, true);
@@ -207,12 +237,22 @@ describe("mutation gate", () => {
             }
         });
 
-        it("allows URL-shaped values", async () => {
-            for (const value of [
-                "https://api.example.com/v1/models",
-                "file:///etc/passwd",
-                "s3://bucket/key",
-            ]) {
+        it("fences ~ and file:// values, which name an absolute location", async () => {
+            for (const value of ["~/.ssh/config", `file://${join(outside, "a.ts")}`]) {
+                const result = await gate({
+                    toolName: "mcp__fs__write_file",
+                    input: { path: value },
+                });
+                assert.equal(
+                    result?.block,
+                    true,
+                    `value ${JSON.stringify(value)} should be fenced`,
+                );
+            }
+        });
+
+        it("allows URL-shaped values that are not filesystem locations", async () => {
+            for (const value of ["https://api.example.com/v1/models", "s3://bucket/key"]) {
                 const result = await gate({
                     toolName: "mcp__http__request",
                     input: { path: value },

@@ -8,7 +8,44 @@
  */
 
 import { realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Same set pi's `normalizeToolPath` folds to an ASCII space. */
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * Expand `~`, `~/…` and `file://…` exactly as pi's `NodeExecutionEnv`
+ * `resolvePath` does before it resolves against cwd. Anything else is
+ * returned unchanged. A containment check that skips this sees `~/.zshrc`
+ * as a relative path inside the root while the tool writes to `$HOME`.
+ */
+export function expandHomeAndFileUrl(path: string): string {
+    if (path === "~") return homedir();
+    if (path.startsWith("~/") || (process.platform === "win32" && path.startsWith("~\\"))) {
+        return join(homedir(), path.slice(2));
+    }
+    if (path.startsWith("file://")) {
+        try {
+            return fileURLToPath(path);
+        } catch {
+            // pi keeps a malformed URL as an ordinary path; so do we.
+            return path;
+        }
+    }
+    return path;
+}
+
+/**
+ * Mirror the full path pipeline pi's built-in `write` / `edit` apply
+ * (`normalizeToolPath`, then `resolvePath`'s expansions), so the gate checks
+ * the file the tool will actually touch rather than the raw argument.
+ */
+export function normalizeBuiltinToolPath(path: string): string {
+    const spaced = path.replace(UNICODE_SPACES, " ");
+    return expandHomeAndFileUrl(spaced.startsWith("@") ? spaced.slice(1) : spaced);
+}
 
 export interface BoundaryAllowed {
     readonly ok: true;

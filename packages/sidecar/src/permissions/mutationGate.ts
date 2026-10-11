@@ -20,7 +20,11 @@ import { isAbsolute } from "node:path";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import { getPlansDir } from "../plan/planPersistence.ts";
 import { evaluateCommand } from "./commandPolicy.ts";
-import { resolveWithinRoot } from "./workspaceBoundary.ts";
+import {
+    expandHomeAndFileUrl,
+    normalizeBuiltinToolPath,
+    resolveWithinRoot,
+} from "./workspaceBoundary.ts";
 
 export interface ToolCallGateEvent {
     readonly toolName: string;
@@ -116,7 +120,10 @@ export function createMutationGateHook(
                 };
             }
 
-            const resolved = await resolveWithinRoot(opts.root, raw);
+            // Normalise first: pi expands `~/…`, strips a leading `@` and
+            // decodes `file://…` before writing, so checking the raw string
+            // let `~/.taco/taco.json` pass as if it were inside the root.
+            const resolved = await resolveWithinRoot(opts.root, normalizeBuiltinToolPath(raw));
             if (!resolved.ok) {
                 return { block: true, reason: resolved.reason };
             }
@@ -160,10 +167,14 @@ export function createMutationGateHook(
 
         for (const key of PATH_LIKE_KEYS) {
             const value = event.input[key];
-            // `isAbsolute` also rejects URL-shaped values ("file:///etc/passwd",
-            // "https://…"), so they need no separate carve-out.
-            if (typeof value !== "string" || !isAbsolute(value)) continue;
-            const resolved = await resolveWithinRoot(opts.root, value);
+            if (typeof value !== "string") continue;
+            // `~/…` and `file://…` name an absolute location just as
+            // unambiguously as `/…` does, so they are fenced too. Other
+            // URL-shaped values ("https://…", "s3://…") stay non-absolute after
+            // expansion and pass. A leading `@` is pi-specific and not stripped.
+            const expanded = expandHomeAndFileUrl(value);
+            if (!isAbsolute(expanded)) continue;
+            const resolved = await resolveWithinRoot(opts.root, expanded);
             if (!resolved.ok) {
                 return {
                     block: true,

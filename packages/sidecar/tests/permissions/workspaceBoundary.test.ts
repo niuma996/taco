@@ -1,9 +1,14 @@
 import { strict as assert } from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { resolveWithinRoot } from "../../src/permissions/workspaceBoundary.ts";
+import {
+    normalizeBuiltinToolPath,
+    resolveWithinRoot,
+} from "../../src/permissions/workspaceBoundary.ts";
+import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
+import { createWriteTool } from "../../src/runtime/pi/values.ts";
 
 describe("resolveWithinRoot", () => {
     let root: string;
@@ -100,4 +105,57 @@ describe("resolveWithinRoot", () => {
         const result = await resolveWithinRoot(linkedRoot, join("..", "outside.txt"));
         assert.equal(result.ok, false);
     });
+});
+
+// The gate checks the path pi's built-in write/edit will actually touch, so its
+// normalisation must not drift from pi's. Drive pi's real `write` tool with an
+// env whose path resolution is pi's own (NodeExecutionEnv) but whose writeFile
+// only records the target — a pi upgrade that changes the rules fails here.
+describe("normalizeBuiltinToolPath matches pi's write tool", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "taco-parity-"));
+    const real = new NodeExecutionEnv({ cwd });
+
+    async function piWriteTarget(rawPath: string): Promise<string> {
+        let target = "";
+        const env = new Proxy(real, {
+            get(obj, key, receiver) {
+                if (key === "writeFile") {
+                    return async (path: string) => {
+                        target = path;
+                        return { ok: true, value: undefined };
+                    };
+                }
+                const value = Reflect.get(obj, key, receiver);
+                return typeof value === "function" ? value.bind(obj) : value;
+            },
+        });
+        const tool = createWriteTool();
+        await tool.execute(
+            "t",
+            { path: rawPath, content: "" },
+            () => undefined,
+            { env } as never,
+            undefined as never,
+            { abortSignal: undefined } as never,
+        );
+        return target;
+    }
+
+    for (const raw of [
+        "src/a.ts",
+        "../escape.ts",
+        "/etc/hosts",
+        "~",
+        "~/.taco/taco.json",
+        "@src/a.ts",
+        "@/etc/hosts",
+        "@~/x.ts",
+        "file:///etc/hosts",
+        "file://%zz",
+        "with\u00A0nbsp.ts",
+    ]) {
+        it(`agrees on ${JSON.stringify(raw)}`, async () => {
+            assert.equal(resolve(cwd, normalizeBuiltinToolPath(raw)), await piWriteTarget(raw));
+        });
+    }
 });
