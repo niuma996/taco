@@ -61,7 +61,9 @@ describe("agent tool", () => {
         });
         assert.equal(res.content[0]?.type, "text");
         const text1 = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-        assert.equal(text1, "done");
+        // The model only sees `content`, so the id agentContinue needs must
+        // appear in the text — `details` is UI-only.
+        assert.equal(text1, "done\n\n[subagent session: sub-1]");
         assert.deepEqual(res.details, {
             status: "completed",
             subSessionId: "sub-1",
@@ -299,7 +301,7 @@ describe("agent tool", () => {
         assert.equal(results.length, N);
         for (const r of results) {
             const text = r.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-            assert.match(text, /^peak-\d+$/);
+            assert.match(text, /^peak-\d+\n\n\[subagent session: sub-\d+\]$/);
             const details = r.details as { agentType: string };
             assert.equal(details.agentType, "explorer");
         }

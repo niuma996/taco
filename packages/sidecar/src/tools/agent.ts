@@ -162,7 +162,12 @@ export function createAgentTool(
                         : { status: "completed", agentType: params.subagent_type },
                 };
             }
-            const text = isError ? `subagent error: ${resultText}` : resultText;
+            const body = isError ? `subagent error: ${resultText}` : resultText;
+            // `details` never reaches the model, so the id `agentContinue`
+            // and `agentAbort` need has to ride in the text. Without it a
+            // synchronous call left the model unable to follow up, and it
+            // would guess an id instead.
+            const text = subSessionId ? `${body}\n\n[subagent session: ${subSessionId}]` : body;
             return {
                 content: [{ type: "text", text }],
                 details: {

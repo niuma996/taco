@@ -34,7 +34,7 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
     const continueSchema = Type.Object({
         subSessionId: Type.String({
             description:
-                "The subagent session id returned by an earlier `agent` tool call. Must belong to the same parent session.",
+                "The subagent session id from an earlier `agent` call — the `[subagent session: …]` line of a result, or the background launch receipt. Must belong to the same parent session.",
         }),
         prompt: Type.String({
             description:
