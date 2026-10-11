@@ -11,6 +11,7 @@
  */
 
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import type {
     InstructionsConfig,
     AgentMessage as ProtocolAgentMessage,
@@ -24,6 +25,7 @@ import { asSessionId } from "@taco-ai/protocol";
 import { CheckpointManager } from "../../checkpoints/manager.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
+import { tacoHome } from "../../config/tacoHome.ts";
 import type {
     ContextHookBuckets,
     ToolCallHook,
@@ -552,6 +554,16 @@ export class AttachedSession extends EventEmitter {
                 // Same root the tools resolve against — write/edit targets must stay
                 // inside it, and plan mode refuses mutations at dispatch.
                 mutationGateRoot: args.env.cwd,
+                // Skill and agent authoring writes to $TACO_HOME. Granted to
+                // local main sessions only: an IM session is driven by a third
+                // party, and a subagent acts without the user watching. A
+                // skill or agent written here enters every later session's
+                // system prompt, which is why it is not handed out more widely.
+                // $TACO_HOME itself (taco.json) stays out of reach.
+                mutationGateExtraWriteRoots:
+                    args.sessionKind === "main" && !args.isIm
+                        ? [join(tacoHome(), "skills"), join(tacoHome(), "agents")]
+                        : undefined,
                 checkpointManager: attached.checkpoints,
                 // Passed through, not currently read: keeps the pinOnce wiring
                 // live end-to-end so a future pinOnce tag only touches its hook.

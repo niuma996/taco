@@ -4,7 +4,8 @@
  * Three guarantees that a system prompt cannot provide, because the model is
  * free to ignore prose:
  *   1. Plan mode is read-only. Only the plan document may be written.
- *   2. `write` / `edit` targets stay inside the workspace root.
+ *   2. `write` / `edit` targets stay inside the workspace root, or inside one
+ *      of the caller-supplied `extraWriteRoots`.
  *   3. Absolute path arguments of unknown tools (MCP servers, extensions) stay
  *      inside the workspace root — the tool may do anything with them, but a
  *      target that escapes the root (including via a symlinked ancestor) is
@@ -16,7 +17,7 @@
  * visible to it.
  */
 
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import { getPlansDir } from "../plan/planPersistence.ts";
 import { evaluateCommand } from "./commandPolicy.ts";
@@ -63,6 +64,20 @@ export interface MutationGateOptions {
     /** Workspace root; every `write` / `edit` target must resolve inside it. */
     readonly root: string;
     readonly getPlanState: () => PlanModeState;
+    /**
+     * Additional directories built-in `write` / `edit` may target outside
+     * `root`, checked with the same symlink-safe containment. Plan mode
+     * ignores them (it still allows only the plan document), and the
+     * unknown-tool path fence does not consult them: an MCP or extension tool
+     * stays fenced to `root`.
+     *
+     * Production passes `$TACO_HOME/skills` and `$TACO_HOME/agents`, for
+     * local main sessions only, so skill and agent authoring works without a
+     * shell redirect that prompts. `$TACO_HOME` itself is deliberately not
+     * included: `taco.json` holds API keys and the shell permission rules, and
+     * a silent write there could disable every later approval.
+     */
+    readonly extraWriteRoots?: readonly string[];
     /**
      * True when the tool is a built-in declaring `taco.mutates === false`.
      * Exempts `read` / `grep` / `glob` from the unknown-tool path fence —
@@ -123,7 +138,22 @@ export function createMutationGateHook(
             // Normalise first: pi expands `~/…`, strips a leading `@` and
             // decodes `file://…` before writing, so checking the raw string
             // let `~/.taco/taco.json` pass as if it were inside the root.
-            const resolved = await resolveWithinRoot(opts.root, normalizeBuiltinToolPath(raw));
+            const target = normalizeBuiltinToolPath(raw);
+            let resolved = await resolveWithinRoot(opts.root, target);
+            // Outside the workspace: try the extra roots, never in plan mode.
+            // Resolve against `root` first — pi resolves a relative path
+            // against cwd, so an extra root must only ever match an absolute
+            // target, never re-anchor a relative one.
+            if (!resolved.ok && !planActive && opts.extraWriteRoots?.length) {
+                const absoluteTarget = resolve(opts.root, target);
+                for (const extra of opts.extraWriteRoots) {
+                    const inExtra = await resolveWithinRoot(extra, absoluteTarget);
+                    if (inExtra.ok) {
+                        resolved = inExtra;
+                        break;
+                    }
+                }
+            }
             if (!resolved.ok) {
                 return { block: true, reason: resolved.reason };
             }

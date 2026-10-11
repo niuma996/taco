@@ -147,6 +147,12 @@ export interface HookWiringOptions {
      */
     mutationGateRoot?: string;
     /**
+     * Extra `write` / `edit` roots outside `mutationGateRoot` (see
+     * `MutationGateOptions.extraWriteRoots`). The caller decides who gets
+     * them; AttachedSession grants them to local main sessions only.
+     */
+    mutationGateExtraWriteRoots?: readonly string[];
+    /**
      * Turn-scoped pre-write snapshots. When present, the mutation gate captures
      * each allowed `write` / `edit` target before it changes, so a turn's edits
      * can be rolled back. Absent → no snapshots (the gate still enforces
@@ -478,6 +484,7 @@ export async function wireHarnessHooks(
         const checkpoints = opts.checkpointManager;
         const gate = createMutationGateHook({
             root: opts.mutationGateRoot,
+            extraWriteRoots: opts.mutationGateExtraWriteRoots,
             getPlanState: () => getActiveTasksState().planState,
             captureBeforeWrite: checkpoints
                 ? (path) => checkpoints.captureBeforeWrite(path)

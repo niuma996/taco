@@ -89,6 +89,80 @@ describe("mutation gate", () => {
             }
         });
 
+        describe("extra write roots", () => {
+            let extra: string;
+            let withExtra: ReturnType<typeof createMutationGateHook>;
+            beforeEach(() => {
+                extra = join(outside, "skills");
+                mkdirSync(extra, { recursive: true });
+                withExtra = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    isKnownReadOnly,
+                    extraWriteRoots: [extra],
+                });
+            });
+
+            it("allows an absolute write or edit inside an extra root", async () => {
+                for (const toolName of ["write", "edit"]) {
+                    const result = await withExtra({
+                        toolName,
+                        input: { path: join(extra, "my-skill", "SKILL.md") },
+                    });
+                    assert.equal(result, undefined, `${toolName} should be allowed`);
+                }
+            });
+
+            it("still blocks a sibling of the extra root", async () => {
+                const result = await withExtra({
+                    toolName: "write",
+                    input: { path: join(outside, "taco.json") },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("resolves relative paths against the workspace, never the extra root", async () => {
+                // A bare name is a workspace path; it must not be re-anchored
+                // onto the extra root and must not be blocked.
+                const bare = await withExtra({ toolName: "write", input: { path: "SKILL.md" } });
+                assert.equal(bare, undefined);
+                // A traversal that lands outside both roots stays blocked.
+                const traversal = await withExtra({
+                    toolName: "write",
+                    input: { path: "../outside/elsewhere.txt" },
+                });
+                assert.equal(traversal?.block, true);
+            });
+
+            it("blocks a write that escapes the extra root through a symlink", async () => {
+                const elsewhere = join(outside, "nested");
+                mkdirSync(elsewhere, { recursive: true });
+                symlinkSync(elsewhere, join(extra, "out"), "dir");
+                const result = await withExtra({
+                    toolName: "write",
+                    input: { path: join(extra, "out", "a.txt") },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("refuses extra roots in plan mode", async () => {
+                enterPlanMode(planState, "plan");
+                const result = await withExtra({
+                    toolName: "write",
+                    input: { path: join(extra, "SKILL.md") },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("does not widen the unknown-tool fence", async () => {
+                const result = await withExtra({
+                    toolName: "mcp__fs__write_file",
+                    input: { path: join(extra, "SKILL.md") },
+                });
+                assert.equal(result?.block, true);
+            });
+        });
+
         it("blocks a mutating call with a non-string path", async () => {
             const result = await gate({ toolName: "write", input: { path: 42 } });
             assert.equal(result?.block, true);

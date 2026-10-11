@@ -26,6 +26,8 @@ Four user-writable directories in priority order (first match by name wins):
 
 Default to **global** (option 2) when the user hasn't specified. Use `askUser` with `scope` as the header when ambiguous — Global first, Project-local second. Never write to `<sidecar>/skills/builtin/` — it ships with taco and is overwritten by upgrades.
 
+`write` reaches the workspace and `$TACO_HOME/{skills,agents}/` (local only); elsewhere needs user-approved `shell`.
+
 New skills only show up in `<available_skills>` after a new session (the system prompt is frozen at boot); the directory itself hot-reloads in ~300ms. For body composition, frontmatter keys, scripts-vs-body tradeoffs, and `runAs` / `inlineOnly` choices, defer to the `create-skill` skill.
 
 ## Agents: directory choice and layout
@@ -68,7 +70,7 @@ Ask the user for the target directory with the same `scope` question used for lo
 
 ## Patching `$TACO_HOME/taco.json`
 
-The file is JSON. Read it, build a partial object with only the changed fields, write back atomically (use `write` only after a full read — partial writes drop untouched fields). Permissions stay `0600`.
+The file is JSON. Read it, merge the changed fields, and write the full result back via `shell` (temp file + `mv`); partial writes drop fields. Permissions stay `0600`.
 
 Schema: `TacoGlobalConfigShape` in `packages/protocol/src/config.ts`. The masked IPC view (`TacoGlobalConfigView`) strips `anthropicApiKey`, `openaiApiKey`, `apiKeys.*`, `mcpServers[i].{env,headers,command,args,url,cwd}`, and `channels[i].config` — disk keeps plaintext, only IPC frames mask.
 
