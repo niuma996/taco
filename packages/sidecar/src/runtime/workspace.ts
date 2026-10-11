@@ -892,7 +892,16 @@ export class WorkspaceRuntime extends EventEmitter {
         // `requires: ["skills"]` lets the subagent rebuilder drop this section
         // for read-only agents that have no `skill` tool — without it, the
         // listing would be noise (visible to the model but unreachable).
-        const skillsPrompt = formatSkillsForSystemPrompt([...skills]);
+        // A skill's `<location>` only helps a session that can read files; it
+        // is how the model finds a skill's own scripts and references. With
+        // neither `read` nor `shell` — the default IM policy strips both — the
+        // path is useless and would still hand a third party an absolute host
+        // path. Keyed on the live toolset, so an IM policy edit (and the
+        // refreshToolset rebuild it triggers) is reflected.
+        const toolNames = new Set(this.tools.map((t) => t.name));
+        const skillsPrompt = formatSkillsForSystemPrompt([...skills], {
+            includeLocation: toolNames.has("read") || toolNames.has("shell"),
+        });
         if (skillsPrompt) contributors.push({ append: skillsPrompt, requires: ["skills"] });
         const deferredPrompt = formatDeferredToolsForSystemPrompt(
             this.toolRegistry.listDeferred().map((c) => ({ name: c.name, summary: c.summary })),

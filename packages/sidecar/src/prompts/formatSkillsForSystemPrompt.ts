@@ -20,15 +20,36 @@ function escapeXml(value: string): string {
         .replace(/'/g, "&apos;");
 }
 
-export function formatSkillsForSystemPrompt(skills: Skill[]): string {
+export interface FormatSkillsOptions {
+    /**
+     * Emit each skill's `<location>` (absolute file path) and the guidance for
+     * resolving a skill's relative references against it. Defaults to `true`.
+     *
+     * Pass `false` when the session has no file-reading tool. The path is
+     * then unusable — invoking a skill needs only its name, and the body is
+     * injected server-side — while still exposing an absolute host path, which
+     * on an IM channel reaches a third party.
+     */
+    readonly includeLocation?: boolean;
+}
+
+export function formatSkillsForSystemPrompt(
+    skills: Skill[],
+    options: FormatSkillsOptions = {},
+): string {
     const visibleSkills = skills.filter((skill) => !skill.disableModelInvocation);
     if (visibleSkills.length === 0) return "";
+    const includeLocation = options.includeLocation ?? true;
 
     const lines = [
         "The following skills provide specialized instructions for specific tasks.",
-        "Use the <skill> tool to invoke a skill when the task matches its description.",
+        "Use the `skill` tool to invoke a skill when the task matches its description.",
         'Skill body content is injected into context after the tool call — you will see <skill_body name="NAME"> blocks when a skill is active.',
-        "When a skill file references a relative path, resolve it against the skill directory (parent of the skill file) and use that absolute path in tool commands.",
+        ...(includeLocation
+            ? [
+                  "When a skill file references a relative path, resolve it against the skill directory (parent of the skill file) and use that absolute path in tool commands.",
+              ]
+            : []),
         "",
         "<available_skills>",
     ];
@@ -37,7 +58,7 @@ export function formatSkillsForSystemPrompt(skills: Skill[]): string {
         lines.push("  <skill>");
         lines.push(`    <name>${escapeXml(skill.name)}</name>`);
         lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-        lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
+        if (includeLocation) lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
         lines.push("  </skill>");
     }
 

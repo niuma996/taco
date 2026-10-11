@@ -89,3 +89,68 @@ describe("IM workspace withholds the path from parent and children alike", () =>
         assert.ok(!inheritedHideWorkspacePath(local), "local workspace must not set the IM flag");
     });
 });
+
+// Regression: `<available_skills>` printed each skill's absolute host path
+// into IM prompts, though the default IM policy strips read and shell — so the
+// path could not be used, only leaked to the channel's third party.
+describe("skills catalog withholds host paths when the session cannot read files", () => {
+    const skill = {
+        name: "deploy",
+        description: "Ship it",
+        filePath: "/Users/someone/.taco/skills/deploy/SKILL.md",
+        baseDir: "/Users/someone/.taco/skills/deploy",
+        content: "body",
+        disableModelInvocation: false,
+        sourceInfo: {},
+    };
+    let sessionsRoot: string;
+    let localCwd: string;
+    const built: WorkspaceRuntime[] = [];
+
+    before(() => {
+        sessionsRoot = mkdtempSync(join(tmpdir(), "taco-chansafe-skills-"));
+        localCwd = mkdtempSync(join(tmpdir(), "taco-chansafe-skills-local-"));
+    });
+
+    after(async () => {
+        for (const ws of built) await ws.dispose();
+        rmSync(sessionsRoot, { recursive: true, force: true });
+        rmSync(localCwd, { recursive: true, force: true });
+    });
+
+    function make(extra: Record<string, unknown>): WorkspaceRuntime {
+        const ws = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            sessionsRoot,
+            resources: { skills: [skill], prompts: [] },
+            ...extra,
+        } as unknown as ConstructorParameters<typeof WorkspaceRuntime>[0]);
+        built.push(ws);
+        return ws;
+    }
+
+    it("drops location on the default IM policy but keeps the skill listed", () => {
+        const ws = make({
+            cwd: asWorkspaceId("im://mock-1/u1/c1"),
+            workspaceKey: "im://mock-1/u1/c1",
+            disableFsTools: true,
+        });
+        assert.ok(ws.systemPrompt.includes("<name>deploy</name>"));
+        assert.ok(!ws.systemPrompt.includes("<location>"));
+        assert.ok(!ws.systemPrompt.includes("/Users/someone"));
+    });
+
+    it("keeps location when an IM policy grants file tools", () => {
+        const ws = make({
+            cwd: asWorkspaceId("im://mock-1/u1/c1"),
+            workspaceKey: "im://mock-1/u1/c1",
+            imPolicy: { tools: { fsTools: "allow", shell: "deny" }, commands: { mode: "ask" } },
+        });
+        assert.ok(ws.systemPrompt.includes("<location>"));
+    });
+
+    it("keeps location for a local workspace", () => {
+        const ws = make({ cwd: asWorkspaceId(localCwd) });
+        assert.ok(ws.systemPrompt.includes("<location>"));
+    });
+});
