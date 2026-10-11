@@ -48,7 +48,7 @@ export function createTaskUpdateTool(
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Update a persistent task (status, content, dependency). References the task by id returned from taskCreate / taskList.",
+                "Update a persistent task's status or content. References the task by id returned from taskCreate / taskList.",
             mutates: true,
         },
         async execute(

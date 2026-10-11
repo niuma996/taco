@@ -219,7 +219,7 @@ export function createJobsGetTool(): AgentHarnessTool<TacoToolContext> {
         name: "jobsGet",
         label: "jobsGet",
         summary:
-            "Read one scheduled job by id — returns the full record (schedule, args, history last entry). Use when the list summary is too terse to decide the next action.",
+            "Read one scheduled job by id — returns the full record (schedule, args, and recent run history). Use when the list summary is too terse to decide the next action.",
         mutates: false,
         schema: jobsGetSchema,
         rpcMethod: JOBS_RPC.get,

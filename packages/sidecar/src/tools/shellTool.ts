@@ -27,7 +27,12 @@ const shellSchema = Type.Object({
     timeout: Type.Optional(
         Type.Number({ description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT_MS}).` }),
     ),
-    description: Type.Optional(Type.String({ description: "Short description for logging." })),
+    description: Type.Optional(
+        Type.String({
+            description:
+                "Short description of what this command does; shown in the desktop tool card, not executed.",
+        }),
+    ),
 });
 
 type ShellToolResult = {

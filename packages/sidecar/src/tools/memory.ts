@@ -81,7 +81,7 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
         label: "memory",
         description:
             "Save durable information to long-term memory that survives across sessions. " +
-            "Storage: $TACO_HOME/memory/projects/{cwd}/{id}.md (per-workspace topic files). " +
+            "Storage: one topic file per memory under $TACO_HOME/memory/projects/<workspace-key>/. " +
             "Newest 100 topic summaries are injected into the LLM context as <memory> notes; " +
             "use the read tool on the shown file path to fetch a note's full content. " +
             "WHEN TO CALL (proactively, don't wait to be asked): " +
@@ -91,8 +91,9 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "External system reference (URL/file path/tool) → type=reference. " +
             "DO NOT CALL for: task progress (use todoWrite), code patterns (derivable), " +
             "info already in CLAUDE.md / <instructions>. " +
-            "ONE MEMORY = ONE FACT, stated in 1-3 sentences. Every topic body is injected into " +
-            "later sessions' context, so length is a shared budget, not private space. " +
+            "ONE MEMORY = ONE FACT, stated in 1-3 sentences. Only each summary is injected " +
+            "into later sessions, so the first line carries the load; length is a shared " +
+            "budget, not private space. " +
             `The ${MEMORY_CONTENT_MAX_CHARS}-char cap is a hard ceiling, not a target — a body that ` +
             "approaches it is almost always several facts that belong in separate ids. " +
             "Never store architecture overviews, directory layouts, code snippets, or command output: " +

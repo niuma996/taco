@@ -65,7 +65,7 @@ Match the subagent type by capability, not by tool overlap. The harness enforces
 - `explorer` — read-only search/tracing; **cannot modify files** (right for diagnosis: read code, summarise findings)
 - `verification` — adversarial tester; runs builds, tests, checks; returns PASS/FAIL/PARTIAL verdict
 
-If neither built-in matches, list available types via the system-prompt `tool_summary` block (see `agents.list` RPC) — user-defined `.taco/agents/<name>.md` entries appear there too.
+If neither built-in matches, list available types via the system prompt's `<available_agents>` block — user-defined `.taco/agents/<name>.md` entries appear there too.
 
 ### 3. Compose Self-Contained Prompts
 
