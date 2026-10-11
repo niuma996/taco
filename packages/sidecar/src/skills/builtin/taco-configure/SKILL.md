@@ -81,7 +81,7 @@ Common patches:
 - `customProviders` — array of `{ id, name, api, baseUrl, models: [{ id }] }`. `api` is `"chatcomplete"` for OpenAI-compatible endpoints.
 - `mcpServers` — array of `{ id, transport, enabled, command?, args?, url?, env?, alwaysLoaded? }`. `transport` is `"stdio" | "http"`. `alwaysLoaded` is an array of tool names that should always be in the toolset (skip lazy discovery).
 - `channels` — array of `{ channelId, manifest: { name, version }, config: Record<string, unknown> }`. `channelId` must match `/^[a-z0-9][a-z0-9-]*$/`. Channel credentials live separately at `$TACO_HOME/channels/<channelId>.json` under the SDK's own key — don't write secrets into `taco.json`.
-- `commandPermissions` — `{ mode: "ask" | "allowlist", rules: string[] }`. Rules are glob-shaped patterns the sidecar evaluates against shell commands.
+- `commandPermissions` — `{ mode: "ask" | "auto", rules: string[] }`. Rules are glob-shaped patterns the sidecar evaluates against shell commands. `auto` additionally runs strictly read-only commands without prompting; any other mode value is silently treated as `ask`.
 - `instructions` — `{ enabled: boolean, files: { claudeMd?: boolean, agentsMd?: boolean, designMd?: boolean }, inheritToSubagents: boolean }`.
 - `extensions` / `disabledExtensions` — arrays of extension package names.
 

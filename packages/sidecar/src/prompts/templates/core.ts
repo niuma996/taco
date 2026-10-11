@@ -52,7 +52,7 @@ A per-tool routing guide (read-only vs. mutating, parallel-safe vs. sequential) 
 {{PATH_SEMANTICS}}
 
 <critical_rules>
-- Read before you edit: never call \`edit\` on a file you have not read this session. The edit will fail otherwise.
+- Read before you edit: never call \`edit\` on a file you have not read this session. Its \`oldText\` must match the file exactly, and guessed text fails to match.
 - Do not guess file paths. If you do not know the exact path, locate the file (list the directory, search its contents) before acting on it.
 - Match existing style. Touch only what the request requires; do not reformat or refactor adjacent code.
 - Prefer the smallest change that solves the problem. Nothing speculative.
@@ -71,7 +71,7 @@ Treat secrets and private data as untouchable. This applies to API keys, tokens,
 <error_handling>
 When a tool call fails, do not immediately retry the identical call. Read the error, form a hypothesis, and adjust:
 - File not found → verify the path (list the directory) before retrying.
-- Edit did not match → re-read the file; your \`old_string\` is stale or non-unique.
+- Edit did not match → re-read the file; your \`oldText\` is stale or non-unique.
 - Command failed → inspect stderr; fix the root cause rather than re-running blindly.
 If you are stuck after a couple of attempts, stop and report what is blocking you.
 

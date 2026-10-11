@@ -46,9 +46,11 @@ type ShellToolResult = {
  * The text widens "do not retry this command" to "do not attempt the same
  * outcome by another route": models otherwise read a denial as "use a different
  * string" and re-attempt it through a pipe or a sibling tool. A `user_denied`
- * routes the model to `askUser`; an `undefined` reason means the command was
- * blocked by policy before any UI (deny rule, read-only broker, IM channel),
- * where there is no user to ask — so that path explains and stops instead.
+ * routes the model to `askUser`, with a fallback for subagents (which have no
+ * `askUser` — this tool cannot tell which kind of session it runs in); an
+ * `undefined` reason means the command was blocked by policy before any UI
+ * (deny rule, read-only broker, IM channel), where there is no user to ask —
+ * so that path explains and stops instead.
  */
 function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined): ShellToolResult {
     if (reason === "timeout") {
@@ -56,7 +58,7 @@ function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined)
             content: [
                 {
                     type: "text",
-                    text: "[command denied] The permission request timed out before the user responded. Do not retry automatically; if you still need this command, call `askUser` to ask the user. Otherwise wait for a new instruction.",
+                    text: "[command denied] The permission request timed out before the user responded. Do not retry automatically; if you still need this command, call `askUser` to ask the user — or, if you have no `askUser` tool (you are a subagent), report it in your final reply. Otherwise wait for a new instruction.",
                 },
             ],
             details: { exitCode: -1, interrupted: false, reason: "permission_timeout" },
@@ -100,7 +102,7 @@ function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined)
         content: [
             {
                 type: "text",
-                text: "[command denied] The user denied this command. Do not retry it, and do not attempt the same outcome by another route — a different command, a pipeline, or another tool (`write`/`edit`) that has the same effect is still the denied action. The denial is about the intent, not the exact string. If you still need that outcome, stop and call `askUser` to ask how the user wants to proceed; otherwise wait for a new instruction.",
+                text: "[command denied] The user denied this command. Do not retry it, and do not attempt the same outcome by another route — a different command, a pipeline, or another tool (`write`/`edit`) that has the same effect is still the denied action. The denial is about the intent, not the exact string. If you still need that outcome, stop and call `askUser` to ask how the user wants to proceed — or, if you have no `askUser` tool (you are a subagent), report the denial in your final reply; otherwise wait for a new instruction.",
             },
         ],
         details: { exitCode: -1, interrupted: false, reason: "permission_denied" },

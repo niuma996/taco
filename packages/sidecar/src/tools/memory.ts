@@ -89,7 +89,7 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "User explicitly corrects or confirms your behavior → type=feedback; " +
             "Project-level fact NOT derivable from current code → type=project; " +
             "External system reference (URL/file path/tool) → type=reference. " +
-            "DO NOT CALL for: task progress (use TaskWrite), code patterns (derivable), " +
+            "DO NOT CALL for: task progress (use todoWrite), code patterns (derivable), " +
             "info already in CLAUDE.md / <instructions>. " +
             "ONE MEMORY = ONE FACT, stated in 1-3 sentences. Every topic body is injected into " +
             "later sessions' context, so length is a shared budget, not private space. " +
@@ -97,7 +97,7 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "approaches it is almost always several facts that belong in separate ids. " +
             "Never store architecture overviews, directory layouts, code snippets, or command output: " +
             "write those to a doc in the repo and save a `reference` memory pointing at it. " +
-            "ACTIONS: add (new entry; fails if id exists; optional description field for relevance matching, defaults to name), " +
+            "ACTIONS: add (new entry; REQUIRES name, content and type; fails if id exists; optional description field for relevance matching, defaults to name), " +
             "replace (overwrite existing by id; preserves createdAt, sets updatedAt; only updates content — " +
             "to change name/type/description, remove+add), " +
             "remove (delete by id; permanent). " +

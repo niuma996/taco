@@ -48,7 +48,7 @@ export function createTaskCreateTool(
             "\n" +
             "For complex subtasks (broad scope, independent investigation, >5 tool calls, or long-running " +
             "work like codebase exploration / refactor / migration), prefer delegating to a subagent via " +
-            "the Task tool with worktree isolation — keeps the main session's context lean and lets you " +
+            "the `agent` tool — keeps the main session's context lean and lets you " +
             "parallelize independent subtasks. Reserve direct tools in the main session for tightly-coupled " +
             "steps that share state with the current task's outputs.",
         parameters: taskCreateSchema,

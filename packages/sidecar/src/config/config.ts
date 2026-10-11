@@ -599,7 +599,8 @@ export function readMcpServers(): McpServerConfig[] {
  * Validate and normalize the `commandPermissions` field.
  *  - null/undefined returns the default { mode: "ask", rules: [] }
  *  - non-object / array throws (caller surfaces as invalid_value)
- *  - mode must be "ask" or "auto"; "bypass" is rejected at the config layer
+ *  - mode must be "ask" or "auto"; any other value (including "bypass")
+ *    coerces to "ask" rather than throwing
  *  - rules are strings; object-shaped rules ({ kind, command }) are rejected
  *    with an error so the loader fails loud rather than silently dropping
  *    rules the user expected to apply.

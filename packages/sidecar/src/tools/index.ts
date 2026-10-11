@@ -46,7 +46,7 @@ export type TacoTool = AgentHarnessTool<TacoToolContext>;
  * table, so adding a tool means changing exactly one file.
  */
 export interface TacoToolMetadata {
-    /** One-paragraph prose (≤ 280 chars). Should explain *when* to use this
+    /** One-paragraph prose (≤ 350 chars). Should explain *when* to use this
      *  tool vs. a sibling, not re-state the schema description verbatim. */
     readonly promptSummary?: string;
     /** Whether this tool mutates workspace state. Drives the
@@ -104,7 +104,7 @@ export function defaultTools(opts?: {
         ...createEditTool(),
         taco: {
             promptSummary:
-                "Exact-string replacement — the tool for surgical changes to an existing file, where `write` would lose the parts you are not touching. The `old_string` must be unique in the file (anchor with surrounding context if needed) and you must have read the file in this session — otherwise the call fails.",
+                "Exact-string replacement — the tool for surgical changes to an existing file, where `write` would lose the parts you are not touching. Each `edits[].oldText` must match the file exactly and be unique in it (anchor with surrounding context if needed) — otherwise the call fails, so read the file first.",
             mutates: true,
         },
     };
