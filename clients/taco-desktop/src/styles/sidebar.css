@@ -219,9 +219,10 @@ button svg > *,
     fill: none;
 }
 
-/* Activity Rail (left icon column, top-to-bottom). */
+/* Activity Rail (left icon column, top-to-bottom). Labels live in tooltips, so the
+   rail only has to fit the icon — kept narrow to hand width back to the content. */
 .activity-rail {
-    width: 78px;
+    width: var(--rail-width);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -244,15 +245,15 @@ button svg > *,
     align-items: center;
     gap: 0;
     width: 100%;
-    padding: 0 0.5rem;
+    padding: 0 0.25rem;
 }
 
 .activity-rail-divider {
-    /* Divider below chat button: 56px wide, aligned with hover/active square blocks. */
-    width: 56px;
+    /* Divider below chat button: aligns with the hover/active square blocks. */
+    width: 36px;
     height: 1px;
     background: var(--border);
-    margin: 6px 0;
+    margin: 2px 0;
     flex-shrink: 0;
 }
 
@@ -263,25 +264,25 @@ button svg > *,
     align-items: center;
     gap: 0;
     width: 100%;
-    padding: 0 0.5rem;
+    padding: 0 0.25rem;
     margin-top: auto;
     position: relative;
 }
 
 .activity-rail-bottom::before {
     content: "";
-    /* Divider above settings: 56px wide, centered, 6px below the line. */
-    width: 56px;
+    /* Divider above settings: same width as the top divider, centered. */
+    width: 36px;
     height: 1px;
     background: var(--border);
-    margin-bottom: 6px;
+    margin-bottom: 2px;
 }
 
-/* Each item: min-height 56px for the bg block; content (icon + label) centered. */
+/* Each item: min-height for the bg block; content (icon) centered. */
 .activity-rail-item {
     position: relative;
     width: 100%;
-    min-height: 56px;
+    min-height: 44px;
     border: none;
     background: transparent;
     cursor: pointer;
@@ -292,16 +293,18 @@ button svg > *,
     color: var(--fg-dim);
 }
 
-/* Square bg layer — 56x56, flush with item edges, responsible for hover/active orange highlight.
-   Adjacent bg blocks share corner overlap but remain visually square. */
+/* Square bg layer — centered on the item, responsible for hover/active orange
+   highlight. Vertical centering (not top: 0) keeps it aligned with the icon when
+   the item is taller than the block. Adjacent blocks share corner overlap but
+   remain visually square. */
 .activity-rail-bg {
     position: absolute;
-    top: 0;
+    top: 50%;
     left: 50%;
-    width: 56px;
-    height: 56px;
-    transform: translateX(-50%);
-    border-radius: var(--radius-md);
+    width: var(--rail-item-size);
+    height: var(--rail-item-size);
+    transform: translate(-50%, -50%);
+    border-radius: var(--radius-sm);
     background: transparent;
     transition: background 0.12s ease;
 }
@@ -314,16 +317,12 @@ button svg > *,
     background: var(--rail-bg-active);
 }
 
-/* Content layer: icon + label centered on top of bg. No overflow clipping. */
+/* Content layer: icon centered on top of bg. No overflow clipping. */
 .activity-rail-content {
     position: relative;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    font-size: 11px;
-    line-height: 1.2;
 }
 
 .activity-rail-item:hover .activity-rail-content {
@@ -335,12 +334,66 @@ button svg > *,
     color: var(--brand-orange);
 }
 
-/* Label: no-wrap, no truncation. Regular font weight. */
-.activity-rail-label {
-    font-size: 11px;
-    font-weight: 400;
+/* Label tooltip: hidden until hover/focus, then floats clear of the rail on the right.
+   Absolutely positioned so it never widens the rail or shifts the layout. */
+.activity-rail-tooltip {
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    background: var(--tooltip-bg);
+    color: var(--tooltip-fg);
+    font-size: 0.75rem;
+    line-height: 1.4;
     white-space: nowrap;
-    line-height: 1.1;
+    box-shadow: 0 4px 12px var(--shadow-color);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.12s ease;
+    z-index: 200;
+}
+
+.activity-rail-item:hover .activity-rail-tooltip,
+.activity-rail-item:focus-visible .activity-rail-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Overflow menu for the views collapsed behind the "more" button. */
+.activity-rail-menu {
+    min-width: 148px;
+    padding: 4px;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px var(--shadow-color);
+    z-index: 300;
+}
+
+.activity-rail-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-xs);
+    font-size: 0.82rem;
+    color: var(--fg-dim);
+    cursor: pointer;
+    outline: none;
+}
+
+.activity-rail-menu-item:hover,
+.activity-rail-menu-item:focus-visible {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+.activity-rail-menu-label {
+    flex: 1;
 }
 
 /* lucide SVG fill none inheritance. */
@@ -350,14 +403,14 @@ button svg > *,
 
 /* Status dot in the top-right corner of a rail item. Used by the
    Settings entry to flag an available update without auto-opening
-   the dialog — the dot sits inside the 56x56 bg block, slightly
-   outside its rounded corner so it reads as a notification marker
-   rather than part of the icon. Brand-orange so it pops against
-   the rail's muted colour palette. */
+   the dialog — the dot sits just inside the bg block's top-right
+   corner so it reads as a notification marker rather than part of the
+   icon. Brand-orange so it pops against the rail's muted colour palette. */
 .activity-rail-badge {
+    /* Anchored to the bg block's top-right corner, not the item's. */
     position: absolute;
-    top: 6px;
-    right: calc(50% - 36px);
+    top: calc(50% - var(--rail-item-size) / 2 + 2px);
+    right: calc(50% - var(--rail-item-size) / 2 + 2px);
     width: 8px;
     height: 8px;
     border-radius: 50%;

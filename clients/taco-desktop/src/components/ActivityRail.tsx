@@ -1,18 +1,24 @@
 /**
- * ActivityRail — left-side 78px icon column spanning the full window height.
+ * ActivityRail — narrow left icon column spanning the full window height.
  *
- * Entries: chat (default), memory, tools, skills, agents, plugins in the top
- * group; settings pinned to the bottom group. Top padding is driven by
- * --rail-top-padding (36px on macOS to align with the traffic-light center),
- * so the rail no longer needs to be pushed down 40px.
+ * Entries: chat (default) then agents/skills/tools/mcp/plugins/channels in
+ * the top group, a single "more" button collapsing memory/checkpoints/
+ * schedules, and settings pinned to the bottom group. Top padding is driven
+ * by --rail-top-padding (36px on macOS to align with the traffic-light center).
+ *
+ * The rail is too narrow to hold labels, so each button surfaces its label in
+ * a tooltip on hover/focus instead of rendering it inline.
  */
 
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
     Bot,
     Brain,
     CalendarClock,
+    Check,
     History,
     MessageSquare,
+    MoreHorizontal,
     Plug,
     Radio,
     Server,
@@ -39,28 +45,24 @@ type ActivityView =
 type ItemDef = {
     type: ActivityView;
     icon: typeof MessageSquare;
-    labelKey:
-        | "activity.chat"
-        | "activity.tools"
-        | "activity.skills"
-        | "activity.agents"
-        | "activity.plugins"
-        | "activity.channels"
-        | "activity.memory"
-        | "activity.checkpoints"
-        | "activity.schedules"
-        | "activity.mcp"
-        | "activity.settings";
+    labelKey: string;
 };
 
-const ACTIVITY_ITEMS: ReadonlyArray<ItemDef> = [
-    { type: "chat", icon: MessageSquare, labelKey: "activity.chat" },
+/** Views behind the "more" button — they have no rail slot of their own. */
+const OVERFLOW_VIEWS: ReadonlyArray<ActivityView> = ["memory", "checkpoints", "schedules"];
+
+const CHAT_ITEM: ItemDef = { type: "chat", icon: MessageSquare, labelKey: "activity.chat" };
+
+const TOP_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "agents", icon: Bot, labelKey: "activity.agents" },
     { type: "skills", icon: Sparkles, labelKey: "activity.skills" },
     { type: "tools", icon: Wrench, labelKey: "activity.tools" },
     { type: "mcp", icon: Server, labelKey: "activity.mcp" },
     { type: "plugins", icon: Plug, labelKey: "activity.plugins" },
     { type: "channels", icon: Radio, labelKey: "activity.channels" },
+];
+
+const OVERFLOW_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "memory", icon: Brain, labelKey: "activity.memory" },
     { type: "checkpoints", icon: History, labelKey: "activity.checkpoints" },
     { type: "schedules", icon: CalendarClock, labelKey: "activity.schedules" },
@@ -100,15 +102,17 @@ function RailButton({
             type="button"
             className={`activity-rail-item${activeView === type ? " active" : ""}`}
             onClick={() => onSelect(type)}
-            title={label}
             aria-pressed={activeView === type}
         >
-            {/* Background layer: 64x64 square that turns orange on hover/active, no clipping. */}
+            {/* Background layer: square that turns orange on hover/active, no clipping. */}
             <span className="activity-rail-bg" aria-hidden="true" />
-            {/* Content layer: icon + label, centered over the background and allowed to overflow. */}
+            {/* Content layer: icon centered over the background. */}
             <span className="activity-rail-content">
-                <Icon size={22} aria-hidden="true" />
-                <span className="activity-rail-label">{label}</span>
+                <Icon size={20} aria-hidden="true" />
+            </span>
+            {/* Label lives in a tooltip so the narrow rail never has to fit text. */}
+            <span className="activity-rail-tooltip" role="tooltip">
+                {label}
             </span>
             {badge ? (
                 <span
@@ -122,20 +126,15 @@ function RailButton({
 
 export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityRailProps) {
     const { t } = useT();
-    // Render chat separately so the divider between it and the rest of the top
-    // group can live as a sibling element — no Fragment, which trips up Vite
-    // Fast Refresh when added to an existing component mid-HMR.
-    const chatItem = ACTIVITY_ITEMS[0];
-    const restItems = ACTIVITY_ITEMS.slice(1);
+    // An overflow view keeps the "more" button lit so the current location stays visible.
+    const overflowActive = OVERFLOW_VIEWS.includes(activeView);
     return (
         <nav className="activity-rail" aria-label="Activity rail">
             <div className="activity-rail-top">
-                {chatItem && (
-                    <RailButton {...chatItem} activeView={activeView} onSelect={onSelect} t={t} />
-                )}
+                <RailButton {...CHAT_ITEM} activeView={activeView} onSelect={onSelect} t={t} />
                 {/* Divider between chat and the rest of the top group; aligns with the settings border. */}
-                {chatItem && <div className="activity-rail-divider" aria-hidden="true" />}
-                {restItems.map((item) => (
+                <div className="activity-rail-divider" aria-hidden="true" />
+                {TOP_ITEMS.map((item) => (
                     <RailButton
                         key={item.type}
                         {...item}
@@ -144,6 +143,45 @@ export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityR
                         t={t}
                     />
                 ))}
+                <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                        <button
+                            type="button"
+                            className={`activity-rail-item${overflowActive ? " active" : ""}`}
+                            aria-pressed={overflowActive}
+                        >
+                            <span className="activity-rail-bg" aria-hidden="true" />
+                            <span className="activity-rail-content">
+                                <MoreHorizontal size={20} aria-hidden="true" />
+                            </span>
+                            <span className="activity-rail-tooltip" role="tooltip">
+                                {t("activity.more")}
+                            </span>
+                        </button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                            className="activity-rail-menu"
+                            side="right"
+                            sideOffset={6}
+                            align="start"
+                        >
+                            {OVERFLOW_ITEMS.map(({ type, icon: Icon, labelKey }) => (
+                                <DropdownMenu.Item
+                                    key={type}
+                                    className="activity-rail-menu-item"
+                                    onSelect={() => onSelect(type)}
+                                >
+                                    <Icon size={16} aria-hidden="true" />
+                                    <span className="activity-rail-menu-label">{t(labelKey)}</span>
+                                    {activeView === type ? (
+                                        <Check size={14} aria-hidden="true" />
+                                    ) : null}
+                                </DropdownMenu.Item>
+                            ))}
+                        </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                </DropdownMenu.Root>
             </div>
             <div className="activity-rail-bottom">
                 <RailButton

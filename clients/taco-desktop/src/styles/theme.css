@@ -96,6 +96,15 @@
        32px, matching the typical Windows 11 title-bar height and leaving room
        for the square min/max/close buttons. */
     --rail-top-padding: 32px;
+    /* Leading inset for the topbar only — the workspace picker must clear the native
+       traffic lights on macOS, which overlay the window's top-left corner. The
+       content card below keeps its own fixed gutter and stays flush to the rail. */
+    --topbar-leading-inset: 0px;
+
+    /* ActivityRail geometry. The rail carries no inline labels (they live in
+       tooltips), so it only has to fit an icon plus its hover/active block. */
+    --rail-width: 56px;
+    --rail-item-size: 36px;
 
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */
@@ -260,6 +269,10 @@
 
 :root[data-platform="macos"] {
     --rail-top-padding: 36px;
+    /* The native traffic lights sit above the rail's first item (which starts at
+       --rail-top-padding), so no extra rail clearance is needed. This inset pushes
+       the topbar's workspace picker past the lights. */
+    --topbar-leading-inset: 18px;
 }
 
 * {

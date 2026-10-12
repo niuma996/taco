@@ -2,7 +2,7 @@
 
 #root {
     display: grid;
-    grid-template-columns: 78px 1fr;
+    grid-template-columns: var(--rail-width) 1fr;
     min-height: 100%;
     overflow: hidden;
 }
@@ -27,11 +27,13 @@ header.topbar {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    /* Topbar occupies only the right column (left column is ActivityRail at 78px).
+    /* Topbar occupies only the right column (left column is the ActivityRail,
+       sized by --rail-width).
        Height = --rail-top-padding (36px on macOS, 32px elsewhere).
        Fixed height (not min-height) prevents children from stretching the right column
        and causing misalignment with the left column's first icon baseline. */
     padding: 0 0.5rem;
+    padding-left: calc(0.5rem + var(--topbar-leading-inset));
     height: var(--rail-top-padding);
     background: var(--shell-bg);
     flex-shrink: 0;
@@ -159,13 +161,15 @@ header.topbar .topbar-picker-group {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    flex: 0 0 calc(var(--pane-width) - 0.5rem - 4px);
+    /* Sizes to the workspace name instead of mirroring the pane width — the chevron
+       hugs the label, so there is no right edge that has to align with the card below. */
+    flex: 0 1 auto;
     min-width: 0;
+    max-width: calc(var(--pane-width) - 0.5rem - 4px);
 }
 
 .topbar-workspace-select {
     /* Text-button style (not an input): transparent bg, no border, faint hint on hover.
-       Fills the picker-group; label truncates on overflow.
        Vertical padding 0.35rem; horizontal padding is slightly smaller (0.4rem) to give
        the label more room next to the tighter chevron spacing. */
     background: transparent;
@@ -181,12 +185,12 @@ header.topbar .topbar-picker-group {
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    flex: 1;
     min-width: 0;
+    max-width: 100%;
 }
 
 .topbar-workspace-select-label {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -509,14 +513,14 @@ header.topbar .topbar-picker-group {
     /* Shared by the task / files / subagent panels; overridden inline by App. */
     --right-panel-width: var(--pane-width);
     /* Floating content card: rounded like the macOS window shell, lifted off the
-       window edges so the shell backdrop shows around the card. The gutter is on
-       all four sides — .app-main clips at its own left edge, so without the left
-       inset the shadow would be cut in half. overflow: hidden clips the panes to
-       the radius. */
+       window edges so the shell backdrop shows around the card. overflow: hidden
+       clips the panes to the radius. */
     border-radius: var(--radius-lg);
     /* Top inset stays small — the topbar already separates the card from the
-       window edge, and a full gutter there reads as an empty band. */
-    margin: 2px 8px 8px 8px;
+       window edge, and a full gutter there reads as an empty band. The left
+       gutter is tighter than the rest: the rail's own padding already separates
+       the card from the icons, and a full gutter there reads as a wide gap. */
+    margin: 2px 8px 8px 4px;
     box-shadow: var(--card-shadow);
     /* Third tier (rail/topbar → list column → content). Panes without a list
        column fall through to this directly and read as two tiers. */
