@@ -9,32 +9,17 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { asWorkspaceId } from "@taco-ai/protocol";
 import { WorkspaceExtensionSet } from "../../src/extensions/activation.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
-
-before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-ws-permrules-"));
-    // Empty TACO_HOME so readGlobalConfig() contributes no user rules — the
-    // only rules in play are the ones each test contributes.
-    process.env.TACO_HOME = tmpDir;
-});
-
-after(() => {
-    if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
-    else process.env.TACO_HOME = prevTacoHome;
-    rmSync(tmpDir, { recursive: true, force: true });
-});
+// Empty TACO_HOME so readGlobalConfig() contributes no user rules — the
+// only rules in play are the ones each test contributes.
+const tmpDir = useTempTacoHome("permrules");
 
 const fakeTool = (name: string): TacoTool =>
     ({

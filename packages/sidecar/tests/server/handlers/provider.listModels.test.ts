@@ -23,8 +23,8 @@ import {
     registerProviderModelsHandlers,
     TimeoutError,
 } from "../../../src/server/handlers/providerModels.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
 
 type Stub = (url: string, apiKey: string, signal: AbortSignal) => Promise<FakeResponse>;
 
@@ -58,22 +58,8 @@ beforeEach(() => {
     });
 });
 
-function makeCtx(
-    params: unknown,
-): Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0] {
-    return {
-        id: "test-id",
-        workspace: undefined as never,
-        cwd: "*",
-        server: {} as never,
-        params,
-    } as unknown as Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0];
-}
-
 async function invoke(params: unknown): Promise<unknown> {
-    const reg = getRegisteredMethod("provider.listModels");
-    assert.ok(reg, "provider.listModels must be registered");
-    return reg.handler(makeCtx(params));
+    return callMethod("provider.listModels", { server: {}, params });
 }
 
 describe("provider.listModels handler", () => {

@@ -10,31 +10,16 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import { readGlobalConfig } from "../../../src/config/config.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
+useTempTacoHome("settings-defaultmodel");
 
 before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-settings-defaultmodel-"));
-    process.env.TACO_HOME = tmpDir;
     registerBuiltinMethods();
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
 });
 
 interface DefaultModelCall {
@@ -53,29 +38,16 @@ function makeServer(calls: DefaultModelCall[]) {
     };
 }
 
-function makeCtx(server: unknown, global: Record<string, unknown>) {
-    return {
-        id: "test",
-        workspace: undefined as never,
-        cwd: undefined as never,
-        server,
-        params: { global },
-    } as unknown as Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0];
-}
-
 describe("settings.write — defaultModel push", () => {
     it("persists defaultModel/defaultProvider and calls server.setDefaultModel", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const calls: DefaultModelCall[] = [];
         const server = makeServer(calls);
-        await reg.handler(
-            makeCtx(server, {
-                defaultModel: "MiniMax-M2.7-highspeed",
-                defaultProvider: "minimax-cn",
-            }),
-        );
+        await callMethod("settings.write", {
+            server,
+            params: {
+                global: { defaultModel: "MiniMax-M2.7-highspeed", defaultProvider: "minimax-cn" },
+            },
+        });
 
         // Disk persisted
         const onDisk = readGlobalConfig();
@@ -91,25 +63,25 @@ describe("settings.write — defaultModel push", () => {
     });
 
     it("fires when only defaultProvider changes (it scopes the model lookup)", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const calls: DefaultModelCall[] = [];
         const server = makeServer(calls);
         // defaultModel already on disk from the previous test; change provider only.
-        await reg.handler(makeCtx(server, { defaultProvider: "minimax" }));
+        await callMethod("settings.write", {
+            server,
+            params: { global: { defaultProvider: "minimax" } },
+        });
 
         assert.equal(calls.length, 1);
         assert.equal(calls[0].defaultProvider, "minimax");
     });
 
     it("does NOT push when the patch touches neither field", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const calls: DefaultModelCall[] = [];
         const server = makeServer(calls);
-        await reg.handler(makeCtx(server, { thinkingLevel: "low" }));
+        await callMethod("settings.write", {
+            server,
+            params: { global: { thinkingLevel: "low" } },
+        });
 
         assert.equal(calls.length, 0);
     });

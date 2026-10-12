@@ -12,34 +12,19 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import { readGlobalConfig } from "../../../src/config/config.ts";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import type { ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { ServerRegistry } from "../../../src/server/serverRegistry.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
+useTempTacoHome("settings-fanout");
 
 before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-settings-fanout-"));
-    process.env.TACO_HOME = tmpDir;
     registerBuiltinMethods();
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
 });
 
 /** Recorder stub. Tracks every call on every method we expect to fan out. */
@@ -87,47 +72,24 @@ function makeRecorder(label: string) {
     return { server, calls, label };
 }
 
-type HandlerCtx = Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0];
-
-function makeCtx(
-    server: unknown,
-    global: Record<string, unknown>,
-    serverRegistry?: ServerRegistry,
-): HandlerCtx {
-    const base = {
-        id: "test",
-        workspace: undefined as never,
-        cwd: undefined as never,
-        server,
-        params: { global },
-    };
-    if (serverRegistry !== undefined) {
-        (base as { serverRegistry?: ServerRegistry }).serverRegistry = serverRegistry;
-    }
-    return base as unknown as HandlerCtx;
-}
-
 describe("settings.write — server fan-out", () => {
     it("falls back to [server] when no registry is provided", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         // Caller is A; serverRegistry is intentionally undefined so the
         // fan-out helper iterates the single-element [server] fallback.
         // B exists only to assert it stays untouched (it is not the
         // per-RPC server and the registry hook is not wired).
-        await reg.handler(makeCtx(a.server, { apiKeys: { foo: "bar" } }));
+        await callMethod("settings.write", {
+            server: a.server,
+            params: { global: { apiKeys: { foo: "bar" } } },
+        });
 
         assert.equal(a.calls.broadcastModelsChanged, 1, "A: broadcastModelsChanged fires");
         assert.equal(b.calls.broadcastModelsChanged, 0, "B: must NOT receive the broadcast");
     });
 
     it("fans setCustomProviders to every registered server", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         const c = makeRecorder("C");
@@ -145,7 +107,11 @@ describe("settings.write — server fan-out", () => {
                 models: [{ id: "openrouter/test", name: "test" }],
             },
         ];
-        await reg.handler(makeCtx(a.server, { customProviders: provider }, registry));
+        await callMethod("settings.write", {
+            server: a.server,
+            params: { global: { customProviders: provider } },
+            serverRegistry: registry,
+        });
 
         for (const r of [a, b, c]) {
             assert.equal(r.calls.setCustomProviders, 1, `${r.label}: setCustomProviders fires`);
@@ -158,43 +124,40 @@ describe("settings.write — server fan-out", () => {
     });
 
     it("fans broadcastModelsChanged to every server when apiKeys change", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         const registry = new ServerRegistry();
         registry.add(a.server);
         registry.add(b.server);
 
-        await reg.handler(makeCtx(a.server, { apiKeys: { anthropic: "sk-test" } }, registry));
+        await callMethod("settings.write", {
+            server: a.server,
+            params: { global: { apiKeys: { anthropic: "sk-test" } } },
+            serverRegistry: registry,
+        });
 
         assert.equal(a.calls.broadcastModelsChanged, 1);
         assert.equal(b.calls.broadcastModelsChanged, 1);
     });
 
     it("fans invalidateCompactionCaches when compaction is patched", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         const registry = new ServerRegistry();
         registry.add(a.server);
         registry.add(b.server);
 
-        await reg.handler(
-            makeCtx(a.server, { compaction: { enabled: true, threshold: 0.5 } }, registry),
-        );
+        await callMethod("settings.write", {
+            server: a.server,
+            params: { global: { compaction: { enabled: true, threshold: 0.5 } } },
+            serverRegistry: registry,
+        });
 
         assert.equal(a.calls.invalidateCompactionCaches, 1);
         assert.equal(b.calls.invalidateCompactionCaches, 1);
     });
 
     it("fans refreshInstructions with the persisted (post-merge) value", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         const registry = new ServerRegistry();
@@ -202,7 +165,11 @@ describe("settings.write — server fan-out", () => {
         registry.add(b.server);
 
         const patch = { instructions: { enabled: false, files: { "AGENTS.md": true } } };
-        await reg.handler(makeCtx(a.server, patch, registry));
+        await callMethod("settings.write", {
+            server: a.server,
+            params: { global: patch },
+            serverRegistry: registry,
+        });
 
         for (const r of [a, b]) {
             assert.equal(r.calls.refreshInstructions, 1, `${r.label}: refreshInstructions fires`);
@@ -220,22 +187,19 @@ describe("settings.write — server fan-out", () => {
     });
 
     it("fans setDefaultModel when defaultModel/defaultProvider change", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         const registry = new ServerRegistry();
         registry.add(a.server);
         registry.add(b.server);
 
-        await reg.handler(
-            makeCtx(
-                a.server,
-                { defaultModel: "claude-sonnet-4.5", defaultProvider: "anthropic" },
-                registry,
-            ),
-        );
+        await callMethod("settings.write", {
+            server: a.server,
+            params: {
+                global: { defaultModel: "claude-sonnet-4.5", defaultProvider: "anthropic" },
+            },
+            serverRegistry: registry,
+        });
 
         for (const r of [a, b]) {
             assert.equal(r.calls.setDefaultModel, 1, `${r.label}: setDefaultModel fires`);
@@ -247,9 +211,6 @@ describe("settings.write — server fan-out", () => {
     });
 
     it("survives a single server throwing without blocking the others", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const a = makeRecorder("A");
         const b = makeRecorder("B");
         // Wrap B's broadcast so it throws — fan-out helper must catch +
@@ -268,7 +229,11 @@ describe("settings.write — server fan-out", () => {
         const originalErr = console.error;
         console.error = () => {};
         try {
-            await reg.handler(makeCtx(a.server, { apiKeys: { foo: "bar" } }, registry));
+            await callMethod("settings.write", {
+                server: a.server,
+                params: { global: { apiKeys: { foo: "bar" } } },
+                serverRegistry: registry,
+            });
         } finally {
             console.error = originalErr;
         }

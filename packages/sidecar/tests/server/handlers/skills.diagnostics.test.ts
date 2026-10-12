@@ -24,6 +24,7 @@ import {
 } from "../../../src/skills/skillDiagnostics.ts";
 import { preloadSkillFrontmatter } from "../../../src/skills/skillFrontmatter.ts";
 import type { TacoSkill } from "../../../src/skills/tacoSkill.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
 before(() => {
     registerBuiltinMethods();
@@ -72,16 +73,13 @@ async function reloadFromDisk(tmpCwd: string): Promise<{
 }
 
 describe("skills.list diagnostics", () => {
-    let tmpHome: string;
+    const tmpHome = useTempTacoHome("skills-diag");
     let tmpCwd: string;
     let tmpUserHome: string;
-    let prevTacoHome: string | undefined;
     let prevHome: string | undefined;
 
     before(() => {
-        prevTacoHome = process.env.TACO_HOME;
         prevHome = process.env.HOME;
-        tmpHome = mkdtempSync(join(tmpdir(), "taco-skills-diag-home-"));
         tmpCwd = mkdtempSync(join(tmpdir(), "taco-skills-diag-cwd-"));
         // Isolate $HOME too: defaultSkillDirs reads ~/.claude/skills and
         // ~/.pi/skills via os.homedir(), so without this the scan picks up the
@@ -89,7 +87,6 @@ describe("skills.list diagnostics", () => {
         // builtin would then surface here as a duplicate_name diagnostic and
         // fail the "omit when empty" assertion for an unrelated reason.
         tmpUserHome = mkdtempSync(join(tmpdir(), "taco-skills-diag-userhome-"));
-        process.env.TACO_HOME = tmpHome;
         process.env.HOME = tmpUserHome;
 
         // Two user skills plus a third that collides with the second name, so a
@@ -116,11 +113,8 @@ describe("skills.list diagnostics", () => {
     });
 
     after(() => {
-        if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
-        else process.env.TACO_HOME = prevTacoHome;
         if (prevHome === undefined) Reflect.deleteProperty(process.env, "HOME");
         else process.env.HOME = prevHome;
-        rmSync(tmpHome, { recursive: true, force: true });
         rmSync(tmpCwd, { recursive: true, force: true });
         rmSync(tmpUserHome, { recursive: true, force: true });
     });

@@ -23,13 +23,11 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { getRegisteredMethod, RpcHandlerError } from "../../../src/server/methodRegistry.ts";
+import { type MethodCtx, RpcHandlerError } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
 
-type AnyServer = Parameters<
-    NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
->[0]["server"];
-type Ctx = Parameters<NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]>[0];
+type AnyServer = MethodCtx<unknown>["server"];
 
 /** Stub controller that records every call. The unsafe-ID tests
  *  assert `controllerCalls` is empty — unsafe IDs must reject before any
@@ -81,28 +79,17 @@ function formatActor(actor: unknown): string {
     return "?";
 }
 
-function makeCtx(server: AnyServer, params: unknown): Ctx {
-    return {
-        id: "test",
-        workspace: undefined as never,
-        cwd: undefined as never,
-        server,
-        params,
-    } as Ctx;
-}
-
 describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
     it("jobs.create ignores caller-supplied ids before persistence", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.create");
-        assert.ok(reg);
 
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
 
         // Real wire shape: { job: { ... } }
-        await reg.handler(
-            makeCtx(server, {
+        await callMethod("jobs.create", {
+            server,
+            params: {
                 job: {
                     id: "../../etc/passwd",
                     name: "x",
@@ -113,22 +100,21 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                     run_on_startup: false,
                     history: [],
                 },
-            }),
-        );
+            },
+        });
         assert.deepEqual(controllerCalls, ["create::none"]);
     });
 
     it("jobs.create strips a valid caller id before reaching the controller", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.create");
-        assert.ok(reg);
 
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
 
         // Positive control: same wire shape, safe id, controller is invoked.
-        await reg.handler(
-            makeCtx(server, {
+        await callMethod("jobs.create", {
+            server,
+            params: {
                 job: {
                     id: "nightly-cleanup",
                     name: "x",
@@ -139,23 +125,22 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                     run_on_startup: false,
                     history: [],
                 },
-            }),
-        );
+            },
+        });
         assert.deepEqual(controllerCalls, ["create::none"]);
     });
 
     it("jobs.update rejects traversal id before persistence", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.update");
-        assert.ok(reg);
 
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
 
         await assert.rejects(
             () =>
-                reg.handler(
-                    makeCtx(server, {
+                callMethod("jobs.update", {
+                    server,
+                    params: {
                         job: {
                             id: "../escape",
                             name: "x",
@@ -166,8 +151,8 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
                             run_on_startup: false,
                             history: [],
                         },
-                    }),
-                ),
+                    },
+                }),
             (e: unknown) =>
                 e instanceof RpcHandlerError && (e as { code: string }).code === "invalid_params",
         );
@@ -176,14 +161,12 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
 
     it("jobs.delete rejects traversal id without invoking controller", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.delete");
-        assert.ok(reg);
 
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
 
         await assert.rejects(
-            () => reg.handler(makeCtx(server, { id: "../escape" })),
+            () => callMethod("jobs.delete", { server, params: { id: "../escape" } }),
             (e: unknown) =>
                 e instanceof RpcHandlerError && (e as { code: string }).code === "invalid_params",
         );
@@ -192,14 +175,12 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
 
     it("jobs.runNow rejects traversal id without invoking scheduler", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.runNow");
-        assert.ok(reg);
 
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
 
         await assert.rejects(
-            () => reg.handler(makeCtx(server, { id: "../escape" })),
+            () => callMethod("jobs.runNow", { server, params: { id: "../escape" } }),
             (e: unknown) =>
                 e instanceof RpcHandlerError && (e as { code: string }).code === "invalid_params",
         );
@@ -208,14 +189,12 @@ describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
 
     it("jobs.history rejects traversal id without invoking controller", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.history");
-        assert.ok(reg);
 
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
 
         await assert.rejects(
-            () => reg.handler(makeCtx(server, { id: "../escape" })),
+            () => callMethod("jobs.history", { server, params: { id: "../escape" } }),
             (e: unknown) =>
                 e instanceof RpcHandlerError && (e as { code: string }).code === "invalid_params",
         );
@@ -340,53 +319,48 @@ describe("jobs RPC — workspace routing (regression)", () => {
 describe("jobs RPC — actor extraction", () => {
     it("passes IM actor through to the controller", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.list");
-        assert.ok(reg);
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
-        await reg.handler(
-            makeCtx(server, {
+        await callMethod("jobs.list", {
+            server,
+            params: {
                 actor: { kind: "im", channelId: "ch1", peerId: "u1", chatId: "c1" },
-            }),
-        );
+            },
+        });
         assert.deepEqual(controllerCalls, ["list:im"]);
     });
 
     it("passes IDE actor through to the controller", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.list");
-        assert.ok(reg);
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
-        await reg.handler(
-            makeCtx(server, {
+        await callMethod("jobs.list", {
+            server,
+            params: {
                 actor: { kind: "ide", workspace: "/tmp/proj" },
-            }),
-        );
+            },
+        });
         assert.deepEqual(controllerCalls, ["list:ide"]);
     });
 
     it("passes undefined when actor is omitted (legacy / admin callers)", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.list");
-        assert.ok(reg);
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
-        await reg.handler(makeCtx(server, {}));
+        await callMethod("jobs.list", { server, params: {} });
         assert.deepEqual(controllerCalls, ["list:none"]);
     });
 
     it("treats malformed actor as undefined (admin path)", async () => {
         registerBuiltinMethods();
-        const reg = getRegisteredMethod("jobs.list");
-        assert.ok(reg);
         const controllerCalls: string[] = [];
         const server = makeStubServer(controllerCalls);
-        await reg.handler(
-            makeCtx(server, {
+        await callMethod("jobs.list", {
+            server,
+            params: {
                 actor: { kind: "im", channelId: "ch1" }, // missing peerId/chatId
-            }),
-        );
+            },
+        });
         assert.deepEqual(controllerCalls, ["list:none"]);
     });
 });

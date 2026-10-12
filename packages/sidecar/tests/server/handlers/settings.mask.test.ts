@@ -7,36 +7,19 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 
 import { saveGlobalConfig } from "../../../src/config/config.ts";
 import { maskKey, toView } from "../../../src/server/handlers/settings.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
+useTempTacoHome("settings-mask");
 
 before(() => {
-    // Hermetic: point TACO_HOME at a temp dir so saveGlobalConfig touches
-    // only the temp file, never the real ~/.taco/taco.json.
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-settings-mask-"));
-    process.env.TACO_HOME = tmpDir;
     // Register all builtin methods so settings.get is in the registry map.
     registerBuiltinMethods();
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("settings handler — key masking", () => {
@@ -177,16 +160,9 @@ describe("settings handler — key masking", () => {
             anthropicApiKey: "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst",
             openaiApiKey: "sk-OPENAI-abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG",
         });
-        const reg = getRegisteredMethod("settings.get");
-        assert.ok(reg, "settings.get must be registered after registerBuiltinMethods()");
-        // settings.get only reads `params` from ctx; the rest can be dummies.
-        const result = (await reg.handler({
-            id: "test",
-            workspace: undefined as never,
-            cwd: undefined as never,
-            server: undefined as never,
-            params: undefined,
-        })) as { global: { anthropicApiKey?: unknown; openaiApiKey?: unknown } };
+        const result = await callMethod<{
+            global: { anthropicApiKey?: unknown; openaiApiKey?: unknown };
+        }>("settings.get");
         assert.ok(result, "expected settings.get to return a value");
         const anthropic = result.global.anthropicApiKey as {
             configured: boolean;

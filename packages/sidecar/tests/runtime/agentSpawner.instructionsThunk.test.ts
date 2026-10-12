@@ -13,15 +13,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import { asSessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
-import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const defs: AgentDefinition[] = [
     {
@@ -37,21 +36,17 @@ const CLAUDE_MD = "Project rule: always use tabs.";
 
 describe("AgentSpawner parent-instructions inheritance", () => {
     let cwd: string;
-    let sessionsRoot: string;
     let ws: WorkspaceRuntime;
     /** System prompts handed to attachChild, in call order. */
     let captured: string[];
+    let cleanup: () => Promise<void>;
 
     before(async () => {
-        cwd = mkdtempSync(join(tmpdir(), "taco-ws-instr-"));
-        sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-instr-"));
-        writeFileSync(join(cwd, "CLAUDE.md"), CLAUDE_MD);
-        ws = new WorkspaceRuntime({
-            providerKeyStore: new ProviderKeyStore({}),
-            cwd: asWorkspaceId(cwd),
-            sessionsRoot,
+        ({ ws, cwd, cleanup } = createTestWorkspace({
+            prefix: "instr",
             agents: defs,
-        });
+            setup: (dir) => writeFileSync(join(dir, "CLAUDE.md"), CLAUDE_MD),
+        }));
         captured = [];
         // Abort right after the prompt is built: everything under test happens
         // before attach, and the spawn path turns the throw into an isError
@@ -77,11 +72,7 @@ describe("AgentSpawner parent-instructions inheritance", () => {
             .then((s) => s.close(harnessContext));
     });
 
-    after(async () => {
-        await ws.dispose();
-        rmSync(cwd, { recursive: true, force: true });
-        rmSync(sessionsRoot, { recursive: true, force: true });
-    });
+    after(() => cleanup());
 
     async function spawnAndCapture(toolCallId: string): Promise<string> {
         const res = await ws.spawnSubagent({

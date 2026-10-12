@@ -16,17 +16,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import { asSessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { MAIN_BRANCH } from "../../src/runtime/session/sessionBranch.ts";
 import { type SessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
-import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const defs: AgentDefinition[] = [
     {
@@ -41,25 +38,14 @@ const defs: AgentDefinition[] = [
 
 describe("AgentSpawner.resumeSubagent — validation", () => {
     let cwd: string;
-    let sessionsRoot: string;
     let ws: WorkspaceRuntime;
+    let cleanup: () => Promise<void>;
 
     before(() => {
-        cwd = mkdtempSync(join(tmpdir(), "taco-ws-resume-"));
-        sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-resume-"));
-        ws = new WorkspaceRuntime({
-            providerKeyStore: new ProviderKeyStore({}),
-            cwd: asWorkspaceId(cwd),
-            sessionsRoot,
-            agents: defs,
-        });
+        ({ ws, cwd, cleanup } = createTestWorkspace({ prefix: "resume", agents: defs }));
     });
 
-    after(async () => {
-        await ws.dispose();
-        rmSync(cwd, { recursive: true, force: true });
-        rmSync(sessionsRoot, { recursive: true, force: true });
-    });
+    after(() => cleanup());
 
     /**
      * Create a session on disk, optionally stamping the sidecar's facts on it.

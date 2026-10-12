@@ -10,30 +10,12 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
-
-before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-facade-chain-"));
-    process.env.TACO_HOME = tmpDir;
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
-});
+useTempTacoHome("facade-chain");
 
 /**
  * Exposes SidecarServer's private workspaceMap via reflection, then injects fake workspaces.

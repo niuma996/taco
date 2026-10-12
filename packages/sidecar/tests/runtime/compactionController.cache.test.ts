@@ -5,14 +5,14 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { after, afterEach, before, describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { DEFAULT_COMPACTION_ENABLED, DEFAULT_COMPACTION_THRESHOLD } from "@taco-ai/protocol";
 
 import { type ResolvedCompaction, saveGlobalConfig } from "../../src/config/config.ts";
 import { CompactionController } from "../../src/runtime/compaction/compactionController.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 /**
  * Minimal fake harness — CompactionController.effectiveCompaction() doesn't
@@ -45,26 +45,7 @@ const fakeLane = {
 /** getEntry stub: TTL/cache tests don't read compaction entries. */
 const fakeGetEntry = async () => undefined;
 
-let tmpDir: string;
-let tacoJsonPath: string;
-let prevTacoHome: string | undefined;
-
-before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-compaction-ttl-"));
-    process.env.TACO_HOME = tmpDir;
-    mkdirSync(tmpDir, { recursive: true });
-    tacoJsonPath = join(tmpDir, "taco.json");
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
-});
+const tacoJsonPath = join(useTempTacoHome("compaction-ttl"), "taco.json");
 
 /**
  * Builds a CompactionController with a counter-wrapped readGlobalConfig.

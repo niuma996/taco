@@ -27,8 +27,12 @@ import { after, before, describe, it } from "node:test";
 import { asWorkspaceId, type InstructionsConfig } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
+
+// settings.write persists to $TACO_HOME/taco.json — keep it off the real ~/.taco.
+useTempTacoHome("settings-instructions");
 
 let tmpDir: string;
 
@@ -99,9 +103,6 @@ describe("settings.write — instructions reaches refreshInstructions with persi
     });
 
     it("refreshInstructions receives the post-merge value from disk", () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         let received: InstructionsConfig | undefined;
         const server = {
             providerKeyStore: providerKeyStore(),
@@ -114,10 +115,7 @@ describe("settings.write — instructions reaches refreshInstructions with persi
             setDefaultModel(): void {},
         };
 
-        const ctx = {
-            id: "test",
-            workspace: undefined as never,
-            cwd: undefined as never,
+        return callMethod("settings.write", {
             server,
             params: {
                 global: {
@@ -128,11 +126,7 @@ describe("settings.write — instructions reaches refreshInstructions with persi
                     },
                 },
             },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-
-        return reg.handler(ctx).then(() => {
+        }).then(() => {
             // saveGlobalConfig merges with defaults (claudeMd/agentsMd/
             // designMd are filled in), so the persisted value carries
             // the full file set; the patch's intent (AGENTS.md=true,

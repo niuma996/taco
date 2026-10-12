@@ -6,31 +6,13 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import type { TacoGlobalConfigShape } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../src/config/config.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 describe("saveGlobalConfig round-trip", () => {
-    let tmpDir: string;
-    let prevTacoHome: string | undefined;
-
-    before(() => {
-        prevTacoHome = process.env.TACO_HOME;
-        tmpDir = mkdtempSync(join(tmpdir(), "taco-config-roundtrip-"));
-        process.env.TACO_HOME = tmpDir;
-    });
-
-    after(() => {
-        if (prevTacoHome === undefined) {
-            Reflect.deleteProperty(process.env, "TACO_HOME");
-        } else {
-            process.env.TACO_HOME = prevTacoHome;
-        }
-        rmSync(tmpDir, { recursive: true, force: true });
-    });
+    useTempTacoHome("config-roundtrip");
 
     // Covers every scalar field. A fresh file must round-trip the written value.
     // Note: theme / debugMode have been removed from TacoGlobalConfigShape; they are not

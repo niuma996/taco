@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
 import type { ImPolicyGetResult, ImRoute, ImWorkspacePolicyPatch } from "@taco-ai/protocol";
 import type { ImPolicyControl, ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
 
 before(() => {
     registerBuiltinMethods();
@@ -61,9 +61,7 @@ function hook(imPolicy?: ImPolicyControl): ServerRpcSurface {
 }
 
 async function call(method: string, server: ServerRpcSurface, params: unknown): Promise<unknown> {
-    const reg = getRegisteredMethod(method);
-    assert.ok(reg, `method not registered: ${method}`);
-    return await reg.handler({ id: "1", server, params } as never);
+    return await callMethod(method, { server, params });
 }
 
 describe("imPolicy.get", () => {

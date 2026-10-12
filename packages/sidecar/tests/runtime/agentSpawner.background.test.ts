@@ -15,18 +15,15 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { asSessionId, asWorkspaceId, type SessionId } from "@taco-ai/protocol";
+import { asSessionId, type SessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { readPendingSubagentResults } from "../../src/runtime/subagent/subagentPending.ts";
 import { subagentResultPath } from "../../src/runtime/subagent/subagentResultsDir.ts";
-import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 /** Escape a filesystem path for literal use inside a RegExp. */
 function escapeRegExp(s: string): string {
@@ -54,23 +51,13 @@ describe("AgentSpawner.spawnSubagent — background", () => {
     let cwd: string;
     let sessionsRoot: string;
     let ws: WorkspaceRuntime;
+    let cleanup: () => Promise<void>;
 
     before(() => {
-        cwd = mkdtempSync(join(tmpdir(), "taco-ws-bg-"));
-        sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-bg-"));
-        ws = new WorkspaceRuntime({
-            providerKeyStore: new ProviderKeyStore({}),
-            cwd: asWorkspaceId(cwd),
-            sessionsRoot,
-            agents: defs,
-        });
+        ({ ws, cwd, sessionsRoot, cleanup } = createTestWorkspace({ prefix: "bg", agents: defs }));
     });
 
-    after(async () => {
-        await ws.dispose();
-        rmSync(cwd, { recursive: true, force: true });
-        rmSync(sessionsRoot, { recursive: true, force: true });
-    });
+    after(() => cleanup());
 
     async function seedSession(id: string): Promise<void> {
         const session = await ws.repo.create({ id, cwd }, harnessContext);

@@ -16,10 +16,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import * as path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import type { ServerPush } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
@@ -30,6 +27,7 @@ import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import type { ServerFrame, Transport } from "../../src/server/transport.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 const mockChannelConfig: ChannelConfig = {
     channelId: "mock-1",
@@ -37,23 +35,7 @@ const mockChannelConfig: ChannelConfig = {
     config: {},
 };
 
-let prevTacoHome: string | undefined;
-let tmpDir: string;
-
-before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(path.join(tmpdir(), "client-sink-"));
-    process.env.TACO_HOME = tmpDir;
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
-});
+useTempTacoHome("client-sink");
 
 describe("ClientSinkRegistry", () => {
     it("add/remove/fanout", () => {

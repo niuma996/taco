@@ -8,34 +8,16 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import * as path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import type { ServerPush } from "@taco-ai/protocol";
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
 import { MockChannel } from "../../src/channels/builtin/mockChannel.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
-let prevTacoHome: string | undefined;
-let tmpDir: string;
-
-before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(path.join(tmpdir(), "im-integration-"));
-    process.env.TACO_HOME = tmpDir;
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
-});
+useTempTacoHome("im-integration");
 
 describe("IM channel P0 integration", () => {
     it("submit routes (channelId, peerId, chatId) to a stable sessionId via ConversationRouter", async () => {

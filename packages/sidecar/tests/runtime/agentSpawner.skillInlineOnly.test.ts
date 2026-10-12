@@ -13,14 +13,10 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { asWorkspaceId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
-import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
-import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const defs: AgentDefinition[] = [
     {
@@ -34,26 +30,14 @@ const defs: AgentDefinition[] = [
 ];
 
 describe("AgentSpawner.spawnSkillSubagent — inlineOnly guard", () => {
-    let cwd: string;
-    let sessionsRoot: string;
     let ws: WorkspaceRuntime;
+    let cleanup: () => Promise<void>;
 
     before(() => {
-        cwd = mkdtempSync(join(tmpdir(), "taco-ws-skill-io-"));
-        sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-skill-io-"));
-        ws = new WorkspaceRuntime({
-            providerKeyStore: new ProviderKeyStore({}),
-            cwd: asWorkspaceId(cwd),
-            sessionsRoot,
-            agents: defs,
-        });
+        ({ ws, cleanup } = createTestWorkspace({ prefix: "skill-io", agents: defs }));
     });
 
-    after(async () => {
-        await ws.dispose();
-        rmSync(cwd, { recursive: true, force: true });
-        rmSync(sessionsRoot, { recursive: true, force: true });
-    });
+    after(() => cleanup());
 
     it("rejects inlineOnly skill before runSkillSubagent runs", async () => {
         // Stub runSkillSubagent to assert it is never reached.

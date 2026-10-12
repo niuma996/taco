@@ -14,49 +14,20 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import type { McpServerConfig, McpServerConfigView } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../../src/config/config.ts";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { SidecarServer } from "../../../src/server/server.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
+useTempTacoHome("mcp-config");
 
 before(() => {
-    // Hermetic: point TACO_HOME at a temp dir so the write RPCs touch only
-    // the temp taco.json, never the real ~/.taco/taco.json.
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-mcp-config-"));
-    process.env.TACO_HOME = tmpDir;
     registerBuiltinMethods();
 });
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
-});
-
-async function callHandler(name: string, params: unknown): Promise<unknown> {
-    const reg = getRegisteredMethod(name);
-    if (!reg) throw new Error(`unregistered: ${name}`);
-    return reg.handler({
-        id: "test",
-        workspace: undefined as never,
-        cwd: undefined as never,
-        server: undefined as never,
-        params,
-    });
-}
 
 /** A stdio server carrying every sensitive field the masks must strip. */
 function fullServer(id = "dbx"): McpServerConfig {
@@ -77,9 +48,9 @@ function fullServer(id = "dbx"): McpServerConfig {
 describe("mcp per-entry config RPCs", () => {
     it("settings.get mcpServers stays masked — no command/args/env/headers/url", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
-        const result = (await callHandler("settings.get", undefined)) as {
+        const result = await callMethod<{
             global: { mcpServers?: McpServerConfigView[] };
-        };
+        }>("settings.get");
         const view = result.global.mcpServers?.[0];
         assert.ok(view, "expected one mcpServers entry in the settings view");
         assert.equal(view.id, "dbx");
@@ -98,26 +69,28 @@ describe("mcp per-entry config RPCs", () => {
 
     it("mcp.getConfig returns the full raw single entry", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
-        const result = (await callHandler("mcp.getConfig", { id: "dbx" })) as {
-            config: McpServerConfig;
-        };
+        const result = await callMethod<{ config: McpServerConfig }>("mcp.getConfig", {
+            params: { id: "dbx" },
+        });
         assert.deepEqual(result.config, fullServer());
     });
 
     it("mcp.getConfig rejects an unknown id with not_found", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
         await assert.rejects(
-            callHandler("mcp.getConfig", { id: "missing" }),
+            callMethod("mcp.getConfig", { params: { id: "missing" } }),
             (e: unknown) => e instanceof Error && e.message.includes("not found: missing"),
         );
     });
 
     it("mcp.updateConfig merges field-wise and preserves sensitive fields on disk", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
-        const result = (await callHandler("mcp.updateConfig", {
-            id: "dbx",
-            patch: { enabled: false, alwaysLoaded: ["query", "sync"] },
-        })) as { server: McpServerConfigView; requiresRestart: true };
+        const result = await callMethod<{
+            server: McpServerConfigView;
+            requiresRestart: true;
+        }>("mcp.updateConfig", {
+            params: { id: "dbx", patch: { enabled: false, alwaysLoaded: ["query", "sync"] } },
+        });
         assert.equal(result.server.enabled, false);
         assert.deepEqual(result.server.alwaysLoaded, ["query", "sync"]);
         assert.equal(result.requiresRestart, true);
@@ -135,10 +108,9 @@ describe("mcp per-entry config RPCs", () => {
 
     it("mcp.updateConfig rejects an id change in the patch", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
-        const result = (await callHandler("mcp.updateConfig", {
-            id: "dbx",
-            patch: { id: "hijacked", enabled: true },
-        })) as { server: McpServerConfigView };
+        const result = await callMethod<{ server: McpServerConfigView }>("mcp.updateConfig", {
+            params: { id: "dbx", patch: { id: "hijacked", enabled: true } },
+        });
         // The server-side merge pins id to params.id — a patch cannot rename it.
         assert.equal(result.server.id, "dbx");
         const onDisk = readGlobalConfig().mcpServers?.[0];
@@ -148,10 +120,10 @@ describe("mcp per-entry config RPCs", () => {
     it("mcp.createConfig adds the entry and reports requiresRestart", async () => {
         saveGlobalConfig({ mcpServers: [fullServer("existing")] });
         const created = fullServer("new-srv");
-        const result = (await callHandler("mcp.createConfig", { config: created })) as {
+        const result = await callMethod<{
             server: McpServerConfigView;
             requiresRestart: true;
-        };
+        }>("mcp.createConfig", { params: { config: created } });
         assert.equal(result.server.id, "new-srv");
         assert.equal(result.requiresRestart, true);
         const ids = (readGlobalConfig().mcpServers ?? []).map((s) => s.id);
@@ -161,7 +133,7 @@ describe("mcp per-entry config RPCs", () => {
     it("mcp.createConfig rejects a duplicate id", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
         await assert.rejects(
-            callHandler("mcp.createConfig", { config: fullServer() }),
+            callMethod("mcp.createConfig", { params: { config: fullServer() } }),
             (e: unknown) => e instanceof Error && e.message.includes("duplicate id"),
         );
         // Nothing was written — the original server is still the only one.
@@ -171,10 +143,10 @@ describe("mcp per-entry config RPCs", () => {
 
     it("mcp.deleteConfig removes only the target and reports requiresRestart", async () => {
         saveGlobalConfig({ mcpServers: [fullServer("keep"), fullServer("drop")] });
-        const result = (await callHandler("mcp.deleteConfig", { id: "drop" })) as {
+        const result = await callMethod<{
             deleted: string;
             requiresRestart: true;
-        };
+        }>("mcp.deleteConfig", { params: { id: "drop" } });
         assert.equal(result.deleted, "drop");
         assert.equal(result.requiresRestart, true);
         const ids = (readGlobalConfig().mcpServers ?? []).map((s) => s.id);
@@ -184,7 +156,7 @@ describe("mcp per-entry config RPCs", () => {
     it("mcp.deleteConfig rejects an unknown id with not_found", async () => {
         saveGlobalConfig({ mcpServers: [fullServer()] });
         await assert.rejects(
-            callHandler("mcp.deleteConfig", { id: "missing" }),
+            callMethod("mcp.deleteConfig", { params: { id: "missing" } }),
             (e: unknown) => e instanceof Error && e.message.includes("not found: missing"),
         );
     });

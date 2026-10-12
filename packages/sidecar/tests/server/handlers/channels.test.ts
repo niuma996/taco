@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
 import type { ChannelsListResult } from "@taco-ai/protocol";
 import type { ChannelControl, ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
 
 before(() => {
     registerBuiltinMethods();
@@ -79,9 +79,7 @@ function hook(channels?: ChannelControl): ServerRpcSurface {
 }
 
 async function call(method: string, server: ServerRpcSurface, params: unknown): Promise<unknown> {
-    const reg = getRegisteredMethod(method);
-    assert.ok(reg, `method not registered: ${method}`);
-    return await reg.handler({ id: "1", server, params } as never);
+    return await callMethod(method, { server, params });
 }
 
 describe("channels.list", () => {

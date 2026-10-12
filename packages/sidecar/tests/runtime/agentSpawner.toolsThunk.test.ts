@@ -15,17 +15,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { asSessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
-import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
+import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const defs: AgentDefinition[] = [
     // tools: undefined = inherit everything the parent currently has.
@@ -50,23 +47,19 @@ const SHELL_ALLOW_POLICY: ImWorkspacePolicy = {
 
 describe("AgentSpawner parent-toolset inheritance", () => {
     let cwd: string;
-    let sessionsRoot: string;
     let ws: WorkspaceRuntime;
     /** Tool name lists handed to attachChild, in call order. */
     let captured: string[][];
     let policy: ImWorkspacePolicy;
+    let cleanup: () => Promise<void>;
 
     before(async () => {
-        cwd = mkdtempSync(join(tmpdir(), "taco-ws-tools-thunk-"));
-        sessionsRoot = mkdtempSync(join(tmpdir(), "taco-sessions-tools-thunk-"));
         policy = SHELL_DENY_POLICY;
-        ws = new WorkspaceRuntime({
-            providerKeyStore: new ProviderKeyStore({}),
-            cwd,
-            sessionsRoot,
+        ({ ws, cwd, cleanup } = createTestWorkspace({
+            prefix: "tools-thunk",
             agents: defs,
             resolveImPolicy: () => policy,
-        } as ConstructorParameters<typeof WorkspaceRuntime>[0]);
+        }));
         captured = [];
         ws.sessionRegistry.attachChild = (
             _sessionId: never,
@@ -83,11 +76,7 @@ describe("AgentSpawner parent-toolset inheritance", () => {
             .then((s) => s.close(harnessContext));
     });
 
-    after(async () => {
-        await ws.dispose();
-        rmSync(cwd, { recursive: true, force: true });
-        rmSync(sessionsRoot, { recursive: true, force: true });
-    });
+    after(() => cleanup());
 
     async function spawnAndCapture(toolCallId: string): Promise<string[]> {
         const res = await ws.spawnSubagent({

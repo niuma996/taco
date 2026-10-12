@@ -8,10 +8,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import {
     COMPACTION_THRESHOLD_MAX,
     COMPACTION_THRESHOLD_MIN,
@@ -26,6 +23,7 @@ import {
     saveGlobalConfig,
     validateCompactionConfig,
 } from "../../src/config/config.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 describe("validateCompactionConfig", () => {
     it("returns undefined for nullish input", () => {
@@ -107,23 +105,7 @@ describe("mergeCompactionPatch", () => {
 });
 
 describe("resolveConfig — compaction fallback chain", () => {
-    let tmpDir: string;
-    let prevTacoHome: string | undefined;
-
-    before(() => {
-        prevTacoHome = process.env.TACO_HOME;
-        tmpDir = mkdtempSync(join(tmpdir(), "taco-cfg-compaction-"));
-        process.env.TACO_HOME = tmpDir;
-    });
-
-    after(() => {
-        if (prevTacoHome === undefined) {
-            Reflect.deleteProperty(process.env, "TACO_HOME");
-        } else {
-            process.env.TACO_HOME = prevTacoHome;
-        }
-        rmSync(tmpDir, { recursive: true, force: true });
-    });
+    useTempTacoHome("cfg-compaction");
 
     it("uses defaults when neither cli nor global is set", () => {
         const cfg = resolveConfig({});
@@ -170,23 +152,7 @@ describe("resolveConfig — compaction fallback chain", () => {
 });
 
 describe("resolveConfig — memoryEnabled passthrough", () => {
-    let tmpDir: string;
-    let prevTacoHome: string | undefined;
-
-    before(() => {
-        prevTacoHome = process.env.TACO_HOME;
-        tmpDir = mkdtempSync(join(tmpdir(), "taco-cfg-mem-"));
-        process.env.TACO_HOME = tmpDir;
-    });
-
-    after(() => {
-        if (prevTacoHome === undefined) {
-            Reflect.deleteProperty(process.env, "TACO_HOME");
-        } else {
-            process.env.TACO_HOME = prevTacoHome;
-        }
-        rmSync(tmpDir, { recursive: true, force: true });
-    });
+    useTempTacoHome("cfg-mem");
 
     it("is undefined when not set (default = enabled)", () => {
         const cfg = resolveConfig({});

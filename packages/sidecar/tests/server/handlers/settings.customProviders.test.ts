@@ -8,31 +8,16 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import { readGlobalConfig } from "../../../src/config/config.ts";
-import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
-let tmpDir: string;
-let prevTacoHome: string | undefined;
+useTempTacoHome("settings-customproviders");
 
 before(() => {
-    prevTacoHome = process.env.TACO_HOME;
-    tmpDir = mkdtempSync(join(tmpdir(), "taco-settings-customproviders-"));
-    process.env.TACO_HOME = tmpDir;
     registerBuiltinMethods();
-});
-
-after(() => {
-    if (prevTacoHome === undefined) {
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-    } else {
-        process.env.TACO_HOME = prevTacoHome;
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
 });
 
 const CUSTOM_A = {
@@ -53,9 +38,6 @@ const CUSTOM_B = {
 
 describe("settings.write — customProviders push", () => {
     it("persists customProviders and calls server.setCustomProviders", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         let pushCount = 0;
         let lastReceived: readonly unknown[] | undefined;
         const server = {
@@ -66,17 +48,10 @@ describe("settings.write — customProviders push", () => {
             },
             broadcastModelsChanged(): void {},
         };
-        const ctx = {
-            id: "test",
-            workspace: undefined as never,
-            cwd: undefined as never,
+        await callMethod("settings.write", {
             server,
             params: { global: { customProviders: [CUSTOM_A] } },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-
-        await reg.handler(ctx);
+        });
 
         // Disk persisted
         const onDisk = readGlobalConfig();
@@ -90,9 +65,6 @@ describe("settings.write — customProviders push", () => {
     });
 
     it("replace: old custom deleted, new custom upserted via single push", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         const received: unknown[][] = [];
         const server = {
             providerKeyStore: undefined,
@@ -101,17 +73,10 @@ describe("settings.write — customProviders push", () => {
             },
             broadcastModelsChanged(): void {},
         };
-        const ctx = {
-            id: "test",
-            workspace: undefined as never,
-            cwd: undefined as never,
+        await callMethod("settings.write", {
             server,
             params: { global: { customProviders: [CUSTOM_B] } },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-
-        await reg.handler(ctx);
+        });
 
         assert.equal(received.length, 1);
         const ids = (received[0] as Array<{ id: string }>).map((c) => c.id);
@@ -119,9 +84,6 @@ describe("settings.write — customProviders push", () => {
     });
 
     it("does NOT call setCustomProviders when patch omits customProviders", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         let pushCount = 0;
         const server = {
             providerKeyStore: undefined,
@@ -130,25 +92,15 @@ describe("settings.write — customProviders push", () => {
             },
             broadcastModelsChanged(): void {},
         };
-        const ctx = {
-            id: "test",
-            workspace: undefined as never,
-            cwd: undefined as never,
+        // Only changing defaultModel, not touching customProviders
+        await callMethod("settings.write", {
             server,
-            // Only changing defaultModel, not touching customProviders
             params: { global: { defaultModel: "anthropic/claude-x" } },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-
-        await reg.handler(ctx);
+        });
         assert.equal(pushCount, 0, "unrelated fields must not trigger push");
     });
 
     it("empty array is a valid push (clears customs)", async () => {
-        const reg = getRegisteredMethod("settings.write");
-        assert.ok(reg);
-
         let pushCount = 0;
         const server = {
             providerKeyStore: undefined,
@@ -158,17 +110,10 @@ describe("settings.write — customProviders push", () => {
             },
             broadcastModelsChanged(): void {},
         };
-        const ctx = {
-            id: "test",
-            workspace: undefined as never,
-            cwd: undefined as never,
+        await callMethod("settings.write", {
             server,
             params: { global: { customProviders: [] } },
-        } as unknown as Parameters<
-            NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-        >[0];
-
-        await reg.handler(ctx);
+        });
         assert.equal(pushCount, 1);
         assert.deepEqual(readGlobalConfig().customProviders, []);
     });
