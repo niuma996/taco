@@ -275,6 +275,9 @@ const STOP_CHILD_TIMEOUT_MS = 5_000;
  * sees listed and which the next stop settles on its own.
  */
 async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: SessionId): Promise<void> {
+    // Validate the raw RPC id before anything is deleted, not after.
+    sessionAuxDir(workspace.sessionsRoot, sessionId);
+
     // Post-order list of every descendant: children before their own children.
     const ordered: SessionId[] = [];
     const collect = async (id: SessionId): Promise<void> => {
@@ -299,17 +302,21 @@ async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: Session
         }
     }
 
+    // `workspace.deleteSession` emits `session.deleted`, which other clients and
+    // the server's per-session event buffer depend on.
+    const deleted: SessionId[] = [];
     for (const id of ordered) {
         if (stuck.has(id)) continue;
-        const attached = workspace.getAttached(id);
-        if (attached) await workspace.detach(id);
-        await workspace.repo.delete(await workspace.openSession(id), harnessContext);
-        workspace.invalidateListCache();
+        await workspace.deleteSession(id);
+        deleted.push(id);
     }
 
     // Last: a child that settles after this point re-creates the directory in
     // its settle path, which is why the abort wait above has to come first.
-    await rm(sessionAuxDir(workspace.sessionsRoot, sessionId), { recursive: true, force: true });
+    // Every deleted id owns one — a subagent's `tasks/` is keyed by its own id.
+    for (const id of deleted) {
+        await rm(sessionAuxDir(workspace.sessionsRoot, id), { recursive: true, force: true });
+    }
 }
 
 /**

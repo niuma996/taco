@@ -2,8 +2,7 @@
  * session.delete cascade: a session's subagent descendants and its
  * sidecar-owned auxiliary directory go with it.
  *
- * Stub workspace — the handler touches only listSessions / openSession /
- * getAttached / detach / repo.delete / invalidateListCache /
+ * Stub workspace — the handler touches only listSessions / deleteSession /
  * agentSpawner.stopChildrenOf / sessionsRoot, so no harness is needed. The
  * directory removal is exercised against a real temp dir because `rm` is the
  * one side effect that cannot be observed through the call log.
@@ -25,23 +24,15 @@ interface DeleteStub {
     sessionsRoot: string;
     /** Sessions the spawner reports as still running after the wait. */
     stuck: Set<string>;
-    makeMeta(id: string): JsonlSessionMetadata;
     listSessions(): Promise<JsonlSessionMetadata[]>;
-    openSession(id: SessionId): Promise<JsonlSessionMetadata>;
-    getAttached(): undefined;
-    detach(id: SessionId): Promise<void>;
-    repo: { delete(meta: JsonlSessionMetadata): Promise<void> };
-    invalidateListCache(): void;
+    /** Stands in for the real one, which detaches, deletes and emits `session.deleted`. */
+    deleteSession(id: SessionId): Promise<void>;
     agentSpawner: {
         stopChildrenOf(parent: SessionId, timeoutMs: number): Promise<SessionId[]>;
     };
 }
 
-function makeStub(
-    sessionsRoot: string,
-    parents: Record<string, string | undefined>,
-    opts: { resolveAnyId?: boolean } = {},
-): DeleteStub {
+function makeStub(sessionsRoot: string, parents: Record<string, string | undefined>): DeleteStub {
     const calls: string[] = [];
     const stuck = new Set<string>();
     const makeMeta = (id: string): JsonlSessionMetadata => {
@@ -61,26 +52,11 @@ function makeStub(
         calls,
         sessionsRoot,
         stuck,
-        makeMeta,
         listSessions: () => Promise.resolve(Object.keys(parents).map(makeMeta)),
-        async openSession(id: SessionId) {
-            calls.push(`openSession(${id})`);
-            if (!(id in parents) && !opts.resolveAnyId) throw new Error(`session not found: ${id}`);
-            return makeMeta(id);
-        },
-        getAttached: () => undefined,
-        async detach(id: SessionId) {
-            calls.push(`detach(${id})`);
-        },
-        repo: {
-            async delete(meta: JsonlSessionMetadata) {
-                // Mirrors pi: a session that is still open cannot be deleted.
-                if (stuck.has(meta.id)) throw new Error(`Session is open: ${meta.id}`);
-                calls.push(`repo.delete(${meta.id})`);
-            },
-        },
-        invalidateListCache() {
-            calls.push("invalidateListCache");
+        async deleteSession(id: SessionId) {
+            // Mirrors pi: a session that is still open cannot be deleted.
+            if (stuck.has(id)) throw new Error(`Session is open: ${id}`);
+            calls.push(`deleteSession(${id})`);
         },
         agentSpawner: {
             async stopChildrenOf(parent: SessionId, _timeoutMs: number): Promise<SessionId[]> {
@@ -127,10 +103,10 @@ describe("session.delete cascade", () => {
 
         await deleteWith(stub, "parent");
 
-        const deleted = stub.calls.filter((c) => c.startsWith("repo.delete("));
+        const deleted = stub.calls.filter((c) => c.startsWith("deleteSession("));
         assert.deepEqual(
             deleted,
-            ["repo.delete(grandchild)", "repo.delete(child)", "repo.delete(parent)"],
+            ["deleteSession(grandchild)", "deleteSession(child)", "deleteSession(parent)"],
             "post-order: a child must never outlive its parent's deletion",
         );
     });
@@ -167,6 +143,32 @@ describe("session.delete cascade", () => {
         );
     });
 
+    it("removes every deleted descendant's auxiliary directory", async () => {
+        const root = await mkdtemp(join(tmpdir(), "taco-del-"));
+        // A subagent's tasks/ is keyed by its own id, not its parent's.
+        for (const id of ["parent", "child", "grandchild"]) {
+            await mkdir(join(root, id, "tasks"), { recursive: true });
+        }
+        const stub = makeStub(root, { parent: undefined, child: "parent", grandchild: "child" });
+
+        await deleteWith(stub, "parent");
+
+        assert.deepEqual(await readdir(root), []);
+    });
+
+    it("keeps a stuck child's auxiliary directory", async () => {
+        const root = await mkdtemp(join(tmpdir(), "taco-del-"));
+        await mkdir(join(root, "parent", "tasks"), { recursive: true });
+        await mkdir(join(root, "child", "tasks"), { recursive: true });
+        const stub = makeStub(root, { parent: undefined, child: "parent" });
+        stub.stuck.add("child");
+
+        await deleteWith(stub, "parent");
+
+        // Its transcript survives, so its state must too.
+        assert.deepEqual(await readdir(root), ["child"]);
+    });
+
     it("skips a child that will not stop, and still deletes the parent", async () => {
         const root = await mkdtemp(join(tmpdir(), "taco-del-"));
         const stub = makeStub(root, { parent: undefined, child: "parent" });
@@ -174,12 +176,12 @@ describe("session.delete cascade", () => {
 
         await deleteWith(stub, "parent");
 
-        const deleted = stub.calls.filter((c) => c.startsWith("repo.delete("));
+        const deleted = stub.calls.filter((c) => c.startsWith("deleteSession("));
         // A subagent stuck on a long tool call must not make the whole session
         // undeletable; the leftover transcript is hidden from session.list.
-        assert.deepEqual(deleted, ["repo.delete(parent)"]);
+        assert.deepEqual(deleted, ["deleteSession(parent)"]);
         assert.ok(
-            !stub.calls.includes("repo.delete(child)"),
+            !stub.calls.includes("deleteSession(child)"),
             "the stuck child must be skipped, not retried",
         );
     });
@@ -196,22 +198,22 @@ describe("session.delete cascade", () => {
     });
 
     // sessionDeleteSchema is Type.Any() and asSessionId only rejects "", so this
-    // id is whatever a caller sent. Today `openSession` would already reject a
-    // `../..` id, since it resolves against the real session list — so the stub
-    // is told to resolve anything, to exercise the containment check on its own
-    // rather than relying on that incidental guard.
+    // id is whatever a caller sent. The stub's deleteSession accepts any id, so
+    // the containment check is exercised on its own rather than leaning on the
+    // real one's session-list lookup.
     it("refuses a session id that escapes sessionsRoot", async () => {
         const root = await mkdtemp(join(tmpdir(), "taco-del-"));
         const outside = join(root, "..", `taco-del-outside-${process.pid}`);
         await mkdir(outside, { recursive: true });
         await writeFile(join(outside, "precious.txt"), "keep me", "utf8");
         try {
-            const stub = makeStub(root, {}, { resolveAnyId: true });
+            const stub = makeStub(root, {});
 
             await assert.rejects(
                 () => deleteWith(stub, `../${outside.split("/").pop()}`),
                 /refusing to delete outside sessionsRoot/,
             );
+            assert.deepEqual(stub.calls, [], "the id is rejected before any delete runs");
 
             assert.deepEqual(
                 await readdir(outside),
