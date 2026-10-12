@@ -19,6 +19,8 @@
     overflow: hidden;
     grid-column: 2;
     grid-row: 1;
+    /* Same backdrop as the rail/topbar so .layout's rounded corners and gutter read. */
+    background: var(--shell-bg);
 }
 
 header.topbar {
@@ -31,8 +33,7 @@ header.topbar {
        and causing misalignment with the left column's first icon baseline. */
     padding: 0 0.5rem;
     height: var(--rail-top-padding);
-    border-bottom: 1px solid var(--border);
-    background: var(--pane-list-bg);
+    background: var(--shell-bg);
     flex-shrink: 0;
     /* Positioning ancestor for ContextIndicator popover. */
     position: relative;
@@ -507,6 +508,19 @@ header.topbar .topbar-picker-group {
     position: relative;
     /* Shared by the task / files / subagent panels; overridden inline by App. */
     --right-panel-width: var(--pane-width);
+    /* Floating content card: rounded like the macOS window shell, lifted off the
+       window edges so the shell backdrop shows around the card. The gutter is on
+       all four sides — .app-main clips at its own left edge, so without the left
+       inset the shadow would be cut in half. overflow: hidden clips the panes to
+       the radius. */
+    border-radius: var(--radius-lg);
+    /* Top inset stays small — the topbar already separates the card from the
+       window edge, and a full gutter there reads as an empty band. */
+    margin: 2px 8px 8px 8px;
+    box-shadow: var(--card-shadow);
+    /* Third tier (rail/topbar → list column → content). Panes without a list
+       column fall through to this directly and read as two tiers. */
+    background: var(--chat-panel-bg);
 }
 
 /* Right column: topbar → content area → input, top-to-bottom filling remaining width and full height. */

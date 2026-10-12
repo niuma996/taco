@@ -30,8 +30,9 @@ aside.sidebar .workspace-item.active {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    /* Bottom padding gives breathing room to the last session-item. */
-    padding-bottom: 0.5rem;
+    /* Top/bottom padding give breathing room to the first and last session-item;
+       top value matches the other pane lists' .*-list-body. */
+    padding: 0.25rem 0 0.5rem;
 }
 
 /* Session row: status dot | (title + time) | actions (hover).
@@ -222,7 +223,6 @@ button svg > *,
 .activity-rail {
     width: 78px;
     flex-shrink: 0;
-    border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -231,7 +231,7 @@ button svg > *,
     padding-top: var(--rail-top-padding);
     padding-bottom: 8px;
     gap: 4px;
-    background: var(--input-bg);
+    background: var(--shell-bg);
     grid-column: 1;
     grid-row: 1;
 }
@@ -362,6 +362,6 @@ button svg > *,
     height: 8px;
     border-radius: 50%;
     background: var(--brand-orange);
-    box-shadow: 0 0 0 2px var(--pane-list-bg);
+    box-shadow: 0 0 0 2px var(--shell-bg);
     pointer-events: none;
 }

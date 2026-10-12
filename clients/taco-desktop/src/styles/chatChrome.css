@@ -87,7 +87,8 @@ main {
     box-sizing: border-box;
     padding: 0 1rem;
     border-bottom: 1px solid var(--border);
-    background: var(--input-bg);
+    /* Tier-2 surface, same as the session list column it heads. */
+    background: var(--pane-list-bg);
     font-size: 0.78rem;
     color: var(--fg-dim);
     flex-wrap: nowrap;

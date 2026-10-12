@@ -50,6 +50,10 @@
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(0, 0, 0, 0.4);
     --shadow-color-strong: rgba(0, 0, 0, 0.35);
+    /* Content card sitting on --shell-bg. Black is invisible on the near-black dark
+       shell, so the rim does the separating — it needs to be strong enough to read
+       at 1px, unlike the diffuse shadow that carries the light theme. */
+    --card-shadow: 0 3px 10px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.2);
     --tooltip-bg: rgba(0, 0, 0, 0.6);
     --tooltip-fg: #ffffff;
     --bg-elevated: #1a1d23;
@@ -66,8 +70,11 @@
        Clamps: 220px floor, 340px ceiling. */
     --pane-width: clamp(220px, 20vw, 340px);
     --pane-bg: #15171c;
-    /* List area bg (topbar + sidebar + tools-list + skills-list): slightly lighter than --pane-bg. */
-    --pane-list-bg: #191b21;
+    /* Three-tier shell: --shell-bg (rail + topbar + gutter behind the content card)
+       → --pane-list-bg (list column) → --chat-panel-bg (content). Each tier one step
+       lighter (~7 per RGB channel); on dark surfaces smaller steps are illegible. */
+    --shell-bg: #050608;
+    --pane-list-bg: #12151b;
 
     /* User message background — solid deep-blue, same family as --accent. */
     --user-msg-bg: #1a2a3a;
@@ -191,6 +198,7 @@
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(43, 38, 32, 0.18);
     --shadow-color-strong: rgba(43, 38, 32, 0.22);
+    --card-shadow: 0 2px 8px rgba(43, 38, 32, 0.08), 0 0 0 1px rgba(43, 38, 32, 0.04);
     --tooltip-bg: #2b2620;
     --tooltip-fg: var(--warm-gray-1);
     --bg-elevated: var(--warm-gray-1);
@@ -204,8 +212,9 @@
 
     /* Second column bg: darker than --bg, lighter than --input-bg. */
     --pane-bg: var(--warm-gray-3);
-    /* List area bg: slightly lighter than --pane-bg. */
-    --pane-list-bg: var(--warm-gray-2);
+    /* Three-tier shell, darkest to lightest: rail/topbar → list column → content. */
+    --shell-bg: var(--warm-gray-4);
+    --pane-list-bg: var(--warm-gray-3);
 
     /* User message background — solid light blue, same family as --accent. Mirror of dark theme #1a2a3a. */
     --user-msg-bg: #dbe5ee;
