@@ -137,23 +137,47 @@
     scrollbar-width: thin;
 }
 
-/* Frosted gradient over the preview's top edge: thinking content scrolled
-   above the fold blurs away under it while the newest lines at the bottom
-   stay crisp. Rendered only when there is content above (scrollTop > 0).
+/* Dissolve gradient over the preview's top edge: a color ramp from the
+   bubble surface carries most of the fade, so scrolled-off thinking reads as
+   melting into the background rather than being clipped. The blur only
+   softens the mid-zone and falls off on an eased mask curve — a bare linear
+   blur mask read as a hard strip. Rendered only when scrollTop > 0.
    Prefixed variants are required by the WKWebView runtime. */
 .thinking-fade {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    /* 2 lines of the 12px/1.5 thinking text — enough to read as a gradient,
-       small enough to not eat the 10-line preview. */
-    height: 36px;
+    /* ~2.5 lines of the 12px/1.5 thinking text — a longer runway than the
+       fade needs, so the transition reads gradual. */
+    height: 44px;
     pointer-events: none;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    mask-image: linear-gradient(to bottom, black, transparent);
-    -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+    background: linear-gradient(
+        to bottom,
+        var(--assistant-msg-bg),
+        color-mix(in srgb, var(--assistant-msg-bg) 55%, transparent) 55%,
+        transparent
+    );
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    /* Ease-out falloff: full strength at the edge, gentle tail so the blur's
+       visible endpoint blends into the crisp text below. */
+    mask-image: linear-gradient(
+        to bottom,
+        black,
+        rgba(0, 0, 0, 0.8) 20%,
+        rgba(0, 0, 0, 0.5) 45%,
+        rgba(0, 0, 0, 0.22) 72%,
+        transparent
+    );
+    -webkit-mask-image: linear-gradient(
+        to bottom,
+        black,
+        rgba(0, 0, 0, 0.8) 20%,
+        rgba(0, 0, 0, 0.5) 45%,
+        rgba(0, 0, 0, 0.22) 72%,
+        transparent
+    );
 }
 
 .thinking-expand {
