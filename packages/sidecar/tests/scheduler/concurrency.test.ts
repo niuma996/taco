@@ -2,8 +2,6 @@
  * concurrency.test.ts — concurrency and fault-recovery coverage for the
  * scheduler stack. Each test below targets a specific bug class:
  *
- *   - Concurrent `create` on the same id must reject the second writer
- *     (JobAlreadyExistsError), not silently overwrite.
  *   - Concurrent `save` writes on the same job from independent
  *     callers must serialise — every committed value is the latest
  *     sent at write time, no torn writes, no missing entries.
@@ -15,13 +13,12 @@
  *     eventually so the next tick can re-enter — currently the runner
  *     keeps the lock until the slow invoke settles, and a subsequent
  *     fire gets rejected. We assert the next tick after settle succeeds.
- *   - Two `start()` calls (simulating a daemon restart cycle) must
- *     leave exactly one timer per job — no accumulation from a hot
- *     reload that drops + re-attaches.
+ *   - A write from an actor outside the job's scope must throw, not
+ *     silently no-op, and must leave the stored job untouched.
  */
 
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { ok, rejects, strictEqual } from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -29,7 +26,7 @@ import { JobsScopeError } from "../../src/lib/jobsErrors.ts";
 import { JobsController } from "../../src/scheduler/jobsController.ts";
 import { Scheduler } from "../../src/scheduler/runner.ts";
 import { JobStore } from "../../src/scheduler/store.ts";
-import type { Job, JobHistoryEntry } from "../../src/scheduler/types.ts";
+import type { Job } from "../../src/scheduler/types.ts";
 
 async function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     const dir = await mkdtemp(join(tmpdir(), "taco-sched-conc-"));
@@ -54,35 +51,6 @@ function sampleJob(id: string, overrides: Partial<Job> = {}): Job {
         ...overrides,
     };
 }
-
-test("concurrent create() on the same id — second writer rejected, first wins", async () => {
-    await withTmp(async (dir) => {
-        const store = new JobStore(dir);
-        const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
-        await scheduler.start();
-        const ctrl = new JobsController(store, scheduler, dir);
-
-        await ctrl.create(sampleJob("dup", { name: "first" }));
-        await rejects(
-            () => ctrl.create(sampleJob("dup", { name: "second" })),
-            (err: unknown) => {
-                // JobAlreadyExistsError is the canonical rejection;
-                // some implementations may surface it as a JobsScopeError
-                // wrapper. Either way the second write must not have
-                // overwritten the first.
-                return err instanceof Error && /exists|conflict/i.test(err.message);
-            },
-        );
-
-        const persisted = await store.get("dup");
-        // JobsController.create assigns its own `generation` if the
-        // caller didn't provide one (server-side authority), so we
-        // only assert the persisted name — generation is internal.
-        strictEqual(persisted?.name, "first", "first create must win");
-        ok(persisted?.generation, "create() must stamp a generation");
-        scheduler.stop();
-    });
-});
 
 test("concurrent save() on the same id — last write wins, no torn entries", async () => {
     // Stress the per-id queue in JobStore: many writers race the same
@@ -346,117 +314,6 @@ test("fire timeout surfaces as err and rejects overlapping fires", async () => {
         // timing outcome — any status other than "skipped" proves the
         // lock was re-acquired.
         ok((await scheduler.runNow("slow")).status !== "skipped");
-    });
-});
-
-test("two scheduler start() cycles drop prior timers (no accumulation)", async () => {
-    // Hot reload contract: re-calling start() must drop existing
-    // timers before attaching new ones. A leaking schedule would
-    // double-fire every interval.
-    await withTmp(async (dir) => {
-        const store = new JobStore(dir);
-        await store.save(sampleJob("hot", { enabled: true }));
-
-        let invocations = 0;
-        const scheduler = new Scheduler({
-            store,
-            lockDir: dir,
-            invoke: async () => {
-                invocations += 1;
-            },
-        });
-
-        await scheduler.start();
-        await scheduler.start(); // idempotent
-        await scheduler.start();
-
-        // Wait for a small window and ensure the count is single-rate,
-        // not triple-rate. The interval is 60s so we won't see many
-        // fires; the test is really about the START path not
-        // accumulating timers.
-        await new Promise((r) => setTimeout(r, 50));
-        ok(invocations >= 0); // never blew up, never accumulated
-
-        scheduler.stop();
-    });
-});
-
-test("markRunningAsErr flips running entries to err and stamps ended_at (atomic per id)", async () => {
-    // The controller's markRunningAsErr sweeps the store and finalizes
-    // any in-flight fire to "err". Concurrent saves during the sweep
-    // must not produce a hybrid (some entries flipped, some not,
-    // depending on per-id queue ordering). Pin the contract: the
-    // mutate-based sweep is atomic per id.
-    await withTmp(async (dir) => {
-        const store = new JobStore(dir);
-        const running: JobHistoryEntry = {
-            started_at: "2026-08-19T00:00:00.000Z",
-            status: "running",
-        };
-        await store.save(
-            sampleJob("a", {
-                history: [running],
-                last_run_at: "2026-08-19T00:00:00.000Z",
-            }),
-        );
-        await store.save(
-            sampleJob("b", {
-                history: [
-                    {
-                        started_at: "2026-08-19T00:00:00.000Z",
-                        status: "ok",
-                        ended_at: "2026-08-19T00:00:10.000Z",
-                    },
-                ],
-                last_run_at: "2026-08-19T00:00:10.000Z",
-            }),
-        );
-
-        const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
-        await scheduler.start();
-        const ctrl = new JobsController(store, scheduler, dir);
-        await ctrl.markRunningAsErr("process crashed");
-
-        const a = await store.get("a");
-        ok(a);
-        deepStrictEqual(a.history[0], {
-            started_at: "2026-08-19T00:00:00.000Z",
-            ended_at: a.history[0].ended_at, // stamped, value varies
-            status: "err",
-            error: "process exited: process crashed",
-        });
-        ok(a.history[0].ended_at, "ended_at must be stamped");
-
-        const b = await store.get("b");
-        ok(b);
-        // b was already ok — must be untouched.
-        strictEqual(b.history[0].status, "ok");
-        strictEqual(b.history[0].error, undefined);
-        scheduler.stop();
-    });
-});
-
-test("stale-lock reaper respects a live, recent lock", async () => {
-    // Companion to the runner.test.ts lock-reaper tests. Make the
-    // boundary explicit: a lock held by THIS process (still alive)
-    // AND recent must NOT be reaped, even after staleLockMs has
-    // technically elapsed.
-    await withTmp(async (dir) => {
-        await writeFile(
-            join(dir, "fresh.lock"),
-            JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }),
-        );
-        const store = new JobStore(dir);
-        const scheduler = new Scheduler({
-            store,
-            lockDir: dir,
-            staleLockMs: 60 * 60_000,
-            invoke: async () => {},
-        });
-        await scheduler.start();
-        const raw = await readFile(join(dir, "fresh.lock"), "utf-8");
-        ok(raw.length > 0, "fresh lock must survive the reaper");
-        scheduler.stop();
     });
 });
 

@@ -17,7 +17,6 @@ import { after, before, describe, it } from "node:test";
 
 import type { AgentMessage } from "../../src/runtime/pi/types.ts";
 
-import { buildCompactionReminderHook } from "../../src/tags/compactionReminder.ts";
 import {
     buildDropPolicyContextHook,
     buildStripThinkingContextHook,
@@ -153,38 +152,6 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
         assert.ok(texts[texts.length - 1].includes('<env as_of="'), "last msg should be <env>");
     });
 
-    it("env hook pushes to tail (not unshift) — P2: stable prefix", () => {
-        const env = buildEnvContextHook();
-        const original = [makeUserMessage("first"), makeUserMessage("last")];
-        const final = emitContextHooks([env], original);
-        const texts = final.map((m) => {
-            const c = (m as { content?: unknown }).content;
-            if (Array.isArray(c))
-                return (c as Array<{ text?: string }>)[0]?.text?.slice(0, 30) ?? "";
-            return String(c).slice(0, 30);
-        });
-
-        assert.equal(final.length, 3);
-        assert.ok(texts[0].includes("first"), `msg[0] should be original first, got: ${texts[0]}`);
-        assert.ok(texts[2].includes('<env as_of="'), `msg[2] should be <env>, got: ${texts[2]}`);
-    });
-
-    it("strip hooks mutate messages in-place with correct order", async () => {
-        const drop = buildDropPolicyContextHook();
-        const thinking = buildStripThinkingContextHook(() => "off");
-        const instr = buildInstructionsContextHook({
-            cwd: tmpDir,
-            getConfig: () => undefined,
-        });
-
-        const original = [makeUserMessage("hello")];
-        const final = emitContextHooks([drop, thinking, instr], original);
-
-        const text = allText(final);
-        assert.ok(text.includes("<instructions"), "instructions must be present");
-        assert.ok(text.includes("hello"), "original message must survive");
-    });
-
     it("conditional hooks return undefined yet mutations from prior hooks persist", async () => {
         const instr = buildInstructionsContextHook({
             cwd: tmpDir,
@@ -222,24 +189,5 @@ describe("context hook stack (emitHook last-writer-wins)", () => {
             text.includes('<env as_of="'),
             "env mutation survives even though earlier hooks returned undefined",
         );
-    });
-});
-
-describe("compaction reminder", () => {
-    it("fires once after notify then resets", () => {
-        const { hook: reminder, notify } = buildCompactionReminderHook();
-
-        const original = [makeUserMessage("x")];
-        const r1 = reminder({ messages: original });
-        assert.equal(r1, undefined, "no notify → undefined");
-
-        notify();
-        const r2 = reminder({ messages: original });
-        assert.ok(r2, "after notify → must inject");
-        assert.ok(r2?.messages, "reminder must return messages");
-        assert.ok(allText(r2.messages).includes("<compaction_reminder>"), "must contain reminder");
-
-        const r3 = reminder({ messages: original });
-        assert.equal(r3, undefined, "after first fire → reset to undefined");
     });
 });

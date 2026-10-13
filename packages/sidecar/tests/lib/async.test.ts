@@ -312,19 +312,6 @@ describe("withDeadline", () => {
             /timeoutMs must be a positive finite number/,
         );
     });
-
-    it("does not leak the deadline timer when the promise resolves fast", async () => {
-        // Heuristic: the test process holds at most a handful of active
-        // timers after a hundred fast resolves. Without clearing the timer
-        // the count would climb.
-        for (let i = 0; i < 100; i++) {
-            await withDeadline(Promise.resolve(i), { ...deadline("fast") });
-        }
-        // No assertion here — the test passes by not hanging. The point is
-        // to catch a future regression that drops the `clearTimeout` in
-        // the finally block.
-        assert.ok(true);
-    });
 });
 
 function deadline(label: string, timeoutMs = 60_000) {

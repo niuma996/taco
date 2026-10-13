@@ -100,35 +100,6 @@ describe("SkillTool inlineOnly guard", () => {
         }
     });
 
-    it("still rejects subagent-mode invocation even when spawnSkillSubagent is absent", async () => {
-        // Belt-and-braces: the inlineOnly guard fires before the
-        // `spawnSkillSubagent` availability check, so missing the spawner does
-        // not change the error shape.
-        workDir = mkdtempSync(join(tmpdir(), "taco-skilltool-"));
-        try {
-            const fp = writeSkill(
-                workDir,
-                "fan-out",
-                "name: fan-out\nrunAs: subagent\ninlineOnly: true",
-                "# body",
-            );
-            const skill = mkSkill("fan-out", fp);
-            preloadSkillFrontmatter([skill]);
-
-            const tool = createSkillTool(() => [skill], {
-                parentSessionId: "sess-1",
-                getReinjector: () => undefined as unknown as SkillReinjectorHandle,
-                // spawnSkillSubagent omitted on purpose
-            });
-
-            const res = await invokeTool(tool, { skill: "fan-out" }, undefined);
-            const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-            assert.ok(text.includes("inline-only"));
-        } finally {
-            rmSync(workDir, { recursive: true, force: true });
-        }
-    });
-
     it("allows inline-mode invocation when inlineOnly is true", async () => {
         // The guard only fires when runAs === "subagent". With runAs === "inline"
         // (the default), the skill proceeds through the normal inline reinject

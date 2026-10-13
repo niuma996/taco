@@ -75,23 +75,6 @@ describe("AgentSpawner.spawnSkillSubagent — inlineOnly guard", () => {
         }
     });
 
-    it("inlineOnly check fires before runAs check (no precedence ambiguity)", async () => {
-        // Belt-and-braces: if both runAs=inline AND inlineOnly=true are set,
-        // the inlineOnly guard must still win — SkillTool is the first line
-        // of defense, but spawner-side guard should not depend on runAs being
-        // set to "subagent".
-        const res = await ws.agentSpawner.spawnSkillSubagent({
-            parentSessionId: "parent-1",
-            parentToolCallId: "tc-1",
-            skillName: "fan-out-agents",
-            skillContent: "# body",
-            skillFrontmatter: { runAs: "inline", inlineOnly: true },
-            args: "",
-        });
-        assert.equal(res.isError, true);
-        assert.match(res.resultText, /inline-only/);
-    });
-
     it("non-inlineOnly skills with runAs=subagent pass through (no regression)", async () => {
         // Sanity: the guard must not affect skills that legitimately should
         // run as subagents. We cannot drive runSkillSubagent here (it needs

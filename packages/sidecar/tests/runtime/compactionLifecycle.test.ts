@@ -271,8 +271,8 @@ describe("compaction lifecycle interlock", () => {
         assert.equal(frames[0]?.method, "session.compaction_started");
     });
 
-    it("releases the interlock when compaction throws", async () => {
-        const { adapter } = newAdapter();
+    it("releases the interlock and still emits a finished frame when compaction throws", async () => {
+        const { adapter, frames } = newAdapter();
         const { emitRunEnd, compactionEnded } = newController(adapter, async () => {
             throw new Error("summary failed");
         });
@@ -284,16 +284,6 @@ describe("compaction lifecycle interlock", () => {
         // later prompt would burn the full awaitCompactionEnd timeout.
         assert.equal(adapter.isCompressing(CWD, SESSION), false);
         assert.equal(await adapter.awaitCompactionEnd(CWD, SESSION, 50), true);
-    });
-
-    it("still emits a finished frame when compaction never commits", async () => {
-        const { adapter, frames } = newAdapter();
-        const { emitRunEnd, compactionEnded } = newController(adapter, async () => {
-            throw new Error("cancelled by hook");
-        });
-
-        await runAutoCompact(emitRunEnd, compactionEnded);
-
         assert.deepEqual(
             frames.map((f) => f.method),
             ["session.compaction_started", "session.compaction_finished"],
@@ -319,59 +309,42 @@ describe("compaction lifecycle interlock", () => {
         assert.equal(finished.failureMessage, undefined);
     });
 
-    it("classifies 'busy' reason when the lane is already running an operation", async () => {
-        const { adapter, frames } = newAdapter();
-        const { emitRunEnd, compactionEnded } = newController(adapter, async () => {
+    // Each row is a different branch of `classifyCompactFailure` — the tag
+    // match, the /cancel/i message match and the /nothing to compact/i match.
+    for (const [kind, throwIt] of [
+        [
+            "busy",
             // pi 0.85 signals this as a tagged LaneBusy rather than a coded
             // AgentHarnessError. Note it is NOT a HarnessFault subclass, so
             // classification has to match on the tag.
-            throw new LaneBusy({
-                lane: "main",
-                operationId: "op-0",
-                operationKind: "run",
-                message: "lane is busy",
+            () =>
+                new LaneBusy({
+                    lane: "main",
+                    operationId: "op-0",
+                    operationKind: "run",
+                    message: "lane is busy",
+                }),
+        ],
+        ["cancelled", () => new Error("compaction cancelled by hook")],
+        ["nothing", () => new Error("Nothing to compact")],
+    ] as const) {
+        it(`classifies '${kind}' reason when compaction throws`, async () => {
+            const { adapter, frames } = newAdapter();
+            const { emitRunEnd, compactionEnded } = newController(adapter, async () => {
+                throw throwIt();
             });
+
+            await runAutoCompact(emitRunEnd, compactionEnded);
+
+            const finished = frames.find((f) => f.method === "session.compaction_finished")
+                ?.params as
+                | { failed?: boolean; reason?: string; failureMessage?: string }
+                | undefined;
+            assert.equal(finished?.failed, true);
+            assert.equal(finished?.reason, kind);
+            assert.equal(finished?.failureMessage, undefined);
         });
-
-        await runAutoCompact(emitRunEnd, compactionEnded);
-
-        const finished = frames.find((f) => f.method === "session.compaction_finished")?.params as
-            | { failed?: boolean; reason?: string }
-            | undefined;
-        assert.equal(finished?.failed, true);
-        assert.equal(finished?.reason, "busy");
-    });
-
-    it("classifies 'cancelled' reason when a hook cancels compaction", async () => {
-        const { adapter, frames } = newAdapter();
-        const { emitRunEnd, compactionEnded } = newController(adapter, async () => {
-            throw new Error("compaction cancelled by hook");
-        });
-
-        await runAutoCompact(emitRunEnd, compactionEnded);
-
-        const finished = frames.find((f) => f.method === "session.compaction_finished")?.params as
-            | { failed?: boolean; reason?: string }
-            | undefined;
-        assert.equal(finished?.failed, true);
-        assert.equal(finished?.reason, "cancelled");
-    });
-
-    it("classifies 'nothing' reason when the lane reports nothing to compact", async () => {
-        const { adapter, frames } = newAdapter();
-        const { emitRunEnd, compactionEnded } = newController(adapter, async () => {
-            throw new Error("Nothing to compact");
-        });
-
-        await runAutoCompact(emitRunEnd, compactionEnded);
-
-        const finished = frames.find((f) => f.method === "session.compaction_finished")?.params as
-            | { failed?: boolean; reason?: string; failureMessage?: string }
-            | undefined;
-        assert.equal(finished?.failed, true);
-        assert.equal(finished?.reason, "nothing");
-        assert.equal(finished?.failureMessage, undefined);
-    });
+    }
 
     it("reports the committed summary on the successful finished frame", async () => {
         // End-to-end regression for the success signal: the controller has to

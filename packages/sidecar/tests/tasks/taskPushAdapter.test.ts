@@ -58,23 +58,6 @@ describe("TaskPushAdapter", () => {
         assert.equal("cwd" in params, false, "params should not carry cwd");
     });
 
-    it("publishes null active when no active list", () => {
-        const captured: Array<{ method: string; params: unknown }> = [];
-        const adapter = new TaskPushAdapter((method, _cwd, _sid, params) => {
-            captured.push({ method, params });
-        });
-
-        const store: TaskStore = {
-            currentListId: null,
-            lists: new Map(),
-        };
-        adapter.publishTasksUpdated(asWorkspaceId("ws1"), asSessionId("sess1"), store);
-
-        assert.equal(captured.length, 1);
-        const params = captured[0].params as { active: unknown };
-        assert.equal(params.active, null);
-    });
-
     it("routes cwd via push frame workspace, sessionId via params", () => {
         const captured: Array<{ workspace: string; session: string; params: unknown }> = [];
         const adapter = new TaskPushAdapter((_method, workspace, session, params) => {

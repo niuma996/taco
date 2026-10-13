@@ -44,11 +44,13 @@ function makeLane(
 }
 
 describe("enqueueLaneMessage — only an active run consumes the queues", () => {
-    it("run in flight → queued, echoing pi's entryId", async () => {
-        const { lane, calls } = makeLane("run", { entryId: "entry-42" });
-        const result = await enqueueLaneMessage(lane, "steer", "hello");
-        assert.deepEqual(result, { mode: "queued", entryId: "entry-42" });
-        assert.deepEqual(calls, [{ method: "steer", text: "hello" }]);
+    it("run in flight → queued on the requested queue, echoing pi's entryId", async () => {
+        for (const kind of ["steer", "followUp"] as const) {
+            const { lane, calls } = makeLane("run", { entryId: "entry-42" });
+            const result = await enqueueLaneMessage(lane, kind, "hello");
+            assert.deepEqual(result, { mode: "queued", entryId: "entry-42" });
+            assert.deepEqual(calls, [{ method: kind, text: "hello" }]);
+        }
     });
 
     it("compaction in flight → idle, and nothing is written to the inbox", async () => {
@@ -70,12 +72,6 @@ describe("enqueueLaneMessage — only an active run consumes the queues", () => 
         const { lane, calls } = makeLane(null);
         assert.deepEqual(await enqueueLaneMessage(lane, "followUp", "hi"), { mode: "idle" });
         assert.deepEqual(calls, []);
-    });
-
-    it("followUp routes to the followUp queue, not steer", async () => {
-        const { lane, calls } = makeLane("run");
-        await enqueueLaneMessage(lane, "followUp", "later");
-        assert.deepEqual(calls, [{ method: "followUp", text: "later" }]);
     });
 
     it("a rejected write surfaces as a throw, not a silent idle", async () => {

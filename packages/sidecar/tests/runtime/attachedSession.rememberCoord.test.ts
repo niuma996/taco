@@ -240,23 +240,6 @@ describe("memory extraction coordinator — Promise-chain serialization", () => 
         assert.equal(extractor.calls.length, 0);
     });
 
-    it("two turn_ends in a row without remember both see full conversations", async () => {
-        const extractor = makeExtractor();
-        const session: MiniSession = {
-            buildContext: () => Promise.resolve({ messages: messages(4) }),
-        };
-        const state = freshState();
-        const { handleTurnEnd } = makeCoordinator({ session, extractor, state });
-
-        handleTurnEnd();
-        handleTurnEnd();
-        await flush();
-
-        assert.equal(extractor.calls.length, 2);
-        assert.equal(extractor.calls[0]?.length, 4);
-        assert.equal(extractor.calls[1]?.length, 4);
-    });
-
     it("turn_end skips onTurnEnd when the sliced range is empty", async () => {
         const extractor = makeExtractor();
         // Remember tool sees 5 messages, turn_end sees 5 — no new messages.

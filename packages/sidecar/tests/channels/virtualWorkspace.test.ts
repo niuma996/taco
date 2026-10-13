@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { IM_CWD_PREFIX, makeImCwd, parseImCwd } from "@taco-ai/protocol";
+import { makeImCwd, parseImCwd } from "@taco-ai/protocol";
 import {
     IM_FS_TOOL_NAMES,
     IM_SHELL_TOOL_NAME,
@@ -70,10 +70,6 @@ describe("virtualWorkspace", () => {
             makeImSessionsRoot("/home/x/.taco", "ch1"),
             join("/home/x/.taco", "sessions", "im", "ch1"),
         );
-    });
-
-    it("IM_CWD_PREFIX is im://", () => {
-        assert.equal(IM_CWD_PREFIX, "im://");
     });
 
     it("IM fs/shell tool names match the registered tool names", () => {

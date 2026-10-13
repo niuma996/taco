@@ -26,7 +26,7 @@ import { parseJsonPointer } from "../../src/server/validation.ts";
 /**
  * Sibling test files register `test.*` probes into the module-level registry
  * singleton at import time. Filter them so these assertions survive a move to
- * a shared-process test runner. Mirrors rpcRegistry.test.ts.
+ * a shared-process test runner.
  */
 const isTestProbe = (name: string) => name.startsWith("test.");
 const builtinMethods = () => listRegisteredMethods().filter((n) => !isTestProbe(n));
@@ -137,17 +137,17 @@ describe("placeholder schemas reject nothing (characterization)", () => {
     ];
 
     for (const method of [RPC.initialize, RPC.sessionPrompt, RPC.sessionCreate]) {
-        for (const [label, input] of nonsenseInputs) {
-            it(`${method} still accepts ${label}`, () => {
-                const schema = getRegisteredMethod(method)?.options.schema;
-                assert.ok(schema, `${method} must have a schema`);
-                const errors = [...Value.Errors(schema, input)];
+        it(`${method} still accepts nonsense inputs`, () => {
+            const schema = getRegisteredMethod(method)?.options.schema;
+            assert.ok(schema, `${method} must have a schema`);
+            for (const [label, input] of nonsenseInputs) {
+                const errors: unknown[] = [...Value.Errors(schema, input)];
                 assert.equal(
                     errors.length,
                     0,
                     `${method} unexpectedly rejected ${label} — if this schema was intentionally tightened, update this characterization test and the schema's JSDoc note`,
                 );
-            });
-        }
+            }
+        });
     }
 });

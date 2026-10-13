@@ -24,11 +24,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SKILL_PATH = join(HERE, "..", "..", "src", "skills", "builtin", "fan-out-agents", "SKILL.md");
 
 describe("fan-out-agents builtin skill", () => {
-    it("exists on disk at the canonical builtin path", () => {
-        const md = readFileSync(SKILL_PATH, "utf-8");
-        assert.ok(md.length > 0, "SKILL.md must not be empty");
-    });
-
     it("frontmatter declares name + description + runAs:inline + inlineOnly:true", () => {
         const md = readFileSync(SKILL_PATH, "utf-8");
         const fm = parseYamlFrontmatter(md);

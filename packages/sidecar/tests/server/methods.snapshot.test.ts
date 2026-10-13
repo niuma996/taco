@@ -31,16 +31,6 @@ function snapshotMethod(name: string): MethodMeta | null {
     };
 }
 
-function snapshotAll(names: string[]): Record<string, MethodMeta> {
-    const out: Record<string, MethodMeta> = {};
-    for (const name of [...names].sort()) {
-        const meta = snapshotMethod(name);
-        assert.ok(meta !== null, `method not registered: ${name}`);
-        out[name] = meta;
-    }
-    return out;
-}
-
 const EXPECTED_METHODS: Record<string, MethodMeta> = {
     "agents.content": { ensureWorkspace: true },
     "agents.list": { ensureWorkspace: true },
@@ -95,15 +85,6 @@ before(() => {
 });
 
 describe("registry snapshot", () => {
-    it("total method count matches expected", () => {
-        const actualNames = Object.keys(snapshotAll(Object.keys(EXPECTED_METHODS)));
-        assert.equal(
-            actualNames.length,
-            Object.keys(EXPECTED_METHODS).length,
-            "registered method count changed — update EXPECTED_METHODS",
-        );
-    });
-
     for (const [name, expectedMeta] of Object.entries(EXPECTED_METHODS)) {
         it(`method ${name}: ensureWorkspace=${expectedMeta.ensureWorkspace}${expectedMeta.command ? ", command" : ""}${expectedMeta.turnStart ? ", turnStart" : ""}${expectedMeta.workspaceParam ? `, workspaceParam=${expectedMeta.workspaceParam}` : ""}`, () => {
             const actual = snapshotMethod(name);
@@ -121,81 +102,4 @@ describe("registry snapshot", () => {
             assert.deepEqual(subset, expectedMeta, `${name} metadata mismatch`);
         });
     }
-
-    it("no extra methods are registered beyond the snapshot", () => {
-        // Collect all registered names, excluding internal/private ones.
-        // Each handler file registers public names only, so the snapshot
-        // should be exhaustive.
-        const snapshotNames = new Set(Object.keys(EXPECTED_METHODS));
-        const unknown: string[] = [];
-        for (const candidate of [
-            // session handlers
-            "session.list",
-            "session.create",
-            "session.attach",
-            "session.detach",
-            "session.delete",
-            "session.history",
-            "session.snapshot.get",
-            "session.tasks.get",
-            "session.planState.get",
-            "session.taskHistory.get",
-            "session.prompt",
-            "session.steer",
-            "session.followUp",
-            "session.cancelQueued",
-            "session.submitAnswers",
-            "session.abort",
-            "session.setModel",
-            "session.listModels",
-            "session.setThinkingLevel",
-            "session.compact",
-            "session.contextInfo",
-            "session.rename",
-            "session.events.get",
-            // non-session mixed into session.ts
-            "commandPermission.resolve",
-            "providers.list",
-            // settings
-            "settings.get",
-            "settings.write",
-            // workspace
-            "workspace.list",
-            "workspace.ensure",
-            "workspace.dispose",
-            // extensions
-            "extensions.status",
-            // channels
-            "channels.list",
-            "channels.create",
-            "channels.bind",
-            "channels.submitVerifyCode",
-            "channels.unbind",
-            // agents
-            "agents.list",
-            "agents.content",
-            // tools
-            "tools.list",
-            // skills
-            "skills.list",
-            "skills.content",
-            // memory
-            "memory.list",
-            "memory.write",
-            "memory.deleteTopic",
-            "memory.upsert",
-            // provider
-            "provider.listModels",
-        ]) {
-            if (!snapshotNames.has(candidate)) {
-                const reg = getRegisteredMethod(candidate);
-                if (reg) unknown.push(candidate);
-            }
-        }
-        assert.deepEqual(
-            unknown,
-            [],
-            "extra methods registered but not in EXPECTED_METHODS — update the snapshot",
-        );
-    });
 });

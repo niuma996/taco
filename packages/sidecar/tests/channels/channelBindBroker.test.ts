@@ -138,28 +138,35 @@ describe("ChannelBindBroker", () => {
         assert.equal(broker.status("wecom").state, "error");
     });
 
-    it("cancel disarms the watchdog so a closed channel is not resurrected as error", async () => {
-        const broker = new ChannelBindBroker(1000, 10);
-        broker.setState("wecom", "connecting");
-        broker.cancel("wecom", "channel closing");
-        await new Promise((r) => setTimeout(r, 30));
-        assert.equal(broker.status("wecom").state, "connecting");
-    });
-
-    it("reset leaves a mid-connect channel unbound rather than error", async () => {
-        const broker = new ChannelBindBroker(1000, 10);
-        broker.setState("wecom", "connecting");
-        broker.reset("wecom");
-        await new Promise((r) => setTimeout(r, 30));
-        assert.equal(broker.status("wecom").state, "unbound");
-    });
-
-    it("cancelAll disarms watchdogs even with no pending verify requests", async () => {
-        const broker = new ChannelBindBroker(1000, 10);
-        broker.setState("wecom", "connecting");
-        broker.cancelAll();
-        await new Promise((r) => setTimeout(r, 30));
-        assert.equal(broker.status("wecom").state, "connecting");
+    // All three entry points funnel into cancel(), the only place the
+    // `connecting` watchdog is cleared; they differ only in what they publish
+    // afterwards. Past the 10ms deadline the state must still be the one each
+    // entry point left behind — never `error`, which would resurrect a channel
+    // that no longer runs.
+    it("cancel, reset and cancelAll all disarm the connecting watchdog", async () => {
+        for (const { entry, disarm, state } of [
+            {
+                entry: "cancel disarms the watchdog so a closed channel is not resurrected as error",
+                disarm: (b: ChannelBindBroker) => b.cancel("wecom", "channel closing"),
+                state: "connecting",
+            },
+            {
+                entry: "reset leaves a mid-connect channel unbound rather than error",
+                disarm: (b: ChannelBindBroker) => b.reset("wecom"),
+                state: "unbound",
+            },
+            {
+                entry: "cancelAll disarms watchdogs even with no pending verify requests",
+                disarm: (b: ChannelBindBroker) => b.cancelAll(),
+                state: "connecting",
+            },
+        ]) {
+            const broker = new ChannelBindBroker(1000, 10);
+            broker.setState("wecom", "connecting");
+            disarm(broker);
+            await new Promise((r) => setTimeout(r, 30));
+            assert.equal(broker.status("wecom").state, state, entry);
+        }
     });
 
     it("a second requestVerifyCode supersedes the prior pending entry", async () => {

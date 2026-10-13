@@ -83,9 +83,4 @@ describe("session.taskHistory.get result shape", () => {
         // Key: TaskItem wire shape has exactly 4 fields; internal createdAt/updatedAt must not leak
         assert.deepEqual(Object.keys(detail[0]).sort(), ["activeForm", "content", "id", "status"]);
     });
-
-    it("未知 listId 返回 [] (不发错)", () => {
-        const store = createTaskStore("/ws");
-        assert.deepEqual(buildHistoryListDetail(store, "nonexistent"), []);
-    });
 });

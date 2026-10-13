@@ -75,19 +75,6 @@ describe("tacoHome", () => {
             rmSync(tmp, { recursive: true, force: true });
         }
     });
-
-    it("ignores PI_AGENT_DIR", () => {
-        const tmp = mkdtempSync(join(tmpdir(), "pi-agent-"));
-        process.env.PI_AGENT_DIR = tmp;
-        Reflect.deleteProperty(process.env, "TACO_HOME");
-        try {
-            // Key: PI_AGENT_DIR does not affect taco, even when set.
-            assert.equal(tacoHome(), resolve(homedir(), ".taco"));
-        } finally {
-            rmSync(tmp, { recursive: true, force: true });
-            Reflect.deleteProperty(process.env, "PI_AGENT_DIR");
-        }
-    });
 });
 
 describe("defaultSkillDirs / defaultSessionsRoot", () => {

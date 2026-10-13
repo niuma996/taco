@@ -216,7 +216,9 @@ describe("WeChatChannel.start", () => {
 });
 
 describe("WeChatChannel inbound", () => {
-    it("uses the peer's own id as chatId for a 1:1 chat", async () => {
+    // One harness, four shapes of `raw.group_id` — it is the chat id, so a
+    // group shares one session while a 1:1 falls back to the peer's own id.
+    it("routes by raw.group_id: the group id for a group, the peer's own id for 1:1", async () => {
         const h = harness();
         await h.channel.start(h.ctx);
         await h.bot.deliver({
@@ -224,36 +226,15 @@ describe("WeChatChannel inbound", () => {
             text: "hi",
             raw: { message_id: 7, create_time_ms: 1_700_000_000_007 },
         });
-
-        assert.equal(h.submitted.length, 1);
-        assert.equal(h.submitted[0].peerId, "u1");
-        assert.equal(h.submitted[0].chatId, "u1");
-        assert.equal(h.submitted[0].platformMessageId, "7");
-        assert.equal(h.submitted[0].text, "hi");
-    });
-
-    it("uses group_id as chatId so a group shares one session", async () => {
-        const h = harness();
-        await h.channel.start(h.ctx);
         await h.bot.deliver({
             userId: "u1",
             text: "hi",
             raw: { group_id: "g9", message_id: 8, create_time_ms: 1_700_000_000_008 },
         });
-
-        assert.equal(h.submitted[0].peerId, "u1");
-        assert.equal(h.submitted[0].chatId, "g9");
-    });
-
-    /**
-     * Regression guard: iLink sends group_id as "" (not undefined) for 1:1
-     * chats. `??` lets "" through, and an empty chatId builds a workspace key
-     * parseImCwd cannot parse — the session gets created but replies are
-     * silently dropped because no peer resolves for it.
-     */
-    it("treats an empty or blank group_id as a 1:1 chat", async () => {
-        const h = harness();
-        await h.channel.start(h.ctx);
+        // Regression guard: iLink sends group_id as "" (not undefined) for 1:1
+        // chats. `??` lets "" through, and an empty chatId builds a workspace key
+        // parseImCwd cannot parse — the session gets created but replies are
+        // silently dropped because no peer resolves for it.
         await h.bot.deliver({
             userId: "u1",
             text: "a",
@@ -265,8 +246,15 @@ describe("WeChatChannel inbound", () => {
             raw: { group_id: "   ", message_id: 2, create_time_ms: 1_700_000_000_002 },
         });
 
+        assert.equal(h.submitted.length, 4);
+        assert.equal(h.submitted[0].peerId, "u1");
         assert.equal(h.submitted[0].chatId, "u1");
-        assert.equal(h.submitted[1].chatId, "u2");
+        assert.equal(h.submitted[0].platformMessageId, "7");
+        assert.equal(h.submitted[0].text, "hi");
+        assert.equal(h.submitted[1].peerId, "u1");
+        assert.equal(h.submitted[1].chatId, "g9");
+        assert.equal(h.submitted[2].chatId, "u1");
+        assert.equal(h.submitted[3].chatId, "u2");
     });
 
     /**

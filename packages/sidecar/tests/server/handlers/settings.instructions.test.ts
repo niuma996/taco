@@ -59,42 +59,6 @@ describe("WorkspaceRuntime — instructionsConfig plumbing", () => {
         });
         assert.deepEqual(ws.instructionsConfig, cfg);
     });
-
-    it("falls back to undefined when no instructionsConfig is passed (pre-fix path)", () => {
-        // Documents the pre-fix behaviour for any reader comparing both
-        // branches — without this option the runtime sees undefined and
-        // its hook falls back to defaults.
-        const ws = new WorkspaceRuntime({
-            providerKeyStore: providerKeyStore(),
-            cwd: asWorkspaceId(tmpDir),
-        });
-        assert.equal(ws.instructionsConfig, undefined);
-    });
-
-    it("updateInstructionsConfig re-renders the parent instructions block", () => {
-        const initial: InstructionsConfig = {
-            enabled: true,
-            files: { claudeMd: true },
-        };
-        const ws = new WorkspaceRuntime({
-            providerKeyStore: providerKeyStore(),
-            cwd: asWorkspaceId(tmpDir),
-            instructionsConfig: initial,
-        });
-
-        const next: InstructionsConfig = {
-            enabled: true,
-            files: { designMd: true, claudeMd: false },
-        };
-        ws.updateInstructionsConfig(next);
-
-        assert.deepEqual(ws.instructionsConfig, next);
-        // The block should reflect the new instructions set (different
-        // files → different rendered string in non-trivial setups; on an
-        // empty tmp dir both can render empty, so we settle for asserting
-        // the field is updated and the call did not throw).
-        assert.equal(typeof ws.parentInstructionsBlock, "string");
-    });
 });
 
 describe("settings.write — instructions reaches refreshInstructions with persisted value", () => {

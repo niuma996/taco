@@ -114,9 +114,4 @@ describe("ExtensionRegistry", () => {
         r.recordDisabled("ext-y");
         assert.deepEqual(r.report.disabled, ["ext-x", "ext-y"]);
     });
-
-    it("starts with empty disabled bucket", () => {
-        const r = new ExtensionRegistry();
-        assert.deepEqual(r.report.disabled, []);
-    });
 });

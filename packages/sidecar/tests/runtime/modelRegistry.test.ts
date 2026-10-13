@@ -140,12 +140,6 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             providerKeyStore: store,
             builtinProviders: STUBS,
         });
-        const before = models
-            .getModels()
-            .map((m) => m.provider)
-            .sort();
-        assert.deepEqual(before, ["stub-a", "stub-b"]);
-
         // Adding / clearing keys does not touch the catalog (pi-native: key only affects lazy resolution at request time).
         store.update({ "stub-a": "key-a-1234567890" });
         assert.deepEqual(

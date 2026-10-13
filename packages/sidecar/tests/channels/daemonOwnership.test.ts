@@ -29,7 +29,6 @@ import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.t
 import { MockChannel, mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelConfig } from "../../src/channels/registry.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
-import { NullTransport } from "../../src/server/nullTransport.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
@@ -84,20 +83,6 @@ async function startPair(opts?: { registerChannel?: boolean }): Promise<{
     await secondNonOwner.start(new InMemoryTransport(), []);
     return { owner, nonOwner, secondNonOwner, sharedRegistry };
 }
-
-describe("NullTransport", () => {
-    it("open/close/send are no-ops", async () => {
-        const t = new NullTransport();
-        await t.open();
-        await t.close();
-        // Cast to ServerFrame: the resident never inspects outbound frames.
-        await t.send({} as never);
-        // onRequest accepts but does nothing
-        t.onRequest(() => {
-            throw new Error("should not be called");
-        });
-    });
-});
 
 describe("daemon ownership", () => {
     it("non-owner does not duplicate the resident channel", async () => {
@@ -251,7 +236,6 @@ describe("daemon ownership", () => {
             assert.equal(resp.ok, true);
             // Don't assert contents — the test just confirms no throw and
             // a non-error response, which proves the non-im:// path executed.
-            assert.ok((resp.result as { sessions: unknown[] }).sessions.length >= 0);
         } finally {
             await nonOwner.stop();
             await owner.stop();

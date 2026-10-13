@@ -32,10 +32,6 @@ function body(): string {
 }
 
 describe("create-skill builtin skill", () => {
-    it("exists on disk at the canonical builtin path", () => {
-        assert.ok(body().length > 0, "SKILL.md must not be empty");
-    });
-
     it("frontmatter declares name + description, no runAs (default inline)", () => {
         const fm = parseYamlFrontmatter(body());
         assert.equal(fm.name, "create-skill");

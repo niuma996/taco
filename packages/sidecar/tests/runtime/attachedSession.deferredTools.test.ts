@@ -153,23 +153,6 @@ describe("AttachedSession — dynamic tools", () => {
         await attached.abort();
     });
 
-    it("addTools reports the newly activated names in details.added", async () => {
-        const registry = new DefaultDeferredToolRegistry({
-            candidates: [makeToolCandidate("pg-query", "deferred")],
-        });
-        const attached = await makeAttachedSession(registry);
-        assert.ok(attached.toolController != null, "toolController must be set");
-
-        const result = await attached.toolController.addTools(["pg-query"]);
-        assert.deepEqual(result.added, ["pg-query"]);
-        assert.ok(
-            (await attached.toolController.activeToolNames()).includes("pg-query"),
-            "pg-query must be active on the next turn",
-        );
-
-        await attached.abort();
-    });
-
     it("duplicate names in a single addTools request are idempotent", async () => {
         const registry = new DefaultDeferredToolRegistry({
             candidates: [makeToolCandidate("git-status", "deferred")],

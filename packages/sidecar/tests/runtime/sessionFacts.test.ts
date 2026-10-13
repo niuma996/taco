@@ -22,36 +22,54 @@ import {
 import { readSessionMetadataFromDisk } from "../../src/runtime/session/sessionMetadataReader.ts";
 
 describe("isHiddenSubagentSession", () => {
-    it("hides an explicit subagent fact regardless of header parent", () => {
-        const facts: SessionFacts = { kind: "subagent" };
-        assert.equal(isHiddenSubagentSession(facts), true);
-        assert.equal(isHiddenSubagentSession(facts, "parent-id"), true);
-    });
-
-    it("keeps an explicit main session visible even with a header parent", () => {
+    it("hides only when a parent shows up somewhere", () => {
+        // The create→writeSessionFacts window: the file exists, facts are
+        // still {}, but repo.create already stamped parentSessionId.
+        //
+        // Restored v3 metadata, or a facts write that recorded the parent
+        // before kind made it onto disk.
+        //
         // kind:main is the user-session marker. A header parent without
         // kind:subagent would be a fork, which sidecar does not currently
         // expose, but the kind flag must still win so a future fork path
         // cannot hide a labelled main session.
-        assert.equal(isHiddenSubagentSession({ kind: "main" }, "parent-id"), false);
-        assert.equal(isHiddenSubagentSession({ kind: "main" }), false);
-    });
-
-    it("hides a session whose header carries parentSessionId when kind is absent", () => {
-        // The create→writeSessionFacts window: the file exists, facts are
-        // still {}, but repo.create already stamped parentSessionId.
-        assert.equal(isHiddenSubagentSession({}, "parent-id"), true);
-    });
-
-    it("hides a session whose facts carry parentSessionId when kind is absent", () => {
-        // Restored v3 metadata, or a facts write that recorded the parent
-        // before kind made it onto disk.
-        assert.equal(isHiddenSubagentSession({ parentSessionId: "parent-id" }), true);
-    });
-
-    it("keeps a facts-less session with no parent visible — legacy user sessions", () => {
-        assert.equal(isHiddenSubagentSession({}), false);
-        assert.equal(isHiddenSubagentSession({ agentType: "explorer" }), false);
+        const cases: Array<{
+            label: string;
+            facts: SessionFacts;
+            headerParentSessionId?: string;
+            hidden: boolean;
+        }> = [
+            { label: "explicit subagent fact", facts: { kind: "subagent" }, hidden: true },
+            {
+                label: "explicit subagent fact + header parent",
+                facts: { kind: "subagent" },
+                headerParentSessionId: "parent-id",
+                hidden: true,
+            },
+            {
+                label: "labelled main + header parent",
+                facts: { kind: "main" },
+                headerParentSessionId: "parent-id",
+                hidden: false,
+            },
+            { label: "labelled main", facts: { kind: "main" }, hidden: false },
+            {
+                label: "header parentSessionId with kind absent",
+                facts: {},
+                headerParentSessionId: "parent-id",
+                hidden: true,
+            },
+            {
+                label: "facts parentSessionId with kind absent",
+                facts: { parentSessionId: "parent-id" },
+                hidden: true,
+            },
+            { label: "no parent anywhere — legacy user session", facts: {}, hidden: false },
+            { label: "agentType only", facts: { agentType: "explorer" }, hidden: false },
+        ];
+        for (const { label, facts, headerParentSessionId, hidden } of cases) {
+            assert.equal(isHiddenSubagentSession(facts, headerParentSessionId), hidden, label);
+        }
     });
 });
 

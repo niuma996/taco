@@ -12,10 +12,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { loadExtensions } from "../../src/extensions/loader.ts";
-import { ExtensionRegistry } from "../../src/extensions/registry.ts";
-import type { ContextEvent, ExtensionModule, ToolResultEvent } from "../../src/extensions/types.ts";
+import type { ToolResultEvent } from "../../src/extensions/types.ts";
 
 let tmpDir: string;
 
@@ -117,26 +115,6 @@ describe("integration — permission gating", () => {
             u,
             `expected no-perm/tools in unauthorized, got: ${JSON.stringify(r.report.unauthorized)}`,
         );
-    });
-});
-
-describe("integration — registry + extensionApi composition", () => {
-    it("directly composes registry and api without the loader", async () => {
-        const r = new ExtensionRegistry();
-        const seen: string[] = [];
-        const mod: ExtensionModule = (taco) => {
-            seen.push(taco.manifest.name);
-            taco.registerContextHook(async (_e: ContextEvent) => undefined);
-        };
-        const api = createExtensionApi(
-            { name: "direct", version: "0.0.1", apiVersion: "1", permissions: ["context"] },
-            r,
-            { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
-            "external",
-        );
-        await mod(api);
-        assert.deepEqual(seen, ["direct"]);
-        assert.equal(r.contextHooks().external.length, 1);
     });
 });
 

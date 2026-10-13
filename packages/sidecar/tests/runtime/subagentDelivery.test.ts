@@ -61,36 +61,36 @@ describe("deliverSubagentResult", () => {
         assert.equal(promptedWith, "result text");
     });
 
-    it("falls back to enqueue(followUp) when prompt() rejects busy, and stops there if queued", async () => {
-        let promptCalls = 0;
-        let enqueuedWith: string | undefined;
-        const attached: FakeAttached = {
-            prompt: async () => {
-                promptCalls++;
-                throw laneBusy();
+    it("falls back to enqueue(followUp) when prompt() rejects busy, then stops on queued and retries once on idle", async () => {
+        for (const outcome of [
+            {
+                enqueueResult: { mode: "queued", entryId: "e1" } as const,
+                expectedPromptCalls: 1,
+                message: "must attempt prompt() once before falling back",
             },
-            enqueue: async (_kind, text) => {
-                enqueuedWith = text;
-                return { mode: "queued", entryId: "e1" };
+            {
+                enqueueResult: { mode: "idle" } as const,
+                expectedPromptCalls: 2,
+                message: "busy then idle-on-enqueue must trigger exactly one retry",
             },
-        };
-        await deliverSubagentResult(registryFor(attached), parentSessionId, "notify me");
-        assert.equal(promptCalls, 1, "must attempt prompt() once before falling back");
-        assert.equal(enqueuedWith, "notify me");
-    });
-
-    it("retries prompt() once when the run ends between the busy rejection and enqueue", async () => {
-        let promptCalls = 0;
-        const attached: FakeAttached = {
-            prompt: async () => {
-                promptCalls++;
-                if (promptCalls === 1) throw laneBusy();
-                // Second call (the retry) succeeds.
-            },
-            enqueue: async () => ({ mode: "idle" }),
-        };
-        await deliverSubagentResult(registryFor(attached), parentSessionId, "notify me");
-        assert.equal(promptCalls, 2, "busy then idle-on-enqueue must trigger exactly one retry");
+        ]) {
+            let promptCalls = 0;
+            let enqueuedWith: string | undefined;
+            const attached: FakeAttached = {
+                prompt: async () => {
+                    promptCalls++;
+                    if (promptCalls === 1) throw laneBusy();
+                    // Second call (the retry) succeeds.
+                },
+                enqueue: async (_kind, text) => {
+                    enqueuedWith = text;
+                    return outcome.enqueueResult;
+                },
+            };
+            await deliverSubagentResult(registryFor(attached), parentSessionId, "notify me");
+            assert.equal(promptCalls, outcome.expectedPromptCalls, outcome.message);
+            assert.equal(enqueuedWith, "notify me");
+        }
     });
 
     it("propagates a non-busy error from prompt() instead of swallowing it", async () => {

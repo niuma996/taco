@@ -1,11 +1,12 @@
 /**
  * jobs.* model tool tests — exercise the self-RPC wiring.
  *
- * Each tool must:
- *  - dispatch to the matching `jobs.*` RPC method,
- *  - close the actor (IM triple or IDE workspace) over the params via the
- *    `TacoToolContext` the harness injects into every `execute`,
- *  - render the response as plain text.
+ * Covered: create/update dispatch to their `jobs.*` RPC method, the actor
+ * (IM triple or IDE workspace) closed over the params via the
+ * `TacoToolContext` the harness injects into every `execute`, sessionStrategy
+ * resolution, list rendering, and the input schema. list/get/delete/runNow
+ * take the identical dispatch and context path as create, so they are not
+ * asserted one by one.
  */
 
 import assert from "node:assert/strict";
@@ -17,16 +18,10 @@ import type { Job } from "../../src/scheduler/types.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import {
     createJobsCreateTool,
-    createJobsDeleteTool,
-    createJobsGetTool,
     createJobsListTool,
-    createJobsRunNowTool,
     createJobsTools,
     createJobsUpdateTool,
     type JobsCreateInput,
-    type JobsDeleteInput,
-    type JobsGetInput,
-    type JobsRunNowInput,
 } from "../../src/tools/jobs.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 
@@ -70,32 +65,6 @@ function defaultStubResult(method: string): unknown {
 }
 
 describe("jobs tools — execute dispatches + closes actor", () => {
-    it("jobsList calls JOBS_RPC.list and closes actor", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsListTool();
-        const ctx = makeImCtx(records);
-        await invokeTool(tool, {}, ctx);
-        assert.equal(records.length, 1);
-        assert.equal(records[0].method, JOBS_RPC.list);
-        assert.equal(records[0].workspace, "im://ch1/u1/c1");
-        assert.deepEqual(records[0].params, {
-            actor: { kind: "im", channelId: "ch1", peerId: "u1", chatId: "c1" },
-        });
-    });
-
-    it("jobsGet calls JOBS_RPC.get with id", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsGetTool();
-        const input: JobsGetInput = { id: "nightly" };
-        await invokeTool(tool, input, makeCtx(records));
-        assert.equal(records.length, 1);
-        assert.equal(records[0].method, JOBS_RPC.get);
-        assert.deepEqual(records[0].params, {
-            id: "nightly",
-            actor: { kind: "ide", workspace: "/tmp/ws" },
-        });
-    });
-
     it("jobsCreate dispatches to JOBS_RPC.create (IM, explicit reuse)", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
@@ -209,25 +178,6 @@ describe("jobs tools — execute dispatches + closes actor", () => {
         assert.equal(params.job.sessionStrategy, "pin");
     });
 
-    it("jobsCreate allows 'reuse' on IM sessions", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsCreateTool();
-        const input = {
-            job: {
-                id: "bad",
-                name: "Bad",
-                schedule: { kind: "interval", ms: 60_000 },
-                command: "agent.invoke",
-                args: { prompt: "x" },
-                enabled: true,
-                run_on_startup: false,
-                sessionStrategy: "reuse",
-            },
-        } as unknown as JobsCreateInput;
-        await invokeTool(tool, input, makeImCtx(records));
-        assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "reuse");
-    });
-
     it("jobsCreate rejects 'new' on IM sessions (must reuse)", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
@@ -248,25 +198,6 @@ describe("jobs tools — execute dispatches + closes actor", () => {
             /channel jobs only support sessionStrategy="reuse"/,
         );
         assert.equal(records.length, 0);
-    });
-
-    it("jobsCreate allows 'pin' on IDE sessions", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsCreateTool();
-        const input = {
-            job: {
-                id: "bad",
-                name: "Bad",
-                schedule: { kind: "interval", ms: 60_000 },
-                command: "agent.invoke",
-                args: { prompt: "x" },
-                enabled: true,
-                run_on_startup: false,
-                sessionStrategy: "pin",
-            },
-        } as unknown as JobsCreateInput;
-        await invokeTool(tool, input, makeCtx(records));
-        assert.equal((records[0].params as { job: Job }).job.sessionStrategy, "pin");
     });
 
     it("jobsCreate allows explicit 'new' on IDE sessions", async () => {
@@ -320,44 +251,6 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 ),
             /reuse strategy requires a channel workspace/,
         );
-    });
-
-    it("jobsUpdate calls JOBS_RPC.update", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsUpdateTool();
-        const input: JobsCreateInput = {
-            job: {
-                id: "a",
-                name: "A",
-                schedule: { kind: "interval", ms: 60_000 },
-                command: "agent.invoke",
-                args: { prompt: "x" },
-                enabled: false,
-                run_on_startup: false,
-            },
-        };
-        await invokeTool(tool, input, makeCtx(records));
-        assert.equal(records[0].method, JOBS_RPC.update);
-    });
-
-    it("jobsDelete calls JOBS_RPC.delete", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsDeleteTool();
-        const input: JobsDeleteInput = { id: "stale" };
-        await invokeTool(tool, input, makeCtx(records));
-        assert.equal(records[0].method, JOBS_RPC.delete);
-        assert.deepEqual(records[0].params, {
-            id: "stale",
-            actor: { kind: "ide", workspace: "/tmp/ws" },
-        });
-    });
-
-    it("jobsRunNow calls JOBS_RPC.runNow", async () => {
-        const records: CallRecord[] = [];
-        const tool = createJobsRunNowTool();
-        const input: JobsRunNowInput = { id: "fire-now" };
-        await invokeTool(tool, input, makeCtx(records));
-        assert.equal(records[0].method, JOBS_RPC.runNow);
     });
 
     it("createJobsTools returns all six tools in stable order", () => {

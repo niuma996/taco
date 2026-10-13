@@ -204,19 +204,3 @@ test("stop() cancels pending recheck (timer does not fire)", async () => {
         strictEqual(calls, 0);
     });
 });
-
-test("start() surfaces orchestrator errors without crashing the caller", async () => {
-    let calls = 0;
-    const orch = new UpgradeOrchestrator({
-        markerPath: "/dev/null/cannot-have-subdir",
-        requestShutdown: () => {
-            calls += 1;
-        },
-        intervalMs: 1_000_000,
-    });
-    orch.start();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    orch.stop();
-    ok(true);
-    strictEqual(calls, 0);
-});

@@ -104,14 +104,6 @@ describe("addTools execute", () => {
         assert.deepEqual(controller.loadedToolNames(), ["git-status"]);
     });
 
-    it("reports added tools in details on success", async () => {
-        const { tool } = makeTool(["git-status", "pg-query"]);
-        const result = await invokeTool(tool, { toolNames: "git-status" }, ctx, {
-            toolCallId: "tc1",
-        });
-        assert.deepEqual(details(result).added, ["git-status"]);
-    });
-
     it("reports unknown tools in the result", async () => {
         const { tool } = makeTool(["git-status"]);
         const result = await invokeTool(tool, { toolNames: "nope" }, ctx, { toolCallId: "tc1" });

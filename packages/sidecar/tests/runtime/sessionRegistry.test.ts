@@ -171,21 +171,12 @@ describe("SessionRegistry", () => {
         );
     });
 
-    it("rename + getSessionName round-trip via cache", async () => {
-        const sr = makeRegistry();
-        const id = uuidv7();
-        await seedSession(sr.repo, id);
-        sr.invalidateListCache();
-        await sr.renameSession(asSessionId(id), "my-session");
-        const name = await sr.getSessionName(asSessionId(id));
-        assert.equal(name, "my-session");
-    });
-
-    // The round-trip above is answered from _nameCache (renameSession populates
-    // it), so it never exercises the disk read. getSessionName streams the
-    // JSONL instead of building a full JsonlSessionStorage, and a rename
-    // appends a second session_info rather than rewriting the first — so
-    // "last one wins" has to hold against the file, not the cache.
+    // A rename populates _nameCache, so a rename→getSessionName round-trip is
+    // answered from the cache and never exercises the disk read.
+    // getSessionName streams the JSONL instead of building a full
+    // JsonlSessionStorage, and a rename appends a second session_info rather than
+    // rewriting the first — so "last one wins" has to hold against the file, not
+    // the cache.
     it("getSessionName reads the newest session_info from disk on a cold cache", async () => {
         const sr = makeRegistry();
         const id = uuidv7();

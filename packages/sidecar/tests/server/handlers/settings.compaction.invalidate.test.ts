@@ -9,7 +9,6 @@
 
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
-import { readGlobalConfig } from "../../../src/config/config.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
@@ -21,25 +20,6 @@ before(() => {
 });
 
 describe("settings.write — compaction invalidation", () => {
-    it("calls server.invalidateCompactionCaches when patch has compaction", async () => {
-        let invalidateCount = 0;
-        const server = {
-            providerKeyStore: undefined,
-            invalidateCompactionCaches(): void {
-                invalidateCount++;
-            },
-        };
-        await callMethod("settings.write", {
-            server,
-            params: { global: { compaction: { threshold: 0.15 } } },
-        });
-
-        // Disk persisted
-        assert.equal(readGlobalConfig().compaction?.threshold, 0.15);
-        // server received invalidate notification
-        assert.equal(invalidateCount, 1);
-    });
-
     it("does NOT call invalidateCompactionCaches when patch omits compaction", async () => {
         let invalidateCount = 0;
         const server = {

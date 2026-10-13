@@ -160,9 +160,6 @@ describe("tagWrap / escapeAttr", () => {
 });
 
 describe("tagRegistry integrity", () => {
-    it("registry loads without throwing", () => {
-        assert.ok(tagRegistry);
-    });
     it("contains expected well-known tags", () => {
         for (const name of ["instructions", "skill_body", "memory", "im_channel"]) {
             assert.ok(Object.hasOwn(tagRegistry, name), `missing ${name}`);

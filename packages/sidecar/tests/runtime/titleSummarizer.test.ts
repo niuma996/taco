@@ -34,21 +34,12 @@ describe("cleanTitle", () => {
     });
 
     it("clamps to 20 grapheme clusters, not UTF-16 code units", () => {
-        const raw = "a".repeat(30);
-        assert.equal(cleanTitle(raw).length, 20);
-    });
-
-    it("clamps CJK text by character count, matching the ASCII cap", () => {
-        const raw = "修".repeat(25);
-        const out = cleanTitle(raw);
-        assert.equal(Array.from(out).length, 20);
-    });
-
-    it("clamping a surrogate-pair emoji does not split it into an unpaired half", () => {
+        // One `Array.from(stripped).slice(0, 20)` serves all three alphabets.
+        assert.equal(Array.from(cleanTitle("a".repeat(30))).length, 20);
+        assert.equal(Array.from(cleanTitle("修".repeat(25))).length, 20);
         // 21 emoji graphemes (each a surrogate pair) — clamped to 20 must drop
         // whole graphemes, never leave a lone high/low surrogate dangling.
-        const raw = "😀".repeat(21);
-        const out = cleanTitle(raw);
+        const out = cleanTitle("😀".repeat(21));
         assert.equal(Array.from(out).length, 20);
         // A dangling surrogate would make this string invalid / mismatched
         // length under a code-point re-split; assert round-trip stability.

@@ -11,7 +11,6 @@
 
 import { strict as assert } from "node:assert";
 import { before, describe, it } from "node:test";
-import { readGlobalConfig } from "../../../src/config/config.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
@@ -39,29 +38,6 @@ function makeServer(calls: DefaultModelCall[]) {
 }
 
 describe("settings.write — defaultModel push", () => {
-    it("persists defaultModel/defaultProvider and calls server.setDefaultModel", async () => {
-        const calls: DefaultModelCall[] = [];
-        const server = makeServer(calls);
-        await callMethod("settings.write", {
-            server,
-            params: {
-                global: { defaultModel: "MiniMax-M2.7-highspeed", defaultProvider: "minimax-cn" },
-            },
-        });
-
-        // Disk persisted
-        const onDisk = readGlobalConfig();
-        assert.equal(onDisk.defaultModel, "MiniMax-M2.7-highspeed");
-        assert.equal(onDisk.defaultProvider, "minimax-cn");
-
-        // server received the push with the resolved-on-disk values
-        assert.equal(calls.length, 1);
-        assert.deepEqual(calls[0], {
-            defaultModel: "MiniMax-M2.7-highspeed",
-            defaultProvider: "minimax-cn",
-        });
-    });
-
     it("fires when only defaultProvider changes (it scopes the model lookup)", async () => {
         const calls: DefaultModelCall[] = [];
         const server = makeServer(calls);

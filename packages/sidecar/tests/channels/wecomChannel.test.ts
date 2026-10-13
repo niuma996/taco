@@ -167,11 +167,11 @@ describe("WeComChannel", () => {
         await handle.close();
     });
 
-    it("routes an inbound text message into the conversation router with msgid as platformMessageId", async () => {
-        const h = harness({
-            credentials: { botId: "b", secret: "s" },
-            route: { channelId: "wecom", peerId: "u1", chatId: "u1" },
-        });
+    // One harness, three shapes of `chatid`: a group keeps the SDK-provided id
+    // so the whole group shares one session, a 1:1 falls back to the peer's own
+    // id (aibot sends `chatid` as "" there).
+    it("routes an inbound text message with msgid as platformMessageId, chatid falling back to the peer userid for 1:1 chats", async () => {
+        const h = harness({ credentials: { botId: "b", secret: "s" } });
         const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         h.client.deliverText({
             body: {
@@ -181,26 +181,6 @@ describe("WeComChannel", () => {
                 text: { content: "hello" },
             },
         });
-        // Wait one microtask for the void promise.
-        await new Promise((r) => setImmediate(r));
-        assert.equal(h.submitted.length, 1);
-        assert.deepEqual(h.submitted[0], {
-            platformMessageId: "m-123",
-            channelId: "wecom",
-            peerId: "u1",
-            chatId: "u1",
-            kind: "text",
-            text: "hello",
-        });
-        await handle.close();
-    });
-
-    it("falls back chatId to the peer userid for 1:1 chats when chatid is empty", async () => {
-        const h = harness({
-            credentials: { botId: "b", secret: "s" },
-            route: { channelId: "wecom", peerId: "u1", chatId: "u1" },
-        });
-        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         h.client.deliverText({
             body: {
                 msgid: "m-empty",
@@ -210,18 +190,6 @@ describe("WeComChannel", () => {
                 text: { content: "hi" },
             },
         });
-        await new Promise((r) => setImmediate(r));
-        assert.equal(h.submitted.length, 1);
-        assert.equal(h.submitted[0].chatId, "u1");
-        await handle.close();
-    });
-
-    it("uses the SDK-provided chatid for group chats", async () => {
-        const h = harness({
-            credentials: { botId: "b", secret: "s" },
-            route: { channelId: "wecom", peerId: "u2", chatId: "g-77" },
-        });
-        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
         h.client.deliverText({
             body: {
                 msgid: "m-grp",
@@ -231,9 +199,19 @@ describe("WeComChannel", () => {
                 text: { content: "team" },
             },
         });
+        // Wait one microtask for the void promise.
         await new Promise((r) => setImmediate(r));
-        assert.equal(h.submitted.length, 1);
-        assert.equal(h.submitted[0].chatId, "g-77");
+        assert.equal(h.submitted.length, 3);
+        assert.deepEqual(h.submitted[0], {
+            platformMessageId: "m-123",
+            channelId: "wecom",
+            peerId: "u1",
+            chatId: "u1",
+            kind: "text",
+            text: "hello",
+        });
+        assert.equal(h.submitted[1].chatId, "u1");
+        assert.equal(h.submitted[2].chatId, "g-77");
         await handle.close();
     });
 
@@ -280,18 +258,8 @@ describe("WeComChannel", () => {
         await handle.close();
     });
 
-    it("login persists credentials, transitions to connecting, and kicks connect", async () => {
-        const h = harness();
-        const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
-        await handle.login(false, { botId: "B", secret: "S" });
-        assert.deepEqual(h.store.get("credentials"), { botId: "B", secret: "S" });
-        assert.equal(h.broker.status("wecom").state, "connecting");
-        assert.equal(h.client.connectCalls, 1);
-        h.client.markAuthenticated();
-        assert.equal(h.broker.status("wecom").state, "connected");
-        await handle.close();
-    });
-
+    // Also the persistence contract: login must write the credentials it just
+    // connected with, not just hand them to the client.
     it("login builds a fresh client carrying the new credentials rather than reusing the old one", async () => {
         // Regression: WSClient copies botId/secret in its constructor, so a
         // reconnect on the same instance re-sends the credentials it was born
@@ -302,6 +270,8 @@ describe("WeComChannel", () => {
 
         await handle.login(false, { botId: "B1", secret: "S1" });
         assert.equal(h.clients.length, 1);
+        assert.equal(h.broker.status("wecom").state, "connecting");
+        assert.deepEqual(h.store.get("credentials"), { botId: "B1", secret: "S1" });
         assert.deepEqual(
             { botId: h.clients[0].opts.botId, secret: h.clients[0].opts.secret },
             { botId: "B1", secret: "S1" },
@@ -309,6 +279,7 @@ describe("WeComChannel", () => {
 
         await handle.login(false, { botId: "B2", secret: "S2" });
         assert.equal(h.clients.length, 2);
+        assert.deepEqual(h.store.get("credentials"), { botId: "B2", secret: "S2" });
         assert.deepEqual(
             { botId: h.clients[1].opts.botId, secret: h.clients[1].opts.secret },
             { botId: "B2", secret: "S2" },

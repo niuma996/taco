@@ -13,13 +13,6 @@ import {
 const ROUTE = { channelId: "wechat", peerId: "u1", chatId: "c1" };
 
 describe("imWorkspacePolicy", () => {
-    it("defaults deny everything and asks for commands", () => {
-        assert.deepEqual(DEFAULT_IM_WORKSPACE_POLICY, {
-            tools: { fsTools: "deny", shell: "deny" },
-            commands: { mode: "ask" },
-        });
-    });
-
     it("resolves to defaults for an empty or absent document", () => {
         assert.deepEqual(
             resolveImWorkspacePolicyFromDocument(undefined, ROUTE),

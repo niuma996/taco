@@ -111,12 +111,7 @@ describe("hasStoredCredentials", () => {
         assert.equal(hasStoredCredentials("wechat", home), false);
     });
 
-    it("is true once credentials are stored", async () => {
-        await new FileChannelConfigStore("wechat", {}, home).set(CREDENTIALS_KEY, { uin: "u1" });
-        assert.equal(hasStoredCredentials("wechat", home), true);
-    });
-
-    it("stays true regardless of connectivity — the contract is disk state", async () => {
+    it("is true once credentials are stored — the contract is disk state", async () => {
         // This is the whole point of probing disk instead of deriving from the
         // bind state: an errored/expired binding still has credentials, so the
         // UI must offer Rebind rather than Bind.

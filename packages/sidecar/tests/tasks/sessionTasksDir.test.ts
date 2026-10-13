@@ -10,19 +10,16 @@ import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { loadAllTaskLists, saveTaskListToDisk } from "../../src/tasks/taskPersistence.ts";
 
 describe("sessionTasksDir", () => {
-    it("is scoped under the caller-supplied sessionsRoot", () => {
-        const dir = sessionTasksDir(asSessionId("abc-123"), "/var/taco/sessions");
-        // Path is joined with `path.join`, so use `join` here too — the
-        // original assertion hard-coded POSIX "/" and broke on Windows.
-        assert.equal(dir, join("/var/taco", "sessions", "abc-123", "tasks"));
-    });
-
-    it("follows the same root JsonlSessionRepo uses (TACO_HOME-aware)", () => {
+    it("is scoped under the caller-supplied sessionsRoot, TACO_HOME-aware", () => {
         // Regression: hardcoded homedir() ignored TACO_HOME, splitting session
         // data and task state onto different roots — attach would hydrate an
         // empty task list.
-        const dir = sessionTasksDir(asSessionId("abc-123"), "/srv/taco/sessions");
-        assert.equal(dir, join("/srv/taco", "sessions", "abc-123", "tasks"));
+        for (const sessionsRoot of ["/var/taco/sessions", "/srv/taco/sessions"]) {
+            const dir = sessionTasksDir(asSessionId("abc-123"), sessionsRoot);
+            // Path is joined with `path.join`, so use `join` here too — the
+            // original assertion hard-coded POSIX "/" and broke on Windows.
+            assert.equal(dir, join(sessionsRoot, "abc-123", "tasks"));
+        }
     });
 });
 

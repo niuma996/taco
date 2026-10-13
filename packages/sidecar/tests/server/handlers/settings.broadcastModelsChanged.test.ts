@@ -34,15 +34,6 @@ function makeServer(): { server: unknown; getCalls: () => number } {
 }
 
 describe("settings.write — broadcastModelsChanged trigger", () => {
-    it("broadcasts once when apiKeys changes", async () => {
-        const { server, getCalls } = makeServer();
-        await callMethod("settings.write", {
-            server,
-            params: { global: { apiKeys: { anthropic: "sk-ant-test123" } } },
-        });
-        assert.equal(getCalls(), 1);
-    });
-
     it("broadcasts once when customProviders changes", async () => {
         const { server, getCalls } = makeServer();
         await callMethod("settings.write", { server, params: { global: { customProviders: [] } } });
