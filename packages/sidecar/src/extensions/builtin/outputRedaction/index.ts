@@ -140,6 +140,7 @@ export function buildOutputRedactionHook(): ToolResultHook {
 /** Builtin manifest — self-describes metadata and registration logic. */
 export const manifest: BuiltinManifest = {
     name: "@taco/builtin-output-redaction",
+    version: "0.1.0",
     description:
         "Redacts common secrets (OpenAI keys, AWS access keys, GitHub tokens, bearer tokens, PEM private keys) from tool result content before it reaches the model or UI.",
     whenToUse:

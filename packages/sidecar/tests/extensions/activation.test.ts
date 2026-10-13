@@ -267,6 +267,7 @@ describe("registerBuiltinExtensions — dispatcher bookkeeping", () => {
         const r = new ExtensionRegistry();
         const throwing = {
             name: "@taco/test-throws",
+            version: "0.1.0",
             register: () => {
                 throw new Error("intentional");
             },

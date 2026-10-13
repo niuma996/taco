@@ -9,7 +9,6 @@
  * `addWorkspaceActivator`; `activateExtensions` invokes them per workspace.
  */
 
-import { sidecarVersion } from "../runtime/runtimeResources.ts";
 import { registerExtensionTag } from "../tags/registry.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { TacoTool } from "../tools/index.ts";
@@ -246,8 +245,6 @@ export async function registerBuiltinExtensions(
     disabledExtensions: ReadonlySet<string> = new Set(),
     manifests: readonly BuiltinManifest[] = [],
 ): Promise<void> {
-    const version = sidecarVersion();
-
     // Narrowed view handed to `manifest.register` — deliberately excludes
     // recordLoaded/recordFailed so a builtin cannot double-record itself;
     // the dispatcher below owns that bookkeeping exclusively.
@@ -288,7 +285,7 @@ export async function registerBuiltinExtensions(
             const tags = registry.extensionTagsFor(manifest.name);
             registry.recordLoaded({
                 name: manifest.name,
-                version,
+                version: manifest.version,
                 source: "builtin",
                 permissions: [],
                 description: manifest.description,

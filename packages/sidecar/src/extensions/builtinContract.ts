@@ -28,6 +28,12 @@ export interface BuiltinRegistryApi {
 export interface BuiltinManifest {
     /** Extension name, e.g. "@taco/builtin-output-redaction". */
     readonly name: string;
+    /**
+     * The extension's own version, independent of the sidecar version. Bump
+     * only when the extension itself changes; a sidecar release must not drag
+     * every builtin's reported version along with it.
+     */
+    readonly version: string;
     /** Short description for the extensions.status report. */
     readonly description?: string;
     /** Usage guidance for the extensions.status report. */

@@ -339,6 +339,7 @@ export function buildGitContextActivator(): WorkspaceActivator {
 /** Builtin manifest — self-describes metadata, tag spec, and workspace activator. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
+    version: "0.1.0",
     description:
         "Injects <recent_git_commits> (last N commits: hash, subject, author, date, --stat) and <working_tree_changes> (staged, unstaged, untracked files) as hidden tags with inline usage guidance. Silently no-ops on non-git repos or when git is unavailable.",
     whenToUse:

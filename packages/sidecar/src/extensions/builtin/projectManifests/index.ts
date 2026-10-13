@@ -199,6 +199,7 @@ export function getProjectManifestsTagSpec(): TagSpec {
 /** Builtin manifest — self-describes metadata, tag spec, and workspace activator. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
+    version: "0.1.0",
     description:
         "Injects a hidden <project_manifests> tag listing detected root-level manifest filenames (package.json, Cargo.toml, etc.) so the model can recognize the language stack and package manager. Survives compaction. Silently no-ops when no manifest is detected. Always disabled on IM/third-party channels (see extensions/activation.ts).",
     whenToUse:

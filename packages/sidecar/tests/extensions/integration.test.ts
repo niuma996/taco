@@ -8,7 +8,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -134,18 +134,13 @@ describe("integration — built-in extensions", () => {
         assert.equal(buckets.external.length, 0);
     });
 
-    it("output-redaction builtin version tracks the sidecar package version", async () => {
+    it("output-redaction builtin reports its own version, not the sidecar's", async () => {
         const r = await loadExtensions({ extensions: [] });
         const builtin = r.report.loaded.find((e) => e.name === "@taco/builtin-output-redaction");
         assert.ok(builtin);
-        // Should equal the sidecar package.json version, read at runtime.
-        // (Independently verified via the same `readPackageVersion` path used
-        // by registry.ts; if registry.ts hardcodes or drifts, this test will
-        // catch it by comparing against an out-of-band value.)
-        assert.match(builtin.version, /^\d+\.\d+\.\d+/, `expected semver, got: ${builtin.version}`);
-        const pkgPath = join(import.meta.dirname, "..", "..", "package.json");
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
-        assert.equal(builtin.version, pkg.version);
+        // Each builtin versions independently: a sidecar release must not drag
+        // the extension's reported version along with it.
+        assert.equal(builtin.version, "0.1.0");
     });
 
     it("output-redaction hook redacts API keys from tool output", async () => {

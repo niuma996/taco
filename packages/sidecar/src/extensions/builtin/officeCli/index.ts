@@ -43,6 +43,7 @@ export function buildOfficeCliActivator(): WorkspaceActivator {
 /** Builtin manifest — contributes the officecli shell allow-rule per workspace. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
+    version: "0.1.0",
     description:
         "Allow-lists `officecli` shell invocations so the bundled officecli skill can create and edit .docx/.xlsx/.pptx without a permission prompt per command.",
     whenToUse:
