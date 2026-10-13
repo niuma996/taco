@@ -56,6 +56,10 @@
     --card-shadow: 0 3px 10px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.2);
     --tooltip-bg: rgba(0, 0, 0, 0.6);
     --tooltip-fg: #ffffff;
+    /* Switch — two-tone pill: a recessed neutral track when off, the brand
+       fill when on, and a bright thumb that needs no ring to read. */
+    --switch-track-off: #3a4150;
+    --switch-thumb: #eceff4;
     --bg-elevated: #1a1d23;
     --surface-tint: rgba(255, 255, 255, 0.03);
 
@@ -210,6 +214,10 @@
     --card-shadow: 0 2px 8px rgba(43, 38, 32, 0.08), 0 0 0 1px rgba(43, 38, 32, 0.04);
     --tooltip-bg: #2b2620;
     --tooltip-fg: var(--warm-gray-1);
+    /* Switch — same two-tone pill as dark mode; the off track sits just
+       under --border so it reads on warm paper without a dark rim. */
+    --switch-track-off: #dad6d0;
+    --switch-thumb: #ffffff;
     --bg-elevated: var(--warm-gray-1);
     --surface-tint: rgba(0, 0, 0, 0.02);
 
