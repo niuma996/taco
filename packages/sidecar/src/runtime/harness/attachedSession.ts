@@ -789,6 +789,10 @@ export class AttachedSession extends EventEmitter {
      * a throw.
      */
     async abort(): Promise<AbortResult> {
+        // Cancel checks already queued by earlier run_ends; lane.abort() owns an
+        // admitted run or compaction. The aborted run's own run_end still
+        // schedules a fresh check, so an over-threshold session compacts anyway.
+        this.compactionController.cancelAutoCompaction();
         const result = await this.lane.abort(harnessContext);
         if (!result.ok) {
             if (NoActiveOperation.is(result.error)) {

@@ -11,8 +11,8 @@
  * observes, so a future regression in either half — or an upstream change to
  * pi's dispatch channels — fails here.
  *
- * The controller reacts to `run_end` and defers the check through
- * `lane.runWhenIdle`, so the stubs below have to honour both.
+ * The controller reacts to `run_end` and waits for lane idleness without
+ * holding an idle-owner callback while it invokes `lane.compact()`.
  */
 
 import { strict as assert } from "node:assert";
@@ -109,6 +109,7 @@ function newController(
      * empty-summary refusal.
      */
     sessionEntries: Entry[] = compactableEntries(),
+    waitForIdleImpl: (signal?: AbortSignal) => Promise<void> = async () => {},
 ): {
     controller: CompactionController;
     pushed: CompactionSettings[];
@@ -167,14 +168,21 @@ function newController(
     } as unknown as AgentHarness<ExecutionToolContext>;
 
     const lane = {
-        // Always idle in these tests, so the deferred check runs immediately.
-        runWhenIdle: async (callback: () => void | Promise<void>) => {
-            await callback();
+        name: "main",
+        // Waiting returns before the controller invokes compact(). A real lane
+        // must not hold an idle owner while compact() re-enters lane.command().
+        waitForIdle: async (context: { abortSignal?: AbortSignal }) => {
+            await waitForIdleImpl(context.abortSignal);
         },
         getModel: async () => ({ contextWindow: 1000 }),
         compact: async () => {
-            await compactImpl();
+            // `rejectWith` models an admission refusal, which pi reports
+            // before emitting `compaction_start`.
             if (rejectWith !== undefined) return Result.err(rejectWith);
+            for (const listener of listeners.get("compaction_start") ?? []) {
+                listener({ type: "compaction_start", lane: "main", reason: "manual" });
+            }
+            await compactImpl();
             // Reaching here means compactImpl did not throw, so report the
             // committed-compaction shape the controller expects. `tipId` is the
             // committed entry — the controller reads it back for the toast
@@ -256,6 +264,116 @@ async function runAutoCompact(
 }
 
 describe("compaction lifecycle interlock", () => {
+    it("does not start a queued auto-compaction after Stop cancels before the idle wait begins", async () => {
+        const { adapter, frames } = newAdapter();
+        let compactCalls = 0;
+        const { emitRunEnd, controller } = newController(adapter, async () => {
+            compactCalls += 1;
+        });
+
+        emitRunEnd();
+        controller.cancelAutoCompaction();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(compactCalls, 0);
+        assert.deepEqual(frames, []);
+    });
+
+    it("checks threshold and admits compaction only after waitForIdle resolves", async () => {
+        const { adapter } = newAdapter();
+        let releaseWait!: () => void;
+        const waitForIdle = new Promise<void>((resolve) => {
+            releaseWait = resolve;
+        });
+        let compactCalls = 0;
+        let enteredWait!: () => void;
+        const waitStarted = new Promise<void>((resolve) => {
+            enteredWait = resolve;
+        });
+        const { emitRunEnd, compactionEnded } = newController(
+            adapter,
+            async () => {
+                compactCalls += 1;
+            },
+            undefined,
+            COMPACTED_ENTRY_ID,
+            compactableEntries(),
+            async () => {
+                enteredWait();
+                await waitForIdle;
+            },
+        );
+
+        emitRunEnd();
+        await waitStarted;
+        assert.equal(compactCalls, 0, "must not compact while lane is still busy");
+        releaseWait();
+        await compactionEnded;
+        assert.equal(compactCalls, 1);
+    });
+
+    it("cancels an automatic compaction while waiting for lane idleness", async () => {
+        const { adapter, frames } = newAdapter();
+        let compactCalls = 0;
+        let enteredWait!: () => void;
+        const waitStarted = new Promise<void>((resolve) => {
+            enteredWait = resolve;
+        });
+        const { emitRunEnd, controller } = newController(
+            adapter,
+            async () => {
+                compactCalls += 1;
+            },
+            undefined,
+            COMPACTED_ENTRY_ID,
+            compactableEntries(),
+            (signal) =>
+                new Promise<void>((_resolve, reject) => {
+                    enteredWait();
+                    signal?.addEventListener(
+                        "abort",
+                        () => reject(new DOMException("aborted", "AbortError")),
+                        { once: true },
+                    );
+                }),
+        );
+
+        emitRunEnd();
+        await waitStarted;
+        controller.cancelAutoCompaction();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(compactCalls, 0);
+        assert.deepEqual(frames, []);
+    });
+
+    it("stays silent when auto-compaction loses the admission race", async () => {
+        const { adapter, frames } = newAdapter();
+        let compactCalls = 0;
+        const { emitRunEnd, controller } = newController(
+            adapter,
+            async () => {},
+            new LaneBusy({
+                lane: "main",
+                operationId: "op-0",
+                operationKind: "run",
+                message: "lane is busy",
+            }),
+        );
+        const lane = (controller as unknown as { lane: { compact: () => Promise<unknown> } }).lane;
+        const compact = lane.compact;
+        lane.compact = async () => {
+            compactCalls += 1;
+            return compact();
+        };
+
+        emitRunEnd();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(compactCalls, 1);
+        assert.deepEqual(frames, [], "a lost race must not toast or freeze the input");
+    });
+
     it("engages the interlock while compaction runs", async () => {
         const { adapter, frames } = newAdapter();
         let seenDuringCompact: boolean | undefined;

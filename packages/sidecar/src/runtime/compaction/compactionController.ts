@@ -43,8 +43,9 @@ export type Now = () => number;
 
 /**
  * Compaction lifecycle signal. Emitted as a strictly paired start/end around
- * every `harness.compact()` call so downstream consumers (the push adapter's
- * in-flight map, the desktop input freeze) can never be left latched on.
+ * every manual compaction and every admitted auto-compaction, so downstream
+ * consumers (the push adapter's in-flight map, the desktop input freeze) can
+ * never be left latched on.
  *
  * pi 0.85 does emit `compaction_start` and `compaction_end` on the same event
  * bus, but the sidecar's own pair is kept because pi's events do not cover the
@@ -177,6 +178,15 @@ export interface CompactionControllerOptions {
  */
 const EFFECTIVE_TTL_MS = 1_000;
 
+type CompactRequest =
+    | {
+          kind: "manual";
+          customInstructions?: string;
+          signal?: AbortSignal;
+          retention: { keepRecentTokens: number };
+      }
+    | { kind: "auto"; signal: AbortSignal };
+
 export class CompactionController {
     private readonly harness: AgentHarness<ExecutionToolContext>;
     private readonly lane: AgentLane;
@@ -195,6 +205,8 @@ export class CompactionController {
      * propagates to the UI.
      */
     private compactionCheck: Promise<void> = Promise.resolve();
+    /** Controllers for post-run checks that are queued or running. */
+    private readonly autoCompactionAborts = new Set<AbortController>();
     /**
      * Short-TTL cache for `effectiveCompaction()`. `undefined` means not cached
      * or invalidated. The `settings.write` handler invalidates after writing,
@@ -231,34 +243,54 @@ export class CompactionController {
      * classification the lifecycle sink just published, rather than
      * re-deriving — and flattening — it.
      *
-     * `signal`, when supplied, is threaded into pi's Context so the summary
-     * LLM call itself aborts with the caller (pi passes `context.abortSignal`
-     * to the provider request); pi then finishes the compaction with status
-     * "aborted" or a thrown `CompactionError`.
+     * Manual compaction publishes `start` immediately — the user is waiting.
+     * Auto-compaction publishes it only once pi admits the operation (its
+     * `compaction_start` event), so losing the admission race to a new prompt
+     * (LaneBusy) or to Stop stays invisible instead of toasting a failure the
+     * user never asked for. `end` is emitted iff `start` was.
      *
-     * `retention`, when supplied, temporarily replaces `keepRecentTokens` for
-     * this call only and restores the previous budget afterwards. Manual
-     * compact uses a usage-relative budget; auto compact leaves the shared
-     * threshold-derived settings in place. An empty cut (no history and no
-     * split-turn prefix) is `nothing` — do not commit an empty summary.
+     * `signal` cancels work before lane admission. For manual compaction it is
+     * also threaded into pi's Context; for auto-compaction, session.abort()
+     * owns cancellation after admission and calls lane.abort() so the durable
+     * operation can reconcile and settle normally.
+     *
+     * Manual `retention` temporarily replaces `keepRecentTokens` for this call
+     * only and restores the previous budget afterwards; auto compact leaves
+     * the shared threshold-derived settings in place. An empty cut (no history
+     * and no split-turn prefix) is `nothing` — do not commit an empty summary.
      */
     private async runCompact(
-        customInstructions?: string,
-        signal?: AbortSignal,
-        retention?: { keepRecentTokens: number },
+        request: CompactRequest,
     ): Promise<{ ok: true } | { ok: false; reason: CompactionFailureReason; error: unknown }> {
+        const { signal } = request;
         const tokensBefore = await this.readTokensBefore();
-        try {
-            this.onLifecycle?.({ phase: "start", tokensBefore });
-        } catch (e) {
-            log.error("compaction lifecycle start sink threw:", e);
+        let started = false;
+        const emitStart = (): void => {
+            if (started) return;
+            started = true;
+            try {
+                this.onLifecycle?.({ phase: "start", tokensBefore });
+            } catch (e) {
+                log.error("compaction lifecycle start sink threw:", e);
+            }
+        };
+        let disposeStartListener: (() => void) | undefined;
+        if (request.kind === "manual") {
+            emitStart();
+        } else {
+            // lane.compact() always admits with reason "manual"; run-internal
+            // threshold/overflow compactions carry their own reason.
+            disposeStartListener = this.harness.events.on("compaction_start", (event) => {
+                if (event.lane === this.lane.name && event.reason === "manual") emitStart();
+            });
         }
         let reason: CompactionFailureReason | undefined;
         let committed: { summaryChars: number; fromHook: boolean } | undefined;
         let error: unknown;
         let previousKeep: number | undefined;
         try {
-            if (retention !== undefined) {
+            if (request.kind === "manual") {
+                const { retention } = request;
                 const current = await this.harness.getCompactionSettings(harnessContext);
                 previousKeep = current.keepRecentTokens;
                 if (current.keepRecentTokens !== retention.keepRecentTokens) {
@@ -286,11 +318,22 @@ export class CompactionController {
                     });
                 }
             }
-            const result = await this.lane.compact(
-                customInstructions === undefined ? undefined : { customInstructions },
-                signal ? contextFor(signal) : harnessContext,
-            );
+            if (signal?.aborted) {
+                reason = "aborted";
+                return { ok: false, reason, error: signal.reason };
+            }
+            const result =
+                request.kind === "manual"
+                    ? await this.lane.compact(
+                          request.customInstructions === undefined
+                              ? undefined
+                              : { customInstructions: request.customInstructions },
+                          signal ? contextFor(signal) : harnessContext,
+                      )
+                    : await this.lane.compact(undefined, harnessContext);
             if (!result.ok) throw toHarnessError("compact", result.error);
+            // Admitted — keep the pair intact even if the start event was missed.
+            emitStart();
             const record = result.value.compaction;
             if (record.status === "completed") {
                 // The record's `tipId` is the committed compaction entry (pi sets
@@ -321,6 +364,7 @@ export class CompactionController {
             reason = classifyCompactFailure(e);
             error = e;
         } finally {
+            disposeStartListener?.();
             if (previousKeep !== undefined) {
                 try {
                     const current = await this.harness.getCompactionSettings(harnessContext);
@@ -335,11 +379,12 @@ export class CompactionController {
                 }
             }
             try {
-                this.onLifecycle?.({
-                    phase: "end",
-                    ...(reason ? { reason } : {}),
-                    ...(committed ? { committed } : {}),
-                });
+                if (started)
+                    this.onLifecycle?.({
+                        phase: "end",
+                        ...(reason ? { reason } : {}),
+                        ...(committed ? { committed } : {}),
+                    });
             } catch (e) {
                 log.error("compaction lifecycle end sink threw:", e);
             }
@@ -450,8 +495,8 @@ export class CompactionController {
      *
      * Two triggers:
      *  - `run_end` → schedule an auto-compaction check (deferred via
-     *    `lane.runWhenIdle` so it cannot race a queued steer / follow-up
-     *    turn, and also covers compaction and navigation operations)
+     *    `lane.waitForIdle` so it does not race a queued steer / follow-up
+     *    turn, nor a compaction or navigation operation)
      *  - `compaction_end` → maintain the pinOnce consumed set for pinOnce
      *    tenants (currently none; see `wireHooks.pinOnceConsumer`)
      */
@@ -484,23 +529,50 @@ export class CompactionController {
     }
 
     /**
+     * Cancel a pending or active post-run automatic compaction. The lane abort
+     * remains the authority for an already-admitted operation; this signal
+     * covers the wait-for-idle and threshold-check window before admission.
+     * Idempotent so session.abort can call it on every Stop click.
+     */
+    cancelAutoCompaction(): void {
+        for (const controller of this.autoCompactionAborts) controller.abort();
+    }
+
+    /**
      * Serialized auto-compaction check. Multiple `run_end` events queue in
      * order; one failed compaction does not interrupt later checks.
      * Internal fire-and-forget — does not block `prompt()`.
      *
-     * The check runs via `lane.runWhenIdle` so it cannot race a queued steer /
-     * follow-up turn: pi holds the callback until the lane is genuinely idle,
-     * which is also what makes `compact()` safe to call from here.
+     * The check waits for lane idleness without holding the idle owner. It then
+     * asks lane.compact() to atomically admit a compaction; a concurrent new
+     * operation may win and produce a normal LaneBusy result.
      */
     private scheduleCompactionCheck(): void {
-        const next = this.compactionCheck.then(() =>
-            this.lane
-                .runWhenIdle(() => this.maybeCompact(), harnessContext)
-                .catch((e: unknown) => {
+        const abortController = new AbortController();
+        // Register synchronously with the run_end event: Stop may arrive before
+        // the serialized promise chain gets its next microtask.
+        this.autoCompactionAborts.add(abortController);
+        const next = this.compactionCheck.then(async () => {
+            try {
+                if (abortController.signal.aborted) return;
+                // waitForIdle observes idleness without claiming the lane's
+                // idleOwner. Calling lane.compact() after this promise returns
+                // therefore re-enters lane.command() safely; a new operation
+                // may win the race and be reported as LaneBusy.
+                await this.lane.waitForIdle(contextFor(abortController.signal));
+                if (abortController.signal.aborted) return;
+                await this.maybeCompact(abortController.signal);
+            } catch (e: unknown) {
+                if (abortController.signal.aborted) {
+                    log.debug("automatic compaction cancelled:", e);
+                } else {
                     // A closed lane (session detached mid-turn) is expected here.
-                    log.debug("runWhenIdle for auto-compaction did not run:", e);
-                }),
-        );
+                    log.debug("automatic compaction check did not run:", e);
+                }
+            } finally {
+                this.autoCompactionAborts.delete(abortController);
+            }
+        });
         this.compactionCheck = next.catch(() => undefined);
     }
 
@@ -513,7 +585,8 @@ export class CompactionController {
      * shared settings `syncSettings()` pushes, which is what keeps this path
      * and pi's turn-boundary check cutting at the same place.
      */
-    private async maybeCompact(): Promise<void> {
+    private async maybeCompact(signal: AbortSignal): Promise<void> {
+        if (signal.aborted) return;
         const { enabled, threshold } = this.effectiveCompaction();
         if (!enabled) return;
         let usedTokens: number;
@@ -522,8 +595,9 @@ export class CompactionController {
             const usage = await this.getContextUsage();
             usedTokens = usage.usedTokens;
             contextWindow = usage.model?.contextWindow ?? 0;
+            if (signal.aborted) return;
         } catch (e) {
-            log.error("maybeCompact: failed to read context:", e);
+            if (!signal.aborted) log.error("maybeCompact: failed to read context:", e);
             return;
         }
         if (!contextWindow || contextWindow <= 0) {
@@ -538,9 +612,13 @@ export class CompactionController {
         if (usedTokens <= triggerTokens(contextWindow, threshold)) return;
         // Busy / another run_end already triggered it — log and retry on the
         // next run_end. `runCompact` reports rather than throws.
-        const outcome = await this.runCompact();
+        const outcome = await this.runCompact({ kind: "auto", signal });
         if (!outcome.ok) {
-            log.error("maybeCompact: harness.compact() failed:", outcome.reason, outcome.error);
+            if (outcome.reason === "busy") {
+                log.debug("maybeCompact: lane became busy before compaction admission");
+            } else if (outcome.reason !== "aborted") {
+                log.error("maybeCompact: harness.compact() failed:", outcome.reason, outcome.error);
+            }
         }
     }
 
@@ -658,8 +736,11 @@ export class CompactionController {
         } catch (e) {
             log.error("runManualCompact: failed to read context:", e);
         }
-        return this.runCompact(customInstructions, signal, {
-            keepRecentTokens: manualKeepRecentTokens(usedTokens),
+        return this.runCompact({
+            kind: "manual",
+            customInstructions,
+            signal,
+            retention: { keepRecentTokens: manualKeepRecentTokens(usedTokens) },
         });
     }
 
