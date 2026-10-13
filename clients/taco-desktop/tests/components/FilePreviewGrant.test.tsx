@@ -56,6 +56,15 @@ vi.mock("shiki", () => ({
     codeToHtml: vi.fn(async (code: string) => `<pre class="shiki"><code>${code}</code></pre>`),
 }));
 
+// The retry renders the file as markdown through AssistantMarkdown, whose
+// rehype-shiki plugin loads real grammars — seconds of work that pushed this
+// case to ~4s alone and past the 5s timeout under suite load. A no-op plugin
+// keeps the react-markdown render (the heading below) without the grammar
+// load; real highlighting is covered by AssistantMarkdown.test.tsx.
+vi.mock("@shikijs/rehype", () => ({
+    default: () => () => {},
+}));
+
 vi.spyOn(useI18n, "useT").mockReturnValue({
     t: (key: string) => key,
 } as unknown as ReturnType<typeof useI18n.useT>);

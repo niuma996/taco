@@ -365,117 +365,128 @@ export function useWorkspaceLifecycle({
             placeholder[cwd] = createEmptyWorkspace(cwd, cwd === activeTarget);
         }
         dispatchWs({ type: "INIT", workspaces: placeholder });
-        // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is now read
-        // from ~/.taco/desktop.json by the Rust host at spawn time, so
-        // client.start no longer takes options. Local pre-spawn LS reads are
-        // still useful for the other client fields (theme, uiLanguage) that
-        // drive synchronous UI before the sidecar answers.
-        // Cold-start barrier: a single `client.start(activeCwd)` first to give prewarm's spawn
-        // a beat to finish before any sessionList fires. Without it the per-cwd `Promise.all`
-        // races prewarm — prewarm's reap+respawn of a stale daemon takes seconds (Alive → dies
-        // mid-reap → Stale → fresh daemon binds), every per-cwd start burns its retry budget
-        // on the same daemon, sidebar sits empty for 30+s. After the leader succeeds the daemon
-        // is hot and per-cwd ensureWorkspace hits a populated slot in ms.
-        //
-        // Budget is deliberately SHORT (3 attempts ≈ 4s) — common cold start resolves in 1-3s.
-        // If the leader can't get the daemon ready, fall back to a single deferred background
-        // retry so the sidebar renders immediately (empty) and self-fills ~5s later.
-        const leaderDelays = [0, 1000, 3000];
-        let leaderOk = false;
-        let leaderLastErr: unknown;
-        bootMark("ui.leader.barrier_enter", `cwd=${activeTarget}`);
-        for (const [i, delay] of leaderDelays.entries()) {
-            if (delay > 0) {
-                await new Promise((r) => setTimeout(r, delay));
-            }
-            try {
-                // Each attempt is timed separately: client.start carries its own
-                // 10s awaitHandshake ceiling, so 3 attempts can legitimately
-                // consume ~34s. Per-attempt marks distinguish "one slow attempt"
-                // from "the budget was walked to exhaustion".
-                await bootPhase(`ui.leader.start.attempt${i}`, () =>
-                    client.start(asWorkspaceId(activeTarget)),
-                );
-                leaderOk = true;
-                break;
-            } catch (err) {
-                leaderLastErr = err;
-            }
-        }
-        bootMark("ui.leader.barrier_exit", `ok=${leaderOk}`);
-        if (!leaderOk) {
-            console.error(
-                "[taco] leader start failed (daemon not ready in budget); scheduling background retry",
-                activeTarget,
-                leaderLastErr,
-            );
-            // Non-blocking fallback: retry the full load once, well after the
-            // cold-start window. If the daemon is just slow (not dead), this
-            // fills the sidebar without the user staring at an empty panel;
-            // if it's truly dead, the empty state + this error is the signal.
-            setTimeout(() => {
-                void reloadAllWorkspacesRef.current().catch((e) => {
-                    console.error("[taco] background session reload failed", e);
-                });
-            }, 5000);
-        }
-        // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is read from
-        // ~/.taco/desktop.json by the Rust host, so client.start no longer takes options.
-        //
-        // Only the active workspace is fetched here. Fetching all of `opened` made cold start
-        // pay for workspaces the user cannot see: five concurrent session.list calls, each
-        // walking that workspace's whole session store on the daemon — that both delayed the
-        // one list the sidebar renders and drove daemon memory up, pushing calls past their
-        // 15s ceiling. The rest load on demand (see switchWorkspace). Per-cwd retries are now
-        // a safety net only — leader barrier usually succeeds on first attempt.
-        const delays = [0, 1000, 2000];
-        let anyExhausted = false;
-        {
-            const cwd = activeTarget;
-            let lastErr: unknown;
-            for (const delay of delays) {
+        // No workspace to load: `resolveActiveCwd` returns "" when nothing is
+        // opened and `initDefaultCwd` failed (see `defaultCwdSettled`). `asWorkspaceId`
+        // rejects "", so the leader barrier and per-cwd retries below would only
+        // sleep through their delays on a guaranteed TypeError. Onboarding picks a
+        // directory and loads it from there.
+        if (activeTarget !== "") {
+            // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is now read
+            // from ~/.taco/desktop.json by the Rust host at spawn time, so
+            // client.start no longer takes options. Local pre-spawn LS reads are
+            // still useful for the other client fields (theme, uiLanguage) that
+            // drive synchronous UI before the sidecar answers.
+            // Cold-start barrier: a single `client.start(activeCwd)` first to give prewarm's spawn
+            // a beat to finish before any sessionList fires. Without it the per-cwd `Promise.all`
+            // races prewarm — prewarm's reap+respawn of a stale daemon takes seconds (Alive → dies
+            // mid-reap → Stale → fresh daemon binds), every per-cwd start burns its retry budget
+            // on the same daemon, sidebar sits empty for 30+s. After the leader succeeds the daemon
+            // is hot and per-cwd ensureWorkspace hits a populated slot in ms.
+            //
+            // Budget is deliberately SHORT (3 attempts ≈ 4s) — common cold start resolves in 1-3s.
+            // If the leader can't get the daemon ready, fall back to a single deferred background
+            // retry so the sidebar renders immediately (empty) and self-fills ~5s later.
+            const leaderDelays = [0, 1000, 3000];
+            let leaderOk = false;
+            let leaderLastErr: unknown;
+            bootMark("ui.leader.barrier_enter", `cwd=${activeTarget}`);
+            for (const [i, delay] of leaderDelays.entries()) {
                 if (delay > 0) {
-                    console.warn(`[taco] retrying start+sessionList for ${cwd} in ${delay}ms`);
                     await new Promise((r) => setTimeout(r, delay));
                 }
                 try {
-                    await bootPhase(`ui.percwd.start[${cwd}]`, () =>
-                        client.start(asWorkspaceId(cwd)),
+                    // Each attempt is timed separately: client.start carries its own
+                    // 10s awaitHandshake ceiling, so 3 attempts can legitimately
+                    // consume ~34s. Per-attempt marks distinguish "one slow attempt"
+                    // from "the budget was walked to exhaustion".
+                    await bootPhase(`ui.leader.start.attempt${i}`, () =>
+                        client.start(asWorkspaceId(activeTarget)),
                     );
-                    // sessionList is bounded only by rpcTimeoutMs, which
-                    // defaults to 1,000,000ms. If the daemon accepts the
-                    // connection and completes the handshake but never
-                    // answers this call, the await parks here for ~17min
-                    // with no error to catch — the mark is how we tell that
-                    // apart from a slow-but-answering daemon.
-                    const list = await bootPhase(`ui.percwd.sessionList[${cwd}]`, () =>
-                        client.sessionList(asWorkspaceId(cwd)),
-                    );
-                    dispatchListResult(cwd, list, false);
-                    lastErr = undefined;
+                    leaderOk = true;
                     break;
                 } catch (err) {
-                    lastErr = err;
+                    leaderLastErr = err;
                 }
             }
-            if (lastErr !== undefined) {
-                console.error("[taco] loadWorkspaceSessions failed after retries", cwd, lastErr);
-                bootMark(`ui.percwd.exhausted[${cwd}]`);
-                anyExhausted = true;
+            bootMark("ui.leader.barrier_exit", `ok=${leaderOk}`);
+            if (!leaderOk) {
+                console.error(
+                    "[taco] leader start failed (daemon not ready in budget); scheduling background retry",
+                    activeTarget,
+                    leaderLastErr,
+                );
+                // Non-blocking fallback: retry the full load once, well after the
+                // cold-start window. If the daemon is just slow (not dead), this
+                // fills the sidebar without the user staring at an empty panel;
+                // if it's truly dead, the empty state + this error is the signal.
+                setTimeout(() => {
+                    void reloadAllWorkspacesRef.current().catch((e) => {
+                        console.error("[taco] background session reload failed", e);
+                    });
+                }, 5000);
             }
-        }
-        // Exhausting the per-cwd retries is otherwise terminal: nothing else refetches, so
-        // the sidebar stays empty. `leaderOk` fallback above does not cover this — a daemon
-        // that was serving when the leader barrier passed and died moments later leaves
-        // `leaderOk === true` with every list still unfetched.
-        //
-        // Arming a timer does not work: retries burn ~45s of FAST_RPC_TIMEOUT_MS and the
-        // replacement daemon binds on its own schedule (measured: exhaustion +49.4s,
-        // replacement serving +54.1s — a 3s timer fired into the gap and failed twice).
-        // Latch the failure instead and let the epoch handler fire the reload when the
-        // new daemon has actually answered `initialize`.
-        if (anyExhausted) {
-            pendingSessionReloadRef.current = true;
+            // Sidecar spawn-time env (debugMode → TACO_DEBUG_LLM_PAYLOAD) is read from
+            // ~/.taco/desktop.json by the Rust host, so client.start no longer takes options.
+            //
+            // Only the active workspace is fetched here. Fetching all of `opened` made cold start
+            // pay for workspaces the user cannot see: five concurrent session.list calls, each
+            // walking that workspace's whole session store on the daemon — that both delayed the
+            // one list the sidebar renders and drove daemon memory up, pushing calls past their
+            // 15s ceiling. The rest load on demand (see switchWorkspace). Per-cwd retries are now
+            // a safety net only — leader barrier usually succeeds on first attempt.
+            const delays = [0, 1000, 2000];
+            let anyExhausted = false;
+            {
+                const cwd = activeTarget;
+                let lastErr: unknown;
+                for (const delay of delays) {
+                    if (delay > 0) {
+                        console.warn(`[taco] retrying start+sessionList for ${cwd} in ${delay}ms`);
+                        await new Promise((r) => setTimeout(r, delay));
+                    }
+                    try {
+                        await bootPhase(`ui.percwd.start[${cwd}]`, () =>
+                            client.start(asWorkspaceId(cwd)),
+                        );
+                        // sessionList is bounded only by rpcTimeoutMs, which
+                        // defaults to 1,000,000ms. If the daemon accepts the
+                        // connection and completes the handshake but never
+                        // answers this call, the await parks here for ~17min
+                        // with no error to catch — the mark is how we tell that
+                        // apart from a slow-but-answering daemon.
+                        const list = await bootPhase(`ui.percwd.sessionList[${cwd}]`, () =>
+                            client.sessionList(asWorkspaceId(cwd)),
+                        );
+                        dispatchListResult(cwd, list, false);
+                        lastErr = undefined;
+                        break;
+                    } catch (err) {
+                        lastErr = err;
+                    }
+                }
+                if (lastErr !== undefined) {
+                    console.error(
+                        "[taco] loadWorkspaceSessions failed after retries",
+                        cwd,
+                        lastErr,
+                    );
+                    bootMark(`ui.percwd.exhausted[${cwd}]`);
+                    anyExhausted = true;
+                }
+            }
+            // Exhausting the per-cwd retries is otherwise terminal: nothing else refetches, so
+            // the sidebar stays empty. `leaderOk` fallback above does not cover this — a daemon
+            // that was serving when the leader barrier passed and died moments later leaves
+            // `leaderOk === true` with every list still unfetched.
+            //
+            // Arming a timer does not work: retries burn ~45s of FAST_RPC_TIMEOUT_MS and the
+            // replacement daemon binds on its own schedule (measured: exhaustion +49.4s,
+            // replacement serving +54.1s — a 3s timer fired into the gap and failed twice).
+            // Latch the failure instead and let the epoch handler fire the reload when the
+            // new daemon has actually answered `initialize`.
+            if (anyExhausted) {
+                pendingSessionReloadRef.current = true;
+            }
         }
         // Sidebar is populated at this point — everything after is the active
         // workspace's chat panel, not the session list the user is waiting on.
