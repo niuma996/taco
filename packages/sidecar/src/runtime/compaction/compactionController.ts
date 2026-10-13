@@ -233,31 +233,21 @@ export class CompactionController {
      * Run `harness.compact()` bracketed by a paired lifecycle start/end.
      * `finally` is the pairing guarantee — every path out of `compact()`
      * (hook cancel, summary failure, `session_compact` never emitted, busy)
-     * still emits `end`, so a consumer's in-flight state cannot latch.
-     *
-     * A lifecycle-sink throw must not turn into a compaction failure, hence
-     * the guards around each emit.
-     *
-     * Returns the classified outcome instead of throwing, so the caller that
-     * needs the reason (the `session.compact` RPC) reports the same
-     * classification the lifecycle sink just published, rather than
-     * re-deriving — and flattening — it.
+     * still emits `end`, so a consumer's in-flight state cannot latch. Guards
+     * around each emit keep a lifecycle-sink throw from becoming a compaction
+     * failure. Returns the classified outcome rather than throwing, so the RPC
+     * reports the same classification the sink published.
      *
      * Manual compaction publishes `start` immediately — the user is waiting.
-     * Auto-compaction publishes it only once pi admits the operation (its
-     * `compaction_start` event), so losing the admission race to a new prompt
-     * (LaneBusy) or to Stop stays invisible instead of toasting a failure the
-     * user never asked for. `end` is emitted iff `start` was.
+     * Auto-compaction publishes it only once pi admits the operation, so
+     * losing the admission race to a new prompt (LaneBusy) or to Stop stays
+     * invisible instead of toasting a failure nobody asked for. `end` is
+     * emitted iff `start` was.
      *
-     * `signal` cancels work before lane admission. For manual compaction it is
-     * also threaded into pi's Context; for auto-compaction, session.abort()
-     * owns cancellation after admission and calls lane.abort() so the durable
-     * operation can reconcile and settle normally.
-     *
-     * Manual `retention` temporarily replaces `keepRecentTokens` for this call
-     * only and restores the previous budget afterwards; auto compact leaves
-     * the shared threshold-derived settings in place. An empty cut (no history
-     * and no split-turn prefix) is `nothing` — do not commit an empty summary.
+     * `signal` cancels before lane admission. Manual `retention` temporarily
+     * replaces `keepRecentTokens` for this call only; auto compact leaves the
+     * shared threshold-derived settings alone. An empty cut (no history, no
+     * split-turn prefix) is `nothing` — do not commit an empty summary.
      */
     private async runCompact(
         request: CompactRequest,
@@ -630,20 +620,17 @@ export class CompactionController {
      *
      * Bounded by `COMPACT_TIMEOUT_MS` (30s). `signal` aborting, the timeout
      * elapsing, and a classified harness rejection all resolve to
-     * `{ ok: false, reason }` — `reason` distinguishes them so callers do not
-     * have to parse logs.
+     * `{ ok: false, reason }` so callers need not parse logs. Retention is
+     * sized from current usage, not the auto-compact trigger, so Compact on a
+     * 1M-window session that is 10% full still cuts history; if
+     * `prepareCompaction` would summarize nothing under that budget, the call
+     * returns `nothing` without committing an empty summary.
      *
-     * Retention is sized from current usage, not the auto-compact trigger, so
-     * Compact on a 1M-window session that is only 10% full still cuts history.
-     * If `prepareCompaction` would summarize nothing under that budget, the
-     * call returns `nothing` without committing an empty summary.
-     *
-     * Cancellation: the caller's signal is threaded into pi's Context
-     * (`contextFor`), so aborting cancels the in-flight summary LLM call —
-     * pi hands `context.abortSignal` to the provider request. A cancelled
-     * summary surfaces as status "aborted" or a thrown `CompactionError`;
-     * the wait resolves `{ ok: false, reason: "aborted" }` either way, and no
-     * compaction entry is committed for the aborted attempt.
+     * The caller's signal is threaded into pi's Context (`contextFor`), so
+     * aborting cancels the in-flight summary LLM call — pi hands
+     * `context.abortSignal` to the provider request. A cancelled summary
+     * surfaces as status "aborted" or a thrown `CompactionError`; either way
+     * the wait resolves `{ ok: false, reason: "aborted" }`.
      */
     async compact(
         customInstructions?: string,

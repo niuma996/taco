@@ -34,20 +34,17 @@ function escalateToSigkill(child: ChildProcess): void {
  * land on the right process — but for anything compound (`a && b`, `a; b`,
  * `a | b`, `a & wait`) sh stays alive as the group leader and the command runs
  * as its child. Signalling only the leader leaves that grandchild running: it
- * keeps its inherited stdout/stderr pipes open, so the `close` event this
- * module awaits never fires and the tool call hangs until the grandchild exits
- * on its own. A timed-out or aborted `pnpm build && pnpm test` is the common
- * case, not an edge one.
+ * holds the inherited stdout/stderr pipes open, so the `close` event this
+ * module awaits never fires and the tool call hangs. A timed-out or aborted
+ * `pnpm build && pnpm test` is the common case, not an edge one.
  *
  * `detached: true` (set at spawn) makes the child a process-group leader, so
- * the negative pid addresses the whole group rather than one member. Killing
- * the group also reaches grandchildren the child spawned itself.
+ * the negative pid addresses the whole group, reaching grandchildren too.
  *
  * POSIX-only, and deliberately so: on Windows `detached` gives the child its
- * own console window, which is exactly what `HIDDEN_WINDOWS_SPAWN` exists to
- * prevent, and negative pids are not a thing there either. Windows therefore
- * still terminates only the direct child — see `killProcessTree`'s Windows
- * branch for what that leaves behind.
+ * own console window — what `HIDDEN_WINDOWS_SPAWN` exists to prevent — and
+ * negative pids are not a thing there. Windows still terminates only the
+ * direct child.
  */
 function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
     if (process.platform === "win32" || child.pid === undefined) {

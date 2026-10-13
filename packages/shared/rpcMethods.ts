@@ -98,30 +98,18 @@ export type RpcMethodName = (typeof RPC)[keyof typeof RPC];
  * on a model, a subprocess, or the network. A daemon that has accepted the
  * connection and finished the handshake but cannot answer one of these within
  * seconds is not "busy", it is broken — and the caller is better served by an
- * error it can retry or surface than by a promise that never settles.
+ * error it can retry than by a promise that never settles. The default RPC
+ * ceiling is deliberately huge (a `session.prompt` can stream for minutes);
+ * applying it to a metadata read is what let a wedged daemon leave the
+ * desktop's sidebar empty with nothing to catch.
  *
- * The distinction matters because the default RPC ceiling is deliberately huge
- * (a `session.prompt` can legitimately stream for many minutes). Applying that
- * ceiling to a metadata read is what let a wedged daemon leave the desktop's
- * sidebar empty with nothing to catch: the await simply never returned.
- *
- * Deliberately NOT in this set:
- *   - session.prompt / compact / submitAnswers — model-bound, unbounded
- *     by nature.
- *   - session.steer / followUp — enqueue-style and bounded (the handler waits
- *     out a compaction, then writes the inbox instantly), but the compaction
- *     wait can outlast the 15s fast ceiling. A spurious client timeout would
- *     leave the caller unsure whether the message landed in the queue — the
- *     same ambiguity this set exists to avoid. Callers wait the full bounded
- *     duration instead.
- *   - session.cancelQueued — an inbox delete with no compaction wait, so it is
- *     genuinely fast. Kept out anyway because it is a mutation: see the note on
- *     mutations below.
- *   - provider.listModels — reaches out to a user-configured HTTP endpoint.
- *   - channels.* bind/verify — waits on a human completing a flow.
- *   - checkpoints.restore, memory.write, *.create/update/delete — mutations,
- *     where a spurious timeout could leave the caller unsure whether the write
- *     landed. A slow mutation is a lesser evil than an ambiguous one.
+ * Deliberately NOT in this set: anything model- or network-bound
+ * (`session.prompt` / `compact` / `submitAnswers`, `provider.listModels`,
+ * `channels.*` bind/verify, which waits on a human); anything unbounded in
+ * practice (`session.steer` / `followUp`, whose compaction wait can outlast
+ * the 15s ceiling, leaving the caller unsure whether the message landed); and
+ * any mutation (`session.cancelQueued`, `checkpoints.restore`, `memory.write`,
+ * `*.create/update/delete`), where a spurious timeout is ambiguous.
  */
 export const FAST_RPC_METHODS: ReadonlySet<string> = new Set<string>([
     RPC.workspaceList,
