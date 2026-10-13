@@ -84,7 +84,9 @@
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: thin;
-    scrollbar-color: var(--fg-dim) transparent;
+    scrollbar-color: var(--scrollbar-thumb-rest) transparent;
+    --scrollbar-thumb-rest: color-mix(in srgb, var(--fg-dim) 50%, transparent);
+    --scrollbar-thumb-active: var(--fg-dim);
 }
 .md-table-scroll::-webkit-scrollbar {
     height: 8px;
@@ -93,11 +95,8 @@
     background: transparent;
 }
 .md-table-scroll::-webkit-scrollbar-thumb {
-    background: var(--fg-dim);
+    background: var(--scrollbar-thumb-rest);
     border-radius: var(--radius-sm);
-}
-.md-table-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--brand-orange);
 }
 /* The scroll wrapper owns the outer spacing so it doesn't sit inside the
    scrollable area. */
@@ -206,7 +205,9 @@
    code block. */
 .md-code-block pre {
     scrollbar-width: thin;
-    scrollbar-color: var(--fg-dim) transparent;
+    scrollbar-color: var(--scrollbar-thumb-rest) transparent;
+    --scrollbar-thumb-rest: color-mix(in srgb, var(--fg-dim) 50%, transparent);
+    --scrollbar-thumb-active: var(--fg-dim);
 }
 .md-code-block pre::-webkit-scrollbar {
     height: 8px;
@@ -215,11 +216,8 @@
     background: transparent;
 }
 .md-code-block pre::-webkit-scrollbar-thumb {
-    background: var(--fg-dim);
+    background: var(--scrollbar-thumb-rest);
     border-radius: var(--radius-sm);
-}
-.md-code-block pre::-webkit-scrollbar-thumb:hover {
-    background: var(--brand-orange);
 }
 
 /* Shiki dual theme: token colors driven by --shiki-light/--shiki-dark variables.

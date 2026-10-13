@@ -291,11 +291,22 @@
 /* ── Global scrollbar ──
  * Theme: Nord dark var(--bg), var(--accent) (light blue).
  * Scrollbar thickened to 12px, thumb uses semi-transparent accent — darker on hover/active.
- * Firefox uses scrollbar-width / scrollbar-color; Chromium/WebKit uses ::-webkit-scrollbar.
- * `.md-code-block pre` has a thinner scrollbar (8px) defined earlier that overrides this. */
+ * The resting thumb is the accent at half strength so an idle list doesn't carry a
+ * full-opacity bar next to its content; hovering the scrolled region brings it back to
+ * full accent. Hover has to arrive through a custom property: Blink won't re-match a
+ * `:hover` selector against the thumb pseudo-element, but a property that changes on
+ * the scroller does reach the thumb. The `html` prefix is load-bearing — without it
+ * `*:hover` and a scroller's own class both weigh (0,1,0), and whichever stylesheet
+ * loads last silently wins; prefixing tips the hover rule above any single class.
+ * Hovering a scroller also puts its thumb in `:hover`, so the thumb's own hover state
+ * resolves to the same active color rather than a third, darker one.
+ * Firefox uses scrollbar-width / scrollbar-color and has no hover state for
+ * scrollbars, so it keeps the resting color. */
 * {
     scrollbar-width: thin;
-    scrollbar-color: var(--accent-bg-active) transparent;
+    scrollbar-color: var(--scrollbar-thumb-rest) transparent;
+    --scrollbar-thumb-rest: color-mix(in srgb, var(--accent-bg-active) 50%, transparent);
+    --scrollbar-thumb-active: var(--accent-bg-active);
 }
 *::-webkit-scrollbar {
     width: 12px;
@@ -305,13 +316,16 @@
     background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-    background: var(--accent-bg-active);
+    background: var(--scrollbar-thumb-rest);
     border-radius: var(--radius-md);
     border: 2px solid transparent;
     background-clip: padding-box;
 }
+html *:hover {
+    --scrollbar-thumb-rest: var(--scrollbar-thumb-active);
+}
 *::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-border);
+    background: var(--scrollbar-thumb-rest);
     background-clip: padding-box;
     border: 2px solid transparent;
 }
