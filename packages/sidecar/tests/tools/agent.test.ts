@@ -69,22 +69,9 @@ describe("agent tool", () => {
             subSessionId: "sub-1",
             agentType: "explorer",
         });
-    });
 
-    it("forwards an explicit context override to spawn", async () => {
-        let captured: unknown;
-        const spyOnUpdate = (): void => {};
-        const ctx: SubagentSpawnContext = {
-            async spawn(args) {
-                captured = args;
-                return { subSessionId: asSessionId("sub-1"), resultText: "done", isError: false };
-            },
-            async continue() {
-                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
-            },
-            abortSubagent: () => ({ stopped: false }),
-        };
-        const tool = createAgentTool(ctx, [{ agentType: "reviewer" }]);
+        // An explicit `context` override reaches spawn verbatim instead of
+        // being defaulted away.
         await invokeTool(
             tool,
             {
@@ -285,7 +272,6 @@ describe("agent tool", () => {
             [{ agentType: "explorer" }],
         );
 
-        const start = Date.now();
         const results = await Promise.all(
             Array.from({ length: N }, (_, i) =>
                 invokeTool(
@@ -296,7 +282,6 @@ describe("agent tool", () => {
                 ),
             ),
         );
-        const elapsed = Date.now() - start;
 
         assert.equal(results.length, N);
         for (const r of results) {
@@ -305,14 +290,14 @@ describe("agent tool", () => {
             const details = r.details as { agentType: string };
             assert.equal(details.agentType, "explorer");
         }
-        assert.ok(
-            peakActive >= 2,
-            `expected overlapping spawn calls (peak active=${peakActive}), proves Promise.all concurrency`,
-        );
-        // Loose upper bound: serial would be ≥ 3 * PER_CALL_MS; parallel ≈ PER_CALL_MS.
-        assert.ok(
-            elapsed < 3 * PER_CALL_MS,
-            `wall time ${elapsed}ms suggests sequential execution, not parallel`,
+        // Overlap is the proof of concurrency: a serial execute() would never
+        // have two spawns in flight at once. A wall-clock bound used to sit
+        // here too, but it failed under suite load (164ms vs a 150ms limit)
+        // while proving nothing peakActive does not.
+        assert.equal(
+            peakActive,
+            N,
+            `expected all ${N} spawn calls in flight together (peak active=${peakActive}), proves Promise.all concurrency`,
         );
     });
 });

@@ -11,7 +11,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { applyRunOutcome, Scheduler } from "../../src/scheduler/runner.ts";
 import { DEFAULT_MAX_CONSECUTIVE_FAILURES, type Job } from "../../src/scheduler/types.ts";
 
@@ -120,7 +120,9 @@ test("start() schedules every enabled job and skips disabled ones", async () => 
 test("successful invoke writes a history entry with status=ok", async () => {
     await withTmp(async (dir) => {
         const store = new MemoryStore();
-        store.jobs.set("a", intervalJob("a", 30));
+        // runNow, not a live interval: a second tick landing before stop()
+        // would append a second entry and break the length assertion.
+        store.jobs.set("a", intervalJob("a", 60_000, { enabled: false }));
         const scheduler = new Scheduler({
             store,
             lockDir: dir,
@@ -128,7 +130,7 @@ test("successful invoke writes a history entry with status=ok", async () => {
             now: fixedDate("2026-01-01T00:00:00.000Z"),
         });
         await scheduler.start();
-        await waitFor(() => store.writeCount >= 1, 500);
+        await scheduler.runNow("a");
         scheduler.stop();
         const saved = store.jobs.get("a");
         ok(saved);
@@ -398,33 +400,33 @@ test("reload reattaches the timer to reflect the latest stored copy", async () =
 
 test("detachAll clears every timer (no leaks after stop)", async () => {
     await withTmp(async (dir) => {
-        const store = new MemoryStore();
-        store.jobs.set("a", intervalJob("a", 20));
-        store.jobs.set("b", intervalJob("b", 20));
-        let invocations = 0;
-        const scheduler = new Scheduler({
-            store,
-            lockDir: dir,
-            invoke: async () => {
-                invocations += 1;
-            },
-        });
-        await scheduler.start();
-        await waitFor(() => invocations >= 4, 1_000);
-        // Wait for any in-flight invoke to finish (the lock release path
-        // schedules a save on the next microtask; stopping the scheduler
-        // before that lands leaves history entries truncated). Then
-        // snapshot the count.
-        await new Promise((r) => setTimeout(r, 30));
-        const beforeStop = invocations;
-        scheduler.detachAll();
-        await new Promise((r) => setTimeout(r, 200));
-        // After detachAll + a generous wait, no new invokes can land —
-        // but the assertion compares against the snapshot taken at stop,
-        // so any late-arriving fire from before stop time would show up
-        // as a failure. The 30ms sleep above absorbs those.
-        const delta = invocations - beforeStop;
-        ok(delta <= 1, `expected no new invokes after detachAll; saw ${delta}`);
+        // Mock only setInterval so ticks fire on demand; setTimeout and fs
+        // stay real. With wall-clock ticks, a fire still awaiting its lock
+        // write when the count was snapshotted landed after detachAll and
+        // read as a leak.
+        mock.timers.enable({ apis: ["setInterval"] });
+        try {
+            const store = new MemoryStore();
+            store.jobs.set("a", intervalJob("a", 20));
+            store.jobs.set("b", intervalJob("b", 20));
+            let invocations = 0;
+            const scheduler = new Scheduler({
+                store,
+                lockDir: dir,
+                invoke: async () => {
+                    invocations += 1;
+                },
+            });
+            await scheduler.start();
+            mock.timers.tick(20);
+            await waitFor(() => invocations === 2 && store.writeCount === 2, 1_000);
+            scheduler.detachAll();
+            mock.timers.tick(1_000);
+            await new Promise((r) => setTimeout(r, 50));
+            strictEqual(invocations, 2, "no fire may land after detachAll");
+        } finally {
+            mock.timers.reset();
+        }
     });
 });
 
