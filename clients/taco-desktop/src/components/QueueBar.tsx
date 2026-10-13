@@ -11,6 +11,7 @@
 import { X } from "lucide-react";
 import { useT } from "../i18n/useI18n.ts";
 import type { QueuedUiItem } from "../lib/chat/chatUtils";
+import { IconButton } from "./ui/IconButton.tsx";
 
 export interface QueueBarProps {
     items: QueuedUiItem[];
@@ -33,16 +34,14 @@ export function QueueBar({ items, onCancel }: QueueBarProps) {
                 <li key={item.id} className="queue-bar__row">
                     <span className="queue-bar__kind">{t(KIND_LABEL_KEYS[item.kind])}</span>
                     <span className="queue-bar__text">{item.text}</span>
-                    <button
-                        type="button"
-                        className="queue-bar__cancel"
+                    <IconButton
                         aria-label={t("queue.cancel")}
                         title={t("queue.cancel")}
                         disabled={item.optimistic === true}
                         onClick={() => onCancel(item)}
                     >
                         <X size={14} aria-hidden="true" />
-                    </button>
+                    </IconButton>
                 </li>
             ))}
         </ul>

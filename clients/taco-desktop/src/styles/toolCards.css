@@ -86,29 +86,6 @@
     color: var(--fg-dim);
     font-size: 0.9em;
 }
-.tool-card-read-open {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xs);
-    color: var(--fg-dim);
-    cursor: pointer;
-}
-.tool-card-read-open:hover {
-    background: var(--hover-overlay);
-    color: var(--fg);
-}
-.tool-card-read-open:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
 /* ── askUser tool card ── */
 .askuser-card {
     padding: 0.5rem 0.6rem;

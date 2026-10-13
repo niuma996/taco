@@ -157,29 +157,6 @@
     color: var(--fg);
     flex: 1;
 }
-.permission-rule-remove {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    line-height: 0;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--fg-dim);
-    font-size: var(--text-base);
-    cursor: pointer;
-}
-.permission-rule-remove:hover:not(:disabled) {
-    background: var(--hover-overlay);
-    color: var(--error);
-}
-.permission-rule-remove:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
 .settings-btn {
     display: inline-flex;
     align-items: center;
@@ -336,52 +313,12 @@
 .provider-row-status--ok {
     color: var(--success, var(--fg));
 }
-/* Card action icon buttons — square, transparent bg, faint bg on hover. line-height:0
-   eliminates SVG inline baseline offset; flex center truly centers the icon. */
-.icon-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    line-height: 0;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-dim);
-    cursor: pointer;
-    transition:
-        background 0.12s ease,
-        border-color 0.12s ease,
-        color 0.12s ease;
-}
-.icon-button:hover:not(:disabled) {
-    background: var(--hover-overlay);
-    border-color: var(--brand-orange);
-    color: var(--fg);
-}
-.icon-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-.icon-button svg {
-    display: block;
-}
-.icon-button svg > * {
-    fill: none;
-}
 /* Key icon — brand orange, signals "configure API key here". */
-.provider-row-key {
+.ui-icon-btn.provider-row-key {
     color: var(--brand-orange);
 }
-.provider-row-key:hover:not(:disabled) {
-    border-color: var(--brand-orange);
+.ui-icon-btn.provider-row-key:hover:not(:disabled) {
     color: var(--brand-orange-hover);
-}
-.provider-row-icon.provider-row-delete:hover:not(:disabled) {
-    border-color: var(--error);
-    color: var(--error);
 }
 
 /* custom-provider-modal — CustomProviderForm's own Radix Dialog, wider than

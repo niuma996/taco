@@ -14,6 +14,7 @@ import type { CheckpointEntry } from "@taco-ai/protocol";
 import { History, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { IconButton } from "../components/ui/IconButton";
 import type { UseCheckpointsPaneResult } from "../hooks/useCheckpointsPane";
 import { useT } from "../i18n/useI18n";
 import { lastSegment } from "../lib/workspaceStorage";
@@ -54,16 +55,14 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
                     <History size={16} aria-hidden="true" />
                     {t("checkpoints.title")}
                 </div>
-                <button
-                    type="button"
-                    className="pane-refresh"
+                <IconButton
                     onClick={refresh}
                     disabled={loading}
                     title={t("checkpoints.refresh")}
                     aria-label={t("checkpoints.refresh")}
                 >
                     <RefreshCw size={14} aria-hidden="true" />
-                </button>
+                </IconButton>
             </div>
 
             {data.checkpoints.length === 0 ? (

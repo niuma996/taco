@@ -10,6 +10,7 @@ import { CheckCircle2, Circle, Loader2, Square, XCircle } from "lucide-react";
 import type { ReactElement } from "react";
 import { useT } from "../../i18n/useI18n";
 import type { SubagentEntry, SubagentStatus } from "../../lib/chat/subagentList";
+import { IconButton } from "../ui/IconButton";
 
 function StatusIcon({ status }: { status: SubagentStatus }): ReactElement {
     switch (status) {
@@ -105,15 +106,15 @@ export function SubagentRow({
                 )}
             </button>
             {stoppable && entry.subSessionId !== null && onStop !== undefined && (
-                <button
-                    type="button"
+                <IconButton
+                    tone="danger"
                     className="subagent-row-stop"
                     title={t("subagents.stop")}
                     aria-label={t("subagents.stop")}
                     onClick={() => onStop(entry.subSessionId as string)}
                 >
                     <Square size={11} aria-hidden="true" />
-                </button>
+                </IconButton>
             )}
         </li>
     );

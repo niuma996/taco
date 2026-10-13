@@ -176,6 +176,67 @@
     border-color: var(--danger);
 }
 
+/* ── IconButton ── */
+/* One icon-only control for the whole app. The transparent 1px border keeps
+   ghost and outline the same outer size, so swapping variant never shifts
+   layout. Hover is always --hover-overlay; state colors come from
+   aria-pressed (toggles) and data-state="open" (Radix triggers). */
+.ui-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 0;
+    line-height: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        border-color 0.12s ease,
+        color 0.12s ease;
+}
+.ui-icon-btn:hover:not(:disabled),
+.ui-icon-btn[data-state="open"] {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+.ui-icon-btn[aria-pressed="true"] {
+    color: var(--accent);
+}
+.ui-icon-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+.ui-icon-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.ui-icon-btn--sm {
+    width: 18px;
+    height: 18px;
+    border-radius: var(--radius-xs);
+}
+.ui-icon-btn--md {
+    width: 22px;
+    height: 22px;
+}
+.ui-icon-btn--lg {
+    width: 26px;
+    height: 26px;
+}
+.ui-icon-btn--outline {
+    border-color: var(--border);
+}
+.ui-icon-btn--danger:hover:not(:disabled) {
+    color: var(--danger);
+}
+.ui-icon-btn--outline.ui-icon-btn--danger:hover:not(:disabled) {
+    border-color: var(--danger);
+}
+
 /* ── Select (Radix) ── */
 
 .ui-select-trigger {

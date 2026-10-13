@@ -117,47 +117,14 @@ aside.sidebar .session-item.active {
     margin-left: auto;
 }
 
-/* Action buttons: circular bg, appear on item hover. Rename uses neutral color, delete uses brand orange. */
-.session-copy,
-.session-rename,
-.session-delete {
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    min-width: auto;
-    background: var(--accent-bg-active);
-    color: var(--fg);
-    border-radius: var(--radius-circle);
-    /* Hidden until hover. */
+/* Row actions (ui/IconButton) stay hidden until the row is hovered or one of
+   them takes keyboard focus — otherwise Tab would land on invisible buttons. */
+.session-action {
     display: none;
-    transition:
-        background 0.12s ease,
-        color 0.12s ease;
 }
-
-.session-item:hover .session-copy,
-.session-item:hover .session-rename,
-.session-item:hover .session-delete {
+.session-item:hover .session-action,
+.session-item:focus-within .session-action {
     display: inline-flex;
-}
-
-.session-copy:hover,
-.session-rename:hover {
-    background: var(--accent);
-    color: var(--bg);
-}
-
-/* Delete: idle has light orange bg with orange icon; hover reverses to solid orange bg with light icon. */
-.session-delete {
-    background: var(--rail-bg-active);
-    color: var(--brand-orange);
-}
-
-.session-delete:hover {
-    background: var(--brand-orange);
-    color: var(--bg);
 }
 
 /* "Load more" — sits at the bottom of .sidebar-list, full-width, low-contrast
@@ -212,10 +179,7 @@ aside.sidebar .session-item.active {
 /* lucide-react v1.x sets fill="none" on <svg>, but the attribute does not inherit to
    children — they fall back to default fill=black, rendering outlined icons as solid black.
    Explicitly reset child fill to none; stroke is inherited from the svg. */
-button svg > *,
-.session-rename svg > *,
-.session-delete svg > *,
-.session-info-copy svg > * {
+button svg > * {
     fill: none;
 }
 

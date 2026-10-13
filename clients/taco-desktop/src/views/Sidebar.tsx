@@ -8,6 +8,7 @@
 
 import { Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { IconButton } from "../components/ui/IconButton";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
@@ -57,8 +58,8 @@ export function Sidebar(props: SidebarProps) {
                             </div>
                         </div>
                         <div className="session-actions">
-                            <button
-                                className="session-rename"
+                            <IconButton
+                                className="session-action"
                                 title={t("session.rename")}
                                 aria-label={t("session.rename")}
                                 onClick={(e) => {
@@ -67,9 +68,10 @@ export function Sidebar(props: SidebarProps) {
                                 }}
                             >
                                 <Pencil size={14} aria-hidden="true" />
-                            </button>
-                            <button
-                                className="session-delete"
+                            </IconButton>
+                            <IconButton
+                                tone="danger"
+                                className="session-action"
                                 title={t("session.deleteSession")}
                                 aria-label={t("session.deleteSession")}
                                 onClick={(e) => {
@@ -78,7 +80,7 @@ export function Sidebar(props: SidebarProps) {
                                 }}
                             >
                                 <Trash2 size={14} aria-hidden="true" />
-                            </button>
+                            </IconButton>
                         </div>
                     </div>
                 ))}

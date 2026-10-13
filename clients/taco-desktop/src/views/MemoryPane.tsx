@@ -11,6 +11,7 @@ import { Pencil, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
+import { IconButton } from "../components/ui/IconButton";
 import { useT } from "../i18n/useI18n";
 import type {
     MemoryConflictPayload,
@@ -188,15 +189,14 @@ export function MemoryPane(props: MemoryPaneProps) {
                     query={query}
                     onQueryChange={setQuery}
                 >
-                    <button
-                        type="button"
-                        className="memory-refresh-btn"
+                    <IconButton
                         onClick={onRefresh}
                         title={t("memory.refresh")}
+                        aria-label={t("memory.refresh")}
                         disabled={loading}
                     >
                         <RefreshCw size={14} aria-hidden="true" />
-                    </button>
+                    </IconButton>
                 </PaneHeader>
 
                 <div className="memory-list-body">

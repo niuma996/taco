@@ -86,33 +86,6 @@
     line-height: 1.3;
 }
 
-.memory-refresh-btn {
-    margin-left: 0.5rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    width: 24px;
-    height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--fg-dim);
-    cursor: pointer;
-    /* Reset the global `button` padding — with border-box it would shrink the
-       24px box to zero content width and the icon would not render at all. */
-    padding: 0;
-}
-
-.memory-refresh-btn:hover {
-    color: var(--fg);
-    background: var(--accent-bg-hover);
-}
-
-.memory-refresh-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 .memory-detail {
     flex: 1;
     overflow-y: auto;

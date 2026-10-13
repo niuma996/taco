@@ -17,30 +17,6 @@
     font-weight: 600;
 }
 
-.pane-refresh {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    width: 24px;
-    height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--fg-dim);
-    cursor: pointer;
-    padding: 0;
-}
-
-.pane-refresh:hover:not(:disabled) {
-    color: var(--fg);
-    background: var(--accent-bg-hover);
-}
-
-.pane-refresh:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
 .checkpoints-list {
     list-style: none;
     margin: 0;

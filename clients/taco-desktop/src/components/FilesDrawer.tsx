@@ -23,6 +23,7 @@ import { createFsClient, type FsClient } from "../lib/clients/fsClient";
 import { FilePreviewPopup } from "./FilePreviewPopup";
 import { FilesTreeView } from "./FilesTreeView";
 import { RightPanel } from "./panels/RightPanel";
+import { IconButton } from "./ui/IconButton.tsx";
 import { Switch } from "./ui/Switch.tsx";
 
 // Shared between the switch and its visible label so clicking the text
@@ -91,9 +92,7 @@ export function FilesDrawer(props: FilesDrawerProps) {
                 resizeLabel={resizeLabel}
                 actions={
                     activeCwd && (
-                        <button
-                            type="button"
-                            className="right-panel-icon-btn"
+                        <IconButton
                             onClick={() => {
                                 // openPath on a directory opens it in the OS file
                                 // manager (Finder/Explorer), so the user lands
@@ -106,7 +105,7 @@ export function FilesDrawer(props: FilesDrawerProps) {
                             title={t("files.revealWorkspace")}
                         >
                             <FolderOpen size={14} aria-hidden="true" />
-                        </button>
+                        </IconButton>
                     )
                 }
             >

@@ -28,6 +28,7 @@ import type { ThemePreference } from "../lib/clientSettings.ts";
 import { writeClientSettings } from "../lib/globalConfig.ts";
 import type { AppNotification } from "../lib/notifications.ts";
 import { NotificationBell } from "./NotificationBell.tsx";
+import { IconButton } from "./ui/IconButton.tsx";
 
 const THEME_OPTIONS: ReadonlyArray<{
     value: ThemePreference;
@@ -62,8 +63,10 @@ function QuickMenu({
 }) {
     return (
         <DropdownMenu.Root>
-            <DropdownMenu.Trigger className="topbar-quick-btn" aria-label={label} title={label}>
-                {icon}
+            <DropdownMenu.Trigger asChild>
+                <IconButton size="lg" aria-label={label} title={label}>
+                    {icon}
+                </IconButton>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
                 <DropdownMenu.Content className="topbar-quick-menu" sideOffset={4} align="end">

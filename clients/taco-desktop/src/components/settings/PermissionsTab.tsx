@@ -1,4 +1,5 @@
 import type { CommandPermissionMode } from "@taco-ai/protocol";
+import { X } from "lucide-react";
 import { useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
@@ -6,6 +7,7 @@ import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import type { ClientRuleValidationError } from "../../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleClient.ts";
+import { IconButton } from "../ui/IconButton.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
@@ -123,15 +125,15 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                             <span className="permission-rule-text">
                                 <code>{rule}</code>
                             </span>
-                            <button
-                                type="button"
-                                className="permission-rule-remove"
+                            <IconButton
+                                tone="danger"
                                 disabled={saving}
                                 title={t("settings.permissionsRemoveRule")}
+                                aria-label={t("settings.permissionsRemoveRule")}
                                 onClick={() => removeRule(i)}
                             >
-                                ×
-                            </button>
+                                <X size={12} aria-hidden="true" />
+                            </IconButton>
                         </li>
                     ))}
                 </ul>

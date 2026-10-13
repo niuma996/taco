@@ -121,24 +121,6 @@
     right: 4px;
     top: 50%;
     transform: translateY(-50%);
-    display: flex;
-    align-items: center;
-    padding: 3px;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--fg-dim);
-    cursor: pointer;
-}
-
-.subagent-row-stop:hover {
-    color: var(--danger);
-    background: var(--accent-bg-hover);
-}
-
-.subagent-row-stop:focus-visible {
-    outline: 1px solid var(--accent-border);
-    outline-offset: -1px;
 }
 
 .subagent-row-type {

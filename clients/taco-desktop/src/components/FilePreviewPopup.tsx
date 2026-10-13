@@ -12,6 +12,7 @@ import { useT } from "../i18n/useI18n";
 import { resolveFsPath } from "../lib/clients/fsClient";
 import { lastSegment } from "../lib/workspaceStorage";
 import { FilesPreviewPane } from "./FilesPreviewPane";
+import { IconButton } from "./ui/IconButton";
 
 export interface FilePreviewPopupProps {
     preview: UseFilePreviewApi;
@@ -49,15 +50,13 @@ export function FilePreviewPopup({ preview, cwd }: FilePreviewPopupProps) {
                         <Dialog.Title asChild>
                             <h3 className="right-panel-title">{lastSegment(path)}</h3>
                         </Dialog.Title>
-                        <button
-                            type="button"
-                            className="right-panel-close"
+                        <IconButton
                             onClick={() => preview.clear()}
                             aria-label={t("app.dismiss")}
                             title={t("app.dismiss")}
                         >
                             <X size={14} aria-hidden="true" />
-                        </button>
+                        </IconButton>
                     </div>
                     {/* Keyed by path: resets the markdown rendered/source toggle per file. */}
                     <FilesPreviewPane

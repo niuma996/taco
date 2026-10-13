@@ -14,6 +14,7 @@ import { useProviders } from "../../hooks/useProviders.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../../lib/globalConfig.ts";
+import { IconButton } from "../ui/IconButton.tsx";
 import { CustomProviderForm } from "./CustomProviderForm.tsx";
 import { ProviderKeyDialog } from "./ProviderKeyDialog.tsx";
 
@@ -215,9 +216,10 @@ function ProviderRow(props: ProviderRowProps) {
                     </span>
                 </div>
                 <div className="provider-row-actions">
-                    <button
-                        type="button"
-                        className="icon-button provider-row-icon provider-row-key"
+                    <IconButton
+                        size="lg"
+                        variant="outline"
+                        className="provider-row-key"
                         disabled={props.disabled}
                         title={
                             provider.configured
@@ -231,8 +233,8 @@ function ProviderRow(props: ProviderRowProps) {
                         }
                         onClick={() => setDialogOpen(true)}
                     >
-                        <KeyRound size={16} aria-hidden="true" />
-                    </button>
+                        <KeyRound size={14} aria-hidden="true" />
+                    </IconButton>
                 </div>
             </div>
             {dialogOpen && (
@@ -287,9 +289,10 @@ function CustomProviderRow(props: CustomProviderRowProps) {
                     </span>
                 </div>
                 <div className="provider-row-actions">
-                    <button
-                        type="button"
-                        className="icon-button provider-row-icon provider-row-key"
+                    <IconButton
+                        size="lg"
+                        variant="outline"
+                        className="provider-row-key"
                         disabled={props.disabled}
                         title={
                             provider.configured
@@ -303,28 +306,29 @@ function CustomProviderRow(props: CustomProviderRowProps) {
                         }
                         onClick={() => setDialogOpen(true)}
                     >
-                        <KeyRound size={16} aria-hidden="true" />
-                    </button>
-                    <button
-                        type="button"
-                        className="icon-button provider-row-icon"
+                        <KeyRound size={14} aria-hidden="true" />
+                    </IconButton>
+                    <IconButton
+                        size="lg"
+                        variant="outline"
                         disabled={props.disabled}
                         title={t("settings.customProviderEditBtn")}
                         aria-label={t("settings.customProviderEditBtn")}
                         onClick={props.onEdit}
                     >
-                        <Pencil size={16} aria-hidden="true" />
-                    </button>
-                    <button
-                        type="button"
-                        className="icon-button provider-row-icon provider-row-delete"
+                        <Pencil size={14} aria-hidden="true" />
+                    </IconButton>
+                    <IconButton
+                        size="lg"
+                        variant="outline"
+                        tone="danger"
                         disabled={props.disabled}
                         title={t("settings.customProviderDeleteBtn")}
                         aria-label={t("settings.customProviderDeleteBtn")}
                         onClick={props.onDelete}
                     >
-                        <Trash2 size={16} aria-hidden="true" />
-                    </button>
+                        <Trash2 size={14} aria-hidden="true" />
+                    </IconButton>
                 </div>
             </div>
             {dialogOpen && (

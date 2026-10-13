@@ -6,6 +6,7 @@
 import type { McpServerConfigView, McpServerView } from "@taco-ai/protocol";
 import { Pencil, Trash2 } from "lucide-react";
 import { useT } from "../../i18n/useI18n.ts";
+import { IconButton } from "../ui/IconButton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 
 export interface McpServerCardProps {
@@ -79,26 +80,27 @@ export function McpServerCard(props: McpServerCardProps) {
                         onChange={(checked) => props.onToggle(cfg.id, checked)}
                         label={t("settings.mcpServerToggleEnabled")}
                     />
-                    <button
-                        type="button"
-                        className="icon-button"
+                    <IconButton
+                        size="lg"
+                        variant="outline"
                         disabled={disabled}
                         title={t("settings.mcpServerEditBtn")}
                         aria-label={t("settings.mcpServerEditBtn")}
                         onClick={() => props.onEdit(cfg)}
                     >
                         <Pencil size={14} aria-hidden="true" />
-                    </button>
-                    <button
-                        type="button"
-                        className="icon-button provider-row-icon provider-row-delete"
+                    </IconButton>
+                    <IconButton
+                        size="lg"
+                        variant="outline"
+                        tone="danger"
                         disabled={disabled}
                         title={t("settings.mcpServerDelete")}
                         aria-label={t("settings.mcpServerDelete")}
                         onClick={() => props.onDelete(cfg.id)}
                     >
                         <Trash2 size={14} aria-hidden="true" />
-                    </button>
+                    </IconButton>
                 </div>
             </div>
             {errorMsg && <p className="mcp-server-error">{errorMsg}</p>}

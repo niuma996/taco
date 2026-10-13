@@ -292,35 +292,6 @@ header.topbar .topbar-picker-group {
     -webkit-app-region: no-drag;
 }
 
-.topbar-quick-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--fg-dim);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition:
-        color 0.12s ease,
-        background 0.12s ease;
-}
-
-.topbar-quick-btn:hover,
-.topbar-quick-btn[data-state="open"] {
-    color: var(--fg);
-    background: var(--accent-bg-active);
-}
-
-.topbar-quick-btn:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-}
-
 /* Same chrome as .topbar-workspace-menu, but without the pane-width cap —
    these menus are short labels (English / 中文 / Light / Dark / System). */
 .topbar-quick-menu {
@@ -348,7 +319,7 @@ header.topbar .topbar-picker-group {
     border: 0;
 }
 
-/* Notification bell. The trigger reuses .topbar-quick-btn; the badge hangs off
+/* Notification bell. The trigger is a ui/IconButton; the badge hangs off
    the icon so the count can exceed the button's 26px box. The popover portals
    to body — same chrome as .topbar-quick-menu, one row per message. */
 .notification-bell__icon {
@@ -476,31 +447,6 @@ header.topbar .topbar-picker-group {
     font-size: 0.65rem;
     font-variant-numeric: tabular-nums;
     line-height: 1.4;
-}
-
-.notification-row__close {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-xs);
-    background: transparent;
-    color: var(--fg-dim);
-    cursor: pointer;
-}
-
-.notification-row__close:hover {
-    color: var(--fg);
-    background: var(--hover-overlay);
-}
-
-.notification-row__close:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
 }
 
 /* .layout (second definition, originally L1083-1097) */
@@ -888,31 +834,6 @@ button.topbar-context-indicator {
    split the row with the expanded search box. */
 .right-panel-title:empty {
     flex: 0 0 auto;
-}
-
-/* Header icon buttons (close, custom actions, and SubagentPanel's search
-   toggle). Borderless until hover so the search icon and the X read as the
-   same family of control. */
-.right-panel-close,
-.right-panel-icon-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-circle);
-    color: var(--fg-dim);
-    cursor: pointer;
-}
-
-.right-panel-close:hover,
-.right-panel-icon-btn:hover {
-    background: var(--border-subtle);
-    color: var(--fg-primary);
 }
 
 .task-list {

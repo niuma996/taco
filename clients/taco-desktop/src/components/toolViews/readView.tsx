@@ -11,6 +11,7 @@ import { FileText } from "lucide-react";
 import type { ReactElement } from "react";
 import { useFilePreviewOpener } from "../../hooks/useFilePreviewOpener";
 import { useT } from "../../i18n/useI18n";
+import { IconButton } from "../ui/IconButton";
 import { truncate } from "./_util";
 import { type ToolViewProps, toolViews } from "./registry";
 
@@ -73,15 +74,14 @@ export function ReadToolView({ tool }: ToolViewProps): ReactElement | null {
         <div className="tool-card-read">
             <span className="tool-card-read-status">{summary}</span>
             {opener !== null && path.length > 0 && (
-                <button
-                    type="button"
-                    className="tool-card-read-open"
+                <IconButton
+                    variant="outline"
                     onClick={() => opener.openPreview(path)}
                     aria-label={t("activity.readOpenFile")}
                     title={t("activity.readOpenFile")}
                 >
                     <FileText size={13} aria-hidden="true" />
-                </button>
+                </IconButton>
             )}
         </div>
     );

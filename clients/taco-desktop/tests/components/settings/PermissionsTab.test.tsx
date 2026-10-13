@@ -23,6 +23,9 @@ vi.mock("react-i18next", () => ({
     })),
 }));
 
+// The mocked t() echoes its key, so this is the remove buttons' accessible name.
+const REMOVE = "settings.permissionsRemoveRule";
+
 afterEach(cleanup);
 
 beforeEach(async () => {
@@ -56,11 +59,11 @@ describe("PermissionsTab — removeRule", () => {
 
         // Three rules initially.
         await waitFor(() => {
-            expect(screen.getAllByText("×")).toHaveLength(3);
+            expect(screen.getAllByRole("button", { name: REMOVE })).toHaveLength(3);
         });
 
         // Click the × on the second rule ("b").
-        const removeButtons = screen.getAllByText("×");
+        const removeButtons = screen.getAllByRole("button", { name: REMOVE });
         expect(removeButtons.length).toBeGreaterThan(1);
         const secondRemove = removeButtons[1];
         if (!secondRemove) throw new Error("expected at least two remove buttons");
@@ -80,7 +83,7 @@ describe("PermissionsTab — removeRule", () => {
 
         // UI must update to reflect the new state.
         await waitFor(() => {
-            expect(screen.getAllByText("×")).toHaveLength(2);
+            expect(screen.getAllByRole("button", { name: REMOVE })).toHaveLength(2);
         });
         expect(screen.queryByText("b")).toBeNull();
     });

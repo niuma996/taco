@@ -15,6 +15,7 @@ import type { UiToolCall } from "../lib/chat/chatUtils";
 import { HighlightedCode } from "./HighlightedCode";
 import { DefaultToolBody, defaultSummary } from "./toolViews/defaults";
 import { resolveToolView } from "./toolViews/registry";
+import { IconButton } from "./ui/IconButton";
 
 export interface ToolCardShellProps {
     tool: UiToolCall;
@@ -71,8 +72,8 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
                 <span className="tool-card-name">{tool.name}</span>
                 {summary && <span className="tool-card-summary">{summary}</span>}
                 {rawArgs !== "" && (
-                    <button
-                        type="button"
+                    <IconButton
+                        size="sm"
                         className="tool-card-raw-toggle"
                         onClick={() => setRawOpen((v) => !v)}
                         aria-expanded={rawOpen}
@@ -86,7 +87,7 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
                                 rawOpen ? "tool-card-raw-chevron--open" : ""
                             }`}
                         />
-                    </button>
+                    </IconButton>
                 )}
             </div>
             {rawOpen && rawArgs !== "" && (

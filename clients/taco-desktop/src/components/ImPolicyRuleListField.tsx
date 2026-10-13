@@ -6,12 +6,14 @@
  * switch is off the field is omitted from the patch and inherited; when
  * on, the local list replaces the inherited one — are specific to the
  * IM policy patch shape. PermissionsTab has a similar visual but no
- * gating Switch and uses the same CSS classes (.permission-rule-list /
- * .permission-rule-remove), so a future extraction could unify both.
+ * gating Switch and uses the same .permission-rule-list markup, so a
+ * future extraction could unify both.
  */
 
+import { X } from "lucide-react";
 import { useT } from "../i18n/useI18n.ts";
 import type { ClientRuleValidationError } from "../lib/commandPermissionRuleClient.ts";
+import { IconButton } from "./ui/IconButton.tsx";
 import { Switch } from "./ui/Switch.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
 
@@ -94,15 +96,14 @@ export function ImPolicyRuleListField(props: ImPolicyRuleListFieldProps): React.
                                     <span className="permission-rule-text">
                                         <code>{rule}</code>
                                     </span>
-                                    <button
-                                        type="button"
-                                        className="permission-rule-remove"
+                                    <IconButton
+                                        tone="danger"
                                         disabled={disabled}
                                         onClick={() => onRemove(rule)}
                                         aria-label={removeLabel}
                                     >
-                                        ×
-                                    </button>
+                                        <X size={12} aria-hidden="true" />
+                                    </IconButton>
                                 </li>
                             ))}
                         </ul>

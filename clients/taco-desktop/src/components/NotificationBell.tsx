@@ -22,6 +22,7 @@ import { Bell, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/useI18n.ts";
 import { type AppNotification, toastsOnArrival } from "../lib/notifications.ts";
+import { IconButton } from "./ui/IconButton.tsx";
 
 export interface NotificationBellProps {
     notifications: AppNotification[];
@@ -101,22 +102,24 @@ export function NotificationBell({
 
     return (
         <Popover.Root open={open} onOpenChange={setOpen}>
-            <Popover.Trigger
-                className="topbar-quick-btn"
-                aria-label={
-                    unreadLabel
-                        ? `${t("app.notifications")} — ${unreadLabel}`
-                        : t("app.notifications")
-                }
-            >
-                <span className="notification-bell__icon">
-                    <Bell size={14} aria-hidden="true" />
-                    {unread > 0 && (
-                        <span className="notification-bell__badge" aria-hidden="true">
-                            {unread > 99 ? "99+" : unread}
-                        </span>
-                    )}
-                </span>
+            <Popover.Trigger asChild>
+                <IconButton
+                    size="lg"
+                    aria-label={
+                        unreadLabel
+                            ? `${t("app.notifications")} — ${unreadLabel}`
+                            : t("app.notifications")
+                    }
+                >
+                    <span className="notification-bell__icon">
+                        <Bell size={14} aria-hidden="true" />
+                        {unread > 0 && (
+                            <span className="notification-bell__badge" aria-hidden="true">
+                                {unread > 99 ? "99+" : unread}
+                            </span>
+                        )}
+                    </span>
+                </IconButton>
             </Popover.Trigger>
             {/* The badge is aria-hidden decoration, and Radix unmounts the
                 popover content while it is closed — so the live region has to
@@ -172,14 +175,13 @@ export function NotificationBell({
                                             ×{n.count}
                                         </span>
                                     )}
-                                    <button
-                                        type="button"
-                                        className="notification-row__close"
+                                    <IconButton
+                                        size="sm"
                                         aria-label={t("app.dismiss")}
                                         onClick={() => onDismiss(n.id)}
                                     >
                                         <X size={12} aria-hidden="true" />
-                                    </button>
+                                    </IconButton>
                                 </li>
                             ))}
                         </ul>

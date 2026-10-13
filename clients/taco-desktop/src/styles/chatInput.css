@@ -236,26 +236,3 @@ footer.input textarea:focus {
     white-space: nowrap;
     color: var(--fg-dim);
 }
-
-.queue-bar__cancel {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.15rem;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--fg-dim);
-    cursor: pointer;
-}
-
-.queue-bar__cancel:hover:not(:disabled) {
-    background: var(--bg-hover);
-    color: var(--fg);
-}
-
-.queue-bar__cancel:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-}

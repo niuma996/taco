@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
+import { IconButton } from "../ui/IconButton";
 
 /**
  * Shared chrome for the right-side inline panels (task list, file tree,
@@ -43,15 +44,9 @@ export function RightPanel({
             <div className="right-panel-topbar">
                 <h3 className="right-panel-title">{title}</h3>
                 {actions && <div className="right-panel-actions">{actions}</div>}
-                <button
-                    type="button"
-                    className="right-panel-close"
-                    onClick={onClose}
-                    aria-label={closeLabel}
-                    title={closeLabel}
-                >
+                <IconButton onClick={onClose} aria-label={closeLabel} title={closeLabel}>
                     <X size={14} aria-hidden="true" />
-                </button>
+                </IconButton>
             </div>
             {children}
         </div>
