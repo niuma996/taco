@@ -336,7 +336,6 @@
       "title": "App",
       "desc": "App version and desktop updates. New versions ship fixes and features; the app restarts after install.",
       "currentVersion": "Current version",
-      "status": "Status",
       "checkNow": "Check now",
       "statusChecking": "Checking…",
       "statusUpToDate": "Up to date",

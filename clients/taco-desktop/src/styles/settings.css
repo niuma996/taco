@@ -91,6 +91,38 @@
     align-items: center;
     gap: 0.6rem;
 }
+.settings-row-label {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+}
+/* Values stay below the section heading (--text-md) — the heading owns
+   the visual weight, the row just carries the fact. */
+.settings-row-value {
+    font-size: var(--text-sm);
+    color: var(--fg);
+}
+/* One step smaller than the version value, and tinted per state since
+   there is no "Status" label to disambiguate. */
+.settings-row-status {
+    margin-top: 0.25rem;
+    /* Same 0.6rem gap the .settings-row + .settings-row-block rhythm
+       rule gives a version row — that rule no longer matches once the
+       status line sits between them. */
+    margin-bottom: 0.6rem;
+    font-size: var(--text-xs);
+}
+.settings-row-status[data-status="upToDate"] {
+    color: var(--success);
+}
+.settings-row-status[data-status="available"] {
+    color: var(--accent-fg);
+}
+.settings-row-status[data-status="checking"] {
+    color: var(--fg-dim);
+}
+.settings-row-status[data-status="error"] {
+    color: var(--danger);
+}
 /* Inline inputs take remaining width; buttons keep their own width —
    without this .ui-input's width:100% would push sibling buttons onto the next line. */
 .settings-row > .ui-input {

@@ -47,8 +47,8 @@ export interface UpdatesTabProps {
     onRestart: () => Promise<void>;
 }
 
-/** Status line for the "Status" row — single source of truth so the
- *  parent doesn't have to recompute it. */
+/** Last-check result — single source of truth so the parent doesn't have
+ *  to recompute it. */
 type Status = "checking" | "upToDate" | "available" | "error";
 
 export function UpdatesTab(props: UpdatesTabProps) {
@@ -113,11 +113,10 @@ export function UpdatesTab(props: UpdatesTabProps) {
                 <div className="settings-row-label">{t("settings.updates.currentVersion")}</div>
                 <div className="settings-row-value">{currentVersion ?? "—"}</div>
             </div>
-            <div className="settings-row">
-                <div className="settings-row-label">{t("settings.updates.status")}</div>
-                <div className="settings-row-value" data-status={status}>
-                    {statusText}
-                </div>
+            {/* Status rides directly under the version row — no "Status" label;
+                the per-state color below is what distinguishes the states. */}
+            <div className="settings-row-status" data-status={status}>
+                {statusText}
             </div>
             <div className="settings-row-block">
                 <Button
