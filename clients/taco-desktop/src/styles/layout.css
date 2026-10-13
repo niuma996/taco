@@ -790,7 +790,9 @@ button.topbar-context-indicator {
 .task-panel {
     width: var(--right-panel-width);
     flex-shrink: 0;
-    padding: 12px;
+    /* Top inset matches .subagent-panel's header padding so the three right
+       panels don't start their headers at different heights. */
+    padding: 8px 12px 12px;
     overflow-y: auto;
     border-left: 1px solid var(--border);
     background: var(--bg-secondary, transparent);
@@ -846,20 +848,34 @@ button.topbar-context-indicator {
     margin-bottom: 8px;
 }
 
-/* SubagentPanel puts a whole PaneHeader (title + count + search) into
-   RightPanel's title slot, so it must claim the row's free space. Its own
-   gutter and margins are dropped: the topbar owns the row's height and inset,
-   and the asymmetric margins would otherwise push the title below the close
-   button sharing the row. */
-.right-panel-topbar > .pane-header {
-    flex: 1 1 auto;
+/* SubagentPanel hides its title while the search box is open, so the box can
+   claim the whole row — mirror that by letting the actions slot grow. */
+.right-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
     min-width: 0;
-    margin: 0;
-    padding: 0;
+}
+
+.right-panel-actions:has(.pane-search.open) {
+    flex: 1 1 auto;
+}
+
+/* Title + count badge, matching the second-column pane header's cluster. */
+.right-panel-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
 }
 
 .right-panel-title {
     font-weight: 600;
+    /* Same token PaneHeader uses, so all three right panels (task, files,
+       subagents) render their title at one size — FilesDrawer previously
+       inherited the body size and dwarfed the other two. */
+    font-size: var(--text-base);
     margin: 0;
     color: var(--fg-primary, inherit);
     overflow: hidden;
@@ -868,9 +884,15 @@ button.topbar-context-indicator {
     flex: 1;
     min-width: 0;
 }
+/* An empty title (SubagentPanel while searching) must not grow, or it would
+   split the row with the expanded search box. */
+.right-panel-title:empty {
+    flex: 0 0 auto;
+}
 
-/* Header icon buttons (close, custom actions). Same circular background
-   treatment so every header button looks consistent. */
+/* Header icon buttons (close, custom actions, and SubagentPanel's search
+   toggle). Borderless until hover so the search icon and the X read as the
+   same family of control. */
 .right-panel-close,
 .right-panel-icon-btn {
     display: flex;
@@ -880,7 +902,7 @@ button.topbar-context-indicator {
     width: 22px;
     height: 22px;
     padding: 0;
-    background: var(--hover);
+    background: transparent;
     border: none;
     border-radius: var(--radius-circle);
     color: var(--fg-dim);

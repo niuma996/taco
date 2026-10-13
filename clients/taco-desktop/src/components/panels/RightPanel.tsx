@@ -42,7 +42,7 @@ export function RightPanel({
             )}
             <div className="right-panel-topbar">
                 <h3 className="right-panel-title">{title}</h3>
-                {actions}
+                {actions && <div className="right-panel-actions">{actions}</div>}
                 <button
                     type="button"
                     className="right-panel-close"

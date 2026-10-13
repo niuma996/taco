@@ -17,7 +17,7 @@ import type { UiMessage } from "../../lib/chat/chatUtils";
 import { deriveSubagents, filterSubagents, type SubagentEntry } from "../../lib/chat/subagentList";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { Message } from "../Message";
-import { PaneHeader } from "../PaneHeader";
+import { PaneSearch } from "../PaneSearch";
 import { Button } from "../ui/Button";
 import { RightPanel } from "./RightPanel";
 import { SubagentRow } from "./SubagentRow";
@@ -55,6 +55,7 @@ export function SubagentPanel({
 }): ReactElement | null {
     const { t } = useT();
     const [query, setQuery] = useState("");
+    const [searchOpen, setSearchOpen] = useState(false);
 
     const entries = useMemo(
         () => deriveSubagents(messages, backgroundSubagents),
@@ -69,13 +70,19 @@ export function SubagentPanel({
     return (
         <RightPanel
             title={
-                <PaneHeader
-                    title={t("subagents.title")}
-                    count={entries.length}
-                    shownCount={shown.length}
-                    query={query}
-                    onQueryChange={setQuery}
-                />
+                searchOpen ? null : (
+                    <span className="right-panel-heading">
+                        {t("subagents.title")}
+                        <span className="pane-count-badge">
+                            {query.trim() !== ""
+                                ? `${shown.length}/${entries.length}`
+                                : entries.length}
+                        </span>
+                    </span>
+                )
+            }
+            actions={
+                <PaneSearch query={query} onQueryChange={setQuery} onOpenChange={setSearchOpen} />
             }
             onClose={onClose}
             closeLabel={t("app.dismiss")}
