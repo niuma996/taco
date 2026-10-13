@@ -4,9 +4,8 @@
  * PR4 keeps the jobs.* RPC method names in the sidecar's scheduler module
  * rather than `@taco-ai/shared` (which is shared with the protocol package
  * and would force a cross-PR widening). The UI duplicates the strings
- * here; an integration test in the sidecar (`tests/server/rpcRegistry.test.ts`)
- * enforces that the registered handlers use exactly these names, so the
- * two sides can't drift silently.
+ * here. No test compares this copy to the sidecar's — keep the two in sync by
+ * hand.
  *
  * Segment casing follows the shared `namespace.action` convention; the
  * LLM-facing tool names drop the dot and live in `tools/jobs.ts`.
