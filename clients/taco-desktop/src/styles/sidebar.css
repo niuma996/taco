@@ -120,11 +120,16 @@ aside.sidebar .session-item.active {
 /* Row actions (ui/IconButton) stay hidden until the row is hovered or one of
    them takes keyboard focus — otherwise Tab would land on invisible buttons. */
 .session-action {
-    display: none;
+    /* Keep the controls in the tab order while hiding them visually at rest.
+       `display: none` would make :focus-within impossible to reach by keyboard. */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
 }
 .session-item:hover .session-action,
 .session-item:focus-within .session-action {
-    display: inline-flex;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* "Load more" — sits at the bottom of .sidebar-list, full-width, low-contrast
