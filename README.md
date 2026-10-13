@@ -49,7 +49,7 @@ taco/
 ## Quick Start
 
 <p align="center">
-  <img src="assets/desktop2.png" alt="Taco Desktop" />
+  <img src="assets/desktop3.png" alt="Taco Desktop" />
 </p>
 
 ```bash
