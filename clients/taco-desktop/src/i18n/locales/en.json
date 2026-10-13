@@ -48,7 +48,9 @@
     "slogans": [
       "Turning your ideas into working code.",
       "Ask anything about your codebase.",
-      "Ship faster, debug smarter."
+      "Ship faster, debug smarter.",
+      "Every refactor has a plan.",
+      "Run it, read the output, fix it."
     ]
   },
   "subagents": {

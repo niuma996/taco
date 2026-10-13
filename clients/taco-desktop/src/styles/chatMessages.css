@@ -211,6 +211,10 @@
    active chat has no messages yet. `main` is already flex column; flex:1
    here lets this block absorb the remaining height and center its content. */
 .empty-chat-state {
+    /* Cancel main's asymmetric padding (1rem left / 0 right, 1rem top /
+       1.5rem bottom) so `justify-content: center` centers on the true
+       pane box instead of the padded content box. */
+    margin: -1rem 0 -1.5rem -1rem;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -220,20 +224,22 @@
        `justify-content: center` on the column keeps the whole unit
        vertically centered in <main>. */
     gap: 0.35rem;
-    /* Right padding mirrors `main`'s right inset (padding-right:0 on main
-       itself) so the centered content isn't skewed by the scrollbar gutter. */
-    padding-right: 1rem;
 }
 
 .empty-chat-state__logo {
+    /* Height is auto so the wide (1024x481) asset keeps its aspect ratio —
+       a square box with object-fit:contain padded it with ~34px of dead
+       space above and below, reading as a gap before the slogan. */
     width: 128px;
-    height: 128px;
-    object-fit: contain;
+    height: auto;
     opacity: 0.9;
 }
 
 .empty-chat-state__slogan {
     margin: 0;
+    /* Reserve one line so the centered flex column doesn't shift the logo
+       when the typewriter clears the text between slogans. */
+    min-height: 1lh;
     color: var(--fg-dim);
     font-size: var(--text-base);
     text-align: center;
