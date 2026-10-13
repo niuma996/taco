@@ -123,8 +123,14 @@ so the local preflight below must pass before pushing tags.
 ### Pre-flight (local)
 
 ```bash
-# 1. Bump version (six package.json files: root + 5 workspace packages)
-#    Replace "0.1.0" -> "0.1.1" in each, then:
+# 1. Bump version in the five files that carry it:
+#      packages/{shared,protocol,cli,sidecar}/package.json
+#      clients/taco-desktop/src-tauri/tauri.conf.json
+#    The root package.json and clients/{taco-desktop,debug-console} are
+#    "private": true and deliberately stay off the release line.
+#    Author release-notes/vX.Y.Z.md in the same commit.
+#    Do NOT touch the version in packages/sidecar/src/extensions/builtin/* —
+#    each built-in extension versions itself, independently of the sidecar.
 pnpm install --no-frozen-lockfile
 pnpm install --frozen-lockfile   # must succeed - proves CI will install
 

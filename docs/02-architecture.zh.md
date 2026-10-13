@@ -2,6 +2,28 @@
 
 > 本文深入解释 Taco sidecar 的协议层、运行时、客户端设计，以及为什么这样拆。
 
+## 0. 项目要点
+
+Taco 在 Pi 的 harness 之上补了什么，从代码里能看到的：
+
+- **`agent` 工具 —— 可 fan-out 的 subagent。** 按类型配工具白名单、`agent/<type>` 命名空间、深度受限的递归、`executionMode: "parallel"` 支持并发调用。
+- **`skill` 工具 —— inline 或 subagent 两种形态。** 按名字加载；inline 形态入队一条由 `skillReinjector` 保护的 `<skill_body name="NAME">` 消息，subagent 形态则经 `spawnSkillSubagent` 开一个新 session。
+- **带硬闸门的 Plan 模式。** `planEnter` 打开 `.taco/plans/<slug>.md`；期间只允许 read / askUser / 写 plan 文档；`planExit` 把 plan 交回审批。
+- **Prompt tag 体系。** 每个 `<tag>` 块带 `compression` 策略（`pin` / `pinOnce` / `summarize` / `drop`）与 `tuiVisibility`（`visible` / `hidden` / `ephemeral`）；感知 pin 的 compact hook 直接读这张注册表。
+- **扩展系统。** 新能力以扩展的形式接入，而不是写死进运行时；workspace 激活时把进程级与 workspace 级贡献合并为一个冻结的 `WorkspaceExtensionSet`，扩展可自带 tag。
+- **JSONL 存储。** session / history / event log 全部走 `JsonlSessionStorage` + `JsonlSessionRepo` —— 只追加、可回放、无 schema 迁移。
+- **Pi 作为依赖。** `pi-agent-core` 与 `pi-ai` 锁在 `0.99.2`；直接消费上游 API。这是 Pi 1.0 把 agent harness 从 `pi-agent-core` 挪到重新设计的 `pi-durable` 包之前的最后一个版本。
+- **独立部署。** `@taco-ai/sidecar` 是带自己 bin 的独立 npm 包，支持两种运行模式 —— 直接的 `NDJSON over stdio`（任何语言都能这么驱动它）与 `taco start` 及 Tauri 桌面端所用的常驻 daemon 模式。见 §2.8。
+- **单 daemon 多 workspace。** 一个 daemon 服务 UI 打开的每一个 workspace，按 `cwd` 路由；同一条 NDJSON socket 还能并发承载多个客户端的流量。
+
+## 0.1 接下来在做什么
+
+harness 这层仍在建设：
+
+- **Plan / Tasks / Memory 继续打磨。** 提醒节奏、hook 顺序、抽取 prompt 的质量都还在演进。
+- **编码能力以扩展的形式落地。** 打补丁 / 重构 / 跑测试都走扩展系统。
+- **加固安全边界。** `PermissionBroker` 已经能隔离只读 subagent、支持按 workspace 的 IM 策略；沙箱与更细粒度的 IM 策略是下一步。
+
 ## 1. 协议层
 
 ### 1.1 物理层：NDJSON over stdio 或 daemon socket
@@ -217,7 +239,7 @@ ws.on("session.event", (e: any) => {
 
 - **同一 workspace 内的多个 session 完全并行**——各自持有独立的 AgentHarness 实例，phase 互不影响
 - **多 workspace 同样完全并行**
-- 唯一被串行化的是**对同一个 session 的并发 turn**：sidecar 在 RPC 层按 `(workspace, sessionId)` 拒绝，返回 `session_busy`（见 2.6）。这是为了避免用户消息在同一对话分支上交错
+- 唯一被串行化的是**对同一个 session 的并发 turn**：sidecar 在 RPC 层按 `(workspace, sessionId)` 拒绝，返回 `session_busy`（见 2.8）。这是为了避免用户消息在同一对话分支上交错
 - Subagent 跑在**自己的子 session** 中，同样是独立 harness，与父 session 并行
 
 ```typescript
@@ -232,7 +254,31 @@ class AttachedSession {
 }
 ```
 
-### 2.5 配置加载
+### 2.5 Channel layer (IM)
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ChannelRegistry  (已加载的 channel 实例)              │
+│  ├─ 每个 channelId 一个 Channel / ChannelHandle      │
+│  ├─ ChannelBindBroker（状态 / 待验证的验证码）        │
+│  └─ 每 channel 的 OutboundSink + 串行 push 链         │
+└─────────────────┬───────────────────────────────────┘
+                  │ 1:N 跟踪
+┌─────────────────▼───────────────────────────────────┐
+│ WorkspaceRuntime (im:// 路径)                         │
+│  ├─ NodeExecutionEnv 位于 $TACO_HOME/sessions/im/…/   │
+│  ├─ ConversationRouter（peer/chat → session）         │
+│  ├─ ImWorkspacePolicy（per-channel 默认值 + chat 覆盖）│
+│  └─ fs 工具被禁用（IM_DISABLED_FS_TOOLS）              │
+└─────────────────────────────────────────────────────┘
+```
+
+channel 层与常规 workspace 层是**相互独立**的：IM workspace 使用虚拟的
+`im://` cwd，共用同一个 `SidecarServer`，但拿到的是一个单独且关掉了 FS
+工具的 `WorkspaceRuntime`。IM 策略叠加在全局 command permission broker
+与 per-channel 默认值之上。
+
+### 2.6 配置加载
 
 加载顺序（后者覆盖前者）：
 
@@ -274,13 +320,7 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
 加载顺序的 `merge` 语义详见
 [`packages/sidecar/src/config/config.ts`](../packages/sidecar/src/config.ts)。
 
-### 2.5a Channel layer (IM)
-
-> **注：** Channel layer 段落当前中文版落后于英文版，留作独立 PR
-> 同步。英文版 §2.5 Channel layer (IM) 是权威描述，定义了 IM 工作
-> 空间与普通工作空间隔离的边界。
-
-### 2.5a MCP 工具动态接入
+### 2.7 MCP 工具动态接入
 
 `mcpServers` 数组是 `TacoGlobalConfigShape` 的可选字段，每项是一份独立的 stdio / Streamable HTTP MCP server 配置。接入路径：
 
@@ -298,7 +338,7 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
 
 **重启是必须代价**：toolset 在 attach 时一次性构建，settings.write 改 `mcpServers` 只会落盘 + 影响 `mcp.listServers` 的实时输出，新工具要等到下次 workspace attach 才可见（通常通过 sidecar 重启触发）。desktop MCP 设置面板提供「应用并重启」按钮明说这个事实。
 
-### 2.6 单进程作用域
+### 2.8 Daemon 作用域与租户隔离
 
 sidecar 两种运行模式的隔离语义不同：
 
@@ -396,6 +436,12 @@ daemon 生命周期由 `cli` 包与操作系统服务注册（如适用）共同
   - `App.tsx` — workspace sidebar + session list + chat pane + settings
     + plugins + skills + agents + channels + memory panes；共用一套状态机
 
+**Rust 侧的坑**（值得留意）：
+
+- `#[tauri::command] async fn` 拿到的是 `State<'_, ...>`。持锁跨 `.await`
+  会死锁。写法是：在 `lock()` 里把需要的 `mpsc::Sender` clone 出来，
+  释放锁，再 `send().await`。
+
 ## 4. 数据流示例
 
 ### 4.1 一次完整 prompt 的消息流
@@ -433,3 +479,33 @@ prompt() 是同步的（等完整回复才 resolve），但 LLM 流式输出需�
 - **push 持续增量**：`session.event` 帧持续推 AgentHarness emit 的所有 event
 
 这套组合让客户端可以做到 **"先拉全量 history 还原现场，再订阅 push 持续增量"**。
+
+### 4.3 IM 通道的一次往返
+
+```
+IM 对端          Channel SDK          sidecar                       桌面端
+  │                  │                │                            │
+  │── 文本消息 ─────>│                │                            │
+  │                  │──onMessage──>  │                            │
+  │                  │                │──ConversationRouter.route()│
+  │                  │                │  (peer/chat → sessionId)   │
+  │                  │                │                            │
+  │                  │                │──ingress.submit() (RPC)────>│
+  │                  │                │  session.prompt (im cwd)   │
+  │                  │                │                            │
+  │                  │                │<─push: session.event ──────│
+  │                  │                │  message_start / update…   │
+  │                  │                │                            │
+  │                  │                │──channel.push(text)────────>│
+  │                  │                │  extractReplyText + 分片   │
+  │                  │                │                            │
+  │<─ 回复文本 ──────│<─sdk.send()────│                            │
+  │                  │                │                            │
+  │                  │                │<─push: im.tools_enabled ───│  （仅首次）
+```
+
+sidecar 的 channel handle 在 `push` 时用 `extractReplyText` 抽取 assistant
+文本（跳过 thinking 块、tool call、tool result），按渠道的单条消息长度预算
+分片，再调 SDK 的 `send`。反向的请求流（扫码、配对码）走
+`ChannelBindBroker.requestScan` / `requestVerifyCode`，它们会发布
+`channel.status_changed` push 帧，让桌面端能实时渲染绑定 UI。

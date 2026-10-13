@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.1.0
+> **版本**: 0.2.8
 > **传输**: NDJSON over stdio
 > **来源**: 源码为唯一权威来源——`packages/shared/rpcMethods.ts`（RPC method 名）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -121,8 +121,11 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `session.planState.get` | session.* |
 | `session.prompt` | session.* |
 | `session.steer` | session.* |
+| `session.followUp` | session.* |
+| `session.cancelQueued` | session.* |
 | `session.abort` | session.* |
-| `command_permission.resolve` | command_permission.* |
+| `subagent.abort` | subagent.* |
+| `commandPermission.resolve` | commandPermission.* |
 | `session.setModel` | session.* |
 | `session.listModels` | session.* |
 | `providers.list` | providers.* |
@@ -140,6 +143,7 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `channels.bind` | channels.* |
 | `channels.submitVerifyCode` | channels.* |
 | `channels.unbind` | channels.* |
+| `channels.retry` | channels.* |
 | `imPolicy.get` | imPolicy.* |
 | `imPolicy.setChannelDefault` | imPolicy.* |
 | `imPolicy.setChatOverride` | imPolicy.* |
@@ -204,8 +208,8 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `session.tool_call_update` | Tool call producing partial/incremental output. |
 | `session.tool_call_end` | Tool call completed (success or error). |
 | `subagent.spawned` | A sub-agent was spawned by the harness. |
-| `session.compaction_started` | Auto-compaction entered. |
-| `session.compaction_finished` | Auto-compaction completed. |
+| `session.compaction_started` | Compaction entered. Auto-compaction emits this only once the harness has admitted the compact — losing the admission race emits nothing. |
+| `session.compaction_finished` | Compaction completed. Emitted only when a matching `session.compaction_started` was sent, so the two are always pairable. |
 | `tasks.updated` | Task list changed. |
 | `plan.state.updated` | Plan mode state changed. |
 
@@ -220,6 +224,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `session.tool_call_end` | ToolCallEnd |
 | `command_permission.requested` | CommandPermissionRequested |
 | `subagent.spawned` | SubagentSpawned |
+| `subagent.settled` | SubagentSettled |
 | `session.error` | Error |
 | `session.compaction_started` | CompactionStarted |
 | `session.compaction_finished` | CompactionFinished |
@@ -227,6 +232,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `plan.state.updated` | PlanStateUpdated |
 | `models.changed` | ModelsChanged |
 | `session.deleted` | SessionDeleted |
+| `session.renamed` | SessionRenamed |
 | `channel.status_changed` | ChannelStatusChanged |
 | `channels.conversations_changed` | ConversationsChanged |
 | `im.tools_enabled` | ImToolsEnabled |
@@ -257,6 +263,11 @@ is appended at `seq = N + 1` (one past the last live frame) and the stream
 is cleared after `TOMBSTONE_TTL_MS = 60_000` ms. A client reconnecting within
 60s receives the tombstone frame and can surface "session was deleted" before
 the stream disappears.
+
+`session.delete` cascades: it tears down the whole session tree, so a single
+call emits one `session.deleted` per session id removed — the target plus every
+subagent descendant. Each frame carries its own stream's `seq`, so a client must
+treat them as independent tombstones rather than a single notification.
 
 **`session.events.get { afterSeq }` semantics.** The handler returns:
 

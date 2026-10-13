@@ -30,9 +30,23 @@
 |---|---|
 | **协议层** | NDJSON over stdio + JSON-RPC 风格（pull 请求/响应 + push 持续帧）|
 | **运行时** | 一个 sidecar 进程内**多 workspace + 多 session**，按 cwd 路由 |
-| **pull 接口** | workspace.list / ensure / dispose、session.list / create / attach / detach / history / prompt / steer / abort / setModel / listModels，以及 settings.* / channels.* / imPolicy.* / mcp.* / memory.* / commands_permission.* / skills.* / agents.* / checkpoints.* / tools.* / provider.* / extensions.* 全部 RPC。完整列表见 `docs/sidecar-protocol.md` |
-| **push 事件** | session.attached / detached / event / error / deleted / tool_call_{start,update,end}、subagent.spawned、session.compaction_{started,finished}、tasks.updated、plan.state.updated、models.changed、channel.status_changed、channels.conversations_changed、im.tools_enabled、im.policy_changed |
-| **历史还原** | 通过 `session.history` 拉取完整 chat tree（entries + leafEntryId），客户端自行重建分支 |
+| **握手（v2+）** | 强制 `initialize` RPC；握手完成前服务端拒绝一切非 `initialize` 调用，返回 `not_initialized`。`initialize` 响应携带 `serverVersion`、`pid`、`instanceId`、`protocolVersion`（此前由已下线的 `sidecar.hello` push 帧投递的身份信息）。完整契约见 `docs/sidecar-protocol.md` |
+| **pull 接口** | `workspace.list / ensure / dispose`、完整 `session.*` 生命周期（create / attach / detach / delete / rename / history / events.get / snapshot.get / prompt / steer / followUp / cancelQueued / abort / setModel / setThinkingLevel / compact / contextInfo / submitAnswers / tasks.get / taskHistory.get / planState.get / listModels）、`providers.list`、`provider.listModels`、`settings.get/write`、`extensions.status`、`agents.list/content`、`tools.list`、`skills.list/content`、`memory.list/write/deleteTopic/upsert`、`commandPermission.resolve`、`subagent.abort`、`mcp.listServers/getConfig/createConfig/updateConfig/deleteConfig`、`channels.list/listConversations/create/bind/submitVerifyCode/retry/unbind`、`imPolicy.get/setChannelDefault/setChatOverride/clearChatOverride`、`checkpoints.list/restore` |
+| **push 事件** | `session.attached / detached / event / error / deleted`、`session.tool_call_{start,update,end}`、`subagent.spawned`、`session.compaction_{started,finished}`、`tasks.updated`、`plan.state.updated`、`models.changed`、`channel.status_changed`、`channels.conversations_changed`、`im.tools_enabled`、`im.policy_changed`、`im.workspaces_invalidated`、`command_permission.requested`、`subagent.settled`、`session.renamed` |
+| **历史还原** | 通过 `session.history` 拉取完整 chat tree（entries + `leafEntryId`），客户端自行重建分支。`session.snapshot.get` 一次往返即返回 history + tasks + plan 状态。`session.events.get` 按 `seq` 回放单个 session 的事件日志 |
+| **动态工具加载** | 工具分为 `always`（attach 时常驻）与 `deferred`（经 `addTools` 按需加载）。MCP server、skill subagent 及其它 deferred 来源填充候选池 |
+| **项目上下文指令** | 按优先级链解析 `CLAUDE.md` / `AGENTS.md` / `DESIGN.md`，包成 `<instructions>` 标签前置到每一次 LLM 调用。由 `taco.json.instructions` 开关控制 |
+| **Subagent 系统** | 每个 agent 的工具白名单、按深度设限的递归保护、`agentContinue` 续跑、经 `agent` 工具派生独立子 session、按工具名划命名空间 |
+| **Plan 模式** | `planEnter` / `planExit` 工具，plan 文档持久化在 `.taco/plans/<slug>.md`，执行期强制硬闸门 |
+| **Tasks 系统** | `todoWrite`（临时拆解）+ `taskCreate/Update/List`（持久化的命名清单）、per-session task store、`tasks.updated` push |
+| **Memory 系统** | `~/.taco/memory/MEMORY.md` + `projects/<id>/<slug>.md` 按主题分文件存储、基于 hash 的乐观并发、自动抽取 hook |
+| **权限 broker** | 5 级风险分级（readOnly / workspaceWrite / externalSideEffect / destructive / privilegeEscape）、基于规则的 ask/allow/deny、作用域（once / session / global）、subagent 继承、IM workspace policy 覆盖 |
+| **IM 渠道** | 渠道 SDK 框架；`channels.*` 管理接口 + `imPolicy.*` 按 workspace 覆盖；`channel.status_changed` 与 `im.*` push |
+| **MCP** | stdio + Streamable HTTP 两种 transport、经 `DeferredToolRegistry` 动态注册工具、`mcp.listServers` 健康探测、`alwaysLoaded` 常驻集合 |
+| **检查点** | turn 级的写前文件快照；`checkpoints.list` / `checkpoints.restore` 供客户端驱动撤销 |
+| **配置** | `$TACO_HOME` 下的 `taco.json`（默认 `~/.taco/`）；settings view 屏蔽秘密字段（API key → `MaskedKey`；`mcpServers[i].{env,headers,command,args,url,cwd}` 与 `channels[i].config` 被剥离） |
+| **桌面客户端** | Tauri 2 + React（`@taco-ai/desktop`）；Node.js TUI 示例（复用 `@taco-ai/protocol` 共享类型） |
+| **i18n** | 桌面 UI 内置 en + zh；`initialize.clientCapabilities.uiLocale` 传递到每一轮的 `<reply_language>` 标签 |
 | **模型配置** | 走独立 config 目录 `~/.taco/taco.json`（`TacoGlobalConfigShape`），sessions 默认在 `~/.taco/sessions/` |
 
 ```

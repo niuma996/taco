@@ -38,9 +38,32 @@ allowBuilds:
 Linux 用户若要 daemon-on-boot，需要自写 systemd user unit。`taco start`
 本身在 Linux 上是可用的——只要用户登录，daemon 就一直跑。
 
-## 2. 模型配置
+## 2. 存储位置
 
-### 2.1 配置加载顺序（后者覆盖前者）
+Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.taco/`。
+
+| 路径 | 归属 | 说明 |
+|------|------|------|
+| `$TACO_HOME/taco.json` | sidecar + desktop | 全局配置（`TacoGlobalConfigShape`）。权限 `0600`。 |
+| `$TACO_HOME/desktop.json` | 仅 desktop | 安装引导状态、debug 开关。sidecar 不读。 |
+| `$TACO_HOME/workspace/` | desktop | 桌面端没有 workspace 时的默认 cwd。首次启动时创建。 |
+| `$TACO_HOME/skills/` | sidecar + 用户 | 全局 skill 扫描根目录。**本地主** session 可以直接用 `write` 写进去 —— 不触发权限询问、不需要退回 shell。IM 与 subagent session 拿不到这个权限。 |
+| `$TACO_HOME/agents/` | sidecar + 用户 | 全局 agent 扫描根目录。同一条直写路径，同样的限制。 |
+| `$TACO_HOME/sessions/<workspace>/<sid>.jsonl` | sidecar | 按 workspace 存放的 session transcript。 |
+| `$TACO_HOME/sessions/im/<channelId>/<sid>.jsonl` | sidecar | 按 IM 渠道存放的 session transcript。 |
+| `$TACO_HOME/sessions/<sid>/tasks/` | sidecar | 按 session 的 task store（与该 session 的 `.jsonl` 同处）。 |
+| `$TACO_HOME/channels/<channelId>.json` | channel SDK | 渠道凭证。权限 `0600`。不放进 `taco.json`。 |
+| `$TACO_HOME/checkpoints/<workspaceHash>/` | sidecar | turn 级的写前文件快照。`index.json` + 内容寻址的 `blobs/<sha256>`。 |
+| `$TACO_HOME/im-workspace-policies/<channelId>.json` | sidecar | 按渠道的 IM workspace 策略（`imPolicy.*`）。 |
+| `$TACO_HOME/logs/taco-desktop.log` | desktop | 轮转主日志（上限 10 MiB，保留 3 份，`0600`）。 |
+| `$TACO_HOME/logs/llm-dump.log` | desktop | 可选的 LLM payload dump（仅当 `TACO_DEBUG_LLM_PAYLOAD=1` 且用户开启）。 |
+
+`$TACO_HOME` 本身（也就是 `taco.json`）**不在**上面这份可写清单里：
+它保存 API key 与 shell 权限规则，静默写入等于能绕过后续所有审批。
+
+## 3. 模型配置
+
+### 3.1 配置加载顺序（后者覆盖前者）
 
 > 模型 key（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 等）由 pi-ai 直接读
 > process.env，不在 taco 的覆盖链里。taco.json 的 `apiKeys` 字段
@@ -53,7 +76,7 @@ Linux 用户若要 daemon-on-boot，需要自写 systemd user unit。`taco start
 | 2 | **`~/.taco/taco.json`** | 配置文件 |
 | 3（最高） | CLI 参数 `--default-model` / `--sessions-root` | config 文件 + 环境变量 |
 
-### 2.2 global config：写 `~/.taco/taco.json`
+### 3.2 global config：写 `~/.taco/taco.json`
 
 默认路径 `~/.taco/taco.json`（`TacoGlobalConfigShape` schema）。
 **不创建任何** **`.taco`** **目录。**
@@ -67,11 +90,12 @@ Linux 用户若要 daemon-on-boot，需要自写 systemd user unit。`taco start
 }
 ```
 
-完整示例（顺便把 key 也存到 config 里）：
+完整示例（覆盖所有支持的字段）：
 
 ```json
 {
   "defaultModel": "claude-sonnet-4-5",
+  "defaultProvider": "anthropic",
   "systemPrompt": "Be concise. You are a helpful assistant.",
   "anthropicApiKey": "sk-ant-...",
   "openaiApiKey": "sk-...",
@@ -79,7 +103,49 @@ Linux 用户若要 daemon-on-boot，需要自写 systemd user unit。`taco start
     "groq": "gsk-...",
     "deepseek": "sk-..."
   },
-  "sessionsRoot": "/custom/path/to/sessions"
+  "sessionsRoot": "/custom/path/to/sessions",
+  "thinkingLevel": "medium",
+  "compaction": {
+    "enabled": true,
+    "threshold": 0.7
+  },
+  "commandPermissions": {
+    "mode": "ask",
+    "rules": ["git status", "ls *", "npm test *"]
+  },
+  "customProviders": [
+    {
+      "id": "custom:abcd1234",
+      "name": "Local llama",
+      "api": "chatcomplete",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "models": [{ "id": "llama-3" }]
+    }
+  ],
+  "mcpServers": [
+    {
+      "id": "dbx",
+      "transport": "stdio",
+      "enabled": true,
+      "command": "node",
+      "args": ["/opt/dbx/server.js"],
+      "alwaysLoaded": ["query"]
+    }
+  ],
+  "channels": [
+    {
+      "channelId": "example-personal",
+      "manifest": { "name": "example", "version": "0.1.0" },
+      "config": {}
+    }
+  ],
+  "extensions": ["@taco/extension-foo"],
+  "disabledExtensions": ["@taco/extension-bar"],
+  "instructions": {
+    "enabled": true,
+    "files": { "claudeMd": true, "agentsMd": true, "designMd": false },
+    "inheritToSubagents": true
+  }
 }
 ```
 
@@ -96,14 +162,26 @@ Linux 用户若要 daemon-on-boot，需要自写 systemd user unit。`taco start
 | `apiKeys`         | object | 其它 provider → key，注入到 `<PROVIDER>_API_KEY` env |
 | `extra`           | object | 兜底，未来扩展用                                       |
 
-### 2.3 没有 per-workspace config
+### 3.3 safe view（`settings.get` / `settings.write` 返回的那份）
+
+`TacoGlobalConfigView` 在跨过 IPC 边界之前会剥掉所有带秘密的字段：
+
+- `anthropicApiKey` / `openaiApiKey` / `apiKeys` → `MaskedKey`（provider
+  前缀 + 末 4 位）
+- `mcpServers[i]` → 丢弃 `env`、`headers`、`command`、`args`、`url`、`cwd`
+- `channels[i]` → 丢弃 `config`
+
+需要拿到未脱敏值的客户端，只能请用户重新输入，或从另一个入口读（桌面端
+Tauri 命令 `read_file` 之类）。
+
+### 3.4 没有 per-workspace config
 
 跟 pi 保持一致——每个 cwd 的差异**不通过配置**表达，而是：
 
 - session 数据按 cwd 隔离存放在 `~/.taco/sessions/<encoded-cwd>/`
 - workspace 内模型/工具行为相同；如果有差异应该改 **session 内部的状态**（model\_change entry 等），不是配置文件
 
-### 2.4 验证 config 链路
+### 3.5 验证 config 链路
 
 跑一次 sidecar 看 stderr 中暴露的路径：
 
@@ -120,3 +198,20 @@ echo '{"id":"1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}' | npx ts
 
 如果看到 `sessionsRoot=...~/.taco/sessions`、`agentConfig=.../taco.json`，说明
 走的是默认路径。
+
+## 4. CLI flags
+
+```
+taco-sidecar [--default-model <model>] [--sessions-root <path>]
+             [--system-prompt <text>] [--thinking-level <level>]
+             [--anthropic-api-key <key>] [--openai-api-key <key>]
+```
+
+| Flag | 对应的环境变量 | 默认值 |
+|------|----------------|---------|
+| `--default-model` | `TACO_DEFAULT_MODEL` | 无 |
+| `--sessions-root` | `TACO_SESSIONS_ROOT` | `~/.taco/sessions` |
+| `--system-prompt` | — | 无 |
+| `--thinking-level` | — | `off` |
+| `--anthropic-api-key` | `ANTHROPIC_API_KEY` | `process.env` |
+| `--openai-api-key` | `OPENAI_API_KEY` | `process.env` |

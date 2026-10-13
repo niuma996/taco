@@ -11,11 +11,11 @@ What Taco adds on top of Pi's harness, from the code:
 - **`skill` tool — inline or subagent.** Loads by name; inline enqueues a `<skill_body name="NAME">` message protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
 - **Plan mode with a hard gate.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
 - **Prompt tag system.** Each `<tag>` block carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`); the pin-aware compact hook reads that registry.
-- **Extension system.** Workspace activation builds a frozen `WorkspaceExtensionSet` from process + workspace contributions. Three built-ins: `projectManifests`, `gitContext`, `outputRedaction`. New tags via `registerExtensionTag`.
+- **Extension system.** Capabilities plug in as extensions rather than being built into the runtime; workspace activation merges process and workspace contributions into one frozen `WorkspaceExtensionSet`, and an extension can contribute its own tags.
 - **JSONL storage.** Sessions / history / event logs go through `JsonlSessionStorage` + `JsonlSessionRepo` — append-only, replayable, no schema migrations.
-- **Pi as a dependency.** `pi-agent-core` and `pi-ai` pinned at `^0.83.0`; consumes upstream APIs directly.
-- **Standalone deploy.** `@taco-ai/sidecar` is a standalone npm package with its own bin; the Tauri desktop embeds it, but any stdio-capable runtime drives it directly.
-- **One process, many workspaces.** One `taco-sidecar` serves every workspace the UI has open, routed by `cwd`. Tenant isolation = start another process.
+- **Pi as a dependency.** `pi-agent-core` and `pi-ai` pinned at `0.99.2`; consumes upstream APIs directly. This is the last release before Pi 1.0 moves the agent harness out of `pi-agent-core` into a redesigned `pi-durable` package.
+- **Standalone deploy.** `@taco-ai/sidecar` is a standalone npm package with its own bin. It supports two running modes — direct `NDJSON over stdio` (any language can drive it that way) and the long-lived daemon mode used by `taco start` and the Tauri desktop. See §2.8.
+- **One daemon, many workspaces.** One daemon serves every workspace the UI has open, routed by `cwd`, and the same NDJSON socket carries traffic from multiple clients concurrently.
 
 ## 0.1 What's Next
 

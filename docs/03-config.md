@@ -54,6 +54,8 @@ Taco reads / writes the following filesystem paths. The base is
 | `$TACO_HOME/taco.json` | sidecar + desktop | Global config (`TacoGlobalConfigShape`). Permission `0600`. |
 | `$TACO_HOME/desktop.json` | desktop only | Onboarding state, debug toggles. Not read by sidecar. |
 | `$TACO_HOME/workspace/` | desktop | Default workspace cwd when the desktop has none. Created on first launch. |
+| `$TACO_HOME/skills/` | sidecar + user | Global skills scan root. A **local main** session may `write` into it directly — no permission prompt, no shell fallback. IM and subagent sessions do not get this. |
+| `$TACO_HOME/agents/` | sidecar + user | Global agents scan root. Same direct-write path and same restrictions. |
 | `$TACO_HOME/sessions/<workspace>/<sid>.jsonl` | sidecar | Per-workspace session transcripts. |
 | `$TACO_HOME/sessions/im/<channelId>/<sid>.jsonl` | sidecar | Per-IM-channel session transcripts. |
 | `$TACO_HOME/sessions/<sid>/tasks/` | sidecar | Per-session task store (colocated with the session's `.jsonl`). |

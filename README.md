@@ -16,9 +16,9 @@ Taco ships four packages: the sidecar server (`@taco-ai/sidecar`), the typed Nod
 - **`skill` tool.** Loads by name; inline enqueues `<skill_body name="NAME">` protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
 - **Plan mode.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
 - **Prompt tag system.** Each `<tag>` carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`).
-- **Extension system.** Workspace activation builds a frozen `WorkspaceExtensionSet` from process + workspace contributions. Built-ins: `projectManifests`, `gitContext`, `outputRedaction`. Register new tags via `registerExtensionTag`.
+- **Extension system.** New capabilities ship as extensions rather than being built into the runtime — process-level and workspace-level contributions merge into one frozen set, and an extension brings its own tags.
 - **JSONL storage.** Sessions / history / event logs go through `JsonlSessionStorage` + `JsonlSessionRepo` — append-only, replayable, no schema migrations.
-- **Pi as a dependency.** `pi-agent-core` and `pi-ai` pinned to `0.85.1`; consumes upstream APIs directly.
+- **Pi as a dependency.** `pi-agent-core` and `pi-ai` pinned to `0.99.2`; consumes upstream APIs directly.
 - **Standalone deploy.** `@taco-ai/sidecar` is a standalone npm package with its own bin. It supports two running modes — direct `NDJSON over stdio` (any language can drive it that way) and the long-lived daemon mode used by `taco start` and the Tauri desktop. Tenant isolation in daemon mode is "another control endpoint", not "another process".
 - **One daemon, many workspaces.** The desktop daemon serves every workspace the UI has open, routed by `cwd`. The same NDJSON socket can carry traffic from multiple clients concurrently.
 
