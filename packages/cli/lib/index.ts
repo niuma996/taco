@@ -16,7 +16,7 @@
  */
 
 import { installCommand } from "./install.ts";
-import { startCommand } from "./start.ts";
+import { ForeignDaemonError, startCommand } from "./start.ts";
 import { statusCommand } from "./status.ts";
 import { stopCommand } from "./stop.ts";
 import { uninstallCommand } from "./uninstall.ts";
@@ -95,7 +95,10 @@ if (isEntry) {
     run(process.argv).then(
         (code) => process.exit(code ?? 0),
         (err) => {
-            process.stderr.write(`[taco] error: ${err?.stack ?? err}\n`);
+            // An expected refusal carries its own instructions; a stack trace
+            // would bury them (the desktop surfaces this stderr verbatim).
+            const text = err instanceof ForeignDaemonError ? err.message : (err?.stack ?? err);
+            process.stderr.write(`[taco] error: ${text}\n`);
             process.exit(1);
         },
     );
