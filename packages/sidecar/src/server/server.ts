@@ -1587,6 +1587,21 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /**
+     * Rescan agent definitions for every workspace after an `agents.write` /
+     * `agents.delete`. Unlike `reloadMcpServers` this does not dispose
+     * workspaces: the catalog is re-derived per workspace and installed
+     * narrowly (spawner + prompt section), so attached sessions keep running.
+     */
+    async reloadAgents(): Promise<void> {
+        const builtinDir = join(resourceRoot(), "agents", "builtin");
+        for (const ws of this.workspaceMap.values()) {
+            ws.reloadAgentsNow(
+                await loadAgents({ builtinDir, userDirs: defaultAgentDirs(ws.executionCwd) }),
+            );
+        }
+    }
+
+    /**
      * Dispose + clear every workspace so the next `ensureWorkspace` rebuilds
      * against the latest disk config. Called by the `mcp.*` mutation handlers
      * after persisting a change so newly enabled / removed MCP servers are

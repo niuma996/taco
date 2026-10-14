@@ -230,4 +230,7 @@ export interface ServerRpcSurface {
      * rare config mutation.
      */
     reloadMcpServers?(): Promise<void>;
+
+    /** Rescan agent definitions into every workspace after agents.write/delete. */
+    reloadAgents?(): Promise<void>;
 }

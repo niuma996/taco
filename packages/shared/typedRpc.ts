@@ -13,7 +13,11 @@ import type {
     AbortResult,
     AgentsContentParams,
     AgentsContentResult,
+    AgentsDeleteParams,
+    AgentsDeleteResult,
     AgentsListResult,
+    AgentsWriteParams,
+    AgentsWriteResult,
     AttachParams,
     CancelQueuedParams,
     CancelQueuedResult,
@@ -365,6 +369,11 @@ export interface TypedRpc {
     // ── agents ──
     agentsList(workspace: WorkspaceId): Promise<AgentsListResult>;
     agentsContent(workspace: WorkspaceId, agentType: string): Promise<AgentsContentResult>;
+    agentsWrite(
+        workspace: WorkspaceId,
+        params: Omit<AgentsWriteParams, "workspace">,
+    ): Promise<AgentsWriteResult>;
+    agentsDelete(workspace: WorkspaceId, agentType: string): Promise<AgentsDeleteResult>;
 
     // ── skills ──
     skillsList(workspace: WorkspaceId): Promise<SkillsListResult>;
@@ -715,6 +724,18 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
         // agentsContent: workspace + agentType
         agentsContent: (workspace, agentType) =>
             call<AgentsContentParams, AgentsContentResult>(RPC.agentsContent, workspace, {
+                workspace,
+                agentType,
+            }),
+
+        agentsWrite: (workspace, params) =>
+            call<AgentsWriteParams, AgentsWriteResult>(RPC.agentsWrite, workspace, {
+                workspace,
+                ...params,
+            }),
+
+        agentsDelete: (workspace, agentType) =>
+            call<AgentsDeleteParams, AgentsDeleteResult>(RPC.agentsDelete, workspace, {
                 workspace,
                 agentType,
             }),

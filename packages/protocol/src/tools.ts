@@ -162,7 +162,11 @@ export interface AgentEntry {
     whenToUse?: string;
     /** Context mode from the definition's frontmatter; absent = "independent". */
     context?: "independent" | "fork";
+    /** Engine from the definition's frontmatter; absent = "pi". */
+    runtime?: "pi" | "claude-code";
     source: "builtin" | "user";
+    /** Whether `agents.write` / `agents.delete` may modify this definition. */
+    editable: boolean;
 }
 
 /** `agents.list` RPC result. */
@@ -184,7 +188,45 @@ export interface AgentsContentResult {
     whenToUse?: string;
     /** Context mode from the definition's frontmatter; absent = "independent". */
     context?: "independent" | "fork";
+    runtime?: "pi" | "claude-code";
+    maxTurns?: number;
     source: "builtin" | "user";
+    editable: boolean;
+}
+
+/**
+ * `agents.write` RPC params — create or overwrite one agent definition in
+ * `$TACO_HOME/agents/<agentType>.md`. Only `claude-code` agents can be written
+ * from the UI in this version.
+ */
+export interface AgentsWriteParams {
+    workspace: WorkspaceId;
+    agentType: string;
+    description: string;
+    whenToUse?: string;
+    runtime: "claude-code";
+    maxTurns: number;
+    systemPrompt: string;
+    /**
+     * Set when editing: the agentType being replaced. Renaming deletes the old
+     * file once the new one is written. Absent = create, which fails if the
+     * agentType already exists in any source.
+     */
+    previousAgentType?: string;
+}
+
+export interface AgentsWriteResult {
+    ok: true;
+}
+
+/** `agents.delete` RPC params — only editable (`$TACO_HOME/agents`) definitions. */
+export interface AgentsDeleteParams {
+    workspace: WorkspaceId;
+    agentType: string;
+}
+
+export interface AgentsDeleteResult {
+    ok: true;
 }
 
 /** `subagent.spawned` push params. */

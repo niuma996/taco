@@ -213,3 +213,40 @@ describe("AgentSpawner — runtime: claude-code", () => {
         assert.match(r.resultText, /cannot be resumed/);
     });
 });
+
+// Reload path used by agents.write/delete: the workspace swaps the catalog
+// into the spawner and rebuilds <available_agents> only when it changed.
+import {
+    after as afterReload,
+    before as beforeReload,
+    describe as describeReload,
+    it as itReload,
+} from "node:test";
+
+describeReload("WorkspaceRuntime.reloadAgentsNow", () => {
+    let ws2: WorkspaceRuntime;
+    let cleanup2: () => Promise<void>;
+    beforeReload(() => {
+        ({ ws: ws2, cleanup: cleanup2 } = createTestWorkspace({
+            prefix: "cc-reload",
+            agents: defs,
+        }));
+    });
+    afterReload(() => cleanup2());
+
+    itReload("makes a newly written claude-code agent spawnable without a rebuild", () => {
+        const added: AgentDefinition = {
+            agentType: "cc2",
+            description: "second",
+            systemPrompt: "you read more",
+            runtime: "claude-code",
+            source: "user",
+            filePath: "/x/cc2.md",
+        };
+        const promptBefore = ws2.agentSpawner.findAgent("cc2");
+        assert.equal(promptBefore, undefined);
+        ws2.reloadAgentsNow([...defs, added]);
+        assert.equal(ws2.agentSpawner.findAgent("cc2")?.runtime, "claude-code");
+        assert.ok(ws2.systemPrompt.includes("cc2"));
+    });
+});

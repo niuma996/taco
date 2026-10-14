@@ -217,7 +217,8 @@ export class AgentSpawner extends EventEmitter {
     readonly models: MutableModels;
     /** Public so tests can assert on the live parent toolset a spawn would see. */
     readonly getTools: () => TacoTool[];
-    readonly agents: AgentDefinition[];
+    /** NOT readonly: `replaceAgents` swaps the catalog after an `agents.write`. */
+    agents: AgentDefinition[];
     private readonly sessionRegistry: SessionRegistry;
     private readonly systemPromptContributors: SystemPromptContributor[];
     /** Claude Code SDK/CLI lookup. Fields rather than imports so tests can swap them. */
@@ -439,6 +440,11 @@ export class AgentSpawner extends EventEmitter {
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
         return this.agents.find((a) => a.agentType === type);
+    }
+
+    /** Swap the agent catalog after an `agents.write` / `agents.delete` rescan. */
+    replaceAgents(next: AgentDefinition[]): void {
+        this.agents = next;
     }
 
     /** parentToolCallIds with a live subagent under `parentSessionId`. */

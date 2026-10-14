@@ -33,7 +33,9 @@ function snapshotMethod(name: string): MethodMeta | null {
 
 const EXPECTED_METHODS: Record<string, MethodMeta> = {
     "agents.content": { ensureWorkspace: true },
+    "agents.delete": { ensureWorkspace: true },
     "agents.list": { ensureWorkspace: true },
+    "agents.write": { ensureWorkspace: true },
     "channels.bind": { ensureWorkspace: false, command: true },
     "channels.create": { ensureWorkspace: false, command: true },
     "channels.list": { ensureWorkspace: false },
