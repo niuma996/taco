@@ -94,6 +94,20 @@ describe("AgentSpawner — runtime: claude-code", () => {
         return id;
     }
 
+    /** Parent with one message — fork renders nothing from an empty branch. */
+    async function seedParentWithMessage(): Promise<SessionId> {
+        const id = asSessionId(`parent-${Math.random().toString(36).slice(2)}`);
+        const session = await ws.repo.create({ id, cwd }, harnessContext);
+        const branch = await session.createBranch("main", null, harnessContext);
+        await branch.appendMessage(
+            { role: "user", content: "earlier context", timestamp: Date.now() },
+            harnessContext,
+        );
+        await session.close(harnessContext);
+        ws.sessionRegistry.invalidateListCache();
+        return id;
+    }
+
     it("runs synchronously, returns the answer, and persists a readable transcript", async () => {
         frames = readThenAnswer;
         const parent = await seedParent();
@@ -233,8 +247,13 @@ describe("AgentSpawner — runtime: claude-code", () => {
         assert.equal(await readFile(receipt.resultPath, "utf-8"), "It says hello.");
     });
 
-    it("rejects context: fork before creating a child session", async () => {
-        const parent = await seedParent();
+    it("corrects context: fork to independent instead of failing", async () => {
+        // The model cannot pass a runtime, so it may ask a claude-code agent
+        // for fork context it cannot have. Correcting it is friendlier than an
+        // error — the spawner already decided the mode before creating the
+        // child, so nothing is lost.
+        frames = readThenAnswer;
+        const parent = await seedParentWithMessage();
         const r = await ws.agentSpawner.spawnSubagent({
             parentSessionId: parent,
             parentToolCallId: "call-3",
@@ -242,9 +261,17 @@ describe("AgentSpawner — runtime: claude-code", () => {
             prompt: "x",
             context: "fork",
         });
-        assert.equal(r.isError, true);
-        assert.equal(r.subSessionId, undefined);
-        assert.match(r.resultText, /only supports context "independent"/);
+        assert.equal(r.isError, false, r.resultText);
+        assert.ok(r.subSessionId);
+        // The real assertion: the fork block never ran. Asserting only on
+        // success would pass either way — the claude-code runner ignores
+        // `forkedContext`, so a missing downgrade is invisible to the result.
+        // It is still wrong: it renders the whole parent transcript and
+        // persists it into the child's facts for a child that cannot use it.
+        const facts = await ws.sessionRegistry.withSession(r.subSessionId, (sess) =>
+            readSessionFacts(sess),
+        );
+        assert.equal(facts.forkedContext, undefined);
     });
 
     it("refuses agentContinue on a claude-code child", async () => {

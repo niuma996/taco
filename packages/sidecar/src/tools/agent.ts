@@ -64,7 +64,7 @@ export function createAgentTool(
         context: Type.Optional(
             Type.Union([Type.Literal("independent"), Type.Literal("fork")], {
                 description:
-                    'Context mode. Omit to use the agent type\'s configured default. "fork" additionally gives the subagent a transcript of this conversation up to now — use it when the task depends on what was already discussed or discovered.',
+                    'Context mode. Omit to use the agent type\'s configured default. "fork" additionally gives the subagent a transcript of this conversation up to now — use it when the task depends on what was already discussed or discovered. Only agents running on taco\'s own engine support it. A "fork" sent for one that does not (e.g. a Claude Code type) is corrected to "independent" rather than failing, so passing it is harmless but pointless.',
             }),
         ),
         background: Type.Optional(
@@ -157,9 +157,15 @@ export function createAgentTool(
                           : "");
                 return {
                     content: [{ type: "text", text }],
+                    // Without a child session the launch failed; reporting
+                    // "completed" would render a green check on a card whose
+                    // own text says it failed.
+                    ...(isError ? { isError: true } : {}),
                     details: subSessionId
                         ? { status: "launched", subSessionId, agentType: params.subagent_type }
-                        : { status: "completed", agentType: params.subagent_type },
+                        : isError
+                          ? { status: "error", agentType: params.subagent_type }
+                          : { status: "completed", agentType: params.subagent_type },
                 };
             }
             const body = isError ? `subagent error: ${resultText}` : resultText;
@@ -170,11 +176,17 @@ export function createAgentTool(
             const text = subSessionId ? `${body}\n\n[subagent session: ${subSessionId}]` : body;
             return {
                 content: [{ type: "text", text }],
-                details: {
-                    status: "completed",
-                    agentType: params.subagent_type,
-                    ...(subSessionId ? { subSessionId } : {}),
-                },
+                // Same reason as the background branch: `isError` is what the
+                // harness persists into the toolResult, and it is the only
+                // signal the desktop turns into a red card.
+                ...(isError ? { isError: true } : {}),
+                details: isError
+                    ? { status: "error", agentType: params.subagent_type }
+                    : {
+                          status: "completed",
+                          agentType: params.subagent_type,
+                          ...(subSessionId ? { subSessionId } : {}),
+                      },
             };
         },
     };

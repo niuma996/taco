@@ -283,7 +283,8 @@ export interface SubagentSettledPayload {
  */
 export type AgentToolDetails =
     | { status: "completed"; subSessionId?: SessionId; agentType: string }
-    | { status: "launched"; subSessionId: SessionId; agentType: string };
+    | { status: "launched"; subSessionId: SessionId; agentType: string }
+    | { status: "error"; agentType: string };
 
 /**
  * Shape of the `details` field on a subagent tool's **live progress** update

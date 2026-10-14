@@ -161,7 +161,10 @@ describe("agent tool", () => {
             { env: mockEnv },
             { toolCallId: "tc-parent" },
         );
-        assert.deepEqual(res.details, { status: "completed", agentType: "explorer" });
+        // A failed launch must not read as "completed" — that is what put a
+        // green check on a card whose own text said it failed.
+        assert.deepEqual(res.details, { status: "error", agentType: "explorer" });
+        assert.equal(res.isError, true);
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("failed to launch background subagent:"));
     });
@@ -216,6 +219,10 @@ describe("agent tool", () => {
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("subagent error:"));
+        // Same contract as the background branch: a failure is an error, not a
+        // completed card. `isError` is what pi persists and the desktop colours.
+        assert.equal(res.isError, true);
+        assert.deepEqual(res.details, { status: "error", agentType: "bogus" });
     });
 
     it("declares executionMode 'parallel' so multiple agent calls in one turn run concurrently", () => {

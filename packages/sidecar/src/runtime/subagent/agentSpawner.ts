@@ -891,13 +891,11 @@ export class AgentSpawner extends EventEmitter {
         const contextMode = resolveContextMode(args.context, def.context);
         // A Claude Code child is a separate process with its own logs and
         // telemetry — a new trust domain — so the parent transcript must not
-        // be copied into it (see forkedHistory.ts).
-        if (def.runtime === "claude-code" && contextMode === "fork") {
-            return {
-                resultText: `agent type "${def.agentType}" runs on Claude Code, which only supports context "independent"`,
-                isError: true,
-            };
-        }
+        // be copied into it (see forkedHistory.ts). The model cannot pass the
+        // runtime, so it may well ask for `fork` here; correct the request
+        // instead of failing it. `<available_agents>` states the constraint, so
+        // a model that reads it never gets here.
+        const effectiveContextMode = def.runtime === "claude-code" ? "independent" : contextMode;
         // Compute parent depth to feed filterToolsForAgent before delegating.
         // Depth lives in the session's value store, not `JsonlSessionMetadata`
         // (pi 0.85 removed the free-form metadata bag), so it needs a read.
@@ -915,7 +913,7 @@ export class AgentSpawner extends EventEmitter {
         // attach path and lets us persist the exact string the child saw so a
         // later resume re-injects byte-identically.
         let forkedContext: string | undefined;
-        if (contextMode === "fork") {
+        if (effectiveContextMode === "fork") {
             forkedContext = await this.sessionRegistry.withSession(
                 args.parentSessionId,
                 async (parentSession) => buildForkedContext(await findBranchEntries(parentSession)),
