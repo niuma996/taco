@@ -659,7 +659,11 @@ export class WorkspaceRuntime extends EventEmitter {
             "session.deleted",
             "session.renamed",
         ]);
-        forwardEvents(this.agentSpawner, this, ["subagent.spawned", "subagent.settled"]);
+        forwardEvents(this.agentSpawner, this, [
+            "subagent.spawned",
+            "subagent.settled",
+            "session.event",
+        ]);
 
         // Skill hot reload: watcher, debounce timer and the in-flight scan all
         // live in `SkillHotReloader`; the workspace only says what "apply the

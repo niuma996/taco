@@ -956,8 +956,24 @@ export class SessionRegistry extends EventEmitter {
      * therefore report "main" for a subagent. Harmless today — no client path
      * branches on sessionKind for those two methods.
      */
+    /** Let a non-harness child (claude-code) mark itself as a subagent for push routing. */
+    noteSessionKind(sessionId: SessionId, kind: "main" | "subagent"): void {
+        this._factsCache.set(sessionId, {
+            ...(this._factsCache.get(sessionId) ?? {}),
+            kind,
+        });
+    }
+
     getSessionKind(sessionId: SessionId): "main" | "subagent" {
-        return this.attached.get(sessionId)?.sessionKind ?? "main";
+        const attached = this.attached.get(sessionId);
+        if (attached) return attached.sessionKind;
+        // A claude-code subagent never attaches — there is no pi harness — so
+        // its kind only lives in the facts cache, populated when the spawner
+        // writes facts or when a read path hydrates the session. Fall back to
+        // it so frames pushed for that session still route as "subagent".
+        const facts = this._factsCache.get(sessionId);
+        if (facts?.kind === "subagent") return "subagent";
+        return "main";
     }
 
     async dispose(): Promise<void> {

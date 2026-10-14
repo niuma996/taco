@@ -29,7 +29,7 @@ import type { TacoTool } from "../../tools/index.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelRegistry.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
-import type { Api, Model, MutableModels } from "../pi/types.ts";
+import type { AgentMessage, Api, Model, MutableModels } from "../pi/types.ts";
 import type { JsonlSessionRepo } from "../pi/values.ts";
 import { uuidv7 } from "../pi/values.ts";
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
@@ -579,6 +579,11 @@ export class AgentSpawner extends EventEmitter {
         await childSession.close(harnessContext);
         this.sessionRegistry.invalidateListCache();
 
+        // A claude-code child never attaches, so the push layer cannot read
+        // its kind from the attached map. Register it here — before the first
+        // event — so its frames route as "subagent" from the start.
+        this.sessionRegistry.noteSessionKind(asSessionId(childSessionId), "subagent");
+
         // 2. Emit spawned (same agentType as the persisted facts)
         this.emit("subagent.spawned", {
             parentSessionId: args.parentSessionId,
@@ -770,12 +775,89 @@ export class AgentSpawner extends EventEmitter {
                         const branch =
                             (await session.branch(MAIN_BRANCH, harnessContext)) ??
                             (await session.createBranch(MAIN_BRANCH, null, harnessContext));
-                        for (const m of messages) await branch.appendMessage(m, harnessContext);
+                        for (const m of messages) {
+                            await branch.appendMessage(m, harnessContext);
+                            this.pushChildMessages(childSessionId, m);
+                        }
                     }),
             });
         } finally {
             args.signal?.removeEventListener("abort", follow);
             this.releaseController(childSessionId);
+        }
+    }
+
+    /**
+     * Push one persisted child message as pi-style events so the desktop panel
+     * streams it live. The registry routes by the facts cache (`noteSessionKind`),
+     * so the frame lands in `childMessagesBySubSessionId` as a subagent.
+     *
+     * - user text → `message_end` (the prompt; the panel already shows it via
+     *   `entry.prompt`, but live stream needs it for the transcript)
+     * - assistant with toolCall blocks → `tool_start` per block (the card)
+     * - assistant text-only → `message_end` (the reply bubble)
+     * - toolResult → `tool_end` (fills the card)
+     */
+    private pushChildMessages(subSessionId: SessionId, m: AgentMessage): void {
+        const emit = (event: object) =>
+            this.emit("session.event", { sessionId: subSessionId, event });
+        if (m.role === "user") {
+            emit({ type: "message_end", message: m, timestamp: Date.now() });
+            return;
+        }
+        if (m.role === "assistant") {
+            const content = (m as { content?: unknown[] }).content ?? [];
+            const toolCalls = content.filter(
+                (
+                    c,
+                ): c is {
+                    type: "toolCall";
+                    id: string;
+                    name: string;
+                    arguments: Record<string, unknown>;
+                } =>
+                    typeof c === "object" &&
+                    c !== null &&
+                    (c as { type?: string }).type === "toolCall",
+            );
+            for (const tc of toolCalls) {
+                emit({
+                    type: "tool_start",
+                    toolCallId: tc.id,
+                    toolName: tc.name,
+                    args: tc.arguments,
+                    timestamp: Date.now(),
+                });
+            }
+            const text = content
+                .filter(
+                    (c) =>
+                        typeof c === "object" &&
+                        c !== null &&
+                        (c as { type?: string }).type === "text",
+                )
+                .map((c) => (c as { text?: string }).text ?? "")
+                .join("");
+            if (text.trim() !== "") {
+                emit({ type: "message_end", message: m, timestamp: Date.now() });
+            }
+            return;
+        }
+        if (m.role === "toolResult") {
+            const tr = m as {
+                toolCallId?: string;
+                toolName?: string;
+                isError?: boolean;
+                content?: unknown;
+            };
+            emit({
+                type: "tool_end",
+                toolCallId: tr.toolCallId ?? "",
+                toolName: tr.toolName ?? "tool",
+                result: { content: tr.content ?? [] },
+                isError: tr.isError ?? false,
+                timestamp: Date.now(),
+            });
         }
     }
 

@@ -149,6 +149,32 @@ describe("AgentSpawner — runtime: claude-code", () => {
         }
     });
 
+    it("streams child messages as pi-style events so the panel updates live", async () => {
+        frames = readThenAnswer;
+        const parent = await seedParent();
+        const events: Array<{ type: string; toolCallId?: string; toolName?: string }> = [];
+        ws.on("session.event", (e: { sessionId: string; event: Record<string, unknown> }) => {
+            if (e.sessionId !== undefined && e.sessionId !== parent) {
+                events.push({
+                    type: e.event.type as string,
+                    toolCallId: e.event.toolCallId as string | undefined,
+                    toolName: e.event.toolName as string | undefined,
+                });
+            }
+        });
+        await ws.agentSpawner.spawnSubagent({
+            parentSessionId: parent,
+            parentToolCallId: "call-live",
+            agentType: "cc",
+            prompt: "x",
+        });
+        const kinds = events.map((e) => e.type);
+        // user prompt + assistant tool_start + tool_end + assistant reply
+        assert.deepEqual(kinds, ["message_end", "tool_start", "tool_end", "message_end"]);
+        assert.equal(events[1]?.toolName, "Read");
+        assert.equal(events[2]?.toolName, "Read");
+    });
+
     it("stops through abortSubagentRun, like a pi subagent", async () => {
         let started: () => void = () => {};
         const running = new Promise<void>((resolve) => {
