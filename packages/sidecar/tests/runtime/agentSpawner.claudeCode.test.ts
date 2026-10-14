@@ -183,10 +183,21 @@ describe("AgentSpawner — runtime: claude-code", () => {
             prompt: "x",
         });
         const kinds = events.map((e) => e.type);
-        // user prompt + assistant tool_start + tool_end + assistant reply
-        assert.deepEqual(kinds, ["message_end", "tool_start", "tool_end", "message_end"]);
-        assert.equal(events[1]?.toolName, "Read");
-        assert.equal(events[2]?.toolName, "Read");
+        // pi's order: every assistant message opens its bubble before its tool
+        // calls arrive. The desktop attaches tool events to the last bubble, so
+        // a tool_start ahead of message_start renders as a fallback text row
+        // ("▶ Read" / "✓ Read: …") instead of a card.
+        assert.deepEqual(kinds, [
+            "message_end", // user prompt
+            "message_start", // assistant: tool call
+            "message_end",
+            "tool_start",
+            "tool_end", // its result fills the card
+            "message_start", // assistant: final reply
+            "message_end",
+        ]);
+        assert.equal(events[3]?.toolName, "Read");
+        assert.equal(events[4]?.toolName, "Read");
     });
 
     it("stops through abortSubagentRun, like a pi subagent", async () => {

@@ -792,54 +792,44 @@ export class AgentSpawner extends EventEmitter {
      * streams it live. The registry routes by the facts cache (`noteSessionKind`),
      * so the frame lands in `childMessagesBySubSessionId` as a subagent.
      *
-     * - user text → `message_end` (the prompt; the panel already shows it via
-     *   `entry.prompt`, but live stream needs it for the transcript)
-     * - assistant with toolCall blocks → `tool_start` per block (the card)
-     * - assistant text-only → `message_end` (the reply bubble)
-     * - toolResult → `tool_end` (fills the card)
+     * Order matters, because the desktop reducer attaches each tool event to
+     * the *last assistant bubble*. pi always opens that bubble first; a
+     * `tool_start` that arrives with no bubble to land in is rendered as a
+     * plain fallback text row ("▶ Read", "✓ Grep: …") instead of a card. So an
+     * assistant message is replayed the way pi emits one:
+     *
+     *   message_start → message_end (text + thinking) → tool_start per call
+     *
+     * and a toolResult as `tool_end`, which then finds its card in that bubble.
+     * Both events carry the message's own timestamp — the reducer keys the
+     * bubble on it (`live-asst-<timestamp>`), and start and end must agree.
      */
     private pushChildMessages(subSessionId: SessionId, m: AgentMessage): void {
         const emit = (event: object) =>
             this.emit("session.event", { sessionId: subSessionId, event });
         if (m.role === "user") {
-            emit({ type: "message_end", message: m, timestamp: Date.now() });
+            emit({ type: "message_end", message: m });
             return;
         }
         if (m.role === "assistant") {
+            emit({ type: "message_start", message: m });
+            emit({ type: "message_end", message: m });
             const content = (m as { content?: unknown[] }).content ?? [];
-            const toolCalls = content.filter(
-                (
-                    c,
-                ): c is {
-                    type: "toolCall";
-                    id: string;
-                    name: string;
-                    arguments: Record<string, unknown>;
-                } =>
-                    typeof c === "object" &&
-                    c !== null &&
-                    (c as { type?: string }).type === "toolCall",
-            );
-            for (const tc of toolCalls) {
+            for (const c of content) {
+                if (typeof c !== "object" || c === null) continue;
+                const block = c as {
+                    type?: string;
+                    id?: string;
+                    name?: string;
+                    arguments?: unknown;
+                };
+                if (block.type !== "toolCall") continue;
                 emit({
                     type: "tool_start",
-                    toolCallId: tc.id,
-                    toolName: tc.name,
-                    args: tc.arguments,
-                    timestamp: Date.now(),
+                    toolCallId: block.id,
+                    toolName: block.name,
+                    args: block.arguments,
                 });
-            }
-            const text = content
-                .filter(
-                    (c) =>
-                        typeof c === "object" &&
-                        c !== null &&
-                        (c as { type?: string }).type === "text",
-                )
-                .map((c) => (c as { text?: string }).text ?? "")
-                .join("");
-            if (text.trim() !== "") {
-                emit({ type: "message_end", message: m, timestamp: Date.now() });
             }
             return;
         }
@@ -856,7 +846,6 @@ export class AgentSpawner extends EventEmitter {
                 toolName: tr.toolName ?? "tool",
                 result: { content: tr.content ?? [] },
                 isError: tr.isError ?? false,
-                timestamp: Date.now(),
             });
         }
     }

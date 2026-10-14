@@ -645,3 +645,69 @@ describe("applyEventToMessages — failed assistant turns", () => {
         assert.equal(messages.filter((m) => m.kind === "system").length, 2);
     });
 });
+
+describe("applyEventToMessages — replayed claude-code child stream", () => {
+    // The sidecar replays a claude-code child's persisted transcript as pi-style
+    // events (agentSpawner.pushChildMessages). The order has to be pi's, or the
+    // tool events find no assistant bubble and degrade to plain text rows.
+    const replay = (events: object[]): UiMessage[] => {
+        let messages: UiMessage[] = [];
+        for (const ev of events)
+            messages = applyEventToMessages(messages, asEv(ev), baseOpts).messages;
+        return messages;
+    };
+    const call = {
+        role: "assistant",
+        timestamp: 101,
+        stopReason: "toolUse",
+        content: [{ type: "toolCall", id: "t1", name: "Read", arguments: { file_path: "a.ts" } }],
+    };
+    const answer = {
+        role: "assistant",
+        timestamp: 102,
+        stopReason: "stop",
+        content: [{ type: "text", text: "done" }],
+    };
+
+    it("renders tool calls as cards inside their bubble, not as fallback rows", () => {
+        const messages = replay([
+            { type: "message_end", message: { role: "user", timestamp: 100, content: "go" } },
+            { type: "message_start", message: call },
+            { type: "message_end", message: call },
+            { type: "tool_start", toolCallId: "t1", toolName: "Read", args: { file_path: "a.ts" } },
+            {
+                type: "tool_end",
+                toolCallId: "t1",
+                toolName: "Read",
+                result: { content: [{ type: "text", text: "file body" }] },
+                isError: false,
+            },
+            { type: "message_start", message: answer },
+            { type: "message_end", message: answer },
+        ]);
+        assert.equal(
+            messages.filter((m) => m.kind === "tool").length,
+            0,
+            "a tool event fell through to a fallback text row",
+        );
+        const assistants = messages.filter(
+            (m): m is Extract<UiMessage, { kind: "assistant" }> => m.kind === "assistant",
+        );
+        assert.equal(assistants.length, 2);
+        assert.equal(assistants[0]?.tools[0]?.name, "Read");
+        assert.equal(assistants[0]?.tools[0]?.status, "ok");
+        assert.equal(assistants[0]?.tools[0]?.resultText, "file body");
+        assert.equal(assistants[1]?.text, "done");
+    });
+
+    it("the old order (tool_start with no bubble) is exactly what produced fallback rows", () => {
+        // Pins the failure mode the order above avoids, so a regression in the
+        // sidecar's emit order is recognisable from this test's name.
+        const messages = replay([
+            { type: "message_end", message: { role: "user", timestamp: 100, content: "go" } },
+            { type: "tool_start", toolCallId: "t1", toolName: "Read" },
+            { type: "tool_end", toolCallId: "t1", toolName: "Read", result: "x", isError: false },
+        ]);
+        assert.equal(messages.filter((m) => m.kind === "tool").length, 2);
+    });
+});
