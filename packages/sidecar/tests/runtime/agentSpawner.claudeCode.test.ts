@@ -122,6 +122,33 @@ describe("AgentSpawner — runtime: claude-code", () => {
         assert.equal(facts.parentSessionId, parent);
     });
 
+    it("publishes a started update carrying subSessionId, so the card is clickable while running", async () => {
+        frames = readThenAnswer;
+        const parent = await seedParent();
+        const updates: Array<Record<string, unknown>> = [];
+        await ws.agentSpawner.spawnSubagent({
+            parentSessionId: parent,
+            parentToolCallId: "call-live",
+            agentType: "cc",
+            prompt: "x",
+            onUpdate: (payload) => {
+                updates.push(payload as unknown as Record<string, unknown>);
+            },
+        });
+        const started = updates[0];
+        assert.ok(started, "no progress update was published");
+        const startedDetails = started.details as { subSessionId?: string; agentType?: string };
+        assert.equal(startedDetails.agentType, "cc");
+        assert.ok(startedDetails.subSessionId, "started update carried no subSessionId");
+        // Every update carries the id — that is what makes a running card openable.
+        for (const u of updates) {
+            assert.ok(
+                (u.details as { subSessionId?: string })?.subSessionId,
+                `update without subSessionId: ${JSON.stringify(u)}`,
+            );
+        }
+    });
+
     it("stops through abortSubagentRun, like a pi subagent", async () => {
         let started: () => void = () => {};
         const running = new Promise<void>((resolve) => {
