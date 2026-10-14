@@ -223,4 +223,60 @@ describe("SubagentPanel — 详情", () => {
         renderPanel({ selected: "does-not-exist" });
         assert.ok(screen.getByText("subagents.selectPrompt"));
     });
+
+    it("运行中拉到的半截历史会在 settled 后再拉一次", async () => {
+        // 复现：claude-code 子代理没有 live 事件流；面板在运行中打开时只拉
+        // 到 prompt 一条，运行结束后若不重拉就一直停在半截。
+        const loadHistory = vi.fn(async () => {});
+        const history: Record<string, UiMessage[]> = { "sub-1": [userMsg] };
+        const renderWith = (status: UiToolCall["status"]) =>
+            render(
+                <SubagentProvider
+                    cwd="/proj"
+                    loadSubagentHistory={loadHistory}
+                    liveMessagesFor={() => []}
+                    historyMessagesFor={(id) => history[id] ?? []}
+                    openInPanel={() => {}}
+                >
+                    <SubagentPanel
+                        messages={[asst("m1", [agentTool({ status })])]}
+                        open={true}
+                        selectedSubSessionId="sub-1"
+                        onSelect={() => {}}
+                        onClose={() => {}}
+                    />
+                </SubagentProvider>,
+            );
+        const { rerender } = renderWith("running");
+        await waitFor(() => {
+            assert.equal(loadHistory.mock.calls.length, 1);
+        });
+        history["sub-1"] = [
+            userMsg,
+            { id: "cm2", kind: "assistant", text: "完成了", ts: 1, tools: [], thinking: [] },
+        ];
+        rerender(
+            <SubagentProvider
+                cwd="/proj"
+                loadSubagentHistory={loadHistory}
+                liveMessagesFor={() => []}
+                historyMessagesFor={(id) => history[id] ?? []}
+                openInPanel={() => {}}
+            >
+                <SubagentPanel
+                    messages={[asst("m1", [agentTool({ status: "ok" })])]}
+                    open={true}
+                    selectedSubSessionId="sub-1"
+                    onSelect={() => {}}
+                    onClose={() => {}}
+                />
+            </SubagentProvider>,
+        );
+        await waitFor(() => {
+            assert.equal(loadHistory.mock.calls.length, 2);
+        });
+        await waitFor(() => {
+            assert.ok(screen.getByText("完成了"));
+        });
+    });
 });
