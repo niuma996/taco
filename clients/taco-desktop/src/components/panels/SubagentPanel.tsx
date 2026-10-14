@@ -9,8 +9,9 @@
  * the historical-replay case — no more push events will arrive for it).
  */
 
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
+import { useStickToBottom } from "../../hooks/primitives/useStickToBottom";
 import { useSubagent } from "../../hooks/useSubagent";
 import { useT } from "../../i18n/useI18n";
 import type { UiMessage } from "../../lib/chat/chatUtils";
@@ -65,6 +66,11 @@ export function SubagentPanel({
     const selected: SubagentEntry | null =
         entries.find((e) => e.subSessionId === selectedSubSessionId) ?? null;
 
+    // The detail div is shared across selections, so a new selection must
+    // re-pin; `open` is in the key because the div does not exist while closed.
+    const detailRef = useRef<HTMLDivElement | null>(null);
+    useStickToBottom(detailRef, open ? selectedSubSessionId : null);
+
     if (!open) return null;
 
     return (
@@ -107,7 +113,7 @@ export function SubagentPanel({
                     ))}
                 </ul>
             )}
-            <div className="subagent-panel-detail">
+            <div className="subagent-panel-detail" ref={detailRef}>
                 {selected === null || selected.subSessionId === null ? (
                     // "Select one above" points at the list; with no subagents
                     // at all its own empty message is the whole story, and the

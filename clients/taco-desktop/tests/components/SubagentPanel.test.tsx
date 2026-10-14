@@ -280,3 +280,45 @@ describe("SubagentPanel — 详情", () => {
         });
     });
 });
+
+describe("SubagentPanel — 自动滚动", () => {
+    it("选中子代理的新消息到达时详情区滚到底部", async () => {
+        const scrolls: number[] = [];
+        const proto = HTMLElement.prototype as unknown as {
+            scrollTo: (opts: ScrollToOptions) => void;
+        };
+        const original = proto.scrollTo;
+        proto.scrollTo = function (this: HTMLElement, opts: ScrollToOptions) {
+            if (this.classList.contains("subagent-panel-detail")) scrolls.push(opts.top ?? 0);
+        };
+        try {
+            const live: Record<string, UiMessage[]> = { "sub-1": [userMsg] };
+            const view = renderPanel({ selected: "sub-1", live });
+            const mountScrolls = scrolls.length;
+            assert.ok(mountScrolls > 0, "snaps to the bottom when a subagent is selected");
+
+            live["sub-1"] = [userMsg, { id: "cm2", kind: "user", text: "第二条", ts: 1 }];
+            view.rerender(
+                <SubagentProvider
+                    cwd="/proj"
+                    loadSubagentHistory={async () => {}}
+                    liveMessagesFor={(id) => live[id] ?? []}
+                    historyMessagesFor={() => []}
+                    openInPanel={() => {}}
+                >
+                    <SubagentPanel
+                        messages={[asst("m1", [agentTool()])]}
+                        open={true}
+                        selectedSubSessionId="sub-1"
+                        onSelect={() => {}}
+                        onClose={() => {}}
+                    />
+                </SubagentProvider>,
+            );
+            await screen.findByText("第二条");
+            await waitFor(() => assert.ok(scrolls.length > mountScrolls));
+        } finally {
+            proto.scrollTo = original;
+        }
+    });
+});

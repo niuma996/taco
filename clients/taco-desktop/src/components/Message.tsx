@@ -11,6 +11,7 @@
 import type { CommandPermissionScope } from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
 import { useT } from "../i18n/useI18n";
 import {
     isEmptyAssistant,
@@ -226,9 +227,6 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
     const [overflowing, setOverflowing] = useState(false);
     const [showFade, setShowFade] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
-    // True while the user is pinned to the newest line; scrolling up unpins so
-    // streaming chunks stop yanking the viewport back down.
-    const pinnedRef = useRef(true);
     const isHistorical = block.isHistorical === true;
     const isStreaming = !isHistorical && block.endedAt === undefined;
     const defaultOpen = isStreaming;
@@ -242,19 +240,12 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
     const toggle = () => {
         setUserOverridden((prev) => !prev);
         setExpanded(false);
-        pinnedRef.current = true;
     };
 
-    // Keep the preview scrolled to the newest line: on open, and on every
-    // streaming chunk while the user hasn't scrolled away.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: block.thinking is the trigger — the effect re-measures scrollHeight after each streaming chunk without reading the string itself.
-    useEffect(() => {
-        const el = scrollRef.current;
-        if (!el || !preview) return;
-        if (!isStreaming || pinnedRef.current) {
-            el.scrollTop = el.scrollHeight;
-        }
-    }, [block.thinking, preview, isStreaming]);
+    // Keep the preview on the newest line while the user hasn't scrolled
+    // away. Keyed on the preview being mounted: the node only exists then.
+    const previewMounted = open && preview && !block.redacted && block.thinking.length > 0;
+    useStickToBottom(scrollRef, previewMounted);
 
     // The expand affordance only exists when the content actually exceeds the
     // preview cap; short blocks read in full without it.
@@ -268,7 +259,6 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
     const handleScroll = () => {
         const el = scrollRef.current;
         if (!el) return;
-        pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
         setShowFade(el.scrollTop > 0);
     };
 

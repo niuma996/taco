@@ -17,6 +17,7 @@ export default defineConfig({
             "tests/hooks/useSaveConfigPatch.test.tsx",
             "tests/hooks/useDragResize.test.tsx",
             "tests/hooks/useRightPanel.test.tsx",
+            "tests/hooks/useStickToBottom.test.tsx",
             "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",
             "tests/components/FilePreviewGrant.test.tsx",

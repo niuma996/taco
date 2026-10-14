@@ -25,7 +25,7 @@
     "test:memory": "vitest run tests/components/MemoryPane.test.tsx",
     "test:subagent-panel": "vitest run tests/components/SubagentPanel.test.tsx",
     "test:llm-dump": "vitest run tests/components/LlmDumpPanel.test.tsx",
-    "test:right-panel": "vitest run tests/hooks/useDragResize.test.tsx tests/hooks/useRightPanel.test.tsx"
+    "test:right-panel": "vitest run tests/hooks/useDragResize.test.tsx tests/hooks/useRightPanel.test.tsx tests/hooks/useStickToBottom.test.tsx"
   },
   "license": "MIT",
   "repository": "github:niuma996/taco",
