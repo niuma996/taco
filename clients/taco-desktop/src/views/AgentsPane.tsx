@@ -8,6 +8,7 @@
  */
 
 import type { AgentEntry, AgentsContentResult } from "@taco-ai/protocol";
+import { Plus } from "lucide-react";
 import { type ReactElement, useMemo, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { AgentForm, type AgentFormValue } from "../components/agents/AgentForm";
@@ -99,13 +100,14 @@ export function AgentsPane({
                     onQueryChange={setQuery}
                 >
                     <IconButton
+                        title={t("agents.new")}
                         aria-label={t("agents.new")}
                         onClick={() => {
                             setFormError(null);
                             setFormOpen("new");
                         }}
                     >
-                        +
+                        <Plus size={14} aria-hidden="true" />
                     </IconButton>
                 </PaneHeader>
                 {error && <div className="error-banner">{error}</div>}
@@ -136,35 +138,51 @@ export function AgentsPane({
                 {selectedAgent ? (
                     <>
                         <div className="agents-detail-header">
-                            <h2 className="agents-detail-name">{selectedAgent.agentType}</h2>
+                            <div className="agents-detail-title-row">
+                                <h2 className="agents-detail-name">{selectedAgent.agentType}</h2>
+                                {selectedEditable && (
+                                    <div className="agents-detail-actions">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            disabled={saving || contentLoading || !content}
+                                            onClick={() => {
+                                                setFormError(null);
+                                                setFormOpen("edit");
+                                            }}
+                                        >
+                                            {t("agents.edit")}
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            disabled={saving}
+                                            onClick={() => setConfirmDelete(true)}
+                                        >
+                                            {t("agents.delete")}
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="agents-detail-meta">
+                                <span className="agents-detail-tag">
+                                    {selectedAgent.runtime === "claude-code"
+                                        ? t("agents.runtimeCc")
+                                        : t("agents.runtimeStandard")}
+                                </span>
+                                <span className="agents-detail-tag">{selectedAgent.source}</span>
+                                {content?.agentType === selectedAgent.agentType &&
+                                    content.maxTurns !== undefined && (
+                                        <span className="agents-detail-tag">
+                                            {t("agents.form.maxTurns")} {content.maxTurns}
+                                        </span>
+                                    )}
+                            </div>
                             <p className="agents-detail-description">{selectedAgent.description}</p>
                             {selectedAgent.whenToUse && (
                                 <p className="agents-detail-when-to-use">
                                     {selectedAgent.whenToUse}
                                 </p>
-                            )}
-                            {selectedEditable && (
-                                <div className="agents-detail-actions">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={saving || contentLoading || !content}
-                                        onClick={() => {
-                                            setFormError(null);
-                                            setFormOpen("edit");
-                                        }}
-                                    >
-                                        {t("agents.edit")}
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={saving}
-                                        onClick={() => setConfirmDelete(true)}
-                                    >
-                                        {t("agents.delete")}
-                                    </Button>
-                                </div>
                             )}
                         </div>
                         <div className="agents-detail-content-label">

@@ -671,7 +671,7 @@
     "empty": "No tasks yet"
   },
   "agents": {
-    "new": "New agent",
+    "new": "Add subagent",
     "edit": "Edit",
     "delete": "Delete",
     "deleteTitle": "Delete this agent?",

@@ -78,25 +78,58 @@
     padding: 1.2rem;
 }
 
+.agents-detail-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 0 0.5rem 0;
+}
+
 .agents-detail-name {
-    margin: 0 0 0.4rem 0;
+    flex: 1;
+    min-width: 0;
+    margin: 0;
     font-size: 1.2rem;
     font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.agents-detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.8rem 0;
+}
+
+.agents-detail-tag {
+    padding: 0.1rem 0.5rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border);
+    font-size: 0.7rem;
+    color: var(--fg-dim);
 }
 
 .agents-detail-description {
-    margin: 0 0 0.6rem 0;
+    margin: 0;
     font-size: 0.9rem;
     color: var(--fg-dim);
     line-height: 1.5;
 }
 
 .agents-detail-when-to-use {
-    margin: 0 0 1rem 0;
+    margin: 0.5rem 0 0 0;
     font-size: 0.85rem;
     color: var(--fg-dim);
     font-style: italic;
     line-height: 1.5;
+}
+
+/* The header is separated from the prompt body by a rule, so the label gets
+   breathing room instead of sitting flush under the last header line. */
+.agents-detail-header {
+    padding-bottom: 1rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .agents-detail-content-label {
@@ -104,7 +137,7 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--fg-dim);
-    margin: 0 0 0.4rem 0;
+    margin: 0 0 0.5rem 0;
     font-weight: 600;
 }
 
@@ -135,8 +168,17 @@
 
 .agents-detail-actions {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
+    flex-shrink: 0;
+    gap: 0.25rem;
+}
+
+/* Fixed width: the base .ui-modal is content-sized, so switching the runtime
+   hint or showing a field error would otherwise resize the dialog. */
+.agent-form-modal {
+    width: 600px;
+    max-width: calc(100vw - 4rem);
+    max-height: 85vh;
+    overflow-y: auto;
 }
 
 .agent-form-modal .ui-textarea {

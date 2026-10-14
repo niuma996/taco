@@ -100,7 +100,7 @@ export function AgentForm(props: AgentFormProps) {
                 <TextInput
                     value={agentType}
                     onChange={(e) => setAgentType(e.target.value)}
-                    placeholder="my-cc-reader"
+                    placeholder="code-reviewer"
                 />
             </FormField>
             <FormField label={t("agents.form.description")}>

@@ -669,7 +669,7 @@
     "empty": "暂无任务"
   },
   "agents": {
-    "new": "新建 agent",
+    "new": "添加子代理",
     "edit": "编辑",
     "delete": "删除",
     "deleteTitle": "删除该 agent?",
