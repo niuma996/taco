@@ -132,3 +132,14 @@
     font-style: italic;
     text-align: center;
 }
+
+.agents-detail-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.agent-form-modal .ui-textarea {
+    font-family: var(--font-mono);
+    min-height: 16rem;
+}

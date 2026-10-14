@@ -669,5 +669,29 @@
   },
   "tasks": {
     "empty": "No tasks yet"
+  },
+  "agents": {
+    "new": "New agent",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteTitle": "Delete this agent?",
+    "deleteBody": "This removes the definition file from the taco agents directory. Sessions that already used it are unaffected.",
+    "runtimeCc": "Claude Code",
+    "form": {
+      "newTitle": "New Claude Code agent",
+      "editTitle": "Edit agent",
+      "runtimeHint": "Runs on your local Claude Code CLI with read-only tools.",
+      "name": "Name",
+      "nameHint": "lowercase-kebab-case; used as the agent type",
+      "nameInvalid": "Lowercase letters, digits and dashes, starting with a letter",
+      "description": "Description",
+      "whenToUse": "When to use (optional)",
+      "maxTurns": "Max turns",
+      "maxTurnsInvalid": "A positive whole number",
+      "systemPrompt": "System prompt",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…"
+    }
   }
 }

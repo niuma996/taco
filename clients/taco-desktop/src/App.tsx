@@ -459,6 +459,9 @@ export default function App() {
         agentContent,
         agentContentLoading,
         agentContentError,
+        agentSaving,
+        saveAgent,
+        deleteAgent,
     } = useAgentsPane(client, mainView === "agents", activeCwd);
     const {
         extensionStatus,
@@ -825,6 +828,9 @@ export default function App() {
                             content={agentContent}
                             contentLoading={agentContentLoading}
                             contentError={agentContentError}
+                            saving={agentSaving}
+                            onSaveAgent={saveAgent}
+                            onDeleteAgent={deleteAgent}
                         />
                     ) : mainView === "plugins" ? (
                         <PluginsPane

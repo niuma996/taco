@@ -667,5 +667,29 @@
   },
   "tasks": {
     "empty": "暂无任务"
+  },
+  "agents": {
+    "new": "新建 agent",
+    "edit": "编辑",
+    "delete": "删除",
+    "deleteTitle": "删除该 agent?",
+    "deleteBody": "这会从 taco agents 目录删除定义文件。已使用它的会话不受影响。",
+    "runtimeCc": "Claude Code",
+    "form": {
+      "newTitle": "新建 Claude Code agent",
+      "editTitle": "编辑 agent",
+      "runtimeHint": "在本机 Claude Code CLI 上运行,仅含只读工具。",
+      "name": "名称",
+      "nameHint": "小写 kebab-case,即 agent type",
+      "nameInvalid": "字母开头,仅含小写字母、数字和连字符",
+      "description": "描述",
+      "whenToUse": "何时使用(可选)",
+      "maxTurns": "最大轮数",
+      "maxTurnsInvalid": "正整数",
+      "systemPrompt": "系统提示词",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中…"
+    }
   }
 }
