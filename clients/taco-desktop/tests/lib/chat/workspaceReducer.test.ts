@@ -985,6 +985,43 @@ describe("subagent actions", () => {
         assert.deepEqual(next["/ws"]?.askUserPending, { "fresh-tool": true });
     });
 
+    it("RESTORE_SESSION_SNAPSHOT keeps a session known to be running marked as running", () => {
+        // Re-attaching to a chat whose turn is still in flight (a subagent that
+        // takes minutes) must not flip the stop button back on.
+        const state = {
+            "/ws": baseWs({
+                activeSession: "main-1",
+                pendingBySessionId: { "main-1": true },
+            }),
+        };
+
+        const next = workspacesReducer(state, {
+            type: "RESTORE_SESSION_SNAPSHOT",
+            cwd: "/ws",
+            sid: "main-1",
+            sessionKind: "main",
+            messages: [],
+            pendingAskUserIds: [],
+        });
+
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], true);
+    });
+
+    it("RESTORE_SESSION_SNAPSHOT seeds pending false for a session it knows nothing about", () => {
+        const state = { "/ws": baseWs({ activeSession: "main-1" }) };
+
+        const next = workspacesReducer(state, {
+            type: "RESTORE_SESSION_SNAPSHOT",
+            cwd: "/ws",
+            sid: "main-1",
+            sessionKind: "main",
+            messages: [],
+            pendingAskUserIds: [],
+        });
+
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], false);
+    });
+
     it("RESTORE_SESSION_SNAPSHOT replaces a subagent stream without changing the main view", () => {
         const state = {
             "/ws": baseWs({

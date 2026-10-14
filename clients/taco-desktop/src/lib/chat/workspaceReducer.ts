@@ -865,7 +865,17 @@ export function workspacesReducer(
                 return {
                     messages: action.messages,
                     askUserPending,
-                    pendingBySessionId: { ...existing.pendingBySessionId, [action.sid]: false },
+                    // A restore is about messages, not liveness — run_start /
+                    // run_end own this flag. Re-attaching to a session whose
+                    // turn is still in flight (switch away mid-run and back, or
+                    // a reload) must not mark it stopped, so seed `false` only
+                    // when nothing is known about this session yet. Without
+                    // this, a long tool call — e.g. a Claude Code subagent
+                    // running for minutes — shows as finished while it works.
+                    pendingBySessionId: {
+                        ...existing.pendingBySessionId,
+                        [action.sid]: existing.pendingBySessionId[action.sid] ?? false,
+                    },
                 };
             });
         case "ASKUSER_ANSWERED":
