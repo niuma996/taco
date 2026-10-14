@@ -138,6 +138,22 @@ describe("parseAgentMarkdown", () => {
         );
         assert.equal(invalid?.context, undefined);
     });
+
+    it("parses runtime, falling back to undefined (pi) for an unknown value", () => {
+        const cc = parseAgentMarkdown(
+            "---\nname: x\ndescription: y\nruntime: claude-code\n---\nbody",
+            "/x/x.md",
+            "user",
+        );
+        assert.equal(cc?.runtime, "claude-code");
+        const bogus = parseAgentMarkdown(
+            "---\nname: x\ndescription: y\nruntime: codex\n---\nbody",
+            "/x/x.md",
+            "user",
+        );
+        assert.ok(bogus);
+        assert.equal(bogus.runtime, undefined);
+    });
 });
 
 describe("loadAgents", () => {

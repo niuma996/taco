@@ -19,6 +19,7 @@ await build({
     // only affects the fallback path (e.g. an OAuth request where we
     // intentionally skip the override to preserve the provider identity).
     keepNames: true,
-    // Optional deps stay out of the bundle; loaded at runtime via dynamic import (see channelFactory).
-    external: ["@wechatbot/wechatbot"],
+    // Optional deps stay out of the bundle; loaded at runtime via dynamic import
+    // (see channelFactory, claudeCodeSdk).
+    external: ["@wechatbot/wechatbot", "@anthropic-ai/claude-agent-sdk"],
 });

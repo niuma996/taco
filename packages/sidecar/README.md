@@ -86,6 +86,16 @@ regardless of whether the SDK is installed, but `channels.bind`
 returns the channel's `<channel>_sdk_missing` error so the desktop
 can offer a one-click install.
 
+Agents with `runtime: claude-code` run on the user's own Claude Code CLI
+(`claude` on PATH, signed in) through `@anthropic-ai/claude-agent-sdk`.
+The SDK is not declared as a dependency at all — it carries a ~240 MB
+platform binary taco does not need — and is loaded at run time, either
+from normal resolution or from `$TACO_HOME/vendor`:
+
+```bash
+npm install --prefix ~/.taco/vendor --omit=optional @anthropic-ai/claude-agent-sdk
+```
+
 ## Build
 
 ```bash

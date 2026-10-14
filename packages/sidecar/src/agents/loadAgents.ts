@@ -8,7 +8,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
-import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "./types.ts";
+import type {
+    AgentDefinition,
+    AgentFewShot,
+    SubagentContextMode,
+    SubagentRuntime,
+} from "./types.ts";
 
 interface AgentFrontmatter {
     name?: string;
@@ -19,6 +24,7 @@ interface AgentFrontmatter {
     timeoutMinutes?: unknown;
     fewShots?: unknown;
     context?: unknown;
+    runtime?: unknown;
     [key: string]: unknown;
 }
 
@@ -66,6 +72,7 @@ export function parseAgentMarkdown(
                 : undefined,
         fewShots: parseFewShots(frontmatter.fewShots),
         context: parseContext(frontmatter.context),
+        runtime: parseRuntime(frontmatter.runtime),
         source,
         filePath,
     };
@@ -104,6 +111,12 @@ function parseFewShots(raw: unknown): ReadonlyArray<AgentFewShot> | undefined {
  */
 function parseContext(raw: unknown): SubagentContextMode | undefined {
     if (raw === "independent" || raw === "fork") return raw;
+    return undefined;
+}
+
+/** Validate the optional `runtime:` entry; anything unknown falls back to pi. */
+function parseRuntime(raw: unknown): SubagentRuntime | undefined {
+    if (raw === "pi" || raw === "claude-code") return raw;
     return undefined;
 }
 

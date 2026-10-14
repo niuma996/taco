@@ -101,6 +101,23 @@ function tailOf(text: string): string {
  */
 export type SubagentResumability = "resumable" | "not_resumable";
 
+/** Result text for a run stopped by the user, the parent's abort, or its own timeout. */
+export const SUBAGENT_STOPPED_TEXT =
+    "Subagent was stopped before it finished: the user aborted the parent " +
+    "session (or the run's own timeout fired). This is a deliberate " +
+    "interruption, not a failure — do not retry or respawn unless the user asks.";
+
+/**
+ * Label a turn-capped run so the caller can tell a finished answer from a
+ * truncated one. Returned as a success: the work done so far is still usable.
+ */
+export function partialResult(text: string, cap: number): string {
+    const prefix = `[partial: stopped after reaching the ${cap}-turn limit]`;
+    return text === ""
+        ? `${prefix} subagent produced no answer before the limit.`
+        : `${prefix}\n${text}`;
+}
+
 /**
  * The checkpoint published before the child does any work. Its `content` is
  * what the model reads if the call is interrupted — the session id is the

@@ -18,6 +18,8 @@ import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
 import {
     assistantText,
     neutralizeControlTags,
+    partialResult,
+    SUBAGENT_STOPPED_TEXT,
     type SubagentResumability,
     subagentStartedResult,
     subagentTurnResult,
@@ -152,10 +154,7 @@ export async function runAttachedSubagent(
         if (args.signal?.aborted) {
             return {
                 subSessionId,
-                resultText:
-                    "Subagent was stopped before it finished: the user aborted the parent " +
-                    "session (or the run's own timeout fired). This is a deliberate " +
-                    "interruption, not a failure — do not retry or respawn unless the user asks.",
+                resultText: SUBAGENT_STOPPED_TEXT,
                 isError: true,
             };
         }
@@ -184,15 +183,4 @@ export async function runAttachedSubagent(
     // partial-cap branch above.
     const { text } = neutralizeControlTags(rawText);
     return { subSessionId, resultText: text, isError: false };
-}
-
-/**
- * Label a turn-capped run so the caller can tell a finished answer from a
- * truncated one. Returned as a success: the work done so far is still usable.
- */
-function partialResult(text: string, cap: number): string {
-    const prefix = `[partial: stopped after reaching the ${cap}-turn limit]`;
-    return text === ""
-        ? `${prefix} subagent produced no answer before the limit.`
-        : `${prefix}\n${text}`;
 }
