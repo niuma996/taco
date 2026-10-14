@@ -114,6 +114,13 @@ describe("agentsWrite", () => {
         assert.doesNotMatch(text, /tools:|permissionMode:/);
     });
 
+    it("rejects AskUserQuestion, which the runner always blocks", async () => {
+        await assert.rejects(
+            writeUserAgent(params({ tools: ["Read", "AskUserQuestion"] }), []),
+            /AskUserQuestion is not available/,
+        );
+    });
+
     it("rejects tool names that are not plain identifiers", async () => {
         await assert.rejects(
             writeUserAgent(params({ tools: ["Read", "x\nrm"] }), []),

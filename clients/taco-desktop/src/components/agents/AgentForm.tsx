@@ -27,6 +27,9 @@ export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 /** Claude Code tool names, as the sidecar validates them. */
 const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
+/** Never available to a subagent: it would open a prompt no one can answer. */
+const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
+
 const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
     "auto",
     "default",
@@ -91,13 +94,19 @@ export function AgentForm(props: AgentFormProps) {
     const turns = Number.parseInt(maxTurns.trim(), 10);
     const turnsValid = Number.isInteger(turns) && turns >= 1 && String(turns) === maxTurns.trim();
     const toolList = parseTools(tools);
-    const toolsValid = toolList?.every((n) => TOOL_NAME_PATTERN.test(n)) ?? true;
+    const blockedTool = toolList?.find((n) => BLOCKED_CC_TOOLS.has(n));
+    const toolsError =
+        blockedTool !== undefined
+            ? t("agents.form.ccToolBlocked", { tool: blockedTool })
+            : (toolList?.some((n) => !TOOL_NAME_PATTERN.test(n)) ?? false)
+              ? t("agents.form.ccToolsInvalid")
+              : undefined;
     const canSave =
         typeValid &&
         description.trim() !== "" &&
         turnsValid &&
         systemPrompt.trim() !== "" &&
-        (!isCc || toolsValid);
+        (!isCc || toolsError === undefined);
 
     const save = () => {
         if (!canSave) return;
@@ -144,6 +153,7 @@ export function AgentForm(props: AgentFormProps) {
                     <li>{t("agents.form.ccRulePermissions")}</li>
                     <li>{t("agents.form.ccRuleContext")}</li>
                     <li>{t("agents.form.ccRuleCheckpoints")}</li>
+                    <li>{t("agents.form.ccRuleAskUser")}</li>
                 </ul>
             )}
             <FormField
@@ -168,7 +178,7 @@ export function AgentForm(props: AgentFormProps) {
                     <FormField
                         label={t("agents.form.ccTools")}
                         hint={t("agents.form.ccToolsHint")}
-                        error={!toolsValid ? t("agents.form.ccToolsInvalid") : undefined}
+                        error={toolsError}
                     >
                         <TextInput
                             value={tools}

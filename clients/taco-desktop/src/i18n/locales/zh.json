@@ -715,7 +715,9 @@
         "bypassPermissionsHint": "跳过所有权限检查，不做任何拦截。请只在可信的工作区使用。",
         "inherit": "以 Claude Code 配置为准",
         "inheritHint": "不指定模式，使用你在 Claude Code 里配置的 permissions.defaultMode。"
-      }
+      },
+      "ccRuleAskUser": "不能向用户提问：AskUserQuestion 不可用，需要用户选择的内容请在系统提示词里预先说明。",
+      "ccToolBlocked": "{{tool}} 对子代理不可用"
     },
     "runtimeStandard": "标准",
     "addStandard": "taco 子代理",

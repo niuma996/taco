@@ -33,6 +33,9 @@ const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 /** Claude Code tool names (`Read`, `WebFetch`, `mcp__x__y`). */
 const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
+/** Tools the runner always blocks; persisting them would suggest they work. */
+const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
+
 /** True when the definition lives in `$TACO_HOME/agents` (the editable set). */
 export function isEditableAgent(def: AgentDefinition): boolean {
     return def.filePath.startsWith(userAgentsDir());
@@ -102,6 +105,11 @@ export async function writeUserAgent(
     }
     if (params.tools?.some((t) => !TOOL_NAME_PATTERN.test(t))) {
         throw new AgentWriteError("tool names may contain only letters, digits, _ and -");
+    }
+    if (params.tools?.some((t) => BLOCKED_CC_TOOLS.has(t))) {
+        throw new AgentWriteError(
+            "AskUserQuestion is not available to subagents — a subagent cannot ask the user questions",
+        );
     }
     const target = params.agentType;
     if (params.previousAgentType === undefined) {

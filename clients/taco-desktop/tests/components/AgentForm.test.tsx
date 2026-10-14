@@ -78,6 +78,28 @@ describe("AgentForm", () => {
         assert.deepEqual(onSave.mock.calls[0]?.[0].tools, ["Read", "Edit", "Bash"]);
     });
 
+    it("refuses to save when the tool list names AskUserQuestion", async () => {
+        const onSave = vi.fn<(v: AgentFormValue) => void>();
+        render(<AgentForm runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
+        const user = await fillRequired("coder");
+        await user.type(
+            screen.getByPlaceholderText("Read, Grep, Glob, Edit, Bash"),
+            "AskUserQuestion",
+        );
+        assert.ok(screen.getByText("agents.form.ccToolBlocked"));
+        assert.equal(
+            (screen.getByText("agents.form.save").closest("button") as HTMLButtonElement).disabled,
+            true,
+        );
+        assert.equal(onSave.mock.calls.length, 0);
+    });
+
+    it("shows the no-user-questions rule in the Claude Code dialog", () => {
+        render(<AgentForm runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
+        assert.ok(screen.getByText("agents.form.ccRuleAskUser"));
+        assert.ok(screen.getByText("agents.form.ccRuleCheckpoints"));
+    });
+
     it("edit prefills Claude Code settings from the definition", () => {
         render(
             <AgentForm

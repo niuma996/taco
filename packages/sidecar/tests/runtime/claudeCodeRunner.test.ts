@@ -84,6 +84,9 @@ describe("runClaudeCodeSubagent", () => {
         // taco has no surface for Claude Code prompts: nothing may wait on one.
         assert.equal(o.permissionPrompts, "none");
         assert.equal("canUseTool" in o, false);
+        // AskUserQuestion would open an interactive prompt no one can answer;
+        // blocked even when a definition's tool list names it.
+        assert.deepEqual(o.disallowedTools, ["AskUserQuestion"]);
         assert.deepEqual(o.settingSources, ["user"]);
         assert.equal(o.persistSession, false);
         assert.equal(o.strictMcpConfig, true);

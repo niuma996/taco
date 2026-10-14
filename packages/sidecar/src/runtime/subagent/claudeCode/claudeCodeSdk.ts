@@ -77,6 +77,8 @@ export interface SdkQueryOptions {
     strictMcpConfig: boolean;
     mcpServers: Record<string, never>;
     tools: string[] | { type: "preset"; preset: "claude_code" };
+    /** Removed from the toolset entirely, even when listed in `tools`. */
+    disallowedTools?: string[];
     maxTurns?: number;
     abortController: AbortController;
     env: Record<string, string>;

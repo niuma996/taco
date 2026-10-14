@@ -717,7 +717,9 @@
         "bypassPermissionsHint": "Skips every permission check. Use only in workspaces you trust.",
         "inherit": "Use my Claude Code setting",
         "inheritHint": "Passes no mode, so your permissions.defaultMode in Claude Code applies."
-      }
+      },
+      "ccRuleAskUser": "It cannot ask the user questions: AskUserQuestion is unavailable, so state any choices it should make up front in the system prompt.",
+      "ccToolBlocked": "{{tool}} is not available to subagents"
     },
     "runtimeStandard": "Standard",
     "addStandard": "taco subagent",

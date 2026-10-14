@@ -16,8 +16,11 @@
  *    `permissions.defaultMode` decides.
  *  - `permissionPrompts: "none"`: taco has no surface to answer a Claude Code
  *    permission prompt, so anything that would prompt is denied in-process
- *    with a message telling Claude so. It also removes AskUserQuestion from
- *    the toolset — the subagent reports decisions back instead of asking.
+ *    with a message telling Claude so. AskUserQuestion is additionally
+ *    blocked via `disallowedTools` so a definition's explicit tool list
+ *    cannot re-add it — the subagent reports decisions back instead of
+ *    asking. This is the interim stance until prompts can be proxied to the
+ *    parent session.
  *  - `settingSources: ["user"]` is required for the CLI to find the user's own
  *    login when the sidecar was started without `ANTHROPIC_*` in its env. It
  *    also loads the user's MCP servers, which `strictMcpConfig` turns off.
@@ -50,6 +53,16 @@ const log = createLogger("sidecar.claudeCodeRunner");
 
 /** Claude Code's own default toolset; used when a definition lists no tools. */
 export const CLAUDE_CODE_TOOL_PRESET = { type: "preset", preset: "claude_code" } as const;
+
+/**
+ * Tools never handed to a Claude Code child, regardless of the definition's
+ * list. AskUserQuestion would open an interactive prompt no one can answer:
+ * `permissionPrompts: "none"` already drops it from the preset, and this
+ * stops a definition's explicit tool list from adding it back. Verified
+ * against SDK 0.3.299 + CLI 2.1.295: a disallowed tool never appears in the
+ * init frame's tool list.
+ */
+export const CLAUDE_CODE_BLOCKED_TOOLS = ["AskUserQuestion"] as const;
 
 /** Permission mode when a definition names none. */
 export const DEFAULT_CLAUDE_CODE_PERMISSION_MODE: ClaudeCodePermissionMode = "auto";
@@ -153,6 +166,7 @@ export async function runClaudeCodeSubagent(
                 strictMcpConfig: true,
                 mcpServers: {},
                 tools: args.tools !== undefined ? [...args.tools] : CLAUDE_CODE_TOOL_PRESET,
+                disallowedTools: [...CLAUDE_CODE_BLOCKED_TOOLS],
                 maxTurns,
                 abortController: args.abortController,
                 env: scrubbedProcessEnv(),
