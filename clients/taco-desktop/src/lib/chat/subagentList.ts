@@ -230,6 +230,18 @@ export function shouldAutoOpen(
 }
 
 /**
+ * Whether the task panel should auto-open: a task list that was not active at
+ * the last evaluation just became the active one. The same id staying active
+ * (tasks ticking off) and the list going away both leave the UI alone.
+ */
+export function shouldAutoOpenTasks(
+    prevActiveId: string | null,
+    nextActiveId: string | null,
+): boolean {
+    return nextActiveId !== null && nextActiveId !== prevActiveId;
+}
+
+/**
  * Clamp a persisted or dragged width into the allowed range.
  *
  * The upper bound is whatever is left after the sidebar and the chat column's
