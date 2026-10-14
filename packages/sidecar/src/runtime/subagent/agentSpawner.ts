@@ -203,7 +203,7 @@ export interface SubagentSessionArgs {
      * on a missing definition.
      */
     resumability?: SubagentResumability;
-    /** Engine for this run; absent = "pi". */
+    /** Engine for this run; absent = "standard". */
     runtime?: SubagentRuntime;
 }
 

@@ -28,7 +28,7 @@ export const agentsWriteSchema = Type.Object({
     agentType,
     description: Type.String({ minLength: 1, maxLength: 1024 }),
     whenToUse: Type.Optional(Type.String({ maxLength: 2048 })),
-    runtime: Type.Literal("claude-code"),
+    runtime: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("claude-code")])),
     maxTurns: Type.Integer({ minimum: 1, maximum: 200 }),
     systemPrompt: Type.String({ maxLength: 65536 }),
     previousAgentType: Type.Optional(agentType),

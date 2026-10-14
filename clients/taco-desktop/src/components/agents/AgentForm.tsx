@@ -1,25 +1,34 @@
 /**
  * AgentForm — create or edit a user agent definition under $TACO_HOME/agents.
  *
- * v1 covers `runtime: claude-code` agents only: pi agents need a tools
- * whitelist UI, which is deliberately out of scope. The form carries no
- * runtime picker — every save writes `runtime: claude-code`.
+ * Runtime is optional and defaults to "standard" (taco's own harness); the
+ * model never sees it — it delegates by agent name only. There is no tools
+ * picker yet, so a standard agent inherits the parent's toolset, same as a
+ * hand-written md file without a `tools:` line.
  */
+import type { AgentRuntime } from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Modal } from "../ui/Modal.tsx";
+import { Select } from "../ui/Select.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
 export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 
-/** What the form produces; the pane adds `runtime` and `previousAgentType`. */
+const RUNTIME_OPTIONS: ReadonlyArray<{ value: AgentRuntime; labelKey: string }> = [
+    { value: "standard", labelKey: "agents.runtimeStandard" },
+    { value: "claude-code", labelKey: "agents.runtimeCc" },
+];
+
+/** What the form produces; the pane adds `previousAgentType`. */
 export interface AgentFormValue {
     agentType: string;
     description: string;
     whenToUse?: string;
+    runtime: AgentRuntime;
     maxTurns: number;
     systemPrompt: string;
 }
@@ -42,6 +51,7 @@ export function AgentForm(props: AgentFormProps) {
     const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
     const [description, setDescription] = useState(props.existing?.description ?? "");
     const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
+    const [runtime, setRuntime] = useState<AgentRuntime>(props.existing?.runtime ?? "standard");
     const [maxTurns, setMaxTurns] = useState(String(props.existing?.maxTurns ?? 30));
     const [systemPrompt, setSystemPrompt] = useState(props.existing?.systemPrompt ?? "");
 
@@ -58,6 +68,7 @@ export function AgentForm(props: AgentFormProps) {
             agentType: trimmedType,
             description: description.trim(),
             whenToUse: whenToUse.trim() === "" ? undefined : whenToUse.trim(),
+            runtime,
             maxTurns: turns,
             systemPrompt,
         });
@@ -68,7 +79,6 @@ export function AgentForm(props: AgentFormProps) {
             open
             onClose={props.onCancel}
             title={isEdit ? t("agents.form.editTitle") : t("agents.form.newTitle")}
-            description={t("agents.form.runtimeHint")}
             className="agent-form-modal"
             actions={
                 <>
@@ -98,6 +108,21 @@ export function AgentForm(props: AgentFormProps) {
             </FormField>
             <FormField label={t("agents.form.whenToUse")}>
                 <TextInput value={whenToUse} onChange={(e) => setWhenToUse(e.target.value)} />
+            </FormField>
+            <FormField
+                label={t("agents.form.runtime")}
+                hint={
+                    runtime === "claude-code"
+                        ? t("agents.form.runtimeCcHint")
+                        : t("agents.form.runtimeStandardHint")
+                }
+            >
+                <Select
+                    value={runtime}
+                    onValueChange={(v) => setRuntime(v as AgentRuntime)}
+                    options={RUNTIME_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                    label={t("agents.form.runtime")}
+                />
             </FormField>
             <FormField
                 label={t("agents.form.maxTurns")}

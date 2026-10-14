@@ -248,6 +248,7 @@ export { SESSION_LIST_DEFAULT_LIMIT, SESSION_LIST_MAX_LIMIT } from "./session.js
 export type {
     AgentContinueToolDetails,
     AgentEntry,
+    AgentRuntime,
     AgentsContentParams,
     AgentsContentResult,
     AgentsDeleteParams,

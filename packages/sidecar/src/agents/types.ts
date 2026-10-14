@@ -36,12 +36,18 @@ export type SubagentProgressSink = AgentHarnessToolUpdateCallback<never>;
 export type SubagentContextMode = "independent" | "fork";
 
 /**
- * Which engine runs a subagent. `pi` is taco's own harness. `claude-code`
- * delegates the whole run to the user's local Claude Code CLI through the
- * Agent SDK: it gets Claude Code's own read-only tools rather than taco's,
- * always runs `independent`, and cannot be resumed with `agentContinue`.
+ * Which engine runs a subagent. Never model-visible: the model picks an agent
+ * by name and the spawner dispatches on the definition's runtime.
+ *
+ * - `standard` — taco's own harness. The default when frontmatter omits it.
+ * - `claude-code` — the whole run is delegated to the user's local Claude
+ *   Code CLI through the Agent SDK: Claude Code's own read-only tools rather
+ *   than taco's, always `independent`, and not resumable with `agentContinue`.
  */
-export type SubagentRuntime = "pi" | "claude-code";
+export type SubagentRuntime = "standard" | "claude-code";
+
+/** Runtime assumed when a definition does not name one. */
+export const DEFAULT_SUBAGENT_RUNTIME: SubagentRuntime = "standard";
 
 /** A single example conversation turn injected ahead of the profile body. */
 export interface AgentFewShot {
@@ -73,7 +79,7 @@ export interface AgentDefinition {
      * The `agent` tool's `context` param overrides this per-spawn.
      */
     context?: SubagentContextMode;
-    /** Engine for this agent type. Omitted in frontmatter = "pi". */
+    /** Engine for this agent type. Omitted in frontmatter = "standard". */
     runtime?: SubagentRuntime;
     /** Optional in-context examples. Injected into the child's system prompt
      *  ahead of `systemPrompt` (md body) so the examples establish tone and

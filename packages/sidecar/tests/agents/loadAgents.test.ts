@@ -139,7 +139,7 @@ describe("parseAgentMarkdown", () => {
         assert.equal(invalid?.context, undefined);
     });
 
-    it("parses runtime, falling back to undefined (pi) for an unknown value", () => {
+    it("parses runtime, falling back to undefined (standard) for an unknown value", () => {
         const cc = parseAgentMarkdown(
             "---\nname: x\ndescription: y\nruntime: claude-code\n---\nbody",
             "/x/x.md",
@@ -153,6 +153,12 @@ describe("parseAgentMarkdown", () => {
         );
         assert.ok(bogus);
         assert.equal(bogus.runtime, undefined);
+        const explicit = parseAgentMarkdown(
+            "---\nname: x\ndescription: y\nruntime: standard\n---\nbody",
+            "/x/x.md",
+            "user",
+        );
+        assert.equal(explicit?.runtime, "standard");
     });
 });
 

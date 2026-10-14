@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { after, before, describe, it } from "node:test";
 import { asSessionId, type SessionId } from "@taco-ai/protocol";
-import type { AgentDefinition } from "../../src/agents/types.ts";
+import type { AgentDefinition, SubagentSpawnContext } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { readSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import type {
@@ -16,6 +16,7 @@ import type {
     SdkQueryOptions,
 } from "../../src/runtime/subagent/claudeCode/claudeCodeSdk.ts";
 import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { createAgentTool } from "../../src/tools/agent.ts";
 import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const defs: AgentDefinition[] = [
@@ -233,6 +234,16 @@ describeReload("WorkspaceRuntime.reloadAgentsNow", () => {
         }));
     });
     afterReload(() => cleanup2());
+
+    itReload("keeps the runtime out of everything the model sees", () => {
+        // The model delegates by agent name only; the spawner picks the engine.
+        const prompt = ws2.systemPrompt;
+        assert.ok(prompt.includes("<name>cc</name>"));
+        assert.ok(!/claude-code|runtime/i.test(prompt.slice(prompt.indexOf("<available_agents>"))));
+        const agentTool = createAgentTool({} as SubagentSpawnContext, []);
+        const schema = JSON.stringify(agentTool.parameters);
+        assert.ok(!/runtime|claude-code/i.test(schema), schema);
+    });
 
     itReload("makes a newly written claude-code agent spawnable without a rebuild", () => {
         const added: AgentDefinition = {

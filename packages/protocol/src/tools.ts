@@ -155,6 +155,12 @@ export interface AgentsListParams {
     workspace: WorkspaceId;
 }
 
+/**
+ * Engine that runs an agent. UI/config only — the model always delegates by
+ * agent name and never sees this. Absent = "standard" (taco's own harness).
+ */
+export type AgentRuntime = "standard" | "claude-code";
+
 /** Available agent type entry. */
 export interface AgentEntry {
     agentType: string;
@@ -162,8 +168,8 @@ export interface AgentEntry {
     whenToUse?: string;
     /** Context mode from the definition's frontmatter; absent = "independent". */
     context?: "independent" | "fork";
-    /** Engine from the definition's frontmatter; absent = "pi". */
-    runtime?: "pi" | "claude-code";
+    /** Engine from the definition's frontmatter; absent = "standard". UI-only, never model-visible. */
+    runtime?: AgentRuntime;
     source: "builtin" | "user";
     /** Whether `agents.write` / `agents.delete` may modify this definition. */
     editable: boolean;
@@ -188,7 +194,7 @@ export interface AgentsContentResult {
     whenToUse?: string;
     /** Context mode from the definition's frontmatter; absent = "independent". */
     context?: "independent" | "fork";
-    runtime?: "pi" | "claude-code";
+    runtime?: AgentRuntime;
     maxTurns?: number;
     source: "builtin" | "user";
     editable: boolean;
@@ -196,15 +202,15 @@ export interface AgentsContentResult {
 
 /**
  * `agents.write` RPC params — create or overwrite one agent definition in
- * `$TACO_HOME/agents/<agentType>.md`. Only `claude-code` agents can be written
- * from the UI in this version.
+ * `$TACO_HOME/agents/<agentType>.md`.
  */
 export interface AgentsWriteParams {
     workspace: WorkspaceId;
     agentType: string;
     description: string;
     whenToUse?: string;
-    runtime: "claude-code";
+    /** Omitted = "standard"; the file then carries no `runtime:` line. */
+    runtime?: AgentRuntime;
     maxTurns: number;
     systemPrompt: string;
     /**

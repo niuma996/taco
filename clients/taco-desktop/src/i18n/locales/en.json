@@ -678,9 +678,8 @@
     "deleteBody": "This removes the definition file from the taco agents directory. Sessions that already used it are unaffected.",
     "runtimeCc": "Claude Code",
     "form": {
-      "newTitle": "New Claude Code agent",
+      "newTitle": "New agent",
       "editTitle": "Edit agent",
-      "runtimeHint": "Runs on your local Claude Code CLI with read-only tools.",
       "name": "Name",
       "nameHint": "lowercase-kebab-case; used as the agent type",
       "nameInvalid": "Lowercase letters, digits and dashes, starting with a letter",
@@ -691,7 +690,11 @@
       "systemPrompt": "System prompt",
       "cancel": "Cancel",
       "save": "Save",
-      "saving": "Saving…"
-    }
+      "saving": "Saving…",
+      "runtime": "Runtime",
+      "runtimeStandardHint": "taco's own harness, inheriting this session's tools.",
+      "runtimeCcHint": "Runs on your local Claude Code CLI with read-only tools. Needs `claude` installed and signed in."
+    },
+    "runtimeStandard": "Standard"
   }
 }

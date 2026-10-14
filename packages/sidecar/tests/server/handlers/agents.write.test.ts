@@ -72,6 +72,17 @@ describe("agentsWrite", () => {
         assert.equal(parsed?.systemPrompt, "You read files.");
     });
 
+    it("writes a standard agent with no runtime line, so it parses as the default", async () => {
+        await writeUserAgent(params({ agentType: "plain", runtime: undefined }), []);
+        const text = readFileSync(join(userAgentsDir(), "plain.md"), "utf-8");
+        assert.doesNotMatch(text, /runtime:/);
+        const { parseAgentMarkdown } = await import("../../../src/agents/loadAgents.ts");
+        assert.equal(parseAgentMarkdown(text, "x", "user")?.runtime, undefined);
+
+        await writeUserAgent(params({ agentType: "plain2", runtime: "standard" }), []);
+        assert.doesNotMatch(readFileSync(join(userAgentsDir(), "plain2.md"), "utf-8"), /runtime:/);
+    });
+
     it("rejects names that would escape the agents dir or break tooling", async () => {
         for (const bad of ["../evil", "My-Agent", "a b", "x".repeat(70)]) {
             await assert.rejects(writeUserAgent(params({ agentType: bad }), []), AgentWriteError);

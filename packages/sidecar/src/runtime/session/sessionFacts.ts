@@ -29,8 +29,8 @@ export interface SessionFacts {
     kind?: "main" | "subagent";
     /** Registered agent definition name, for subagent sessions. */
     agentType?: string;
-    /** Engine that ran this subagent; absent = "pi". */
-    runtime?: "pi" | "claude-code";
+    /** Engine that ran this subagent; absent = "standard". */
+    runtime?: "standard" | "claude-code";
     /** Spawn-chain depth. 0 for a user session, parent+1 for a subagent. */
     depth?: number;
     /**

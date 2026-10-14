@@ -3,8 +3,7 @@
  *
  * Left: list (agentType + source) with a "new agent" action; right: detail
  * (description, whenToUse, rendered systemPrompt) with edit/delete for
- * user agents that live in $TACO_HOME/agents. v1 edits claude-code agents
- * only — pi agents need a tools whitelist UI that is out of scope here.
+ * user agents that live in $TACO_HOME/agents.
  * Data fetching and mutations live in useAgentsPane (App.tsx).
  */
 
@@ -63,8 +62,7 @@ export function AgentsPane({
     }, [agents, query]);
     const selected = selectedAgentType ?? filtered[0]?.agentType ?? null;
     const selectedAgent = agents.find((a) => a.agentType === selected) ?? null;
-    const selectedEditable =
-        selectedAgent?.editable === true && selectedAgent.runtime === "claude-code";
+    const selectedEditable = selectedAgent?.editable === true;
 
     const saveForm = async (value: AgentFormValue) => {
         setFormError(null);
@@ -195,6 +193,7 @@ export function AgentsPane({
                                   agentType: selectedAgent.agentType,
                                   description: selectedAgent.description,
                                   whenToUse: selectedAgent.whenToUse,
+                                  runtime: selectedAgent.runtime ?? "standard",
                                   maxTurns: content.maxTurns ?? 30,
                                   systemPrompt: content.systemPrompt,
                               }

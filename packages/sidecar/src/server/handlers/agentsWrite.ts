@@ -13,7 +13,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { AgentsWriteParams } from "@taco-ai/protocol";
 import { parseAgentMarkdown } from "../../agents/loadAgents.ts";
-import type { AgentDefinition } from "../../agents/types.ts";
+import { type AgentDefinition, DEFAULT_SUBAGENT_RUNTIME } from "../../agents/types.ts";
 import { tacoHome } from "../../config/tacoHome.ts";
 
 export class AgentWriteError extends Error {
@@ -54,7 +54,12 @@ function renderAgentMarkdown(p: AgentsWriteParams): string {
     if (p.whenToUse !== undefined && p.whenToUse !== "") {
         lines.push(`whenToUse: ${JSON.stringify(p.whenToUse)}`);
     }
-    lines.push(`runtime: ${p.runtime}`, `maxTurns: ${p.maxTurns}`, "---", "");
+    // The default runtime is left implicit so the file reads like any
+    // hand-written agent and follows the default if it ever changes.
+    if (p.runtime !== undefined && p.runtime !== DEFAULT_SUBAGENT_RUNTIME) {
+        lines.push(`runtime: ${p.runtime}`);
+    }
+    lines.push(`maxTurns: ${p.maxTurns}`, "---", "");
     return `${lines.join("\n")}${p.systemPrompt.trimEnd()}\n`;
 }
 

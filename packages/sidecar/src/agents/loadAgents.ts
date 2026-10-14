@@ -114,9 +114,9 @@ function parseContext(raw: unknown): SubagentContextMode | undefined {
     return undefined;
 }
 
-/** Validate the optional `runtime:` entry; anything unknown falls back to pi. */
+/** Validate the optional `runtime:` entry; absent or unknown = the default (`standard`). */
 function parseRuntime(raw: unknown): SubagentRuntime | undefined {
-    if (raw === "pi" || raw === "claude-code") return raw;
+    if (raw === "standard" || raw === "claude-code") return raw;
     return undefined;
 }
 

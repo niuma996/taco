@@ -1,4 +1,9 @@
-import { type AgentEntry, type AgentsContentResult, asWorkspaceId } from "@taco-ai/protocol";
+import {
+    type AgentEntry,
+    type AgentRuntime,
+    type AgentsContentResult,
+    asWorkspaceId,
+} from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
@@ -7,6 +12,7 @@ export interface AgentSaveInput {
     agentType: string;
     description: string;
     whenToUse?: string;
+    runtime: AgentRuntime;
     maxTurns: number;
     systemPrompt: string;
 }
@@ -104,7 +110,6 @@ export function useAgentsPane(
             setAgentSaving(true);
             try {
                 await client.agentsWrite(asWorkspaceId(activeCwd), {
-                    runtime: "claude-code",
                     ...input,
                     ...(previousAgentType !== undefined ? { previousAgentType } : {}),
                 });
