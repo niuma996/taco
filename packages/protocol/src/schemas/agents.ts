@@ -30,6 +30,20 @@ export const agentsWriteSchema = Type.Object({
     whenToUse: Type.Optional(Type.String({ maxLength: 2048 })),
     runtime: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("claude-code")])),
     maxTurns: Type.Integer({ minimum: 1, maximum: 200 }),
+    tools: Type.Optional(
+        Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 64 }),
+    ),
+    permissionMode: Type.Optional(
+        Type.Union([
+            Type.Literal("auto"),
+            Type.Literal("default"),
+            Type.Literal("acceptEdits"),
+            Type.Literal("plan"),
+            Type.Literal("dontAsk"),
+            Type.Literal("bypassPermissions"),
+            Type.Literal("inherit"),
+        ]),
+    ),
     systemPrompt: Type.String({ maxLength: 65536 }),
     previousAgentType: Type.Optional(agentType),
 });

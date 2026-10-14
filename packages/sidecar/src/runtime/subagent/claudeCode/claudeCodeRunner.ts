@@ -6,20 +6,29 @@
  * into the already-created child session, and reports the same
  * `{ resultText, isError }` shape. Never throws.
  *
- * Security posture, verified against SDK 0.3.295 + CLI 2.1.295:
- *  - `tools` is an exact allowlist of read-only tools, so the child cannot
- *    write, run commands, or spawn its own subagents.
- *  - In-workspace reads are auto-allowed by the CLI; anything that reaches
- *    `canUseTool` (reads outside cwd) is denied, keeping it in the workspace.
+ * taco only launches Claude Code; what the child may do is Claude Code's own
+ * permission system's call, not taco's. Verified against SDK 0.3.299 + CLI
+ * 2.1.295:
+ *  - `tools` defaults to Claude Code's full preset (write, shell, web
+ *    included); a definition may narrow it to an explicit list.
+ *  - `permissionMode` defaults to `auto` (Claude Code's classifier approves or
+ *    denies each call). `inherit` passes none, so the user's
+ *    `permissions.defaultMode` decides.
+ *  - `permissionPrompts: "none"`: taco has no surface to answer a Claude Code
+ *    permission prompt, so anything that would prompt is denied in-process
+ *    with a message telling Claude so. It also removes AskUserQuestion from
+ *    the toolset — the subagent reports decisions back instead of asking.
  *  - `settingSources: ["user"]` is required for the CLI to find the user's own
  *    login when the sidecar was started without `ANTHROPIC_*` in its env. It
  *    also loads the user's MCP servers, which `strictMcpConfig` turns off.
  *  - The env is `scrubbedProcessEnv()`: provider keys taco injected never reach
  *    the CLI. Claude Code authenticates with its own configuration.
+ *  - Files Claude Code writes bypass taco's file tools, so taco checkpoints do
+ *    not cover them.
  */
 
 import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
-import type { SubagentProgressSink } from "../../../agents/types.ts";
+import type { ClaudeCodePermissionMode, SubagentProgressSink } from "../../../agents/types.ts";
 import { createLogger } from "../../../lib/logger.ts";
 import { scrubbedProcessEnv } from "../../models/providerKeyStore.ts";
 import type { AgentMessage, AgentToolResult } from "../../pi/types.ts";
@@ -39,13 +48,14 @@ import { ClaudeCodeTranscript } from "./claudeCodeTranscript.ts";
 
 const log = createLogger("sidecar.claudeCodeRunner");
 
-/** Claude Code's read-only tools. Names are Claude Code's, not taco's. */
-export const CLAUDE_CODE_READONLY_TOOLS = ["Read", "Grep", "Glob"];
+/** Claude Code's own default toolset; used when a definition lists no tools. */
+export const CLAUDE_CODE_TOOL_PRESET = { type: "preset", preset: "claude_code" } as const;
+
+/** Permission mode when a definition names none. */
+export const DEFAULT_CLAUDE_CODE_PERMISSION_MODE: ClaudeCodePermissionMode = "auto";
 
 /** Turn cap when the agent definition sets none; mirrors the `explorer` builtin. */
 export const DEFAULT_CLAUDE_CODE_MAX_TURNS = 30;
-
-const DENY_MESSAGE = "Denied: this subagent is read-only and limited to the workspace directory.";
 
 export interface RunClaudeCodeSubagentArgs {
     readonly subSessionId: SessionId;
@@ -54,6 +64,9 @@ export interface RunClaudeCodeSubagentArgs {
     /** md body of the agent definition, appended to Claude Code's own system prompt. */
     readonly rolePrompt?: string;
     readonly maxTurns?: number;
+    /** Claude Code tool names; undefined = Claude Code's full preset. */
+    readonly tools?: readonly string[];
+    readonly permissionMode?: ClaudeCodePermissionMode;
     readonly cwd: string;
     readonly abortController: AbortController;
     readonly onUpdate?: SubagentProgressSink;
@@ -97,6 +110,7 @@ export async function runClaudeCodeSubagent(
         args.maxTurns !== undefined && args.maxTurns > 0
             ? args.maxTurns
             : DEFAULT_CLAUDE_CODE_MAX_TURNS;
+    const permissionMode = args.permissionMode ?? DEFAULT_CLAUDE_CODE_PERMISSION_MODE;
     const transcript = new ClaudeCodeTranscript();
     let turns = 0;
     let result: { subtype: string; isError: boolean; text: string } | undefined;
@@ -130,11 +144,15 @@ export async function runClaudeCodeSubagent(
                 pathToClaudeCodeExecutable: executable,
                 cwd: args.cwd,
                 settingSources: ["user"],
-                permissionMode: "default",
+                ...(permissionMode === "inherit" ? {} : { permissionMode }),
+                ...(permissionMode === "bypassPermissions"
+                    ? { allowDangerouslySkipPermissions: true }
+                    : {}),
+                permissionPrompts: "none",
                 persistSession: false,
                 strictMcpConfig: true,
                 mcpServers: {},
-                tools: CLAUDE_CODE_READONLY_TOOLS,
+                tools: args.tools !== undefined ? [...args.tools] : CLAUDE_CODE_TOOL_PRESET,
                 maxTurns,
                 abortController: args.abortController,
                 env: scrubbedProcessEnv(),
@@ -143,7 +161,6 @@ export async function runClaudeCodeSubagent(
                     preset: "claude_code",
                     ...(args.rolePrompt ? { append: args.rolePrompt } : {}),
                 },
-                canUseTool: async () => ({ behavior: "deny", message: DENY_MESSAGE }),
                 stderr: (data) => log.debug("claude stderr", { subSessionId, data }),
             },
         });

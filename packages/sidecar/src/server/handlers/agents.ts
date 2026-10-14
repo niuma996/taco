@@ -66,6 +66,8 @@ export function registerAgentsHandlers(): void {
                 context: def.context,
                 runtime: def.runtime,
                 maxTurns: def.maxTurns,
+                ...(def.tools !== undefined ? { tools: def.tools } : {}),
+                ...(def.permissionMode !== undefined ? { permissionMode: def.permissionMode } : {}),
                 source: def.source,
                 editable: isEditableAgent(def),
             };

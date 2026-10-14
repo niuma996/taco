@@ -48,7 +48,7 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
         name: "agentContinue",
         label: "agentContinue",
         description:
-            "Send a follow-up message to an existing subagent. The subagent keeps its prior conversation, toolset, and profile — use this instead of `agent` when you already have a subSessionId. Safe to issue multiple `agentContinue` calls in the same turn when they target different subSessionIds — they run concurrently.",
+            "Send a follow-up message to an existing subagent. The subagent keeps its prior conversation, toolset, and profile — use this instead of `agent` when you already have a subSessionId. Only subagents of types running on taco's own engine can be continued; for any other type the call fails with a message saying so, and the way forward is a fresh `agent` call whose prompt restates what the earlier run found. Safe to issue multiple `agentContinue` calls in the same turn when they target different subSessionIds — they run concurrently.",
         parameters: continueSchema,
         executionMode: "parallel",
         taco: {

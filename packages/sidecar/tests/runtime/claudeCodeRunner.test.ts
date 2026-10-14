@@ -8,7 +8,7 @@ import { asSessionId } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { AgentMessage } from "../../src/runtime/pi/types.ts";
 import {
-    CLAUDE_CODE_READONLY_TOOLS,
+    CLAUDE_CODE_TOOL_PRESET,
     DEFAULT_CLAUDE_CODE_MAX_TURNS,
     runClaudeCodeSubagent,
 } from "../../src/runtime/subagent/claudeCode/claudeCodeRunner.ts";
@@ -70,7 +70,7 @@ describe("runClaudeCodeSubagent", () => {
         );
     });
 
-    it("passes the locked-down options to the SDK", async () => {
+    it("passes Claude Code's own toolset and permission system to the SDK", async () => {
         const seen: { options?: SdkQueryOptions; prompt?: string } = {};
         await runClaudeCodeSubagent({
             ...baseArgs(fakeSdk(() => reply("ok"), seen)),
@@ -78,9 +78,13 @@ describe("runClaudeCodeSubagent", () => {
         });
         const o = seen.options;
         assert.ok(o);
-        assert.deepEqual(o.tools, CLAUDE_CODE_READONLY_TOOLS);
+        assert.deepEqual(o.tools, CLAUDE_CODE_TOOL_PRESET);
+        assert.equal(o.permissionMode, "auto");
+        assert.equal(o.allowDangerouslySkipPermissions, undefined);
+        // taco has no surface for Claude Code prompts: nothing may wait on one.
+        assert.equal(o.permissionPrompts, "none");
+        assert.equal("canUseTool" in o, false);
         assert.deepEqual(o.settingSources, ["user"]);
-        assert.equal(o.permissionMode, "default");
         assert.equal(o.persistSession, false);
         assert.equal(o.strictMcpConfig, true);
         assert.deepEqual(o.mcpServers, {});
@@ -88,10 +92,35 @@ describe("runClaudeCodeSubagent", () => {
         assert.equal(o.maxTurns, DEFAULT_CLAUDE_CODE_MAX_TURNS);
         assert.equal(o.systemPrompt.append, "be brief");
         assert.equal(seen.prompt, "do it");
-        assert.deepEqual(await o.canUseTool("Read", { file_path: "/etc/hosts" }), {
-            behavior: "deny",
-            message: "Denied: this subagent is read-only and limited to the workspace directory.",
+    });
+
+    it("narrows tools to an explicit list when the definition names one", async () => {
+        const seen: { options?: SdkQueryOptions } = {};
+        await runClaudeCodeSubagent({
+            ...baseArgs(fakeSdk(() => reply("ok"), seen)),
+            tools: ["Read", "Edit"],
         });
+        assert.deepEqual(seen.options?.tools, ["Read", "Edit"]);
+    });
+
+    it("passes no permission mode for inherit, so Claude Code picks its own", async () => {
+        const seen: { options?: SdkQueryOptions } = {};
+        await runClaudeCodeSubagent({
+            ...baseArgs(fakeSdk(() => reply("ok"), seen)),
+            permissionMode: "inherit",
+        });
+        assert.ok(seen.options);
+        assert.equal("permissionMode" in seen.options, false);
+    });
+
+    it("pairs bypassPermissions with the SDK's required opt-in flag", async () => {
+        const seen: { options?: SdkQueryOptions } = {};
+        await runClaudeCodeSubagent({
+            ...baseArgs(fakeSdk(() => reply("ok"), seen)),
+            permissionMode: "bypassPermissions",
+        });
+        assert.equal(seen.options?.permissionMode, "bypassPermissions");
+        assert.equal(seen.options?.allowDangerouslySkipPermissions, true);
     });
 
     it("does not hand taco-injected provider keys to the CLI", async () => {

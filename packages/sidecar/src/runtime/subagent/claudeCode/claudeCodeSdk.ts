@@ -55,24 +55,32 @@ export type SdkMessage =
       }
     | { type: "system"; subtype: string };
 
-export type SdkPermissionResult =
-    | { behavior: "allow"; updatedInput: Record<string, unknown> }
-    | { behavior: "deny"; message: string };
+export type SdkPermissionMode =
+    | "default"
+    | "acceptEdits"
+    | "bypassPermissions"
+    | "plan"
+    | "dontAsk"
+    | "auto";
 
 export interface SdkQueryOptions {
     pathToClaudeCodeExecutable: string;
     cwd: string;
     settingSources: Array<"user" | "project" | "local">;
-    permissionMode: "default";
+    /** Omitted = Claude Code picks its own starting mode. */
+    permissionMode?: SdkPermissionMode;
+    /** Required by the SDK alongside `permissionMode: "bypassPermissions"`. */
+    allowDangerouslySkipPermissions?: boolean;
+    /** `"none"`: nothing reaches a host prompt; asks are denied in-process. */
+    permissionPrompts?: "host" | "none";
     persistSession: boolean;
     strictMcpConfig: boolean;
     mcpServers: Record<string, never>;
-    tools: string[];
+    tools: string[] | { type: "preset"; preset: "claude_code" };
     maxTurns?: number;
     abortController: AbortController;
     env: Record<string, string>;
     systemPrompt: { type: "preset"; preset: "claude_code"; append?: string };
-    canUseTool: (toolName: string, input: Record<string, unknown>) => Promise<SdkPermissionResult>;
     stderr?: (data: string) => void;
 }
 

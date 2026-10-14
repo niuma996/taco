@@ -1,12 +1,18 @@
 /**
  * AgentForm — create or edit a user agent definition under $TACO_HOME/agents.
  *
- * Runtime is optional and defaults to "standard" (taco's own harness); the
- * model never sees it — it delegates by agent name only. There is no tools
- * picker yet, so a standard agent inherits the parent's toolset, same as a
- * hand-written md file without a `tools:` line.
+ * One dialog per runtime, picked when the agent is created and fixed after:
+ * a taco agent and a Claude Code agent share almost no settings beyond the
+ * name and prompt, so switching between them mid-edit would only hide fields.
+ *
+ * - standard: taco's own harness; inherits the parent's toolset (no tools
+ *   picker yet, same as a hand-written md file without a `tools:` line).
+ * - claude-code: Claude Code's tools and permission system. Empty tools =
+ *   its full preset; permission mode defaults to `auto`.
+ *
+ * The model never sees the runtime — it delegates by agent name only.
  */
-import type { AgentRuntime } from "@taco-ai/protocol";
+import type { AgentRuntime, ClaudeCodePermissionMode } from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
@@ -18,9 +24,17 @@ import { TextInput } from "../ui/TextInput.tsx";
 
 export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 
-const RUNTIME_OPTIONS: ReadonlyArray<{ value: AgentRuntime; labelKey: string }> = [
-    { value: "standard", labelKey: "agents.runtimeStandard" },
-    { value: "claude-code", labelKey: "agents.runtimeCc" },
+/** Claude Code tool names, as the sidecar validates them. */
+const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+
+const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
+    "auto",
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+    "inherit",
 ];
 
 /** What the form produces; the pane adds `previousAgentType`. */
@@ -31,9 +45,13 @@ export interface AgentFormValue {
     runtime: AgentRuntime;
     maxTurns: number;
     systemPrompt: string;
+    tools?: string[];
+    permissionMode?: ClaudeCodePermissionMode;
 }
 
 export interface AgentFormProps {
+    /** Which dialog to show. Edit mode passes the existing definition's runtime. */
+    runtime: AgentRuntime;
     /** Edit mode: prefill from the existing definition. Undefined = create. */
     existing?: AgentFormValue;
     /** While saving, both action buttons are disabled to prevent double submits. */
@@ -44,23 +62,42 @@ export interface AgentFormProps {
     onCancel: () => void;
 }
 
+/** Comma/whitespace separated tool names → list; empty input = undefined (preset). */
+function parseTools(raw: string): string[] | undefined {
+    const names = raw
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return names.length > 0 ? names : undefined;
+}
+
 export function AgentForm(props: AgentFormProps) {
     const { t } = useT();
     const isEdit = props.existing !== undefined;
+    const isCc = props.runtime === "claude-code";
 
     const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
     const [description, setDescription] = useState(props.existing?.description ?? "");
     const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
-    const [runtime, setRuntime] = useState<AgentRuntime>(props.existing?.runtime ?? "standard");
     const [maxTurns, setMaxTurns] = useState(String(props.existing?.maxTurns ?? 30));
     const [systemPrompt, setSystemPrompt] = useState(props.existing?.systemPrompt ?? "");
+    const [tools, setTools] = useState(props.existing?.tools?.join(", ") ?? "");
+    const [permissionMode, setPermissionMode] = useState<ClaudeCodePermissionMode>(
+        props.existing?.permissionMode ?? "auto",
+    );
 
     const trimmedType = agentType.trim();
     const typeValid = AGENT_TYPE_PATTERN.test(trimmedType);
     const turns = Number.parseInt(maxTurns.trim(), 10);
     const turnsValid = Number.isInteger(turns) && turns >= 1 && String(turns) === maxTurns.trim();
+    const toolList = parseTools(tools);
+    const toolsValid = toolList?.every((n) => TOOL_NAME_PATTERN.test(n)) ?? true;
     const canSave =
-        typeValid && description.trim() !== "" && turnsValid && systemPrompt.trim() !== "";
+        typeValid &&
+        description.trim() !== "" &&
+        turnsValid &&
+        systemPrompt.trim() !== "" &&
+        (!isCc || toolsValid);
 
     const save = () => {
         if (!canSave) return;
@@ -68,17 +105,26 @@ export function AgentForm(props: AgentFormProps) {
             agentType: trimmedType,
             description: description.trim(),
             whenToUse: whenToUse.trim() === "" ? undefined : whenToUse.trim(),
-            runtime,
+            runtime: props.runtime,
             maxTurns: turns,
             systemPrompt,
+            ...(isCc ? { tools: toolList, permissionMode } : {}),
         });
     };
+
+    const title = isCc
+        ? isEdit
+            ? t("agents.form.editCcTitle")
+            : t("agents.form.newCcTitle")
+        : isEdit
+          ? t("agents.form.editTitle")
+          : t("agents.form.newTitle");
 
     return (
         <Modal
             open
             onClose={props.onCancel}
-            title={isEdit ? t("agents.form.editTitle") : t("agents.form.newTitle")}
+            title={title}
             className="agent-form-modal"
             actions={
                 <>
@@ -92,6 +138,14 @@ export function AgentForm(props: AgentFormProps) {
             }
         >
             {props.error ? <div className="error-banner">{props.error}</div> : null}
+            {isCc && (
+                <ul className="agent-form-rules" aria-label={t("agents.form.ccRulesLabel")}>
+                    <li>{t("agents.form.ccRuleEngine")}</li>
+                    <li>{t("agents.form.ccRulePermissions")}</li>
+                    <li>{t("agents.form.ccRuleContext")}</li>
+                    <li>{t("agents.form.ccRuleCheckpoints")}</li>
+                </ul>
+            )}
             <FormField
                 label={t("agents.form.name")}
                 hint={t("agents.form.nameHint")}
@@ -109,21 +163,35 @@ export function AgentForm(props: AgentFormProps) {
             <FormField label={t("agents.form.whenToUse")}>
                 <TextInput value={whenToUse} onChange={(e) => setWhenToUse(e.target.value)} />
             </FormField>
-            <FormField
-                label={t("agents.form.runtime")}
-                hint={
-                    runtime === "claude-code"
-                        ? t("agents.form.runtimeCcHint")
-                        : t("agents.form.runtimeStandardHint")
-                }
-            >
-                <Select
-                    value={runtime}
-                    onValueChange={(v) => setRuntime(v as AgentRuntime)}
-                    options={RUNTIME_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-                    label={t("agents.form.runtime")}
-                />
-            </FormField>
+            {isCc && (
+                <>
+                    <FormField
+                        label={t("agents.form.ccTools")}
+                        hint={t("agents.form.ccToolsHint")}
+                        error={!toolsValid ? t("agents.form.ccToolsInvalid") : undefined}
+                    >
+                        <TextInput
+                            value={tools}
+                            onChange={(e) => setTools(e.target.value)}
+                            placeholder="Read, Grep, Glob, Edit, Bash"
+                        />
+                    </FormField>
+                    <FormField
+                        label={t("agents.form.ccPermissionMode")}
+                        hint={t(`agents.form.ccMode.${permissionMode}Hint`)}
+                    >
+                        <Select
+                            value={permissionMode}
+                            onValueChange={(v) => setPermissionMode(v as ClaudeCodePermissionMode)}
+                            options={PERMISSION_MODES.map((m) => ({
+                                value: m,
+                                label: t(`agents.form.ccMode.${m}`),
+                            }))}
+                            label={t("agents.form.ccPermissionMode")}
+                        />
+                    </FormField>
+                </>
+            )}
             <FormField
                 label={t("agents.form.maxTurns")}
                 error={!turnsValid ? t("agents.form.maxTurnsInvalid") : undefined}

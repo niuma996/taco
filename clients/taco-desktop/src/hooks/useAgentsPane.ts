@@ -3,6 +3,7 @@ import {
     type AgentRuntime,
     type AgentsContentResult,
     asWorkspaceId,
+    type ClaudeCodePermissionMode,
 } from "@taco-ai/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -15,6 +16,10 @@ export interface AgentSaveInput {
     runtime: AgentRuntime;
     maxTurns: number;
     systemPrompt: string;
+    /** `claude-code` only; omitted = Claude Code's full preset. */
+    tools?: string[];
+    /** `claude-code` only; omitted = "auto". */
+    permissionMode?: ClaudeCodePermissionMode;
 }
 
 export interface UseAgentsPaneResult {

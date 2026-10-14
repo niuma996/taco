@@ -689,10 +689,38 @@
       "cancel": "取消",
       "save": "保存",
       "saving": "保存中…",
-      "runtime": "运行方式",
-      "runtimeStandardHint": "taco 自身的执行引擎，继承当前会话的工具。",
-      "runtimeCcHint": "在本机 Claude Code CLI 上运行，仅含只读工具。需要已安装并登录 `claude`。"
+      "newCcTitle": "新建 Claude Code 子代理",
+      "editCcTitle": "编辑 Claude Code 子代理",
+      "ccRulesLabel": "运行规则",
+      "ccRuleEngine": "在本机 Claude Code CLI 上运行，需要已安装并登录 `claude`；工作目录为当前工作区。",
+      "ccRulePermissions": "工具与权限由 Claude Code 自己管理；需要人工审批的操作会被直接拒绝，taco 无法代为确认。",
+      "ccRuleContext": "始终从空白上下文开始，看不到父会话；运行结束后不能用 agentContinue 续跑。",
+      "ccRuleCheckpoints": "它直接改写文件，不在 taco 检查点内，无法用检查点回滚。",
+      "ccTools": "工具（可选）",
+      "ccToolsHint": "留空使用 Claude Code 全套工具；填写则只开放列出的工具，逗号分隔。",
+      "ccToolsInvalid": "工具名只能包含字母、数字、_ 和 -",
+      "ccPermissionMode": "权限模式",
+      "ccMode": {
+        "auto": "自动（auto）",
+        "autoHint": "由 Claude Code 的分类器逐个批准或拒绝；拿不准的会被拒绝。",
+        "default": "默认（default）",
+        "defaultHint": "危险操作需要审批；子代理里无人审批，写文件和执行命令基本都会被拒绝。",
+        "acceptEdits": "自动接受编辑（acceptEdits）",
+        "acceptEditsHint": "自动接受文件编辑；执行命令等其他需审批的操作会被拒绝。",
+        "plan": "规划（plan）",
+        "planHint": "只做规划，不执行任何改动。",
+        "dontAsk": "不询问（dontAsk）",
+        "dontAskHint": "只执行已预先允许的操作，其余直接拒绝。",
+        "bypassPermissions": "跳过权限（bypassPermissions）",
+        "bypassPermissionsHint": "跳过所有权限检查，不做任何拦截。请只在可信的工作区使用。",
+        "inherit": "以 Claude Code 配置为准",
+        "inheritHint": "不指定模式，使用你在 Claude Code 里配置的 permissions.defaultMode。"
+      }
     },
-    "runtimeStandard": "标准"
+    "runtimeStandard": "标准",
+    "addStandard": "taco 子代理",
+    "addStandardHint": "taco 自身引擎，继承当前会话的工具",
+    "addCc": "Claude Code 子代理",
+    "addCcHint": "在本机 Claude Code 上运行，可读写代码"
   }
 }

@@ -7,15 +7,14 @@
  * Data fetching and mutations live in useAgentsPane (App.tsx).
  */
 
-import type { AgentEntry, AgentsContentResult } from "@taco-ai/protocol";
-import { Plus } from "lucide-react";
+import type { AgentEntry, AgentRuntime, AgentsContentResult } from "@taco-ai/protocol";
 import { type ReactElement, useMemo, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
+import { AddAgentMenu } from "../components/agents/AddAgentMenu";
 import { AgentForm, type AgentFormValue } from "../components/agents/AgentForm";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
 import { Button } from "../components/ui/Button";
-import { IconButton } from "../components/ui/IconButton";
 import type { AgentSaveInput } from "../hooks/useAgentsPane";
 import { useT } from "../i18n/useI18n";
 
@@ -46,7 +45,11 @@ export function AgentsPane({
 }: AgentsPaneProps): ReactElement {
     const { t } = useT();
     const [query, setQuery] = useState("");
-    const [formOpen, setFormOpen] = useState<false | "new" | "edit">(false);
+    // `new` carries the runtime picked from the add menu; edit reads it off
+    // the selected agent, since a definition's runtime is fixed once created.
+    const [formOpen, setFormOpen] = useState<
+        false | { mode: "new"; runtime: AgentRuntime } | { mode: "edit" }
+    >(false);
     const [formError, setFormError] = useState<string | null>(null);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -70,7 +73,9 @@ export function AgentsPane({
         try {
             await onSaveAgent(
                 value,
-                formOpen === "edit" && selectedAgent ? selectedAgent.agentType : undefined,
+                formOpen !== false && formOpen.mode === "edit" && selectedAgent
+                    ? selectedAgent.agentType
+                    : undefined,
             );
             setFormOpen(false);
         } catch (e) {
@@ -99,16 +104,12 @@ export function AgentsPane({
                     query={query}
                     onQueryChange={setQuery}
                 >
-                    <IconButton
-                        title={t("agents.new")}
-                        aria-label={t("agents.new")}
-                        onClick={() => {
+                    <AddAgentMenu
+                        onPick={(runtime) => {
                             setFormError(null);
-                            setFormOpen("new");
+                            setFormOpen({ mode: "new", runtime });
                         }}
-                    >
-                        <Plus size={14} aria-hidden="true" />
-                    </IconButton>
+                    />
                 </PaneHeader>
                 {error && <div className="error-banner">{error}</div>}
                 {actionError && <div className="error-banner">{actionError}</div>}
@@ -148,7 +149,7 @@ export function AgentsPane({
                                             disabled={saving || contentLoading || !content}
                                             onClick={() => {
                                                 setFormError(null);
-                                                setFormOpen("edit");
+                                                setFormOpen({ mode: "edit" });
                                             }}
                                         >
                                             {t("agents.edit")}
@@ -171,6 +172,14 @@ export function AgentsPane({
                                         : t("agents.runtimeStandard")}
                                 </span>
                                 <span className="agents-detail-tag">{selectedAgent.source}</span>
+                                {selectedAgent.runtime === "claude-code" &&
+                                    content?.agentType === selectedAgent.agentType && (
+                                        <span className="agents-detail-tag">
+                                            {t(
+                                                `agents.form.ccMode.${content.permissionMode ?? "auto"}`,
+                                            )}
+                                        </span>
+                                    )}
                                 {content?.agentType === selectedAgent.agentType &&
                                     content.maxTurns !== undefined && (
                                         <span className="agents-detail-tag">
@@ -205,8 +214,13 @@ export function AgentsPane({
             </div>
             {formOpen !== false && (
                 <AgentForm
+                    runtime={
+                        formOpen.mode === "new"
+                            ? formOpen.runtime
+                            : (selectedAgent?.runtime ?? "standard")
+                    }
                     existing={
-                        formOpen === "edit" && content && selectedAgent
+                        formOpen.mode === "edit" && content && selectedAgent
                             ? {
                                   agentType: selectedAgent.agentType,
                                   description: selectedAgent.description,
@@ -214,6 +228,8 @@ export function AgentsPane({
                                   runtime: selectedAgent.runtime ?? "standard",
                                   maxTurns: content.maxTurns ?? 30,
                                   systemPrompt: content.systemPrompt,
+                                  tools: content.tools,
+                                  permissionMode: content.permissionMode,
                               }
                             : undefined
                     }

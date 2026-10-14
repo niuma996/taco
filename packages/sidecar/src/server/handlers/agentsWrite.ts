@@ -30,6 +30,9 @@ export function userAgentsDir(): string {
 /** Lowercase-alphanumeric start; the name doubles as the markdown file name. */
 const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 
+/** Claude Code tool names (`Read`, `WebFetch`, `mcp__x__y`). */
+const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+
 /** True when the definition lives in `$TACO_HOME/agents` (the editable set). */
 export function isEditableAgent(def: AgentDefinition): boolean {
     return def.filePath.startsWith(userAgentsDir());
@@ -59,6 +62,16 @@ function renderAgentMarkdown(p: AgentsWriteParams): string {
     if (p.runtime !== undefined && p.runtime !== DEFAULT_SUBAGENT_RUNTIME) {
         lines.push(`runtime: ${p.runtime}`);
     }
+    // Claude Code settings mean nothing to the standard runtime, so they are
+    // never written for it. Defaults (full preset, `auto`) stay implicit too.
+    if (p.runtime === "claude-code") {
+        if (p.tools !== undefined && p.tools.length > 0) {
+            lines.push(`tools: ${JSON.stringify(p.tools)}`);
+        }
+        if (p.permissionMode !== undefined && p.permissionMode !== "auto") {
+            lines.push(`permissionMode: ${p.permissionMode}`);
+        }
+    }
     lines.push(`maxTurns: ${p.maxTurns}`, "---", "");
     return `${lines.join("\n")}${p.systemPrompt.trimEnd()}\n`;
 }
@@ -86,6 +99,9 @@ export async function writeUserAgent(
     }
     if (!Number.isInteger(params.maxTurns) || params.maxTurns < 1) {
         throw new AgentWriteError("maxTurns must be a positive integer");
+    }
+    if (params.tools?.some((t) => !TOOL_NAME_PATTERN.test(t))) {
+        throw new AgentWriteError("tool names may contain only letters, digits, _ and -");
     }
     const target = params.agentType;
     if (params.previousAgentType === undefined) {

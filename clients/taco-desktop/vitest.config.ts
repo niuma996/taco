@@ -25,6 +25,7 @@ export default defineConfig({
             "tests/components/MemoryPane.test.tsx",
             "tests/components/Sidebar.test.tsx",
             "tests/components/SubagentPanel.test.tsx",
+            "tests/components/AgentForm.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",
             "tests/components/ContextIndicator.test.tsx",
             "tests/components/TopbarQuickActions.test.tsx",

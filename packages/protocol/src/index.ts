@@ -261,6 +261,7 @@ export type {
     AskUserParams,
     AskUserQuestion,
     AskUserToolDetails,
+    ClaudeCodePermissionMode,
     QuestionOption,
     SkillContentParams,
     SkillContentResult,

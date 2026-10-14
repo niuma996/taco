@@ -185,3 +185,50 @@
     font-family: var(--font-mono);
     min-height: 16rem;
 }
+
+/* Add-agent menu: two-line items (kind + one-line hint). Chrome comes from
+   .topbar-quick-menu; the items are taller than the topbar's one-liners. */
+.agent-add-menu {
+    min-width: 240px;
+    max-width: 320px;
+}
+
+.agent-add-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.45rem 0.8rem;
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+}
+
+.agent-add-item-label {
+    font-size: 0.85rem;
+    color: var(--fg);
+}
+
+.agent-add-item-hint {
+    font-size: 0.75rem;
+    color: var(--fg-dim);
+}
+
+.agent-add-item[data-highlighted] {
+    background: var(--accent-bg-hover);
+}
+
+/* Claude Code dialog: short rules shown above the fields. */
+.agent-form-rules {
+    margin: 0 0 1rem 0;
+    padding: 0.6rem 0.8rem 0.6rem 1.6rem;
+    background: var(--surface-tint);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+    line-height: 1.5;
+}
+
+.agent-form-rules li + li {
+    margin-top: 0.2rem;
+}

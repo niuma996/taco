@@ -15,6 +15,7 @@ import { buildForkedContext, resolveContextMode } from "../../agents/forkedHisto
 import type {
     AgentDefinition,
     AgentFewShot,
+    ClaudeCodePermissionMode,
     SubagentContextMode,
     SubagentProgressSink,
     SubagentRuntime,
@@ -160,6 +161,13 @@ export interface SubagentSessionArgs {
      * their instructions are the prompt itself.
      */
     rolePrompt?: string;
+    /**
+     * `claude-code` only: the definition's raw tool names (Claude Code's own,
+     * so `tools` — taco tool objects filtered by those names — cannot carry
+     * them) and its permission mode.
+     */
+    claudeCodeTools?: readonly string[];
+    permissionMode?: ClaudeCodePermissionMode;
     /**
      * Optional in-context examples to inject ahead of `rolePrompt`. The
      * examples establish the contract the profile expects (e.g. citation
@@ -765,6 +773,8 @@ export class AgentSpawner extends EventEmitter {
                 prompt: args.prompt,
                 rolePrompt: args.rolePrompt,
                 maxTurns: args.maxTurns,
+                tools: args.claudeCodeTools,
+                permissionMode: args.permissionMode,
                 cwd: this.env.cwd,
                 abortController: controller,
                 onUpdate: args.onUpdate,
@@ -925,6 +935,9 @@ export class AgentSpawner extends EventEmitter {
             fewShots: def.fewShots,
             maxTurns: def.maxTurns,
             forkedContext,
+            ...(def.runtime === "claude-code"
+                ? { claudeCodeTools: def.tools, permissionMode: def.permissionMode }
+                : {}),
         };
         if (!args.background) {
             // Synchronous path: still bounded by the caller's signal, but

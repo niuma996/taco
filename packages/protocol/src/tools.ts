@@ -161,6 +161,19 @@ export interface AgentsListParams {
  */
 export type AgentRuntime = "standard" | "claude-code";
 
+/**
+ * Claude Code permission mode of a `claude-code` agent. `inherit` = pass none
+ * and let Claude Code pick its own. Absent = "auto".
+ */
+export type ClaudeCodePermissionMode =
+    | "auto"
+    | "default"
+    | "acceptEdits"
+    | "plan"
+    | "dontAsk"
+    | "bypassPermissions"
+    | "inherit";
+
 /** Available agent type entry. */
 export interface AgentEntry {
     agentType: string;
@@ -196,6 +209,10 @@ export interface AgentsContentResult {
     context?: "independent" | "fork";
     runtime?: AgentRuntime;
     maxTurns?: number;
+    /** Tool names from frontmatter; absent = default toolset (Claude Code's preset for `claude-code`). */
+    tools?: string[];
+    /** `claude-code` only. */
+    permissionMode?: ClaudeCodePermissionMode;
     source: "builtin" | "user";
     editable: boolean;
 }
@@ -212,6 +229,12 @@ export interface AgentsWriteParams {
     /** Omitted = "standard"; the file then carries no `runtime:` line. */
     runtime?: AgentRuntime;
     maxTurns: number;
+    /**
+     * `claude-code` only — written for no other runtime. `tools` omitted or
+     * empty = Claude Code's full preset; `permissionMode` omitted = "auto".
+     */
+    tools?: string[];
+    permissionMode?: ClaudeCodePermissionMode;
     systemPrompt: string;
     /**
      * Set when editing: the agentType being replaced. Renaming deletes the old

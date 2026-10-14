@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { AgentsWriteParams } from "@taco-ai/protocol";
+import { parseAgentMarkdown } from "../../../src/agents/loadAgents.ts";
 import type { AgentDefinition } from "../../../src/agents/types.ts";
 import {
     AgentWriteError,
@@ -64,7 +65,6 @@ describe("agentsWrite", () => {
         assert.match(text, /runtime: claude-code/);
         assert.match(text, /maxTurns: 30/);
         // Round-trip through the real loader's parser.
-        const { parseAgentMarkdown } = await import("../../../src/agents/loadAgents.ts");
         const parsed = parseAgentMarkdown(text, "x", "user");
         assert.equal(parsed?.agentType, "my-cc");
         assert.equal(parsed?.description, "reads: things");
@@ -76,11 +76,49 @@ describe("agentsWrite", () => {
         await writeUserAgent(params({ agentType: "plain", runtime: undefined }), []);
         const text = readFileSync(join(userAgentsDir(), "plain.md"), "utf-8");
         assert.doesNotMatch(text, /runtime:/);
-        const { parseAgentMarkdown } = await import("../../../src/agents/loadAgents.ts");
         assert.equal(parseAgentMarkdown(text, "x", "user")?.runtime, undefined);
 
         await writeUserAgent(params({ agentType: "plain2", runtime: "standard" }), []);
         assert.doesNotMatch(readFileSync(join(userAgentsDir(), "plain2.md"), "utf-8"), /runtime:/);
+    });
+
+    it("round-trips claude-code tools and permission mode; defaults stay implicit", async () => {
+        await writeUserAgent(
+            params({ agentType: "cc-a", tools: ["Read", "Edit"], permissionMode: "acceptEdits" }),
+            [],
+        );
+        const a = parseAgentMarkdown(
+            readFileSync(join(userAgentsDir(), "cc-a.md"), "utf-8"),
+            "x",
+            "user",
+        );
+        assert.deepEqual(a?.tools, ["Read", "Edit"]);
+        assert.equal(a?.permissionMode, "acceptEdits");
+
+        await writeUserAgent(params({ agentType: "cc-b", tools: [], permissionMode: "auto" }), []);
+        const text = readFileSync(join(userAgentsDir(), "cc-b.md"), "utf-8");
+        assert.doesNotMatch(text, /tools:|permissionMode:/);
+    });
+
+    it("never writes Claude Code settings for a standard agent", async () => {
+        await writeUserAgent(
+            params({
+                agentType: "std",
+                runtime: "standard",
+                tools: ["Read"],
+                permissionMode: "bypassPermissions",
+            }),
+            [],
+        );
+        const text = readFileSync(join(userAgentsDir(), "std.md"), "utf-8");
+        assert.doesNotMatch(text, /tools:|permissionMode:/);
+    });
+
+    it("rejects tool names that are not plain identifiers", async () => {
+        await assert.rejects(
+            writeUserAgent(params({ tools: ["Read", "x\nrm"] }), []),
+            AgentWriteError,
+        );
     });
 
     it("rejects names that would escape the agents dir or break tooling", async () => {
