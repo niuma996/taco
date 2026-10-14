@@ -181,6 +181,18 @@ describe("agent tool", () => {
         assert.ok(!withTypes.description.includes("coder"));
     });
 
+    it("explains independent context, not only what fork adds", () => {
+        // The model picks this parameter from its description alone. A fork-only
+        // description leaves "independent" undefined and the trade-off (restate
+        // everything vs. inherit framing) invisible, so both modes must be stated.
+        const tool = createAgentTool(stubCtx(), []);
+        const ctx = JSON.stringify(tool.parameters) as string;
+        assert.ok(ctx.includes("independent"), "independent is not described at all");
+        assert.ok(ctx.includes("starts blank"), "does not say what independent gives");
+        assert.ok(ctx.includes("restate every path"), "does not say what independent costs");
+        assert.ok(ctx.includes("inherits this conversation"), "does not state fork's cost");
+    });
+
     it("does not embed frontmatter hints in the tool JSON", () => {
         const tool = createAgentTool(stubCtx(), [
             { agentType: "explorer", description: "read-only search specialist" },

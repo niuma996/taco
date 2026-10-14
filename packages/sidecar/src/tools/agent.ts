@@ -60,11 +60,22 @@ export function createAgentTool(
                 "Name of a registered agent type. Types are listed in the system prompt's <available_agents> section.",
         }),
         description: Type.String({ description: "3-5 word task summary (for display)." }),
-        prompt: Type.String({ description: "The task for the subagent to perform." }),
+        prompt: Type.String({
+            description:
+                'The task for the subagent to perform. In the default independent context this is the ONLY thing it will read: spell out every path, constraint and decision it needs, because a subagent told to "fix the bug we discussed" without the discussion invents the bug.',
+        }),
         context: Type.Optional(
             Type.Union([Type.Literal("independent"), Type.Literal("fork")], {
-                description:
-                    'Context mode. Omit to use the agent type\'s configured default. "fork" additionally gives the subagent a transcript of this conversation up to now — use it when the task depends on what was already discussed or discovered. Only agents running on taco\'s own engine support it. A "fork" sent for one that does not (e.g. a Claude Code type) is corrected to "independent" rather than failing, so passing it is harmless but pointless.',
+                description: [
+                    "Context mode — what the subagent knows before it reads your prompt. Omit to use the agent type's configured default.",
+                    "",
+                    '"independent" (the usual default): the subagent starts blank. It sees your prompt and nothing else from this conversation.',
+                    "Prefer it when the task stands on its own and you can state everything it needs up front. Beyond simplicity, two reasons: an assumption formed earlier in this conversation cannot silently become a premise the subagent never thinks to check, and nothing you did not write into the prompt is handed across a process or trust boundary. The cost is yours to pay — restate every path, constraint and decision it needs.",
+                    "",
+                    '"fork": the subagent additionally receives a transcript of this conversation up to now. Use it only when the task is a judgement about something already settled here — reviewing a change made above, or continuing from earlier findings — and accept that it inherits this conversation\'s framing along with its facts, and that it costs more context.',
+                    "",
+                    'Only agent types running on taco\'s own engine support fork. A "fork" sent for any other type is corrected to "independent" rather than failing, so passing it there is harmless but pointless.',
+                ].join("\n"),
             }),
         ),
         background: Type.Optional(
