@@ -8,8 +8,10 @@
 
 /* ── update dialog progress bar (PR5) ── */
 .update-dialog {
-    /* Widen slightly to fit the progress bar + percentage. */
-    min-width: 380px;
+    /* Fixed width: title, body and progress bar swap per phase
+       (available → downloading → ready/error); content-sizing made it jump. */
+    width: 420px;
+    max-width: calc(100vw - 4rem);
 }
 .update-progress {
     height: 6px;
