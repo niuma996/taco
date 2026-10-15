@@ -67,11 +67,15 @@ button svg {
 main {
     flex: 1;
     overflow-y: auto;
-    /* Zero right padding so scrollbar hugs the window edge. Top padding adds a
+    /* Symmetric 10% reading gutter; padding (not margin) so `main`'s background
+       still paints edge-to-edge and the scrollbar stays flush against the
+       window's right edge (padding does not displace it). Top padding adds a
        full bar height: the frosted .session-info overlays this strip, and the
-       first message must start below it, not scroll out from under it. Bottom
-       padding clears the fixed-bottom input. */
-    padding: calc(var(--rail-top-padding) + 1rem) 0 1.5rem 1rem;
+       first message must start below it, not scroll out from under it.
+       No bottom padding: the sticky input footer is the last child in flow, so
+       it supplies the bottom spacing and the scrollbar reaches the window
+       bottom edge. */
+    padding: calc(var(--rail-top-padding) + 1rem) 10% 0 10%;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;

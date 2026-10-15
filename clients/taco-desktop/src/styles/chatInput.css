@@ -1,18 +1,29 @@
 /* chatInput.css — input footer, status bar, textarea, controls, send/stop/attach buttons; split from chat.css */
 
 footer.input {
-    /* Outer transparent wrapper: fills the chat panel bg, side margins let .input-card float above.
-       position:relative anchors floating overlays (LLM dump fab/panel) above the footer. */
-    position: relative;
+    /* Last child of <main> (the scroll container) and sticky to its bottom
+       edge, so the scrollbar runs to the window bottom instead of stopping at
+       the input's top edge. Staying in flow is what makes a growing textarea
+       push messages up rather than cover them — no measured height needed.
+       Sticky (not fixed) so it keeps the container's horizontal padding, which
+       keeps the card aligned with the message column and clear of the
+       scrollbar. */
+    position: sticky;
+    bottom: 0;
+    /* Owns the surface the messages scroll under: opaque so text passing
+       beneath is not visible through the card's gaps. */
     background: var(--chat-panel-bg);
-    padding: 0.5rem 0.75rem 0.75rem;
+    /* No top padding: `main`'s flex gap already separates the last message from
+       the card, and a second 0.5rem would read as a seam. Horizontal padding is
+       zero because `main`'s gutter already insets this box. */
+    padding: 0 0 0.75rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
 }
 
 /* In-progress status bar. Lives inside footer.input so its width matches
-   .input-card (same content box, including the collapsed-sidebar 10% gutter).
+   .input-card (same content box, including the collapsed-sidebar 20% gutter).
    The `output` element has role=status so screen readers need no extra role. */
 .input-status {
     display: flex;

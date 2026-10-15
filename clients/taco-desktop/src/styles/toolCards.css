@@ -5,7 +5,8 @@
 .agent-card {
     margin-top: 0.4rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    /* Same tier as .tool-card — both are tool frames in the message stream. */
+    border-radius: var(--radius-lg);
     background: var(--surface-tint);
     font-size: 0.85em;
     overflow: hidden;

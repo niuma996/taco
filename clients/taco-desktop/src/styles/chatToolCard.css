@@ -4,7 +4,9 @@
     margin-top: 0.4rem;
     padding: 0.5rem 0.6rem;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    /* Matches .message.user — the card is the other filled surface in the
+       stream, and a smaller radius made the two read as different tiers. */
+    border-radius: var(--radius-lg);
     background: var(--surface-tint);
     font-size: 0.85em;
     /* Same flex-shrink guard as `.message` — without min-width: 0 the wide
@@ -12,18 +14,10 @@
        the whole assistant message) wider than the chat pane. */
     min-width: 0;
 }
-/* running uses brand orange (--brand-orange) rather than --tool yellow: the tool yellow is too gray
-   in both themes and lacks contrast against --fg-dim. Brand orange is more saturated so
-   "in progress" is easier to scan. */
-.tool-card.running {
-    border-left: 3px solid var(--brand-orange);
-}
-.tool-card.error {
-    border-left: 3px solid var(--error);
-}
-.tool-card.ok {
-    border-left: 3px solid var(--user);
-}
+/* Status is carried by the head icon alone (spinner / cross / check) — a colored
+   bar on every card was redundant signal and turned a long tool stream into noise.
+   running uses brand orange rather than --tool yellow: the tool yellow is too gray
+   in both themes and lacks contrast against --fg-dim. */
 .tool-card-head {
     display: flex;
     align-items: center;

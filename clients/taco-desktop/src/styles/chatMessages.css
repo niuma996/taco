@@ -2,8 +2,6 @@
 
 .message {
     padding: 0.6rem;
-    /* Right padding already 0 on main (scrollbar flush to right edge); margin-right gives bubble breathing room. */
-    margin-right: 1rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
     /* Same flex-shrink guard as `main` so wide content in a message
@@ -28,11 +26,11 @@
        filled "chip" in the stream, so it carries the large radius alone. */
     border-radius: var(--radius-lg);
     color: var(--fg);
-    /* Slightly larger vertical margin than the per-bubble padding alone would
-       give — reads as a clear turn boundary against adjacent assistant rows,
-       which only carry the default `.message` padding. */
-    margin-top: 1rem;
-    margin-bottom: 0.5rem;
+    /* Turn boundary lives *above* the user bubble (a new turn starts with user
+       input): margin-top + main's 0.5rem gap = 16px against 6.4px intra-turn
+       block spacing. No margin-bottom — the user→assistant gap stays the
+       same-turn 8px, so the answer reads as belonging to its prompt. */
+    margin-top: 0.5rem;
     /* Consistent font size with .md-assistant (0.85em) for uniform reading rhythm. */
     font-size: 0.85rem;
     /* Adaptive width (main already set flex-direction: column), max 90% of chat area.
@@ -44,6 +42,24 @@
 
 .message.assistant {
     background: var(--assistant-msg-bg);
+    /* No border: the tinted fill alone separates the turn from the page, and the
+       tool cards inside carry the only outline — a bubble border framed the
+       cards in a second frame. */
+    border: none;
+    /* No horizontal padding: the fill is invisible in both themes (light matches
+       --chat-panel-bg exactly), so the padding bought no grouping — it only
+       inset every tool card and text line by 0.6rem, breaking their edge
+       alignment with the input card and the user bubble. Vertical padding stays:
+       it separates the first block from the bubble's top edge. */
+    padding: 0.6rem 0;
+}
+
+/* Whichever block type opens the bubble (thinking block, markdown, tool card),
+   its top margin must not stack on the bubble's 0.6rem padding — the first
+   block's inset stays the padding alone. Bottom needs no rule: tool cards and
+   meta carry margin-top only, and .md-assistant zeroes its own last child. */
+.message.assistant > :first-child {
+    margin-top: 0;
 }
 
 .message.tool {
@@ -54,13 +70,14 @@
 /* End-of-turn meta row: timestamp + copy button. Floats to the right so it
    reads as an afterthought rather than a sibling of the message content.
    Anchored to the bubble's bottom edge — the bubble's own border-radius
-   contains it visually without a wrapping container. */
+   contains it visually without a wrapping container. margin-top matches the
+   0.4rem intra-turn block spacing shared with .tool-card. */
 .message-meta {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
-    margin-top: 6px;
+    margin-top: 0.4rem;
     color: var(--fg-dim);
     font-size: var(--text-xs);
 }
@@ -98,7 +115,9 @@
 /* assistant thinking block + markdown rendering (originally L1455-1722) */
 /* ── thinking collapse block inside the assistant bubble ── */
 .thinking-block {
-    margin: 4px 0;
+    /* 0.4rem matches the tool-card margin-top — one intra-turn block spacing
+       for thinking / text / tools alike. */
+    margin: 0.4rem 0;
 }
 .thinking-header {
     display: inline-flex;
@@ -218,10 +237,11 @@
    active chat has no messages yet. `main` is already flex column; flex:1
    here lets this block absorb the remaining height and center its content. */
 .empty-chat-state {
-    /* Cancel main's asymmetric padding (1rem left / 0 right, bar height + 1rem
-       top / 1.5rem bottom) so `justify-content: center` centers on the true
-       pane box instead of the padded content box. */
-    margin: calc(-1 * (var(--rail-top-padding) + 1rem)) 0 -1.5rem -1rem;
+    /* Cancel main's top padding (bar height + 1rem, the frosted .session-info
+       overlays it) so `justify-content: center` centers on the true pane box
+       instead of the padded content box. Only the top: main's bottom padding is
+       0, and the sticky footer below supplies the bottom spacing. */
+    margin: calc(-1 * (var(--rail-top-padding) + 1rem)) 0 0 0;
     flex: 1;
     display: flex;
     flex-direction: column;

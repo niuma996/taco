@@ -230,195 +230,195 @@ export function ChatPane(props: ChatPaneProps) {
                         ));
                     })()
                 )}
-            </main>
-            <footer className="input">
-                {/* Same column as .input-card so the banner inherits the footer's
+                <footer className="input">
+                    {/* Same column as .input-card so the banner inherits the footer's
                     padding (including the 10% reading gutter). Shown for both
                     auto and manual compact; `busy` is not a gate — background
                     agent-tool activity must not hide a parent-session compact. */}
-                {compacting && (
-                    <output className="input-status input-status--compacting">
-                        <span className="input-status__dot" aria-hidden="true" />
-                        <span>{t("input.compactingNotice")}</span>
-                    </output>
-                )}
-                <QueueBar items={queuedItems} onCancel={onCancelQueued} />
-                <div className="input-card">
-                    {attachments.length > 0 && (
-                        <div className="attachment-bar">
-                            {attachments.map((a, i) => (
-                                // Thumbnail key uses mimeType + first/last 8 chars of the data payload — the
-                                // same image yields the same key, so removing a middle
-                                // attachment won't be mistaken for a reorder by React.
-                                <div
-                                    key={`${a.mimeType}-${a.data.slice(0, 8)}-${a.data.slice(-8)}`}
-                                    className="attachment-thumb-wrap"
-                                >
-                                    <img
-                                        className="attachment-thumb"
-                                        src={`data:${a.mimeType};base64,${a.data}`}
-                                        alt=""
-                                    />
-                                    <button
-                                        type="button"
-                                        className="attachment-remove"
-                                        aria-label={t("input.removeAttachment")}
-                                        onClick={() => removeAttachment(i)}
-                                    >
-                                        ×
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
+                    {compacting && (
+                        <output className="input-status input-status--compacting">
+                            <span className="input-status__dot" aria-hidden="true" />
+                            <span>{t("input.compactingNotice")}</span>
+                        </output>
                     )}
-                    <textarea
-                        ref={textareaRef}
-                        rows={1}
-                        value={input}
-                        onChange={(e) => onInputChange(e.target.value)}
-                        onPaste={handlePaste}
-                        disabled={compacting}
-                        onKeyDown={(e) => {
-                            // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
-                            // keyCode === 229 is a WebKit legacy fallback for older versions.
-                            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                            if (e.key === "Enter" && !e.shiftKey) {
-                                e.preventDefault();
-                                // The composer stays unlocked during a run: Enter
-                                // delivers the text as an in-run steer. Only a
-                                // compaction locks it.
-                                if (!compacting && canSend) {
-                                    // Reset the textarea height before sending so the input snaps back to a
-                                    // single line ahead of the React re-render — avoids a
-                                    // single-frame flicker of the multi-line state.
-                                    const el = textareaRef.current;
-                                    if (el) {
-                                        el.style.height = "auto";
-                                    }
-                                    onEnter();
-                                }
-                            }
-                        }}
-                        placeholder={
-                            runInFlight
-                                ? t("input.placeholderRunning")
-                                : compacting
-                                  ? t("input.placeholderCompacting")
-                                  : t("input.placeholderIdle")
-                        }
-                    />
-                    <div className="input-controls">
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            hidden
-                            onChange={(e) => {
-                                const files = e.target.files;
-                                if (files && files.length > 0) void addFiles(files);
-                                // Allow re-selecting the same file to retrigger the change — clear value.
-                                e.target.value = "";
-                            }}
-                        />
-                        <button
-                            type="button"
-                            className="prompt-button attach"
-                            aria-label={t("input.attachImages")}
-                            title={t("input.attachImages")}
-                            onClick={() => fileInputRef.current?.click()}
-                            // Unlocked during a run: steer passthrough carries images
-                            // (session.steer accepts `images`). Compaction still locks —
-                            // its handler refuses new input until the compaction settles.
-                            disabled={compacting || attachments.length >= MAX_ATTACHMENTS}
-                        >
-                            <ImageIcon size={16} aria-hidden="true" />
-                        </button>
-                        {activeModel && (
-                            <ModelMenu
-                                value={activeModel}
-                                options={modelOptions}
-                                onModelChange={onModelChange}
-                                thinkingValue={
-                                    activeLevel ??
-                                    defaultThinkingLevelForNewSession(getGlobalConfig().global)
-                                }
-                                onThinkingChange={onLevelChange}
-                                disabled={busy}
-                                pendingNote={busy}
-                                onOpen={onRefreshModels}
-                            />
+                    <QueueBar items={queuedItems} onCancel={onCancelQueued} />
+                    <div className="input-card">
+                        {attachments.length > 0 && (
+                            <div className="attachment-bar">
+                                {attachments.map((a, i) => (
+                                    // Thumbnail key uses mimeType + first/last 8 chars of the data payload — the
+                                    // same image yields the same key, so removing a middle
+                                    // attachment won't be mistaken for a reorder by React.
+                                    <div
+                                        key={`${a.mimeType}-${a.data.slice(0, 8)}-${a.data.slice(-8)}`}
+                                        className="attachment-thumb-wrap"
+                                    >
+                                        <img
+                                            className="attachment-thumb"
+                                            src={`data:${a.mimeType};base64,${a.data}`}
+                                            alt=""
+                                        />
+                                        <button
+                                            type="button"
+                                            className="attachment-remove"
+                                            aria-label={t("input.removeAttachment")}
+                                            onClick={() => removeAttachment(i)}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         )}
-                        <div className="input-right">
-                            {!isEmptyChat && (
-                                <ContextIndicator
-                                    info={contextIndicator.info}
-                                    loading={contextIndicator.loading}
-                                    compacting={contextIndicator.compacting}
-                                    threshold={contextIndicator.threshold}
-                                    onCompact={contextIndicator.onCompact}
-                                    sessionBusy={contextIndicator.sessionBusy}
-                                    className="input-context-indicator"
+                        <textarea
+                            ref={textareaRef}
+                            rows={1}
+                            value={input}
+                            onChange={(e) => onInputChange(e.target.value)}
+                            onPaste={handlePaste}
+                            disabled={compacting}
+                            onKeyDown={(e) => {
+                                // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
+                                // keyCode === 229 is a WebKit legacy fallback for older versions.
+                                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                    e.preventDefault();
+                                    // The composer stays unlocked during a run: Enter
+                                    // delivers the text as an in-run steer. Only a
+                                    // compaction locks it.
+                                    if (!compacting && canSend) {
+                                        // Reset the textarea height before sending so the input snaps back to a
+                                        // single line ahead of the React re-render — avoids a
+                                        // single-frame flicker of the multi-line state.
+                                        const el = textareaRef.current;
+                                        if (el) {
+                                            el.style.height = "auto";
+                                        }
+                                        onEnter();
+                                    }
+                                }
+                            }}
+                            placeholder={
+                                runInFlight
+                                    ? t("input.placeholderRunning")
+                                    : compacting
+                                      ? t("input.placeholderCompacting")
+                                      : t("input.placeholderIdle")
+                            }
+                        />
+                        <div className="input-controls">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                hidden
+                                onChange={(e) => {
+                                    const files = e.target.files;
+                                    if (files && files.length > 0) void addFiles(files);
+                                    // Allow re-selecting the same file to retrigger the change — clear value.
+                                    e.target.value = "";
+                                }}
+                            />
+                            <button
+                                type="button"
+                                className="prompt-button attach"
+                                aria-label={t("input.attachImages")}
+                                title={t("input.attachImages")}
+                                onClick={() => fileInputRef.current?.click()}
+                                // Unlocked during a run: steer passthrough carries images
+                                // (session.steer accepts `images`). Compaction still locks —
+                                // its handler refuses new input until the compaction settles.
+                                disabled={compacting || attachments.length >= MAX_ATTACHMENTS}
+                            >
+                                <ImageIcon size={16} aria-hidden="true" />
+                            </button>
+                            {activeModel && (
+                                <ModelMenu
+                                    value={activeModel}
+                                    options={modelOptions}
+                                    onModelChange={onModelChange}
+                                    thinkingValue={
+                                        activeLevel ??
+                                        defaultThinkingLevelForNewSession(getGlobalConfig().global)
+                                    }
+                                    onThinkingChange={onLevelChange}
+                                    disabled={busy}
+                                    pendingNote={busy}
+                                    onOpen={onRefreshModels}
                                 />
                             )}
-                            {(busy || compacting) && (
-                                <button
-                                    type="button"
-                                    className="prompt-button stop"
-                                    onClick={onAbort}
-                                >
-                                    {/* Solid glyph: matches the subagent row's
+                            <div className="input-right">
+                                {!isEmptyChat && (
+                                    <ContextIndicator
+                                        info={contextIndicator.info}
+                                        loading={contextIndicator.loading}
+                                        compacting={contextIndicator.compacting}
+                                        threshold={contextIndicator.threshold}
+                                        onCompact={contextIndicator.onCompact}
+                                        sessionBusy={contextIndicator.sessionBusy}
+                                        className="input-context-indicator"
+                                    />
+                                )}
+                                {(busy || compacting) && (
+                                    <button
+                                        type="button"
+                                        className="prompt-button stop"
+                                        onClick={onAbort}
+                                    >
+                                        {/* Solid glyph: matches the subagent row's
                                        stop button, and an outlined square next
                                        to a label reads as a tick box. */}
-                                    <Square size={16} fill="currentColor" aria-hidden="true" />
-                                    {t("input.stop")}
-                                </button>
-                            )}
-                            {runInFlight && (
-                                // Steer send: coexists with Stop so an in-run
-                                // message and an abort are both one click away.
-                                <button
-                                    type="button"
-                                    className="prompt-button send"
-                                    onClick={() => {
-                                        const el = textareaRef.current;
-                                        if (el) {
-                                            el.style.height = "auto";
-                                        }
-                                        onSend();
-                                    }}
-                                    disabled={!canSend || compacting}
-                                >
-                                    <ArrowUp size={16} aria-hidden="true" />
-                                    {t("input.sendSteer")}
-                                </button>
-                            )}
-                            {!runInFlight && !compacting && (
-                                // Background agent-tool activity (`busy` without
-                                // `runInFlight`) still allows a normal prompt: the
-                                // active session is idle. Without this branch that
-                                // state had Enter but no send button.
-                                <button
-                                    type="button"
-                                    className="prompt-button send"
-                                    onClick={() => {
-                                        const el = textareaRef.current;
-                                        if (el) {
-                                            el.style.height = "auto";
-                                        }
-                                        onSend();
-                                    }}
-                                    disabled={!canSend}
-                                >
-                                    <ArrowUp size={16} aria-hidden="true" />
-                                    {t("input.send")}
-                                </button>
-                            )}
+                                        <Square size={16} fill="currentColor" aria-hidden="true" />
+                                        {t("input.stop")}
+                                    </button>
+                                )}
+                                {runInFlight && (
+                                    // Steer send: coexists with Stop so an in-run
+                                    // message and an abort are both one click away.
+                                    <button
+                                        type="button"
+                                        className="prompt-button send"
+                                        onClick={() => {
+                                            const el = textareaRef.current;
+                                            if (el) {
+                                                el.style.height = "auto";
+                                            }
+                                            onSend();
+                                        }}
+                                        disabled={!canSend || compacting}
+                                    >
+                                        <ArrowUp size={16} aria-hidden="true" />
+                                        {t("input.sendSteer")}
+                                    </button>
+                                )}
+                                {!runInFlight && !compacting && (
+                                    // Background agent-tool activity (`busy` without
+                                    // `runInFlight`) still allows a normal prompt: the
+                                    // active session is idle. Without this branch that
+                                    // state had Enter but no send button.
+                                    <button
+                                        type="button"
+                                        className="prompt-button send"
+                                        onClick={() => {
+                                            const el = textareaRef.current;
+                                            if (el) {
+                                                el.style.height = "auto";
+                                            }
+                                            onSend();
+                                        }}
+                                        disabled={!canSend}
+                                    >
+                                        <ArrowUp size={16} aria-hidden="true" />
+                                        {t("input.send")}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
-                {llmDumpDock}
-            </footer>
+                    {llmDumpDock}
+                </footer>
+            </main>
         </div>
     );
 }
