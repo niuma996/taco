@@ -47,7 +47,7 @@ export const manifest: BuiltinManifest = {
     description:
         "Allow-lists `officecli` shell invocations so the bundled officecli skill can create and edit .docx/.xlsx/.pptx without a permission prompt per command.",
     whenToUse:
-        "Built-in. Disable via `disabledExtensions` in ~/.taco/taco.json to restore a permission prompt for every officecli command and drop the bundled officecli skill. A user-installed officecli skill under ~/.claude/skills is unaffected.",
+        "Built-in. Disable via `disabledExtensions` in ~/.taco/taco.json to restore a permission prompt for every officecli command and drop the bundled officecli skill.",
     activator: buildOfficeCliActivator,
     skillDirs: [SKILL_DIR],
 };
