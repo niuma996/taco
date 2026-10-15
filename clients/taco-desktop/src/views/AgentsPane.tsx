@@ -204,10 +204,16 @@ export function AgentsPane({
                         ) : contentError ? (
                             <p className="agents-detail-content-error">{contentError}</p>
                         ) : content ? (
-                            <AssistantMarkdown
-                                className="agents-detail-content"
-                                text={content.systemPrompt}
-                            />
+                            content.systemPrompt.trim() === "" ? (
+                                <p className="agents-detail-content-empty">
+                                    {t("agents.detailNoPrompt")}
+                                </p>
+                            ) : (
+                                <AssistantMarkdown
+                                    className="agents-detail-content"
+                                    text={content.systemPrompt}
+                                />
+                            )
                         ) : null}
                     </>
                 ) : (

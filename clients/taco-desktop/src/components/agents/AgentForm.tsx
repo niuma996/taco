@@ -19,6 +19,7 @@ import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
+import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
@@ -91,6 +92,15 @@ export function AgentForm(props: AgentFormProps) {
         String(props.existing?.maxTurns ?? defaultMaxTurns(props.runtime)),
     );
     const [systemPrompt, setSystemPrompt] = useState(props.existing?.systemPrompt ?? "");
+    // Off by default and only reachable by flipping it: an empty md body is a
+    // valid definition (no role contributor is appended to the child's
+    // prompt), so this switch buys no new capability — it makes the choice
+    // explicit instead of letting a forgotten field silently produce a
+    // role-less agent. A create form has nothing to inherit, so it starts off
+    // regardless — hence the explicit guard rather than an optional chain.
+    const [noRolePrompt, setNoRolePrompt] = useState(
+        props.existing !== undefined && props.existing.systemPrompt.trim() === "",
+    );
     const [tools, setTools] = useState(props.existing?.tools?.join(", ") ?? "");
     const [permissionMode, setPermissionMode] = useState<ClaudeCodePermissionMode>(
         props.existing?.permissionMode ?? "auto",
@@ -118,7 +128,7 @@ export function AgentForm(props: AgentFormProps) {
         description.trim().length <= 1024 &&
         whenToUse.trim().length <= 2048 &&
         turnsValid &&
-        systemPrompt.trim() !== "" &&
+        (noRolePrompt || systemPrompt.trim() !== "") &&
         systemPrompt.trim().length <= 65536 &&
         (!isCc || toolsError === undefined);
 
@@ -130,7 +140,7 @@ export function AgentForm(props: AgentFormProps) {
             whenToUse: whenToUse.trim() === "" ? undefined : whenToUse.trim(),
             runtime: props.runtime,
             maxTurns: turns,
-            systemPrompt,
+            systemPrompt: noRolePrompt ? "" : systemPrompt,
             ...(isCc ? { tools: toolList, permissionMode } : {}),
         });
     };
@@ -234,12 +244,26 @@ export function AgentForm(props: AgentFormProps) {
                     inputMode="numeric"
                 />
             </FormField>
-            <FormField label={t("agents.form.systemPrompt")}>
+            <FormField
+                label={t("agents.form.systemPrompt")}
+                hint={t("agents.form.systemPromptHint")}
+                action={
+                    <span className="agent-form-no-role">
+                        <Switch
+                            checked={noRolePrompt}
+                            onChange={setNoRolePrompt}
+                            label={t("agents.form.noRolePrompt")}
+                        />
+                        {t("agents.form.noRolePrompt")}
+                    </span>
+                }
+            >
                 <Textarea
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     rows={12}
                     maxLength={65536}
+                    disabled={noRolePrompt}
                 />
             </FormField>
         </Modal>

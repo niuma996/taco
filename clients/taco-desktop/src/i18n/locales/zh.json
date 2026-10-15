@@ -689,6 +689,8 @@
       "maxTurns": "最大轮数",
       "maxTurnsInvalid": "正整数",
       "systemPrompt": "系统提示词",
+      "systemPromptHint": "子代理的角色、停止条件与汇报契约——打开开关则一概没有。",
+      "noRolePrompt": "不设角色正文",
       "cancel": "取消",
       "save": "保存",
       "saving": "保存中…",
@@ -726,6 +728,7 @@
     "addStandard": "taco 子代理",
     "addStandardHint": "taco 自身引擎，继承当前会话的工具",
     "addCc": "Claude Code 子代理",
-    "addCcHint": "在本机 Claude Code 上运行，可读写代码"
+    "addCcHint": "在本机 Claude Code 上运行，可读写代码",
+    "detailNoPrompt": "没有系统提示词——该子代理不自带角色。"
   }
 }

@@ -158,6 +158,13 @@
     font-size: 0.85rem;
 }
 
+.agents-detail-content-empty {
+    color: var(--fg-dim);
+    font-size: var(--text-base);
+    font-style: italic;
+    margin: 0;
+}
+
 .agents-empty {
     padding: 0.75rem;
     color: var(--fg-dim);
@@ -184,6 +191,17 @@
 .agent-form-modal .ui-textarea {
     font-family: var(--font-mono);
     min-height: 16rem;
+}
+
+/* "No role body" switch on the system-prompt label row (FormField's `action`
+   slot). The track/thumb come from ui.css .ui-switch; only the inline layout
+   is feature-specific. Same switch-plus-label shape as .context-file-row. */
+.agent-form-no-role {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
 }
 
 /* Add-agent menu: two-line items (kind + one-line hint). Chrome comes from

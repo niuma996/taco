@@ -163,4 +163,79 @@ describe("AgentForm", () => {
         );
         assert.ok(screen.getByText("agents.form.ccMode.acceptEditsHint"));
     });
+
+    // The switch is the only way to save without a role body — an empty prompt
+    // on its own must stay unsavable, or a forgotten field silently produces a
+    // role-less agent.
+    describe("no role body switch", () => {
+        it("refuses to save an empty prompt while the switch is off", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            const user = userEvent.setup();
+            const inputs = screen.getAllByRole("textbox");
+            await user.type(inputs[0] as HTMLElement, "plain");
+            await user.type(inputs[1] as HTMLElement, "does things");
+
+            const save = screen
+                .getByText("agents.form.save")
+                .closest("button") as HTMLButtonElement;
+            assert.equal(save.disabled, true);
+            assert.equal(
+                screen.getByRole("switch").getAttribute("aria-checked"),
+                "false",
+                "the switch must default to off on a new definition",
+            );
+        });
+
+        it("saves an empty system prompt once the switch is on", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            const user = userEvent.setup();
+            const inputs = screen.getAllByRole("textbox");
+            await user.type(inputs[0] as HTMLElement, "plain");
+            await user.type(inputs[1] as HTMLElement, "does things");
+
+            await user.click(screen.getByRole("switch"));
+            assert.equal(screen.getByRole("switch").getAttribute("aria-checked"), "true");
+            await user.click(screen.getByText("agents.form.save"));
+
+            assert.equal(onSave.mock.calls[0]?.[0].systemPrompt, "");
+        });
+
+        it("disables the textarea without discarding a draft", async () => {
+            render(<AgentForm runtime="standard" onSave={() => {}} onCancel={() => {}} />);
+            const user = userEvent.setup();
+            const inputs = screen.getAllByRole("textbox");
+            await user.type(inputs[0] as HTMLElement, "plain");
+            await user.type(inputs[1] as HTMLElement, "does things");
+            await user.type(inputs[inputs.length - 1] as HTMLElement, "You do things.");
+
+            await user.click(screen.getByRole("switch"));
+            const textarea = inputs[inputs.length - 1] as HTMLTextAreaElement;
+            assert.equal(textarea.disabled, true);
+            assert.equal(textarea.value, "You do things.");
+
+            await user.click(screen.getByRole("switch"));
+            assert.equal(textarea.disabled, false);
+            assert.equal(textarea.value, "You do things.");
+        });
+
+        it("edit starts with the switch on for a definition that has no body", () => {
+            render(
+                <AgentForm
+                    runtime="standard"
+                    existing={{
+                        agentType: "roamer",
+                        description: "d",
+                        runtime: "standard",
+                        maxTurns: 30,
+                        systemPrompt: "",
+                    }}
+                    onSave={() => {}}
+                    onCancel={() => {}}
+                />,
+            );
+            assert.equal(screen.getByRole("switch").getAttribute("aria-checked"), "true");
+        });
+    });
 });

@@ -691,6 +691,8 @@
       "maxTurns": "Max turns",
       "maxTurnsInvalid": "A positive whole number",
       "systemPrompt": "System prompt",
+      "systemPromptHint": "The subagent's role, stop condition and reporting contract — with the switch on, it has none.",
+      "noRolePrompt": "No role body",
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving…",
@@ -728,6 +730,7 @@
     "addStandard": "taco subagent",
     "addStandardHint": "taco's own engine, inheriting this session's tools",
     "addCc": "Claude Code subagent",
-    "addCcHint": "Runs on your local Claude Code, can read and write code"
+    "addCcHint": "Runs on your local Claude Code, can read and write code",
+    "detailNoPrompt": "No system prompt — this subagent runs with no role of its own."
   }
 }
