@@ -367,7 +367,10 @@ export function ChatPane(props: ChatPaneProps) {
                                     className="prompt-button stop"
                                     onClick={onAbort}
                                 >
-                                    <Square size={16} aria-hidden="true" />
+                                    {/* Solid glyph: matches the subagent row's
+                                       stop button, and an outlined square next
+                                       to a label reads as a tick box. */}
+                                    <Square size={16} fill="currentColor" aria-hidden="true" />
                                     {t("input.stop")}
                                 </button>
                             )}

@@ -165,15 +165,17 @@ footer.input textarea:focus {
     cursor: not-allowed;
 }
 
+/* After clicking Send, Stop is the only action that needs immediate attention.
+   The error red shifts it away from the send button accent and away from brand
+   orange, which elsewhere means "act on the app", not "interrupt". */
 .prompt-button.stop {
-    /* Shares brand orange with the topbar Open button — after clicking Send, Stop is the
-       only action that needs immediate attention. The brand orange distinguishes it from
-       the global button (--accent blue), visually shifting from "send" to "interrupt". */
-    background: var(--brand-orange);
+    background: var(--danger);
+    color: var(--bg);
 }
 
 .prompt-button.stop:hover:not(:disabled) {
-    background: var(--brand-orange-hover);
+    background: var(--danger-hover);
+    color: var(--bg);
 }
 
 /* Attach button (paperclip) — icon only, narrower than send, not dominant.
