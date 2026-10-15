@@ -865,7 +865,17 @@ export function workspacesReducer(
                 return {
                     messages: action.messages,
                     askUserPending,
-                    pendingBySessionId: { ...existing.pendingBySessionId, [action.sid]: false },
+                    // A restore is about messages, not liveness — run_start /
+                    // run_end own this flag. Re-attaching to a session whose
+                    // turn is still in flight (switch away mid-run and back, or
+                    // a reload) must not mark it stopped, so seed `false` only
+                    // when nothing is known about this session yet. Without
+                    // this, a long tool call — e.g. a Claude Code subagent
+                    // running for minutes — shows as finished while it works.
+                    pendingBySessionId: {
+                        ...existing.pendingBySessionId,
+                        [action.sid]: existing.pendingBySessionId[action.sid] ?? false,
+                    },
                 };
             });
         case "ASKUSER_ANSWERED":
@@ -909,9 +919,15 @@ export function workspacesReducer(
             // Same reset shape as ATTACH's switch branch (subagent state, child streams,
             // askUser/agent-tool pendings): the new session must not inherit anything
             // from the previous one. The sessions list is kept so sidebar entries remain
-            // and the user can re-attach to a prior chat. pendingBySessionId is per-sid,
-            // so a late turn_end from the abandoned session hits the activeSession guard
-            // in APPLY_EVENT and is dropped — clearing the whole map cannot resurrect it.
+            // and the user can re-attach to a prior chat.
+            //
+            // pendingBySessionId / queuedBySessionId are deliberately kept. They are
+            // keyed per session id, so nothing in them can leak into the new session,
+            // and starting a new chat does not stop the old one — its run keeps going
+            // on the server. Clearing them dropped that session's running mark, and
+            // nothing put it back: run lifecycle events update these maps before the
+            // activeSession guard, but `run_start` has already fired, so the sidebar
+            // dot and the stop button read "idle" until the run ended.
             return updateWs(state, action.cwd, () => ({
                 activeSession: undefined,
                 messages: [],
@@ -921,8 +937,6 @@ export function workspacesReducer(
                 askUserPending: {},
                 agentToolPending: {},
                 backgroundSubagents: {},
-                pendingBySessionId: {},
-                queuedBySessionId: {},
             }));
     }
 }

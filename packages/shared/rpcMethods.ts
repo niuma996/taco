@@ -71,6 +71,8 @@ export const RPC = {
     // agents.*
     agentsList: "agents.list",
     agentsContent: "agents.content",
+    agentsWrite: "agents.write",
+    agentsDelete: "agents.delete",
     skillsList: "skills.list",
     skillContent: "skills.content",
     // checkpoints.* — pre-write file snapshots; restore is client-driven only.

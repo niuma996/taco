@@ -20,8 +20,8 @@
  *      cleanly and only surfaces at runtime.
  *   2. `ctx.params` is the raw `req.params` (no `Value.Cast`), so the handler's
  *      static type is an assertion about untrusted input, not a guarantee.
- * Both are acceptable only while the schemas remain `Type.Any()` placeholders
- * that reject nothing; tightening them requires closing these gaps first.
+ * Handlers with concrete schemas must still keep defensive runtime checks for
+ * values whose semantics are stricter than the wire shape.
  */
 
 import type { WorkspaceId } from "@taco-ai/protocol";

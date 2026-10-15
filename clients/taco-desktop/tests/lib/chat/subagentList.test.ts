@@ -185,6 +185,18 @@ describe("deriveSubagents — agentContinue 去重", () => {
 });
 
 describe("deriveSubagents — 字段回落", () => {
+    it("保留同步子代理主动停止的状态", () => {
+        const out = deriveSubagents([
+            asst("m1", [
+                agentTool({
+                    status: "error",
+                    details: { status: "aborted", subSessionId: "sub-1", agentType: "Explore" },
+                }),
+            ]),
+        ]);
+        assert.equal(out[0]?.status, "aborted");
+    });
+
     it("agentType 取 details 优先，其次 args.subagent_type，最后 'agent'", () => {
         const out = deriveSubagents([
             asst("m1", [

@@ -23,6 +23,7 @@ import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
 import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
+import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import type { QueuedUiItem } from "../lib/chat/chatUtils";
@@ -162,56 +163,10 @@ export function ChatPane(props: ChatPaneProps) {
     // that was just created via "New chat" but never prompted.
     const isEmptyChat = (ws?.messages ?? []).length === 0;
 
-    // chat scroll auto-follow.
-    //
-    // Attach observer + scroll listener to the <main> rendered by ChatPane itself so they
-    // clean up on unmount/remount. Putting them in App (which never unmounts) and forwarding
-    // via ref would leak to a detached node when the <main> is replaced by a conditional
-    // render on tab switch — the new node would have no observer, breaking auto-scroll.
-    //
-    // Stick maintenance: scroll events update the stick flag (observer fires after content
-    // is added so distance-from-bottom is measured correctly). rAF double-checks before
-    // scrolling to avoid a race where the user scrolls up between the scroll event and
-    // the rAF callback.
+    // Auto-follow lives on the <main> ChatPane renders itself, so the
+    // observers go away with it on a tab switch (see useStickToBottom).
     const mainRef = useRef<HTMLDivElement | null>(null);
-    useEffect(() => {
-        const el = mainRef.current;
-        if (!el) return;
-        let rafId: number | null = null;
-        const NEAR_BOTTOM_PX = 80;
-        let stick = true;
-        const onScroll = (): void => {
-            stick = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
-        };
-        el.addEventListener("scroll", onScroll, { passive: true });
-        const schedule = (): void => {
-            if (!stick) return;
-            if (rafId !== null) return;
-            rafId = requestAnimationFrame(() => {
-                rafId = null;
-                if (!stick) return;
-                el.scrollTo({ top: el.scrollHeight });
-            });
-        };
-        const mo = new MutationObserver(schedule);
-        mo.observe(el, { childList: true, subtree: true, characterData: true });
-        const ro = new ResizeObserver(schedule);
-        ro.observe(el);
-        return () => {
-            el.removeEventListener("scroll", onScroll);
-            mo.disconnect();
-            ro.disconnect();
-            if (rafId !== null) cancelAnimationFrame(rafId);
-        };
-    }, []);
-
-    // On mount, snap to the bottom — covers the case where the previous session
-    // left the scroll position non-zero.
-    useEffect(() => {
-        const el = mainRef.current;
-        if (!el) return;
-        el.scrollTo({ top: 1e9 });
-    }, []);
+    useStickToBottom(mainRef);
 
     // After-send snap to bottom: an empty `input` signals a just-completed send.
     // The MutationObserver will fire for the incoming assistant message, but
@@ -412,7 +367,10 @@ export function ChatPane(props: ChatPaneProps) {
                                     className="prompt-button stop"
                                     onClick={onAbort}
                                 >
-                                    <Square size={16} aria-hidden="true" />
+                                    {/* Solid glyph: matches the subagent row's
+                                       stop button, and an outlined square next
+                                       to a label reads as a tick box. */}
+                                    <Square size={16} fill="currentColor" aria-hidden="true" />
                                     {t("input.stop")}
                                 </button>
                             )}

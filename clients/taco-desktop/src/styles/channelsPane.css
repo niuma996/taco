@@ -213,7 +213,10 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-    min-width: 320px;
+    /* Fixed width: content swaps on every bind state (connecting, QR,
+       verify-code form, result), and content-sizing made it jump. */
+    width: 420px;
+    max-width: calc(100vw - 4rem);
 }
 .channels-bind-qr,
 .channel-bind-qr {

@@ -8,7 +8,13 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
-import type { AgentDefinition, AgentFewShot, SubagentContextMode } from "./types.ts";
+import type {
+    AgentDefinition,
+    AgentFewShot,
+    ClaudeCodePermissionMode,
+    SubagentContextMode,
+    SubagentRuntime,
+} from "./types.ts";
 
 interface AgentFrontmatter {
     name?: string;
@@ -19,6 +25,8 @@ interface AgentFrontmatter {
     timeoutMinutes?: unknown;
     fewShots?: unknown;
     context?: unknown;
+    runtime?: unknown;
+    permissionMode?: unknown;
     [key: string]: unknown;
 }
 
@@ -66,6 +74,8 @@ export function parseAgentMarkdown(
                 : undefined,
         fewShots: parseFewShots(frontmatter.fewShots),
         context: parseContext(frontmatter.context),
+        runtime: parseRuntime(frontmatter.runtime),
+        permissionMode: parsePermissionMode(frontmatter.permissionMode),
         source,
         filePath,
     };
@@ -105,6 +115,29 @@ function parseFewShots(raw: unknown): ReadonlyArray<AgentFewShot> | undefined {
 function parseContext(raw: unknown): SubagentContextMode | undefined {
     if (raw === "independent" || raw === "fork") return raw;
     return undefined;
+}
+
+/** Validate the optional `runtime:` entry; absent or unknown = the default (`standard`). */
+function parseRuntime(raw: unknown): SubagentRuntime | undefined {
+    if (raw === "standard" || raw === "claude-code") return raw;
+    return undefined;
+}
+
+const PERMISSION_MODES: ReadonlySet<string> = new Set<ClaudeCodePermissionMode>([
+    "auto",
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+    "inherit",
+]);
+
+/** Validate the optional `permissionMode:` entry; absent or unknown = the default (`auto`). */
+function parsePermissionMode(raw: unknown): ClaudeCodePermissionMode | undefined {
+    return typeof raw === "string" && PERMISSION_MODES.has(raw)
+        ? (raw as ClaudeCodePermissionMode)
+        : undefined;
 }
 
 async function loadDir(dir: string, source: "builtin" | "user"): Promise<AgentDefinition[]> {

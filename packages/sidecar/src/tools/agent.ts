@@ -60,11 +60,22 @@ export function createAgentTool(
                 "Name of a registered agent type. Types are listed in the system prompt's <available_agents> section.",
         }),
         description: Type.String({ description: "3-5 word task summary (for display)." }),
-        prompt: Type.String({ description: "The task for the subagent to perform." }),
+        prompt: Type.String({
+            description:
+                'The task for the subagent to perform. In the default independent context this is the ONLY thing it will read: spell out every path, constraint and decision it needs, because a subagent told to "fix the bug we discussed" without the discussion invents the bug.',
+        }),
         context: Type.Optional(
             Type.Union([Type.Literal("independent"), Type.Literal("fork")], {
-                description:
-                    'Context mode. Omit to use the agent type\'s configured default. "fork" additionally gives the subagent a transcript of this conversation up to now — use it when the task depends on what was already discussed or discovered.',
+                description: [
+                    "Context mode — what the subagent knows before it reads your prompt. Omit to use the agent type's configured default.",
+                    "",
+                    '"independent" (the usual default): the subagent starts blank. It sees your prompt and nothing else from this conversation.',
+                    "Prefer it when the task stands on its own and you can state everything it needs up front. Beyond simplicity, two reasons: an assumption formed earlier in this conversation cannot silently become a premise the subagent never thinks to check, and nothing you did not write into the prompt is handed across a process or trust boundary. The cost is yours to pay — restate every path, constraint and decision it needs.",
+                    "",
+                    '"fork": the subagent additionally receives a transcript of this conversation up to now. Use it only when the task is a judgement about something already settled here — reviewing a change made above, or continuing from earlier findings — and accept that it inherits this conversation\'s framing along with its facts, and that it costs more context.',
+                    "",
+                    'Only agent types running on taco\'s own engine support fork. A "fork" sent for any other type is corrected to "independent" rather than failing, so passing it there is harmless but pointless.',
+                ].join("\n"),
             }),
         ),
         background: Type.Optional(
@@ -118,21 +129,22 @@ export function createAgentTool(
             // a background spawn gets its own timeout-driven AbortController
             // instead (see agentSpawner.ts), since it must outlive this call.
             const signal = piContext.abortSignal;
-            const { subSessionId, resultText, isError, background, resultPath } = await ctx.spawn({
-                parentToolCallId: toolCallId,
-                agentType: params.subagent_type,
-                prompt: params.prompt,
-                // Forwarded for the background path only, where the completion
-                // notice may arrive many turns after this call: by then the
-                // conversation has moved on, and a compaction may have replaced
-                // the tool call that would otherwise identify what the subagent
-                // was for. Echoing it back makes the notice self-describing.
-                description: params.description,
-                context: params.context,
-                background: params.background,
-                signal,
-                onUpdate,
-            });
+            const { subSessionId, resultText, isError, aborted, background, resultPath } =
+                await ctx.spawn({
+                    parentToolCallId: toolCallId,
+                    agentType: params.subagent_type,
+                    prompt: params.prompt,
+                    // Forwarded for the background path only, where the completion
+                    // notice may arrive many turns after this call: by then the
+                    // conversation has moved on, and a compaction may have replaced
+                    // the tool call that would otherwise identify what the subagent
+                    // was for. Echoing it back makes the notice self-describing.
+                    description: params.description,
+                    context: params.context,
+                    background: params.background,
+                    signal,
+                    onUpdate,
+                });
             if (background) {
                 // subSessionId is always present here — a background spawn
                 // that failed before the child existed reports isError instead
@@ -157,9 +169,17 @@ export function createAgentTool(
                           : "");
                 return {
                     content: [{ type: "text", text }],
+                    // Without a child session the launch failed; reporting
+                    // "completed" would render a green check on a card whose
+                    // own text says it failed.
+                    ...(isError ? { isError: true } : {}),
+                    // A background spawn returns a receipt, never a run
+                    // outcome, so `aborted` cannot reach this branch.
                     details: subSessionId
                         ? { status: "launched", subSessionId, agentType: params.subagent_type }
-                        : { status: "completed", agentType: params.subagent_type },
+                        : isError
+                          ? { status: "error", agentType: params.subagent_type }
+                          : { status: "completed", agentType: params.subagent_type },
                 };
             }
             const body = isError ? `subagent error: ${resultText}` : resultText;
@@ -170,11 +190,20 @@ export function createAgentTool(
             const text = subSessionId ? `${body}\n\n[subagent session: ${subSessionId}]` : body;
             return {
                 content: [{ type: "text", text }],
-                details: {
-                    status: "completed",
-                    agentType: params.subagent_type,
-                    ...(subSessionId ? { subSessionId } : {}),
-                },
+                // Same reason as the background branch: `isError` is what the
+                // harness persists into the toolResult, and it is the only
+                // signal the desktop turns into a red card.
+                ...(isError ? { isError: true } : {}),
+                details:
+                    aborted && subSessionId
+                        ? { status: "aborted", subSessionId, agentType: params.subagent_type }
+                        : isError
+                          ? { status: "error", agentType: params.subagent_type }
+                          : {
+                                status: "completed",
+                                agentType: params.subagent_type,
+                                ...(subSessionId ? { subSessionId } : {}),
+                            },
             };
         },
     };

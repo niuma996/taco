@@ -155,6 +155,25 @@ export interface AgentsListParams {
     workspace: WorkspaceId;
 }
 
+/**
+ * Engine that runs an agent. UI/config only — the model always delegates by
+ * agent name and never sees this. Absent = "standard" (taco's own harness).
+ */
+export type AgentRuntime = "standard" | "claude-code";
+
+/**
+ * Claude Code permission mode of a `claude-code` agent. `inherit` = pass none
+ * and let Claude Code pick its own. Absent = "auto".
+ */
+export type ClaudeCodePermissionMode =
+    | "auto"
+    | "default"
+    | "acceptEdits"
+    | "plan"
+    | "dontAsk"
+    | "bypassPermissions"
+    | "inherit";
+
 /** Available agent type entry. */
 export interface AgentEntry {
     agentType: string;
@@ -162,7 +181,11 @@ export interface AgentEntry {
     whenToUse?: string;
     /** Context mode from the definition's frontmatter; absent = "independent". */
     context?: "independent" | "fork";
+    /** Engine from the definition's frontmatter; absent = "standard". UI-only, never model-visible. */
+    runtime?: AgentRuntime;
     source: "builtin" | "user";
+    /** Whether `agents.write` / `agents.delete` may modify this definition. */
+    editable: boolean;
 }
 
 /** `agents.list` RPC result. */
@@ -184,7 +207,55 @@ export interface AgentsContentResult {
     whenToUse?: string;
     /** Context mode from the definition's frontmatter; absent = "independent". */
     context?: "independent" | "fork";
+    runtime?: AgentRuntime;
+    maxTurns?: number;
+    /** Tool names from frontmatter; absent = default toolset (Claude Code's preset for `claude-code`). */
+    tools?: string[];
+    /** `claude-code` only. */
+    permissionMode?: ClaudeCodePermissionMode;
     source: "builtin" | "user";
+    editable: boolean;
+}
+
+/**
+ * `agents.write` RPC params — create or overwrite one agent definition in
+ * `$TACO_HOME/agents/<agentType>.md`.
+ */
+export interface AgentsWriteParams {
+    workspace: WorkspaceId;
+    agentType: string;
+    description: string;
+    whenToUse?: string;
+    /** Omitted = "standard"; the file then carries no `runtime:` line. */
+    runtime?: AgentRuntime;
+    maxTurns: number;
+    /**
+     * `claude-code` only — written for no other runtime. `tools` omitted or
+     * empty = Claude Code's full preset; `permissionMode` omitted = "auto".
+     */
+    tools?: string[];
+    permissionMode?: ClaudeCodePermissionMode;
+    systemPrompt: string;
+    /**
+     * Set when editing: the agentType being replaced. Renaming deletes the old
+     * file once the new one is written. Absent = create, which fails if the
+     * agentType already exists in any source.
+     */
+    previousAgentType?: string;
+}
+
+export interface AgentsWriteResult {
+    ok: true;
+}
+
+/** `agents.delete` RPC params — only editable (`$TACO_HOME/agents`) definitions. */
+export interface AgentsDeleteParams {
+    workspace: WorkspaceId;
+    agentType: string;
+}
+
+export interface AgentsDeleteResult {
+    ok: true;
 }
 
 /** `subagent.spawned` push params. */
@@ -235,7 +306,9 @@ export interface SubagentSettledPayload {
  */
 export type AgentToolDetails =
     | { status: "completed"; subSessionId?: SessionId; agentType: string }
-    | { status: "launched"; subSessionId: SessionId; agentType: string };
+    | { status: "launched"; subSessionId: SessionId; agentType: string }
+    | { status: "aborted"; subSessionId: SessionId; agentType: string }
+    | { status: "error"; agentType: string };
 
 /**
  * Shape of the `details` field on a subagent tool's **live progress** update
@@ -258,6 +331,8 @@ export interface SubagentProgressDetails {
 /** Shape of the `details` field on the `agentContinue` tool's result. */
 export interface AgentContinueToolDetails {
     subSessionId: SessionId;
+    /** Set when the resumed run was stopped on purpose, not when it failed. */
+    status?: "aborted";
 }
 
 // askUser tool

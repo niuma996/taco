@@ -161,7 +161,10 @@ describe("agent tool", () => {
             { env: mockEnv },
             { toolCallId: "tc-parent" },
         );
-        assert.deepEqual(res.details, { status: "completed", agentType: "explorer" });
+        // A failed launch must not read as "completed" — that is what put a
+        // green check on a card whose own text said it failed.
+        assert.deepEqual(res.details, { status: "error", agentType: "explorer" });
+        assert.equal(res.isError, true);
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("failed to launch background subagent:"));
     });
@@ -176,6 +179,18 @@ describe("agent tool", () => {
         assert.ok(withTypes.description.includes("<available_agents>"));
         assert.ok(!withTypes.description.includes("explorer"));
         assert.ok(!withTypes.description.includes("coder"));
+    });
+
+    it("explains independent context, not only what fork adds", () => {
+        // The model picks this parameter from its description alone. A fork-only
+        // description leaves "independent" undefined and the trade-off (restate
+        // everything vs. inherit framing) invisible, so both modes must be stated.
+        const tool = createAgentTool(stubCtx(), []);
+        const ctx = JSON.stringify(tool.parameters) as string;
+        assert.ok(ctx.includes("independent"), "independent is not described at all");
+        assert.ok(ctx.includes("starts blank"), "does not say what independent gives");
+        assert.ok(ctx.includes("restate every path"), "does not say what independent costs");
+        assert.ok(ctx.includes("inherits this conversation"), "does not state fork's cost");
     });
 
     it("does not embed frontmatter hints in the tool JSON", () => {
@@ -216,6 +231,42 @@ describe("agent tool", () => {
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("subagent error:"));
+        // Same contract as the background branch: a failure is an error, not a
+        // completed card. `isError` is what pi persists and the desktop colours.
+        assert.equal(res.isError, true);
+        assert.deepEqual(res.details, { status: "error", agentType: "bogus" });
+    });
+
+    it("retains aborted state and child session id for a synchronous stop", async () => {
+        const tool = createAgentTool(
+            {
+                spawn: async () => ({
+                    subSessionId: asSessionId("sub-stopped"),
+                    resultText: "stopped",
+                    isError: true,
+                    aborted: true,
+                }),
+                continue: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: true,
+                }),
+                abortSubagent: () => ({ stopped: false }),
+            },
+            [{ agentType: "explorer" }],
+        );
+        const res = await invokeTool(
+            tool,
+            { subagent_type: "explorer", description: "x", prompt: "y" },
+            { env: mockEnv },
+            { toolCallId: "tc" },
+        );
+        assert.equal(res.isError, true);
+        assert.deepEqual(res.details, {
+            status: "aborted",
+            subSessionId: "sub-stopped",
+            agentType: "explorer",
+        });
     });
 
     it("declares executionMode 'parallel' so multiple agent calls in one turn run concurrently", () => {

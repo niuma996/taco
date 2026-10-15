@@ -13,6 +13,7 @@ import { useSubagent } from "../../hooks/useSubagent";
 import { type ToolViewProps, toolViews } from "./registry";
 
 interface AgentToolDetailsShape {
+    status?: unknown;
     subSessionId?: unknown;
     agentType?: unknown;
 }
@@ -27,10 +28,12 @@ export function AgentToolView({ tool }: ToolViewProps): ReactElement {
     const args = (tool.args ?? {}) as AgentToolArgsShape;
     const description = typeof args.description === "string" ? args.description : "";
     const agentTypeFromArgs = typeof args.subagent_type === "string" ? args.subagent_type : "";
-    const isRunning = tool.status === "running";
-    const isError = tool.status === "error";
-
     const details = (tool.details ?? {}) as AgentToolDetailsShape;
+    const isRunning = tool.status === "running";
+    // A deliberate stop also lands as an error tool result; label it as
+    // stopped so the card agrees with the subagent panel.
+    const isAborted = details.status === "aborted";
+    const isError = tool.status === "error" && !isAborted;
     const subSessionId = typeof details.subSessionId === "string" ? details.subSessionId : null;
     const agentTypeFromDetails = typeof details.agentType === "string" ? details.agentType : "";
     const agentType = agentTypeFromDetails || agentTypeFromArgs || "agent";
@@ -54,6 +57,7 @@ export function AgentToolView({ tool }: ToolViewProps): ReactElement {
                     </span>
                 )}
                 {isError && <span className="agent-card-error">error</span>}
+                {isAborted && <span className="agent-card-aborted">stopped</span>}
                 {subSessionId && (
                     <span className="agent-card-subid" title={subSessionId}>
                         id {subSessionId.slice(0, 8)}

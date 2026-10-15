@@ -79,6 +79,7 @@ function entryFromTool(
     if (!TOOL_CALL_STATUSES.has(tool.status)) throw new Error("agent tool call missing status");
 
     const subSessionId = readString(tool.details, "subSessionId") || null;
+    const detailStatus = readString(tool.details, "status");
     const agentType =
         readString(tool.details, "agentType") || readString(tool.args, "subagent_type") || "agent";
 
@@ -92,7 +93,9 @@ function entryFromTool(
         status:
             subSessionId === null
                 ? "detached"
-                : backgroundStatus(tool.id, backgroundSubagents, tool.status),
+                : detailStatus === "aborted"
+                  ? "aborted"
+                  : backgroundStatus(tool.id, backgroundSubagents, tool.status),
         firstToolCallId: tool.id,
     };
 }
@@ -227,6 +230,18 @@ export function shouldAutoOpen(
         return entry.subSessionId;
     }
     return null;
+}
+
+/**
+ * Whether the task panel should auto-open: a task list that was not active at
+ * the last evaluation just became the active one. The same id staying active
+ * (tasks ticking off) and the list going away both leave the UI alone.
+ */
+export function shouldAutoOpenTasks(
+    prevActiveId: string | null,
+    nextActiveId: string | null,
+): boolean {
+    return nextActiveId !== null && nextActiveId !== prevActiveId;
 }
 
 /**

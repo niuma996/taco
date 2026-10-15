@@ -35,6 +35,35 @@ export type SubagentProgressSink = AgentHarnessToolUpdateCallback<never>;
  */
 export type SubagentContextMode = "independent" | "fork";
 
+/**
+ * Which engine runs a subagent. Never model-visible: the model picks an agent
+ * by name and the spawner dispatches on the definition's runtime.
+ *
+ * - `standard` — taco's own harness. The default when frontmatter omits it.
+ * - `claude-code` — the whole run is delegated to the user's local Claude
+ *   Code CLI through the Agent SDK: Claude Code's own tools and permission
+ *   system rather than taco's, always `independent`, and not resumable with
+ *   `agentContinue`.
+ */
+export type SubagentRuntime = "standard" | "claude-code";
+
+/**
+ * Claude Code permission mode for a `claude-code` agent. `inherit` passes no
+ * mode, so Claude Code picks its own (the user's `permissions.defaultMode`,
+ * else its default). Omitted in frontmatter = `auto`.
+ */
+export type ClaudeCodePermissionMode =
+    | "auto"
+    | "default"
+    | "acceptEdits"
+    | "plan"
+    | "dontAsk"
+    | "bypassPermissions"
+    | "inherit";
+
+/** Runtime assumed when a definition does not name one. */
+export const DEFAULT_SUBAGENT_RUNTIME: SubagentRuntime = "standard";
+
 /** A single example conversation turn injected ahead of the profile body. */
 export interface AgentFewShot {
     /** The example user message. */
@@ -50,7 +79,11 @@ export interface AgentDefinition {
     whenToUse?: string;
     /** md body — used as the subagent's system prompt base */
     systemPrompt: string;
-    /** Tool whitelist; undefined = inherit all parent tools (agent still removed by depth recursion guard) */
+    /**
+     * Tool whitelist; undefined = inherit all parent tools (agent still removed
+     * by depth recursion guard). For `claude-code` the names are Claude Code's
+     * own, and undefined = its full default toolset.
+     */
     tools?: string[];
     maxTurns?: number;
     /**
@@ -65,6 +98,10 @@ export interface AgentDefinition {
      * The `agent` tool's `context` param overrides this per-spawn.
      */
     context?: SubagentContextMode;
+    /** Engine for this agent type. Omitted in frontmatter = "standard". */
+    runtime?: SubagentRuntime;
+    /** `claude-code` only; ignored for other runtimes. Omitted = "auto". */
+    permissionMode?: ClaudeCodePermissionMode;
     /** Optional in-context examples. Injected into the child's system prompt
      *  ahead of `systemPrompt` (md body) so the examples establish tone and
      *  contract before the role body takes over. Keep total length under a
@@ -108,6 +145,8 @@ export interface SubagentSpawnContext {
         subSessionId?: SessionId;
         resultText: string;
         isError: boolean;
+        /** A deliberate interruption; distinct from a failed run. */
+        aborted?: boolean;
         /** Echoes the effective `background` mode so the tool layer knows which `AgentToolDetails` variant to report. */
         background?: boolean;
         /**
@@ -131,7 +170,12 @@ export interface SubagentSpawnContext {
         signal?: AbortSignal;
         /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
         onUpdate?: SubagentProgressSink;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
+    }): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }>;
     /**
      * Stop a running subagent by `subSessionId` without aborting the parent
      * turn. Implementations restrict this to the calling session's own

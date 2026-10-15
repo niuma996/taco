@@ -42,6 +42,7 @@ import { useMemoryPane } from "./hooks/useMemoryPane";
 import { usePluginsPane } from "./hooks/usePluginsPane";
 import { useProviders } from "./hooks/useProviders";
 import { useRightPanel } from "./hooks/useRightPanel";
+import { useRightPanelAutoOpen } from "./hooks/useRightPanelAutoOpen";
 import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
 import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
@@ -198,6 +199,17 @@ export default function App() {
         },
         [rightPanel.show],
     );
+
+    const showTasksPanel = useCallback(() => rightPanel.show("tasks"), [rightPanel.show]);
+    useRightPanelAutoOpen({
+        sessionKey: subagentSessionKey,
+        runInFlight,
+        subagentEntries,
+        activeTaskListId:
+            (activeSid && ws?.taskSnapshotsBySessionId[activeSid]?.active?.id) || null,
+        showTasks: showTasksPanel,
+        showSubagent: openInPanel,
+    });
 
     // Compaction-finished push → refresh ratio + clear one-shot state, and
     // report a failure. Input is frozen while compaction runs, so the user is
@@ -459,6 +471,9 @@ export default function App() {
         agentContent,
         agentContentLoading,
         agentContentError,
+        agentSaving,
+        saveAgent,
+        deleteAgent,
     } = useAgentsPane(client, mainView === "agents", activeCwd);
     const {
         extensionStatus,
@@ -541,13 +556,20 @@ export default function App() {
     // creation: the new session id is allocated by the server on the first
     // real send, not here. Only confirm when there's unsent content to
     // discard.
+    // Tasks and subagents belong to the session being left; the file tree
+    // belongs to the workspace, which the new chat shares, so it stays.
+    function startNewSession(cwd: string): void {
+        if (rightPanel.panel === "tasks" || rightPanel.panel === "subagents") rightPanel.close();
+        beginPendingNewSession(cwd);
+    }
+
     function handleNewSession(): void {
         if (input.trim() !== "" || attachments.length > 0) {
             setPendingNewSessionCwd(activeCwd);
             setConfirmNewSession(true);
             return;
         }
-        beginPendingNewSession(activeCwd);
+        startNewSession(activeCwd);
         setInput("");
         setAttachments([]);
     }
@@ -825,6 +847,9 @@ export default function App() {
                             content={agentContent}
                             contentLoading={agentContentLoading}
                             contentError={agentContentError}
+                            saving={agentSaving}
+                            onSaveAgent={saveAgent}
+                            onDeleteAgent={deleteAgent}
                         />
                     ) : mainView === "plugins" ? (
                         <PluginsPane
@@ -969,7 +994,7 @@ export default function App() {
                     setPendingNewSessionCwd(null);
                     setInput("");
                     setAttachments([]);
-                    beginPendingNewSession(cwd);
+                    startNewSession(cwd);
                 }}
                 onCancel={() => {
                     setConfirmNewSession(false);

@@ -985,6 +985,89 @@ describe("subagent actions", () => {
         assert.deepEqual(next["/ws"]?.askUserPending, { "fresh-tool": true });
     });
 
+    it("RESTORE_SESSION_SNAPSHOT keeps a session known to be running marked as running", () => {
+        // Re-attaching to a chat whose turn is still in flight (a subagent that
+        // takes minutes) must not flip the stop button back on.
+        const state = {
+            "/ws": baseWs({
+                activeSession: "main-1",
+                pendingBySessionId: { "main-1": true },
+            }),
+        };
+
+        const next = workspacesReducer(state, {
+            type: "RESTORE_SESSION_SNAPSHOT",
+            cwd: "/ws",
+            sid: "main-1",
+            sessionKind: "main",
+            messages: [],
+            pendingAskUserIds: [],
+        });
+
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], true);
+    });
+
+    it("RESTORE_SESSION_SNAPSHOT seeds pending false for a session it knows nothing about", () => {
+        const state = { "/ws": baseWs({ activeSession: "main-1" }) };
+
+        const next = workspacesReducer(state, {
+            type: "RESTORE_SESSION_SNAPSHOT",
+            cwd: "/ws",
+            sid: "main-1",
+            sessionKind: "main",
+            messages: [],
+            pendingAskUserIds: [],
+        });
+
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], false);
+    });
+
+    it("BEGIN_PENDING_NEW_SESSION keeps an abandoned session's running mark", () => {
+        // Repro: a run is in flight, the user clicks "new chat", then goes back.
+        // The run is still going on the server, and run_start fired long ago, so
+        // nothing would re-mark it running — clearing the map made it read idle.
+        const queued = [{ id: "q1", text: "next" }] as WorkspaceState["queuedBySessionId"][string];
+        const state = {
+            "/ws": baseWs({
+                activeSession: "main-1",
+                pendingBySessionId: { "main-1": true },
+                queuedBySessionId: { "main-1": queued },
+            }),
+        };
+
+        let next = workspacesReducer(state, { type: "BEGIN_PENDING_NEW_SESSION", cwd: "/ws" });
+        assert.equal(next["/ws"]?.activeSession, undefined);
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], true);
+        assert.deepEqual(next["/ws"]?.queuedBySessionId["main-1"], queued);
+
+        // Switching back restores the snapshot; the mark must survive that too.
+        const afterNew = next["/ws"];
+        assert.ok(afterNew);
+        next = workspacesReducer(
+            { "/ws": { ...afterNew, activeSession: "main-1" } },
+            {
+                type: "RESTORE_SESSION_SNAPSHOT",
+                cwd: "/ws",
+                sid: "main-1",
+                sessionKind: "main",
+                messages: [],
+                pendingAskUserIds: [],
+            },
+        );
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], true);
+
+        // And the run's own end still clears it.
+        next = workspacesReducer(next, {
+            type: "APPLY_EVENT",
+            cwd: "/ws",
+            sid: "main-1",
+            suppressedThinking: false,
+            now: 3,
+            ev: { type: "run_end" },
+        });
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], false);
+    });
+
     it("RESTORE_SESSION_SNAPSHOT replaces a subagent stream without changing the main view", () => {
         const state = {
             "/ws": baseWs({

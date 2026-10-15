@@ -14,18 +14,22 @@ export interface ConfirmModalProps {
     message: string;
     confirmLabel?: string;
     cancelLabel?: string;
+    error?: string | null;
+    busy?: boolean;
     onConfirm: () => void;
     onCancel: () => void;
 }
 
 export function ConfirmModal(props: ConfirmModalProps) {
-    const { open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel } = props;
+    const { open, title, message, confirmLabel, cancelLabel, error, busy, onConfirm, onCancel } =
+        props;
     const confirmRef = useRef<HTMLButtonElement>(null);
 
     return (
         <Modal
             open={open}
             onClose={onCancel}
+            dismissible={!busy}
             title={title}
             description={message}
             // Keep the prior default-focus-on-confirm convention. We use onOpenAutoFocus
@@ -37,14 +41,16 @@ export function ConfirmModal(props: ConfirmModalProps) {
             }}
             actions={
                 <>
-                    <Button variant="ghost" onClick={onCancel}>
+                    <Button variant="ghost" onClick={onCancel} disabled={busy}>
                         {cancelLabel ?? "Cancel"}
                     </Button>
-                    <Button ref={confirmRef} variant="primary" onClick={onConfirm}>
+                    <Button ref={confirmRef} variant="primary" onClick={onConfirm} disabled={busy}>
                         {confirmLabel ?? "Confirm"}
                     </Button>
                 </>
             }
-        />
+        >
+            {error ? <div className="error-banner">{error}</div> : null}
+        </Modal>
     );
 }

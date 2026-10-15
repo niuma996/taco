@@ -342,11 +342,12 @@ export class WorkspaceRuntime extends EventEmitter {
      */
     readonly compaction?: ResolvedCompaction;
     /**
-     * Agent-type catalog captured at construction. `rebuildSystemPrompt` runs
-     * before `agentSpawner` is assigned, so the getter `this.agents` is not
-     * safe there — this snapshot is.
+     * Agent-type catalog used to render `<available_agents>`. Set at
+     * construction — `rebuildSystemPrompt` runs before `agentSpawner` is
+     * assigned, so the getter `this.agents` is not safe there — and swapped by
+     * `reloadAgentsNow` after an `agents.write` / `agents.delete`.
      */
-    private readonly agentCatalog: ReadonlyArray<AgentDefinition>;
+    private agentCatalog: ReadonlyArray<AgentDefinition>;
     /** User-level memory store. */
     readonly memoryStore: MemoryStore;
     /** Pre-write snapshots for this workspace; undefined when FS tools are off. */
@@ -658,7 +659,11 @@ export class WorkspaceRuntime extends EventEmitter {
             "session.deleted",
             "session.renamed",
         ]);
-        forwardEvents(this.agentSpawner, this, ["subagent.spawned", "subagent.settled"]);
+        forwardEvents(this.agentSpawner, this, [
+            "subagent.spawned",
+            "subagent.settled",
+            "session.event",
+        ]);
 
         // Skill hot reload: watcher, debounce timer and the in-flight scan all
         // live in `SkillHotReloader`; the workspace only says what "apply the
@@ -941,6 +946,20 @@ export class WorkspaceRuntime extends EventEmitter {
      */
     async reloadSkillsNow(): Promise<void> {
         await this.skillHotReload.reloadNow();
+    }
+
+    /**
+     * Install a freshly-rescanned agent catalog: spawns (`agentSpawner`) and
+     * the `<available_agents>` prompt section both pick it up. Guarded by
+     * comparison like the skill rescan — an unchanged catalog must not pay a
+     * KV-cache miss. Same caveat as `reloadSkillsNow`: already-attached
+     * sessions keep their baked prompt until the next re-attach.
+     */
+    reloadAgentsNow(agents: AgentDefinition[]): void {
+        this.agentSpawner.replaceAgents(agents);
+        this.agentCatalog = agents;
+        const nextPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
+        if (nextPrompt !== this.systemPrompt) this.systemPrompt = nextPrompt;
     }
 
     /**

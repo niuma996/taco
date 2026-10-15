@@ -15,8 +15,10 @@ import { buildForkedContext, resolveContextMode } from "../../agents/forkedHisto
 import type {
     AgentDefinition,
     AgentFewShot,
+    ClaudeCodePermissionMode,
     SubagentContextMode,
     SubagentProgressSink,
+    SubagentRuntime,
 } from "../../agents/types.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
@@ -28,10 +30,10 @@ import type { TacoTool } from "../../tools/index.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelRegistry.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
-import type { Api, Model, MutableModels } from "../pi/types.ts";
+import type { AgentMessage, Api, Model, MutableModels } from "../pi/types.ts";
 import type { JsonlSessionRepo } from "../pi/values.ts";
 import { uuidv7 } from "../pi/values.ts";
-import { findBranchEntries } from "../session/sessionBranch.ts";
+import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import {
     readSessionFacts,
     resolveParentDepth,
@@ -40,6 +42,8 @@ import {
 } from "../session/sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.ts";
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
+import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
+import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
 import { deliverSubagentResult } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
@@ -158,6 +162,13 @@ export interface SubagentSessionArgs {
      */
     rolePrompt?: string;
     /**
+     * `claude-code` only: the definition's raw tool names (Claude Code's own,
+     * so `tools` — taco tool objects filtered by those names — cannot carry
+     * them) and its permission mode.
+     */
+    claudeCodeTools?: readonly string[];
+    permissionMode?: ClaudeCodePermissionMode;
+    /**
      * Optional in-context examples to inject ahead of `rolePrompt`. The
      * examples establish the contract the profile expects (e.g. citation
      * shape, stop condition) before the role body takes over. Kept
@@ -200,6 +211,8 @@ export interface SubagentSessionArgs {
      * on a missing definition.
      */
     resumability?: SubagentResumability;
+    /** Engine for this run; absent = "standard". */
+    runtime?: SubagentRuntime;
 }
 
 export class AgentSpawner extends EventEmitter {
@@ -212,9 +225,13 @@ export class AgentSpawner extends EventEmitter {
     readonly models: MutableModels;
     /** Public so tests can assert on the live parent toolset a spawn would see. */
     readonly getTools: () => TacoTool[];
-    readonly agents: AgentDefinition[];
+    /** NOT readonly: `replaceAgents` swaps the catalog after an `agents.write`. */
+    agents: AgentDefinition[];
     private readonly sessionRegistry: SessionRegistry;
     private readonly systemPromptContributors: SystemPromptContributor[];
+    /** Claude Code SDK/CLI lookup. Fields rather than imports so tests can swap them. */
+    private loadClaudeCodeSdk = loadClaudeAgentSdk;
+    private findClaudeCode = findClaudeExecutable;
 
     constructor(options: AgentSpawnerOptions) {
         super();
@@ -433,6 +450,11 @@ export class AgentSpawner extends EventEmitter {
         return this.agents.find((a) => a.agentType === type);
     }
 
+    /** Swap the agent catalog after an `agents.write` / `agents.delete` rescan. */
+    replaceAgents(next: AgentDefinition[]): void {
+        this.agents = next;
+    }
+
     /** parentToolCallIds with a live subagent under `parentSessionId`. */
     inFlightAgentToolCallIds(parentSessionId: SessionId): string[] {
         return [...(this.inFlight.get(parentSessionId) ?? [])];
@@ -506,9 +528,12 @@ export class AgentSpawner extends EventEmitter {
      * a launch failure still reaches the parent as an error notification
      * instead of dying in `.catch` as a log line.
      */
-    async executeSubagentSession(
-        args: SubagentSessionArgs,
-    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    async executeSubagentSession(args: SubagentSessionArgs): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         return this.trackInFlight(args.parentSessionId, args.parentToolCallId, async () => {
             try {
                 return await this.runSubagentSession(args);
@@ -528,9 +553,12 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /** `executeSubagentSession` body, wrapped by it for in-flight tracking. */
-    private async runSubagentSession(
-        args: SubagentSessionArgs,
-    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    private async runSubagentSession(args: SubagentSessionArgs): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         // Caller must supply `childDepth` — used by tool filtering to gate Skill/agent
         // recursion, and computing it here would require a second openSession() call.
         const childDepth =
@@ -557,12 +585,18 @@ export class AgentSpawner extends EventEmitter {
             parentSessionId: args.parentSessionId,
             parentToolCallId: args.parentToolCallId,
             depth: childDepth,
+            ...(args.runtime !== undefined ? { runtime: args.runtime } : {}),
             ...(args.forkedContext !== undefined ? { forkedContext: args.forkedContext } : {}),
         });
         // create() holds pi's open-session slot. attachChild() below opens the
         // same id again, which throws unless this handle is released first.
         await childSession.close(harnessContext);
         this.sessionRegistry.invalidateListCache();
+
+        // A claude-code child never attaches, so the push layer cannot read
+        // its kind from the attached map. Register it here — before the first
+        // event — so its frames route as "subagent" from the start.
+        this.sessionRegistry.noteSessionKind(asSessionId(childSessionId), "subagent");
 
         // 2. Emit spawned (same agentType as the persisted facts)
         this.emit("subagent.spawned", {
@@ -571,6 +605,10 @@ export class AgentSpawner extends EventEmitter {
             subSessionId: childSessionId,
             agentType: args.agentType,
         });
+
+        if (args.runtime === "claude-code") {
+            return this.runClaudeCodeChild(asSessionId(childSessionId), args);
+        }
 
         // 3. Build the child's toolset + system prompt.
         const {
@@ -657,6 +695,7 @@ export class AgentSpawner extends EventEmitter {
         subSessionId?: SessionId;
         resultText: string;
         isError: boolean;
+        aborted?: boolean;
         background?: boolean;
         /** Set only for a launched background spawn; see `SubagentSpawnContext`. */
         resultPath?: string;
@@ -714,6 +753,126 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /**
+     * `runtime: claude-code` body of `runSubagentSession`, after the child
+     * session exists. The transcript is appended through `withSession` one
+     * batch at a time rather than through a held handle, so a concurrent
+     * history read from the desktop queues behind it instead of failing on
+     * pi's "already open" guard.
+     */
+    private async runClaudeCodeChild(
+        childSessionId: SessionId,
+        args: SubagentSessionArgs,
+    ): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
+        // The SDK takes a controller, not a signal. Spawn paths always pass one;
+        // a caller with only `signal` gets a controller that follows it.
+        const controller = args.abortController ?? new AbortController();
+        const follow = (): void => controller.abort();
+        if (args.signal?.aborted) controller.abort();
+        args.signal?.addEventListener("abort", follow, { once: true });
+        this.subagentControllers.set(childSessionId, {
+            controller,
+            parentSessionId: args.parentSessionId,
+        });
+        try {
+            return await runClaudeCodeSubagent({
+                subSessionId: childSessionId,
+                agentType: args.agentType,
+                prompt: args.prompt,
+                rolePrompt: args.rolePrompt,
+                maxTurns: args.maxTurns,
+                tools: args.claudeCodeTools,
+                permissionMode: args.permissionMode,
+                cwd: this.env.cwd,
+                abortController: controller,
+                onUpdate: args.onUpdate,
+                loadSdk: this.loadClaudeCodeSdk,
+                findExecutable: () => this.findClaudeCode(),
+                appendMessages: (messages) =>
+                    this.sessionRegistry.withSession(childSessionId, async (session) => {
+                        const branch =
+                            (await session.branch(MAIN_BRANCH, harnessContext)) ??
+                            (await session.createBranch(MAIN_BRANCH, null, harnessContext));
+                        for (const m of messages) {
+                            await branch.appendMessage(m, harnessContext);
+                            this.pushChildMessages(childSessionId, m);
+                        }
+                    }),
+            });
+        } finally {
+            args.signal?.removeEventListener("abort", follow);
+            this.releaseController(childSessionId);
+        }
+    }
+
+    /**
+     * Push one persisted child message as pi-style events so the desktop panel
+     * streams it live. The registry routes by the facts cache (`noteSessionKind`),
+     * so the frame lands in `childMessagesBySubSessionId` as a subagent.
+     *
+     * Order matters, because the desktop reducer attaches each tool event to
+     * the *last assistant bubble*. pi always opens that bubble first; a
+     * `tool_start` that arrives with no bubble to land in is rendered as a
+     * plain fallback text row ("▶ Read", "✓ Grep: …") instead of a card. So an
+     * assistant message is replayed the way pi emits one:
+     *
+     *   message_start → message_end (text + thinking) → tool_start per call
+     *
+     * and a toolResult as `tool_end`, which then finds its card in that bubble.
+     * Both events carry the message's own timestamp — the reducer keys the
+     * bubble on it (`live-asst-<timestamp>`), and start and end must agree.
+     */
+    private pushChildMessages(subSessionId: SessionId, m: AgentMessage): void {
+        const emit = (event: object) =>
+            this.emit("session.event", { sessionId: subSessionId, event });
+        if (m.role === "user") {
+            emit({ type: "message_end", message: m });
+            return;
+        }
+        if (m.role === "assistant") {
+            emit({ type: "message_start", message: m });
+            emit({ type: "message_end", message: m });
+            const content = (m as { content?: unknown[] }).content ?? [];
+            for (const c of content) {
+                if (typeof c !== "object" || c === null) continue;
+                const block = c as {
+                    type?: string;
+                    id?: string;
+                    name?: string;
+                    arguments?: unknown;
+                };
+                if (block.type !== "toolCall") continue;
+                emit({
+                    type: "tool_start",
+                    toolCallId: block.id,
+                    toolName: block.name,
+                    args: block.arguments,
+                });
+            }
+            return;
+        }
+        if (m.role === "toolResult") {
+            const tr = m as {
+                toolCallId?: string;
+                toolName?: string;
+                isError?: boolean;
+                content?: unknown;
+            };
+            emit({
+                type: "tool_end",
+                toolCallId: tr.toolCallId ?? "",
+                toolName: tr.toolName ?? "tool",
+                result: { content: tr.content ?? [] },
+                isError: tr.isError ?? false,
+            });
+        }
+    }
+
+    /**
      * Depth/toolset/fork prep, then either await the run or fire it off in
      * the background. The background slot (if any) is already reserved by
      * `spawnSubagent`; this method must not add it again.
@@ -741,6 +900,13 @@ export class AgentSpawner extends EventEmitter {
         // Unlike childDepth there is a safe default, so an omitted value is not
         // a caller error — see resolveContextMode for the precedence rationale.
         const contextMode = resolveContextMode(args.context, def.context);
+        // A Claude Code child is a separate process with its own logs and
+        // telemetry — a new trust domain — so the parent transcript must not
+        // be copied into it (see forkedHistory.ts). The model cannot pass the
+        // runtime, so it may well ask for `fork` here; correct the request
+        // instead of failing it. `<available_agents>` states the constraint, so
+        // a model that reads it never gets here.
+        const effectiveContextMode = def.runtime === "claude-code" ? "independent" : contextMode;
         // Compute parent depth to feed filterToolsForAgent before delegating.
         // Depth lives in the session's value store, not `JsonlSessionMetadata`
         // (pi 0.85 removed the free-form metadata bag), so it needs a read.
@@ -758,7 +924,7 @@ export class AgentSpawner extends EventEmitter {
         // attach path and lets us persist the exact string the child saw so a
         // later resume re-injects byte-identically.
         let forkedContext: string | undefined;
-        if (contextMode === "fork") {
+        if (effectiveContextMode === "fork") {
             forkedContext = await this.sessionRegistry.withSession(
                 args.parentSessionId,
                 async (parentSession) => buildForkedContext(await findBranchEntries(parentSession)),
@@ -772,13 +938,18 @@ export class AgentSpawner extends EventEmitter {
             tools: childTools,
             onUpdate: args.onUpdate,
             // Spawned from a registry profile, so runResume can re-derive the
-            // child's toolset from its agentType.
-            resumability: "resumable",
+            // child's toolset from its agentType. Claude Code runs keep no
+            // resumable harness state.
+            resumability: def.runtime === "claude-code" ? "not_resumable" : "resumable",
+            runtime: def.runtime,
             childDepth,
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             maxTurns: def.maxTurns,
             forkedContext,
+            ...(def.runtime === "claude-code"
+                ? { claudeCodeTools: def.tools, permissionMode: def.permissionMode }
+                : {}),
         };
         if (!args.background) {
             // Synchronous path: still bounded by the caller's signal, but
@@ -1416,7 +1587,12 @@ export class AgentSpawner extends EventEmitter {
         prompt: string;
         signal?: AbortSignal;
         onUpdate?: SubagentProgressSink;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    }): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         // Single-flight: a second concurrent call with the same subSessionId
         // reuses the in-flight promise rather than racing to re-attach and
         // interleave user messages on the same branch. The cache entry is
@@ -1492,6 +1668,13 @@ export class AgentSpawner extends EventEmitter {
             return {
                 subSessionId: args.subSessionId,
                 resultText: `cannot continue: agent definition for "${agentType ?? "unknown"}" is no longer available. Re-spawn the subagent to continue.`,
+                isError: true,
+            };
+        }
+        if (def.runtime === "claude-code") {
+            return {
+                subSessionId: args.subSessionId,
+                resultText: `cannot continue: "${agentType}" runs on Claude Code, which cannot be resumed. Spawn a new subagent instead.`,
                 isError: true,
             };
         }

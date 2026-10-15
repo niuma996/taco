@@ -106,14 +106,17 @@ export function SubagentRow({
                 )}
             </button>
             {stoppable && entry.subSessionId !== null && onStop !== undefined && (
+                // Outline-only read as a checkbox, so the button carries the
+                // weight instead: filled danger red, same as the composer's
+                // Stop. A solid glyph inside a filled square is the stop
+                // convention; an outlined one just looks like a tick box.
                 <IconButton
-                    tone="danger"
                     className="subagent-row-stop"
                     title={t("subagents.stop")}
                     aria-label={t("subagents.stop")}
                     onClick={() => onStop(entry.subSessionId as string)}
                 >
-                    <Square size={11} aria-hidden="true" />
+                    <Square size={10} fill="currentColor" aria-hidden="true" />
                 </IconButton>
             )}
         </li>

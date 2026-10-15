@@ -14,6 +14,18 @@ import { invokeTool } from "../_helpers/invokeTool.ts";
 describe("agentContinue tool", () => {
     const mockEnv = new NodeExecutionEnv({ cwd: "/" });
 
+    it("tells the model which subagents can be continued, without naming a runtime", () => {
+        const stub = {} as SubagentSpawnContext;
+        const { description } = createAgentContinueTool(stub);
+        assert.match(
+            description,
+            /Only subagents of types running on taco's own engine can be continued/,
+        );
+        assert.match(description, /fresh `agent` call/);
+        // The runtime stays invisible to the model: it delegates by agent name.
+        assert.doesNotMatch(description, /claude[- ]?code/i);
+    });
+
     it("forwards params to continue and wraps result into content+details", async () => {
         let captured: unknown;
         const spyOnUpdate = (): void => {};
@@ -73,6 +85,32 @@ describe("agentContinue tool", () => {
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("subagent continue error:"));
         assert.ok(text.includes("different parent session"));
+    });
+
+    it("reports a stopped resume as aborted, without the error prefix", async () => {
+        const tool = createAgentContinueTool({
+            async spawn() {
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
+            },
+            async continue() {
+                return {
+                    subSessionId: asSessionId("sub-s"),
+                    resultText: "stopped on purpose",
+                    isError: true,
+                    aborted: true,
+                };
+            },
+            abortSubagent: () => ({ stopped: false }),
+        });
+        const res = await invokeTool(
+            tool,
+            { subSessionId: "sub-s", prompt: "x" },
+            { env: mockEnv },
+            { toolCallId: "tc" },
+        );
+        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+        assert.equal(text, "stopped on purpose");
+        assert.deepEqual(res.details, { subSessionId: "sub-s", status: "aborted" });
     });
 
     it("exposes a `name`, `taco.promptSummary`, and a `subSessionId` schema field", () => {

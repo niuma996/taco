@@ -139,7 +139,12 @@ export interface SessionRegistryOptions {
         prompt: string;
         signal?: AbortSignal;
         onUpdate?: SubagentProgressSink;
-    }) => Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
+    }) => Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }>;
     /** Skill subagent spawn callback (same deferred AgentSpawner pattern). */
     readonly spawnSkillSubagent: (
         opts: SpawnSkillSubagentOptions,
@@ -948,16 +953,29 @@ export class SessionRegistry extends EventEmitter {
         this.resources = { ...this.resources, skills: [...skills] };
     }
 
+    /** Let a non-harness child (claude-code) mark itself as a subagent for push routing. */
+    noteSessionKind(sessionId: SessionId, kind: "main" | "subagent"): void {
+        this._factsCache.set(sessionId, {
+            ...(this._factsCache.get(sessionId) ?? {}),
+            kind,
+        });
+    }
+
     /**
      * Synchronously classify a session for server.emitPush's frame stamping.
-     * Reads the attached map (populated by attachChild from `facts.kind`), so
-     * it is only accurate while the session is attached: the `session.detached`
-     * and `session.deleted` frames are emitted after the map entry is gone and
-     * therefore report "main" for a subagent. Harmless today — no client path
-     * branches on sessionKind for those two methods.
+     * Attached sessions use their live harness kind; non-harness children use
+     * the kind cached when their facts were written.
      */
     getSessionKind(sessionId: SessionId): "main" | "subagent" {
-        return this.attached.get(sessionId)?.sessionKind ?? "main";
+        const attached = this.attached.get(sessionId);
+        if (attached) return attached.sessionKind;
+        // A claude-code subagent never attaches — there is no pi harness — so
+        // its kind only lives in the facts cache, populated when the spawner
+        // writes facts or when a read path hydrates the session. Fall back to
+        // it so frames pushed for that session still route as "subagent".
+        const facts = this._factsCache.get(sessionId);
+        if (facts?.kind === "subagent") return "subagent";
+        return "main";
     }
 
     async dispose(): Promise<void> {

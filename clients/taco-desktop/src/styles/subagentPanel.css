@@ -111,16 +111,26 @@
 
 /* Room for the stop button so it never covers the description text. */
 .subagent-row--stoppable {
-    padding-right: 28px;
+    padding-right: 32px;
 }
 
 /* Stop one subagent (not the session). Sits over the row's right gutter as a
    sibling — a button cannot nest inside the row's own <button>. */
 .subagent-row-stop {
     position: absolute;
-    right: 4px;
+    right: 6px;
     top: 50%;
     transform: translateY(-50%);
+    /* Same fill and glyph colour as the composer's Stop, so the two read as
+       one action. --bg is the page colour: dark glyph on dark theme, light on
+       paper, which keeps contrast on the red in both. */
+    background: var(--danger);
+    color: var(--bg);
+}
+
+.subagent-row-stop:hover:not(:disabled) {
+    background: var(--danger-hover);
+    color: var(--bg);
 }
 
 .subagent-row-type {

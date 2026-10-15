@@ -48,7 +48,7 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
         name: "agentContinue",
         label: "agentContinue",
         description:
-            "Send a follow-up message to an existing subagent. The subagent keeps its prior conversation, toolset, and profile — use this instead of `agent` when you already have a subSessionId. Safe to issue multiple `agentContinue` calls in the same turn when they target different subSessionIds — they run concurrently.",
+            "Send a follow-up message to an existing subagent. The subagent keeps its prior conversation, toolset, and profile — use this instead of `agent` when you already have a subSessionId. Only subagents of types running on taco's own engine can be continued; for any other type the call fails with a message saying so, and the way forward is a fresh `agent` call whose prompt restates what the earlier run found. Safe to issue multiple `agentContinue` calls in the same turn when they target different subSessionIds — they run concurrently.",
         parameters: continueSchema,
         executionMode: "parallel",
         taco: {
@@ -67,17 +67,20 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.
             const signal = piContext.abortSignal;
-            const { subSessionId, resultText, isError } = await ctx.continue({
+            const { subSessionId, resultText, isError, aborted } = await ctx.continue({
                 parentToolCallId: toolCallId,
                 subSessionId: asSessionId(params.subSessionId),
                 prompt: params.prompt,
                 signal,
                 onUpdate,
             });
-            const text = isError ? `subagent continue error: ${resultText}` : resultText;
+            // A stop is not an error: its text already says so, and the
+            // prefix would make the model treat it as a failure to retry.
+            const text =
+                isError && !aborted ? `subagent continue error: ${resultText}` : resultText;
             return {
                 content: [{ type: "text", text }],
-                details: { subSessionId },
+                details: aborted ? { subSessionId, status: "aborted" } : { subSessionId },
             };
         },
     };

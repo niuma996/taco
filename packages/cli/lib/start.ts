@@ -204,6 +204,36 @@ async function killWedgedDaemon(
     }
 }
 
+/** A live daemon in this runtime directory belongs to another install. */
+export class ForeignDaemonError extends Error {
+    constructor(pid: number, installId: string, ownInstallId: string) {
+        super(
+            `a sidecar daemon (pid ${pid}, install ${installId}) from another taco install ` +
+                `owns this runtime directory, so this install (${ownInstallId}) cannot ` +
+                "replace it. It is usually a launchd/schtasks service registered by " +
+                "`taco install` from a different checkout or bundle: run `taco uninstall` " +
+                "for that install, or `taco stop`, then retry.",
+        );
+        this.name = "ForeignDaemonError";
+    }
+}
+
+/** Throw when the pid file names a live daemon owned by a different install.
+ *  A dead pid or a legacy record (no install_id) is ours to clean up. */
+function assertDaemonOwned(runtimeDir: string, ownInstallId: string): void {
+    let parsed: ReturnType<typeof parsePidFile> | null = null;
+    try {
+        parsed = parsePidFile(readFileSync(join(runtimeDir, "sidecar.pid"), "utf8"));
+    } catch {
+        return;
+    }
+    if (parsed === null || parsed.installId === null || parsed.installId === ownInstallId) {
+        return;
+    }
+    if (!pidAlive(parsed.pid)) return;
+    throw new ForeignDaemonError(parsed.pid, parsed.installId, ownInstallId);
+}
+
 async function waitForSocket(path: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let lastError: unknown;
@@ -366,6 +396,13 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
             process.stderr.write(`[taco] sidecar daemon already running (socket=${socket})\n`);
             return;
         }
+        // A live daemon we are not allowed to kill must stop the restart here.
+        // killWedgedDaemon refuses a foreign record but still unlinks the
+        // socket paths, so falling through would bind a second daemon beside a
+        // still-running one — every client that had already connected stays
+        // on the old build, which is exactly how a stale daemon outlives
+        // every restart.
+        assertDaemonOwned(runtimeDir, ownInstallId);
         process.stderr.write(`[taco] sidecar daemon stale (${staleReason}); restarting\n`);
         await killWedgedDaemon(runtimeDir, socket, control, ownInstallId);
         probe = "absent";
@@ -376,6 +413,7 @@ export async function startCommand(opts: StartOptions = {}): Promise<void> {
         // application level. Reap it and fall through to a fresh spawn, or
         // every launch from here on would attach to the same unresponsive
         // process.
+        assertDaemonOwned(runtimeDir, ownInstallId);
         process.stderr.write(
             "[taco] sidecar daemon accepts connections but does not serve; killing it\n",
         );

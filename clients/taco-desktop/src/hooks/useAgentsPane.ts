@@ -1,7 +1,26 @@
-import { type AgentEntry, asWorkspaceId } from "@taco-ai/protocol";
-import { useEffect, useState } from "react";
+import {
+    type AgentEntry,
+    type AgentRuntime,
+    type AgentsContentResult,
+    asWorkspaceId,
+    type ClaudeCodePermissionMode,
+} from "@taco-ai/protocol";
+import { useCallback, useEffect, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
+
+export interface AgentSaveInput {
+    agentType: string;
+    description: string;
+    whenToUse?: string;
+    runtime: AgentRuntime;
+    maxTurns: number;
+    systemPrompt: string;
+    /** `claude-code` only; omitted = Claude Code's full preset. */
+    tools?: string[];
+    /** `claude-code` only; omitted = "auto". */
+    permissionMode?: ClaudeCodePermissionMode;
+}
 
 export interface UseAgentsPaneResult {
     agents: AgentEntry[];
@@ -9,12 +28,16 @@ export interface UseAgentsPaneResult {
     agentsError: string | null;
     selectedAgentType: string | null;
     setSelectedAgentType: (type: string | null) => void;
-    agentContent: string;
+    agentContent: AgentsContentResult | null;
     agentContentLoading: boolean;
     agentContentError: string | null;
+    /** True while an agents.write/delete RPC is in flight. */
+    agentSaving: boolean;
+    saveAgent: (input: AgentSaveInput, previousAgentType?: string) => Promise<void>;
+    deleteAgent: (agentType: string) => Promise<void>;
 }
 
-/** Loads the agents list + selected agent system prompt when the agents pane is active. */
+/** Loads the agents list + selected agent content, and owns write/delete mutations. */
 export function useAgentsPane(
     client: TacoClient,
     active: boolean,
@@ -27,39 +50,42 @@ export function useAgentsPane(
         clearError: clearAgentsError,
     } = useAutoClearError();
     const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
-    const [agentContent, setAgentContent] = useState<string>("");
+    const [agentContent, setAgentContent] = useState<AgentsContentResult | null>(null);
     const [agentContentLoading, setAgentContentLoading] = useState(false);
     const [agentContentError, setAgentContentError] = useState<string | null>(null);
+    const [agentSaving, setAgentSaving] = useState(false);
 
-    // Load list + auto-select first item so the content effect fires on entry.
+    const reload = useCallback(async () => {
+        if (!activeCwd) return;
+        const r = await client.agentsList(asWorkspaceId(activeCwd));
+        setAgents(r.agents);
+        setSelectedAgentType((prev) =>
+            prev !== null && r.agents.some((a) => a.agentType === prev)
+                ? prev
+                : (r.agents[0]?.agentType ?? null),
+        );
+    }, [activeCwd, client]);
+
+    // Load list on entry so the content effect fires on the first item.
     useEffect(() => {
         if (!active || !activeCwd) return;
-        // reset selection + content so previous workspace's state doesn't leak through
         setSelectedAgentType(null);
-        setAgentContent("");
+        setAgentContent(null);
         setAgentContentError(null);
         clearAgentsError();
-        void client
-            .agentsList(asWorkspaceId(activeCwd))
-            .then((r) => {
-                setAgents(r.agents);
-                if (r.agents.length > 0) {
-                    setSelectedAgentType(r.agents[0].agentType);
-                }
-            })
-            .catch((e: unknown) => {
-                // Surface it: a swallowed failure renders an empty list that is
-                // indistinguishable from a workspace with no agents.
-                console.error("[useAgentsPane] agentsList failed:", e);
-                failAgentsList(e);
-            });
-    }, [active, activeCwd, client, clearAgentsError, failAgentsList]);
+        reload().catch((e: unknown) => {
+            // Surface it: a swallowed failure renders an empty list that is
+            // indistinguishable from a workspace with no agents.
+            console.error("[useAgentsPane] agentsList failed:", e);
+            failAgentsList(e);
+        });
+    }, [active, activeCwd, reload, clearAgentsError, failAgentsList]);
 
-    // Fetch agent system prompt when user picks an agent.
+    // Fetch agent content when user picks an agent.
     // Cancellation flag prevents slow earlier requests from overwriting later selections.
     useEffect(() => {
         let cancelled = false;
-        setAgentContent("");
+        setAgentContent(null);
         setAgentContentError(null);
         if (!selectedAgentType || !activeCwd) return;
         setAgentContentLoading(true);
@@ -67,13 +93,13 @@ export function useAgentsPane(
             .agentsContent(asWorkspaceId(activeCwd), selectedAgentType)
             .then((r) => {
                 if (cancelled) return;
-                setAgentContent(r.systemPrompt);
+                setAgentContent(r);
                 setAgentContentError(null);
             })
             .catch((e: unknown) => {
                 if (cancelled) return;
                 setAgentContentError(e instanceof Error ? e.message : String(e));
-                setAgentContent("");
+                setAgentContent(null);
             })
             .finally(() => {
                 if (!cancelled) setAgentContentLoading(false);
@@ -83,6 +109,38 @@ export function useAgentsPane(
         };
     }, [selectedAgentType, activeCwd, client]);
 
+    const saveAgent = useCallback(
+        async (input: AgentSaveInput, previousAgentType?: string) => {
+            if (!activeCwd) return;
+            setAgentSaving(true);
+            try {
+                await client.agentsWrite(asWorkspaceId(activeCwd), {
+                    ...input,
+                    ...(previousAgentType !== undefined ? { previousAgentType } : {}),
+                });
+                await reload();
+                setSelectedAgentType(input.agentType);
+            } finally {
+                setAgentSaving(false);
+            }
+        },
+        [activeCwd, client, reload],
+    );
+
+    const deleteAgent = useCallback(
+        async (agentType: string) => {
+            if (!activeCwd) return;
+            setAgentSaving(true);
+            try {
+                await client.agentsDelete(asWorkspaceId(activeCwd), agentType);
+                await reload();
+            } finally {
+                setAgentSaving(false);
+            }
+        },
+        [activeCwd, client, reload],
+    );
+
     return {
         agents,
         agentsError,
@@ -91,5 +149,8 @@ export function useAgentsPane(
         agentContent,
         agentContentLoading,
         agentContentError,
+        agentSaving,
+        saveAgent,
+        deleteAgent,
     };
 }

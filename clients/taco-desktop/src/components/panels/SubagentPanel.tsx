@@ -9,8 +9,9 @@
  * the historical-replay case — no more push events will arrive for it).
  */
 
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
+import { useStickToBottom } from "../../hooks/primitives/useStickToBottom";
 import { useSubagent } from "../../hooks/useSubagent";
 import { useT } from "../../i18n/useI18n";
 import type { UiMessage } from "../../lib/chat/chatUtils";
@@ -65,6 +66,11 @@ export function SubagentPanel({
     const selected: SubagentEntry | null =
         entries.find((e) => e.subSessionId === selectedSubSessionId) ?? null;
 
+    // The detail div is shared across selections, so a new selection must
+    // re-pin; `open` is in the key because the div does not exist while closed.
+    const detailRef = useRef<HTMLDivElement | null>(null);
+    useStickToBottom(detailRef, open ? selectedSubSessionId : null);
+
     if (!open) return null;
 
     return (
@@ -107,7 +113,7 @@ export function SubagentPanel({
                     ))}
                 </ul>
             )}
-            <div className="subagent-panel-detail">
+            <div className="subagent-panel-detail" ref={detailRef}>
                 {selected === null || selected.subSessionId === null ? (
                     // "Select one above" points at the list; with no subagents
                     // at all its own empty message is the whole story, and the
@@ -134,6 +140,11 @@ export function SubagentPanel({
  * are empty and no pull has been attempted yet, pull history once. A failed
  * pull is recoverable via retry — the former inline card rendered a dead error
  * line, leaving the user no way forward but reopening the card.
+ *
+ * The pull is keyed on the run's phase, not just "attempted": a pull taken
+ * mid-run is a partial snapshot, and a claude-code child has no live event
+ * stream to top it up, so without a second pull once the run settles the panel
+ * would stick at whatever existed at first pull (often just the prompt).
  */
 function SubagentDetail({
     entry,
@@ -150,26 +161,31 @@ function SubagentDetail({
     const shown = live.length > 0 ? live : history;
     const hasContent = shown.length > 0;
 
+    const settled = entry.status === "ok" || entry.status === "error" || entry.status === "aborted";
+    const pullKey = settled ? "settled" : "open";
     const [loading, setLoading] = useState(false);
-    const [attempted, setAttempted] = useState(false);
+    const [pulledKey, setPulledKey] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    const pull = useCallback(() => {
-        setAttempted(true);
-        setLoading(true);
-        setError(null);
-        loadSubagentHistory(subSessionId)
-            .catch((e: unknown) => {
-                setError(e instanceof Error ? e.message : String(e));
-            })
-            .finally(() => setLoading(false));
-    }, [loadSubagentHistory, subSessionId]);
+    const pull = useCallback(
+        (key: string) => {
+            setPulledKey(key);
+            setLoading(true);
+            setError(null);
+            loadSubagentHistory(subSessionId)
+                .catch((e: unknown) => {
+                    setError(e instanceof Error ? e.message : String(e));
+                })
+                .finally(() => setLoading(false));
+        },
+        [loadSubagentHistory, subSessionId],
+    );
 
     useEffect(() => {
-        if (hasContent) return;
-        if (attempted) return;
-        pull();
-    }, [hasContent, attempted, pull]);
+        if (live.length > 0) return;
+        if (pulledKey === pullKey) return;
+        pull(pullKey);
+    }, [live.length, pullKey, pulledKey, pull]);
 
     return (
         <>
@@ -185,7 +201,7 @@ function SubagentDetail({
                 <div className="subagent-detail-error">
                     {t("subagents.historyFailed")}: {error}
                     <div className="subagent-detail-retry">
-                        <Button variant="ghost" onClick={pull}>
+                        <Button variant="ghost" onClick={() => pull(pullKey)}>
                             {t("subagents.retry")}
                         </Button>
                     </div>
@@ -193,7 +209,7 @@ function SubagentDetail({
             )}
             {!hasContent && error === null && (
                 <div className="subagent-detail-status">
-                    {loading || !attempted
+                    {loading || pulledKey === null
                         ? entry.status === "running" || entry.status === "background"
                             ? t("subagents.starting")
                             : t("subagents.loading")

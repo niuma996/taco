@@ -3,6 +3,10 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         environment: "happy-dom",
+        // Component tests mount real markdown/shiki pipelines and Radix portals,
+        // and vitest runs the 36 files in parallel — a loaded box needs more
+        // than the 5s default before a legitimate render is called a hang.
+        testTimeout: 15000,
         // Only runs hooks/ and components/ .test.tsx — other .test.ts go through the
         // `pnpm test` tsx --test path. Pure function + reducer unit tests use node:test;
         // React component tests use vitest.
@@ -17,12 +21,16 @@ export default defineConfig({
             "tests/hooks/useSaveConfigPatch.test.tsx",
             "tests/hooks/useDragResize.test.tsx",
             "tests/hooks/useRightPanel.test.tsx",
+            "tests/hooks/useStickToBottom.test.tsx",
+            "tests/hooks/useRightPanelAutoOpen.test.tsx",
             "tests/components/AssistantMarkdown.test.tsx",
             "tests/components/FilesDrawer.test.tsx",
             "tests/components/FilePreviewGrant.test.tsx",
             "tests/components/MemoryPane.test.tsx",
             "tests/components/Sidebar.test.tsx",
             "tests/components/SubagentPanel.test.tsx",
+            "tests/components/AgentForm.test.tsx",
+            "tests/components/AgentsPane.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",
             "tests/components/ContextIndicator.test.tsx",
             "tests/components/TopbarQuickActions.test.tsx",
