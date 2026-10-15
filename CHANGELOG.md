@@ -6,6 +6,93 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.2.9] — 2026-10-16
+
+A subagent can now work inside your own Claude Code CLI, the agents that
+give a subagent its job can be written from the desktop, and a session
+that's still working no longer looks like it's done.
+
+### Added
+
+**A second runtime for subagents.** An agent marked `claude-code` hands
+its work to the `claude` you already have installed and signed in to,
+instead of running inside taco. You pick which tools it has and how it
+asks permission, and you watch it work live in the panel.
+
+**Agents you can edit from the desktop.** The agents panel can now create,
+edit and delete agent definitions — no more hand-writing files — and a
+saved change takes effect right away in every open workspace, without a
+restart. An agent that is only a set of tools, with no personality of its
+own, can now say so instead of being left with a blank prompt.
+
+**Panels that open themselves.** When a turn spawns a subagent or starts a
+task list, the task and subagent panels come up on their own, once per
+run, so you don't have to go looking for them. Reopening a session that
+was already running stays quiet.
+
+### Changed
+
+**One visual language.** The interface reads as a single design rather
+than a stack of separately-built panels.
+
+### Fixed
+
+- A session that is still working no longer looks like it finished.
+  Switching away mid-run and coming back, or starting a new chat while
+  another session was busy, both marked the running session as stopped
+  even though it carried on.
+- The CLI stops instead of taking over another install's daemon. Launching
+  taco while a live daemon from a different checkout or bundle was running
+  used to quietly kill it, leaving you connected to an old build with
+  nothing to explain it; it now says what's in the way and how to fix it.
+
+## [0.2.8] — 2026-10-14
+
+A reliability release: the agent stops being told about tools that don't
+exist, stops deadlocking on its own compaction, and no longer walks
+around the permission gate with a `~` in the path. Deleting a session now
+takes its subagents with it.
+
+### Added
+
+**Global skills and agents from `write`.** From a local main session,
+`write` now reaches `$TACO_HOME/skills/` and `$TACO_HOME/agents/`
+directly, without a permission prompt — installing a skill no longer
+requires an approved shell command.
+
+### Changed
+
+- Prompts no longer advertise capabilities the harness doesn't have: an
+  `edit` parameter that isn't one, read-before-edit enforcement that
+  doesn't exist, tools missing from the catalog, and tool calls described
+  as sequential when they run concurrently.
+- Subagents no longer receive `agent`, `askUser`, `planEnter` or
+  `planExit`, so a child can't ask the user a question it has no way to
+  deliver.
+- The desktop shell is tidied into one system — panes now share surface
+  tiers, heading alignment, and button and modal primitives.
+- Pi moves `0.86.1` → `0.99.2`, the last release before Pi 1.0 relocates
+  the agent harness out of `pi-agent-core`. The bundled OpenRouter catalog
+  dropped 16 model ids, so a `defaultModel` pointing at one now starts
+  with no default model.
+- `session.delete` now emits one `session.deleted` frame per session id
+  removed, not just the target.
+
+### Fixed
+
+- The permission gate no longer leaks `~`, `@` and `file://` paths:
+  `write ~/.zshrc` passed the workspace-containment check because the path
+  was compared before pi expanded it.
+- Auto-compaction no longer deadlocks. Compaction scheduled from the
+  idle-owner callback waited on the very lock it already held, so a session
+  past its threshold hung instead of compacting.
+- Stopping a shell command now stops what it started. Surviving
+  grandchildren could hold stdout open and freeze the tool call forever;
+  POSIX now signals the whole process group.
+- Deleting a session takes its subagents with it: `session.delete`
+  cascades across the session tree instead of orphaning each one's task
+  store and results.
+
 ## [0.2.7] — 2026-09-23
 
 Subagents become background citizens: they no longer block the turn, can be
