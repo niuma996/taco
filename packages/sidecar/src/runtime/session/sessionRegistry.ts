@@ -139,7 +139,12 @@ export interface SessionRegistryOptions {
         prompt: string;
         signal?: AbortSignal;
         onUpdate?: SubagentProgressSink;
-    }) => Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
+    }) => Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }>;
     /** Skill subagent spawn callback (same deferred AgentSpawner pattern). */
     readonly spawnSkillSubagent: (
         opts: SpawnSkillSubagentOptions,
@@ -948,14 +953,6 @@ export class SessionRegistry extends EventEmitter {
         this.resources = { ...this.resources, skills: [...skills] };
     }
 
-    /**
-     * Synchronously classify a session for server.emitPush's frame stamping.
-     * Reads the attached map (populated by attachChild from `facts.kind`), so
-     * it is only accurate while the session is attached: the `session.detached`
-     * and `session.deleted` frames are emitted after the map entry is gone and
-     * therefore report "main" for a subagent. Harmless today — no client path
-     * branches on sessionKind for those two methods.
-     */
     /** Let a non-harness child (claude-code) mark itself as a subagent for push routing. */
     noteSessionKind(sessionId: SessionId, kind: "main" | "subagent"): void {
         this._factsCache.set(sessionId, {
@@ -964,6 +961,11 @@ export class SessionRegistry extends EventEmitter {
         });
     }
 
+    /**
+     * Synchronously classify a session for server.emitPush's frame stamping.
+     * Attached sessions use their live harness kind; non-harness children use
+     * the kind cached when their facts were written.
+     */
     getSessionKind(sessionId: SessionId): "main" | "subagent" {
         const attached = this.attached.get(sessionId);
         if (attached) return attached.sessionKind;

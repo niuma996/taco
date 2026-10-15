@@ -55,6 +55,10 @@
     color: var(--danger);
     font-size: 0.85em;
 }
+.agent-card-aborted {
+    color: var(--fg-dim);
+    font-size: 0.85em;
+}
 .agent-card-subid {
     color: var(--fg-dim);
     font-family: var(--mono);

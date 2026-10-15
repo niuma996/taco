@@ -67,7 +67,7 @@ export interface RunAttachedSubagentArgs {
  */
 export async function runAttachedSubagent(
     args: RunAttachedSubagentArgs,
-): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean; aborted?: boolean }> {
     const { subSessionId, attached, agentType, readLastAssistantText } = args;
     const onUpdate = args.onUpdate;
     // Single point where this runner asserts its payload shape onto the sink:
@@ -156,6 +156,7 @@ export async function runAttachedSubagent(
                 subSessionId,
                 resultText: SUBAGENT_STOPPED_TEXT,
                 isError: true,
+                aborted: true,
             };
         }
         return {

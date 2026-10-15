@@ -67,17 +67,20 @@ export function createAgentContinueTool(ctx: SubagentSpawnContext): AgentContinu
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.
             const signal = piContext.abortSignal;
-            const { subSessionId, resultText, isError } = await ctx.continue({
+            const { subSessionId, resultText, isError, aborted } = await ctx.continue({
                 parentToolCallId: toolCallId,
                 subSessionId: asSessionId(params.subSessionId),
                 prompt: params.prompt,
                 signal,
                 onUpdate,
             });
-            const text = isError ? `subagent continue error: ${resultText}` : resultText;
+            // A stop is not an error: its text already says so, and the
+            // prefix would make the model treat it as a failure to retry.
+            const text =
+                isError && !aborted ? `subagent continue error: ${resultText}` : resultText;
             return {
                 content: [{ type: "text", text }],
-                details: { subSessionId },
+                details: aborted ? { subSessionId, status: "aborted" } : { subSessionId },
             };
         },
     };

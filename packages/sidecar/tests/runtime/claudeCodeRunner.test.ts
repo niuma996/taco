@@ -55,6 +55,15 @@ function baseArgs(sdk: ClaudeAgentSdk, appended: AgentMessage[] = []) {
 }
 
 describe("runClaudeCodeSubagent", () => {
+    it("marks an already-aborted run as aborted, not as a plain failure", async () => {
+        const args = baseArgs(fakeSdk(() => reply("never used")));
+        args.abortController.abort();
+        const r = await runClaudeCodeSubagent(args);
+        assert.equal(r.isError, true);
+        assert.equal(r.aborted, true);
+        assert.equal(r.subSessionId, subSessionId);
+    });
+
     it("returns the final reply and persists prompt + transcript", async () => {
         const appended: AgentMessage[] = [];
         const r = await runClaudeCodeSubagent(

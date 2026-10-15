@@ -87,6 +87,32 @@ describe("agentContinue tool", () => {
         assert.ok(text.includes("different parent session"));
     });
 
+    it("reports a stopped resume as aborted, without the error prefix", async () => {
+        const tool = createAgentContinueTool({
+            async spawn() {
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
+            },
+            async continue() {
+                return {
+                    subSessionId: asSessionId("sub-s"),
+                    resultText: "stopped on purpose",
+                    isError: true,
+                    aborted: true,
+                };
+            },
+            abortSubagent: () => ({ stopped: false }),
+        });
+        const res = await invokeTool(
+            tool,
+            { subSessionId: "sub-s", prompt: "x" },
+            { env: mockEnv },
+            { toolCallId: "tc" },
+        );
+        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+        assert.equal(text, "stopped on purpose");
+        assert.deepEqual(res.details, { subSessionId: "sub-s", status: "aborted" });
+    });
+
     it("exposes a `name`, `taco.promptSummary`, and a `subSessionId` schema field", () => {
         const tool = createAgentContinueTool({
             async spawn() {

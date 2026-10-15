@@ -79,6 +79,7 @@ function entryFromTool(
     if (!TOOL_CALL_STATUSES.has(tool.status)) throw new Error("agent tool call missing status");
 
     const subSessionId = readString(tool.details, "subSessionId") || null;
+    const detailStatus = readString(tool.details, "status");
     const agentType =
         readString(tool.details, "agentType") || readString(tool.args, "subagent_type") || "agent";
 
@@ -92,7 +93,9 @@ function entryFromTool(
         status:
             subSessionId === null
                 ? "detached"
-                : backgroundStatus(tool.id, backgroundSubagents, tool.status),
+                : detailStatus === "aborted"
+                  ? "aborted"
+                  : backgroundStatus(tool.id, backgroundSubagents, tool.status),
         firstToolCallId: tool.id,
     };
 }

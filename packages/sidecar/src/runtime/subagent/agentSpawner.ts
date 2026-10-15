@@ -528,9 +528,12 @@ export class AgentSpawner extends EventEmitter {
      * a launch failure still reaches the parent as an error notification
      * instead of dying in `.catch` as a log line.
      */
-    async executeSubagentSession(
-        args: SubagentSessionArgs,
-    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    async executeSubagentSession(args: SubagentSessionArgs): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         return this.trackInFlight(args.parentSessionId, args.parentToolCallId, async () => {
             try {
                 return await this.runSubagentSession(args);
@@ -550,9 +553,12 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /** `executeSubagentSession` body, wrapped by it for in-flight tracking. */
-    private async runSubagentSession(
-        args: SubagentSessionArgs,
-    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    private async runSubagentSession(args: SubagentSessionArgs): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         // Caller must supply `childDepth` — used by tool filtering to gate Skill/agent
         // recursion, and computing it here would require a second openSession() call.
         const childDepth =
@@ -689,6 +695,7 @@ export class AgentSpawner extends EventEmitter {
         subSessionId?: SessionId;
         resultText: string;
         isError: boolean;
+        aborted?: boolean;
         background?: boolean;
         /** Set only for a launched background spawn; see `SubagentSpawnContext`. */
         resultPath?: string;
@@ -755,7 +762,12 @@ export class AgentSpawner extends EventEmitter {
     private async runClaudeCodeChild(
         childSessionId: SessionId,
         args: SubagentSessionArgs,
-    ): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    ): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         // The SDK takes a controller, not a signal. Spawn paths always pass one;
         // a caller with only `signal` gets a controller that follows it.
         const controller = args.abortController ?? new AbortController();
@@ -1575,7 +1587,12 @@ export class AgentSpawner extends EventEmitter {
         prompt: string;
         signal?: AbortSignal;
         onUpdate?: SubagentProgressSink;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+    }): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }> {
         // Single-flight: a second concurrent call with the same subSessionId
         // reuses the in-flight promise rather than racing to re-attach and
         // interleave user messages on the same branch. The cache entry is

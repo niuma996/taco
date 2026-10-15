@@ -233,6 +233,9 @@ describe("runAttachedSubagent — progress", () => {
         // the child instead of waiting out its full run.
         assert.equal(attached.aborted, true);
         assert.equal(result.isError, true);
+        // `aborted` is what lets the tool layer report "stopped" instead of a
+        // red failure card for a run the user ended on purpose.
+        assert.equal(result.aborted, true);
         assert.match(result.resultText, /deliberate\s+interruption, not a failure/);
     });
 });

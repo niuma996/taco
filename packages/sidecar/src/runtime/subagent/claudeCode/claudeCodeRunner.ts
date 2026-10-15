@@ -93,9 +93,14 @@ export interface RunClaudeCodeSubagentArgs {
 
 export async function runClaudeCodeSubagent(
     args: RunClaudeCodeSubagentArgs,
-): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
+): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean; aborted?: boolean }> {
     const { subSessionId, agentType } = args;
-    const fail = (resultText: string) => ({ subSessionId, resultText, isError: true });
+    const fail = (resultText: string, aborted = false) => ({
+        subSessionId,
+        resultText,
+        isError: true,
+        ...(aborted ? { aborted: true } : {}),
+    });
     const publish = (
         payload: AgentToolResult<SubagentProgressDetails>,
         options?: { checkpoint: true },
@@ -117,7 +122,7 @@ export async function runClaudeCodeSubagent(
     if (executable === undefined) return fail(new ClaudeCodeCliMissingError().message);
 
     const signal = args.abortController.signal;
-    if (signal.aborted) return fail(SUBAGENT_STOPPED_TEXT);
+    if (signal.aborted) return fail(SUBAGENT_STOPPED_TEXT, true);
 
     const maxTurns =
         args.maxTurns !== undefined && args.maxTurns > 0
@@ -201,7 +206,7 @@ export async function runClaudeCodeSubagent(
         });
     }
 
-    if (signal.aborted) return fail(SUBAGENT_STOPPED_TEXT);
+    if (signal.aborted) return fail(SUBAGENT_STOPPED_TEXT, true);
     const lastText = transcript.lastAssistantText;
     if (result?.subtype === "error_max_turns") {
         return { subSessionId, resultText: partialResult(lastText, maxTurns), isError: false };

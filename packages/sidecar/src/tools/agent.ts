@@ -129,21 +129,22 @@ export function createAgentTool(
             // a background spawn gets its own timeout-driven AbortController
             // instead (see agentSpawner.ts), since it must outlive this call.
             const signal = piContext.abortSignal;
-            const { subSessionId, resultText, isError, background, resultPath } = await ctx.spawn({
-                parentToolCallId: toolCallId,
-                agentType: params.subagent_type,
-                prompt: params.prompt,
-                // Forwarded for the background path only, where the completion
-                // notice may arrive many turns after this call: by then the
-                // conversation has moved on, and a compaction may have replaced
-                // the tool call that would otherwise identify what the subagent
-                // was for. Echoing it back makes the notice self-describing.
-                description: params.description,
-                context: params.context,
-                background: params.background,
-                signal,
-                onUpdate,
-            });
+            const { subSessionId, resultText, isError, aborted, background, resultPath } =
+                await ctx.spawn({
+                    parentToolCallId: toolCallId,
+                    agentType: params.subagent_type,
+                    prompt: params.prompt,
+                    // Forwarded for the background path only, where the completion
+                    // notice may arrive many turns after this call: by then the
+                    // conversation has moved on, and a compaction may have replaced
+                    // the tool call that would otherwise identify what the subagent
+                    // was for. Echoing it back makes the notice self-describing.
+                    description: params.description,
+                    context: params.context,
+                    background: params.background,
+                    signal,
+                    onUpdate,
+                });
             if (background) {
                 // subSessionId is always present here — a background spawn
                 // that failed before the child existed reports isError instead
@@ -172,6 +173,8 @@ export function createAgentTool(
                     // "completed" would render a green check on a card whose
                     // own text says it failed.
                     ...(isError ? { isError: true } : {}),
+                    // A background spawn returns a receipt, never a run
+                    // outcome, so `aborted` cannot reach this branch.
                     details: subSessionId
                         ? { status: "launched", subSessionId, agentType: params.subagent_type }
                         : isError
@@ -191,13 +194,16 @@ export function createAgentTool(
                 // harness persists into the toolResult, and it is the only
                 // signal the desktop turns into a red card.
                 ...(isError ? { isError: true } : {}),
-                details: isError
-                    ? { status: "error", agentType: params.subagent_type }
-                    : {
-                          status: "completed",
-                          agentType: params.subagent_type,
-                          ...(subSessionId ? { subSessionId } : {}),
-                      },
+                details:
+                    aborted && subSessionId
+                        ? { status: "aborted", subSessionId, agentType: params.subagent_type }
+                        : isError
+                          ? { status: "error", agentType: params.subagent_type }
+                          : {
+                                status: "completed",
+                                agentType: params.subagent_type,
+                                ...(subSessionId ? { subSessionId } : {}),
+                            },
             };
         },
     };

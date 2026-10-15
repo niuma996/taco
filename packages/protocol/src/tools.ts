@@ -307,6 +307,7 @@ export interface SubagentSettledPayload {
 export type AgentToolDetails =
     | { status: "completed"; subSessionId?: SessionId; agentType: string }
     | { status: "launched"; subSessionId: SessionId; agentType: string }
+    | { status: "aborted"; subSessionId: SessionId; agentType: string }
     | { status: "error"; agentType: string };
 
 /**
@@ -330,6 +331,8 @@ export interface SubagentProgressDetails {
 /** Shape of the `details` field on the `agentContinue` tool's result. */
 export interface AgentContinueToolDetails {
     subSessionId: SessionId;
+    /** Set when the resumed run was stopped on purpose, not when it failed. */
+    status?: "aborted";
 }
 
 // askUser tool

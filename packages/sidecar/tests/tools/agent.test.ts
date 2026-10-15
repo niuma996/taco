@@ -237,6 +237,38 @@ describe("agent tool", () => {
         assert.deepEqual(res.details, { status: "error", agentType: "bogus" });
     });
 
+    it("retains aborted state and child session id for a synchronous stop", async () => {
+        const tool = createAgentTool(
+            {
+                spawn: async () => ({
+                    subSessionId: asSessionId("sub-stopped"),
+                    resultText: "stopped",
+                    isError: true,
+                    aborted: true,
+                }),
+                continue: async () => ({
+                    subSessionId: asSessionId("stub"),
+                    resultText: "",
+                    isError: true,
+                }),
+                abortSubagent: () => ({ stopped: false }),
+            },
+            [{ agentType: "explorer" }],
+        );
+        const res = await invokeTool(
+            tool,
+            { subagent_type: "explorer", description: "x", prompt: "y" },
+            { env: mockEnv },
+            { toolCallId: "tc" },
+        );
+        assert.equal(res.isError, true);
+        assert.deepEqual(res.details, {
+            status: "aborted",
+            subSessionId: "sub-stopped",
+            agentType: "explorer",
+        });
+    });
+
     it("declares executionMode 'parallel' so multiple agent calls in one turn run concurrently", () => {
         // Guard against accidental regression to "sequential" — the harness
         // collapses the entire batch to sequential when ANY tool is sequential

@@ -145,6 +145,8 @@ export interface SubagentSpawnContext {
         subSessionId?: SessionId;
         resultText: string;
         isError: boolean;
+        /** A deliberate interruption; distinct from a failed run. */
+        aborted?: boolean;
         /** Echoes the effective `background` mode so the tool layer knows which `AgentToolDetails` variant to report. */
         background?: boolean;
         /**
@@ -168,7 +170,12 @@ export interface SubagentSpawnContext {
         signal?: AbortSignal;
         /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
         onUpdate?: SubagentProgressSink;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }>;
+    }): Promise<{
+        subSessionId: SessionId;
+        resultText: string;
+        isError: boolean;
+        aborted?: boolean;
+    }>;
     /**
      * Stop a running subagent by `subSessionId` without aborting the parent
      * turn. Implementations restrict this to the calling session's own
