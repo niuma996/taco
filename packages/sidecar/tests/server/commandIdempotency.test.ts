@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import { CommandIdempotencyGate } from "../../src/server/commandIdempotency.ts";
 import { registerMethod } from "../../src/server/methodRegistry.ts";
+import type { CommandOutcome } from "../../src/server/rpcResponse.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 
 /** Monotonic clock — advance() fakes time passing without touching wall-clock. */
@@ -64,6 +66,21 @@ registerMethod(
 );
 
 describe("command idempotency", () => {
+    it("normalizes a non-positive record limit to one", async () => {
+        const gate = new CommandIdempotencyGate({ limit: 0 });
+        const exec = async (): Promise<CommandOutcome> => ({ ok: true, result: null });
+
+        const first = gate.run("first", "fp", undefined, exec);
+        assert.ok(first instanceof Promise);
+        await first;
+
+        const second = gate.run("second", "fp", undefined, exec);
+        assert.ok(second instanceof Promise);
+        await second;
+
+        assert.equal(gate.size, 1);
+    });
+
     it("executes concurrent retries with one commandId only once", async () => {
         calls = 0;
         const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
@@ -262,34 +279,29 @@ describe("command idempotency", () => {
         assert.equal(boundedCalls, 3, "expired record must not survive to replay");
     });
 
-    it("pruneCommandRecords drops expired entries without a new RPC", async () => {
-        boundedCalls = 0;
+    it("prune drops expired entries without a new RPC", async () => {
         const clock = new FakeClock();
-        const server = new SidecarServer({
-            providerKeyStore: new ProviderKeyStore({}),
-            commandRecordLimit: 100,
-            commandRecordTtlMs: 100,
-            now: clock.now,
-        });
-        await server.dispatchRpc({
-            id: "sweep-first",
-            method: "test.bounded-command",
-            commandId: "sweep-command",
-            params: { value: "first" },
-        });
-        const internals = server as unknown as {
-            commandRecords: Map<string, unknown>;
-            pruneCommandRecords: () => void;
+        const gate = new CommandIdempotencyGate({ ttlMs: 100, limit: 100, now: clock.now });
+        let calls = 0;
+        const exec = async (): Promise<CommandOutcome> => {
+            calls++;
+            return { ok: true, result: { value: "sweep" } };
         };
-        assert.equal(internals.commandRecords.size, 1);
+
+        const first = gate.run("test.bounded-command\u0000sweep-command", "fp", undefined, exec);
+        assert.ok(first instanceof Promise);
+        assert.equal(gate.size, 1);
+        await first;
 
         clock.advance(101);
-        internals.pruneCommandRecords();
-        assert.equal(
-            internals.commandRecords.size,
-            0,
-            "expired entries must be swept even with no new RPC",
-        );
+        gate.prune();
+        assert.equal(gate.size, 0, "expired entries must be swept even with no new RPC");
+
+        // Behavior side: after the sweep the same key re-executes.
+        const retry = gate.run("test.bounded-command\u0000sweep-command", "fp", undefined, exec);
+        assert.ok(retry instanceof Promise);
+        assert.equal(calls, 2, "expired record must not survive to replay");
+        await retry;
     });
 });
 

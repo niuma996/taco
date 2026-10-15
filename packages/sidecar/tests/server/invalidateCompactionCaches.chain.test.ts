@@ -1,7 +1,7 @@
 /**
  * Compaction cache invalidation integration test — verifies
  * SidecarServer.invalidateCompactionCaches() actually traverses the full
- * workspaceMap → WorkspaceRuntime → SessionRegistry → AttachedSession →
+ * workspace registry → WorkspaceRuntime → SessionRegistry → AttachedSession →
  * CompactionController.invalidate() chain, rather than calling the wrong
  * method or no-oping.
  *
@@ -11,19 +11,22 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { WorkspaceRegistry } from "../../src/server/workspaceRegistry.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 useTempTacoHome("facade-chain");
 
-/**
- * Exposes SidecarServer's private workspaceMap via reflection, then injects fake workspaces.
- * Uses `as unknown as` to bypass the private modifier — test-only, not a production API.
- */
-type WorkspaceMap = Map<string, FakeWorkspaceRuntime>;
-function injectWorkspaceMap(server: SidecarServer, map: WorkspaceMap): void {
-    (server as unknown as { workspaceMap: WorkspaceMap }).workspaceMap = map;
+function injectWorkspaces(
+    workspaces: WorkspaceRegistry,
+    entries: readonly [key: string, ws: unknown][],
+): void {
+    for (const [key, ws] of entries) {
+        workspaces.publish(asWorkspaceId(key), ws as unknown as WorkspaceRuntime);
+    }
 }
 
 interface FakeWorkspaceRuntime {
@@ -43,7 +46,7 @@ interface FakeCompactionController {
 }
 
 describe("SidecarServer.invalidateCompactionCaches — facade chain", () => {
-    it("walks workspaceMap → workspace → sessionRegistry → session → controller", () => {
+    it("walks the workspace registry → workspace → sessionRegistry → session → controller", () => {
         const controller1 = makeControllerSpy();
         const controller2 = makeControllerSpy();
         const session1 = makeSessionSpy(controller1);
@@ -51,8 +54,14 @@ describe("SidecarServer.invalidateCompactionCaches — facade chain", () => {
         const registry = makeRegistrySpy([session1, session2]);
         const workspace = makeWorkspaceSpy(registry);
 
-        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
-        injectWorkspaceMap(server, new Map([["/proj/a", workspace]]));
+        const workspaces = new WorkspaceRegistry(async () => {
+            throw new Error("unexpected workspace build in test");
+        });
+        const server = new SidecarServer({
+            providerKeyStore: new ProviderKeyStore({}),
+            workspaceRegistry: workspaces,
+        });
+        injectWorkspaces(workspaces, [["/proj/a", workspace]]);
 
         // Call the facade entry point
         server.invalidateCompactionCaches();
@@ -79,14 +88,17 @@ describe("SidecarServer.invalidateCompactionCaches — facade chain", () => {
         const ws2Registry = makeRegistrySpy([ws2Session]);
         const ws2 = makeWorkspaceSpy(ws2Registry);
 
-        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
-        injectWorkspaceMap(
-            server,
-            new Map([
-                ["/proj/one", ws1],
-                ["/proj/two", ws2],
-            ]),
-        );
+        const workspaces = new WorkspaceRegistry(async () => {
+            throw new Error("unexpected workspace build in test");
+        });
+        const server = new SidecarServer({
+            providerKeyStore: new ProviderKeyStore({}),
+            workspaceRegistry: workspaces,
+        });
+        injectWorkspaces(workspaces, [
+            ["/proj/one", ws1],
+            ["/proj/two", ws2],
+        ]);
 
         server.invalidateCompactionCaches();
 
@@ -105,9 +117,8 @@ describe("SidecarServer.invalidateCompactionCaches — facade chain", () => {
         assert.equal(ws2Controller.calls.length, 1);
     });
 
-    it("no-op on empty workspaceMap (still safe to call)", () => {
+    it("no-op with no registered workspaces (still safe to call)", () => {
         const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
-        injectWorkspaceMap(server, new Map());
 
         // Must not throw
         server.invalidateCompactionCaches();

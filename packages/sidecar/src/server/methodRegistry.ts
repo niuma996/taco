@@ -6,7 +6,8 @@
  * commandId idempotency (`command: true`): fingerprint =
  * `JSON.stringify(params)` (byte-exact); commandId is process-scoped —
  * adapters derive stable id, e.g. `sessionId + sha256(canonicalParams)`;
- * retry is best-effort (`commandRecordLimit` 1024, settled-only FIFO prune,
+ * retry is best-effort (`commandRecordLimit` defaults to 1024 and clamps to 1,
+ * settled-only FIFO prune,
  * TTL via `commandRecordTtlMs`).
  *
  * Schema validation (`schema: TSchema`): when a method registers a typebox

@@ -132,7 +132,7 @@ describe("daemon ownership", () => {
             );
 
             // The forward path must NOT have built a local im:// workspace
-            // — the connection server's workspaceMap should hold zero im://
+            // — the connection server's workspace registry should hold zero im://
             // workspaces (forwarding rather than hosting is the contract).
             const imWorkspaces = nonOwner.workspaceIds().filter((id) => id.startsWith("im://"));
             assert.deepEqual(imWorkspaces, []);
@@ -224,7 +224,7 @@ describe("daemon ownership", () => {
         const { owner, nonOwner } = await startPair();
         try {
             // session.list on a fs path must execute locally on the
-            // connection server (which has its own workspaceMap), not
+            // connection server (which has its own workspace registry), not
             // on the resident. The resident has no fs workspaces, so a
             // forwarded call would return [] and the connection server
             // would publish a wrong view.

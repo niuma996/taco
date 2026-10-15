@@ -175,7 +175,7 @@ export interface WorkspaceRuntimeOptions {
     taskPushAdapter?: TaskPushAdapter;
     /** Entry point for `plan.state.updated` pushes; defaults to NoopPlanPushAdapter. */
     planPushAdapter?: PlanPushAdapter;
-    /** Routing key (im:// virtual key); defaults to fsCwd. Used only as workspaceMap key / push frame workspace field. */
+    /** Routing key (im:// virtual key); defaults to fsCwd. Used only as the registry key / push frame workspace field. */
     workspaceKey?: string;
     /** Real fs cwd for IM workspace (scratch root). IDE paths are resolved via resolvePath(cwd). */
     fsCwd?: string;

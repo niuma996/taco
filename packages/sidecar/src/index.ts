@@ -594,7 +594,7 @@ async function runDaemon(
             // Scheduler runtime last: any in-flight job invokes have already
             // been cancelled by scheduler.stop() above, so tearing this down
             // only reclaims the fs workspaces the scheduler built. NullTransport
-            // close is a no-op; the value of stop() is the workspaceMap dispose.
+            // close is a no-op; the value of stop() is disposing live workspaces.
             await schedulerSidecar.stop().catch((err: unknown) => {
                 log.error(`scheduler runtime stop failed: ${String(err)}`);
             });

@@ -1,11 +1,26 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { ChannelRegistry } from "../../src/channels/registry.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { WorkspaceRegistry } from "../../src/server/workspaceRegistry.ts";
 
 describe("policy invalidation", () => {
+    function makeServerWithRegistry(): { server: SidecarServer; workspaces: WorkspaceRegistry } {
+        const workspaces = new WorkspaceRegistry(async () => {
+            throw new Error("unexpected workspace build in test");
+        });
+        return {
+            server: new SidecarServer({
+                providerKeyStore: new ProviderKeyStore({}),
+                workspaceRegistry: workspaces,
+            }),
+            workspaces,
+        };
+    }
+
     it("workspacesForChannel returns tracked keys and [] for unknown channels", () => {
         const reg = new ChannelRegistry();
         assert.deepEqual(reg.workspacesForChannel("wechat"), []);
@@ -83,20 +98,17 @@ describe("policy invalidation", () => {
     // The test bypasses the disposeWorkspace spy (which would skip the real
     // cleanup) by wiring up minimal real workspaces.
     it("policy write disposes cached workspaces and cleans the reverse index", async () => {
-        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+        const { server, workspaces } = makeServerWithRegistry();
         // Replace the heavy WorkspaceRuntime constructor with a tiny stub so
         // we can exercise the real disposeWorkspace + the real
         // untrackWorkspace call it does.
         const fake = { dispose: async () => {} } as unknown as WorkspaceRuntime;
-        // workspaceMap is private; cast through unknown to reach it for setup.
-        const wm = (server as unknown as { workspaceMap: Map<string, WorkspaceRuntime> })
-            .workspaceMap;
         for (const key of ["im://wechat/u1/c1", "im://wechat/u2/c1"]) {
             server.channelRegistry.trackWorkspace("wechat", key);
-            wm.set(key, fake);
+            workspaces.publish(asWorkspaceId(key), fake);
         }
         server.channelRegistry.trackWorkspace("feishu", "im://feishu/u1/c1");
-        wm.set("im://feishu/u1/c1", fake);
+        workspaces.publish(asWorkspaceId("im://feishu/u1/c1"), fake);
 
         await server.setImChannelDefault("wechat", { tools: { shell: "allow" } });
 

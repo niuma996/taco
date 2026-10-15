@@ -10,7 +10,6 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import {
     asWorkspaceId,
     type ChannelStatusEntry,
@@ -65,7 +64,6 @@ import {
 import { tacoHome } from "../config/tacoHome.ts";
 import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
-import { SingleFlight } from "../lib/async.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
@@ -100,6 +98,7 @@ import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../t
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
+import { CommandIdempotencyGate } from "./commandIdempotency.ts";
 import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
 import type { DurablePushLog } from "./durablePushLog.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
@@ -112,7 +111,6 @@ import {
     toToolCallPush,
 } from "./push.ts";
 import {
-    type CommandOutcome,
     err,
     getTurnKey,
     normalizeError,
@@ -125,6 +123,7 @@ import { SessionEventLog } from "./sessionEventLog.ts";
 import { StdioTransport } from "./stdioTransport.ts";
 import type { Transport } from "./transport.ts";
 import { parseJsonPointer } from "./validation.ts";
+import { WorkspaceRegistry } from "./workspaceRegistry.ts";
 
 const log = createLogger("sidecar");
 
@@ -189,7 +188,7 @@ export interface SidecarServerOptions {
     customProviders?: readonly CustomProviderConfig[];
     /** MCP servers whose tools become dynamic-tool candidates (parsed at startup from taco.json). */
     mcpServers?: readonly McpServerConfig[];
-    /** Maximum number of settled command outcomes retained for retry idempotency. */
+    /** Maximum number of settled command outcomes retained; values below 1 clamp to 1. */
     commandRecordLimit?: number;
     /**
      * How long a command outcome stays eligible for idempotent replay
@@ -200,6 +199,8 @@ export interface SidecarServerOptions {
     commandRecordTtlMs?: number;
     /** Monotonic clock for TTL decisions. Defaults to performance.now(). */
     now?: () => number;
+    /** Optional workspace registry injection for isolated server tests. */
+    workspaceRegistry?: WorkspaceRegistry;
     /** Transport instance; defaults to StdioTransport. */
     transport?: Transport;
     /** Channel configs for IM channels; Channel instances are resolved from manifest.name via ChannelFactory. */
@@ -251,14 +252,6 @@ export interface SidecarServerOptions {
     serverRegistry?: ServerRegistry;
 }
 
-interface CommandRecord {
-    fingerprint: string;
-    outcome: Promise<CommandOutcome>;
-    settled: boolean;
-    /** Monotonic deadline: created_at + commandRecordTtlMs. */
-    expiresAt: number;
-}
-
 interface RuntimePushEvent {
     sessionId: SessionId;
     event?: unknown;
@@ -283,13 +276,7 @@ function imToolsEnabledNotice(locale: SupportedLocale | undefined): string {
 /** How long a deleted session's tombstone stays in the replay log. */
 const TOMBSTONE_TTL_MS = 60_000;
 
-/** Default idempotency window for command outcomes. See commandRecordTtlMs. */
-const DEFAULT_COMMAND_RECORD_TTL_MS = 10 * 60_000;
-
 export class SidecarServer implements ServerRpcSurface {
-    private readonly workspaceMap = new Map<WorkspaceId, WorkspaceRuntime>();
-    private readonly commandRecords = new Map<string, CommandRecord>();
-    private readonly activeTurnCommands = new Map<string, Promise<CommandOutcome>>();
     /**
      * Replay ring for sequenced pushes. The disk tail behind it —
      * `hydrateSessionEvents` reads it back after a restart so client cursors
@@ -298,20 +285,11 @@ export class SidecarServer implements ServerRpcSurface {
      * file. See `DurablePushLog`'s "One writer per stream".
      */
     private readonly sessionEvents: SessionEventLog;
-    /**
-     * Cold-start single-flight for workspace constructions, keyed by
-     * workspaceKey. Concurrent ensureWorkspace() calls for the same cwd
-     * share one promise; without this N parallel RPCs each run the full
-     * asset-load + MCP-discovery + push-wire path, leaking the loser's
-     * MCP handles and double-writing the imPolicyStore.
-     */
-    private readonly workspaceFlight = new SingleFlight<WorkspaceId, WorkspaceRuntime>((cwd) =>
-        this.buildWorkspace(cwd),
-    );
+    /** Live workspace table + cold-start single-flight — see workspaceRegistry.ts. */
+    private readonly workspaces: WorkspaceRegistry;
     private readonly options: SidecarServerOptions;
-    private readonly commandRecordTtlMs: number;
-    private readonly now: () => number;
-    private commandSweeper?: ReturnType<typeof setInterval>;
+    /** Command-idempotency cache + turn gate — see commandIdempotency.ts. */
+    private readonly idempotency: CommandIdempotencyGate;
     /** IM workspace policy store — admin-granted, survives channel unbind. */
     readonly imPolicyStore: ImWorkspacePolicyStore;
     /**
@@ -405,7 +383,7 @@ export class SidecarServer implements ServerRpcSurface {
     /**
      * True once stop() has run. Used by buildWorkspace to drop a workspace it
      * was constructing when shutdown raced in — without this the worker would
-     * silently publish a ws that no caller will ever see (workspaceMap was
+     * silently publish a ws that no caller will ever see (the registry was
      * cleared). Distinct from `isInitialized`, which tracks the initialize
      * RPC handshake and is false for IM-only sidecars that never call it.
      */
@@ -477,13 +455,13 @@ export class SidecarServer implements ServerRpcSurface {
 
     constructor(options: SidecarServerOptions) {
         this.options = options;
-        // Guard against 0 / negative TTL: expiresAt would be permanently
-        // expired (records unusable) and setInterval(<=0) would busy-spin.
-        this.commandRecordTtlMs = Math.max(
-            1,
-            options.commandRecordTtlMs ?? DEFAULT_COMMAND_RECORD_TTL_MS,
-        );
-        this.now = options.now ?? (() => performance.now());
+        this.workspaces =
+            options.workspaceRegistry ?? new WorkspaceRegistry((cwd) => this.buildWorkspace(cwd));
+        this.idempotency = new CommandIdempotencyGate({
+            ttlMs: options.commandRecordTtlMs,
+            limit: options.commandRecordLimit,
+            now: options.now,
+        });
         this.extensionRegistry = options.extensionRegistry;
         this.providerKeyStore = options.providerKeyStore;
         this._jobs = options.jobs;
@@ -548,7 +526,7 @@ export class SidecarServer implements ServerRpcSurface {
 
     /** For method handlers / tests — list cwd of currently active workspaces */
     workspaceIds(): WorkspaceId[] {
-        return [...this.workspaceMap.keys()];
+        return this.workspaces.keys();
     }
 
     getSessionEvents(
@@ -626,19 +604,7 @@ export class SidecarServer implements ServerRpcSurface {
         }
         this.startedChannelIds = startedChannelIds;
 
-        // Periodic TTL sweep: guarantees the command map cannot grow unbounded
-        // even when no new RPC ever arrives (the original leak). unref so a
-        // long-running sidecar can still exit; matches the TOMBSTONE pattern.
-        // Trade-off: sweeping at exactly the TTL means a record can linger up
-        // to ~2×TTL worst case (expired just after a sweep ran). Cheap memory
-        // reclamation vs. tighter precision — for a 10min TTL the extra 10min
-        // is acceptable and avoids a noisier interval.
-        this.clearCommandSweeper();
-        this.commandSweeper = setInterval(
-            () => this.pruneCommandRecords(),
-            this.commandRecordTtlMs,
-        );
-        this.commandSweeper.unref();
+        this.idempotency.startSweeper();
     }
 
     /** Named refs for stop() to off() — see start() for why this matters. */
@@ -650,13 +616,6 @@ export class SidecarServer implements ServerRpcSurface {
         // the client replaces the entry wholesale on applyChannelStatus.
         this.broadcastChannelStatus(this.channelControl.toStatusEntry(s));
     };
-
-    private clearCommandSweeper(): void {
-        if (this.commandSweeper) {
-            clearInterval(this.commandSweeper);
-            this.commandSweeper = undefined;
-        }
-    }
 
     /** Stop — close all harnesses held by runtimes */
     async stop(): Promise<void> {
@@ -689,20 +648,11 @@ export class SidecarServer implements ServerRpcSurface {
         if (this.conversationRouter) {
             this.conversationRouter.off("conversation", this.onRouterConversation);
         }
-        for (const ws of this.workspaceMap.values()) {
-            await ws.dispose();
-        }
-        this.workspaceMap.clear();
+        await this.workspaces.disposeAll();
         // Drop any in-flight construction promises; their awaiters will
         // observe whatever the constructor throws, not a cancelled value.
-        this.workspaceFlight.clear();
-        this.commandRecords.clear();
-        // The active-turn table is workspace\0sessionId keyed and only drops a
-        // key when its outcome settles. A turn interrupted by stop() never
-        // settles, so without this clear the restarted server would answer
-        // `session_busy` for that session forever.
-        this.activeTurnCommands.clear();
-        this.clearCommandSweeper();
+        this.workspaces.clearFlight();
+        this.idempotency.stop();
         // Drain the push tail BEFORE dropping the ring: a graceful restart is
         // exactly when seq continuity matters, and the buffered window would
         // otherwise be lost — leaving the restarted server to hydrate a seq
@@ -824,56 +774,31 @@ export class SidecarServer implements ServerRpcSurface {
             return err(req.id, ErrorCodes.InvalidParams, "commandId must be a non-empty string");
         }
 
+        // Key/fingerprint extraction stays here (the gate knows nothing
+        // about RpcRequest); error frames are minted here too — their
+        // message strings are wire contract asserted verbatim by
+        // commandIdempotency.test.ts.
         const key = `${req.method}\u0000${req.commandId}`;
         const fingerprint = JSON.stringify(req.params ?? null);
-        const existing = this.commandRecords.get(key);
-        if (existing) {
-            // Lazy TTL expiry: a stale record is treated as absent so a retry
-            // re-executes (idempotency window expired). Never touches outcome —
-            // the original request is still awaiting it.
-            if (this.now() >= existing.expiresAt) {
-                this.commandRecords.delete(key);
-            } else if (existing.fingerprint !== fingerprint) {
-                return err(
-                    req.id,
-                    ErrorCodes.CommandIdConflict,
-                    "commandId was already used with different request parameters",
-                );
-            } else {
-                return withRequestId(req.id, await existing.outcome);
-            }
-        }
-
         const turnKey = reg.options.turnStart ? getTurnKey(req.params) : undefined;
-        if (turnKey && this.activeTurnCommands.has(turnKey)) {
+        const result = this.idempotency.run(key, fingerprint, turnKey, () =>
+            this.executeRpcRequest(req, reg).then(toCommandOutcome),
+        );
+        if (result === "conflict") {
+            return err(
+                req.id,
+                ErrorCodes.CommandIdConflict,
+                "commandId was already used with different request parameters",
+            );
+        }
+        if (result === "busy") {
             return err(
                 req.id,
                 ErrorCodes.SessionBusy,
                 "a turn command is already active for this session",
             );
         }
-
-        const outcome = this.executeRpcRequest(req, reg).then(toCommandOutcome);
-        const record: CommandRecord = {
-            fingerprint,
-            outcome,
-            settled: false,
-            expiresAt: this.now() + this.commandRecordTtlMs,
-        };
-        this.commandRecords.set(key, record);
-        void outcome.then(() => {
-            record.settled = true;
-            this.pruneCommandRecords();
-        });
-        if (turnKey) {
-            this.activeTurnCommands.set(turnKey, outcome);
-            void outcome.finally(() => {
-                if (this.activeTurnCommands.get(turnKey) === outcome) {
-                    this.activeTurnCommands.delete(turnKey);
-                }
-            });
-        }
-        return withRequestId(req.id, await outcome);
+        return withRequestId(req.id, await result);
     }
 
     private async executeRpcRequest(
@@ -954,7 +879,7 @@ export class SidecarServer implements ServerRpcSurface {
             sessionsRoot = makeImSessionsRoot(tacoHome(), parsedIm.channelId);
             fsCwd = asWorkspaceId(join(sessionsRoot, "scratch"));
             mkdirSync(fsCwd, { recursive: true });
-            workspaceKey = cwd; // im:// URL for workspaceMap key + emitPush
+            workspaceKey = cwd; // im:// URL keys the workspace registry + emitPush
             disableFsTools = true;
             // Register channel → workspace reverse index (for P2 single-channel restart)
             this.channelRegistry.trackWorkspace(parsedIm.channelId, cwd);
@@ -1106,9 +1031,7 @@ export class SidecarServer implements ServerRpcSurface {
 
     /** For handlers / method layer — lazily created on first access */
     async ensureWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
-        const cached = this.workspaceMap.get(cwd);
-        if (cached) return cached;
-        return this.workspaceFlight.run(cwd);
+        return this.workspaces.ensure(cwd);
     }
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
@@ -1228,24 +1151,24 @@ export class SidecarServer implements ServerRpcSurface {
         // emitPush's IM_CWD_PREFIX branch fires correctly. All emitPush call sites
         // inside ensureWorkspace pass workspaceKey to this method, not cwd.
         //
-        // set() must come AFTER ws is fully constructed but BEFORE any await
+        // publish() must come AFTER ws is fully constructed but BEFORE any await
         // that yields control: if we yielded first, a concurrent
         // ensureWorkspace(cwd) could observe a half-built state (cache miss +
         // buildWorkspace already past the ctor) and start a second build that
-        // would clobber this one in workspaceMap.set, leaking this ws's
-        // mcpProvider. Putting set() here means a concurrent caller either
+        // would clobber this one in the registry, leaking this ws's
+        // mcpProvider. Putting publish() here means a concurrent caller either
         // gets the fully-built ws from the cache or shares the SingleFlight
         // promise — never both.
-        this.workspaceMap.set(paths.workspaceKey, ws);
+        this.workspaces.publish(paths.workspaceKey, ws);
 
         // If stop() ran while we were awaiting loadWorkspaceAssets /
         // discoverMcpTools / new WorkspaceRuntime / wireWorkspacePush, our
-        // SingleFlight entry was cleared and workspaceMap was cleared, but
+        // SingleFlight entry was cleared and the registry was cleared, but
         // we are still about to publish a ws into a server that's been
         // told to shut down. Dispose and reject so no caller observes a
         // zombie.
         if (this.stopped) {
-            this.workspaceMap.delete(paths.workspaceKey);
+            this.workspaces.unpublish(paths.workspaceKey);
             await ws.dispose().catch(() => undefined);
             throw new Error(
                 `sidecar stopped before workspace ${paths.workspaceKey} finished building`,
@@ -1416,10 +1339,8 @@ export class SidecarServer implements ServerRpcSurface {
 
     /** For handlers / method layer */
     async disposeWorkspace(cwd: WorkspaceId): Promise<void> {
-        const ws = this.workspaceMap.get(cwd);
-        if (!ws) return;
-        await ws.dispose();
-        this.workspaceMap.delete(cwd);
+        const disposed = await this.workspaces.remove(cwd);
+        if (!disposed) return;
         this.sessionEvents.clearWorkspace(cwd);
         // Clean the channel → workspace reverse index so dispose does not leave
         // stale keys (memory leak across channel lifetime).
@@ -1431,7 +1352,7 @@ export class SidecarServer implements ServerRpcSurface {
 
     /**
      * Drop every cached IM workspace for a channel after an admin policy write.
-     * Without this, `ensureWorkspace` early-returns from the workspaceMap cache
+     * Without this, `ensureWorkspace` early-returns from the workspace cache
      * and the new policy would not take effect until a sidecar restart.
      *
      * TRADEOFF: this releases attached sessions and interrupts any in-flight
@@ -1471,7 +1392,7 @@ export class SidecarServer implements ServerRpcSurface {
      *
      * On a non-owner (daemon connection server), IM workspaces live on the
      * resident host — `invalidateImWorkspaces` against this server's empty
-     * `workspaceMap` would silently do nothing, leaving stale policy on the
+     * workspace registry would silently do nothing, leaving stale policy on the
      * host until restart. Delegate the mutation + invalidate to the host,
      * then broadcast locally so the connection's own desktop still re-pulls.
      */
@@ -1521,24 +1442,6 @@ export class SidecarServer implements ServerRpcSurface {
         this.broadcastImPolicyChanged(channelId);
     }
 
-    private pruneCommandRecords(): void {
-        const now = this.now();
-        // Expired records never count toward the limit and are freed eagerly
-        // even when every survivor is in-flight — this is what bounds the map
-        // when a handler never settles.
-        for (const [key, record] of this.commandRecords) {
-            if (now >= record.expiresAt) this.commandRecords.delete(key);
-        }
-        const limit = this.options.commandRecordLimit ?? 1024;
-        while (this.commandRecords.size > limit) {
-            const oldestSettled = [...this.commandRecords.entries()].find(
-                ([, record]) => record.settled,
-            )?.[0];
-            if (!oldestSettled) return;
-            this.commandRecords.delete(oldestSettled);
-        }
-    }
-
     /**
      * Replace the custom provider set (pushed by the handler after
      * settings.write changes customProviders).
@@ -1550,7 +1453,7 @@ export class SidecarServer implements ServerRpcSurface {
      */
     setCustomProviders(next: readonly CustomProviderConfig[]): void {
         this.customProviders = next;
-        for (const ws of this.workspaceMap.values()) {
+        for (const ws of this.workspaces.list()) {
             ws.setCustomProviders(next);
         }
     }
@@ -1569,7 +1472,7 @@ export class SidecarServer implements ServerRpcSurface {
     setDefaultModel(defaultModel?: string, defaultProvider?: string): void {
         this.options.defaultModel = defaultModel;
         this.options.defaultProvider = defaultProvider;
-        for (const ws of this.workspaceMap.values()) {
+        for (const ws of this.workspaces.list()) {
             ws.setDefaultModel(defaultModel, defaultProvider);
         }
     }
@@ -1581,7 +1484,7 @@ export class SidecarServer implements ServerRpcSurface {
      * value immediately instead of waiting for the TTL.
      */
     invalidateCompactionCaches(): void {
-        for (const ws of this.workspaceMap.values()) {
+        for (const ws of this.workspaces.list()) {
             ws.invalidateCompactionCache();
         }
     }
@@ -1594,7 +1497,7 @@ export class SidecarServer implements ServerRpcSurface {
      */
     async reloadAgents(): Promise<void> {
         const builtinDir = join(resourceRoot(), "agents", "builtin");
-        for (const ws of this.workspaceMap.values()) {
+        for (const ws of this.workspaces.list()) {
             ws.reloadAgentsNow(
                 await loadAgents({ builtinDir, userDirs: defaultAgentDirs(ws.executionCwd) }),
             );
@@ -1616,10 +1519,7 @@ export class SidecarServer implements ServerRpcSurface {
         // once per mcp mutation rather than on every ensureWorkspace. The three
         // mcp.* mutation handlers are the only callers.
         this.mcpServers = readGlobalConfig().mcpServers ?? [];
-        for (const ws of this.workspaceMap.values()) {
-            await ws.dispose();
-        }
-        this.workspaceMap.clear();
+        await this.workspaces.disposeAll();
     }
 
     /**
@@ -1636,7 +1536,7 @@ export class SidecarServer implements ServerRpcSurface {
      */
     refreshInstructions(next: InstructionsConfig | undefined): void {
         this.instructionsConfig = next;
-        for (const ws of this.workspaceMap.values()) {
+        for (const ws of this.workspaces.list()) {
             ws.updateInstructionsConfig(next);
         }
     }
@@ -1692,7 +1592,7 @@ export class SidecarServer implements ServerRpcSurface {
      *  are skipped for the same reason as broadcastConversationsChanged: they
      *  scale with conversation count and never render the Channels pane. */
     broadcastChannelStatus(channel: ChannelStatusEntry): void {
-        for (const cwd of this.workspaceMap.keys()) {
+        for (const cwd of this.workspaces.keys()) {
             if (cwd.startsWith(IM_CWD_PREFIX)) continue;
             this.emitPush(PushMethods.ChannelStatusChanged, cwd, undefined, { channel });
         }
@@ -1702,13 +1602,13 @@ export class SidecarServer implements ServerRpcSurface {
      *  ConversationRouter when a NEW session is created (not on every inbound
      *  message). Empty payload — desktop re-pulls the conversation list.
      *
-     *  IM workspaces are skipped: workspaceMap is keyed by workspaceKey, so
+     *  IM workspaces are skipped: the workspace registry is keyed by workspaceKey, so
      *  every routed conversation occupies a slot. Fanning out to those too
      *  would make the push count grow with conversation count, and each copy
      *  costs the client a full listConversations re-pull. Only real (fs)
      *  workspaces host the Channels pane that consumes this. */
     broadcastConversationsChanged(): void {
-        for (const cwd of this.workspaceMap.keys()) {
+        for (const cwd of this.workspaces.keys()) {
             if (cwd.startsWith(IM_CWD_PREFIX)) continue;
             this.emitPush(PushMethods.ConversationsChanged, cwd, undefined, {});
         }
@@ -1718,7 +1618,7 @@ export class SidecarServer implements ServerRpcSurface {
         // Workspace-dimensioned push (no session) — desktop re-pulls
         // providers.list / session.listModels for this workspace. IM workspaces
         // don't render a model picker, so skip them like the other broadcasts.
-        for (const cwd of this.workspaceMap.keys()) {
+        for (const cwd of this.workspaces.keys()) {
             if (cwd.startsWith(IM_CWD_PREFIX)) continue;
             this.emitPush(PushMethods.ModelsChanged, cwd, undefined, {});
         }
@@ -1737,7 +1637,7 @@ export class SidecarServer implements ServerRpcSurface {
      * channel→workspaces registry for a one-line saving.
      */
     broadcastImPolicyChanged(channelId: string): void {
-        for (const cwd of this.workspaceMap.keys()) {
+        for (const cwd of this.workspaces.keys()) {
             if (cwd.startsWith(IM_CWD_PREFIX)) continue;
             this.emitPush(PushMethods.ImPolicyChanged, cwd, undefined, { channelId });
         }
@@ -1758,7 +1658,7 @@ export class SidecarServer implements ServerRpcSurface {
         // a session dimension leave it empty.
         const sessionKind =
             session !== undefined
-                ? this.workspaceMap.get(workspace)?.getSessionKind(session)
+                ? this.workspaces.get(workspace)?.getSessionKind(session)
                 : undefined;
         const frame =
             session === undefined
