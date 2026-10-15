@@ -13,7 +13,9 @@
 import type { SessionContextInfoResult } from "@taco-ai/protocol";
 import { Minimize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useT } from "../i18n/useI18n.ts";
+import { useNow } from "../hooks/useNow.ts";
+import { useT, useUiLanguage } from "../i18n/useI18n.ts";
+import { formatRelativeTime } from "../lib/relativeTime.ts";
 
 export interface ContextIndicatorProps {
     info: SessionContextInfoResult | null;
@@ -53,21 +55,6 @@ function formatTokens(t: number): string {
     return `${Math.round(t / 1000)}k`;
 }
 
-/**
- * Compaction timestamps arrive as a millisecond epoch (`String(entry.timestamp)`).
- * Older/other sources may already be ISO. Local time as `yyyy-MM-DD HH:mm:ss`.
- */
-function pad2(n: number): string {
-    return String(n).padStart(2, "0");
-}
-
-function formatCompactionAt(raw: string): string {
-    const numeric = Number(raw);
-    const date = Number.isFinite(numeric) && numeric > 0 ? new Date(numeric) : new Date(raw);
-    if (Number.isNaN(date.getTime())) return raw;
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
-}
-
 export function ContextIndicator(props: ContextIndicatorProps) {
     const {
         info,
@@ -79,6 +66,8 @@ export function ContextIndicator(props: ContextIndicatorProps) {
         className,
     } = props;
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
     const [popoverOpen, setPopoverOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
 
@@ -199,7 +188,8 @@ export function ContextIndicator(props: ContextIndicatorProps) {
                     {info.lastCompactionAt && (
                         <div className="context-indicator-popover__row">
                             {t("context.lastCompaction")}:{" "}
-                            {formatCompactionAt(info.lastCompactionAt)}
+                            {formatRelativeTime(info.lastCompactionAt, lng, nowMs) ||
+                                info.lastCompactionAt}
                         </div>
                     )}
                     <div className="context-indicator-popover__row context-indicator-popover__row--cache">

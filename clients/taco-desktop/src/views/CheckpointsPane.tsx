@@ -16,27 +16,20 @@ import { useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { IconButton } from "../components/ui/IconButton";
 import type { UseCheckpointsPaneResult } from "../hooks/useCheckpointsPane";
-import { useT } from "../i18n/useI18n";
+import { useNow } from "../hooks/useNow";
+import { useT, useUiLanguage } from "../i18n/useI18n";
+import { formatRelativeTime } from "../lib/relativeTime";
 import { lastSegment } from "../lib/workspaceStorage";
 
 export interface CheckpointsPaneProps extends UseCheckpointsPaneResult {
     hasActiveSession: boolean;
 }
 
-// Short format keeps a narrow column readable; full DateTimeFormat wraps.
-function formatTimestamp(iso: string, label: (k: string) => string): string {
-    try {
-        const d = new Date(iso);
-        const sameDay = d.toDateString() === new Date().toDateString();
-        return sameDay ? d.toLocaleTimeString() : d.toLocaleDateString();
-    } catch {
-        return label("checkpoints.unknownTime");
-    }
-}
-
 export function CheckpointsPane(props: CheckpointsPaneProps) {
     const { data, loading, error, restoringId, refresh, restore, hasActiveSession } = props;
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
     const [pendingRestore, setPendingRestore] = useState<CheckpointEntry | null>(null);
 
     if (!data) {
@@ -79,7 +72,8 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
                             <li key={c.id} className="checkpoint-item">
                                 <div className="checkpoint-meta">
                                     <span className="checkpoint-time">
-                                        {formatTimestamp(c.createdAt, t)}
+                                        {formatRelativeTime(c.createdAt, lng, nowMs) ||
+                                            t("checkpoints.unknownTime")}
                                     </span>
                                     <span className="checkpoint-label">{c.label}</span>
                                 </div>

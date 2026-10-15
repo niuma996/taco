@@ -27,8 +27,10 @@ import {
     ListTodo,
     Plus,
 } from "lucide-react";
+import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
-import { useT } from "../i18n/useI18n";
+import { useT, useUiLanguage } from "../i18n/useI18n";
+import { formatRelativeTime } from "../lib/relativeTime";
 
 export function SessionInfo({
     ws,
@@ -70,6 +72,8 @@ export function SessionInfo({
     isIm?: boolean;
 }) {
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
     const activeId = ws?.activeSession;
     const activeMeta = activeId ? ws?.sessions.find((s) => s.id === activeId) : undefined;
     const isRunning = Boolean(ws?.pendingBySessionId[activeId ?? ""]);
@@ -196,7 +200,8 @@ export function SessionInfo({
             </span>
             {activeMeta?.createdAt && (
                 <span className="session-info-time">
-                    {t("session.createdAtLabel")} {new Date(activeMeta.createdAt).toLocaleString()}
+                    {t("session.createdAtLabel")}{" "}
+                    {formatRelativeTime(activeMeta.createdAt, lng, nowMs)}
                 </span>
             )}
             {filePath && <span className="session-info-divider" aria-hidden="true" />}

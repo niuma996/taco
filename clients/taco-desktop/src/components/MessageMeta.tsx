@@ -13,7 +13,9 @@
  * original UiMessage.
  */
 
-import { useT } from "../i18n/useI18n";
+import { useNow } from "../hooks/useNow";
+import { useT, useUiLanguage } from "../i18n/useI18n";
+import { formatRelativeTime } from "../lib/relativeTime";
 import { CopyButton } from "./ui/CopyButton";
 
 export interface MessageMetaProps {
@@ -23,22 +25,14 @@ export interface MessageMetaProps {
     text: string;
 }
 
-/** Format epoch ms as `yyyy-MM-DD HH:mm:ss` in the local timezone. */
-function formatTimestamp(ts: number): string {
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return (
-        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-        `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-    );
-}
-
 export function MessageMeta({ ts, text }: MessageMetaProps) {
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
     return (
         <div className="message-meta">
             <time className="message-meta__time" dateTime={new Date(ts).toISOString()}>
-                {formatTimestamp(ts)}
+                {formatRelativeTime(ts, lng, nowMs)}
             </time>
             <CopyButton
                 value={text}

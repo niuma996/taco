@@ -33,9 +33,59 @@ describe("formatRelativeTime", () => {
         );
     });
 
-    it("formats sub-day as relative minutes (no absolute date)", () => {
-        const out = formatRelativeTime(new Date(NOW - 3 * 3_600_000).toISOString(), "en", NOW);
-        assert.equal(out, "180 minutes ago");
+    it("formats an exact hour count without leftover minutes", () => {
+        assert.equal(
+            formatRelativeTime(new Date(NOW - 3 * 3_600_000).toISOString(), "en", NOW),
+            "3 hours ago",
+        );
+        assert.equal(
+            formatRelativeTime(new Date(NOW - 3 * 3_600_000).toISOString(), "zh", NOW),
+            "3小时前",
+        );
+    });
+
+    it("formats hours and leftover minutes under a day", () => {
+        assert.equal(
+            formatRelativeTime(new Date(NOW - 800 * 60_000).toISOString(), "en", NOW),
+            "13 hours 20 minutes ago",
+        );
+        assert.equal(
+            formatRelativeTime(new Date(NOW - 800 * 60_000).toISOString(), "zh", NOW),
+            "13小时20分钟前",
+        );
+    });
+
+    it("keeps singular unit words in a compound stamp", () => {
+        assert.equal(
+            formatRelativeTime(new Date(NOW - 61 * 60_000).toISOString(), "en", NOW),
+            "1 hour 1 minute ago",
+        );
+        assert.equal(
+            formatRelativeTime(new Date(NOW - 61 * 60_000).toISOString(), "zh", NOW),
+            "1小时1分钟前",
+        );
+    });
+
+    it("formats a future compound the same way", () => {
+        assert.equal(
+            formatRelativeTime(new Date(NOW + 90 * 60_000).toISOString(), "en", NOW),
+            "in 1 hour 30 minutes",
+        );
+        assert.equal(
+            formatRelativeTime(new Date(NOW + 90 * 60_000).toISOString(), "zh", NOW),
+            "1小时30分钟后",
+        );
+    });
+
+    it("promotes a rounded-up day to the weekday form", () => {
+        // 23h 59.6m rounds to 24h, which must not render as "24 hours ago".
+        const out = formatRelativeTime(
+            new Date(NOW - (24 * 60 - 0.4) * 60_000).toISOString(),
+            "en",
+            NOW,
+        );
+        assert.ok(/:/.test(out), `expected a time in "${out}"`);
+        assert.ok(!/hour/.test(out), `expected no hour phrase in "${out}"`);
     });
 
     it("1+ day shows weekday + time (has a time colon, no year)", () => {
@@ -50,7 +100,14 @@ describe("formatRelativeTime", () => {
         assert.ok(/\d{4}|\d{1,2}\/\d{1,2}/.test(out), `expected a date in "${out}"`);
     });
 
+    it("accepts epoch milliseconds and an epoch string", () => {
+        const at = NOW - 800 * 60_000;
+        assert.equal(formatRelativeTime(at, "zh", NOW), "13小时20分钟前");
+        assert.equal(formatRelativeTime(String(at), "zh", NOW), "13小时20分钟前");
+    });
+
     it("returns empty string for invalid ISO", () => {
         assert.equal(formatRelativeTime("not-a-date", "en", NOW), "");
+        assert.equal(formatRelativeTime("   ", "en", NOW), "");
     });
 });

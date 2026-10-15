@@ -20,8 +20,10 @@
 import * as Popover from "@radix-ui/react-popover";
 import { Bell, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useT } from "../i18n/useI18n.ts";
+import { useNow } from "../hooks/useNow.ts";
+import { useT, useUiLanguage } from "../i18n/useI18n.ts";
 import { type AppNotification, toastsOnArrival } from "../lib/notifications.ts";
+import { formatRelativeTime } from "../lib/relativeTime.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 
 export interface NotificationBellProps {
@@ -36,27 +38,6 @@ export interface NotificationBellProps {
     onNewArrival?: (notification: AppNotification) => void;
 }
 
-function pad2(n: number): string {
-    return String(n).padStart(2, "0");
-}
-
-/**
- * Time for today, month/day for anything older — the list is a session-lifetime
- * buffer, so a bare HH:MM:SS makes yesterday's failures look like they just
- * happened. Locale-independent on purpose: this is a log, not prose, and the
- * UI language can change under a row that is already on screen.
- */
-export function formatNotificationStamp(at: number, now: number): string {
-    const d = new Date(at);
-    const clock = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-    const n = new Date(now);
-    const sameDay =
-        d.getFullYear() === n.getFullYear() &&
-        d.getMonth() === n.getMonth() &&
-        d.getDate() === n.getDate();
-    return sameDay ? clock : `${d.getMonth() + 1}/${d.getDate()} ${clock}`;
-}
-
 export function NotificationBell({
     notifications,
     onDismiss,
@@ -64,6 +45,8 @@ export function NotificationBell({
     onNewArrival,
 }: NotificationBellProps) {
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
     const [open, setOpen] = useState(false);
     // Highest id the user has had on screen (popover open). Rows above it are
     // unread. Starts at 0 so a list populated before mount still badges — the
@@ -162,7 +145,7 @@ export function NotificationBell({
                             {notifications.map((n) => (
                                 <li key={n.id} className="notification-row" data-level={n.level}>
                                     <span className="notification-row__time">
-                                        {formatNotificationStamp(n.at, Date.now())}
+                                        {formatRelativeTime(n.at, lng, nowMs)}
                                     </span>
                                     <span className="notification-row__text">{n.text}</span>
                                     {n.count > 1 && (

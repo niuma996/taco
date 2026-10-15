@@ -21,8 +21,8 @@ import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "
 import { ImPolicyDialog } from "../components/ImPolicyDialog.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane.ts";
-import i18n from "../i18n/index.ts";
-import { useT } from "../i18n/useI18n";
+import { useNow } from "../hooks/useNow.ts";
+import { useT, useUiLanguage } from "../i18n/useI18n";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { formatRelativeTime } from "../lib/relativeTime.js";
 
@@ -512,6 +512,8 @@ function ConversationRow(props: {
 }): ReactElement {
     const { entry, isActive, onOpen, onOpenPolicy } = props;
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
     return (
         <div className={`channels-conv-row ${isActive ? "channels-conv-row--active" : ""}`}>
             <button
@@ -525,11 +527,7 @@ function ConversationRow(props: {
                 </span>
                 <span className="channels-conv-row-channel">{entry.channelId}</span>
                 <span className="channels-conv-row-time">
-                    {formatRelativeTime(
-                        new Date(entry.lastUsedAt).toISOString(),
-                        i18n.language,
-                        Date.now(),
-                    )}
+                    {formatRelativeTime(entry.lastUsedAt, lng, nowMs)}
                 </span>
             </button>
             <Button size="sm" variant="ghost" onClick={onOpenPolicy}>

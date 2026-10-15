@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { formatNotificationStamp, NotificationBell } from "../../src/components/NotificationBell";
+import { NotificationBell } from "../../src/components/NotificationBell";
 import * as useI18n from "../../src/i18n/useI18n";
 import type { AppNotification } from "../../src/lib/notifications";
 
@@ -305,21 +305,5 @@ describe("NotificationBell", () => {
         );
 
         expect(screen.getByRole("button", { name: /app\.notificationsUnread:2/ })).not.toBeNull();
-    });
-});
-
-describe("formatNotificationStamp", () => {
-    const now = new Date(2026, 9, 10, 12, 0, 0).getTime();
-
-    it("shows the bare clock for today", () => {
-        const at = new Date(2026, 9, 10, 9, 5, 3).getTime();
-        expect(formatNotificationStamp(at, now)).toBe("09:05:03");
-    });
-
-    it("prefixes the date once the row is from another day", () => {
-        // The list outlives a session, so yesterday's failure must not look
-        // like it just happened.
-        const at = new Date(2026, 9, 9, 23, 59, 59).getTime();
-        expect(formatNotificationStamp(at, now)).toBe("10/9 23:59:59");
     });
 });

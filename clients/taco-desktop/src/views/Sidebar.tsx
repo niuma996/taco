@@ -7,8 +7,8 @@
  */
 
 import { Pencil, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { IconButton } from "../components/ui/IconButton";
+import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
@@ -26,13 +26,7 @@ export function Sidebar(props: SidebarProps) {
     const { t } = useT();
     const { ws, onAttach, onDelete, onRename, onLoadMore, isLoadingMore } = props;
     const lng = useUiLanguage();
-    // 30s tick so relative times ("2 minutes ago") advance without a reload;
-    // coarse enough to avoid re-rendering the whole list every second.
-    const [nowMs, setNowMs] = useState(() => Date.now());
-    useEffect(() => {
-        const id = setInterval(() => setNowMs(Date.now()), 30_000);
-        return () => clearInterval(id);
-    }, []);
+    const nowMs = useNow();
     return (
         <aside className="sidebar">
             {/* Scroll container: header stays fixed; min-height:0 lets flex children collapse correctly. */}

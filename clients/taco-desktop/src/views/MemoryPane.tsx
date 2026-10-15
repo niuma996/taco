@@ -12,13 +12,15 @@ import { useEffect, useMemo, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
 import { IconButton } from "../components/ui/IconButton";
-import { useT } from "../i18n/useI18n";
+import { useNow } from "../hooks/useNow";
+import { useT, useUiLanguage } from "../i18n/useI18n";
 import type {
     MemoryConflictPayload,
     MemoryListResult,
     MemoryTopicEntry,
 } from "../lib/memoryPaneTypes";
 import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes";
+import { formatRelativeTime } from "../lib/relativeTime";
 
 export interface MemoryPaneProps {
     data: MemoryListResult | null;
@@ -51,6 +53,8 @@ export function MemoryPane(props: MemoryPaneProps) {
         saving,
     } = props;
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
 
     const [isEditing, setIsEditing] = useState(false);
     const [draft, setDraft] = useState<string>("");
@@ -304,11 +308,13 @@ export function MemoryPane(props: MemoryPaneProps) {
                             <dt>{t("memory.typeLabel")}</dt>
                             <dd>{selectedTopic.type}</dd>
                             <dt>{t("memory.createdLabel")}</dt>
-                            <dd>{selectedTopic.createdAt}</dd>
+                            <dd>{formatRelativeTime(selectedTopic.createdAt, lng, nowMs)}</dd>
                             {selectedTopic.updatedAt && (
                                 <>
                                     <dt>{t("memory.updatedLabel")}</dt>
-                                    <dd>{selectedTopic.updatedAt}</dd>
+                                    <dd>
+                                        {formatRelativeTime(selectedTopic.updatedAt, lng, nowMs)}
+                                    </dd>
                                 </>
                             )}
                             {selectedTopic.description && (
