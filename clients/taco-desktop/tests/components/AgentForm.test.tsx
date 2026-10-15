@@ -125,6 +125,14 @@ describe("AgentForm", () => {
         });
     }
 
+    it("starts a new definition at the runtime's default turn cap", () => {
+        render(<AgentForm runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
+        assert.ok(screen.getByDisplayValue("50"));
+        cleanup();
+        render(<AgentForm runtime="standard" onSave={() => {}} onCancel={() => {}} />);
+        assert.ok(screen.getByDisplayValue("30"));
+    });
+
     it("shows the no-user-questions rule in the Claude Code dialog", () => {
         render(<AgentForm runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
         assert.ok(screen.getByText("agents.form.ccRuleAskUser"));

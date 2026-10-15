@@ -11,7 +11,7 @@ import type { AgentEntry, AgentRuntime, AgentsContentResult } from "@taco-ai/pro
 import { type ReactElement, useMemo, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { AddAgentMenu } from "../components/agents/AddAgentMenu";
-import { AgentForm, type AgentFormValue } from "../components/agents/AgentForm";
+import { AgentForm, type AgentFormValue, defaultMaxTurns } from "../components/agents/AgentForm";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
 import { Button } from "../components/ui/Button";
@@ -228,7 +228,9 @@ export function AgentsPane({
                                   description: selectedAgent.description,
                                   whenToUse: selectedAgent.whenToUse,
                                   runtime: selectedAgent.runtime ?? "standard",
-                                  maxTurns: content.maxTurns ?? 30,
+                                  maxTurns:
+                                      content.maxTurns ??
+                                      defaultMaxTurns(selectedAgent.runtime ?? "standard"),
                                   systemPrompt: content.systemPrompt,
                                   tools: content.tools,
                                   permissionMode: content.permissionMode,

@@ -67,8 +67,8 @@ export const CLAUDE_CODE_BLOCKED_TOOLS = ["AskUserQuestion"] as const;
 /** Permission mode when a definition names none. */
 export const DEFAULT_CLAUDE_CODE_PERMISSION_MODE: ClaudeCodePermissionMode = "auto";
 
-/** Turn cap when the agent definition sets none; mirrors the `explorer` builtin. */
-export const DEFAULT_CLAUDE_CODE_MAX_TURNS = 30;
+/** Turn cap when the agent definition sets none. */
+export const DEFAULT_CLAUDE_CODE_MAX_TURNS = 50;
 
 export interface RunClaudeCodeSubagentArgs {
     readonly subSessionId: SessionId;

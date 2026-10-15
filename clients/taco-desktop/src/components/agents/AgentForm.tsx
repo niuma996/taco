@@ -30,6 +30,11 @@ const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 /** Never available to a subagent: it would open a prompt no one can answer. */
 const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
 
+/** Turn cap a new definition starts with; Claude Code matches the sidecar's runner default. */
+export function defaultMaxTurns(runtime: AgentRuntime): number {
+    return runtime === "claude-code" ? 50 : 30;
+}
+
 const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
     "auto",
     "default",
@@ -82,7 +87,9 @@ export function AgentForm(props: AgentFormProps) {
     const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
     const [description, setDescription] = useState(props.existing?.description ?? "");
     const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
-    const [maxTurns, setMaxTurns] = useState(String(props.existing?.maxTurns ?? 30));
+    const [maxTurns, setMaxTurns] = useState(
+        String(props.existing?.maxTurns ?? defaultMaxTurns(props.runtime)),
+    );
     const [systemPrompt, setSystemPrompt] = useState(props.existing?.systemPrompt ?? "");
     const [tools, setTools] = useState(props.existing?.tools?.join(", ") ?? "");
     const [permissionMode, setPermissionMode] = useState<ClaudeCodePermissionMode>(
