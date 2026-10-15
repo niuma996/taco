@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.2.10] — 2026-10-16
+
+A one-line fix: the input box goes back to the bottom of the window, where
+it belongs.
+
+### Fixed
+
+- The input box stays at the bottom of the window. Since 0.2.9 it scrolled
+  along with the messages, which held it down only while the conversation
+  was long enough to fill the pane; in a short conversation it floated
+  right under the last message, halfway up the window.
+
 ## [0.2.9] — 2026-10-16
 
 A subagent can now work inside your own Claude Code CLI, the agents that
