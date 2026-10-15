@@ -10,6 +10,12 @@ footer.input {
        scrollbar. */
     position: sticky;
     bottom: 0;
+    /* Sticky only pins the footer while the content overflows; when a short
+       conversation leaves free space in `main`, the footer would otherwise
+       float right after the last message, mid-window. The auto margin absorbs
+       that free space, pushing the footer to the window bottom — and computes
+       to 0 once messages overflow, leaving the scrolling behaviour untouched. */
+    margin-top: auto;
     /* Owns the surface the messages scroll under: opaque so text passing
        beneath is not visible through the card's gaps. */
     background: var(--chat-panel-bg);
