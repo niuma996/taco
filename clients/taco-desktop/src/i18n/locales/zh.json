@@ -676,8 +676,8 @@
     "deleteBody": "这会从 taco agents 目录删除定义文件。已使用它的会话不受影响。",
     "runtimeCc": "Claude Code",
     "form": {
-      "newTitle": "新建 agent",
-      "editTitle": "编辑 agent",
+      "newTitle": "新建子代理",
+      "editTitle": "编辑子代理",
       "name": "名称",
       "nameHint": "小写 kebab-case,即 agent type",
       "nameInvalid": "字母开头,仅含小写字母、数字和连字符",

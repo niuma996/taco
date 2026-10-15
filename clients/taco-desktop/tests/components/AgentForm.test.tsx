@@ -3,7 +3,7 @@
  * different fields; each must save only what belongs to its runtime.
  */
 import { strict as assert } from "node:assert";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, it, vi } from "vitest";
 
@@ -93,6 +93,37 @@ describe("AgentForm", () => {
         );
         assert.equal(onSave.mock.calls.length, 0);
     });
+
+    // Bulk-set instead of typing: the values are far past the limits and
+    // per-keystroke events would dominate the test's runtime. Each case starts
+    // from a valid form, so the one over-limit field is what disables Save.
+    const limitCases: Array<[string, (inputs: HTMLElement[]) => [HTMLElement, string]]> = [
+        ["description", (inputs) => [inputs[1] as HTMLElement, "x".repeat(1025)]],
+        ["whenToUse", (inputs) => [inputs[2] as HTMLElement, "x".repeat(2049)]],
+        ["maxTurns", () => [screen.getByDisplayValue("30"), "201"]],
+        ["systemPrompt", (inputs) => [inputs[inputs.length - 1] as HTMLElement, "x".repeat(65537)]],
+    ];
+    for (const [field, pick] of limitCases) {
+        it(`disables save when ${field} exceeds the server limit`, () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            const inputs = screen.getAllByRole("textbox");
+            fireEvent.change(inputs[0] as HTMLElement, { target: { value: "limits" } });
+            fireEvent.change(inputs[1] as HTMLElement, { target: { value: "does things" } });
+            fireEvent.change(inputs[inputs.length - 1] as HTMLElement, {
+                target: { value: "You do things." },
+            });
+            const save = screen
+                .getByText("agents.form.save")
+                .closest("button") as HTMLButtonElement;
+            assert.equal(save.disabled, false, "baseline form must be savable");
+
+            const [el, value] = pick(screen.getAllByRole("textbox"));
+            fireEvent.change(el, { target: { value } });
+            assert.equal(save.disabled, true);
+            assert.equal(onSave.mock.calls.length, 0);
+        });
+    }
 
     it("shows the no-user-questions rule in the Claude Code dialog", () => {
         render(<AgentForm runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);

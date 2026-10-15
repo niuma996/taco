@@ -678,8 +678,8 @@
     "deleteBody": "This removes the definition file from the taco agents directory. Sessions that already used it are unaffected.",
     "runtimeCc": "Claude Code",
     "form": {
-      "newTitle": "New agent",
-      "editTitle": "Edit agent",
+      "newTitle": "New subagent",
+      "editTitle": "Edit subagent",
       "name": "Name",
       "nameHint": "lowercase-kebab-case; used as the agent type",
       "nameInvalid": "Lowercase letters, digits and dashes, starting with a letter",

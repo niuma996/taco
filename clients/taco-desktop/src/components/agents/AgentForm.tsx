@@ -92,7 +92,8 @@ export function AgentForm(props: AgentFormProps) {
     const trimmedType = agentType.trim();
     const typeValid = AGENT_TYPE_PATTERN.test(trimmedType);
     const turns = Number.parseInt(maxTurns.trim(), 10);
-    const turnsValid = Number.isInteger(turns) && turns >= 1 && String(turns) === maxTurns.trim();
+    const turnsValid =
+        Number.isInteger(turns) && turns >= 1 && turns <= 200 && String(turns) === maxTurns.trim();
     const toolList = parseTools(tools);
     const blockedTool = toolList?.find((n) => BLOCKED_CC_TOOLS.has(n));
     const toolsError =
@@ -101,11 +102,17 @@ export function AgentForm(props: AgentFormProps) {
             : (toolList?.some((n) => !TOOL_NAME_PATTERN.test(n)) ?? false)
               ? t("agents.form.ccToolsInvalid")
               : undefined;
+    // Mirrors agentsWriteSchema: `maxLength` on the inputs stops typing, but a
+    // value set any other way (e.g. a pre-limit definition) must not reach a
+    // write the sidecar rejects.
     const canSave =
         typeValid &&
         description.trim() !== "" &&
+        description.trim().length <= 1024 &&
+        whenToUse.trim().length <= 2048 &&
         turnsValid &&
         systemPrompt.trim() !== "" &&
+        systemPrompt.trim().length <= 65536 &&
         (!isCc || toolsError === undefined);
 
     const save = () => {
@@ -168,10 +175,18 @@ export function AgentForm(props: AgentFormProps) {
                 />
             </FormField>
             <FormField label={t("agents.form.description")}>
-                <TextInput value={description} onChange={(e) => setDescription(e.target.value)} />
+                <TextInput
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    maxLength={1024}
+                />
             </FormField>
             <FormField label={t("agents.form.whenToUse")}>
-                <TextInput value={whenToUse} onChange={(e) => setWhenToUse(e.target.value)} />
+                <TextInput
+                    value={whenToUse}
+                    onChange={(e) => setWhenToUse(e.target.value)}
+                    maxLength={2048}
+                />
             </FormField>
             {isCc && (
                 <>
@@ -217,6 +232,7 @@ export function AgentForm(props: AgentFormProps) {
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     rows={12}
+                    maxLength={65536}
                 />
             </FormField>
         </Modal>

@@ -7,13 +7,18 @@ import { getRegisteredMethod, type MethodCtx } from "../../src/server/methodRegi
 
 export async function callMethod<T = unknown>(
     name: string,
-    args: { server?: unknown; params?: unknown; serverRegistry?: unknown } = {},
+    args: {
+        server?: unknown;
+        params?: unknown;
+        serverRegistry?: unknown;
+        workspace?: unknown;
+    } = {},
 ): Promise<T> {
     const reg = getRegisteredMethod(name);
     if (!reg) throw new Error(`unregistered: ${name}`);
     const ctx: MethodCtx<unknown> = {
         id: "test",
-        workspace: undefined as never,
+        workspace: args.workspace as never,
         cwd: undefined as never,
         server: args.server as never,
         serverRegistry: args.serverRegistry as never,

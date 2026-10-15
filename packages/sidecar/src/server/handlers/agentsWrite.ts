@@ -10,7 +10,7 @@
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { AgentsWriteParams } from "@taco-ai/protocol";
 import { parseAgentMarkdown } from "../../agents/loadAgents.ts";
 import { type AgentDefinition, DEFAULT_SUBAGENT_RUNTIME } from "../../agents/types.ts";
@@ -38,7 +38,9 @@ const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
 
 /** True when the definition lives in `$TACO_HOME/agents` (the editable set). */
 export function isEditableAgent(def: AgentDefinition): boolean {
-    return def.filePath.startsWith(userAgentsDir());
+    const rel = relative(resolve(userAgentsDir()), resolve(def.filePath));
+    // `relative` across Windows drives returns an absolute path, not `..`.
+    return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
 function pathFor(agentType: string): string {
@@ -134,7 +136,7 @@ export async function writeUserAgent(
 
     await mkdir(userAgentsDir(), { recursive: true });
     const targetPath = pathFor(target);
-    const tmpPath = `${targetPath}.tmp-${process.pid}`;
+    const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await writeFile(tmpPath, renderAgentMarkdown(params), "utf-8");
     await rename(tmpPath, targetPath);
     if (params.previousAgentType !== undefined && params.previousAgentType !== target) {

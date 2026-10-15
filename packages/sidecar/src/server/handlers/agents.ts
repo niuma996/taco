@@ -25,8 +25,29 @@ import {
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 import type { AgentDefinition } from "../../agents/types.ts";
+import { createLogger } from "../../lib/logger.ts";
+import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
+import type { ServerRegistry } from "../serverRegistry.ts";
 import { deleteUserAgent, isEditableAgent, writeUserAgent } from "./agentsWrite.ts";
+
+const log = createLogger("agents");
+
+async function reloadAgentsEverywhere(
+    server: ServerRpcSurface,
+    serverRegistry: ServerRegistry | undefined,
+): Promise<void> {
+    const targets = serverRegistry?.all() ?? [server];
+    await Promise.all(
+        targets.map(async (target) => {
+            try {
+                await target.reloadAgents?.();
+            } catch (error) {
+                log.warn("agent catalog hot reload failed", { error: String(error) });
+            }
+        }),
+    );
+}
 
 export function registerAgentsHandlers(): void {
     registerMethod(
@@ -80,11 +101,12 @@ export function registerAgentsHandlers(): void {
         true,
         async ({
             server,
+            serverRegistry,
             workspace,
             params,
         }: MethodCtx<AgentsWriteParams>): Promise<AgentsWriteResult> => {
             await writeUserAgent(params, workspace.agents);
-            if (server.reloadAgents) await server.reloadAgents();
+            await reloadAgentsEverywhere(server, serverRegistry);
             return { ok: true };
         },
         { schema: agentsWriteSchema },
@@ -95,11 +117,12 @@ export function registerAgentsHandlers(): void {
         true,
         async ({
             server,
+            serverRegistry,
             workspace,
             params,
         }: MethodCtx<AgentsDeleteParams>): Promise<AgentsDeleteResult> => {
             await deleteUserAgent(params.agentType, workspace.agents);
-            if (server.reloadAgents) await server.reloadAgents();
+            await reloadAgentsEverywhere(server, serverRegistry);
             return { ok: true };
         },
         { schema: agentsDeleteSchema },

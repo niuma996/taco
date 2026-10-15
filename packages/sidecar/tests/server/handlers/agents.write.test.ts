@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import type { AgentsWriteParams } from "@taco-ai/protocol";
 import { parseAgentMarkdown } from "../../../src/agents/loadAgents.ts";
 import type { AgentDefinition } from "../../../src/agents/types.ts";
+import type { ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
 import {
     AgentWriteError,
     deleteUserAgent,
@@ -18,6 +19,10 @@ import {
     userAgentsDir,
     writeUserAgent,
 } from "../../../src/server/handlers/agentsWrite.ts";
+import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { ServerRegistry } from "../../../src/server/serverRegistry.ts";
+import { callMethod } from "../../_helpers/handlerCall.ts";
+import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
 function def(over: Partial<AgentDefinition> = {}): AgentDefinition {
     return {
@@ -185,12 +190,108 @@ describe("agentsWrite", () => {
     it("deletes only editable definitions", async () => {
         await writeUserAgent(params(), []);
         await deleteUserAgent("my-cc", [def({ agentType: "my-cc" })]);
-        assert.deepEqual(readdirSync(userAgentsDir()), []);
+        assert.equal(readdirSync(userAgentsDir()).includes("my-cc.md"), false);
         await assert.rejects(deleteUserAgent("ghost", []), /not found/);
+    });
+
+    it("并发写同一个 agent 不互相踩临时文件", async () => {
+        // The write goes to `<target>.tmp-*` then renames. If the temp name were
+        // derived from the pid alone, two writes in one process would share it:
+        // one rename would win and the other would fail with ENOENT.
+        await Promise.all([
+            writeUserAgent(params({ agentType: "race", description: "v1" }), []),
+            writeUserAgent(params({ agentType: "race", description: "v2" }), []),
+        ]);
+        const parsed = parseAgentMarkdown(
+            readFileSync(join(userAgentsDir(), "race.md"), "utf-8"),
+            "race",
+            "user",
+        );
+        assert.ok(["v1", "v2"].includes(parsed?.description ?? ""));
+        assert.deepEqual(
+            readdirSync(userAgentsDir()).filter((f) => f.includes(".tmp-")),
+            [],
+            "no temp file may survive the rename",
+        );
     });
 
     it("marks only $TACO_HOME/agents definitions as editable", () => {
         assert.equal(isEditableAgent(def()), true);
         assert.equal(isEditableAgent(def({ filePath: "/pkg/builtin/explorer.md" })), false);
+        assert.equal(isEditableAgent(def({ filePath: `${userAgentsDir()}-evil/x.md` })), false);
+    });
+});
+
+describe("agents.write/delete server fan-out", () => {
+    useTempTacoHome("agents-fanout");
+
+    it("reloads every registered server after writing a definition", async () => {
+        registerBuiltinMethods();
+        const calls = [0, 0, 0];
+        const servers = calls.map(
+            (_, i) =>
+                ({
+                    async reloadAgents() {
+                        calls[i] = (calls[i] ?? 0) + 1;
+                    },
+                }) as unknown as ServerRpcSurface,
+        );
+        const registry = new ServerRegistry();
+        servers.forEach((server) => {
+            registry.add(server);
+        });
+        const workspace = { agents: [] };
+        await callMethod("agents.write", {
+            server: servers[0],
+            serverRegistry: registry,
+            params: params({ agentType: "fanout" }),
+            workspace,
+        });
+        assert.deepEqual(calls, [1, 1, 1]);
+    });
+
+    it("reloads every server after deletion and isolates reload failures", async () => {
+        registerBuiltinMethods();
+        const calls = [0, 0, 0];
+        const servers = calls.map(
+            (_, i) =>
+                ({
+                    async reloadAgents() {
+                        calls[i] = (calls[i] ?? 0) + 1;
+                        if (i === 1) throw new Error("stale server");
+                    },
+                }) as unknown as ServerRpcSurface,
+        );
+        const registry = new ServerRegistry();
+        servers.forEach((server) => {
+            registry.add(server);
+        });
+        await writeUserAgent(params({ agentType: "to-delete" }), []);
+
+        await callMethod("agents.delete", {
+            server: servers[0],
+            serverRegistry: registry,
+            params: { workspace: "/w", agentType: "to-delete" },
+            workspace: { agents: [def({ agentType: "to-delete" })] },
+        });
+
+        assert.deepEqual(calls, [1, 1, 1]);
+        assert.equal(readdirSync(userAgentsDir()).includes("to-delete.md"), false);
+    });
+
+    it("falls back to reloading the request server without a registry", async () => {
+        registerBuiltinMethods();
+        let calls = 0;
+        const server = {
+            async reloadAgents() {
+                calls++;
+            },
+        } as unknown as ServerRpcSurface;
+        await callMethod("agents.write", {
+            server,
+            params: params({ agentType: "single" }),
+            workspace: { agents: [] },
+        });
+        assert.equal(calls, 1);
     });
 });

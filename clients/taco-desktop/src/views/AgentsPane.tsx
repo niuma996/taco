@@ -112,7 +112,6 @@ export function AgentsPane({
                     />
                 </PaneHeader>
                 {error && <div className="error-banner">{error}</div>}
-                {actionError && <div className="error-banner">{actionError}</div>}
                 <div className="agents-list-body">
                     {filtered.length === 0 ? (
                         <div className="agents-empty">
@@ -158,7 +157,10 @@ export function AgentsPane({
                                             variant="ghost"
                                             size="sm"
                                             disabled={saving}
-                                            onClick={() => setConfirmDelete(true)}
+                                            onClick={() => {
+                                                setActionError(null);
+                                                setConfirmDelete(true);
+                                            }}
                                         >
                                             {t("agents.delete")}
                                         </Button>
@@ -244,6 +246,8 @@ export function AgentsPane({
                 title={t("agents.deleteTitle")}
                 message={t("agents.deleteBody")}
                 confirmLabel={t("agents.delete")}
+                error={actionError}
+                busy={saving}
                 onConfirm={confirmDeleteSelected}
                 onCancel={() => setConfirmDelete(false)}
             />
