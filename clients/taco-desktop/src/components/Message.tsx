@@ -22,6 +22,7 @@ import {
 import { AssistantMarkdown } from "./AssistantMarkdown";
 import { MessageMeta } from "./MessageMeta";
 import { ToolCardShell } from "./ToolCardShell";
+import { Clamp } from "./ui/Clamp";
 
 /**
  * memo: applyEventToMessages emits a new reference only for the affected
@@ -34,6 +35,7 @@ export const Message = memo(function Message({
     m,
     isLastInTurn = false,
     isTurnInProgress = false,
+    clampLines,
     onCommandPermission,
 }: {
     m: UiMessage;
@@ -48,6 +50,13 @@ export const Message = memo(function Message({
      * message — it shows up only after the turn actually settles.
      */
     isTurnInProgress?: boolean;
+    /**
+     * Collapse the user bubble's text to this many lines, expanding on click.
+     * The subagent panel sets it because its stream is a narrow side pane whose
+     * prompt can run far past the fold; the main chat has the width to show a
+     * prompt in full, so it leaves this unset.
+     */
+    clampLines?: number;
     onCommandPermission?: (
         requestId: string,
         approved: boolean,
@@ -70,7 +79,13 @@ export const Message = memo(function Message({
                         ))}
                     </div>
                 )}
-                <div className="message-text">{m.text}</div>
+                {clampLines === undefined ? (
+                    <div className="message-text">{m.text}</div>
+                ) : (
+                    <Clamp lines={clampLines} className="message-text">
+                        {m.text}
+                    </Clamp>
+                )}
                 {showMeta && <MessageMeta ts={m.ts} text={m.text} />}
             </div>
         );

@@ -20,15 +20,13 @@ import { ErrorBoundary } from "../ErrorBoundary";
 import { Message } from "../Message";
 import { PaneSearch } from "../PaneSearch";
 import { Button } from "../ui/Button";
+import { Clamp } from "../ui/Clamp";
 import { RightPanel } from "./RightPanel";
 import { SubagentRow } from "./SubagentRow";
 
-/** Prompt preview cap; matches the inline card's former trimPrompt default. */
-const PROMPT_MAX = 240;
-
-function trimPrompt(s: string): string {
-    return s.length <= PROMPT_MAX ? s : `${s.slice(0, PROMPT_MAX)}…`;
-}
+/** Both the prompt block and a user bubble in this pane clamp to this many
+ *  lines — the panel is a side column, so anything longer has to fold. */
+const PROMPT_MAX_LINES = 5;
 
 export function SubagentPanel({
     messages,
@@ -194,7 +192,9 @@ function SubagentDetail({
                     <span className="subagent-detail-prompt-label">
                         {t("subagents.promptLabel")}
                     </span>
-                    <pre>{trimPrompt(entry.prompt)}</pre>
+                    <Clamp lines={PROMPT_MAX_LINES} className="subagent-detail-prompt-text">
+                        {entry.prompt}
+                    </Clamp>
                 </div>
             )}
             {error !== null && (
@@ -219,7 +219,7 @@ function SubagentDetail({
             {hasContent && (
                 <div className="subagent-detail-stream">
                     {shown.map((m) => (
-                        <Message key={m.id} m={m} />
+                        <Message key={m.id} m={m} clampLines={PROMPT_MAX_LINES} />
                     ))}
                 </div>
             )}

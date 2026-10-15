@@ -9,6 +9,13 @@
     overflow: hidden;
     border-left: 1px solid var(--border);
     background: var(--bg-secondary);
+    /* --assistant-msg-bg is tuned against `main`'s --chat-panel-bg; this panel
+       sits on --bg-secondary, one step lighter in light mode and one step
+       darker in dark. Painted as-is it rings every reused tool card with a
+       band of the wrong tone. Re-point it at the panel's own surface: the
+       bubble then matches its background, and .thinking-fade's gradient end
+       (which also reads this token) lands on the right color too. */
+    --assistant-msg-bg: var(--bg-secondary);
     font-size: 13px;
     line-height: 1.4;
 }
@@ -147,8 +154,15 @@
 }
 
 /* ── Detail area ── */
+/* Label and text share one recessed box. The fill was --bg, which in light
+   theme is the same warm-gray as the panel's --bg-secondary — the box was
+   invisible there, and two steps too dark in dark theme. --pane-bg is exactly
+   one step below the panel in both. */
 .subagent-detail-prompt {
     margin-bottom: 12px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--pane-bg);
 }
 
 .subagent-detail-prompt-label {
@@ -160,11 +174,9 @@
     margin-bottom: 4px;
 }
 
-.subagent-detail-prompt pre {
-    margin: 0;
-    padding: 6px 8px;
-    border-radius: var(--radius-sm);
-    background: var(--bg);
+/* Only the text carries the fill's inner shape; the padding and background
+   live on the parent so the label sits inside the same box. */
+.subagent-detail-prompt-text {
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -187,10 +199,17 @@
 
 /* Column flex so `.message.user { align-self: flex-end }` actually
    right-aligns, matching `main`. min-width:0 keeps fit-content bubbles
-   from expanding the panel past its width. */
+   from expanding the panel past its width.
+   Gap is 0.4rem, not main's 0.5rem: the child's transcript persists one
+   assistant entry per tool call (ClaudeCodeTranscript closes its draft
+   whenever the SDK frame's message.id changes), so one turn of tool calls
+   arrives here as a run of single-card bubbles. At main's spacing those
+   cards would sit 0.5rem + two 0.6rem paddings apart instead of the 0.4rem
+   that separates cards sharing one bubble. */
 .subagent-detail-stream {
     display: flex;
     flex-direction: column;
+    gap: 0.4rem;
     min-width: 0;
 }
 
@@ -204,6 +223,15 @@
 
 .subagent-detail-stream .message.user {
     max-width: 100%;
+}
+
+/* Same reasoning, vertical: the fill now matches the panel, so the padding
+   separates nothing visible — it only doubles the gap between two bubbles
+   that already read as one tool run. Prose keeps its own rhythm from
+   `.md-assistant p { margin: 0.5em }`, whose sibling margins collapse to the
+   same ~0.4rem the stream gap now uses. */
+.subagent-detail-stream .message.assistant {
+    padding: 0;
 }
 
 /* Narrow panel, so even assistant markdown needs the stronger `anywhere` the

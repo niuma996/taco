@@ -430,3 +430,36 @@
     justify-content: flex-end;
     gap: 0.5rem;
 }
+
+/* ── Clamp (long text collapsed to N lines) ── */
+/* The cap lives on the text element itself, NOT under .ui-clamp--toggle: the
+   toggle only appears once an overflow has been measured, so anchoring the
+   clamp there would leave the first layout uncapped — and an uncapped box
+   cannot measure itself as overflowing. */
+.ui-clamp__text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--ui-clamp-lines, 5);
+    line-clamp: var(--ui-clamp-lines, 5);
+    overflow: hidden;
+}
+.ui-clamp__text--expanded {
+    display: block;
+    overflow: visible;
+}
+/* The button replaces the text's own wrapper, so it has to reproduce that
+   wrapper's box — otherwise the UA button styles land on text that was a plain
+   div a moment ago. */
+.ui-clamp--toggle {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
