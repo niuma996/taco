@@ -1,12 +1,14 @@
 /**
  * SessionInfo — top-of-ChatPane session info bar. Left to right: session-list
- * toggle, new-chat button, divider, then id (short) / copy / log / status /
- * creation time, with the task panel and file-tree toggles pinned right.
+ * toggle, new-chat button, divider, then status and title (truncating), with
+ * the session details icon (full id + copy / created-at / open log) and the
+ * task panel and file-tree toggles pinned right.
  *
  * The toggle and new-chat button are the row's two primary actions and share
  * an accent-chip style (.session-info-toggle / .session-info-new); copy, log,
  * tasks and files are plain icon buttons clustered with negative margins.
- * "Open log" sits next to the copy button as a session-level action.
+ * Copy / log / created-at are consolidated behind one details icon so the bar
+ * never carries more than one metadata line.
  *
  * "Open folder…" (the workspace picker entry that switches the active
  * workspace to a directory the user chooses) deliberately stays inside the
@@ -15,6 +17,7 @@
  * natural home.
  */
 
+import * as Popover from "@radix-ui/react-popover";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
     Bot,
@@ -24,6 +27,7 @@ import {
     Copy,
     FileText,
     FolderTree,
+    Info,
     ListTodo,
     Plus,
 } from "lucide-react";
@@ -31,6 +35,7 @@ import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
+import { IconButton } from "./ui/IconButton";
 
 export function SessionInfo({
     ws,
@@ -138,6 +143,18 @@ export function SessionInfo({
     }
     const statusKey = isRunning ? "session.status.running" : "session.status.idle";
     const filePath = activeMeta?.filePath;
+    const openLog = async () => {
+        // Try system default app first; fall back to revealing in file manager.
+        try {
+            await openPath(filePath ?? "");
+        } catch {
+            try {
+                await revealItemInDir(filePath ?? "");
+            } catch (err) {
+                console.error("[taco] open log file failed", err);
+            }
+        }
+    };
     return (
         <div className="session-info">
             {toggle}
@@ -157,54 +174,104 @@ export function SessionInfo({
                 </button>
             )}
             <span className="session-info-divider" aria-hidden="true" />
-            {/* Short id saves horizontal space; hover shows full id; copy uses the full value. */}
-            <code className="session-info-id" title={activeId}>
-                {activeId.slice(0, 8)}
-            </code>
-            <button
-                className="session-info-copy"
-                title={t("session.copySessionId")}
-                aria-label={t("session.copySessionId")}
-                onClick={() => onCopy(activeId)}
-            >
-                {copiedSessionId === activeId ? (
-                    <Check size={13} aria-hidden="true" />
-                ) : (
-                    <Copy size={13} aria-hidden="true" />
-                )}
-            </button>
-            {filePath && (
-                <button
-                    type="button"
-                    className="session-info-log"
-                    title={`${filePath}\n${t("session.openLog")}`}
-                    aria-label={`${t("session.openLog")}: ${filePath}`}
-                    onClick={async () => {
-                        // Try system default app first; fall back to revealing in file manager.
-                        try {
-                            await openPath(filePath);
-                        } catch {
-                            try {
-                                await revealItemInDir(filePath);
-                            } catch (err) {
-                                console.error("[taco] open log file failed", err);
-                            }
-                        }
-                    }}
-                >
-                    <FileText size={14} aria-hidden="true" />
-                </button>
-            )}
+            {/* Status leads the metadata block: the dot reads as the session's
+                live signal before its name. Never shrinks — the title
+                truncates instead. */}
             <span className={`session-info-status ${isRunning ? "running" : "idle"}`}>
+                <span className="session-status-dot" aria-hidden="true" />
                 {t(statusKey)}
             </span>
-            {activeMeta?.createdAt && (
-                <span className="session-info-time">
-                    {t("session.createdAtLabel")}{" "}
-                    {formatRelativeTime(activeMeta.createdAt, lng, nowMs)}
+            {/* Title is the bar's primary identifier: it grows into the free
+                width and truncates with an ellipsis. Unnamed sessions fall
+                back to the short id. */}
+            {activeMeta?.name ? (
+                <span className="session-info-title" title={activeMeta.name}>
+                    {activeMeta.name}
                 </span>
+            ) : (
+                <code className="session-info-id" title={activeId}>
+                    {activeId.slice(0, 8)}
+                </code>
             )}
-            {filePath && <span className="session-info-divider" aria-hidden="true" />}
+            {/* Full id + copy / created-at / open log consolidated behind one
+                icon. margin-left:auto fills the slot the created-time text used
+                to hold: metadata stays left, the action cluster stays right. */}
+            <Popover.Root>
+                <Popover.Trigger asChild>
+                    <button
+                        type="button"
+                        className="session-info-details"
+                        title={t("session.details")}
+                        aria-label={t("session.details")}
+                    >
+                        <Info size={14} aria-hidden="true" />
+                    </button>
+                </Popover.Trigger>
+                <Popover.Portal>
+                    {/* The bar sits on the window's top edge, so "bottom" is the
+                        only side with room — same placement as the notification bell. */}
+                    <Popover.Content
+                        className="session-info-popover"
+                        side="bottom"
+                        sideOffset={6}
+                        align="end"
+                        collisionPadding={8}
+                    >
+                        {/* Key-value rows: dim label on a fixed-width left column,
+                            content after it — same grid for every row so the
+                            popover reads as one table, not mixed styles. */}
+                        <div className="session-info-popover__row">
+                            <span className="session-info-popover__label">
+                                {t("session.idLabel")}
+                            </span>
+                            <code className="session-info-popover__id" title={activeId}>
+                                {activeId}
+                            </code>
+                            <IconButton
+                                size="sm"
+                                aria-label={t("session.copySessionId")}
+                                data-state={copiedSessionId === activeId ? "copied" : undefined}
+                                onClick={() => onCopy(activeId)}
+                            >
+                                {copiedSessionId === activeId ? (
+                                    <Check size={13} aria-hidden="true" />
+                                ) : (
+                                    <Copy size={13} aria-hidden="true" />
+                                )}
+                            </IconButton>
+                        </div>
+                        {activeMeta?.createdAt && (
+                            <div className="session-info-popover__row">
+                                <span className="session-info-popover__label">
+                                    {t("session.createdAtLabel")}
+                                </span>
+                                <span className="session-info-popover__value">
+                                    {formatRelativeTime(activeMeta.createdAt, lng, nowMs)}
+                                </span>
+                            </div>
+                        )}
+                        {filePath && (
+                            <div className="session-info-popover__row">
+                                <span className="session-info-popover__label">
+                                    {t("session.logLabel")}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="session-info-popover__log"
+                                    title={filePath}
+                                    onClick={() => void openLog()}
+                                >
+                                    <FileText size={13} aria-hidden="true" />
+                                    {t("session.openLog")}
+                                </button>
+                            </div>
+                        )}
+                    </Popover.Content>
+                </Popover.Portal>
+            </Popover.Root>
+            {(onToggleSubagents || onToggleTasks || filesButton) && (
+                <span className="session-info-divider" aria-hidden="true" />
+            )}
             {onToggleSubagents && (
                 <button
                     type="button"

@@ -20,6 +20,13 @@
 
 .message.user {
     background: var(--user-msg-bg);
+    /* Minimal chip: no outline at all — the tinted fill alone separates the
+       bubble from the chat surface; the shared gray --border would read as a
+       mismatched rim against it. */
+    border: none;
+    /* Softer corner than the shared md radius — the user bubble is the only
+       filled "chip" in the stream, so it carries the large radius alone. */
+    border-radius: var(--radius-lg);
     color: var(--fg);
     /* Slightly larger vertical margin than the per-bubble padding alone would
        give — reads as a clear turn boundary against adjacent assistant rows,
@@ -211,10 +218,10 @@
    active chat has no messages yet. `main` is already flex column; flex:1
    here lets this block absorb the remaining height and center its content. */
 .empty-chat-state {
-    /* Cancel main's asymmetric padding (1rem left / 0 right, 1rem top /
-       1.5rem bottom) so `justify-content: center` centers on the true
+    /* Cancel main's asymmetric padding (1rem left / 0 right, bar height + 1rem
+       top / 1.5rem bottom) so `justify-content: center` centers on the true
        pane box instead of the padded content box. */
-    margin: -1rem 0 -1.5rem -1rem;
+    margin: calc(-1 * (var(--rail-top-padding) + 1rem)) 0 -1.5rem -1rem;
     flex: 1;
     display: flex;
     flex-direction: column;

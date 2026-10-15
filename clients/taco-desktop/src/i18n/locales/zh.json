@@ -30,6 +30,9 @@
     "discardAndCreate": "丢弃并开始新会话",
     "cancel": "取消",
     "copySessionId": "复制会话 ID",
+    "idLabel": "ID",
+    "logLabel": "日志",
+    "details": "会话信息",
     "loadMore": "加载更多",
     "loadingMore": "加载中…",
     "status": {

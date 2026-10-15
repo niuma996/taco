@@ -21,9 +21,9 @@ button svg {
     vertical-align: middle;
 }
 
-/* Sidebar toggle + new-chat button: the row's two "primary" actions get an
-   accent-tinted chip (bg + border) instead of the plain transparent icon
-   button style, so navigation / creation stand out from metadata actions
+/* Sidebar toggle + new-chat button: the row's two "primary" actions get a
+   solid accent-family chip (no border — same minimal language as the user
+   message bubble) so navigation / creation stand out from metadata actions
    (copy / log / tasks / files). Both carry icon + text, so they size to
    content rather than the fixed 26px square. */
 .session-info-toggle,
@@ -33,9 +33,14 @@ button svg {
     gap: 0.25rem;
     padding: 0 0.5rem;
     height: 26px;
-    background: var(--accent-bg-hover);
-    border: 1px solid var(--accent-bg-active);
+    background: var(--session-chip-bg);
+    border: none;
     border-radius: var(--radius-sm);
+    /* Fixed equal width for both chips. 92px = widest label (聊天列表, 4 CJK ×
+       0.78rem ≈ 50px; "New chat" ≈ 48px) + icon 14px + gap + 0.5rem padding,
+       rounded up. Centered so shorter labels ("新聊天" / "Chats") sit balanced. */
+    width: 92px;
+    justify-content: center;
     color: var(--accent);
     cursor: pointer;
     flex-shrink: 0;
@@ -47,8 +52,7 @@ button svg {
 .session-info-toggle:hover,
 .session-info-new:hover:not(:disabled) {
     color: var(--fg);
-    background: var(--accent-bg-active);
-    border-color: var(--accent);
+    background: var(--session-chip-bg-hover);
 }
 .session-info-new:disabled {
     opacity: 0.5;
@@ -63,9 +67,11 @@ button svg {
 main {
     flex: 1;
     overflow-y: auto;
-    /* Zero right padding so scrollbar hugs the window edge; bottom padding clears
-       the fixed-bottom input. */
-    padding: 1rem 0 1.5rem 1rem;
+    /* Zero right padding so scrollbar hugs the window edge. Top padding adds a
+       full bar height: the frosted .session-info overlays this strip, and the
+       first message must start below it, not scroll out from under it. Bottom
+       padding clears the fixed-bottom input. */
+    padding: calc(var(--rail-top-padding) + 1rem) 0 1.5rem 1rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -87,8 +93,17 @@ main {
     box-sizing: border-box;
     padding: 0 1rem;
     border-bottom: 1px solid var(--border);
-    /* Tier-2 surface, same as the session list column it heads. */
-    background: var(--pane-list-bg);
+    /* Frosted glass: the bar overlays the top of `main` (negative margin), so
+       scrolling messages pass under it and pick up the blur. z-index keeps it
+       above the message stream; popovers portal to body and are unaffected. */
+    position: relative;
+    z-index: 5;
+    margin-bottom: calc(-1 * var(--rail-top-padding));
+    /* Tier-2 surface made translucent — the blur does the separation, so the
+       tint can be lighter than the old solid --pane-list-bg. */
+    background: color-mix(in srgb, var(--pane-list-bg) 72%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     font-size: 0.78rem;
     color: var(--fg-dim);
     flex-wrap: nowrap;
@@ -97,11 +112,25 @@ main {
 .session-info.empty {
     font-style: italic;
 }
-/* In the no-active-session bar there is no .session-info-time (the auto-margin
+/* In the no-active-session bar there is no .session-info-details (the auto-margin
    element that pins the right-hand icon cluster). The file-tree toggle stays
    visible regardless of session state, so it pins itself right here. */
 .session-info.empty .session-info-files {
     margin-left: auto;
+}
+/* Session title: the bar's primary identifier. Grows into the free width
+   between the chips and the right-aligned control group (status + details +
+   panel toggles), truncating with an ellipsis instead of pushing them out.
+   Unnamed sessions fall back to .session-info-id (short id). */
+.session-info-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--fg);
 }
 .session-info-id {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -112,39 +141,19 @@ main {
     border: none;
     padding: 0;
 }
-/* The four icon buttons (copy / log / tasks / files) form one tight cluster:
-   negative side margins cancel most of the row-level 0.6rem gap so the icons
-   read as a group rather than four spread-out buttons. */
-.session-info-copy,
-.session-info-log,
+/* The right-cluster icon buttons (tasks / subagents / files) share tight
+   negative side margins: they cancel most of the row-level 0.6rem gap so the
+   icons read as a group rather than three spread-out buttons. */
 .session-info-tasks,
 .session-info-subagents,
 .session-info-files {
     margin-left: -0.25rem;
     margin-right: -0.25rem;
 }
-.session-info-copy {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    /* Matches the toggle: 26x26, same tier as the left column + button size. */
-    padding: 0;
-    width: 26px;
-    height: 26px;
-    min-width: auto;
-    background: transparent;
-    color: var(--fg-dim);
-    border-radius: var(--radius-sm);
-}
-.session-info-copy:hover {
-    color: var(--fg);
-    background: var(--accent-bg-active);
-}
-/* Session-bar action buttons (log / tasks / file-tree): 26x26, same tier as
-   copy. Hover bg signals clickability; aria-pressed marks the active toggle.
-   The file-tree toggle moved here from the topbar to clear the overlap with
-   the custom window controls on the frameless Windows build. */
-.session-info-log,
+/* Session-bar action buttons (tasks / file-tree / subagents): 26x26, transparent
+   with a hover bg. aria-pressed marks the active toggle. The file-tree toggle
+   moved here from the topbar to clear the overlap with the custom window
+   controls on the frameless Windows build. */
 .session-info-tasks,
 .session-info-subagents,
 .session-info-files {
@@ -165,7 +174,6 @@ main {
         color 0.12s ease,
         background 0.12s ease;
 }
-.session-info-log:hover,
 .session-info-tasks:hover,
 .session-info-subagents:hover,
 .session-info-files:hover {
@@ -177,10 +185,115 @@ main {
 .session-info-files[aria-pressed="true"] {
     color: var(--accent);
 }
-.session-info-log:focus-visible,
 .session-info-tasks:focus-visible,
 .session-info-subagents:focus-visible,
 .session-info-files:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Session-details trigger: same 26x26 chrome as the right-cluster buttons but
+   standalone. margin-left:auto fills the slot the created-time text held, so
+   metadata stays left and the right cluster keeps hugging the bar's edge. */
+.session-info-details {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    padding: 0;
+    width: 26px;
+    height: 26px;
+    min-width: auto;
+    background: transparent;
+    color: var(--fg-dim);
+    border-radius: var(--radius-sm);
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+        color 0.12s ease,
+        background 0.12s ease;
+}
+.session-info-details:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+.session-info-details:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Session-details popover — full id + copy, created-at, open log, consolidated
+   from the old inline metadata. Same chrome as .notification-popover. */
+.session-info-popover {
+    min-width: 200px;
+    max-width: calc(100vw - 16px);
+    padding: 8px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 6px 18px var(--shadow-color);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--fg);
+}
+.session-info-popover__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.session-info-popover__id {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    color: var(--fg);
+    /* Reset inline-code styling — same treatment as .session-info-id. */
+    background: none;
+    border: 0;
+    padding: 0;
+}
+/* Label column: fixed min-width so every row's content starts at the same
+   x offset across languages ("ID" / "created" / "Log" differ in width). */
+.session-info-popover__label {
+    flex: 0 0 auto;
+    min-width: 3.5em;
+    color: var(--fg-dim);
+}
+.session-info-popover__value {
+    color: var(--fg);
+}
+/* Copied feedback on the popover copy action (data-state mirrors the old
+   inline copy button's check state). */
+.session-info-popover .ui-icon-btn[data-state="copied"] {
+    color: var(--success);
+}
+/* Log link — content of its row, styled as an accent link rather than a
+   block button so it matches the key-value grid. */
+.session-info-popover__log {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+.session-info-popover__log:hover {
+    color: var(--fg);
+    text-decoration: underline;
+}
+.session-info-popover__log:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
 }
@@ -215,22 +328,18 @@ main {
     background: var(--border);
     align-self: center;
 }
+/* Session status: dot + text instead of the old bordered pill — same language
+   as the sidebar rows' .session-status-dot (dim when idle, accent + pulse when
+   running). The dot carries the activity signal; text just labels it. */
 .session-info-status {
     display: inline-flex;
     align-items: center;
-    padding: 0.05rem 0.45rem;
-    border-radius: var(--radius-pill);
-    font-size: 0.7rem;
-    border: 1px solid var(--border);
-}
-.session-info-status.idle {
+    gap: 5px;
+    font-size: 0.72rem;
     color: var(--fg-dim);
+    /* Never shrinks — the title truncates instead. */
+    flex-shrink: 0;
 }
 .session-info-status.running {
     color: var(--accent);
-    border-color: var(--accent);
-}
-.session-info-time {
-    margin-left: auto;
-    font-size: 0.72rem;
 }

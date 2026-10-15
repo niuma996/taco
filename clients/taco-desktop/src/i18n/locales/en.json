@@ -31,6 +31,9 @@
     "discardAndCreate": "Discard & Start",
     "cancel": "Cancel",
     "copySessionId": "Copy session id",
+    "idLabel": "ID",
+    "logLabel": "Log",
+    "details": "Session info",
     "loadMore": "Load more",
     "loadingMore": "Loading…",
     "status": {
