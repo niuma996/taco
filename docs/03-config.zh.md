@@ -185,6 +185,23 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 返回一个 key 且不落日志；`settings.*` 的整体视图仍然脱敏。`mcpServers` /
 `channels` 里的秘密没有明文出口，需要请用户重新输入。
 
+### 测试供应商连接
+
+`provider.testConnection`（协议 2.2+）通过与会话完全相同的 pi 流式路径发送
+一条极短的对话请求，所以「通过」意味着 key、端点、协议、模型 id 四者一起可用
+——这是 `provider.listModels` 做不到的：不少中转站能应答 `/models` 却拒绝对话，
+或反过来。
+
+两种参数形态：`{ providerId, modelId, apiKey? }` 用于已保存的供应商（key 默认取自
+sidecar 内部存储，`apiKey` 可覆盖，因此在详情面板里输入但还没保存的 key 也能先测）；
+`{ baseUrl, api, apiKey, modelId }` 用于新建自定义供应商。探测失败属于正常返回值而非
+RPC 错误——`reason` 取值为 `auth` / `not-found` / `rate-limited` / `timeout` /
+`network` / `error`，`message` 里带上游原文。
+
+探测本身刻意压得很轻（一条极短请求、输出上限 16 token、不重试、20 秒预算），
+但它是一次真实请求，会消耗 token。每次探测使用独立的 provider 集合，不会读写
+workspace 的 catalog。
+
 ### 内置供应商的模型列表
 
 内置 provider 自带 pi 的静态模型列表。下面两个字段在不分叉 provider 的前提下

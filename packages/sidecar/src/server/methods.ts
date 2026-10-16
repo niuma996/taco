@@ -18,6 +18,7 @@ import { registerJobsHandlers } from "./handlers/jobs.ts";
 import { registerMcpHandlers } from "./handlers/mcp.ts";
 import { registerMemoryHandlers } from "./handlers/memory.ts";
 import { registerProviderModelsHandlers } from "./handlers/providerModels.ts";
+import { registerProviderTestHandlers } from "./handlers/providerTest.ts";
 import { registerSessionLifecycleHandlers } from "./handlers/sessionLifecycle.ts";
 import { registerSessionReadHandlers } from "./handlers/sessionRead.ts";
 import { registerSessionRuntimeHandlers } from "./handlers/sessionRuntime.ts";
@@ -54,6 +55,7 @@ export function registerBuiltinMethods(): void {
     registerMemoryHandlers();
     registerCheckpointsHandlers();
     registerProviderModelsHandlers();
+    registerProviderTestHandlers();
     // PR4: jobs.* lives last so any other handler can reference the
     // scheduler's JobsControl via ServerRpcSurface.jobs without worrying
     // about init order (jobs is process-scoped, never workspace-scoped).

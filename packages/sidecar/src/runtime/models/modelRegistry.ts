@@ -226,6 +226,26 @@ export function resolveProviderEndpoint(
     return { baseUrl, api };
 }
 
+/**
+ * Build the pi Provider a session would stream through for `providerId`:
+ * a custom provider from its config, or a built-in with the user's
+ * extras/hides applied (same wrapper the catalog registers). Used by
+ * provider.testConnection so a probe can target any model the picker offers.
+ */
+export function resolveProvider(
+    providerId: string,
+    customProviders: readonly CustomProviderConfig[],
+    extraModels: Record<string, CustomModelEntry[]> = {},
+    hiddenModels: Record<string, string[]> = {},
+    builtinProviders: ReadonlyArray<BuiltinProviderEntry> = BUILTIN_PROVIDER_FACTORIES,
+): Provider | undefined {
+    const custom = customProviders.find((c) => c.id === providerId);
+    if (custom) return buildCustomProvider(custom);
+    const builtin = builtinProviders.find((b) => b.id === providerId);
+    if (!builtin) return undefined;
+    return withModelEdits(builtin.factory(), extraModels, hiddenModels);
+}
+
 export interface ModelRegistryOptions {
     readonly models: MutableModels;
     readonly sessionRegistry: SessionRegistry;

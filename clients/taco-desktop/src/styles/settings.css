@@ -410,6 +410,56 @@
     display: flex;
     gap: 0.4rem;
     margin-top: 0.5rem;
+    /* Sibling spacing in this modal comes from the previous element's bottom
+       margin (.ui-form-field has 0.9rem); a bare row needs its own or the
+       form field below it sits flush against the inputs. */
+    margin-bottom: 0.9rem;
+}
+/* Connection test: model picker + button, then a one-shot result banner. */
+.provider-detail-test-row {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+.provider-detail-test-row .ui-select-trigger {
+    flex: 1;
+    min-width: 0;
+}
+.provider-detail-test-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+}
+.provider-detail-test-result > svg {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+.provider-detail-test-result--ok {
+    background: var(--success-bg);
+    color: var(--success);
+}
+.provider-detail-test-result--fail {
+    background: var(--error-bg);
+    color: var(--error);
+}
+.provider-detail-test-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+.provider-detail-test-headline {
+    font-weight: 500;
+}
+/* Raw upstream text / reply preview — dim, monospace, wraps long URLs. */
+.provider-detail-test-detail {
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
 }
 /* Push the danger button to the left edge of the actions row. */
 .provider-detail-delete {

@@ -6,6 +6,8 @@
  *
  * Relationship: `class SidecarServer implements ServerRpcSurface`.
  */
+
+import type { Provider } from "@earendil-works/pi-ai";
 import type {
     ChannelsBindCreds,
     ChannelsBindResult,
@@ -152,6 +154,12 @@ export interface ServerRpcSurface {
     getProviderEndpoint?(
         providerId: string,
     ): { baseUrl: string; api: CustomProviderApi } | undefined;
+    /**
+     * Build the pi Provider for a registered id (provider.testConnection
+     * "saved" branch), with the user's model-list edits applied so a test can
+     * target an added model. Undefined for unknown providers.
+     */
+    buildProvider?(providerId: string): Provider | undefined;
     /**
      * Update the default model/provider at runtime (called by handler after
      * settings.write changes defaultModel/defaultProvider). Updates held

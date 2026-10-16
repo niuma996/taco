@@ -13,11 +13,12 @@ import type {
     CustomModelEntry,
     CustomProviderApi,
     CustomProviderConfig,
+    ProviderTestConnectionResult,
     ProviderView,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
-import { Eye, EyeOff, Plus, Trash2, Undo2 } from "lucide-react";
+import { CircleCheck, CircleX, Eye, EyeOff, Plus, Trash2, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
@@ -144,6 +145,56 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
     const canFetch = isCreate
         ? trimmedBaseUrl !== "" && keyInput.trim() !== "" && !fetching
         : (provider?.configured ?? false) && !fetching;
+
+    // Connection test: every model the user could pick, in list order.
+    const testableModels = [...staticModels.map((m) => m.id), ...models];
+    const [testModelPick, setTestModelPick] = useState<string>("");
+    // Fall back to the first model when the pick was removed from the list.
+    const testModel = testableModels.includes(testModelPick)
+        ? testModelPick
+        : (testableModels[0] ?? "");
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState<ProviderTestConnectionResult | null>(null);
+    // A typed key is tested as-is, before saving; otherwise the stored key.
+    const typedKey = keyMode === "edit" ? keyInput.trim() : "";
+    const hasKey = typedKey !== "" || (provider?.configured ?? false);
+    const canTest =
+        !testing &&
+        testModel !== "" &&
+        hasKey &&
+        (isCreate ? trimmedBaseUrl !== "" && typedKey !== "" : true);
+
+    const testConnection = async () => {
+        if (!canTest) return;
+        setTesting(true);
+        setTestResult(null);
+        try {
+            const result = isCreate
+                ? await props.client.providerTestConnection({
+                      baseUrl: trimmedBaseUrl,
+                      api,
+                      apiKey: typedKey,
+                      modelId: testModel,
+                  })
+                : await props.client.providerTestConnection({
+                      providerId: provider?.id ?? "",
+                      modelId: testModel,
+                      ...(typedKey ? { apiKey: typedKey } : {}),
+                  });
+            setTestResult(result);
+        } catch (e) {
+            // Transport-level failure (sidecar down, invalid params) — shown in
+            // the same slot as a probe failure so the user sees one outcome.
+            setTestResult({
+                ok: false,
+                reason: "error",
+                message: e instanceof Error ? e.message : String(e),
+                latencyMs: 0,
+            });
+        } finally {
+            setTesting(false);
+        }
+    };
 
     const toggleReveal = async () => {
         if (!provider) return;
@@ -545,6 +596,63 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                     {t("settings.providerModelAdd")}
                 </Button>
             </div>
+
+            <FormField
+                label={t("settings.providerTestTitle")}
+                hint={
+                    testableModels.length === 0
+                        ? t("settings.providerTestNeedModel")
+                        : !hasKey
+                          ? t("settings.providerTestNeedKey")
+                          : t("settings.providerTestHint")
+                }
+            >
+                <div className="provider-detail-test-row">
+                    <Select
+                        value={testModel}
+                        disabled={testing || testableModels.length === 0}
+                        onValueChange={setTestModelPick}
+                        options={testableModels}
+                        placeholder={t("settings.providerTestModel")}
+                        label={t("settings.providerTestModel")}
+                    />
+                    <Button
+                        variant="default"
+                        disabled={!canTest}
+                        onClick={() => void testConnection()}
+                    >
+                        {testing ? t("settings.providerTesting") : t("settings.providerTestButton")}
+                    </Button>
+                </div>
+            </FormField>
+            {testResult && (
+                <div
+                    className={`provider-detail-test-result provider-detail-test-result--${
+                        testResult.ok ? "ok" : "fail"
+                    }`}
+                    role="status"
+                >
+                    {testResult.ok ? (
+                        <CircleCheck size={14} aria-hidden="true" />
+                    ) : (
+                        <CircleX size={14} aria-hidden="true" />
+                    )}
+                    <div className="provider-detail-test-text">
+                        <span className="provider-detail-test-headline">
+                            {testResult.ok
+                                ? t("settings.providerTestOk", { ms: testResult.latencyMs })
+                                : t(`settings.providerTestFail_${testResult.reason}`)}
+                        </span>
+                        <span className="provider-detail-test-detail">
+                            {testResult.ok
+                                ? testResult.reply
+                                    ? `${testResult.model} · “${testResult.reply}”`
+                                    : testResult.model
+                                : testResult.message}
+                        </span>
+                    </div>
+                </div>
+            )}
 
             {props.saveError && <div className="error-banner">{props.saveError}</div>}
         </Modal>

@@ -20,3 +20,5 @@ export const providersListSchema = Type.Any();
 export const providersRevealKeySchema = Type.Any();
 
 export const providerListModelsSchema = Type.Any();
+
+export const providerTestConnectionSchema = Type.Any();

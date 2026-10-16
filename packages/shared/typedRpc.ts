@@ -81,6 +81,8 @@ import type {
     ProvidersListResult,
     ProvidersRevealKeyParams,
     ProvidersRevealKeyResult,
+    ProviderTestConnectionParams,
+    ProviderTestConnectionResult,
     RenameSessionParams,
     SessionCompactParams,
     SessionCompactResult,
@@ -367,8 +369,12 @@ export interface TypedRpc {
     ): Promise<ImPolicyWriteResult>;
 
     // ── provider (process-level, config-only helpers) ──
-    /** Fetch the model id list from a custom provider's `/v1/models`. */
+    /** Fetch the model id list from a provider's `/models`. */
     providerListModels(params: ProviderListModelsParams): Promise<ProviderListModelsResult>;
+    /** Send one minimal chat turn to verify a provider end to end. */
+    providerTestConnection(
+        params: ProviderTestConnectionParams,
+    ): Promise<ProviderTestConnectionResult>;
 
     // ── tools ──
     toolsList(workspace: WorkspaceId): Promise<ToolsListResult>;
@@ -729,6 +735,10 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             callProcess,
             RPC.providerListModels,
         ),
+        providerTestConnection: process1<
+            ProviderTestConnectionParams,
+            ProviderTestConnectionResult
+        >(callProcess, RPC.providerTestConnection),
 
         // ── tools ──
         toolsList: ws0<ToolsListResult>(call, RPC.toolsList),

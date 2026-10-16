@@ -10,6 +10,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import type { Provider } from "@earendil-works/pi-ai";
 import {
     asWorkspaceId,
     type ChannelStatusEntry,
@@ -72,7 +73,7 @@ import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
-import { resolveProviderEndpoint } from "../runtime/models/modelRegistry.ts";
+import { resolveProvider, resolveProviderEndpoint } from "../runtime/models/modelRegistry.ts";
 import type { ProviderKeyStore } from "../runtime/models/providerKeyStore.ts";
 import type { ImageContent, TextContent, ThinkingLevel } from "../runtime/pi/types.ts";
 import { loadSourcedSkills } from "../runtime/pi/values.ts";
@@ -1500,6 +1501,16 @@ export class SidecarServer implements ServerRpcSurface {
         providerId: string,
     ): { baseUrl: string; api: CustomProviderApi } | undefined {
         return resolveProviderEndpoint(providerId, this.customProviders);
+    }
+
+    /** Build the pi Provider for a registered id (provider.testConnection "saved" branch). */
+    buildProvider(providerId: string): Provider | undefined {
+        return resolveProvider(
+            providerId,
+            this.customProviders,
+            this.providerExtraModels,
+            this.providerHiddenModels,
+        );
     }
 
     /**

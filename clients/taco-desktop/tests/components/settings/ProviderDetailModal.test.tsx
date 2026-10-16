@@ -52,6 +52,18 @@ async function fillPrerequisites(user: ReturnType<typeof userEvent.setup>) {
     await user.type(screen.getByPlaceholderText("settings.providerKeyPlaceholder"), "sk-test");
 }
 
+/**
+ * The editable model list and the dashed candidate list. Model-id queries must
+ * be scoped to one of these: the connection-test Select renders the selected
+ * model id as its trigger text, so an unscoped query matches both.
+ */
+function modelList() {
+    return document.querySelector(".provider-detail-models") as HTMLElement;
+}
+function candidateList() {
+    return document.querySelector(".provider-detail-fetched") as HTMLElement;
+}
+
 describe("ProviderDetailModal — create-custom model discovery", () => {
     it("disables the fetch button until baseUrl and apiKey are filled", async () => {
         const user = userEvent.setup();
@@ -84,7 +96,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
             apiKey: "sk-test",
         });
         // Candidates land in the dashed fetch list, each with its own add button.
-        const fetchedBox = await screen.findByText("gpt-4o-mini");
+        const fetchedBox = await within(candidateList()).findByText("gpt-4o-mini");
         const fetchedRow = fetchedBox.closest(".provider-detail-model-row") as HTMLElement;
         await user.click(
             within(fetchedRow.parentElement as HTMLElement).getAllByRole("button", {
@@ -92,13 +104,8 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
             })[0],
         );
         // Added rows leave the fetch list — only the other candidate remains there.
-        const added = await screen.findByText("gpt-4o");
-        expect(added).toBeTruthy();
-        await waitFor(() => {
-            const rows = screen.getAllByText("gpt-4o");
-            // One row in the model list; the fetch list no longer holds it.
-            expect(rows.length).toBe(1);
-        });
+        await waitFor(() => expect(within(modelList()).getByText("gpt-4o")).toBeTruthy());
+        expect(within(candidateList()).queryByText("gpt-4o")).toBeNull();
     });
 
     it("skips fetched ids the user already added manually", async () => {
@@ -110,9 +117,10 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
         await user.type(manual, "mine{Enter}");
         await user.click(fetchButton());
 
-        await waitFor(() => expect(screen.getByText("fetched")).toBeTruthy());
+        await waitFor(() => expect(within(candidateList()).getByText("fetched")).toBeTruthy());
         // "mine" appears once (the manual row) — the fetched duplicate is filtered out.
-        expect(screen.getAllByText("mine").length).toBe(1);
+        expect(within(modelList()).getAllByText("mine").length).toBe(1);
+        expect(within(candidateList()).queryByText("mine")).toBeNull();
     });
 
     it("re-filters the candidate list when a model is added after the fetch", async () => {
@@ -121,15 +129,16 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
         renderCreate(listModels as unknown as ListModels);
         await fillPrerequisites(user);
         await user.click(fetchButton());
-        await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+        await waitFor(() => expect(within(candidateList()).getByText("alpha")).toBeTruthy());
 
         // Adding "beta" after the fetch must drop it from the candidate list —
         // the filter is derived per render, not snapshotted at fetch time.
         const manual = screen.getByPlaceholderText("settings.providerModelAddPlaceholder");
         await user.type(manual, "beta{Enter}");
 
-        await waitFor(() => expect(screen.getAllByText("beta").length).toBe(1));
-        expect(screen.getAllByText("alpha").length).toBe(1);
+        await waitFor(() => expect(within(modelList()).getAllByText("beta").length).toBe(1));
+        expect(within(candidateList()).queryByText("beta")).toBeNull();
+        expect(within(candidateList()).getAllByText("alpha").length).toBe(1);
     });
 
     it("collapses duplicate ids returned by the endpoint into one candidate", async () => {
@@ -139,8 +148,8 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
         await fillPrerequisites(user);
         await user.click(fetchButton());
 
-        await waitFor(() => expect(screen.getByText("other")).toBeTruthy());
-        expect(screen.getAllByText("dup").length).toBe(1);
+        await waitFor(() => expect(within(candidateList()).getByText("other")).toBeTruthy());
+        expect(within(candidateList()).getAllByText("dup").length).toBe(1);
     });
 
     it("surfaces the message when the RPC reports a failure", async () => {
@@ -192,7 +201,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
         await fillPrerequisites(user);
         await user.click(fetchButton());
 
-        await waitFor(() => expect(screen.getByText("gpt-5")).toBeTruthy());
+        await waitFor(() => expect(within(candidateList()).getByText("gpt-5")).toBeTruthy());
         expect(listModels).toHaveBeenCalledWith({
             baseUrl: "https://api.example.com/v1",
             api: "response",
@@ -251,7 +260,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     it("renders builtin rows with a hide button and extras with a remove button", () => {
         renderBuiltin();
         // Static row: badge + hide (moves it to the removed section).
-        const staticRow = screen
+        const staticRow = within(modelList())
             .getByText("MiniMax-M2")
             .closest(".provider-detail-model-row") as HTMLElement;
         expect(within(staticRow).getByText("settings.providerOriginBuiltin")).toBeTruthy();
@@ -259,7 +268,7 @@ describe("ProviderDetailModal — built-in provider", () => {
             within(staticRow).getByRole("button", { name: "settings.providerModelHide" }),
         ).toBeTruthy();
         // Extra row: badge + remove button.
-        const extraRow = screen
+        const extraRow = within(modelList())
             .getByText("MiniMax-M3.1")
             .closest(".provider-detail-model-row") as HTMLElement;
         expect(within(extraRow).getByText("settings.providerOriginExtra")).toBeTruthy();
@@ -283,11 +292,11 @@ describe("ProviderDetailModal — built-in provider", () => {
     it("moves a hidden model out of the visible list instead of showing it twice", async () => {
         const user = userEvent.setup();
         renderBuiltin();
-        expect(screen.getAllByText("MiniMax-M2").length).toBe(1);
+        expect(within(modelList()).getAllByText("MiniMax-M2").length).toBe(1);
         await user.click(screen.getByRole("button", { name: "settings.providerModelHide" }));
         // Exactly one row survives — now the struck-through "removed" one.
-        await waitFor(() => expect(screen.getAllByText("MiniMax-M2").length).toBe(1));
-        const row = screen
+        await waitFor(() => expect(within(modelList()).getAllByText("MiniMax-M2").length).toBe(1));
+        const row = within(modelList())
             .getByText("MiniMax-M2")
             .closest(".provider-detail-model-row") as HTMLElement;
         expect(row.className).toContain("provider-detail-model-row--off");
@@ -354,7 +363,9 @@ describe("ProviderDetailModal — built-in provider", () => {
                 onClose={vi.fn()}
             />,
         );
-        const row = screen.getByText("MiniMax-M1").closest(".provider-detail-model-row");
+        const row = within(modelList())
+            .getByText("MiniMax-M1")
+            .closest(".provider-detail-model-row");
         expect(row?.className).toContain("provider-detail-model-row--off");
         expect(
             within(row as HTMLElement).getByRole("button", {
@@ -384,7 +395,146 @@ describe("ProviderDetailModal — built-in provider", () => {
         );
         await user.click(fetchButton());
 
-        await waitFor(() => expect(screen.getByText("brand-new")).toBeTruthy());
+        await waitFor(() => expect(within(candidateList()).getByText("brand-new")).toBeTruthy());
         expect(listModels).toHaveBeenCalledWith({ providerId: "minimax" });
+    });
+});
+
+describe("ProviderDetailModal — test connection", () => {
+    const provider: ProviderView = {
+        id: "minimax",
+        name: "MiniMax",
+        configured: true,
+        custom: false,
+        models: [
+            { provider: "minimax", id: "MiniMax-M2", origin: "builtin" },
+            { provider: "minimax", id: "MiniMax-M3.1", origin: "extra" },
+        ],
+    };
+
+    function renderSaved(testConnection: TacoClient["providerTestConnection"]) {
+        const client = {
+            providersRevealKey: vi.fn(),
+            providerTestConnection: testConnection,
+        } as unknown as TacoClient;
+        render(
+            <ProviderDetailModal
+                client={client}
+                workspace={WS}
+                provider={provider}
+                existingIds={[]}
+                mask="sk-…AbCd"
+                saving={false}
+                onSaveBuiltin={vi.fn()}
+                onClose={vi.fn()}
+            />,
+        );
+    }
+
+    const testButton = () =>
+        screen.getByRole("button", { name: "settings.providerTestButton" }) as HTMLButtonElement;
+
+    it("tests the first model with the stored key and shows latency + reply", async () => {
+        const user = userEvent.setup();
+        const testConnection = vi.fn().mockResolvedValue({
+            ok: true,
+            latencyMs: 321,
+            model: "MiniMax-M2",
+            reply: "pong",
+        });
+        renderSaved(testConnection as unknown as TacoClient["providerTestConnection"]);
+        await user.click(testButton());
+
+        // No apiKey field: the stored key stays server-side.
+        expect(testConnection).toHaveBeenCalledWith({
+            providerId: "minimax",
+            modelId: "MiniMax-M2",
+        });
+        await waitFor(() => expect(screen.getByText("settings.providerTestOk")).toBeTruthy());
+        expect(screen.getByText("MiniMax-M2 · “pong”")).toBeTruthy();
+    });
+
+    it("sends a typed-but-unsaved key along with the probe", async () => {
+        const user = userEvent.setup();
+        const testConnection = vi
+            .fn()
+            .mockResolvedValue({ ok: true, latencyMs: 1, model: "MiniMax-M2", reply: "" });
+        renderSaved(testConnection as unknown as TacoClient["providerTestConnection"]);
+        await user.click(screen.getByRole("button", { name: "settings.providerReplaceKey" }));
+        await user.type(screen.getByPlaceholderText("settings.providerKeyPlaceholder"), "sk-new");
+        await user.click(testButton());
+
+        expect(testConnection).toHaveBeenCalledWith({
+            providerId: "minimax",
+            modelId: "MiniMax-M2",
+            apiKey: "sk-new",
+        });
+    });
+
+    it("shows the reason headline and the raw upstream message on failure", async () => {
+        const user = userEvent.setup();
+        const testConnection = vi.fn().mockResolvedValue({
+            ok: false,
+            reason: "auth",
+            message: "401: invalid api key",
+            latencyMs: 90,
+        });
+        renderSaved(testConnection as unknown as TacoClient["providerTestConnection"]);
+        await user.click(testButton());
+
+        await waitFor(() =>
+            expect(screen.getByText("settings.providerTestFail_auth")).toBeTruthy(),
+        );
+        expect(screen.getByText("401: invalid api key")).toBeTruthy();
+    });
+
+    it("reports a thrown RPC in the same result slot", async () => {
+        const user = userEvent.setup();
+        const testConnection = vi
+            .fn()
+            .mockRejectedValue(new Error("unknown method: provider.testConnection"));
+        renderSaved(testConnection as unknown as TacoClient["providerTestConnection"]);
+        await user.click(testButton());
+
+        await waitFor(() =>
+            expect(screen.getByText("unknown method: provider.testConnection")).toBeTruthy(),
+        );
+        expect(screen.getByText("settings.providerTestFail_error")).toBeTruthy();
+    });
+
+    it("tests the unsaved create form with its literal endpoint and key", async () => {
+        const user = userEvent.setup();
+        const testConnection = vi
+            .fn()
+            .mockResolvedValue({ ok: true, latencyMs: 5, model: "m-1", reply: "pong" });
+        const client = {
+            providerListModels: vi.fn(),
+            providerTestConnection: testConnection,
+        } as unknown as TacoClient;
+        render(
+            <ProviderDetailModal
+                client={client}
+                workspace={WS}
+                existingIds={[]}
+                saving={false}
+                onSaveCustom={vi.fn()}
+                onClose={vi.fn()}
+            />,
+        );
+        // Disabled until there is a model to test.
+        expect(testButton().disabled).toBe(true);
+        await fillPrerequisites(user);
+        await user.type(
+            screen.getByPlaceholderText("settings.providerModelAddPlaceholder"),
+            "m-1{Enter}",
+        );
+        await user.click(testButton());
+
+        expect(testConnection).toHaveBeenCalledWith({
+            baseUrl: "https://api.example.com/v1",
+            api: "chatcomplete",
+            apiKey: "sk-test",
+            modelId: "m-1",
+        });
     });
 });

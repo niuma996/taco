@@ -93,7 +93,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 |---|---|
 | 2.0 | `initialize` handshake replaces the `sidecar.hello` push |
 | 2.1 | `session.cancelQueued`; `session.steer` returns `{ mode, entryId }` |
-| 2.2 | `providers.revealKey`; `provider.listModels` `{ providerId }` shape and discovery for every protocol; `providers.list` `baseUrl` / `api` / `models[].origin`; `providerExtraModels` / `providerHiddenModels` config fields |
+| 2.2 | `providers.revealKey`; `provider.listModels` `{ providerId }` shape and discovery for every protocol; `providers.list` `baseUrl` / `api` / `models[].origin`; `providerExtraModels` / `providerHiddenModels` config fields; `provider.testConnection` |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
@@ -146,6 +146,7 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `session.contextInfo` | session.* |
 | `session.submitAnswers` | session.* |
 | `provider.listModels` | provider.* |
+| `provider.testConnection` | provider.* |
 | `settings.get` | settings.* |
 | `settings.write` | settings.* |
 | `extensions.status` | extensions.* |

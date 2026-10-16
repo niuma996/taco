@@ -439,6 +439,66 @@ export type ProviderListModelsResult =
       };
 
 /**
+ * `provider.testConnection` RPC params — sends one minimal chat turn through
+ * the same pi streaming path a session uses, so a pass means key, endpoint,
+ * protocol and model id all work together.
+ *
+ * Two shapes, mirroring `provider.listModels`:
+ * - `{ providerId, modelId, apiKey? }` — a saved provider. The key comes from
+ *   the sidecar's store unless `apiKey` is given (a key typed but not yet
+ *   saved), so stored keys never cross the wire.
+ * - `{ baseUrl, api, apiKey, modelId }` — the create-custom form, before any
+ *   provider is registered.
+ */
+export type ProviderTestConnectionParams =
+    | {
+          providerId: string;
+          modelId: string;
+          apiKey?: string;
+      }
+    | {
+          baseUrl: string;
+          api: CustomProviderApi;
+          apiKey: string;
+          modelId: string;
+      };
+
+/**
+ * `provider.testConnection` result. Probe failures are a normal outcome, not
+ * an RPC error: the RPC itself only rejects on malformed params.
+ * `message` is human-readable and safe to surface verbatim (no API key).
+ */
+export type ProviderTestConnectionResult =
+    | {
+          ok: true;
+          /** Round-trip time of the probe, in milliseconds. */
+          latencyMs: number;
+          /** The model that answered — echoes `responseModel` when the upstream reports one. */
+          model: string;
+          /** First characters of the reply, for a visual sanity check. */
+          reply: string;
+      }
+    | {
+          ok: false;
+          reason: ProviderTestConnectionFailureReason;
+          message: string;
+          latencyMs: number;
+      };
+
+/**
+ * Why a connection test failed. `auth` and `not-found` are split out from
+ * `http-error` because they map to different fixes (check the key vs. check
+ * the model id / endpoint); everything else unclassified is `error`.
+ */
+export type ProviderTestConnectionFailureReason =
+    | "auth"
+    | "not-found"
+    | "rate-limited"
+    | "timeout"
+    | "network"
+    | "error";
+
+/**
  * Why a `provider.listModels` probe failed.
  *
  * `protocol-not-supported` is deprecated: since protocol 2.2 every protocol

@@ -48,8 +48,10 @@ export const RPC = {
     sessionContextInfo: "session.contextInfo",
     /** Submit askUser answers — sidecar injects <ask_user_context> into the user message; clients don't see the wire format. */
     sessionSubmitAnswers: "session.submitAnswers",
-    /** Pull model ids from the user's custom provider's /v1/models endpoint during CustomProviderForm edit. */
+    /** Pull model ids from a provider's /models endpoint for the settings model list. */
     providerListModels: "provider.listModels",
+    /** Send one minimal chat turn to verify key + endpoint + protocol + model id. */
+    providerTestConnection: "provider.testConnection",
     // settings.*
     settingsGet: "settings.get",
     settingsWrite: "settings.write",

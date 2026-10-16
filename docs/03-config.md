@@ -177,6 +177,25 @@ the sidecar socket. The method returns one key per call and never logs it;
 the bulk `settings.*` views stay masked. There is no plaintext surface for
 `mcpServers` / `channels` secrets — re-enter those.
 
+### Testing a provider
+
+`provider.testConnection` (protocol 2.2+) sends one minimal chat turn through
+the same pi streaming path a session uses, so a pass means the key, endpoint,
+protocol and model id all work together — more than `provider.listModels` can
+show, since many relays answer `/models` while rejecting chat, or the reverse.
+
+Two param shapes: `{ providerId, modelId, apiKey? }` for a saved provider (the
+key comes from the sidecar's store unless `apiKey` overrides it, so a key typed
+in the detail panel can be tested before saving) and
+`{ baseUrl, api, apiKey, modelId }` for the create-custom form. Probe failures
+are a normal result, not an RPC error — `reason` is one of `auth`,
+`not-found`, `rate-limited`, `timeout`, `network`, `error`, with the upstream
+message in `message`.
+
+The probe is deliberately cheap (one short turn, ≤16 output tokens, no retries,
+20s budget) but it is a real request and costs tokens. Each probe runs in its
+own provider collection and never touches the workspace catalog.
+
 ### Model lists on built-in providers
 
 Built-in providers ship pi's static model list. Two fields edit that list
