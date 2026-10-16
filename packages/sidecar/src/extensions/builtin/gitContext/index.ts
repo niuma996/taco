@@ -261,14 +261,6 @@ function formatUncommittedFiles(files: UncommittedFiles): string | undefined {
 export function buildGitContextHook(cwd: string): ContextHook {
     let probed = false;
     let probeResult: GitProbeResult | undefined;
-    /**
-     * Last rendered tag bodies. Skip the push when the *text the model would
-     * see* is unchanged — hash / subject / stat / working-tree paths, not
-     * git mtime. An amend that rewrites the subject changes the tag; a
-     * no-op status refresh does not, and must not rewrite the cache prefix.
-     */
-    let lastCommitsTag: string | undefined;
-    let lastUncommittedTag: string | undefined;
 
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
         if (!probed) {
@@ -295,15 +287,18 @@ export function buildGitContextHook(cwd: string): ContextHook {
             : undefined;
 
         if (!commitsTag && !uncommittedTag) return undefined;
-        if (commitsTag === lastCommitsTag && uncommittedTag === lastUncommittedTag) {
-            return undefined;
-        }
-        lastCommitsTag = commitsTag;
-        lastUncommittedTag = uncommittedTag;
 
         // Append (in-place) so `messages[0]` stays the original user turn. A
         // fresh array prepend used to sit in front of every other hook and
         // rewrite the prompt-cache prefix on every working-tree change.
+        //
+        // Re-render on every context build, never skip when the body is
+        // unchanged: the tag is a per-request overlay, not history, so
+        // suppressing an unchanged push is what makes it vanish. This hook
+        // instance is also shared by the main session and every subagent
+        // (activation.ts builds one hook per workspace), so a per-hook
+        // "last pushed" cache let whichever session built context first claim
+        // the tag and silently starve the others.
         if (commitsTag) appendUserTag(event.messages, commitsTag);
         if (uncommittedTag) appendUserTag(event.messages, uncommittedTag);
         return { messages: event.messages };

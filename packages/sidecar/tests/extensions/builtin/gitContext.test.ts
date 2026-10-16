@@ -147,6 +147,39 @@ describe("builtin git-context extension — hook", () => {
         assert.match(secondText, /staged\.txt/);
         assert.match(secondText, /untracked\.txt/);
     });
+
+    it("re-injects the tags on every call, including when git state is unchanged", async () => {
+        // The tags are a per-request overlay, not history — a hook that skips
+        // an unchanged push leaves the model with no git context on every
+        // later turn. One hook instance serves the main session and all
+        // subagents, so a shared "last pushed" cache starved whichever session
+        // did not build context first.
+        const hook = buildGitContextHook(gitDir);
+        const first = await hook({ messages: makeMessages() } as ContextEvent);
+        const second = await hook({ messages: makeMessages() } as ContextEvent);
+
+        assert.ok(first?.messages, "first call should return messages");
+        assert.ok(second?.messages, "second call should return messages");
+        for (const [label, messages] of [
+            ["first", first.messages],
+            ["second", second.messages],
+        ] as const) {
+            const texts = messages.map((m) => {
+                const content = (m as { content?: unknown }).content;
+                return typeof content === "string"
+                    ? content
+                    : ((content as Array<{ text?: string }>)[0]?.text ?? "");
+            });
+            assert.ok(
+                texts.some((t) => t.startsWith("<recent_git_commits")),
+                `${label} call should carry <recent_git_commits>`,
+            );
+            assert.ok(
+                texts.some((t) => t.startsWith("<working_tree_changes")),
+                `${label} call should carry <working_tree_changes>`,
+            );
+        }
+    });
 });
 
 describe("builtin git-context extension — uncommitted files", () => {
