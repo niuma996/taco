@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.2.8
+> **版本**: 0.2.10
 > **传输**: NDJSON over stdio
 > **来源**: 源码为唯一权威来源——`packages/shared/rpcMethods.ts`（RPC method 名）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -74,15 +74,26 @@ succeeds, so clients must send it as their first call.
 The client sends a single `initialize` request:
 
 ```json
-{ "id": "<uuid>", "method": "initialize", "params": { "protocolVersion": { "major": 2, "minor": 0 }, "clientCapabilities": { "uiLocale": "en" } } }
+{ "id": "<uuid>", "method": "initialize", "params": { "protocolVersion": { "major": 2, "minor": 2 }, "clientCapabilities": { "uiLocale": "en" } } }
 ```
 
 The server validates the client's protocol version with `isCompatibleClientProtocol`
 (major must match exactly; client minor must be `<=` server minor). The response is:
 
 ```json
-{ "id": "<uuid>", "ok": true, "result": { "serverVersion": "0.1.0", "serverCapabilities": { "methods": [...], "pushes": [...], "channels": [...] }, "protocolVersion": { "major": 2, "minor": 0 }, "instanceId": "<uuid>", "pid": <pid> } }
+{ "id": "<uuid>", "ok": true, "result": { "serverVersion": "0.1.0", "serverCapabilities": { "methods": [...], "pushes": [...], "channels": [...] }, "protocolVersion": { "major": 2, "minor": 2 }, "instanceId": "<uuid>", "pid": <pid> } }
 ```
+
+Clients run the mirror check, `isCompatibleSidecarProtocol`: major must match
+and the server's minor must be `>=` the client's. A client therefore refuses an
+older daemon outright instead of failing on a single RPC later — this matters
+because a registered system-service daemon can outlive a desktop upgrade.
+
+| Minor | Adds |
+|---|---|
+| 2.0 | `initialize` handshake replaces the `sidecar.hello` push |
+| 2.1 | `session.cancelQueued`; `session.steer` returns `{ mode, entryId }` |
+| 2.2 | `providers.revealKey`; `provider.listModels` `{ providerId }` shape and discovery for every protocol; `providers.list` `baseUrl` / `api` / `models[].origin`; `providerExtraModels` / `providerHiddenModels` config fields |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
@@ -129,6 +140,7 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `session.setModel` | session.* |
 | `session.listModels` | session.* |
 | `providers.list` | providers.* |
+| `providers.revealKey` | providers.* |
 | `session.setThinkingLevel` | session.* |
 | `session.compact` | session.* |
 | `session.contextInfo` | session.* |
@@ -151,6 +163,8 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `tools.list` | tools.* |
 | `agents.list` | agents.* |
 | `agents.content` | agents.* |
+| `agents.write` | agents.* |
+| `agents.delete` | agents.* |
 | `skills.list` | skills.* |
 | `skills.content` | skills.* |
 | `checkpoints.list` | checkpoints.* |

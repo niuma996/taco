@@ -434,9 +434,25 @@ export type ProviderListModelsResult =
     | { ok: true; models: string[] }
     | {
           ok: false;
-          reason: "http-error" | "timeout" | "invalid-response";
+          reason: ProviderListModelsFailureReason;
           message: string;
       };
+
+/**
+ * Why a `provider.listModels` probe failed.
+ *
+ * `protocol-not-supported` is deprecated: since protocol 2.2 every protocol
+ * shares the same `{baseUrl}/models` catalog, so the current sidecar never
+ * returns it. It stays in the union because the type is published and pre-2.2
+ * daemons still emit it — clients should treat it like any other failure and
+ * show `message`.
+ */
+export type ProviderListModelsFailureReason =
+    | "http-error"
+    | "timeout"
+    | "invalid-response"
+    /** @deprecated Not emitted since protocol 2.2; see ProviderListModelsFailureReason. */
+    | "protocol-not-supported";
 
 /** `session.setThinkingLevel` RPC params. */
 export interface SessionSetThinkingLevelParams {

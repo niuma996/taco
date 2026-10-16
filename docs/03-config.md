@@ -127,6 +127,12 @@ below).
       "models": [{ "id": "llama-3" }]
     }
   ],
+  "providerExtraModels": {
+    "minimax": [{ "id": "MiniMax-M3.1-Flash-Preview" }]
+  },
+  "providerHiddenModels": {
+    "minimax": ["MiniMax-M2.7-highspeed"]
+  },
   "mcpServers": [
     {
       "id": "dbx",
@@ -163,9 +169,29 @@ crosses the IPC boundary:
 - `mcpServers[i]` → drops `env`, `headers`, `command`, `args`, `url`, `cwd`
 - `channels[i]` → drops `config`
 
-Clients that need the unmasked values must ask the user to re-enter them
-or read from a different surface (desktop Tauri command `read_file`
-or equivalent).
+A single provider key can be read back in plaintext with
+`providers.revealKey` (protocol 2.2+). This keeps parity with the on-disk
+trust boundary rather than widening it: the key already sits in plaintext
+in `taco.json` on the same machine, readable by anything that can reach
+the sidecar socket. The method returns one key per call and never logs it;
+the bulk `settings.*` views stay masked. There is no plaintext surface for
+`mcpServers` / `channels` secrets — re-enter those.
+
+### Model lists on built-in providers
+
+Built-in providers ship pi's static model list. Two fields edit that list
+without forking the provider; both are keyed by built-in provider id
+(a `custom:` id is rejected — custom providers own their list in
+`customProviders[].models`) and replaced as a whole object on write:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `providerExtraModels` | `Record<id, { id, name?, contextWindow?, maxTokens? }[]>` | Appended after the static list. They stream through the provider's own protocol and endpoint. |
+| `providerHiddenModels` | `Record<id, string[]>` | Static ids removed from the catalog. The settings UI still lists them as `origin: "hidden"` so they can be restored. |
+
+The two are independent: hiding a static id does not drop a user-added
+entry with the same id. Empty arrays are rejected — remove the key instead.
+Both fields need protocol 2.2; an older daemon drops them on write.
 
 ## 4. CLI flags
 

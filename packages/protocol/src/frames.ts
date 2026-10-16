@@ -82,8 +82,13 @@ export type CompactionFailureReason =
  *  v2 dropped the `sidecar.hello` push frame; v1 clients are not accepted.
  *  2.1 added `session.cancelQueued` and gave `session.steer` a result body
  *  (`{ mode, entryId }`); a 2.0 daemon still answers steer with `null`, which
- *  a 2.1 client would misread as a successful enqueue. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 1 } as const;
+ *  a 2.1 client would misread as a successful enqueue.
+ *  2.2 added `providers.revealKey`, the `{ providerId }` shape of
+ *  `provider.listModels`, and the `providerExtraModels` /
+ *  `providerHiddenModels` config fields. A 2.1 daemon drops those fields on
+ *  `settings.write` while still answering ok, so a 2.2 client must refuse it
+ *  rather than lose the user's model-list edits silently. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 2 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

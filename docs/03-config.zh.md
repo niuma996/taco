@@ -122,6 +122,12 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
       "models": [{ "id": "llama-3" }]
     }
   ],
+  "providerExtraModels": {
+    "minimax": [{ "id": "MiniMax-M3.1-Flash-Preview" }]
+  },
+  "providerHiddenModels": {
+    "minimax": ["MiniMax-M2.7-highspeed"]
+  },
   "mcpServers": [
     {
       "id": "dbx",
@@ -160,6 +166,8 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 | `anthropicApiKey` | string | 注入到 `ANTHROPIC_API_KEY` env                    |
 | `openaiApiKey`    | string | 注入到 `OPENAI_API_KEY` env                       |
 | `apiKeys`         | object | 其它 provider → key，注入到 `<PROVIDER>_API_KEY` env |
+| `providerExtraModels`  | object | 内置 provider id → 追加模型列表，见下方「内置供应商的模型列表」 |
+| `providerHiddenModels` | object | 内置 provider id → 从静态列表移除的模型 id         |
 | `extra`           | object | 兜底，未来扩展用                                       |
 
 ### 3.3 safe view（`settings.get` / `settings.write` 返回的那份）
@@ -171,8 +179,25 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 - `mcpServers[i]` → 丢弃 `env`、`headers`、`command`、`args`、`url`、`cwd`
 - `channels[i]` → 丢弃 `config`
 
-需要拿到未脱敏值的客户端，只能请用户重新输入，或从另一个入口读（桌面端
-Tauri 命令 `read_file` 之类）。
+单个 provider 的 key 可以通过 `providers.revealKey`（协议 2.2+）读回明文。
+这是与磁盘上的信任边界保持一致，而不是放宽它：key 本来就以明文存在本机的
+`taco.json` 里，能连上 sidecar socket 的进程也能读到这个文件。该方法每次只
+返回一个 key 且不落日志；`settings.*` 的整体视图仍然脱敏。`mcpServers` /
+`channels` 里的秘密没有明文出口，需要请用户重新输入。
+
+### 内置供应商的模型列表
+
+内置 provider 自带 pi 的静态模型列表。下面两个字段在不分叉 provider 的前提下
+编辑这份列表；两者都以内置 provider id 为 key（`custom:` 前缀的 id 会被拒绝
+——自定义 provider 的列表在 `customProviders[].models` 里），写入时整对象替换：
+
+| Key | 类型 | 说明 |
+|---|---|---|
+| `providerExtraModels` | `Record<id, { id, name?, contextWindow?, maxTokens? }[]>` | 追加在静态列表之后，沿用该 provider 自身的协议与端点 |
+| `providerHiddenModels` | `Record<id, string[]>` | 从 catalog 中移除的静态模型 id。设置界面仍以 `origin: "hidden"` 列出，方便恢复 |
+
+两者相互独立：隐藏某个静态 id 不会连带删除同名的用户追加项。空数组会被拒绝
+——请直接删掉该 key。这两个字段需要协议 2.2；旧版 daemon 写入时会丢弃它们。
 
 ### 3.4 没有 per-workspace config
 

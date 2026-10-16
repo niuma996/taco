@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { RpcResponse } from "@taco-ai/protocol";
+import {
+    isCompatibleSidecarProtocol,
+    type RpcResponse,
+    SIDECAR_PROTOCOL_VERSION,
+} from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { registerMethod } from "../../src/server/methodRegistry.ts";
 import { SidecarServer } from "../../src/server/server.ts";
@@ -74,7 +78,9 @@ describe("initialize handshake (stdio boundary)", () => {
         // v2 dropped the `sidecar.hello` push frame; the hello-shaped
         // identity fields now travel on the initialize response.
         assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
-        assert.deepEqual(result.protocolVersion, { major: 2, minor: 1 });
+        assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
+        // Pinned separately: a bump must be a deliberate edit here too.
+        assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 2 });
         assert.equal(typeof result.instanceId, "string");
         assert.equal(typeof result.pid, "number");
     });
@@ -113,9 +119,23 @@ describe("initialize handshake (stdio boundary)", () => {
 
     it("rejects a client minor newer than the server", async () => {
         const { transport } = await bootServer();
-        const resp = await sendLine(transport, initializeFrame("init-future", 2));
+        // Derived from the constant so a minor bump can't turn this into an
+        // accepted handshake (a hardcoded 2 silently passed at 2.2).
+        const resp = await sendLine(
+            transport,
+            initializeFrame("init-future", SIDECAR_PROTOCOL_VERSION.minor + 1),
+        );
         assert.equal(resp.ok, false);
         if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
+    });
+
+    it("a 2.2 client refuses a 2.1 daemon (it would drop model-list config fields)", () => {
+        // Client-side gate: a 2.1 daemon answers settings.write ok while
+        // discarding providerExtraModels / providerHiddenModels, so the
+        // handshake must fail before any write can be lost.
+        assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 1 }), false);
+        assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 2 }), true);
+        assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 3 }), true);
     });
 
     it("accepts an older compatible client minor", async () => {

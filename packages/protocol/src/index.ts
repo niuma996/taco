@@ -215,6 +215,7 @@ export type {
     ListModelsParams,
     PromptParams,
     PromptResult,
+    ProviderListModelsFailureReason,
     ProviderListModelsParams,
     ProviderListModelsResult,
     ProvidersListParams,
