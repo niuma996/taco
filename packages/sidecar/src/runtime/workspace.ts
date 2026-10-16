@@ -701,31 +701,58 @@ export class WorkspaceRuntime extends EventEmitter {
     /**
      * Resolve the construction-time default model — never throws on a bad id.
      *
-     * If `defaultModel` is missing or invalid we log and return undefined. A
-     * throw here would lock the user out of the UI (no way to fix a stale model
-     * id in taco.json); `session.create` surfaces the explicit invalid_state
-     * error instead. Requires `this.models` to be populated.
+     * A throw here would lock the user out of the UI (no way to fix a stale model
+     * id in taco.json). Requires `this.models` to be populated.
      */
     private resolveDefaultModel(options: WorkspaceRuntimeOptions): Model<Api> | undefined {
-        if (!options.defaultModel) {
+        return this.lookupDefaultModel(options.defaultModel, options.defaultProvider);
+    }
+
+    /**
+     * Resolve the workspace default model, with one policy shared by the
+     * constructor and `setDefaultModel`.
+     *
+     * A configured default that no longer resolves is expected, not exceptional:
+     * its provider can be deleted, or the model removed from a provider's list
+     * (an extra dropped, a static hidden, a custom provider's list edited).
+     * Falling back to the catalog keeps session creation and attach working
+     * instead of failing every prompt with a message that points at the wrong
+     * thing. The constructor used to return undefined here (app bricked) while
+     * the hot-reload path kept the previous value (looked fine, broke on the
+     * next restart) — the two disagreed, which is what made this hard to read.
+     *
+     * A cleared API key is deliberately NOT one of these: the catalog is fully
+     * resident and never filtered by key presence, so the model still resolves
+     * and the failure surfaces per-request as "Provider is not configured",
+     * which names the actual problem. Falling back would only hide that.
+     *
+     * The fallback is the same `all[0]` used when no default is configured, and
+     * deliberately not "first provider with a key": `ProviderKeyStore` only
+     * knows about `apiKeys`, so a provider keyed via a shell env var would look
+     * unconfigured and get skipped.
+     */
+    private lookupDefaultModel(
+        defaultModel: string | Model<Api> | undefined,
+        defaultProvider: string | undefined,
+    ): Model<Api> | undefined {
+        // A caller may hand over a resolved Model object instead of an id.
+        if (defaultModel && typeof defaultModel !== "string") return defaultModel;
+        const firstAvailable = (): Model<Api> | undefined => {
             const all = this.models.getModels();
             return all.length > 0 ? all[0] : undefined;
-        }
-        if (typeof options.defaultModel !== "string") return options.defaultModel;
+        };
+        if (!defaultModel) return firstAvailable();
         // Prefer lookup under defaultProvider to avoid colliding with a
         // same-named model id from another provider.
-        const found = options.defaultProvider
-            ? this.models.getModel(options.defaultProvider, options.defaultModel)
-            : findModelById(this.models, options.defaultModel);
-        if (!found) {
-            const label = options.defaultProvider
-                ? `${options.defaultProvider}/${options.defaultModel}`
-                : options.defaultModel;
-            log.error(
-                `default model "${label}" not found in catalog — starting without a default model. Configure a provider and model in Settings.`,
-            );
-        }
-        return found;
+        const found = defaultProvider
+            ? this.models.getModel(defaultProvider, defaultModel)
+            : findModelById(this.models, defaultModel);
+        if (found) return found;
+        const label = defaultProvider ? `${defaultProvider}/${defaultModel}` : defaultModel;
+        log.error(
+            `default model "${label}" not found in catalog — falling back to the first available model.`,
+        );
+        return firstAvailable();
     }
 
     /**
@@ -1199,8 +1226,9 @@ export class WorkspaceRuntime extends EventEmitter {
     /**
      * Hot-reload the workspace default model after settings.write changes
      * `defaultModel` / `defaultProvider`. Resolves against the live catalog
-     * (same rules as the constructor) and updates both this runtime and its
-     * SessionRegistry so the NEXT session.create / attach uses it. Already
+     * under the same policy as construction (see `lookupDefaultModel`), and
+     * updates both this runtime and its SessionRegistry so the NEXT
+     * session.create / attach uses it. Already
      * attached sessions keep their current model until switched explicitly.
      *
      * Without this, the workspace built before the user configured a provider
@@ -1209,22 +1237,7 @@ export class WorkspaceRuntime extends EventEmitter {
      * not configured" even though the user set a valid default in Settings.
      */
     setDefaultModel(defaultModel?: string, defaultProvider?: string): void {
-        let resolved: Model<Api> | undefined;
-        if (defaultModel) {
-            resolved = defaultProvider
-                ? this.models.getModel(defaultProvider, defaultModel)
-                : findModelById(this.models, defaultModel);
-            if (!resolved) {
-                const label = defaultProvider ? `${defaultProvider}/${defaultModel}` : defaultModel;
-                log.error(
-                    `default model "${label}" not found in catalog — leaving previous default unchanged.`,
-                );
-                return;
-            }
-        } else {
-            const all = this.models.getModels();
-            resolved = all.length > 0 ? all[0] : undefined;
-        }
+        const resolved = this.lookupDefaultModel(defaultModel, defaultProvider);
         this.defaultModel = resolved;
         this.sessionRegistry.defaultModel = resolved;
     }

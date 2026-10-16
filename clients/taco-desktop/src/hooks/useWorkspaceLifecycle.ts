@@ -11,7 +11,12 @@
  */
 
 import type { SessionListResult } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, SESSION_LIST_DEFAULT_LIMIT } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    ErrorCodes,
+    SESSION_LIST_DEFAULT_LIMIT,
+} from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { bootMark, bootPhase } from "../lib/bootTrace";
@@ -181,11 +186,19 @@ export function useWorkspaceLifecycle({
                 const msg = `Cannot open session: ${(err as Error).message}`;
                 console.error("[taco] sessionAttach failed", cwd, sessionId, err);
                 pushNotification(msg);
-                // The session is gone from the server — prune it from the local list
-                // so the sidebar no longer shows a dead entry. REMOVE_SESSION's
-                // reducer strips this sid's pendingBySessionId slot in the same
-                // commit, so the sidebar's "running" dot clears with the row.
-                dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
+                // Prune only when the session really is gone. Every other
+                // failure — no model configured, harness error, transport —
+                // leaves a perfectly valid row on disk, and dropping it here
+                // turned a recoverable error into what looked like lost chat
+                // history. The sidecar answers a missing session with
+                // RpcHandlerError(NotFound); anything else normalizes to
+                // `internal` / `invalid_state`, so the code discriminates.
+                // REMOVE_SESSION's reducer strips this sid's pendingBySessionId
+                // slot in the same commit, so the sidebar's "running" dot
+                // clears with the row.
+                if ((err as { code?: string }).code === ErrorCodes.NotFound) {
+                    dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
+                }
                 return;
             }
             let hist: Awaited<ReturnType<typeof client.sessionHistory>>;

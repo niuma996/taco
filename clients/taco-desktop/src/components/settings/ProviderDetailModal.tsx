@@ -22,6 +22,7 @@ import { CircleCheck, CircleX, Eye, EyeOff, Plus, Trash2, Undo2 } from "lucide-r
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -42,6 +43,11 @@ export interface ProviderDetailModalProps {
     existingIds: ReadonlyArray<string>;
     /** Masked key from the sidecar view (e.g. `sk-ant-…AbCd`). */
     mask?: string;
+    /**
+     * Configured default provider id. Used only to warn that deleting this
+     * provider will reset the default model.
+     */
+    defaultProvider?: string;
     saving: boolean;
     /** Save error from the caller's save hook — shown inside the modal. */
     saveError?: string | null;
@@ -301,6 +307,16 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
 
     const title = isCreate ? t("settings.customProviderAdd") : (provider?.name ?? "");
 
+    /**
+     * Deleting the configured default provider is the one destructive action
+     * here that reaches past this panel: it can strand `defaultProvider` and
+     * break session creation for every later prompt. Gate it behind a confirm
+     * that names the consequence when it applies.
+     */
+    const isDefaultProvider =
+        !isCreate && provider !== undefined && props.defaultProvider === provider.id;
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+
     return (
         <Modal
             open
@@ -314,7 +330,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                             variant="danger"
                             className="provider-detail-delete"
                             disabled={props.saving}
-                            onClick={() => void props.onDeleteCustom?.()}
+                            onClick={() => setConfirmingDelete(true)}
                         >
                             {t("settings.customProviderDeleteBtn")}
                         </Button>
@@ -655,6 +671,26 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
             )}
 
             {props.saveError && <div className="error-banner">{props.saveError}</div>}
+
+            {isCustom && !isCreate && (
+                <ConfirmModal
+                    open={confirmingDelete}
+                    title={t("settings.customProviderDeleteConfirm")}
+                    message={t(
+                        isDefaultProvider
+                            ? "settings.customProviderDeleteConfirmDefault"
+                            : "settings.customProviderDeleteConfirmPlain",
+                    )}
+                    confirmLabel={t("settings.customProviderDeleteConfirmBtn")}
+                    cancelLabel={t("settings.providerCancel")}
+                    busy={props.saving}
+                    onConfirm={() => {
+                        setConfirmingDelete(false);
+                        void props.onDeleteCustom?.();
+                    }}
+                    onCancel={() => setConfirmingDelete(false)}
+                />
+            )}
         </Modal>
     );
 }

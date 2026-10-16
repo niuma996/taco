@@ -12,6 +12,7 @@ import type {
     CustomModelEntry,
     CustomProviderConfig,
     ProviderView,
+    TacoGlobalConfigShape,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
@@ -127,13 +128,20 @@ export function ProviderSection(props: ProviderSectionProps) {
     const deleteCustom = async (id: string): Promise<void> => {
         const current = getGlobalConfig().global.customProviders ?? [];
         const rest = current.filter((c) => c.id !== id);
-        await save({
-            kind: "global",
-            patch: {
-                customProviders: rest,
-                apiKeys: { [id]: "" },
-            },
-        });
+        const patch: Partial<TacoGlobalConfigShape> = {
+            customProviders: rest,
+            apiKeys: { [id]: "" },
+        };
+        // A defaultProvider naming a deleted provider resolves to nothing —
+        // every later session.create fails with "no model configured", and no
+        // catalog entry can ever bring that id back. Drop the stale qualifier
+        // and keep defaultModel: the lookup then falls back to a cross-provider
+        // search by id, which succeeds when the user added that model elsewhere
+        // (the usual reason they delete a relay in favour of a built-in).
+        if (getGlobalConfig().global.defaultProvider === id) {
+            patch.defaultProvider = undefined;
+        }
+        await save({ kind: "global", patch });
         refresh();
         props.onKeysChanged?.();
     };
@@ -218,6 +226,7 @@ export function ProviderSection(props: ProviderSectionProps) {
                     cfg={detail.kind === "custom" ? detail.cfg : undefined}
                     existingIds={customProviders.map((c) => c.id)}
                     mask={detail.kind === "add" ? undefined : maskFor(detail.provider.id)}
+                    defaultProvider={globalState.global.defaultProvider}
                     saving={saving}
                     saveError={error}
                     onSaveBuiltin={
