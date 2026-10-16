@@ -159,7 +159,12 @@ function withModelEdits(
     extraModels: Record<string, CustomModelEntry[]>,
     hiddenModels: Record<string, string[]>,
 ): Provider {
+    const staticIds = new Set(base.getModels().map((m) => m.id));
+    const hiddenIds = new Set(hiddenModels[base.id] ?? []);
     const extras = (extraModels[base.id] ?? [])
+        // A manually entered extra must not create a second model with the
+        // same id as pi's static catalog. The static entry remains canonical.
+        .filter((e) => !staticIds.has(e.id) || hiddenIds.has(e.id))
         .map((e) => toExtraModel(e, base))
         .filter((m): m is Model<Api> => m !== undefined);
     const hidden = hiddenModels[base.id];
@@ -362,7 +367,17 @@ export class ModelRegistry {
      */
     listConfiguredProviders(): ProviderInfo[] {
         const builtins: ProviderInfo[] = this.builtinProviders.map(({ id, name, factory }) => {
-            const extraIds = new Set((this.extraModels[id] ?? []).map((e) => e.id));
+            const staticIds = new Set(
+                factory()
+                    .getModels()
+                    .map((m) => m.id),
+            );
+            const hiddenIdsForProvider = new Set(this.hiddenModels[id] ?? []);
+            const extraIds = new Set(
+                (this.extraModels[id] ?? [])
+                    .filter((e) => !staticIds.has(e.id) || hiddenIdsForProvider.has(e.id))
+                    .map((e) => e.id),
+            );
             const models: ModelInfo[] = this.listAvailableModels(id).map((m) => ({
                 ...m,
                 origin: extraIds.has(m.id) ? ("extra" as const) : ("builtin" as const),

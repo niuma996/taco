@@ -539,6 +539,26 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.equal(extra?.provider, "stub-a");
         });
 
+        it("keeps the static model canonical when an extra reuses its id", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerExtraModels: { "stub-a": [{ id: "model-a", name: "manual alias" }] },
+            });
+            assert.deepEqual(
+                mr.listAvailableModels("stub-a").map((m) => m.id),
+                ["model-a"],
+            );
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            assert.deepEqual(
+                view?.models.map((m) => [m.id, m.origin]),
+                [["model-a", "builtin"]],
+            );
+        });
+
         it("setProviderModelEdits re-registers built-ins with the new extras", () => {
             const store = new ProviderKeyStore({});
             const mr = new ModelRegistry({
