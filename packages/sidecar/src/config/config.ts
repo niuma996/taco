@@ -24,6 +24,7 @@ import {
     type CustomProviderConfig,
     DEFAULT_COMPACTION_ENABLED,
     DEFAULT_COMPACTION_THRESHOLD,
+    type GlobalConfigPatch,
     type InstructionsConfig,
     type McpServerConfig,
     type McpTransportKind,
@@ -749,7 +750,7 @@ export function validateCommandPermissions(
  * `undefined` / `null` on known scalar fields means "clear" (set to `undefined`);
  * the `apiKeys` field uses shallow merge (only the provided keys are overwritten).
  */
-export function saveGlobalConfig(patch: Partial<TacoGlobalConfigShape>): TacoGlobalConfigShape {
+export function saveGlobalConfig(patch: GlobalConfigPatch): TacoGlobalConfigShape {
     if (!patch || typeof patch !== "object") {
         throw new Error("saveGlobalConfig: patch must be an object");
     }
@@ -757,15 +758,20 @@ export function saveGlobalConfig(patch: Partial<TacoGlobalConfigShape>): TacoGlo
     const current = readJsonOrEmpty(path) as TacoGlobalConfigShape;
     const next: TacoGlobalConfigShape = { ...current };
 
-    if ("defaultModel" in patch) next.defaultModel = patch.defaultModel;
-    if ("defaultProvider" in patch) next.defaultProvider = patch.defaultProvider;
-    if ("sessionsRoot" in patch) next.sessionsRoot = patch.sessionsRoot;
-    if ("systemPrompt" in patch) next.systemPrompt = patch.systemPrompt;
+    // A `null` clear arrives from the wire (see `GlobalConfigPatch`); the stored
+    // shape only ever holds `undefined`, so normalize before assigning or the
+    // cleared field would serialize as `null` back out to every reader.
+    const cleared = <T>(value: T | null): T | undefined => (value === null ? undefined : value);
+
+    if ("defaultModel" in patch) next.defaultModel = cleared(patch.defaultModel);
+    if ("defaultProvider" in patch) next.defaultProvider = cleared(patch.defaultProvider);
+    if ("sessionsRoot" in patch) next.sessionsRoot = cleared(patch.sessionsRoot);
+    if ("systemPrompt" in patch) next.systemPrompt = cleared(patch.systemPrompt);
     if ("commandPermissions" in patch) {
         next.commandPermissions = validateCommandPermissions(patch.commandPermissions, "patch");
     }
-    if ("anthropicApiKey" in patch) next.anthropicApiKey = patch.anthropicApiKey;
-    if ("openaiApiKey" in patch) next.openaiApiKey = patch.openaiApiKey;
+    if ("anthropicApiKey" in patch) next.anthropicApiKey = cleared(patch.anthropicApiKey);
+    if ("openaiApiKey" in patch) next.openaiApiKey = cleared(patch.openaiApiKey);
     if ("thinkingLevel" in patch) {
         if (patch.thinkingLevel === undefined || patch.thinkingLevel === null) {
             next.thinkingLevel = undefined;

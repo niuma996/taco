@@ -388,8 +388,40 @@ export interface SettingsGetResult {
  */
 export interface SettingsWriteParams {
     /** Sidecar config patch, merged back to `~/.taco/taco.json`. */
-    global?: Partial<TacoGlobalConfigShape>;
+    global?: GlobalConfigPatch;
 }
+
+/**
+ * A `settings.write` patch: `TacoGlobalConfigShape` with `null` allowed on the
+ * scalar fields `saveGlobalConfig` documents as clearable, as the explicit
+ * "clear this field" value.
+ *
+ * `undefined` cannot express that over the wire — `JSON.stringify` drops an
+ * undefined-valued key, so the field never reaches the sidecar and the stored
+ * value survives a patch the client believed cleared it. `null` survives
+ * serialization. Composite fields (nested config blocks, arrays, maps) keep
+ * their existing merge semantics and are not part of this contract.
+ */
+export type GlobalConfigPatch = Partial<
+    Omit<
+        TacoGlobalConfigShape,
+        | "defaultModel"
+        | "defaultProvider"
+        | "sessionsRoot"
+        | "systemPrompt"
+        | "thinkingLevel"
+        | "anthropicApiKey"
+        | "openaiApiKey"
+    >
+> & {
+    defaultModel?: string | null;
+    defaultProvider?: string | null;
+    sessionsRoot?: string | null;
+    systemPrompt?: string | null;
+    thinkingLevel?: ThinkingLevel | null;
+    anthropicApiKey?: string | null;
+    openaiApiKey?: string | null;
+};
 
 /**
  * Project-context instructions injection — controls whether TACO reads

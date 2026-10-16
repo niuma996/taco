@@ -7,7 +7,7 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { TacoGlobalConfigShape } from "@taco-ai/protocol";
+import type { GlobalConfigPatch, TacoGlobalConfigShape } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../src/config/config.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
@@ -36,6 +36,16 @@ describe("saveGlobalConfig round-trip", () => {
         { name: "disabledExtensions", value: ["@taco/ext-b"] },
     ];
 
+    const clearable: ReadonlySet<keyof TacoGlobalConfigShape> = new Set([
+        "defaultModel",
+        "defaultProvider",
+        "sessionsRoot",
+        "systemPrompt",
+        "thinkingLevel",
+        "anthropicApiKey",
+        "openaiApiKey",
+    ]);
+
     for (const { name, value } of scalars) {
         it(`persists scalar field ${String(name)}`, () => {
             saveGlobalConfig({ [name]: value } as Partial<TacoGlobalConfigShape>);
@@ -45,6 +55,18 @@ describe("saveGlobalConfig round-trip", () => {
                 value,
                 `saveGlobalConfig dropped the field "${String(name)}" — add it to the patch handler`,
             );
+        });
+    }
+
+    // A clear arrives as `null` (undefined keys vanish in JSON.stringify) and
+    // must be stored as an absent key, not a persisted `null`.
+    for (const { name, value } of scalars.filter((s) => clearable.has(s.name))) {
+        it(`clears scalar field ${String(name)} on null`, () => {
+            saveGlobalConfig({ [name]: value } as GlobalConfigPatch);
+            saveGlobalConfig({ [name]: null } as GlobalConfigPatch);
+            const after = readGlobalConfig();
+            assert.equal(after[name], undefined);
+            assert.ok(!(name in after), `"${String(name)}" persisted as a key after a null clear`);
         });
     }
 

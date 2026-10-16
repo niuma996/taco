@@ -66,6 +66,7 @@ export type {
     ExtensionStatusEntry,
     ExtensionsStatusParams,
     ExtensionsStatusResult,
+    GlobalConfigPatch,
     InstructionsConfig,
     MaskedKey,
     McpCreateConfigParams,

@@ -11,8 +11,8 @@
 import type {
     CustomModelEntry,
     CustomProviderConfig,
+    GlobalConfigPatch,
     ProviderView,
-    TacoGlobalConfigShape,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
@@ -128,7 +128,7 @@ export function ProviderSection(props: ProviderSectionProps) {
     const deleteCustom = async (id: string): Promise<void> => {
         const current = getGlobalConfig().global.customProviders ?? [];
         const rest = current.filter((c) => c.id !== id);
-        const patch: Partial<TacoGlobalConfigShape> = {
+        const patch: GlobalConfigPatch = {
             customProviders: rest,
             apiKeys: { [id]: "" },
         };
@@ -138,8 +138,11 @@ export function ProviderSection(props: ProviderSectionProps) {
         // and keep defaultModel: the lookup then falls back to a cross-provider
         // search by id, which succeeds when the user added that model elsewhere
         // (the usual reason they delete a relay in favour of a built-in).
+        // `null`, not `undefined`: the patch crosses a JSON-RPC frame, and
+        // JSON.stringify drops an undefined-valued key — the clear would
+        // silently no-op. `saveGlobalConfig` treats null as clear.
         if (getGlobalConfig().global.defaultProvider === id) {
-            patch.defaultProvider = undefined;
+            patch.defaultProvider = null;
         }
         await save({ kind: "global", patch });
         refresh();

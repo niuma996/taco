@@ -16,14 +16,14 @@
  * waits for the first to settle before issuing its own.
  */
 
-import type { TacoGlobalConfigShape } from "@taco-ai/protocol";
+import type { GlobalConfigPatch } from "@taco-ai/protocol";
 import { useCallback, useRef, useState } from "react";
 import type { TacoClientSettingsShape } from "../../lib/clientSettings.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { applyGlobalConfig, writeClientSettings } from "../../lib/globalConfig.ts";
 
 export type SavePatchInput =
-    | { kind: "global"; patch: Partial<TacoGlobalConfigShape> }
+    | { kind: "global"; patch: GlobalConfigPatch }
     | { kind: "client"; patch: Partial<TacoClientSettingsShape> };
 
 export interface SaveConfigPatchApi {
