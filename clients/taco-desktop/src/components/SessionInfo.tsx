@@ -201,6 +201,22 @@ export function SessionInfo({
                     {activeId.slice(0, 8)}
                 </code>
             )}
+            {onTogglePendingPermissions && pendingPermissionCount > 0 && (
+                // Counted badge, not the dot the sibling panels use: a pending
+                // approval is a decision with a deadline, and an unread dot is
+                // easy to mistake for background activity.
+                <button
+                    type="button"
+                    className="session-info-permissions"
+                    title={t("session.pendingPermissions")}
+                    aria-label={t("session.pendingPermissions")}
+                    aria-pressed={pendingPermissionsOpen}
+                    onClick={onTogglePendingPermissions}
+                >
+                    <ShieldAlert size={14} aria-hidden="true" />
+                    <span className="session-info-permissions-count">{pendingPermissionCount}</span>
+                </button>
+            )}
             {/* Full id + copy / created-at / open log consolidated behind one
                 icon. margin-left:auto fills the slot the created-time text used
                 to hold: metadata stays left, the action cluster stays right. */}
@@ -277,22 +293,6 @@ export function SessionInfo({
                     </Popover.Content>
                 </Popover.Portal>
             </Popover.Root>
-            {onTogglePendingPermissions && pendingPermissionCount > 0 && (
-                // Counted badge, not the dot the sibling panels use: a pending
-                // approval is a decision with a deadline, and an unread dot is
-                // easy to mistake for background activity.
-                <button
-                    type="button"
-                    className="session-info-permissions"
-                    title={t("session.pendingPermissions")}
-                    aria-label={t("session.pendingPermissions")}
-                    aria-pressed={pendingPermissionsOpen}
-                    onClick={onTogglePendingPermissions}
-                >
-                    <ShieldAlert size={14} aria-hidden="true" />
-                    <span className="session-info-permissions-count">{pendingPermissionCount}</span>
-                </button>
-            )}
             {(onToggleSubagents || onToggleTasks || filesButton) && (
                 <span className="session-info-divider" aria-hidden="true" />
             )}
