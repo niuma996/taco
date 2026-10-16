@@ -4,7 +4,10 @@
  * Both paths:
  *   - Honor .gitignore (`ignore` package) + safe defaults
  *   - Emit identical output format
- * Results truncated by line count (MAX_LINES).
+ * Results truncated by line count (MAX_LINES), per-line length (MAX_LINE_CHARS)
+ * and total size (MAX_OUTPUT_CHARS). A line cap alone is not a size cap: a few
+ * hundred minified or jsonl rows can run to hundreds of KB, and one parallel
+ * batch of those overflows the context window past what compaction can cut.
  */
 
 import { spawnSync } from "node:child_process";
@@ -27,6 +30,12 @@ import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";
 export type GrepTool = AgentHarnessTool<ExecutionToolContext>;
 
 const MAX_LINES = 300;
+const MAX_LINE_CHARS = 500;
+const MAX_OUTPUT_CHARS = 50_000;
+
+function clipLine(line: string): string {
+    return line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}… [line clipped]` : line;
+}
 
 const SAFE_DEFAULT_IGNORES = BASE_SAFE_DEFAULT_IGNORES;
 
@@ -175,12 +184,12 @@ export function createGrepTool(): GrepTool {
         name: "grep",
         label: "grep",
         description:
-            "Search file contents by regex or literal string. Respects .gitignore and excludes safe defaults (node_modules/.git/dist/build/.next). Returns matching 'file:line: text' rows, up to 300 lines.",
+            "Search file contents by regex or literal string. Respects .gitignore and excludes safe defaults (node_modules/.git/dist/build/.next). Returns matching 'file:line: text' rows, up to 300 lines / 50k chars; long lines are clipped.",
         parameters: grepSchema,
         executionMode: "parallel",
         taco: {
             promptSummary:
-                "Regex / literal search across files — the tool for finding *where* a symbol or string appears; use `glob` to find files by name instead. Honours .gitignore and skips node_modules/.git/dist/build/.next. Returns up to 300 `file:line: text` rows — if you hit the cap, narrow the pattern. Safe to issue in parallel in the same turn.",
+                "Regex / literal search across files — the tool for finding *where* a symbol or string appears; use `glob` to find files by name instead. Honours .gitignore and skips node_modules/.git/dist/build/.next. Returns up to 300 `file:line: text` rows (50k chars total, long lines clipped) — if you hit the cap, narrow the pattern or `glob`. Safe to issue in parallel in the same turn.",
             mutates: false,
         },
         async execute(
@@ -203,13 +212,22 @@ export function createGrepTool(): GrepTool {
                 : await runFallback(env, root, params, piContext);
 
             if (signal?.aborted) throw new Error("Operation aborted");
-            const truncated = rawLines.length > MAX_LINES;
-            const shown = truncated ? rawLines.slice(0, MAX_LINES) : rawLines;
+            const shown: string[] = [];
+            let size = 0;
+            let clipped = false;
+            for (const raw of rawLines.slice(0, MAX_LINES)) {
+                const line = clipLine(raw);
+                if (line !== raw) clipped = true;
+                if (size + line.length + 1 > MAX_OUTPUT_CHARS) break;
+                shown.push(line);
+                size += line.length + 1;
+            }
+            const omitted = rawLines.length - shown.length;
+            const truncated = omitted > 0 || clipped;
             const body =
                 shown.length === 0
                     ? "(no matches)"
-                    : shown.join("\n") +
-                      (truncated ? `\n… (${rawLines.length - MAX_LINES} more)` : "");
+                    : shown.join("\n") + (omitted > 0 ? `\n… (${omitted} more)` : "");
             return {
                 content: [{ type: "text", text: body }],
                 details: { count: rawLines.length, truncated },

@@ -14,6 +14,8 @@ import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createGrepTool } from "../../src/tools/grep.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 
+type GrepDetails = { count: number; truncated: boolean };
+
 describe("grep tool", () => {
     let dir: string;
     let env: NodeExecutionEnv;
@@ -82,5 +84,35 @@ describe("grep tool", () => {
         );
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
         assert.ok(text.includes("src/c.ts:1:"));
+    });
+
+    it("clips a long matching line", async () => {
+        writeFileSync(join(dir, "src", "min.js"), `var longneedle="${"x".repeat(5000)}";\n`);
+        const tool = createGrepTool();
+        const res = await invokeTool(
+            tool,
+            { pattern: "longneedle" },
+            { env },
+            { toolCallId: "tc" },
+        );
+        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+        assert.ok(text.includes("src/min.js:1:"));
+        assert.ok(text.length < 1000, `got ${text.length} chars`);
+        assert.equal((res.details as GrepDetails).truncated, true);
+    });
+
+    it("caps total output under the line cap", async () => {
+        mkdirSync(join(dir, "wide"));
+        // 200 rows (under MAX_LINES) of ~400 chars each would be ~80k chars unclipped.
+        const row = `widetoken ${"y".repeat(400)}`;
+        writeFileSync(join(dir, "wide", "w.txt"), `${Array(200).fill(row).join("\n")}\n`);
+        const tool = createGrepTool();
+        const res = await invokeTool(tool, { pattern: "widetoken" }, { env }, { toolCallId: "tc" });
+        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+        assert.ok(text.length <= 51_000, `got ${text.length} chars`);
+        const details = res.details as GrepDetails;
+        assert.equal(details.count, 200);
+        assert.equal(details.truncated, true);
+        assert.match(text, /more\)$/);
     });
 });
