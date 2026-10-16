@@ -50,3 +50,37 @@ describe("normalizePushFrame — subagent.settled", () => {
         assert.equal((dispatched as { outcome?: string } | undefined)?.outcome, "completed");
     });
 });
+
+describe("normalizePushFrame — command_permission.resolved", () => {
+    function resolvedFrame(params: unknown): ServerPush {
+        return {
+            method: PushMethods.CommandPermissionResolved,
+            workspace: asWorkspaceId("/workspace"),
+            session: asSessionId("parent-session"),
+            params,
+        };
+    }
+
+    it("maps to COMMAND_PERMISSION_RESOLVED keyed by requestId", () => {
+        let dispatched: SidecarAction | undefined;
+        normalizePushFrame(
+            resolvedFrame({ requestId: "req-1", approved: false, denialReason: "aborted" }),
+            (a) => {
+                dispatched = a;
+            },
+        );
+        assert.deepEqual(dispatched, {
+            type: "COMMAND_PERMISSION_RESOLVED",
+            cwd: "/workspace",
+            requestId: "req-1",
+        });
+    });
+
+    it("drops a frame without a requestId", () => {
+        let dispatched: SidecarAction | undefined;
+        normalizePushFrame(resolvedFrame({}), (a) => {
+            dispatched = a;
+        });
+        assert.equal(dispatched, undefined);
+    });
+});

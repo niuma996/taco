@@ -46,6 +46,9 @@
     "sidebarLabel": "聊天列表",
     "taskPanel": "任务面板",
     "subagentPanel": "子代理面板",
+    "pendingPermissions": "待审批命令",
+    "pendingPermissionsEmpty": "当前没有等待审批的命令。",
+    "pendingPermissionsFrom": "来源",
     "noActiveSession": "暂无活动会话。新建一个,或从左侧选择一个。",
     "slogans": [
       "让每一个想法都快速变成可运行的代码",

@@ -106,7 +106,8 @@
     margin: 0.4rem 0 0 1.4rem;
     color: var(--fg);
 }
-.tool-card-permission-command {
+/* Shared by the tool card and the pending-approvals modal (CommandPermissionPrompt). */
+.permission-prompt-command {
     font-family: var(--mono, monospace);
     font-size: 0.85em;
     margin-top: 0.25rem;
@@ -115,13 +116,13 @@
     border-radius: var(--radius-xs);
     word-break: break-all;
 }
-.tool-card-permission-actions {
+.permission-prompt-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem;
     margin-top: 0.35rem;
 }
-.tool-card-permission-actions button {
+.permission-prompt-actions button {
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     background: var(--input-bg);
@@ -131,26 +132,57 @@
 }
 /* Permission buttons: semantic color border + text — "clickable" and "approve/deny" are instantly distinguishable.
    Background stays very faint to avoid competing with the dense tool-card stream. */
-.tool-card-permission-actions button.permission-allow {
+.permission-prompt-actions button.permission-allow {
     border-color: var(--success);
     background: var(--success-bg);
     color: var(--success);
 }
-.tool-card-permission-actions button.permission-deny {
+.permission-prompt-actions button.permission-deny {
     border-color: var(--error);
     background: var(--error-bg);
     color: var(--error);
 }
-.tool-card-permission-actions button.permission-allow:hover:not(:disabled),
-.tool-card-permission-actions button.permission-deny:hover:not(:disabled) {
+.permission-prompt-actions button.permission-allow:hover:not(:disabled),
+.permission-prompt-actions button.permission-deny:hover:not(:disabled) {
     filter: brightness(1.12);
 }
-.tool-card-permission-actions button:disabled {
+.permission-prompt-actions button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
-.tool-card-permission-actions .permission-error {
+.permission-prompt-actions .permission-error {
     color: var(--error);
     font-size: 0.85em;
     width: 100%;
+}
+
+/* Workspace-level pending-approval list; button styling comes from .permission-prompt-*. */
+.pending-permissions-modal {
+    width: min(640px, 92vw);
+}
+.pending-permissions-list {
+    list-style: none;
+    margin: 0.6rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.pending-permissions-empty {
+    margin: 0.6rem 0 0;
+    color: var(--fg-dim);
+}
+.pending-permission {
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--fg);
+}
+.pending-permission-source {
+    margin-top: 0.3rem;
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
 }

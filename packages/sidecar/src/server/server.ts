@@ -15,6 +15,8 @@ import {
     asWorkspaceId,
     type ChannelStatusEntry,
     type ClientCapabilities,
+    type CommandPermissionDecision,
+    type CommandPermissionRequest,
     type CustomModelEntry,
     type CustomProviderApi,
     type CustomProviderConfig,
@@ -1289,6 +1291,27 @@ export class SidecarServer implements ServerRpcSurface {
                 redacted,
             );
         });
+        ws.permissionBroker.on(
+            "resolved",
+            ({
+                request,
+                decision,
+            }: {
+                request: CommandPermissionRequest;
+                decision: CommandPermissionDecision;
+            }) => {
+                this.emitPush(
+                    PushMethods.CommandPermissionResolved,
+                    workspaceKey,
+                    request.displaySessionId ?? request.sessionId,
+                    {
+                        requestId: request.requestId,
+                        approved: decision.approved,
+                        ...(decision.denialReason ? { denialReason: decision.denialReason } : {}),
+                    },
+                );
+            },
+        );
         ws.on("session.attached", (e: RuntimePushEvent) => {
             this.emitPush(PushMethods.Attached, workspaceKey, e.sessionId, {});
             // Proactively push current task/plan store snapshots — covers

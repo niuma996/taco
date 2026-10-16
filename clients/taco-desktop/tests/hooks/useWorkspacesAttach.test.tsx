@@ -55,6 +55,7 @@ function seedWorkspace(): WorkspaceState {
         childMessagesBySubSessionId: {},
         childHistoryLoaded: {},
         askUserPending: {},
+        pendingCommandPermissions: {},
         agentToolPending: {},
         backgroundSubagents: {},
         pendingBySessionId: {},

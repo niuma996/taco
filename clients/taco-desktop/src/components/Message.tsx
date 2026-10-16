@@ -8,7 +8,7 @@
  * cutting visual noise.
  */
 
-import type { CommandPermissionScope } from "@taco-ai/protocol";
+import type { CommandPermissionRequest, CommandPermissionScope } from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
@@ -20,6 +20,10 @@ import {
     type UiToolCall,
 } from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
+import {
+    CommandPermissionPrompt,
+    type CommandPermissionPromptRequest,
+} from "./CommandPermissionPrompt";
 import { MessageMeta } from "./MessageMeta";
 import { ToolCardShell } from "./ToolCardShell";
 import { Clamp } from "./ui/Clamp";
@@ -37,6 +41,7 @@ export const Message = memo(function Message({
     isTurnInProgress = false,
     clampLines,
     onCommandPermission,
+    pendingPermissionRequests,
 }: {
     m: UiMessage;
     /**
@@ -62,6 +67,9 @@ export const Message = memo(function Message({
         approved: boolean,
         scope: CommandPermissionScope,
     ) => void;
+    /** requestId → request, for approvals still awaiting a decision. Passed as a
+     *  live reference rather than a lookup fn so `memo` stays effective. */
+    pendingPermissionRequests?: Readonly<Record<string, CommandPermissionRequest>>;
 }) {
     const showMeta = isLastInTurn && !isTurnInProgress;
     if (m.kind === "user") {
@@ -115,7 +123,11 @@ export const Message = memo(function Message({
             {m.text && <AssistantMarkdown text={m.text} />}
             {m.tools.map((tool) => (
                 <ToolCardShell key={`${m.id}-${tool.id}`} tool={tool}>
-                    <CommandPermissionActions tool={tool} onResolve={onCommandPermission} />
+                    <CommandPermissionActions
+                        tool={tool}
+                        onResolve={onCommandPermission}
+                        pendingPermissionRequests={pendingPermissionRequests}
+                    />
                 </ToolCardShell>
             ))}
             {showMeta && <MessageMeta ts={m.ts} text={m.text} />}
@@ -126,104 +138,31 @@ export const Message = memo(function Message({
 function CommandPermissionActions({
     tool,
     onResolve,
+    pendingPermissionRequests,
 }: {
     tool: UiToolCall;
     onResolve?: (requestId: string, approved: boolean, scope: CommandPermissionScope) => void;
+    pendingPermissionRequests?: Readonly<Record<string, CommandPermissionRequest>>;
 }) {
-    const { t } = useT();
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const request = (
-        tool.details as
-            | {
-                  commandPermission?: {
-                      requestId: string;
-                      command: string;
-                      evaluation: { risk: string; reason: string };
-                  };
-              }
-            | undefined
+        tool.details as { commandPermission?: CommandPermissionPromptRequest } | undefined
     )?.commandPermission;
     if (!request || !onResolve) return null;
-    if (tool.status !== "running") return null;
-
-    // Destructive / external commands always re-prompt (evaluateCommand returns
-    // "ask" before matchesRule), so persistent scopes have no effect on them.
-    const persistentDisabled =
-        request.evaluation.risk === "destructive" ||
-        request.evaluation.risk === "externalSideEffect";
-
-    const handle = async (approved: boolean, scope: CommandPermissionScope) => {
-        setSubmitting(true);
-        setError(null);
-        try {
-            await onResolve(request.requestId, approved, scope);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-            setSubmitting(false);
-        }
-    };
-
-    const riskLabel = t(
-        `settings.permissionsRisk${request.evaluation.risk.charAt(0).toUpperCase()}${request.evaluation.risk.slice(1)}`,
-    );
-
+    // The pending table, not the card's status, decides this. A background spawn's
+    // card reads `ok` from the moment it launches, so a status gate hides every
+    // approval a running subagent asks for. The table is cleared by the
+    // `command_permission.resolved` push on every settle path. Falling back to
+    // `running` when no table is supplied keeps callers that don't track approvals working.
+    const stillPending = pendingPermissionRequests
+        ? request.requestId in pendingPermissionRequests
+        : tool.status === "running";
+    if (!stillPending) return null;
     return (
-        <div className="tool-card-permission">
-            <div>
-                {riskLabel}: {request.evaluation.reason}
-            </div>
-            <div className="tool-card-permission-command">{request.command}</div>
-            <div className="tool-card-permission-actions">
-                <button
-                    type="button"
-                    className="permission-allow"
-                    disabled={submitting}
-                    onClick={() => void handle(true, "once")}
-                >
-                    {submitting
-                        ? t("settings.permissionsSubmitting")
-                        : t("settings.permissionsAllowOnce")}
-                </button>
-                <button
-                    type="button"
-                    className="permission-allow"
-                    disabled={submitting || persistentDisabled}
-                    title={
-                        persistentDisabled ? t("settings.permissionsPersistentDisabled") : undefined
-                    }
-                    onClick={() => void handle(true, "session")}
-                >
-                    {submitting
-                        ? t("settings.permissionsSubmitting")
-                        : t("settings.permissionsAllowSession")}
-                </button>
-                <button
-                    type="button"
-                    className="permission-allow"
-                    disabled={submitting || persistentDisabled}
-                    title={
-                        persistentDisabled
-                            ? t("settings.permissionsPersistentDisabled")
-                            : t("settings.permissionsAlwaysAllowHint")
-                    }
-                    onClick={() => void handle(true, "global")}
-                >
-                    {submitting
-                        ? t("settings.permissionsSubmitting")
-                        : t("settings.permissionsAlwaysAllow")}
-                </button>
-                <button
-                    type="button"
-                    className="permission-deny"
-                    disabled={submitting}
-                    onClick={() => void handle(false, "once")}
-                >
-                    {t("settings.permissionsDeny")}
-                </button>
-                {error && <span className="permission-error">{error}</span>}
-            </div>
-        </div>
+        <CommandPermissionPrompt
+            request={request}
+            onResolve={onResolve}
+            className="tool-card-permission"
+        />
     );
 }
 

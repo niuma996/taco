@@ -125,6 +125,9 @@ export class PermissionBroker extends EventEmitter {
                 this.pending.delete(request.requestId);
                 args.signal?.removeEventListener("abort", onAbort);
                 resolve(decision);
+                // Every settle path (user, timeout, abort, cleanup) funnels
+                // through here — the UI's only way to learn about the non-user ones.
+                this.emit("resolved", { request, decision });
             };
             const onAbort = () =>
                 finish({ approved: false, scope: "once", evaluation, denialReason: "aborted" });

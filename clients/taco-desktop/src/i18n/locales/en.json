@@ -47,6 +47,9 @@
     "sidebarLabel": "Chats",
     "taskPanel": "Task panel",
     "subagentPanel": "Subagent panel",
+    "pendingPermissions": "Pending approvals",
+    "pendingPermissionsEmpty": "No commands are waiting for approval.",
+    "pendingPermissionsFrom": "From",
     "noActiveSession": "No active session. Create one or pick one from the left.",
     "slogans": [
       "Turning your ideas into working code.",

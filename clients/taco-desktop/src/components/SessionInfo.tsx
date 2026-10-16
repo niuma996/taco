@@ -30,6 +30,7 @@ import {
     Info,
     ListTodo,
     Plus,
+    ShieldAlert,
 } from "lucide-react";
 import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
@@ -50,6 +51,9 @@ export function SessionInfo({
     onToggleSubagents,
     subagentsOpen,
     subagentDot,
+    pendingPermissionCount = 0,
+    pendingPermissionsOpen = false,
+    onTogglePendingPermissions,
     onNewSession,
     newSessionDisabled,
     isIm,
@@ -70,6 +74,10 @@ export function SessionInfo({
     subagentsOpen?: boolean;
     /** none = hide the dot, idle = all terminal, active = at least one running. */
     subagentDot?: "none" | "idle" | "active";
+    /** Shell approvals still awaiting a decision, workspace-wide. */
+    pendingPermissionCount?: number;
+    pendingPermissionsOpen?: boolean;
+    onTogglePendingPermissions?: () => void;
     /** Start a new session — same action as the topbar "new chat" chip. */
     onNewSession?: () => void;
     newSessionDisabled?: boolean;
@@ -269,6 +277,22 @@ export function SessionInfo({
                     </Popover.Content>
                 </Popover.Portal>
             </Popover.Root>
+            {onTogglePendingPermissions && pendingPermissionCount > 0 && (
+                // Counted badge, not the dot the sibling panels use: a pending
+                // approval is a decision with a deadline, and an unread dot is
+                // easy to mistake for background activity.
+                <button
+                    type="button"
+                    className="session-info-permissions"
+                    title={t("session.pendingPermissions")}
+                    aria-label={t("session.pendingPermissions")}
+                    aria-pressed={pendingPermissionsOpen}
+                    onClick={onTogglePendingPermissions}
+                >
+                    <ShieldAlert size={14} aria-hidden="true" />
+                    <span className="session-info-permissions-count">{pendingPermissionCount}</span>
+                </button>
+            )}
             {(onToggleSubagents || onToggleTasks || filesButton) && (
                 <span className="session-info-divider" aria-hidden="true" />
             )}

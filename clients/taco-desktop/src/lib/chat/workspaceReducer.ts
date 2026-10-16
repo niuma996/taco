@@ -92,6 +92,16 @@ export interface WorkspaceState {
      */
     askUserPending: Record<string, true>;
     /**
+     * requestId → the shell approval still awaiting a decision.
+     *
+     * Not derivable from a tool card: a background spawn's card settles to `ok`
+     * the moment it launches, so its status says nothing about whether the child
+     * is now blocked waiting for the user. Entries must survive a session switch
+     * — a background child runs for minutes — so this is workspace-scoped, not
+     * stored in the active session's messages alone.
+     */
+    pendingCommandPermissions: Record<string, CommandPermissionRequest>;
+    /**
      * sessionId → task snapshot.
      * Driven by sidecar's tasks.updated push (normalized via useSidecarStream dispatch).
      * Per-session slot: switching sessions doesn't cross-contaminate.
@@ -186,6 +196,7 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         childMessagesBySubSessionId: {},
         childHistoryLoaded: {},
         askUserPending: {},
+        pendingCommandPermissions: {},
         agentToolPending: {},
         backgroundSubagents: {},
         pendingBySessionId: {},
@@ -234,6 +245,8 @@ export type WorkspaceAction =
           sid: string;
           request: CommandPermissionRequest;
       }
+    /** From the `command_permission.resolved` push; cards re-derive their buttons from the table. */
+    | { type: "COMMAND_PERMISSION_RESOLVED"; cwd: string; requestId: string }
     | { type: "REMOVE_SESSION"; cwd: string; sid: string }
     | { type: "SET_PENDING"; cwd: string; sid: string; pending: boolean }
     | { type: "BUMP_SESSION_TIME"; cwd: string; sid: string; updatedAt: string }
@@ -378,6 +391,17 @@ function omitKey<V>(map: Record<string, V>, key: string): Record<string, V> {
     return next;
 }
 
+function omitRequestsForSession(
+    map: Record<string, CommandPermissionRequest>,
+    sid: string,
+): Record<string, CommandPermissionRequest> {
+    const entries = Object.entries(map);
+    const kept = entries.filter(
+        ([, r]) => r.sessionId !== sid && (r.displaySessionId ?? r.sessionId) !== sid,
+    );
+    return kept.length === entries.length ? map : Object.fromEntries(kept);
+}
+
 /**
  * Rebuild `backgroundSubagents` from a freshly loaded history.
  *
@@ -476,6 +500,9 @@ export function workspacesReducer(
                 return {
                     messages: markRunningShellToolsFailed(existing.messages),
                     childMessagesBySubSessionId,
+                    // The dead daemon's broker took its pending requests with it,
+                    // and no resolved push will ever arrive for them.
+                    pendingCommandPermissions: {},
                 };
             });
         case "SET_ACTIVE": {
@@ -568,11 +595,26 @@ export function workspacesReducer(
             // history — causing blank first-open or stale messages on new sessions.
             return state;
         case "COMMAND_PERMISSION_REQUESTED":
-            return updateWs(state, action.cwd, (existing) => {
-                if (existing.activeSession !== action.sid) return undefined;
-                const messages = attachCommandPermission(existing.messages, action.request);
-                return messages === existing.messages ? undefined : { messages };
-            });
+            return updateWs(state, action.cwd, (existing) => ({
+                pendingCommandPermissions: {
+                    ...existing.pendingCommandPermissions,
+                    [action.request.requestId]: action.request,
+                },
+                // Only the session on screen has messages to patch. The entry above is
+                // written regardless, so a session switch can no longer strand a
+                // request that is still holding a subagent's shell call open.
+                messages:
+                    existing.activeSession === action.sid
+                        ? attachCommandPermission(existing.messages, action.request)
+                        : existing.messages,
+            }));
+        case "COMMAND_PERMISSION_RESOLVED":
+            return updateWs(state, action.cwd, (existing) => ({
+                pendingCommandPermissions: omitKey(
+                    existing.pendingCommandPermissions,
+                    action.requestId,
+                ),
+            }));
         case "REMOVE_SESSION":
             return updateWs(state, action.cwd, (existing) => {
                 const remaining = existing.sessions.filter((s) => s.id !== action.sid);
@@ -597,6 +639,12 @@ export function workspacesReducer(
                     ...(wasActive ? { activeSession: undefined, messages: [] } : {}),
                     pendingBySessionId: omitKey(existing.pendingBySessionId, action.sid),
                     queuedBySessionId: omitKey(existing.queuedBySessionId, action.sid),
+                    // The broker aborts these server-side, but the resolved push is
+                    // routed to the session being removed and may never be applied.
+                    pendingCommandPermissions: omitRequestsForSession(
+                        existing.pendingCommandPermissions,
+                        action.sid,
+                    ),
                 };
             });
         case "SET_PENDING":

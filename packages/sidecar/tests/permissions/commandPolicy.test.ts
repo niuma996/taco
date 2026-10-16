@@ -371,6 +371,52 @@ describe("PermissionBroker", () => {
         assert.equal(decision.denialReason, "aborted");
     });
 
+    // The UI clears its pending-approval list on "resolved"; a settle path that
+    // skipped the event would leave a dead approve button on screen.
+    it("emits resolved on every settle path", async () => {
+        const settle: Record<string, (broker: PermissionBroker, requestId: string) => void> = {
+            user: (broker, requestId) => broker.resolve(requestId, false, "once"),
+            abort: () => controller.abort(),
+            cleanupSession: (broker) => broker.cleanupSession("session-1"),
+            cleanupAll: (broker) => broker.cleanupAll(),
+        };
+        let controller = new AbortController();
+        for (const [path, run] of Object.entries(settle)) {
+            controller = new AbortController();
+            const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 60_000 });
+            const events: { request: { requestId: string }; decision: { approved: boolean } }[] =
+                [];
+            broker.on("resolved", (e) => events.push(e));
+            let requestId = "";
+            broker.once("requested", (value) => {
+                requestId = value.requestId;
+            });
+            const pending = broker.evaluateAndRequest({
+                sessionId: "session-1",
+                toolCallId: "call-1",
+                command: "rm -rf /tmp/demo",
+                signal: controller.signal,
+            });
+            run(broker, requestId);
+            await pending;
+            assert.equal(events.length, 1, path);
+            assert.equal(events[0]?.request.requestId, requestId, path);
+            assert.equal(events[0]?.decision.approved, false, path);
+        }
+    });
+
+    it("emits resolved when a pending request times out", async () => {
+        const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 10 });
+        const reasons: (string | undefined)[] = [];
+        broker.on("resolved", (e) => reasons.push(e.decision.denialReason));
+        await broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-1",
+            command: "rm -rf /tmp/demo",
+        });
+        assert.deepEqual(reasons, ["timeout"]);
+    });
+
     it("times out pending requests after the configured timeout", async () => {
         const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 10 });
         const decision = await broker.evaluateAndRequest({

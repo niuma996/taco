@@ -371,6 +371,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     sid: action.sid,
                     request: action.request,
                 });
+            } else if (action.type === "COMMAND_PERMISSION_RESOLVED") {
+                dispatchWs({
+                    type: "COMMAND_PERMISSION_RESOLVED",
+                    cwd: action.cwd,
+                    requestId: action.requestId,
+                });
             } else if (action.type === "SIDECAR_RESTARTED") {
                 dispatchWs({ type: "SIDECAR_RESTARTED", cwd: action.cwd });
                 // The replacement daemon starts with no attached sessions —

@@ -36,6 +36,7 @@ export default defineConfig({
             "tests/components/ContextIndicator.test.tsx",
             "tests/components/TopbarQuickActions.test.tsx",
             "tests/components/NotificationBell.test.tsx",
+            "tests/components/CommandPermissionActions.test.tsx",
             "tests/components/LlmDumpPanel.test.tsx",
             "tests/components/toolViews/ReadToolCard.test.tsx",
             "tests/components/toolViews/ToolCardShell.test.tsx",

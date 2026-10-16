@@ -62,6 +62,7 @@ export type SidecarAction =
           sid: string;
           request: CommandPermissionRequest;
       }
+    | { type: "COMMAND_PERMISSION_RESOLVED"; cwd: string; requestId: string }
     | { type: "REMOVE_SESSION"; cwd: string; sid: string }
     | { type: "SESSION_RENAMED"; cwd: string; sid: string; name: string }
     | { type: "SIDECAR_RESTARTED"; cwd: string }
@@ -173,6 +174,15 @@ export function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) =
                 sid: p.session,
                 request: p.params as CommandPermissionRequest,
             });
+        case PushMethods.CommandPermissionResolved: {
+            const requestId = (p.params as { requestId?: unknown } | undefined)?.requestId;
+            if (typeof requestId !== "string") return;
+            return void dispatch({
+                type: "COMMAND_PERMISSION_RESOLVED",
+                cwd: p.workspace,
+                requestId,
+            });
+        }
         case PushMethods.SubagentSpawned: {
             const params = (p.params ?? {}) as Partial<SubagentSpawnedPayload>;
             const parentToolCallId =

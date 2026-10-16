@@ -12,6 +12,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
+import { asSessionId, asToolCallId, type CommandPermissionRequest } from "@taco-ai/protocol";
 import type { SessionEventLike, UiMessage } from "../../../src/lib/chat/chatUtils";
 import {
     sortSessionsByUpdatedDesc,
@@ -29,6 +30,7 @@ function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
         childMessagesBySubSessionId: {},
         childHistoryLoaded: {},
         askUserPending: {},
+        pendingCommandPermissions: {},
         agentToolPending: {},
         backgroundSubagents: {},
         pendingBySessionId: {},
@@ -1312,6 +1314,146 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
             answers: {},
         });
         assert.deepEqual(next["/ws"]?.askUserPending, { "tc-1": true });
+    });
+});
+
+describe("workspacesReducer — command permission pending lifecycle", () => {
+    function permissionRequest(
+        overrides: Partial<CommandPermissionRequest> = {},
+    ): CommandPermissionRequest {
+        return {
+            requestId: "req-1",
+            sessionId: asSessionId("s1"),
+            toolCallId: asToolCallId("tc-root"),
+            command: "rm -rf build",
+            evaluation: { behavior: "ask", risk: "destructive", reason: "deletes a directory" },
+            ...overrides,
+        };
+    }
+
+    // A settled `agent` card is the background-spawn shape: it reports `ok`
+    // from the moment it launches, so the approval has to surface without
+    // relying on the card still being `running`.
+    function assistantWithAgentCard(toolCallId: string): UiMessage[] {
+        return [
+            {
+                id: "assistant-1",
+                kind: "assistant",
+                text: "",
+                ts: 1,
+                thinking: [],
+                tools: [{ id: toolCallId, name: "agent", args: { prompt: "go" }, status: "ok" }],
+            },
+        ];
+    }
+
+    function toolById(messages: UiMessage[] | undefined, id: string) {
+        const first = messages?.[0];
+        if (first?.kind !== "assistant") throw new Error("expected an assistant message");
+        const tool = first.tools.find((t) => t.id === id);
+        if (!tool) throw new Error(`missing tool ${id}`);
+        return tool;
+    }
+
+    it("records the request when the requesting session is not the active one", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s-other",
+                messages: assistantWithAgentCard("tc-root"),
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "COMMAND_PERMISSION_REQUESTED",
+            cwd: "/ws",
+            sid: "s1",
+            request: permissionRequest({ displayToolCallId: asToolCallId("tc-root") }),
+        });
+        assert.equal(next["/ws"]?.pendingCommandPermissions["req-1"]?.command, "rm -rf build");
+        // That session's card isn't on screen, so there is nothing to patch.
+        assert.equal(toolById(next["/ws"]?.messages, "tc-root").details, undefined);
+    });
+
+    it("also patches the card when the requesting session is on screen", () => {
+        const state = {
+            "/ws": baseWs({ activeSession: "s1", messages: assistantWithAgentCard("tc-root") }),
+        };
+        const next = workspacesReducer(state, {
+            type: "COMMAND_PERMISSION_REQUESTED",
+            cwd: "/ws",
+            sid: "s1",
+            request: permissionRequest({ displayToolCallId: asToolCallId("tc-root") }),
+        });
+        assert.ok(next["/ws"]?.pendingCommandPermissions["req-1"]);
+        const details = toolById(next["/ws"]?.messages, "tc-root").details as
+            | { commandPermission?: CommandPermissionRequest }
+            | undefined;
+        assert.equal(details?.commandPermission?.requestId, "req-1");
+    });
+
+    it("keeps pending approvals across a session switch", () => {
+        // ATTACH replaces `messages` wholesale; the table must not be rebuilt
+        // along with them or a background subagent's approval is stranded.
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s1",
+                pendingCommandPermissions: { "req-1": permissionRequest() },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "s2",
+            messages: [],
+        });
+        assert.deepEqual(Object.keys(next["/ws"]?.pendingCommandPermissions ?? {}), ["req-1"]);
+    });
+
+    it("COMMAND_PERMISSION_RESOLVED drops the entry", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "s1",
+                pendingCommandPermissions: {
+                    "req-1": permissionRequest(),
+                    "req-2": permissionRequest({ requestId: "req-2" }),
+                },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "COMMAND_PERMISSION_RESOLVED",
+            cwd: "/ws",
+            requestId: "req-1",
+        });
+        assert.deepEqual(Object.keys(next["/ws"]?.pendingCommandPermissions ?? {}), ["req-2"]);
+    });
+
+    it("SIDECAR_RESTARTED clears the table — the old daemon's broker is gone", () => {
+        const state = {
+            "/ws": baseWs({ pendingCommandPermissions: { "req-1": permissionRequest() } }),
+        };
+        const next = workspacesReducer(state, { type: "SIDECAR_RESTARTED", cwd: "/ws" });
+        assert.deepEqual(next["/ws"]?.pendingCommandPermissions, {});
+    });
+
+    it("REMOVE_SESSION drops requests owned by or displayed in that session", () => {
+        const state = {
+            "/ws": baseWs({
+                sessions: [
+                    { id: "s1", createdAt: "2026-01-01T00:00:00Z" },
+                    { id: "s2", createdAt: "2026-01-01T00:00:00Z" },
+                ],
+                pendingCommandPermissions: {
+                    own: permissionRequest({ requestId: "own" }),
+                    child: permissionRequest({
+                        requestId: "child",
+                        sessionId: asSessionId("sub-1"),
+                        displaySessionId: asSessionId("s1"),
+                    }),
+                    other: permissionRequest({ requestId: "other", sessionId: asSessionId("s2") }),
+                },
+            }),
+        };
+        const next = workspacesReducer(state, { type: "REMOVE_SESSION", cwd: "/ws", sid: "s1" });
+        assert.deepEqual(Object.keys(next["/ws"]?.pendingCommandPermissions ?? {}), ["other"]);
     });
 });
 

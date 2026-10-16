@@ -5,6 +5,7 @@
  */
 
 import type { ChannelStatusChangedParams } from "./channels.js";
+import type { CommandPermissionDenialReason } from "./config.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 import type { SubagentSettledPayload } from "./tools.js";
 
@@ -17,7 +18,7 @@ import type { SubagentSettledPayload } from "./tools.js";
  *   `session.compaction_started` / `_finished`
  * - workspace-dimension: `models.changed`, `channel.status_changed`,
  *   `channels.conversations_changed`
- * - reverse-request: `command_permission.requested`, `subagent.spawned`,
+ * - reverse-request: `command_permission.requested` / `_resolved`, `subagent.spawned`,
  *   invalidate: `tasks.updated`, `plan.state.updated`
  */
 
@@ -43,6 +44,12 @@ export const PushMethods = {
     /** Tool call terminal state: isError + result. */
     ToolCallEnd: "session.tool_call_end",
     CommandPermissionRequested: "command_permission.requested",
+    /**
+     * Emitted whenever a pending request settles — user decision, timeout,
+     * turn abort, or session/workspace cleanup. The only signal a client gets
+     * for the non-user paths, so pending-approval UI must clear on this.
+     */
+    CommandPermissionResolved: "command_permission.resolved",
     SubagentSpawned: "subagent.spawned",
     /**
      * Emitted when a `background: true` subagent reaches a terminal state.
@@ -328,6 +335,13 @@ export interface CommandPermissionRequestedParams {
     [extension: string]: unknown;
 }
 
+/** `command_permission.resolved` params. */
+export interface CommandPermissionResolvedParams {
+    requestId: string;
+    approved: boolean;
+    denialReason?: CommandPermissionDenialReason;
+}
+
 /** `subagent.spawned` params — runtime emits when a parent session spawns
  *  a sub-session via the `agent` tool. The desktop renders a breadcrumb
  *  linking back to the parent turn. */
@@ -415,6 +429,7 @@ export interface PushParamsByMethod {
     [PushMethods.ToolCallUpdate]: ToolCallUpdateParams;
     [PushMethods.ToolCallEnd]: ToolCallEndParams;
     [PushMethods.CommandPermissionRequested]: CommandPermissionRequestedParams;
+    [PushMethods.CommandPermissionResolved]: CommandPermissionResolvedParams;
     [PushMethods.SubagentSpawned]: SubagentSpawnedParams;
     [PushMethods.SubagentSettled]: SubagentSettledParams;
     [PushMethods.Error]: ErrorParams;

@@ -173,6 +173,7 @@ export type {
 export type {
     AttachedParams,
     CommandPermissionRequestedParams,
+    CommandPermissionResolvedParams,
     ConversationsChangedParams,
     DetachedParams,
     ErrorParams,
