@@ -20,6 +20,7 @@ import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
 import { readSessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
+import { SessionNotFoundError } from "../../src/runtime/session/sessionLookup.ts";
 import {
     SessionRegistry,
     type SessionRegistryOptions,
@@ -139,9 +140,39 @@ describe("SessionRegistry", () => {
         assert.equal(second.length, 2);
     });
 
-    it("openSession throws when session not found", async () => {
+    it("openSession throws a plain Error, not SessionNotFoundError, on an empty list", async () => {
+        // An empty list is indistinguishable from a transient repo.list
+        // failure; clients prune sidebar rows on SessionNotFoundError.
         const sr = makeRegistry();
-        await assert.rejects(() => sr.openSession(asSessionId("nonexistent")), /session not found/);
+        await assert.rejects(
+            () => sr.openSession(asSessionId("nonexistent")),
+            (e: unknown) =>
+                e instanceof Error &&
+                !(e instanceof SessionNotFoundError) &&
+                /session not found/.test(e.message),
+        );
+    });
+
+    it("openSession throws SessionNotFoundError when a non-empty list lacks the id", async () => {
+        const sr = makeRegistry();
+        await seedSession(sr.repo, uuidv7());
+        sr.invalidateListCache();
+        await assert.rejects(
+            () => sr.openSession(asSessionId("nonexistent")),
+            SessionNotFoundError,
+        );
+    });
+
+    it("openSession re-reads a stale cache before declaring a miss", async () => {
+        const sr = makeRegistry();
+        await seedSession(sr.repo, uuidv7());
+        sr.invalidateListCache();
+        await sr.listSessions();
+        // Created behind the cache's back, as another writer would.
+        const late = uuidv7();
+        await seedSession(sr.repo, late);
+        const meta = await sr.openSession(asSessionId(late));
+        assert.equal(meta.id, late);
     });
 
     it("openSession finds by exact id and by prefix", async () => {

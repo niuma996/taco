@@ -8,6 +8,7 @@
  */
 
 import { ErrorCodes, type RpcResponse } from "@taco-ai/protocol";
+import { SessionNotFoundError } from "../runtime/session/sessionLookup.ts";
 import { RpcHandlerError } from "./methodRegistry.ts";
 
 /**
@@ -71,6 +72,9 @@ export function getTurnKey(params: unknown): string | undefined {
 export function normalizeError(id: string, e: unknown): RpcResponse {
     if (e instanceof RpcHandlerError) {
         return err(id, e.code, e.message, e.data);
+    }
+    if (e instanceof SessionNotFoundError) {
+        return err(id, ErrorCodes.NotFound, e.message);
     }
     // Non-contract error — redact the upstream message.
     const raw = e instanceof Error ? e.message : String(e);

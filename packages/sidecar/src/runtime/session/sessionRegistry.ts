@@ -55,7 +55,7 @@ import type {
 } from "../pi/types.ts";
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFactsIfAbsent } from "./sessionFacts.ts";
-import { resolveSessionByPrefix } from "./sessionLookup.ts";
+import { resolveSessionByPrefix, SessionNotFoundError } from "./sessionLookup.ts";
 import { readLegacyFactsFromPath, readSessionMetadataFromDisk } from "./sessionMetadataReader.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
 import { type TitleSource, writeTitleSource } from "./sessionTitleSource.ts";
@@ -420,10 +420,21 @@ export class SessionRegistry extends EventEmitter {
 
     /** Get an existing session instance by id. */
     async openSession(sessionId: SessionId): Promise<JsonlSessionMetadata> {
-        const list = await this.listSessions();
-        const resolution = resolveSessionByPrefix(list, sessionId);
+        let resolution = resolveSessionByPrefix(await this.listSessions(), sessionId);
         if (resolution.kind === "not_found") {
-            throw new Error(`session not found: ${sessionId}`);
+            // A miss is only proof of absence against a fresh, non-empty read:
+            // the cache can predate a session another writer created, and an
+            // empty list is how a transient repo.list failure looks (see
+            // listSessions). Clients prune rows on SessionNotFoundError.
+            this._metadataCache = null;
+            const fresh = await this.listSessions();
+            resolution = resolveSessionByPrefix(fresh, sessionId);
+            if (resolution.kind === "not_found") {
+                if (fresh.length === 0) {
+                    throw new Error(`session not found: ${sessionId} (session list empty)`);
+                }
+                throw new SessionNotFoundError(sessionId);
+            }
         }
         if (resolution.kind === "ambiguous") {
             throw new Error(`session id prefix is ambiguous: ${sessionId}`);

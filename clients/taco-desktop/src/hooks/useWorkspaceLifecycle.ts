@@ -191,8 +191,9 @@ export function useWorkspaceLifecycle({
                 // leaves a perfectly valid row on disk, and dropping it here
                 // turned a recoverable error into what looked like lost chat
                 // history. The sidecar answers a missing session with
-                // RpcHandlerError(NotFound); anything else normalizes to
-                // `internal` / `invalid_state`, so the code discriminates.
+                // `not_found` (SessionNotFoundError, mapped in normalizeError);
+                // anything else normalizes to `internal` / `invalid_state`, so
+                // the code discriminates.
                 // REMOVE_SESSION's reducer strips this sid's pendingBySessionId
                 // slot in the same commit, so the sidebar's "running" dot
                 // clears with the row.

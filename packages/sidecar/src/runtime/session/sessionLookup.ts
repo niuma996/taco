@@ -43,3 +43,16 @@ export function resolveSessionByPrefix(
     if (matches.length > 1) return { kind: "ambiguous", matches };
     return { kind: "found", meta: matches[0] };
 }
+
+/**
+ * Thrown when a session id resolves to nothing. A distinct class so the RPC
+ * layer can answer `not_found` — the desktop prunes a sidebar row on that code
+ * alone, so it must mean "resolved against the list and absent", never a
+ * transient failure that normalizes to `internal`.
+ */
+export class SessionNotFoundError extends Error {
+    constructor(readonly sessionId: SessionId) {
+        super(`session not found: ${sessionId}`);
+        this.name = "SessionNotFoundError";
+    }
+}

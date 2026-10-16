@@ -7,6 +7,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
+import { asSessionId } from "@taco-ai/protocol";
 import { normalizeError, redactUpstreamMessage } from "../../src/server/rpcResponse.ts";
 
 describe("redactUpstreamMessage", () => {
@@ -62,6 +63,13 @@ describe("normalizeError", () => {
         if (resp.ok) throw new Error("unreachable");
         return { code: resp.error.code, message: resp.error.message };
     }
+
+    it("SessionNotFoundError maps to not_found", async () => {
+        const { SessionNotFoundError } = await import("../../src/runtime/session/sessionLookup.ts");
+        const r = callWith(new SessionNotFoundError(asSessionId("gone")));
+        assert.equal(r.code, "not_found");
+        assert.equal(r.message, "session not found: gone");
+    });
 
     it("RpcHandlerError passes through untouched (our own errors)", async () => {
         const { RpcHandlerError } = await import("../../src/server/methodRegistry.ts");
