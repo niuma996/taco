@@ -1,10 +1,19 @@
 /**
- * provider.listModels — top-level RPC that fetches `/v1/models` from a custom
- * provider so the form can suggest ids. Workspace-less: this is a config-time
- * helper, not a session concern. The key travels in `params.apiKey` and is
- * never persisted, logged, or echoed back. Only chatcomplete has a public
- * catalog; other protocols return protocol-not-supported. Response shape is
- * parsed tolerantly by `extractModelIds`.
+ * provider.listModels — top-level RPC that fetches the remote model catalog
+ * so the settings UI can suggest ids.
+ *
+ * Two param shapes:
+ * - `{ baseUrl, api, apiKey }` — custom-provider form; the key travels in
+ *   params and is never persisted, logged, or echoed back.
+ * - `{ providerId }` — already-saved provider (built-in or custom); baseUrl/api
+ *   resolve via the registered provider and the key comes from the process
+ *   ProviderKeyStore, so plaintext keys never cross the wire.
+ *
+ * Protocol coverage: every protocol shares one model catalog — OpenAI-family
+ * ({baseUrl}/models, Bearer) and Anthropic ({baseUrl}/v1/models, x-api-key).
+ * The `api` value only selects auth headers and the path prefix; it does not
+ * gate discovery. Anthropic also honours a baseUrl already ending in /v1.
+ * Response shape is parsed tolerantly by `extractModelIds`.
  */
 
 import type {
@@ -18,6 +27,8 @@ import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 const HTTP_TIMEOUT_MS = 5_000;
+/** Anthropic Messages version header required by api.anthropic.com/v1/models. */
+const ANTHROPIC_VERSION = "2023-06-01";
 
 export function registerProviderModelsHandlers(
     deps: { performModelsRequest?: typeof performModelsRequest } = {},
@@ -27,36 +38,22 @@ export function registerProviderModelsHandlers(
         RPC.providerListModels,
         false,
         async ({
+            server,
             params,
         }: MethodCtx<ProviderListModelsParams>): Promise<ProviderListModelsResult> => {
-            const { baseUrl, api, apiKey } = params;
-            if (typeof baseUrl !== "string" || baseUrl.trim() === "") {
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "baseUrl is required");
+            const resolved = resolveEndpoint(server, params);
+            if ("error" in resolved) {
+                throw new RpcHandlerError(ErrorCodes.InvalidParams, resolved.error);
             }
-            if (!isApi(api)) {
-                throw new RpcHandlerError(
-                    ErrorCodes.InvalidParams,
-                    `unsupported api: ${String(api)}`,
-                );
-            }
-            if (typeof apiKey !== "string" || apiKey.trim() === "") {
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "apiKey is required");
-            }
+            const { baseUrl, api, apiKey } = resolved;
 
-            if (api !== "chatcomplete") {
-                return {
-                    ok: false,
-                    reason: "protocol-not-supported",
-                    message: reasonMessage(api),
-                };
-            }
-
-            const url = buildModelsUrl(baseUrl.trim());
+            const url = buildModelsUrl(baseUrl, api);
             let response: Response;
             try {
                 response = await performRequest(
                     url,
-                    apiKey.trim(),
+                    apiKey,
+                    api,
                     AbortSignal.timeout(HTTP_TIMEOUT_MS),
                 );
             } catch (e) {
@@ -96,16 +93,56 @@ export function registerProviderModelsHandlers(
     );
 }
 
+type ResolvedEndpoint = { baseUrl: string; api: CustomProviderApi; apiKey: string };
+
+/** Normalize the two param shapes into one endpoint triple, or an error message. */
+function resolveEndpoint(
+    server: MethodCtx<ProviderListModelsParams>["server"],
+    params: ProviderListModelsParams,
+): ResolvedEndpoint | { error: string } {
+    if ("providerId" in params) {
+        const { providerId } = params;
+        if (typeof providerId !== "string" || providerId.trim() === "") {
+            return { error: "providerId is required" };
+        }
+        const endpoint = server.getProviderEndpoint?.(providerId);
+        if (!endpoint) {
+            return { error: `unknown provider: ${providerId}` };
+        }
+        const apiKey = server.providerKeyStore.get(providerId);
+        if (!apiKey) {
+            return { error: `no API key configured for provider: ${providerId}` };
+        }
+        return { baseUrl: endpoint.baseUrl, api: endpoint.api, apiKey };
+    }
+    const { baseUrl, api, apiKey } = params;
+    if (typeof baseUrl !== "string" || baseUrl.trim() === "") {
+        return { error: "baseUrl is required" };
+    }
+    if (!isApi(api)) {
+        return { error: `unsupported api: ${String(api)}` };
+    }
+    if (typeof apiKey !== "string" || apiKey.trim() === "") {
+        return { error: "apiKey is required" };
+    }
+    return { baseUrl: baseUrl.trim(), api, apiKey: apiKey.trim() };
+}
+
 export async function performModelsRequest(
     url: string,
     apiKey: string,
+    api: CustomProviderApi,
     signal: AbortSignal,
 ): Promise<Response> {
+    const authHeaders: Record<string, string> =
+        api === "anthropic"
+            ? { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION }
+            : { Authorization: `Bearer ${apiKey}` };
     try {
         return await fetch(url, {
             method: "GET",
             headers: {
-                Authorization: `Bearer ${apiKey}`,
+                ...authHeaders,
                 ...tacoRequestHeaders(),
             },
             signal,
@@ -129,19 +166,17 @@ function isApi(value: unknown): value is CustomProviderApi {
     return value === "chatcomplete" || value === "response" || value === "anthropic";
 }
 
-function reasonMessage(api: CustomProviderApi): string {
-    if (api === "response") {
-        return "OpenAI Responses API has no public /v1/models endpoint; please type model ids manually";
-    }
-    return "Anthropic has no public /v1/models endpoint; please type model ids manually";
-}
-
 /**
- * Concatenate baseUrl with `/models`. Tolerates trailing slash on baseUrl;
- * does not validate the host (the caller decides what to send).
+ * Concatenate baseUrl with the catalog path. Tolerates trailing slash on
+ * baseUrl; does not validate the host (the caller decides what to send).
+ * Anthropic's catalog lives at `/v1/models`; a baseUrl already ending in
+ * `/v1` (e.g. an Anthropic-compatible gateway) only needs `/models`.
  */
-function buildModelsUrl(baseUrl: string): string {
+function buildModelsUrl(baseUrl: string, api: CustomProviderApi): string {
     const trimmed = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+    if (api === "anthropic" && !trimmed.endsWith("/v1")) {
+        return `${trimmed}/v1/models`;
+    }
     return `${trimmed}/models`;
 }
 

@@ -1,12 +1,19 @@
 /**
- * ProviderSection — provider list and key management for the Model tab.
+ * ProviderSection — provider cards for the Model tab. Every provider (built-in
+ * or custom) renders as one clickable card: name + status dot, then a meta
+ * line (customs show a short protocol badge, all show the model count).
+ * Clicking a card opens the shared ProviderDetailModal, which holds the API
+ * key, custom-only fields, and the model list in one panel.
  *
- * Built-in providers: fill API keys. Custom providers: add/edit/delete via
- * `settings.write({ customProviders: full set })`. After any save, refresh
- * the providers list and model list via `useProviders.refresh`.
+ * After any save, refresh the providers list and model list via
+ * `useProviders.refresh` + `onKeysChanged`.
  */
-import type { CustomProviderConfig, ProviderView, WorkspaceId } from "@taco-ai/protocol";
-import { KeyRound, Pencil, Trash2 } from "lucide-react";
+import type {
+    CustomModelEntry,
+    CustomProviderConfig,
+    ProviderView,
+    WorkspaceId,
+} from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
@@ -14,9 +21,7 @@ import { useProviders } from "../../hooks/useProviders.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../../lib/globalConfig.ts";
-import { IconButton } from "../ui/IconButton.tsx";
-import { CustomProviderForm } from "./CustomProviderForm.tsx";
-import { ProviderKeyDialog } from "./ProviderKeyDialog.tsx";
+import { ProviderDetailModal } from "./ProviderDetailModal.tsx";
 
 export interface ProviderSectionProps {
     client: TacoClient;
@@ -26,14 +31,18 @@ export interface ProviderSectionProps {
     onKeysChanged?: () => void;
 }
 
-type Panel = { kind: "list" } | { kind: "add" } | { kind: "edit"; provider: CustomProviderConfig };
+type Detail =
+    | { kind: "builtin"; provider: ProviderView }
+    | { kind: "custom"; provider: ProviderView; cfg: CustomProviderConfig }
+    | { kind: "add" }
+    | null;
 
 export function ProviderSection(props: ProviderSectionProps) {
     const { t } = useT();
     const { providers, refresh } = useProviders(props.client, props.workspace);
     const { save, saving, error } = useSaveConfigPatch(props.client);
     const globalState = useGlobalConfig();
-    const [panel, setPanel] = useState<Panel>({ kind: "list" });
+    const [detail, setDetail] = useState<Detail>(null);
 
     // Masked key for a provider — the sidecar view already masks
     // (`sk-ant-…AbCd`), so plaintext never reaches the client. Writes land in
@@ -54,17 +63,49 @@ export function ProviderSection(props: ProviderSectionProps) {
 
     // Sync local cache after globalConfig changes. Depends on globalState
     // (NOT providers): the builtin list is the same and the relevant edit is
-    // a custom provider add/delete/edit, which only moves globalState. The
-    // previous dep [providers] was a stable builtin list that did not fire
-    // when customProviders changed — edits landed in desktop.json but the
-    // section's local cache showed stale baseUrl/models until a hard reload.
+    // a custom provider add/delete/edit, which only moves globalState.
     useEffect(() => {
         setCustomProviders(globalState.global.customProviders ?? []);
     }, [globalState.global]);
 
     if (!props.workspace) return null;
+    const workspace = props.workspace;
 
-    const existingIds = customProviders.map((c) => c.id);
+    const saveBuiltin = async (
+        providerId: string,
+        apiKey: string | undefined,
+        extras: CustomModelEntry[],
+        hidden: string[],
+    ): Promise<void> => {
+        const patch: {
+            apiKeys?: Record<string, string>;
+            providerExtraModels?: Record<string, CustomModelEntry[]>;
+            providerHiddenModels?: Record<string, string[]>;
+        } = {};
+        if (apiKey) patch.apiKeys = { [providerId]: apiKey };
+        // Both maps are whole-object replaces on the server. Merge this
+        // provider's entry into the current map, dropping the key when its
+        // list empties (the validator rejects empty arrays). Extras and hides
+        // travel in one write so the registry applies them together.
+        const extrasNow = { ...(getGlobalConfig().global.providerExtraModels ?? {}) };
+        if (extras.length > 0) extrasNow[providerId] = extras;
+        else delete extrasNow[providerId];
+        const hiddenNow = { ...(getGlobalConfig().global.providerHiddenModels ?? {}) };
+        if (hidden.length > 0) hiddenNow[providerId] = hidden;
+        else delete hiddenNow[providerId];
+        const currentExtras = getGlobalConfig().global.providerExtraModels ?? {};
+        const currentHidden = getGlobalConfig().global.providerHiddenModels ?? {};
+        if (JSON.stringify(extrasNow) !== JSON.stringify(currentExtras)) {
+            patch.providerExtraModels = extrasNow;
+        }
+        if (JSON.stringify(hiddenNow) !== JSON.stringify(currentHidden)) {
+            patch.providerHiddenModels = hiddenNow;
+        }
+        if (Object.keys(patch).length === 0) return;
+        await save({ kind: "global", patch });
+        refresh();
+        props.onKeysChanged?.();
+    };
 
     const saveCustom = async (cfg: CustomProviderConfig, apiKey: string): Promise<void> => {
         // Read from getGlobalConfig() — the useState closure can go stale between
@@ -81,11 +122,9 @@ export function ProviderSection(props: ProviderSectionProps) {
         await save({ kind: "global", patch });
         refresh();
         props.onKeysChanged?.();
-        setPanel({ kind: "list" });
     };
 
     const deleteCustom = async (id: string): Promise<void> => {
-        // Read latest from getGlobalConfig(), not the closure's `customProviders`.
         const current = getGlobalConfig().global.customProviders ?? [];
         const rest = current.filter((c) => c.id !== id);
         await save({
@@ -97,252 +136,118 @@ export function ProviderSection(props: ProviderSectionProps) {
         });
         refresh();
         props.onKeysChanged?.();
-        setPanel({ kind: "list" });
     };
 
     return (
         <section className="settings-tab-subsection">
             <div className="provider-section-head">
                 <h3>{t("settings.providersTitle")}</h3>
-                {panel.kind === "list" && (
-                    <button
-                        type="button"
-                        className="prompt-button"
-                        disabled={saving}
-                        onClick={() => setPanel({ kind: "add" })}
-                    >
-                        {t("settings.customProviderAddBtn")}
-                    </button>
-                )}
+                <button
+                    type="button"
+                    className="prompt-button"
+                    disabled={saving}
+                    onClick={() => setDetail({ kind: "add" })}
+                >
+                    {t("settings.customProviderAddBtn")}
+                </button>
             </div>
             <p className="settings-tab-desc">{t("settings.providersDesc")}</p>
             <div className="provider-list">
-                {providers.map((p) =>
-                    p.custom ? (
-                        <CustomProviderRow
+                {providers.map((p) => {
+                    const cfg = p.custom
+                        ? (customProviders.find((c) => c.id === p.id) ?? {
+                              id: p.id,
+                              name: p.name,
+                              api: "chatcomplete" as const,
+                              baseUrl: "",
+                              models: [],
+                          })
+                        : undefined;
+                    return (
+                        <button
                             key={p.id}
-                            provider={p}
-                            cfg={
-                                customProviders.find((c) => c.id === p.id) ?? {
-                                    id: p.id,
-                                    name: p.name,
-                                    api: "chatcomplete",
-                                    baseUrl: "",
-                                    models: [],
-                                }
+                            type="button"
+                            className="provider-row"
+                            disabled={saving}
+                            aria-label={`${p.name} — ${
+                                p.configured
+                                    ? t("settings.providerConfigured")
+                                    : t("settings.providerNotConfigured")
+                            }`}
+                            onClick={() =>
+                                setDetail(
+                                    p.custom && cfg
+                                        ? { kind: "custom", provider: p, cfg }
+                                        : { kind: "builtin", provider: p },
+                                )
                             }
-                            disabled={saving}
-                            mask={maskFor(p.id)}
-                            onEdit={() => {
-                                const cfg = customProviders.find((c) => c.id === p.id);
-                                if (cfg) setPanel({ kind: "edit", provider: cfg });
-                            }}
-                            onDelete={() => void deleteCustom(p.id)}
-                            onReplaceKey={async (key) => {
-                                await save({
-                                    kind: "global",
-                                    patch: { apiKeys: { [p.id]: key } },
-                                });
-                                refresh();
-                                props.onKeysChanged?.();
-                            }}
-                        />
-                    ) : (
-                        <ProviderRow
-                            key={p.id}
-                            provider={p}
-                            disabled={saving}
-                            mask={maskFor(p.id)}
-                            onSaveKey={async (key) => {
-                                await save({
-                                    kind: "global",
-                                    patch: { apiKeys: { [p.id]: key } },
-                                });
-                                refresh();
-                                props.onKeysChanged?.();
-                            }}
-                        />
-                    ),
-                )}
+                        >
+                            <span className="provider-row-title">
+                                <span
+                                    className={`provider-row-dot${
+                                        p.configured ? " provider-row-dot--ok" : ""
+                                    }`}
+                                    aria-hidden="true"
+                                />
+                                <span className="provider-row-name">{p.name}</span>
+                            </span>
+                            <span className="provider-row-meta">
+                                <span className="provider-row-count">
+                                    {t("settings.providerModelCount", {
+                                        // Hidden statics ride along in the view for restore,
+                                        // but they are not selectable — don't count them.
+                                        count: p.models.filter((m) => m.origin !== "hidden").length,
+                                    })}
+                                </span>
+                                {p.custom && cfg && (
+                                    <span className="provider-row-badge">
+                                        {t("settings.customBadge")} ·{" "}
+                                        {t(`settings.providerApiShort_${cfg.api}`)}
+                                    </span>
+                                )}
+                            </span>
+                        </button>
+                    );
+                })}
             </div>
-            {panel.kind === "add" && (
-                <CustomProviderForm
-                    existingIds={existingIds}
+            {detail !== null && (
+                <ProviderDetailModal
                     client={props.client}
-                    onSave={(cfg, apiKey) => void saveCustom(cfg, apiKey)}
-                    onCancel={() => setPanel({ kind: "list" })}
+                    workspace={workspace}
+                    provider={detail.kind === "add" ? undefined : detail.provider}
+                    cfg={detail.kind === "custom" ? detail.cfg : undefined}
+                    existingIds={customProviders.map((c) => c.id)}
+                    mask={detail.kind === "add" ? undefined : maskFor(detail.provider.id)}
+                    saving={saving}
+                    saveError={error}
+                    onSaveBuiltin={
+                        detail.kind === "builtin"
+                            ? async (apiKey, extras, hidden) => {
+                                  await saveBuiltin(detail.provider.id, apiKey, extras, hidden);
+                                  setDetail(null);
+                              }
+                            : undefined
+                    }
+                    onSaveCustom={
+                        detail.kind !== "builtin"
+                            ? async (cfg, apiKey) => {
+                                  await saveCustom(cfg, apiKey);
+                                  setDetail(null);
+                              }
+                            : undefined
+                    }
+                    onDeleteCustom={
+                        detail.kind === "custom"
+                            ? async () => {
+                                  await deleteCustom(detail.cfg.id);
+                                  setDetail(null);
+                              }
+                            : undefined
+                    }
+                    onClose={() => setDetail(null)}
                 />
             )}
-            {panel.kind === "edit" && (
-                <CustomProviderForm
-                    existing={panel.provider}
-                    existingIds={existingIds}
-                    client={props.client}
-                    onSave={(cfg, apiKey) => void saveCustom(cfg, apiKey)}
-                    onCancel={() => setPanel({ kind: "list" })}
-                />
-            )}
-            {error && <div className="error-banner">{error}</div>}
+            {detail === null && error && <div className="error-banner">{error}</div>}
         </section>
-    );
-}
-
-interface ProviderRowProps {
-    provider: ProviderView;
-    disabled: boolean;
-    /** Masked key from the sidecar view (e.g. `sk-ant-…AbCd`); undefined when not configured. */
-    mask?: string;
-    onSaveKey: (key: string) => Promise<void>;
-}
-
-function ProviderRow(props: ProviderRowProps) {
-    const { t } = useT();
-    const [dialogOpen, setDialogOpen] = useState(false);
-    const { provider } = props;
-
-    return (
-        <div className="provider-row">
-            <div className="provider-row-head">
-                <div className="provider-row-info">
-                    <span className="provider-row-name">{provider.name}</span>
-                    <span
-                        className={`provider-row-status${
-                            provider.configured ? " provider-row-status--ok" : ""
-                        }`}
-                    >
-                        {provider.configured
-                            ? t("settings.providerConfigured")
-                            : t("settings.providerNotConfigured")}
-                    </span>
-                </div>
-                <div className="provider-row-actions">
-                    <IconButton
-                        size="lg"
-                        variant="outline"
-                        className="provider-row-key"
-                        disabled={props.disabled}
-                        title={
-                            provider.configured
-                                ? t("settings.providerReplaceKey")
-                                : t("settings.providerSetKey")
-                        }
-                        aria-label={
-                            provider.configured
-                                ? t("settings.providerReplaceKey")
-                                : t("settings.providerSetKey")
-                        }
-                        onClick={() => setDialogOpen(true)}
-                    >
-                        <KeyRound size={14} aria-hidden="true" />
-                    </IconButton>
-                </div>
-            </div>
-            {dialogOpen && (
-                <ProviderKeyDialog
-                    providerName={provider.name}
-                    configured={provider.configured}
-                    currentMask={props.mask}
-                    onSave={async (key) => {
-                        await props.onSaveKey(key);
-                        setDialogOpen(false);
-                    }}
-                    onCancel={() => setDialogOpen(false)}
-                />
-            )}
-        </div>
-    );
-}
-
-interface CustomProviderRowProps {
-    provider: ProviderView;
-    cfg: CustomProviderConfig;
-    disabled: boolean;
-    /** Masked key from the sidecar view (e.g. `sk-ant-…AbCd`); undefined when not configured. */
-    mask?: string;
-    onEdit: () => void;
-    onDelete: () => void;
-    onReplaceKey: (key: string) => Promise<void>;
-}
-
-function CustomProviderRow(props: CustomProviderRowProps) {
-    const { t } = useT();
-    const [dialogOpen, setDialogOpen] = useState(false);
-    const { provider, cfg } = props;
-
-    return (
-        <div className="provider-row">
-            <div className="provider-row-head">
-                <div className="provider-row-info">
-                    <span className="provider-row-name">{provider.name}</span>
-                    <span className="provider-row-meta">
-                        <span className="provider-row-badge">{t("settings.customBadge")}</span>{" "}
-                        {t(`settings.customProviderApi_${cfg.api}`)}
-                    </span>
-                    <span
-                        className={`provider-row-status${
-                            provider.configured ? " provider-row-status--ok" : ""
-                        }`}
-                    >
-                        {provider.configured
-                            ? t("settings.providerConfigured")
-                            : t("settings.providerNotConfigured")}
-                    </span>
-                </div>
-                <div className="provider-row-actions">
-                    <IconButton
-                        size="lg"
-                        variant="outline"
-                        className="provider-row-key"
-                        disabled={props.disabled}
-                        title={
-                            provider.configured
-                                ? t("settings.providerReplaceKey")
-                                : t("settings.providerSetKey")
-                        }
-                        aria-label={
-                            provider.configured
-                                ? t("settings.providerReplaceKey")
-                                : t("settings.providerSetKey")
-                        }
-                        onClick={() => setDialogOpen(true)}
-                    >
-                        <KeyRound size={14} aria-hidden="true" />
-                    </IconButton>
-                    <IconButton
-                        size="lg"
-                        variant="outline"
-                        disabled={props.disabled}
-                        title={t("settings.customProviderEditBtn")}
-                        aria-label={t("settings.customProviderEditBtn")}
-                        onClick={props.onEdit}
-                    >
-                        <Pencil size={14} aria-hidden="true" />
-                    </IconButton>
-                    <IconButton
-                        size="lg"
-                        variant="outline"
-                        tone="danger"
-                        disabled={props.disabled}
-                        title={t("settings.customProviderDeleteBtn")}
-                        aria-label={t("settings.customProviderDeleteBtn")}
-                        onClick={props.onDelete}
-                    >
-                        <Trash2 size={14} aria-hidden="true" />
-                    </IconButton>
-                </div>
-            </div>
-            {dialogOpen && (
-                <ProviderKeyDialog
-                    providerName={provider.name}
-                    configured={provider.configured}
-                    currentMask={props.mask}
-                    onSave={async (key) => {
-                        await props.onReplaceKey(key);
-                        setDialogOpen(false);
-                    }}
-                    onCancel={() => setDialogOpen(false)}
-                />
-            )}
-        </div>
     );
 }

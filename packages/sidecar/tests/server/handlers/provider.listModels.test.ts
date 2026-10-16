@@ -26,7 +26,12 @@ import {
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 
-type Stub = (url: string, apiKey: string, signal: AbortSignal) => Promise<FakeResponse>;
+type Stub = (
+    url: string,
+    apiKey: string,
+    api: string,
+    signal: AbortSignal,
+) => Promise<FakeResponse>;
 
 interface FakeResponse {
     ok: boolean;
@@ -50,38 +55,62 @@ before(() => {
 
 beforeEach(() => {
     registerProviderModelsHandlers({
-        performModelsRequest: ((url: string, apiKey: string, signal: AbortSignal) => {
+        performModelsRequest: ((url: string, apiKey: string, api: string, signal: AbortSignal) => {
             const stub = currentStub;
             if (!stub) throw new Error("test forgot to set currentStub");
-            return stub(url, apiKey, signal);
+            return stub(url, apiKey, api, signal);
         }) as unknown as typeof RealPerform,
     });
 });
 
-async function invoke(params: unknown): Promise<unknown> {
-    return callMethod("provider.listModels", { server: {}, params });
+async function invoke(params: unknown, server: unknown = {}): Promise<unknown> {
+    return callMethod("provider.listModels", { server, params });
 }
 
 describe("provider.listModels handler", () => {
-    it("returns protocol-not-supported for api=response", async () => {
-        const result = (await invoke({ baseUrl: "https://x", api: "response", apiKey: "k" })) as {
-            ok: false;
-            reason: string;
-            message: string;
+    it("fetches the same catalog for api=response as for chatcomplete", async () => {
+        // The Responses API differs only in its inference endpoint; the model
+        // catalog is still {baseUrl}/models with Bearer auth.
+        let captured = "";
+        currentStub = async (url, apiKey) => {
+            captured = url;
+            assert.equal(apiKey, "k");
+            return fakeResponse({ data: [{ id: "gpt-5-codex" }] });
         };
-        assert.equal(result.ok, false);
-        assert.equal(result.reason, "protocol-not-supported");
-        assert.match(result.message, /Responses/);
+        const result = (await invoke({
+            baseUrl: "https://api.openai.com/v1",
+            api: "response",
+            apiKey: "k",
+        })) as { ok: true; models: string[] };
+        assert.equal(result.ok, true);
+        assert.equal(captured, "https://api.openai.com/v1/models");
+        assert.deepEqual(result.models, ["gpt-5-codex"]);
     });
 
-    it("returns protocol-not-supported for api=anthropic with a friendly message", async () => {
-        const result = (await invoke({ baseUrl: "https://x", api: "anthropic", apiKey: "k" })) as {
-            ok: false;
-            reason: string;
-            message: string;
+    it("fetches anthropic catalogs via {baseUrl}/v1/models", async () => {
+        let captured = "";
+        currentStub = async (url) => {
+            captured = url;
+            return fakeResponse({ data: [{ id: "claude-a" }] });
         };
-        assert.equal(result.reason, "protocol-not-supported");
-        assert.match(result.message, /Anthropic/);
+        const result = (await invoke({
+            baseUrl: "https://api.anthropic.com",
+            api: "anthropic",
+            apiKey: "k",
+        })) as { ok: true; models: string[] };
+        assert.equal(result.ok, true);
+        assert.equal(captured, "https://api.anthropic.com/v1/models");
+        assert.deepEqual(result.models, ["claude-a"]);
+    });
+
+    it("does not double-append /v1 when the anthropic baseUrl already ends with it", async () => {
+        let captured = "";
+        currentStub = async (url) => {
+            captured = url;
+            return fakeResponse({ data: [] });
+        };
+        await invoke({ baseUrl: "https://gateway.example/v1", api: "anthropic", apiKey: "k" });
+        assert.equal(captured, "https://gateway.example/v1/models");
     });
 
     it("rejects empty baseUrl with invalid_params", async () => {
@@ -244,6 +273,55 @@ describe("provider.listModels handler", () => {
     });
 });
 
+describe("provider.listModels saved branch ({providerId})", () => {
+    function fakeServer(endpoint?: { baseUrl: string; api: string }, key?: string) {
+        return {
+            getProviderEndpoint: () => endpoint,
+            providerKeyStore: { get: () => key },
+        };
+    }
+
+    it("resolves baseUrl/api from the server and the key from the store", async () => {
+        let capturedUrl = "";
+        let capturedKey = "";
+        currentStub = async (url, apiKey) => {
+            capturedUrl = url;
+            capturedKey = apiKey;
+            return fakeResponse({ data: [{ id: "m-1" }] });
+        };
+        const result = (await invoke(
+            { providerId: "deepseek" },
+            fakeServer({ baseUrl: "https://api.deepseek.com", api: "chatcomplete" }, "sk-stored"),
+        )) as { ok: true; models: string[] };
+        assert.equal(result.ok, true);
+        assert.equal(capturedUrl, "https://api.deepseek.com/models");
+        assert.equal(capturedKey, "sk-stored");
+        assert.deepEqual(result.models, ["m-1"]);
+    });
+
+    it("rejects an unknown provider id with invalid_params", async () => {
+        await assert.rejects(
+            () => invoke({ providerId: "nope" }, fakeServer(undefined, "k")),
+            /unknown provider/,
+        );
+    });
+
+    it("rejects when no key is configured for the provider", async () => {
+        await assert.rejects(
+            () =>
+                invoke(
+                    { providerId: "deepseek" },
+                    fakeServer({ baseUrl: "https://api.deepseek.com", api: "chatcomplete" }),
+                ),
+            /no API key/,
+        );
+    });
+
+    it("rejects an empty providerId", async () => {
+        await assert.rejects(() => invoke({ providerId: " " }, fakeServer()), /providerId/);
+    });
+});
+
 describe("extractModelIds (schema tolerance)", () => {
     it("returns null for non-object, non-array bodies", () => {
         assert.equal(extractModelIds("hello"), null);
@@ -272,6 +350,7 @@ describe("performModelsRequest (outbound HTTP builder)", () => {
             await performModelsRequest(
                 "https://example.com/v1/models",
                 "sk-test",
+                "chatcomplete",
                 AbortSignal.timeout(1000),
             );
             assert.ok(captured, "fetch should have been called");
@@ -279,6 +358,33 @@ describe("performModelsRequest (outbound HTTP builder)", () => {
             assert.equal(headers["user-agent"], `taco/${version}`);
             assert.equal(headers["x-taco-sidecar-version"], version);
             assert.equal(headers.Authorization, "Bearer sk-test");
+        } finally {
+            restore.mock.restore();
+        }
+    });
+
+    it("sends x-api-key + anthropic-version instead of Bearer for api=anthropic", async () => {
+        let captured: RequestInit | undefined;
+        const restore = mock.method(
+            globalThis,
+            "fetch",
+            async (_url: unknown, init?: RequestInit) => {
+                captured = init;
+                return new Response(JSON.stringify({ data: [] }), { status: 200 });
+            },
+        );
+
+        try {
+            await performModelsRequest(
+                "https://api.anthropic.com/v1/models",
+                "sk-ant-test",
+                "anthropic",
+                AbortSignal.timeout(1000),
+            );
+            const headers = captured?.headers as Record<string, string>;
+            assert.equal(headers["x-api-key"], "sk-ant-test");
+            assert.equal(headers["anthropic-version"], "2023-06-01");
+            assert.equal(headers.Authorization, undefined);
         } finally {
             restore.mock.restore();
         }

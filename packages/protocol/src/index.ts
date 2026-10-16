@@ -219,6 +219,8 @@ export type {
     ProviderListModelsResult,
     ProvidersListParams,
     ProvidersListResult,
+    ProvidersRevealKeyParams,
+    ProvidersRevealKeyResult,
     ProviderView,
     RenameSessionParams,
     SessionCompactParams,

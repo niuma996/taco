@@ -67,6 +67,10 @@ export interface ResolvedTacoConfig {
     memoryEnabled?: boolean;
     /** Validated custom providers. Omitted when empty. */
     customProviders?: CustomProviderConfig[];
+    /** User-added models for built-in providers, keyed by provider id. */
+    providerExtraModels?: Record<string, CustomModelEntry[]>;
+    /** Static model ids hidden on built-in providers, keyed by provider id. */
+    providerHiddenModels?: Record<string, string[]>;
     /** IM channel configs loaded from taco.json / CLI. */
     channels?: ChannelConfig[];
     /** MCP servers (validated). Omitted when none are configured. */
@@ -416,6 +420,11 @@ export function resolveConfig(
             };
         })(),
         customProviders: validateCustomProviders(global.customProviders, "taco.json"),
+        providerExtraModels: validateProviderExtraModels(global.providerExtraModels, "taco.json"),
+        providerHiddenModels: validateProviderHiddenModels(
+            global.providerHiddenModels,
+            "taco.json",
+        ),
         mcpServers: validateMcpServers(global.mcpServers, "taco.json"),
         memoryEnabled: cliOverrides.memoryEnabled ?? global.memoryEnabled,
     };
@@ -495,6 +504,101 @@ export function validateCustomProviders(
             baseUrl: e.baseUrl,
             models,
         });
+    }
+    return out;
+}
+
+/**
+ * Validate providerExtraModels. Whole-object replace semantics (same as
+ * customProviders). Keys must NOT use the `custom:` prefix — custom providers
+ * carry their models in `customProviders[].models`; this map is for built-in
+ * providers only. Empty entry arrays are rejected (an empty list would shadow
+ * nothing but suggests a broken write).
+ */
+export function validateProviderExtraModels(
+    value: unknown,
+    source: string,
+): Record<string, CustomModelEntry[]> | undefined {
+    if (value === undefined) return undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`invalid providerExtraModels from ${source}: must be an object`);
+    }
+    const out: Record<string, CustomModelEntry[]> = {};
+    for (const [providerId, rawList] of Object.entries(value as Record<string, unknown>)) {
+        if (providerId.startsWith(CUSTOM_PROVIDER_PREFIX)) {
+            throw new Error(
+                `invalid providerExtraModels from ${source}: "${providerId}" is a custom provider — use customProviders[].models`,
+            );
+        }
+        if (!Array.isArray(rawList) || rawList.length === 0) {
+            throw new Error(
+                `invalid providerExtraModels from ${source}: "${providerId}" must map to a non-empty array`,
+            );
+        }
+        const models: CustomModelEntry[] = [];
+        const seen = new Set<string>();
+        for (const m of rawList) {
+            if (!m || typeof m !== "object" || typeof (m as CustomModelEntry).id !== "string") {
+                throw new Error(
+                    `invalid providerExtraModels from ${source}: each model needs a string id (${providerId})`,
+                );
+            }
+            const entry = m as CustomModelEntry;
+            if (seen.has(entry.id)) {
+                throw new Error(
+                    `invalid providerExtraModels from ${source}: duplicate model id ${entry.id} (${providerId})`,
+                );
+            }
+            seen.add(entry.id);
+            models.push(entry);
+        }
+        out[providerId] = models;
+    }
+    return out;
+}
+
+/**
+ * Validate providerHiddenModels. Same shape rules as providerExtraModels
+ * (built-in ids only, non-empty arrays) but the values are plain id strings:
+ * removals name an existing static entry, they don't carry model metadata.
+ */
+export function validateProviderHiddenModels(
+    value: unknown,
+    source: string,
+): Record<string, string[]> | undefined {
+    if (value === undefined) return undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`invalid providerHiddenModels from ${source}: must be an object`);
+    }
+    const out: Record<string, string[]> = {};
+    for (const [providerId, rawList] of Object.entries(value as Record<string, unknown>)) {
+        if (providerId.startsWith(CUSTOM_PROVIDER_PREFIX)) {
+            throw new Error(
+                `invalid providerHiddenModels from ${source}: "${providerId}" is a custom provider — edit customProviders[].models instead`,
+            );
+        }
+        if (!Array.isArray(rawList) || rawList.length === 0) {
+            throw new Error(
+                `invalid providerHiddenModels from ${source}: "${providerId}" must map to a non-empty array`,
+            );
+        }
+        const ids: string[] = [];
+        const seen = new Set<string>();
+        for (const raw of rawList) {
+            if (typeof raw !== "string" || raw.trim() === "") {
+                throw new Error(
+                    `invalid providerHiddenModels from ${source}: each entry must be a non-empty model id (${providerId})`,
+                );
+            }
+            if (seen.has(raw)) {
+                throw new Error(
+                    `invalid providerHiddenModels from ${source}: duplicate model id ${raw} (${providerId})`,
+                );
+            }
+            seen.add(raw);
+            ids.push(raw);
+        }
+        out[providerId] = ids;
     }
     return out;
 }
@@ -678,6 +782,17 @@ export function saveGlobalConfig(patch: Partial<TacoGlobalConfigShape>): TacoGlo
     if ("customProviders" in patch) {
         // Whole-array replace (no merge). Validation failure throws → falls back to unwritten.
         next.customProviders = validateCustomProviders(patch.customProviders, "patch");
+    }
+    if ("providerExtraModels" in patch) {
+        // Whole-object replace. Validation failure throws → falls back to unwritten.
+        next.providerExtraModels = validateProviderExtraModels(patch.providerExtraModels, "patch");
+    }
+    if ("providerHiddenModels" in patch) {
+        // Whole-object replace. Validation failure throws → falls back to unwritten.
+        next.providerHiddenModels = validateProviderHiddenModels(
+            patch.providerHiddenModels,
+            "patch",
+        );
     }
     if ("mcpServers" in patch) {
         // Whole-array replace. Validation failure throws → falls back to unwritten.

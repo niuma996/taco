@@ -1,6 +1,7 @@
 /**
- * ModelMenu — custom popover listing selectable models with check-mark state
- * and optional thinking-level slider at the bottom (chat-input scenario).
+ * ModelMenu — custom popover listing selectable models grouped by provider,
+ * with a search filter at the top and an optional thinking-level slider at
+ * the bottom (chat-input scenario).
  *
  * Outside-click to close: a document capture-phase listener checks the pointerdown
  * target — only close when the target is outside the anchor subtree.
@@ -9,6 +10,7 @@
 import type { ThinkingLevel } from "@taco-ai/protocol";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
+import { TextInput } from "../ui/TextInput.tsx";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
 import { ThinkingSlider } from "./ThinkingSlider";
 
@@ -31,6 +33,7 @@ interface ModelMenuProps {
 
 export function ModelMenu(props: ModelMenuProps) {
     const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
     const anchorRef = useRef<HTMLDivElement | null>(null);
     const { t } = useT();
 
@@ -54,6 +57,11 @@ export function ModelMenu(props: ModelMenuProps) {
         };
     }, [open]);
 
+    // Clear the filter whenever the popup closes so the next open starts clean.
+    useEffect(() => {
+        if (!open) setQuery("");
+    }, [open]);
+
     function toggle() {
         if (!open) props.onOpen?.();
         setOpen((v) => !v);
@@ -67,6 +75,25 @@ export function ModelMenu(props: ModelMenuProps) {
         : undefined;
     const hasSelection = Boolean(props.value);
     const label = current?.name ?? current?.id ?? props.value?.id ?? t("modelMenu.selectModel");
+
+    // Search matches id, display name, and provider id (case-insensitive).
+    const q = query.trim().toLowerCase();
+    const filtered =
+        q === ""
+            ? props.options
+            : props.options.filter(
+                  (o) =>
+                      o.id.toLowerCase().includes(q) ||
+                      (o.name ?? "").toLowerCase().includes(q) ||
+                      o.provider.toLowerCase().includes(q),
+              );
+    // Group by provider, preserving option order within each group.
+    const groups = new Map<string, ModelOption[]>();
+    for (const opt of filtered) {
+        const list = groups.get(opt.provider);
+        if (list) list.push(opt);
+        else groups.set(opt.provider, [opt]);
+    }
 
     return (
         <div
@@ -89,35 +116,50 @@ export function ModelMenu(props: ModelMenuProps) {
             </button>
             {open && (
                 <div className="model-menu-popup" role="menu">
+                    <div className="model-menu-search">
+                        <TextInput
+                            type="text"
+                            value={query}
+                            placeholder={t("modelMenu.search")}
+                            autoFocus
+                            onChange={(e) => setQuery(e.target.value)}
+                        />
+                    </div>
                     <div className="model-menu-section">
-                        <div className="model-menu-header">{t("modelMenu.modelSection")}</div>
-                        {props.options.map((opt) => {
-                            const selected =
-                                props.value !== undefined &&
-                                opt.provider === props.value.provider &&
-                                opt.id === props.value.id;
-                            return (
-                                <button
-                                    key={`${opt.provider}|${opt.id}`}
-                                    type="button"
-                                    role="menuitemradio"
-                                    aria-checked={selected}
-                                    className={`model-menu-item${selected ? " selected" : ""}`}
-                                    onClick={() => {
-                                        props.onModelChange({
-                                            provider: opt.provider,
-                                            id: opt.id,
-                                        });
-                                        setOpen(false);
-                                    }}
-                                >
-                                    <span className="model-menu-item-name">
-                                        {opt.name ?? opt.id}
-                                    </span>
-                                    <span className="model-menu-item-provider">{opt.provider}</span>
-                                </button>
-                            );
-                        })}
+                        {groups.size === 0 && (
+                            <div className="model-menu-empty">{t("modelMenu.noMatch")}</div>
+                        )}
+                        {[...groups.entries()].map(([provider, opts]) => (
+                            <div key={provider} className="model-menu-group">
+                                <div className="model-menu-group-header">{provider}</div>
+                                {opts.map((opt) => {
+                                    const selected =
+                                        props.value !== undefined &&
+                                        opt.provider === props.value.provider &&
+                                        opt.id === props.value.id;
+                                    return (
+                                        <button
+                                            key={`${opt.provider}|${opt.id}`}
+                                            type="button"
+                                            role="menuitemradio"
+                                            aria-checked={selected}
+                                            className={`model-menu-item${selected ? " selected" : ""}`}
+                                            onClick={() => {
+                                                props.onModelChange({
+                                                    provider: opt.provider,
+                                                    id: opt.id,
+                                                });
+                                                setOpen(false);
+                                            }}
+                                        >
+                                            <span className="model-menu-item-name">
+                                                {opt.name ?? opt.id}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ))}
                     </div>
                     {props.thinkingValue !== undefined && props.onThinkingChange && (
                         <>

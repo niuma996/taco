@@ -482,4 +482,166 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.ok(models.getModels().some((m) => m.provider === "custom:z"));
         });
     });
+
+    describe("providerExtraModels — user-added models on built-ins", () => {
+        it("constructor merges extras on top of the static list", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            assert.deepEqual(
+                mr.listAvailableModels("stub-a").map((m) => m.id),
+                ["model-a", "extra-1"],
+            );
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            assert.deepEqual(
+                view?.models.map((m) => [m.id, m.origin]),
+                [
+                    ["model-a", "builtin"],
+                    ["extra-1", "extra"],
+                ],
+            );
+            // stub-b has no extras — everything stays "builtin".
+            const viewB = mr.listConfiguredProviders().find((p) => p.id === "stub-b");
+            assert.ok(viewB?.models.every((m) => m.origin === "builtin"));
+        });
+
+        it("the view carries baseUrl/api for built-ins so the UI can show them read-only", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+            });
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            assert.equal(view?.baseUrl, "https://stub.example.com");
+            // The stub's static model is openai-responses → maps back to "response".
+            assert.equal(view?.api, "response");
+        });
+
+        it("extra models inherit the provider's api/baseUrl from its static template", () => {
+            const store = new ProviderKeyStore({});
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            const extra = models.getModel("stub-a", "extra-1");
+            assert.equal(extra?.api, "openai-responses", "same api as stub-a's static model");
+            assert.equal(extra?.baseUrl, "https://stub.example.com");
+            assert.equal(extra?.provider, "stub-a");
+        });
+
+        it("setProviderModelEdits re-registers built-ins with the new extras", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+            });
+            mr.setProviderModelEdits({ "stub-b": [{ id: "extra-b" }] }, {});
+            assert.deepEqual(
+                mr.listAvailableModels("stub-b").map((m) => m.id),
+                ["model-b", "extra-b"],
+            );
+            // Replacing again drops the previous extras (whole-object replace).
+            mr.setProviderModelEdits({}, {});
+            assert.deepEqual(
+                mr.listAvailableModels("stub-b").map((m) => m.id),
+                ["model-b"],
+            );
+        });
+    });
+
+    describe("providerHiddenModels — removed static models on built-ins", () => {
+        it("constructor filters hidden ids out of the catalog", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerHiddenModels: { "stub-a": ["model-a"] },
+            });
+            assert.deepEqual(
+                mr.listAvailableModels("stub-a").map((m) => m.id),
+                [],
+            );
+            // Other providers are untouched.
+            assert.deepEqual(
+                mr.listAvailableModels("stub-b").map((m) => m.id),
+                ["model-b"],
+            );
+        });
+
+        it("keeps hidden ids in the view tagged 'hidden' so the UI can restore them", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerHiddenModels: { "stub-a": ["model-a"] },
+            });
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            assert.deepEqual(
+                view?.models.map((m) => [m.id, m.origin]),
+                [["model-a", "hidden"]],
+            );
+        });
+
+        it("hiding a static id does not drop a user-added entry of the same name", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerExtraModels: { "stub-a": [{ id: "model-a" }] },
+                providerHiddenModels: { "stub-a": ["model-a"] },
+            });
+            // The extra survives the hide — extras and removals are independent.
+            assert.deepEqual(
+                mr.listAvailableModels("stub-a").map((m) => m.id),
+                ["model-a"],
+            );
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            assert.deepEqual(
+                view?.models.map((m) => [m.id, m.origin]),
+                [
+                    ["model-a", "extra"],
+                    ["model-a", "hidden"],
+                ],
+            );
+        });
+
+        it("setProviderModelEdits applies and clears hides", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+            });
+            mr.setProviderModelEdits({}, { "stub-a": ["model-a"] });
+            assert.deepEqual(
+                mr.listAvailableModels("stub-a").map((m) => m.id),
+                [],
+            );
+            // Restoring passes an empty hidden map for that provider.
+            mr.setProviderModelEdits({}, {});
+            assert.deepEqual(
+                mr.listAvailableModels("stub-a").map((m) => m.id),
+                ["model-a"],
+            );
+        });
+    });
 });

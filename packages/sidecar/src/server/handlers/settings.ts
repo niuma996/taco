@@ -80,6 +80,8 @@ export function toView(raw: TacoGlobalConfigShape): TacoGlobalConfigView {
         // settings panes (McpSection / ProviderSection / ChannelsPane) empty
         // even though taco.json on disk has entries.
         customProviders: raw.customProviders,
+        providerExtraModels: raw.providerExtraModels,
+        providerHiddenModels: raw.providerHiddenModels,
         channels: raw.channels?.map(channelInstanceToView),
         mcpServers: raw.mcpServers?.map(mcpServerToView),
         instructions: raw.instructions,
@@ -173,11 +175,32 @@ export function registerSettingsHandlers(): void {
                         "setCustomProviders",
                     );
                 }
+                // Both model-list maps go through one call: the registry applies
+                // the hide filter and the extras append in the same wrapper, so
+                // pushing only the changed half would drop the other one's
+                // effect. Unchanged halves come from the merged `next`.
+                if ("providerExtraModels" in globalPatch || "providerHiddenModels" in globalPatch) {
+                    fanoutSetter(
+                        server,
+                        serverRegistry,
+                        (s) =>
+                            s.setProviderModelEdits?.(
+                                next.providerExtraModels ?? {},
+                                next.providerHiddenModels ?? {},
+                            ),
+                        "setProviderModelEdits",
+                    );
+                }
                 // Notify the desktop that the model catalog may have changed
                 // (new apiKeys unlocked a provider, customProviders added/removed
                 // entries). Desktop re-pulls providers.list / session.listModels
                 // to refresh the Model menu without a restart.
-                if ("apiKeys" in globalPatch || "customProviders" in globalPatch) {
+                if (
+                    "apiKeys" in globalPatch ||
+                    "customProviders" in globalPatch ||
+                    "providerExtraModels" in globalPatch ||
+                    "providerHiddenModels" in globalPatch
+                ) {
                     fanoutSetter(
                         server,
                         serverRegistry,

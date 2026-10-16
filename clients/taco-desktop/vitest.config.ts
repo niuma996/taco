@@ -43,7 +43,7 @@ export default defineConfig({
             "tests/components/ui/Select.test.tsx",
             "tests/components/ui/Slider.test.tsx",
             "tests/components/ui/Modal.test.tsx",
-            "tests/components/settings/CustomProviderForm.test.tsx",
+            "tests/components/settings/ProviderDetailModal.test.tsx",
             "tests/components/settings/McpSection.test.tsx",
             "tests/components/settings/PermissionsTab.test.tsx",
             "tests/components/settings/SchedulesTab.test.tsx",

@@ -234,7 +234,7 @@
     font-size: var(--text-sm);
 }
 
-/* Provider section — two-column grid, one provider per cell: name + status + key input. */
+/* Provider section — auto-fill grid, one clickable card per provider: name + status dot + meta line. */
 .provider-section-head {
     display: flex;
     align-items: center;
@@ -250,28 +250,45 @@
     gap: 0.5rem;
     margin-top: 0.6rem;
 }
+/* The whole card is a button opening the detail modal. */
 .provider-row {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.25rem;
     padding: 0.5rem 0.7rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-}
-.provider-row-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.4rem 0.6rem;
-    /* Fills card height so the actions area (align-self:flex-end) lands at the card bottom. */
-    flex: 1;
-}
-/* Info area: name + status stacked vertically, fills remaining width; long names truncate without crowding buttons. */
-.provider-row-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    flex: 1;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    width: 100%;
     min-width: 0;
+    cursor: pointer;
+}
+.provider-row:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--brand-orange);
+}
+.provider-row:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+/* Title line: status dot + provider name (truncates). */
+.provider-row-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+.provider-row-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--fg-dim);
+    flex-shrink: 0;
+}
+.provider-row-dot--ok {
+    background: var(--success, var(--fg));
 }
 .provider-row-name {
     font-weight: 500;
@@ -282,16 +299,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
-/* Action area: icon buttons vertically centered relative to the card outer frame, right-aligned; wraps on narrow widths. */
-.provider-row-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    align-self: center;
-    flex-shrink: 0;
-}
 .provider-row-badge {
     font-size: var(--text-xs);
     padding: 0.05rem 0.4rem;
@@ -300,59 +307,117 @@
     color: var(--fg-dim);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    /* Badge keeps its shape; the count text truncates first. */
+    flex-shrink: 0;
 }
+/* Meta line: model count left (aligned across cards), badge pushed right. */
 .provider-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
     font-size: var(--text-xs);
     color: var(--fg-dim);
     font-family: var(--mono);
 }
-.provider-row-status {
-    font-size: var(--text-xs);
-    color: var(--fg-dim);
+.provider-row-meta .provider-row-badge {
+    margin-left: auto;
 }
-.provider-row-status--ok {
-    color: var(--success, var(--fg));
-}
-/* Key icon — brand orange, signals "configure API key here". */
-.ui-icon-btn.provider-row-key {
-    color: var(--brand-orange);
-}
-.ui-icon-btn.provider-row-key:hover:not(:disabled) {
-    color: var(--brand-orange-hover);
+.provider-row-count {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
-/* custom-provider-modal — CustomProviderForm's own Radix Dialog, wider than
-   the base .ui-modal (420px) so its 6 fields and the "fetch models" action aren't
-   cramped, and so the API Select's long option labels (e.g. "OpenAI
-   /chat/completions (chatcomplete)") fit inside the modal. */
-.custom-provider-modal {
+/* provider-detail-modal — wider than the base .ui-modal (420px) so the model
+   list and the API Select's long option labels fit. */
+.provider-detail-modal {
     /* Base .ui-modal sets only max-width, so width is content-driven; without an
        explicit width the box stays narrow regardless of max-width. */
-    width: 600px;
+    width: 560px;
     max-width: calc(100vw - 4rem);
 }
 /* Cap the API Select's popper to the trigger width and let long labels
    wrap instead of clipping past the modal edge. */
-.custom-provider-modal .ui-select-content {
+.provider-detail-modal .ui-select-content {
     max-width: var(--radix-select-trigger-width);
 }
-.custom-provider-modal .ui-select-item {
+.provider-detail-modal .ui-select-item {
     white-space: normal;
 }
-.custom-provider-modal .settings-row-block {
+/* The modal body ends with the add-row (not a form field), so the actions
+   row needs its own top margin to avoid sitting flush against it. */
+.provider-detail-modal .ui-modal-actions {
+    margin-top: 1rem;
+}
+/* Key view mode: masked/plaintext value + reveal + replace. */
+.provider-detail-key-view {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.provider-detail-key-mask {
+    font-family: var(--mono);
+    color: var(--fg-dim);
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Model list: scrollable row container. */
+.provider-detail-models {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    margin-bottom: 0.9rem;
+    gap: 0.1rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem;
 }
-/* Field label: gap above the input, slightly smaller size, dim color — clearer hierarchy. */
-.custom-provider-modal .settings-row-block > span {
+.provider-detail-fetched {
+    margin-top: 0.5rem;
+    border-style: dashed;
+}
+.provider-detail-model-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.1rem 0.25rem;
     font-size: var(--text-sm);
+}
+/* Hidden statics sit in the same list, dimmed — present but not selectable. */
+.provider-detail-model-row--off .provider-detail-model-id {
     color: var(--fg-dim);
+    text-decoration: line-through;
+}
+.provider-detail-model-id {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--mono);
+}
+.provider-detail-empty {
+    padding: 0.4rem 0.25rem;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+}
+.provider-detail-add-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+/* Push the danger button to the left edge of the actions row. */
+.provider-detail-delete {
+    margin-right: auto;
 }
 
-/* "Fetch models" action for the model id field (right side of the label row, see ui.css .ui-form-label-row). */
-.custom-provider-fetch-btn {
+/* "Fetch models" action for the model field (right side of the label row, see ui.css .ui-form-label-row). */
+.provider-detail-fetch-btn {
     padding: 0.15rem 0.5rem;
     background: transparent;
     border: 1px solid var(--border);
@@ -361,26 +426,13 @@
     font-size: var(--text-xs);
     cursor: pointer;
 }
-.custom-provider-fetch-btn:hover:not(:disabled) {
+.provider-detail-fetch-btn:hover:not(:disabled) {
     border-color: var(--brand-orange);
     color: var(--brand-orange);
 }
-.custom-provider-fetch-btn:disabled {
+.provider-detail-fetch-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-}
-/* Placeholder hint when the protocol doesn't support auto-discovery — replaces the button without stretching the label row. */
-.custom-provider-fetch-hint {
-    font-size: var(--text-xs);
-    color: var(--fg-dim);
-}
-
-/* Read-only API key mask — monospace font displays sk-ant-...AbCd; dimmed bg signals non-editable. */
-.provider-key-mask {
-    font-family: var(--mono);
-    color: var(--fg-dim);
-    background: var(--input-bg);
-    cursor: default;
 }
 
 /* ── MCP Servers tab ── */

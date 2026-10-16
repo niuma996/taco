@@ -41,6 +41,8 @@ export const RPC = {
     sessionListModels: "session.listModels",
     /** List the availability view of built-in providers (configured + models) for the Model settings UI. */
     providersList: "providers.list",
+    /** Return one provider's plaintext API key (settings UI "reveal" toggle). */
+    providersRevealKey: "providers.revealKey",
     sessionSetThinkingLevel: "session.setThinkingLevel",
     sessionCompact: "session.compact",
     sessionContextInfo: "session.contextInfo",
@@ -125,6 +127,7 @@ export const FAST_RPC_METHODS: ReadonlySet<string> = new Set<string>([
     RPC.sessionListModels,
     RPC.sessionContextInfo,
     RPC.providersList,
+    RPC.providersRevealKey,
     RPC.settingsGet,
     RPC.extensionsStatus,
     RPC.channelsList,

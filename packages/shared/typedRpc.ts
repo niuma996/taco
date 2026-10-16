@@ -79,6 +79,8 @@ import type {
     ProviderListModelsResult,
     ProvidersListParams,
     ProvidersListResult,
+    ProvidersRevealKeyParams,
+    ProvidersRevealKeyResult,
     RenameSessionParams,
     SessionCompactParams,
     SessionCompactResult,
@@ -283,6 +285,11 @@ export interface TypedRpc {
     ): Promise<{ models: Array<{ provider: string; id: string; name?: string }> }>;
     /** List the availability view of built-in providers (configured + models) for the Model settings UI. */
     providersList(workspace: WorkspaceId): Promise<ProvidersListResult>;
+    /** Reveal one provider's plaintext API key (settings UI "reveal" toggle). */
+    providersRevealKey(
+        workspace: WorkspaceId,
+        providerId: string,
+    ): Promise<ProvidersRevealKeyResult>;
     sessionSetThinkingLevel(
         workspace: WorkspaceId,
         sessionId: SessionId,
@@ -627,6 +634,14 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             call<ProvidersListParams, ProvidersListResult>(RPC.providersList, workspace, {
                 workspace,
             }),
+
+        // providersRevealKey: workspace + providerId → plaintext key (or null)
+        providersRevealKey: (workspace, providerId) =>
+            call<ProvidersRevealKeyParams, ProvidersRevealKeyResult>(
+                RPC.providersRevealKey,
+                workspace,
+                { workspace, providerId },
+            ),
 
         // sessionSetThinkingLevel: workspace + sessionId + level
         sessionSetThinkingLevel: (workspace, sessionId, level) =>

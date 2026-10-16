@@ -14,6 +14,8 @@ import {
     asWorkspaceId,
     type ChannelStatusEntry,
     type ClientCapabilities,
+    type CustomModelEntry,
+    type CustomProviderApi,
     type CustomProviderConfig,
     ErrorCodes,
     IM_CWD_PREFIX,
@@ -70,6 +72,7 @@ import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
+import { resolveProviderEndpoint } from "../runtime/models/modelRegistry.ts";
 import type { ProviderKeyStore } from "../runtime/models/providerKeyStore.ts";
 import type { ImageContent, TextContent, ThinkingLevel } from "../runtime/pi/types.ts";
 import { loadSourcedSkills } from "../runtime/pi/values.ts";
@@ -186,6 +189,10 @@ export interface SidecarServerOptions {
     providerKeyStore: ProviderKeyStore;
     /** Custom provider config (parsed at startup from taco.json), injected into every workspace's catalog */
     customProviders?: readonly CustomProviderConfig[];
+    /** User-added models for built-in providers (taco.json providerExtraModels), merged into every workspace's catalog. */
+    providerExtraModels?: Record<string, CustomModelEntry[]>;
+    /** Static model ids hidden on built-in providers (taco.json providerHiddenModels), filtered out of every workspace's catalog. */
+    providerHiddenModels?: Record<string, string[]>;
     /** MCP servers whose tools become dynamic-tool candidates (parsed at startup from taco.json). */
     mcpServers?: readonly McpServerConfig[];
     /** Maximum number of settled command outcomes retained; values below 1 clamp to 1. */
@@ -322,6 +329,14 @@ export class SidecarServer implements ServerRpcSurface {
      * latest value in ensureWorkspace.
      */
     private customProviders: readonly CustomProviderConfig[] = [];
+    /**
+     * User-added models for built-in providers — same lifecycle as
+     * customProviders: startup from options, runtime replacement via
+     * `setProviderExtraModels` (after settings.write), read by buildWorkspace.
+     */
+    private providerExtraModels: Record<string, CustomModelEntry[]> = {};
+    /** Same lifecycle as providerExtraModels; hidden static model ids. */
+    private providerHiddenModels: Record<string, string[]> = {};
     /**
      * `instructionsConfig` captured at construction. Hot updates go
      * through `refreshInstructions()` on each SidecarServer; this field
@@ -466,6 +481,8 @@ export class SidecarServer implements ServerRpcSurface {
         this.providerKeyStore = options.providerKeyStore;
         this._jobs = options.jobs;
         this.customProviders = options.customProviders ?? [];
+        this.providerExtraModels = options.providerExtraModels ?? {};
+        this.providerHiddenModels = options.providerHiddenModels ?? {};
         // instructionsConfig is captured at construction so every
         // workspace built by buildWorkspace() sees the same value. The
         // existing refreshInstructions() hot-reload path stays
@@ -1094,6 +1111,8 @@ export class SidecarServer implements ServerRpcSurface {
                 extensions,
                 providerKeyStore: this.providerKeyStore,
                 customProviders: this.customProviders,
+                providerExtraModels: this.providerExtraModels,
+                providerHiddenModels: this.providerHiddenModels,
                 agents,
                 resources: { skills },
                 skillDiagnostics,
@@ -1459,6 +1478,31 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /**
+     * Replace the user's model-list edits for built-in providers (pushed by the
+     * handler after settings.write changes providerExtraModels /
+     * providerHiddenModels). Updates the server's held values for workspaces
+     * built later and re-registers wrapped built-ins in every existing
+     * workspace's ModelRegistry.
+     */
+    setProviderModelEdits(
+        extras: Record<string, CustomModelEntry[]>,
+        hidden: Record<string, string[]>,
+    ): void {
+        this.providerExtraModels = extras;
+        this.providerHiddenModels = hidden;
+        for (const ws of this.workspaces.list()) {
+            ws.setProviderModelEdits(extras, hidden);
+        }
+    }
+
+    /** Resolve a registered provider's endpoint for model discovery (provider.listModels "saved" branch). */
+    getProviderEndpoint(
+        providerId: string,
+    ): { baseUrl: string; api: CustomProviderApi } | undefined {
+        return resolveProviderEndpoint(providerId, this.customProviders);
+    }
+
+    /**
      * Update the default model/provider at runtime (pushed by the settings.write
      * handler after the user picks a provider+model in Settings/onboarding).
      *
@@ -1716,6 +1760,8 @@ export interface SharedSidecarDeps {
     extensionRegistry?: ExtensionRegistry;
     providerKeyStore: ProviderKeyStore;
     customProviders?: readonly CustomProviderConfig[];
+    providerExtraModels?: Record<string, CustomModelEntry[]>;
+    providerHiddenModels?: Record<string, string[]>;
     mcpServers?: readonly McpServerConfig[];
     channels?: readonly ChannelConfig[];
     /**
@@ -1785,6 +1831,8 @@ export function startServer(deps: SharedSidecarDeps, transport: Transport): Star
         extensionRegistry: deps.extensionRegistry,
         providerKeyStore: deps.providerKeyStore,
         customProviders: deps.customProviders,
+        providerExtraModels: deps.providerExtraModels,
+        providerHiddenModels: deps.providerHiddenModels,
         mcpServers: deps.mcpServers,
         channels: deps.channels,
         jobs: deps.jobs,

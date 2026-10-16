@@ -61,6 +61,21 @@ export interface TacoGlobalConfigShape {
      */
     customProviders?: CustomProviderConfig[];
     /**
+     * User-added models for built-in providers (fetched from the provider's
+     * /models endpoint or typed manually), keyed by built-in provider id.
+     * Merged into the catalog on top of pi's static lists; custom providers
+     * keep their models in `customProviders[].models` instead.
+     */
+    providerExtraModels?: Record<string, CustomModelEntry[]>;
+    /**
+     * Static model ids the user removed from a built-in provider's list,
+     * keyed by built-in provider id. pi's static list is immutable, so a
+     * removal is a filter over it — the entries stay available for restore
+     * via the settings UI. Extras and removals are independent: hiding a
+     * static id does not drop a user-added entry of the same name.
+     */
+    providerHiddenModels?: Record<string, string[]>;
+    /**
      * IM channel instances, stored alongside extensions/disabledExtensions.
      * Credentials are NOT here — they live in `$TACO_HOME/channels/<id>.json`,
      * written by the channel itself through its ChannelConfigStore.

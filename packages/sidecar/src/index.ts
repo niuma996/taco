@@ -121,6 +121,8 @@ function toSharedSidecarDeps(deps: ResolvedDeps): SharedSidecarDeps {
         extensionRegistry: deps.extensionRegistry,
         providerKeyStore: deps.providerKeyStore,
         customProviders: deps.cfg.customProviders,
+        providerExtraModels: deps.cfg.providerExtraModels,
+        providerHiddenModels: deps.cfg.providerHiddenModels,
         mcpServers: deps.cfg.mcpServers,
         channels: deps.cfg.channels,
     };

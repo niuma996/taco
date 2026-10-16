@@ -463,3 +463,23 @@
     text-align: inherit;
     cursor: pointer;
 }
+
+/* ── SecretInput ── */
+
+.ui-secret-input {
+    position: relative;
+    display: block;
+}
+.ui-secret-input .ui-input {
+    padding-right: 1.8rem;
+}
+.ui-secret-input-toggle {
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-dim);
+}
+.ui-secret-input-toggle:hover:not(:disabled) {
+    color: var(--fg);
+}

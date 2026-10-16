@@ -367,8 +367,27 @@ export interface ProviderView {
     configured: boolean;
     /** Whether this is a user-defined provider. */
     custom: boolean;
+    /**
+     * Endpoint base URL. Read-only for built-ins (their catalog is fixed by
+     * pi); editable through the custom-provider config for customs.
+     */
+    baseUrl?: string;
+    /** Protocol family. Read-only for built-ins, like baseUrl. */
+    api?: CustomProviderApi;
     /** Models available under this provider. */
-    models: Array<{ provider: string; id: string; name?: string }>;
+    models: Array<{
+        provider: string;
+        id: string;
+        name?: string;
+        /**
+         * Provenance: "builtin" = pi static list (read-only in the UI),
+         * "extra" = user-added on a built-in provider (removable),
+         * "custom" = belongs to a custom provider (editable via that provider),
+         * "hidden" = a static model the user removed; still listed so the
+         * settings UI can offer a restore action.
+         */
+        origin?: "builtin" | "extra" | "custom" | "hidden";
+    }>;
 }
 
 /** `providers.list` RPC result — built-in + custom provider availability. */
@@ -376,30 +395,46 @@ export interface ProvidersListResult {
     providers: ProviderView[];
 }
 
-/**
- * `provider.listModels` RPC params.
- *
- * Configuration-time helper: a top-level (workspace-less) RPC used by the
- * custom-provider form to populate the "model id" textarea from the remote
- * provider's `/v1/models`. The `apiKey` is the literal value the user typed
- * in the form (the store has not been written yet at this point).
- */
-export interface ProviderListModelsParams {
-    baseUrl: string;
-    api: CustomProviderApi;
-    apiKey: string;
+/** `providers.revealKey` RPC params — returns the plaintext key for one provider. */
+export interface ProvidersRevealKeyParams {
+    workspace: WorkspaceId;
+    providerId: string;
+}
+
+/** `providers.revealKey` RPC result — `null` when no key is configured. */
+export interface ProvidersRevealKeyResult {
+    key: string | null;
 }
 
 /**
- * Discriminated result — handlers branch on `api` and either return a model
- * id list or report that the protocol has no public catalog endpoint.
+ * `provider.listModels` RPC params.
+ *
+ * Two shapes:
+ * - `endpoint`: fetch `{baseUrl}/models` with the literal key the user typed
+ *   (custom-provider form — the store has not been written yet).
+ * - `saved`: resolve baseUrl/api from the registered provider (built-in table
+ *   or customProviders) and the key from the sidecar's ProviderKeyStore, so
+ *   plaintext keys never cross the wire for already-saved providers.
+ */
+export type ProviderListModelsParams =
+    | {
+          providerId: string;
+      }
+    | {
+          baseUrl: string;
+          api: CustomProviderApi;
+          apiKey: string;
+      };
+
+/**
+ * Discriminated result — either a model id list or why the probe failed.
  * `message` is human-readable and safe to surface verbatim (no API key).
  */
 export type ProviderListModelsResult =
     | { ok: true; models: string[] }
     | {
           ok: false;
-          reason: "protocol-not-supported" | "http-error" | "timeout" | "invalid-response";
+          reason: "http-error" | "timeout" | "invalid-response";
           message: string;
       };
 

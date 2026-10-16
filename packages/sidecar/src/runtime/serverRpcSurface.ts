@@ -14,6 +14,8 @@ import type {
     ChannelsListResult,
     ChannelsRetryResult,
     ClientCapabilities,
+    CustomModelEntry,
+    CustomProviderApi,
     CustomProviderConfig,
     ImPolicyGetParams,
     ImPolicyGetResult,
@@ -131,6 +133,25 @@ export interface ServerRpcSurface {
      * newly created workspaces read the latest value automatically.
      */
     setCustomProviders?(next: readonly CustomProviderConfig[]): void;
+    /**
+     * Replace the user's model-list edits for built-in providers (called by the
+     * handler after settings.write changes providerExtraModels or
+     * providerHiddenModels). Existing workspaces' ModelRegistry re-registers
+     * the wrapped built-ins; newly created workspaces read the latest values
+     * automatically. Both maps go through one call — the same wrapper applies
+     * the hide filter and the extras append.
+     */
+    setProviderModelEdits?(
+        extras: Record<string, CustomModelEntry[]>,
+        hidden: Record<string, string[]>,
+    ): void;
+    /**
+     * Resolve a registered provider's endpoint for model discovery
+     * (provider.listModels "saved" branch). Undefined for unknown providers.
+     */
+    getProviderEndpoint?(
+        providerId: string,
+    ): { baseUrl: string; api: CustomProviderApi } | undefined;
     /**
      * Update the default model/provider at runtime (called by handler after
      * settings.write changes defaultModel/defaultProvider). Updates held

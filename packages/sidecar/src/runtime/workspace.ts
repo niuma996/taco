@@ -12,6 +12,7 @@ import { EventEmitter } from "node:events";
 import { resolve as resolvePath } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
+    CustomModelEntry,
     CustomProviderConfig,
     InstructionsConfig,
     RpcRequest,
@@ -169,6 +170,10 @@ export interface WorkspaceRuntimeOptions {
     providerKeyStore: ProviderKeyStore;
     /** Custom provider configs (registered into the catalog alongside built-ins). */
     customProviders?: readonly CustomProviderConfig[];
+    /** User-added models for built-in providers (merged on top of pi's static lists). */
+    providerExtraModels?: Record<string, CustomModelEntry[]>;
+    /** Static model ids hidden on built-in providers (filtered out of the catalog). */
+    providerHiddenModels?: Record<string, string[]>;
     /** Enable user-level memory. Default = enabled. */
     memoryEnabled?: boolean;
     /** Entry point for `tasks.updated` pushes; defaults to NoopTaskPushAdapter. */
@@ -456,7 +461,13 @@ export class WorkspaceRuntime extends EventEmitter {
             // Register all built-in + custom providers here so the defaultModel
             // lookup below can resolve. ModelRegistry's constructor skips its own
             // registration (registerProviders=false) when we did it here.
-            applyBuiltinProviders(this.models, undefined, options.customProviders);
+            applyBuiltinProviders(
+                this.models,
+                undefined,
+                options.customProviders,
+                options.providerExtraModels,
+                options.providerHiddenModels,
+            );
         }
         // AgentHarness generation uses `models.streamSimple` directly. This
         // global default only feeds pi's standalone Agent loop; keep it registered
@@ -643,6 +654,8 @@ export class WorkspaceRuntime extends EventEmitter {
             sessionRegistry: this.sessionRegistry,
             providerKeyStore: options.providerKeyStore,
             customProviders: options.customProviders,
+            providerExtraModels: options.providerExtraModels,
+            providerHiddenModels: options.providerHiddenModels,
             registerProviders: false,
         });
 
@@ -1173,6 +1186,14 @@ export class WorkspaceRuntime extends EventEmitter {
     /** Replace the custom provider set at runtime (pushed by server after settings.write). */
     setCustomProviders(next: readonly CustomProviderConfig[]): void {
         this.modelRegistry.setCustomProviders(next);
+    }
+
+    /** Replace the user's model-list edits for built-in providers at runtime (pushed by server after settings.write). */
+    setProviderModelEdits(
+        extras: Record<string, CustomModelEntry[]>,
+        hidden: Record<string, string[]>,
+    ): void {
+        this.modelRegistry.setProviderModelEdits(extras, hidden);
     }
 
     /**
