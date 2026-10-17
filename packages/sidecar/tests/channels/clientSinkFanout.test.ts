@@ -27,6 +27,7 @@ import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import type { ServerFrame, Transport } from "../../src/server/transport.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
+import { stubModelFetch } from "../_helpers/stubModelFetch.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 const mockChannelConfig: ChannelConfig = {
@@ -36,6 +37,7 @@ const mockChannelConfig: ChannelConfig = {
 };
 
 useTempTacoHome("client-sink");
+stubModelFetch();
 
 describe("ClientSinkRegistry", () => {
     it("add/remove/fanout", () => {

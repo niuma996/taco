@@ -31,6 +31,7 @@ import type { ChannelConfig } from "../../src/channels/registry.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
+import { stubModelFetch } from "../_helpers/stubModelFetch.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 const mockChannelConfig: ChannelConfig = {
@@ -40,6 +41,7 @@ const mockChannelConfig: ChannelConfig = {
 };
 
 useTempTacoHome("daemon-ownership");
+stubModelFetch();
 
 /** Helper: start a fresh owner that uses the (mock) channel stack, then
  *  start a non-owner connection server that shares it. Returns all three

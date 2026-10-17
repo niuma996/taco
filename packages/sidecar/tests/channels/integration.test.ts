@@ -15,9 +15,11 @@ import { MockChannel } from "../../src/channels/builtin/mockChannel.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
+import { stubModelFetch } from "../_helpers/stubModelFetch.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 useTempTacoHome("im-integration");
+stubModelFetch();
 
 describe("IM channel P0 integration", () => {
     it("submit routes (channelId, peerId, chatId) to a stable sessionId via ConversationRouter", async () => {
