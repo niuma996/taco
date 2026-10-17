@@ -1,21 +1,45 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
 import { writeToClipboard } from "../../src/lib/clipboard";
 
-describe("writeToClipboard", () => {
-    afterEach(() => vi.restoreAllMocks());
+/** Minimal DOM for the execCommand fallback — node:test has no document. */
+function installFakeDocument(execCommand: (command: string) => boolean): {
+    execCommand: string[];
+} {
+    const calls: string[] = [];
+    const textarea = {
+        value: "",
+        style: {},
+        setAttribute: () => {},
+        select: () => {},
+    };
+    globalThis.document = {
+        createElement: () => textarea,
+        body: { appendChild: () => {}, removeChild: () => {} },
+        execCommand: (command: string) => {
+            calls.push(command);
+            return execCommand(command);
+        },
+    } as unknown as Document;
+    return { execCommand: calls };
+}
 
+afterEach(() => {
+    Reflect.deleteProperty(globalThis, "document");
+    Reflect.deleteProperty(navigator, "clipboard");
+});
+
+describe("writeToClipboard", () => {
     it("falls back to execCommand when Clipboard API rejects", async () => {
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
-            value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+            value: {
+                writeText: () => Promise.reject(new Error("denied")),
+            },
         });
-        const execCommand = vi.fn().mockReturnValue(true);
-        Object.defineProperty(document, "execCommand", {
-            configurable: true,
-            value: execCommand,
-        });
+        const { execCommand } = installFakeDocument(() => true);
 
-        await expect(writeToClipboard("session-1")).resolves.toBe(true);
-        expect(execCommand).toHaveBeenCalledWith("copy");
+        assert.equal(await writeToClipboard("session-1"), true);
+        assert.deepEqual(execCommand, ["copy"]);
     });
 });

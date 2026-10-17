@@ -11,7 +11,6 @@ export default defineConfig({
         // `pnpm test` tsx --test path. Pure function + reducer unit tests use node:test;
         // React component tests use vitest.
         include: [
-            "tests/lib/clipboard.test.ts",
             "tests/hooks/useRetryOnError.test.tsx",
             "tests/hooks/useFileTree.test.tsx",
             "tests/hooks/useFilePreview.test.tsx",
