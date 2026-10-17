@@ -62,6 +62,7 @@ import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig"
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
+import { writeToClipboard } from "./lib/clipboard";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";
@@ -541,7 +542,9 @@ export default function App() {
 
     async function copySessionId(sessionId: string): Promise<void> {
         try {
-            await navigator.clipboard.writeText(sessionId);
+            if (!(await writeToClipboard(sessionId))) {
+                throw new Error("clipboard access was denied");
+            }
             setCopiedSessionId(sessionId);
             window.setTimeout(() => {
                 setCopiedSessionId((cur: string | null) => (cur === sessionId ? null : cur));

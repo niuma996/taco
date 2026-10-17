@@ -4,7 +4,8 @@
  * Single shared copy button: code-block headers (CodeBlockWithCopy) and the
  * per-message meta row (MessageMeta) both need the same `navigator.clipboard`
  * + `execCommand` fallback and the same icon-swap-on-success pattern, so the
- * state machine and the writeToClipboard plumbing live here once.
+ * state machine lives here; the shared writeToClipboard helper is reused by
+ * session metadata actions as well.
  *
  * `labels` is required so the caller owns its own copy — the button stays
  * free of i18n coupling (this lives under `ui/`, which has no locale).
@@ -12,6 +13,7 @@
 
 import { Check, Copy, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { writeToClipboard } from "../../lib/clipboard";
 
 export type CopyState = "idle" | "copied" | "failed";
 
@@ -40,36 +42,6 @@ export interface CopyButtonProps {
  * the clipboard API is unavailable (older WebViews, Tauri without clipboard
  * permission).
  */
-async function writeToClipboard(value: string): Promise<boolean> {
-    try {
-        if (
-            typeof navigator !== "undefined" &&
-            navigator.clipboard &&
-            typeof navigator.clipboard.writeText === "function"
-        ) {
-            await navigator.clipboard.writeText(value);
-            return true;
-        }
-    } catch {
-        // fall through to the legacy path
-    }
-    try {
-        const ta = document.createElement("textarea");
-        ta.value = value;
-        ta.setAttribute("readonly", "");
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        ta.style.pointerEvents = "none";
-        document.body.appendChild(ta);
-        ta.select();
-        const ok = document.execCommand("copy");
-        document.body.removeChild(ta);
-        return ok;
-    } catch {
-        return false;
-    }
-}
-
 export function CopyButton({ value, className, labels, resetMs = 1500 }: CopyButtonProps) {
     const [state, setState] = useState<CopyState>("idle");
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
