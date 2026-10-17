@@ -301,7 +301,7 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
   `ProviderKeyStore` 镜像到 `process.env`
 - `sessionsRoot` — `.jsonl` 存储目录，默认 `$TACO_HOME/sessions/`
 - `compaction` — `{ enabled, threshold }`（默认 `true` / `0.7`）
-- `commandPermissions` — `{ mode: "ask" | "auto", rules: string[] }`
+- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`；黑名单命中需要审批且优先于白名单，未命令在 `ask` 模式审批、在 `auto` 模式自动通过。旧 `rules` 会按白名单读取。
 - `customProviders` — 第三方 OpenAI / Anthropic 兼容端点（id 必须
   带 `custom:` 前缀）
 - `mcpServers` — 每服务器 stdio / Streamable HTTP MCP 配置

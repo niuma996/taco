@@ -6,8 +6,9 @@
 import { strict as assert } from "node:assert";
 import { asSessionId, asToolCallId, type CommandPermissionRequest } from "@taco-ai/protocol";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CommandPermissionPrompt } from "../../src/components/CommandPermissionPrompt";
 import { Message } from "../../src/components/Message";
 import * as useI18n from "../../src/i18n/useI18n";
 import type { UiMessage, UiToolCall } from "../../src/lib/chat/chatUtils";
@@ -73,5 +74,58 @@ describe("CommandPermissionActions gate", () => {
     it("falls back to card status when no table is supplied", () => {
         render(<Message m={assistant("running")} onCommandPermission={() => {}} />);
         assert.ok(allowOnce());
+    });
+});
+
+describe("CommandPermissionPrompt persistent approvals", () => {
+    it("allows persistent approval for a non-blacklisted command regardless of risk", () => {
+        render(<CommandPermissionPrompt request={request} onResolve={() => {}} />);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "settings.permissionsAlwaysAllow",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(false);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "settings.permissionsAllowSession",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(false);
+    });
+
+    it("only offers one-time approval when a command matches the blacklist", () => {
+        const blacklisted = {
+            ...request,
+            evaluation: {
+                ...request.evaluation,
+                risk: "readOnly" as const,
+                matchedList: "deny" as const,
+            },
+        };
+        render(<CommandPermissionPrompt request={blacklisted} onResolve={() => {}} />);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "settings.permissionsAlwaysAllow",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(true);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "settings.permissionsAllowSession",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(true);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "settings.permissionsAllowOnce",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(false);
     });
 });

@@ -78,7 +78,7 @@ function validateCommandRules(
     const rules: CommandPermissionRule[] = [];
     for (const item of raw) {
         if (typeof item !== "string") invalid(source, `commands.${field}`, item);
-        const check = validatePermissionRule(item);
+        const check = validatePermissionRule(item, { allowShellWrapper: field === "deny" });
         if (!check.valid) invalid(source, `commands.${field}`, check.reason);
         rules.push(check.canonical);
     }

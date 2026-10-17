@@ -106,3 +106,14 @@ describe("validatePermissionRule", () => {
         assert.equal(validatePermissionRule("cmd /c del /f /q C:\\foo").valid, false);
     });
 });
+
+describe("blacklist rule validation", () => {
+    it("allows shell wrappers only when explicitly validating a blacklist", () => {
+        assert.deepEqual(validatePermissionRule("  bash *  ", { allowShellWrapper: true }), {
+            valid: true,
+            canonical: "bash *",
+        });
+        assert.equal(validatePermissionRule("bash *").valid, false);
+        assert.equal(validatePermissionRule(" ", { allowShellWrapper: true }).valid, false);
+    });
+});

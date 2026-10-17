@@ -4,7 +4,7 @@
  * pending-approvals modal so the two surfaces cannot drift.
  */
 
-import type { CommandPermissionScope } from "@taco-ai/protocol";
+import type { CommandEvaluation, CommandPermissionScope } from "@taco-ai/protocol";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useT } from "../i18n/useI18n";
@@ -12,7 +12,10 @@ import { useT } from "../i18n/useI18n";
 export interface CommandPermissionPromptRequest {
     requestId: string;
     command: string;
-    evaluation: { risk: string; reason: string };
+    evaluation: Pick<
+        CommandEvaluation,
+        "risk" | "reason" | "matchedList" | "matchedRule" | "triggeringCommand"
+    >;
 }
 
 export function CommandPermissionPrompt({
@@ -36,11 +39,8 @@ export function CommandPermissionPrompt({
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Destructive / external commands always re-prompt (evaluateCommand returns
-    // "ask" before matchesRule), so persistent scopes have no effect on them.
-    const persistentDisabled =
-        request.evaluation.risk === "destructive" ||
-        request.evaluation.risk === "externalSideEffect";
+    // A persistent allow rule cannot override a blacklist match.
+    const persistentDisabled = request.evaluation.matchedList === "deny";
 
     const handle = async (approved: boolean, scope: CommandPermissionScope) => {
         setSubmitting(true);

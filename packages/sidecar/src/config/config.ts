@@ -702,11 +702,11 @@ export function readMcpServers(): McpServerConfig[] {
 
 /**
  * Validate and normalize the `commandPermissions` field.
- *  - null/undefined returns the default { mode: "ask", rules: [] }
+ *  - null/undefined returns the default { mode: "ask", allow: [], deny: [] }
  *  - non-object / array throws (caller surfaces as invalid_value)
  *  - mode must be "ask" or "auto"; any other value (including "bypass")
  *    coerces to "ask" rather than throwing
- *  - rules are strings; object-shaped rules ({ kind, command }) are rejected
+ *  - allow/deny (and legacy rules) are strings; object-shaped rules ({ kind, command }) are rejected
  *    with an error so the loader fails loud rather than silently dropping
  *    rules the user expected to apply.
  */
@@ -714,7 +714,7 @@ export function validateCommandPermissions(
     value: unknown,
     source: string,
 ): CommandPermissionConfig {
-    if (value === undefined || value === null) return { mode: "ask", rules: [] };
+    if (value === undefined || value === null) return { mode: "ask", allow: [], deny: [] };
     if (typeof value !== "object" || Array.isArray(value)) {
         throw new Error(`invalid commandPermissions from ${source}: expected object`);
     }
@@ -725,20 +725,56 @@ export function validateCommandPermissions(
         COMMAND_PERMISSION_MODES.has(rawMode as CommandPermissionMode)
             ? (rawMode as CommandPermissionMode)
             : "ask";
-    const rules: CommandPermissionRule[] = [];
-    if (Array.isArray(obj.rules)) {
-        for (const [i, raw] of obj.rules.entries()) {
+    function readRules(field: string): CommandPermissionRule[] {
+        const out: CommandPermissionRule[] = [];
+        const rawRules = obj[field];
+        if (rawRules === undefined) return out;
+        if (!Array.isArray(rawRules)) {
+            throw new Error(`invalid commandPermissions from ${source}: ${field} must be an array`);
+        }
+        for (const [i, raw] of rawRules.entries()) {
             if (typeof raw !== "string") {
                 throw new Error(
-                    `invalid commandPermissions from ${source}: rules[${i}] must be a string pattern ` +
+                    `invalid commandPermissions from ${source}: ${field}[${i}] must be a string pattern ` +
                         "(legacy { kind, command } shape is no longer supported)",
                 );
             }
-            const result = validatePermissionRule(raw);
-            if (result.valid) rules.push(result.canonical);
+            const result = validatePermissionRule(raw, { allowShellWrapper: field === "deny" });
+            if (result.valid) out.push(result.canonical);
+        }
+        return out;
+    }
+    const allow = readRules(obj.allow === undefined ? "rules" : "allow");
+    const deny = readRules("deny");
+    let allowedDirectories: string[] | undefined;
+    if (obj.allowedDirectories !== undefined) {
+        if (!Array.isArray(obj.allowedDirectories)) {
+            throw new Error(
+                `invalid commandPermissions from ${source}: allowedDirectories must be an array`,
+            );
+        }
+        allowedDirectories = [];
+        for (const [i, directory] of obj.allowedDirectories.entries()) {
+            if (
+                typeof directory !== "string" ||
+                !isAbsolute(directory.trim()) ||
+                directory.includes("\0")
+            ) {
+                throw new Error(
+                    `invalid commandPermissions from ${source}: allowedDirectories[${i}] must be an absolute path`,
+                );
+            }
+            allowedDirectories.push(directory.trim());
         }
     }
-    return { mode, rules: Array.from(new Set(rules)) };
+    return {
+        mode,
+        allow: Array.from(new Set(allow)),
+        deny: Array.from(new Set(deny)),
+        ...(allowedDirectories
+            ? { allowedDirectories: Array.from(new Set(allowedDirectories)) }
+            : {}),
+    };
 }
 
 /**

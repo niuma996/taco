@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { copyShellParserAssets } from "./scripts/copyShellParserAssets.mjs";
 
 await build({
     entryPoints: ["src/index.ts"],
@@ -23,3 +24,5 @@ await build({
     // (see channelFactory, claudeCodeSdk).
     external: ["@wechatbot/wechatbot", "@anthropic-ai/claude-agent-sdk"],
 });
+
+copyShellParserAssets("lib");

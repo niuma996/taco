@@ -21,17 +21,17 @@ export function registerCommandPermissionHandlers(): void {
         true,
         async ({ workspace, params }: MethodCtx<CommandPermissionResolveParams>) => {
             const request = workspace.permissionBroker.getRequest(params.requestId);
-            if (params.approved && params.scope === "global" && request) {
+            if (params.approved && params.scope === "global" && request && request.evaluation.matchedList !== "deny") {
                 const current = validateCommandPermissions(
                     readGlobalConfig().commandPermissions,
                     "taco.json",
                 );
-                if (!current.rules.some((rule) => rule === request.command)) {
+                if (!(current.allow ?? []).some((rule) => rule === request.command)) {
                     try {
                         await saveGlobalConfig({
                             commandPermissions: {
                                 ...current,
-                                rules: [...current.rules, request.command],
+                                allow: [...(current.allow ?? []), request.command],
                             },
                         });
                     } catch (e) {

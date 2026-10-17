@@ -111,7 +111,8 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
   },
   "commandPermissions": {
     "mode": "ask",
-    "rules": ["git status", "ls *", "npm test *"]
+    "allow": ["git status", "ls *", "npm test *"],
+    "deny": ["git push *", "rm -rf *"]
   },
   "customProviders": [
     {

@@ -179,6 +179,8 @@ export function createShellTool(opts?: {
                     sessionId: opts.sessionId,
                     toolCallId,
                     command: params.command,
+                    cwd: env.cwd,
+                    language: process.platform === "win32" ? "powershell" : "bash",
                     signal,
                 });
                 if (!decision.approved) {

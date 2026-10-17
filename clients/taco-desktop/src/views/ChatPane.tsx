@@ -15,6 +15,7 @@ import type {
 import { ArrowUp, ImageIcon, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { EmptyChatState } from "../components/EmptyChatState";
 import { Message } from "../components/Message";
@@ -29,10 +30,12 @@ import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import type { QueuedUiItem } from "../lib/chat/chatUtils";
 import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
+import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import { MAX_ATTACHMENTS } from "../lib/imageAttachment";
 
 export interface ChatPaneProps {
+    client: TacoClient;
     ws: WorkspaceState | undefined;
     input: string;
     attachments: ImageInput[];
@@ -362,6 +365,7 @@ export function ChatPane(props: ChatPaneProps) {
                                     onOpen={onRefreshModels}
                                 />
                             )}
+                            <CommandPermissionModeSelector client={props.client} />
                             <div className="input-right">
                                 {!isEmptyChat && (
                                     <ContextIndicator

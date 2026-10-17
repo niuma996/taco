@@ -116,6 +116,8 @@
     --rail-width: 56px;
     --rail-item-size: 36px;
 
+    --space-2: 0.5rem;
+
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */
     --radius-xs: 3px;

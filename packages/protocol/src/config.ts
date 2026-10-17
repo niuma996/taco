@@ -114,13 +114,23 @@ export const COMMAND_PERMISSION_MODES: ReadonlySet<CommandPermissionMode> = new 
 export type CommandPermissionRule = string;
 export interface CommandPermissionConfig {
     mode: CommandPermissionMode;
-    rules: CommandPermissionRule[];
+    /** Commands that are always allowed unless a deny rule also matches. */
+    allow?: CommandPermissionRule[];
+    /** Commands that always require interactive approval. */
+    deny?: CommandPermissionRule[];
+    /** Legacy alias accepted on disk and normalized into allow. */
+    rules?: CommandPermissionRule[];
+    /** Additional absolute directory roots authorized for static shell directory changes. */
+    allowedDirectories?: string[];
 }
 export interface CommandEvaluation {
     behavior: "allow" | "ask" | "deny";
     risk: CommandRisk;
     reason: string;
     source?: "mode" | "rule" | "channel";
+    matchedList?: "allow" | "deny";
+    matchedRule?: CommandPermissionRule;
+    triggeringCommand?: string;
 }
 export interface CommandPermissionRequest {
     requestId: string;

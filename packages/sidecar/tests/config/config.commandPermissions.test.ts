@@ -9,8 +9,16 @@ import { validateCommandPermissions } from "../../src/config/config.ts";
 
 describe("validateCommandPermissions", () => {
     it("returns the default ask config for nullish input", () => {
-        assert.deepEqual(validateCommandPermissions(undefined, "t"), { mode: "ask", rules: [] });
-        assert.deepEqual(validateCommandPermissions(null, "t"), { mode: "ask", rules: [] });
+        assert.deepEqual(validateCommandPermissions(undefined, "t"), {
+            mode: "ask",
+            allow: [],
+            deny: [],
+        });
+        assert.deepEqual(validateCommandPermissions(null, "t"), {
+            mode: "ask",
+            allow: [],
+            deny: [],
+        });
     });
 
     it("rejects non-object input", () => {
@@ -27,7 +35,7 @@ describe("validateCommandPermissions", () => {
             { mode: "ask", rules: ["mmx *", "pnpm test", "git *"] },
             "t",
         );
-        assert.deepEqual(v.rules, ["mmx *", "pnpm test", "git *"]);
+        assert.deepEqual(v.allow, ["mmx *", "pnpm test", "git *"]);
     });
 
     it("trims and deduplicates string rules", () => {
@@ -35,7 +43,7 @@ describe("validateCommandPermissions", () => {
             { mode: "ask", rules: ["  pnpm test  ", "pnpm test"] },
             "t",
         );
-        assert.deepEqual(v.rules, ["pnpm test"]);
+        assert.deepEqual(v.allow, ["pnpm test"]);
     });
 
     // Every legacy shape below lands on the same `rules[i] must be a string
@@ -82,7 +90,7 @@ describe("validateCommandPermissions", () => {
             },
             "t",
         );
-        assert.equal(v.rules.length, 0);
+        assert.equal(v.allow?.length, 0);
     });
 
     it("rejects malformed non-string entries that aren't legacy shapes", () => {
@@ -97,5 +105,56 @@ describe("validateCommandPermissions", () => {
                 ),
             /rules\[\d+\] must be a string pattern/,
         );
+    });
+});
+
+describe("command permission canonical configuration", () => {
+    it("uses an explicit allow list instead of resurrecting legacy rules", () => {
+        assert.deepEqual(
+            validateCommandPermissions(
+                { mode: "ask", allow: [], rules: ["git push *"], deny: ["bash *"] },
+                "t",
+            ),
+            {
+                mode: "ask",
+                allow: [],
+                deny: ["bash *"],
+            },
+        );
+    });
+
+    it("keeps canonical blacklist wrappers and authorized directories", () => {
+        assert.deepEqual(
+            validateCommandPermissions(
+                {
+                    mode: "auto",
+                    allow: ["bash *", "git diff"],
+                    deny: [" bash * ", "bash *"],
+                    allowedDirectories: [" /workspace/extra ", "/workspace/extra"],
+                },
+                "t",
+            ),
+            {
+                mode: "auto",
+                allow: ["git diff"],
+                deny: ["bash *"],
+                allowedDirectories: ["/workspace/extra"],
+            },
+        );
+    });
+
+    it("rejects invalid authorized directory lists", () => {
+        for (const allowedDirectories of [
+            "/workspace",
+            ["relative/path"],
+            [""],
+            [42],
+            ["/workspace\0bad"],
+        ]) {
+            assert.throws(
+                () => validateCommandPermissions({ mode: "ask", allowedDirectories }, "t"),
+                /allowedDirectories/,
+            );
+        }
     });
 });

@@ -262,3 +262,34 @@ describe("ImPolicyDialog — local rule removal", () => {
         void rerender;
     });
 });
+
+describe("ImPolicyDialog — blacklist wrapper rules", () => {
+    it("accepts a shell wrapper in the blacklist", async () => {
+        const client = {
+            imPolicyGet: vi.fn(async () => ({
+                channelId: "wechat",
+                channelDefault: { commands: { deny: [] } },
+                resolved: { tools: { fsTools: "deny", shell: "deny" }, commands: { mode: "ask" } },
+                chatOverride: null,
+                hasOverride: false,
+                overrides: [],
+            })),
+            imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
+            imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
+            imPolicyClearChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
+        } as unknown as TacoClient;
+        render(
+            <ImPolicyDialog
+                open
+                scope={{ channelId: "wechat" }}
+                client={client}
+                onClose={vi.fn()}
+            />,
+        );
+        const input = await screen.findByPlaceholderText("imPolicy.rulePlaceholder");
+        const user = userEvent.setup();
+        await user.type(input, "bash *");
+        await user.click(screen.getByText("imPolicy.addRule"));
+        expect(screen.getByText("bash *")).toBeTruthy();
+    });
+});

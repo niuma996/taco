@@ -20,7 +20,7 @@
 import { isAbsolute, resolve } from "node:path";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import { getPlansDir } from "../plan/planPersistence.ts";
-import { evaluateCommand } from "./commandPolicy.ts";
+import { evaluateReadOnlyCommand } from "./commandPolicy.ts";
 import {
     expandHomeAndFileUrl,
     normalizeBuiltinToolPath,
@@ -118,7 +118,7 @@ export function createMutationGateHook(
             // command refused regardless of how the user has tuned their
             // shell rules. The classifier still recognises built-in read-only
             // commands (`git log`, `ls`, ...), so inspection stays available.
-            const readOnly = evaluateCommand(command, { mode: "auto", rules: [] });
+            const readOnly = evaluateReadOnlyCommand(command, { cwd: opts.root, allowedRoots: [opts.root] });
             if (readOnly.behavior === "allow") return undefined;
             return {
                 block: true,

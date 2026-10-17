@@ -27,6 +27,7 @@ import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { assertTripleMatchesHost, currentTriple, parseTargetCli } from "./triple.mjs";
+import { copyShellParserAssets } from "./copyShellParserAssets.mjs";
 
 const esbuildModule = await import("esbuild");
 
@@ -95,6 +96,8 @@ function main() {
         minify: true,
         logLevel: "warning",
     });
+
+    copyShellParserAssets(libDir);
 
     // Copy assets: agents / skills builtin — clear dest first for idempotent builds.
     // (Removing entries from src won't leave stale .md in dist; see smoke.test.ts builtin assertions).

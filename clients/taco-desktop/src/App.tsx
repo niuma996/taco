@@ -668,6 +668,7 @@ export default function App() {
                                         setAskUserAnswers={wsApi.setAskUserAnswers}
                                     >
                                         <ChatPane
+                                            client={client}
                                             ws={ws}
                                             sidebarCollapsed={sidebarCollapsed}
                                             onToggleSidebar={() =>

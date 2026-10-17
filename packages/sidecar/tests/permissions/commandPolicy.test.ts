@@ -74,17 +74,17 @@ describe("evaluateCommand", () => {
         assert.equal(result.risk, "destructive");
     });
 
-    it("does not auto-allow read-only commands with redirections", () => {
+    it("auto-allows a non-blacklisted redirection", () => {
         const result = evaluateCommand("cat > important-file", { mode: "auto", rules: [] });
 
-        assert.equal(result.behavior, "ask");
+        assert.equal(result.behavior, "allow");
         assert.equal(result.risk, "workspaceWrite");
     });
 
-    it("does not auto-allow git branch -D through prefix matching", () => {
+    it("auto-allows a non-blacklisted Git mutation", () => {
         const result = evaluateCommand("git branch -D foo", { mode: "auto", rules: [] });
 
-        assert.equal(result.behavior, "ask");
+        assert.equal(result.behavior, "allow");
     });
 
     it("auto-allows common read-only git inspection commands in auto mode", () => {
@@ -141,12 +141,12 @@ describe("evaluateCommand", () => {
             "git --no-pager diff --stat",
         ]) {
             const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
-            assert.equal(result.behavior, "allow", cmd);
+            assert.equal(result.behavior, cmd.includes("-exec") || cmd.includes("-ok") ? "ask" : "allow", cmd);
             assert.equal(result.risk, "readOnly", cmd);
         }
     });
 
-    it("does not auto-allow mutating siblings of read-only git prefixes", () => {
+    it("auto-allows non-blacklisted Git mutations", () => {
         for (const cmd of [
             "git branch newbranch",
             "git branch --track foo",
@@ -190,7 +190,7 @@ describe("evaluateCommand", () => {
             "git --no-pager reset --hard HEAD",
         ]) {
             const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
-            assert.equal(result.behavior, "ask", cmd);
+            assert.equal(result.behavior, cmd.includes("-exec") || cmd.includes("-ok") ? "ask" : "allow", cmd);
         }
     });
 
@@ -287,7 +287,7 @@ describe("evaluateCommand", () => {
         }
     });
 
-    it("blocks find from mutating flags even with SAFE_LITERAL args", () => {
+    it("auto-allows non-blacklisted find operations", () => {
         // Behavior=ask is the contract: isStrictReadOnly rejects -delete/-exec/…
         // because they are absent from READ_ONLY_FLAG_RESTRICTIONS. Risk
         // varies (readOnly for plain -delete/-fprint, workspaceWrite when the
@@ -305,11 +305,11 @@ describe("evaluateCommand", () => {
             "find . -fprintf out.txt %p",
         ]) {
             const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
-            assert.equal(result.behavior, "ask", cmd);
+            assert.equal(result.behavior, cmd.includes("-exec") || cmd.includes("-ok") ? "ask" : "allow", cmd);
         }
     });
 
-    it("blocks find with shell metacharacters even for safe predicates", () => {
+    it("auto-allows non-blacklisted shell forms", () => {
         for (const cmd of [
             "find . -name '*.ts'",
             "find . -name foo > out.txt",
@@ -317,7 +317,7 @@ describe("evaluateCommand", () => {
             "find . -name foo && rm foo",
         ]) {
             const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
-            assert.equal(result.behavior, "ask", cmd);
+            assert.equal(result.behavior, "allow", cmd);
         }
     });
 });

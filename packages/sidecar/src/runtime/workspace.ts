@@ -509,7 +509,7 @@ export class WorkspaceRuntime extends EventEmitter {
                 // runtime's current extension set.
                 const extRules = this.extensions?.commandPermissionRules() ?? [];
                 if (extRules.length === 0) return base;
-                return { ...base, rules: Array.from(new Set([...base.rules, ...extRules])) };
+                return { ...base, allow: Array.from(new Set([...(base.allow ?? base.rules ?? []), ...extRules])) };
             },
             {
                 resolveDisplayContext: (sid) =>
@@ -519,6 +519,7 @@ export class WorkspaceRuntime extends EventEmitter {
                 // `mode`, `allow` — reaches command evaluation on the next
                 // call, not just the next turn's tool list.
                 imCommandPolicy: () => this.resolveImPolicy()?.commands,
+                commandContext: { cwd: this.executionCwd, allowedRoots: [this.executionCwd] },
             },
         );
         const toolContext = this.buildToolContextThunk(options);

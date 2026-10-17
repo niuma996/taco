@@ -225,7 +225,9 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
             const set = kind === "allow" ? setAllow : setDeny;
             const setError = kind === "allow" ? setAllowRuleError : setDenyRuleError;
             const setRaw = kind === "allow" ? setNewAllowRule : setNewDenyRule;
-            const result = validatePermissionRuleClient(raw);
+            const result = validatePermissionRuleClient(raw, {
+                allowShellWrapper: kind === "deny",
+            });
             if (!result.valid) {
                 setError(result.reason);
                 return;

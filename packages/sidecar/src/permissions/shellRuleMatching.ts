@@ -126,14 +126,14 @@ export function matchWildcardPattern(pattern: string, command: string): boolean 
 /** Validate a single permission rule string. Returns the canonical form on success. */
 export function validatePermissionRule(
     rule: string,
+    options: { allowShellWrapper?: boolean } = {},
 ): { valid: true; canonical: CommandPermissionRule } | { valid: false; reason: string } {
     const trimmed = rule.trim();
     if (trimmed.length === 0) {
         return { valid: false, reason: "rule must not be empty" };
     }
-    // Reject shell wrappers as the base command
     const first = trimmed.split(/\s+/)[0]?.toLowerCase() ?? "";
-    if (isShellWrapperCommand(first)) {
+    if (!options.allowShellWrapper && isShellWrapperCommand(first)) {
         return { valid: false, reason: `shell wrapper "${first}" is not allowed in rules` };
     }
     return { valid: true, canonical: trimmed };

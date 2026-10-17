@@ -188,3 +188,15 @@ describe("imWorkspacePolicy", () => {
         assert.deepEqual(describeImChatOverrides(undefined, "wechat", []), []);
     });
 });
+
+it("IM command blacklists permit wrappers without permitting wrapper allow rules", () => {
+    const policy = validateImWorkspacePolicy(
+        { commands: { mode: "auto", deny: ["bash *", "powershell *"] } },
+        "t",
+    );
+    assert.deepEqual(policy.commands.deny, ["bash *", "powershell *"]);
+    assert.throws(
+        () => validateImWorkspacePolicy({ commands: { allow: ["bash *"] } }, "t"),
+        /wrapper/,
+    );
+});

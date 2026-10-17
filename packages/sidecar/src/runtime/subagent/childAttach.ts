@@ -88,7 +88,7 @@ export async function prepareChildAttach(
             : -1;
     if (shellIdx !== -1) {
         const readonlyBroker = new PermissionBroker(
-            () => ({ mode: "auto", rules: [] }) satisfies CommandPermissionConfig,
+            () => ({ mode: "auto", allow: [], deny: [] }) satisfies CommandPermissionConfig,
             { readOnly: true },
         );
         // Replace in place so the toolset keeps its original ordering.

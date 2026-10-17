@@ -9,7 +9,7 @@ import type {
 } from "@taco-ai/protocol";
 import { asSessionId, asToolCallId } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
-import { evaluateCommand, evaluateCommandForImWorkspace } from "./commandPolicy.ts";
+import { evaluateCommand, evaluateCommandForImWorkspace, evaluateReadOnlyCommand } from "./commandPolicy.ts";
 
 interface PendingRequest {
     request: CommandPermissionRequest;
@@ -35,6 +35,7 @@ export interface PermissionBrokerOptions {
      *  Used by read-only subagents (e.g. explorer) so that a user's
      *  root-session allowlist cannot leak into the child's shell execution. */
     readOnly?: boolean;
+    commandContext?: { cwd?: string; allowedRoots?: readonly string[] };
 }
 
 export class PermissionBroker extends EventEmitter {
@@ -44,6 +45,7 @@ export class PermissionBroker extends EventEmitter {
     private readonly resolveDisplayContext?: PermissionBrokerOptions["resolveDisplayContext"];
     private readonly imCommandPolicy?: PermissionBrokerOptions["imCommandPolicy"];
     private readonly readOnly: boolean;
+    private readonly commandContext: PermissionBrokerOptions["commandContext"];
 
     constructor(
         private readonly globalConfig: () => CommandPermissionConfig,
@@ -54,12 +56,15 @@ export class PermissionBroker extends EventEmitter {
         this.resolveDisplayContext = options?.resolveDisplayContext;
         this.imCommandPolicy = options?.imCommandPolicy;
         this.readOnly = options?.readOnly ?? false;
+        this.commandContext = options?.commandContext;
     }
 
     async evaluateAndRequest(args: {
         sessionId: string;
         toolCallId: string;
         command: string;
+        cwd?: string;
+        language?: "bash" | "powershell";
         signal?: AbortSignal;
     }): Promise<CommandPermissionDecision> {
         const config = this.globalConfig();
@@ -89,12 +94,15 @@ export class PermissionBroker extends EventEmitter {
                 : [];
         // readOnly: drop every rule source so a user's allowlist cannot leak
         // into read-only subagents (explorer).
-        const rules = this.readOnly ? [] : [...config.rules, ...ownRules, ...inheritedRules];
-        const baseConfig = { ...config, rules };
+        const allow = this.readOnly ? [] : [...(config.allow ?? config.rules ?? []), ...ownRules, ...inheritedRules];
+        const baseConfig = { ...config, allow };
         const imPolicy = this.imCommandPolicy?.();
-        const evaluation = imPolicy
-            ? evaluateCommandForImWorkspace(args.command, baseConfig, imPolicy)
-            : evaluateCommand(args.command, baseConfig);
+        const context = { ...this.commandContext, ...(args.cwd ? { cwd: args.cwd } : {}), ...(args.language ? { language: args.language } : {}) };
+        const evaluation = this.readOnly
+            ? evaluateReadOnlyCommand(args.command, context)
+            : imPolicy
+              ? evaluateCommandForImWorkspace(args.command, baseConfig, imPolicy, context)
+              : evaluateCommand(args.command, baseConfig, context);
         // readOnly: an "ask" (needs UI approval) degrades to deny immediately.
         // The isolated broker has no UI wiring — waiting would hang the
         // explorer for the full requestTimeoutMs before timing out.
@@ -152,13 +160,14 @@ export class PermissionBroker extends EventEmitter {
     ): CommandPermissionDecision | undefined {
         const pending = this.pending.get(requestId);
         if (!pending) return undefined;
+        if (approved && pending.request.evaluation.matchedList === "deny") scope = "once";
         const decision: CommandPermissionDecision = {
             approved,
             scope,
             evaluation: pending.request.evaluation,
             ...(approved ? {} : { denialReason: "user_denied" as const }),
         };
-        if (approved && scope === "session") {
+        if (approved && scope === "session" && pending.request.evaluation.matchedList !== "deny") {
             // Store the rule against the display session (root) so any future
             // subagent respawn inherits it. When the caller is the root itself,
             // displaySessionId === sessionId and this is a no-op.

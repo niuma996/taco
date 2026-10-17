@@ -288,7 +288,7 @@ The on-disk `taco.json` shape is `TacoGlobalConfigShape` in
 - `apiKeys` / `anthropicApiKey` / `openaiApiKey` — provider credentials, mirrored to `process.env` via `ProviderKeyStore`
 - `sessionsRoot` — `.jsonl` storage location (default `$TACO_HOME/sessions/`)
 - `compaction` — `{ enabled, threshold }` (defaults `true` / `0.7`)
-- `commandPermissions` — `{ mode: "ask" | "auto", rules: string[] }`
+- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`; deny matches require approval and take precedence over allow, while unmatched commands ask in `ask` mode and auto-pass in `auto` mode. Legacy `rules` is read as `allow`.
 - `customProviders` — third-party OpenAI/Anthropic-compatible endpoints (id must have `custom:` prefix)
 - `mcpServers` — per-server stdio / Streamable HTTP MCP config
 - `channels` — IM channel instances (manifest + channel-specific config)
