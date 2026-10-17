@@ -180,7 +180,6 @@ export function createShellTool(opts?: {
                     toolCallId,
                     command: params.command,
                     cwd: env.cwd,
-                    language: process.platform === "win32" ? "powershell" : "bash",
                     signal,
                 });
                 if (!decision.approved) {

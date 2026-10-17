@@ -21,7 +21,12 @@ export function registerCommandPermissionHandlers(): void {
         true,
         async ({ workspace, params }: MethodCtx<CommandPermissionResolveParams>) => {
             const request = workspace.permissionBroker.getRequest(params.requestId);
-            if (params.approved && params.scope === "global" && request && request.evaluation.matchedList !== "deny") {
+            if (
+                params.approved &&
+                params.scope === "global" &&
+                request &&
+                request.evaluation.matchedList !== "deny"
+            ) {
                 const current = validateCommandPermissions(
                     readGlobalConfig().commandPermissions,
                     "taco.json",

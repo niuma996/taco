@@ -509,7 +509,10 @@ export class WorkspaceRuntime extends EventEmitter {
                 // runtime's current extension set.
                 const extRules = this.extensions?.commandPermissionRules() ?? [];
                 if (extRules.length === 0) return base;
-                return { ...base, allow: Array.from(new Set([...(base.allow ?? base.rules ?? []), ...extRules])) };
+                return {
+                    ...base,
+                    allow: Array.from(new Set([...(base.allow ?? base.rules ?? []), ...extRules])),
+                };
             },
             {
                 resolveDisplayContext: (sid) =>

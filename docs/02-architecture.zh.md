@@ -301,7 +301,7 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
   `ProviderKeyStore` 镜像到 `process.env`
 - `sessionsRoot` — `.jsonl` 存储目录，默认 `$TACO_HOME/sessions/`
 - `compaction` — `{ enabled, threshold }`（默认 `true` / `0.7`）
-- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`；黑名单命中需要审批且优先于白名单，未命令在 `ask` 模式审批、在 `auto` 模式自动通过。旧 `rules` 会按白名单读取。
+- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`；黑名单命中需要审批且优先于白名单，未命中在 `ask` 模式审批、在 `auto` 模式自动通过。内置黑名单（递归强制删除、`git reset --hard`、强推、发布、上传、基础设施销毁）在两种模式下都要单次审批，白名单无法覆盖。白名单通配符按复合命令中的每条命令分别匹配，只有完全相同的规则才能放行整段文本。执行其他命令的命令（`eval`、`xargs`、`nohup` 等）除非被完全匹配放行，否则需要审批。`ask` 模式下严格只读的 Git 查看命令免审批。没有 `allow` 时旧 `rules` 按白名单读取。`allowedDirectories` 在工作目录之外追加 `cd` 可进入的绝对路径根。
 - `customProviders` — 第三方 OpenAI / Anthropic 兼容端点（id 必须
   带 `custom:` 前缀）
 - `mcpServers` — 每服务器 stdio / Streamable HTTP MCP 配置

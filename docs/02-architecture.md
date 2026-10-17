@@ -288,7 +288,7 @@ The on-disk `taco.json` shape is `TacoGlobalConfigShape` in
 - `apiKeys` / `anthropicApiKey` / `openaiApiKey` — provider credentials, mirrored to `process.env` via `ProviderKeyStore`
 - `sessionsRoot` — `.jsonl` storage location (default `$TACO_HOME/sessions/`)
 - `compaction` — `{ enabled, threshold }` (defaults `true` / `0.7`)
-- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`; deny matches require approval and take precedence over allow, while unmatched commands ask in `ask` mode and auto-pass in `auto` mode. Legacy `rules` is read as `allow`.
+- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`; deny matches require approval and take precedence over allow, while unmatched commands ask in `ask` mode and auto-pass in `auto` mode. A built-in denylist (recursive force-delete, `git reset --hard`, force push, publish, uploads, infrastructure teardown) always asks once, in both modes, and no allow rule overrides it. Allow wildcards match each command of a compound command separately; only an exact rule can allow the whole text. Commands that run another command (`eval`, `xargs`, `nohup`, …) ask unless exactly allowed. In `ask` mode, strict read-only Git inspection runs without a prompt. Legacy `rules` is read as `allow` when `allow` is absent. `allowedDirectories` adds absolute roots that `cd` may enter besides the working directory.
 - `customProviders` — third-party OpenAI/Anthropic-compatible endpoints (id must have `custom:` prefix)
 - `mcpServers` — per-server stdio / Streamable HTTP MCP config
 - `channels` — IM channel instances (manifest + channel-specific config)

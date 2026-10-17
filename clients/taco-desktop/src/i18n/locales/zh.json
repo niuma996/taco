@@ -76,7 +76,7 @@
     "resizeHandle": "拖动调整面板宽度"
   },
   "input": {
-    "commandPermissionModeHint": "对所有会话生效。手动审批：白名单之外需确认。自动审批：黑名单命令需确认。黑名单优先。",
+    "commandPermissionModeHint": "对所有会话生效。手动审批：白名单之外需确认。自动审批：黑名单和内置高风险命令需确认。黑名单优先。",
     "placeholderRunning": "代理运行中…可直接插话",
     "placeholderIdle": "输入提示后按回车…(可粘贴或附加图片)",
     "placeholderCompacting": "压缩上下文中,请稍候…",
@@ -191,7 +191,7 @@
     "tabContext": "项目约定",
     "tabPermissions": "权限控制",
     "permissionsTitle": "权限控制",
-    "permissionsDesc": "手动审批：白名单之外的命令需要确认。自动审批：黑名单之外的命令自动通过。提权命令仍会被阻止。",
+    "permissionsDesc": "手动审批：白名单之外的命令需要确认。自动审批：黑名单之外的命令自动通过。内置高风险命令（递归删除、强推、发布、上传）始终需要确认。提权命令仍会被阻止。",
     "permissionsMode": "默认模式",
     "permissionsAsk": "手动审批",
     "permissionsAuto": "自动审批",
@@ -217,7 +217,7 @@
     "permissionsRiskExternalSideEffect": "外部副作用",
     "permissionsDeny": "拒绝",
     "permissionsSubmitting": "提交中…",
-    "permissionsPersistentDisabled": "黑名单命令每次都需要审批。移除对应黑名单规则后才能持久放行。",
+    "permissionsPersistentDisabled": "黑名单命令和内置高风险命令每次都需要审批，无法持久放行。",
     "compactionTitle": "压缩策略",
     "compactionDesc": "当会话上下文达到模型窗口的设定比例时,较早的消息会被折成结构化摘要。已 pin 的约束与指令逐字保留。",
     "compactionEnabled": "启用自动压缩",

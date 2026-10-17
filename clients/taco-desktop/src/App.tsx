@@ -57,12 +57,12 @@ import {
     writePersistedSidebarCollapsed,
 } from "./lib/clientSettings";
 import { TacoClient } from "./lib/clients/tacoClient.ts";
+import { writeToClipboard } from "./lib/clipboard";
 import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig.js";
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
-import { writeToClipboard } from "./lib/clipboard";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";

@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 export function copyShellParserAssets(libDir) {
     const destination = join(libDir, "grammars");
     mkdirSync(destination, { recursive: true });
-    cpSync(fileURLToPath(new URL("../src/permissions/grammars/", import.meta.url)), destination, { recursive: true });
+    cpSync(fileURLToPath(new URL("../src/permissions/grammars/", import.meta.url)), destination, {
+        recursive: true,
+    });
     const require = createRequire(import.meta.url);
     const runtime = require.resolve("web-tree-sitter/tree-sitter.wasm");
     copyFileSync(runtime, join(destination, "tree-sitter.wasm"));

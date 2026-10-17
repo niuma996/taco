@@ -30,7 +30,7 @@ describe("saveGlobalConfig round-trip", () => {
         { name: "openaiApiKey", value: "sk-openai-test" },
         {
             name: "commandPermissions",
-            value: { mode: "auto", rules: ["pnpm test"] },
+            value: { mode: "auto", allow: ["pnpm test"], deny: [] },
         },
         { name: "extensions", value: ["@taco/ext-a", "@taco/ext-b"] },
         { name: "disabledExtensions", value: ["@taco/ext-b"] },

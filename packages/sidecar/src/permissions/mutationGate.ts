@@ -118,7 +118,10 @@ export function createMutationGateHook(
             // command refused regardless of how the user has tuned their
             // shell rules. The classifier still recognises built-in read-only
             // commands (`git log`, `ls`, ...), so inspection stays available.
-            const readOnly = evaluateReadOnlyCommand(command, { cwd: opts.root, allowedRoots: [opts.root] });
+            const readOnly = evaluateReadOnlyCommand(command, {
+                cwd: opts.root,
+                allowedRoots: [opts.root],
+            });
             if (readOnly.behavior === "allow") return undefined;
             return {
                 block: true,

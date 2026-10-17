@@ -26,8 +26,8 @@ import {
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { assertTripleMatchesHost, currentTriple, parseTargetCli } from "./triple.mjs";
 import { copyShellParserAssets } from "./copyShellParserAssets.mjs";
+import { assertTripleMatchesHost, currentTriple, parseTargetCli } from "./triple.mjs";
 
 const esbuildModule = await import("esbuild");
 

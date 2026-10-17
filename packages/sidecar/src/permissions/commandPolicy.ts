@@ -1,3 +1,5 @@
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
     CommandEvaluation,
     CommandPermissionConfig,
@@ -5,15 +7,13 @@ import type {
     CommandRisk,
 } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
+import type { ParsedShellNode, ShellLanguage } from "./shellParser.ts";
+import { parseShellCommand } from "./shellParser.ts";
 import {
     isShellWrapperCommand,
     matchWildcardPattern,
     parsePermissionRule,
 } from "./shellRuleMatching.ts";
-import { parseShellCommand } from "./shellParser.ts";
-import { isAbsolute, relative, resolve } from "node:path";
-import { realpathSync, statSync } from "node:fs";
-import type { ParsedShellNode, ShellLanguage } from "./shellParser.ts";
 
 const RISK_ORDER: Record<CommandRisk, number> = {
     readOnly: 0,
@@ -266,7 +266,7 @@ function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason
         if (pattern.test(command)) return { risk: "destructive", reason };
     }
     if (
-        /\b(git\s+push|npm\s+publish|pnpm\s+publish|yarn\s+publish|curl\s+.*-X\s*(POST|PUT|PATCH|DELETE)|wget\s+)/i.test(
+        /\b(git\s+push|npm\s+publish|pnpm\s+publish|yarn\s+publish|curl\s+.*-X\s*(POST|PUT|PATCH|DELETE)|curl\s+(.*\s)?(-d\S*|--data\S*|-F\S*|--form\S*|-T\S*|--upload-file|--json)(\s|=|$)|wget\s+)/i.test(
             command,
         )
     ) {
@@ -290,12 +290,33 @@ function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason
     return { risk: "workspaceWrite", reason: "command may change the workspace" };
 }
 
-function matchingRule(command: string, rules: readonly CommandPermissionRule[], allowWrapper = false): CommandPermissionRule | undefined {
+/**
+ * Persistent approvals store the verbatim command, so only an exact rule may
+ * allow a compound command as a whole. Compared without whitespace collapsing:
+ * `ls\nrm foo` must not equal the single command `ls rm foo`.
+ */
+function exactCommandRule(
+    command: string,
+    rules: readonly CommandPermissionRule[],
+): CommandPermissionRule | undefined {
+    const trimmed = command.trim();
+    return rules.find(
+        (rule) => parsePermissionRule(rule).type === "exact" && rule.trim() === trimmed,
+    );
+}
+
+function matchingRule(
+    command: string,
+    rules: readonly CommandPermissionRule[],
+    allowWrapper = false,
+): CommandPermissionRule | undefined {
     const normalized = normalize(command);
     if (!allowWrapper && isShellWrapperCommand(normalized.split(" ")[0] ?? "")) return undefined;
     return rules.find((rule) => {
         const parsed = parsePermissionRule(rule);
-        return parsed.type === "exact" ? normalized === normalize(parsed.command) : matchWildcardPattern(parsed.pattern, normalized);
+        return parsed.type === "exact"
+            ? normalized === normalize(parsed.command)
+            : matchWildcardPattern(parsed.pattern, normalized);
     });
 }
 
@@ -307,10 +328,10 @@ function matchingRule(command: string, rules: readonly CommandPermissionRule[], 
  * flags (see {@link extraGitArgsAreSafe}).
  */
 const READ_ONLY_BASES = new Set(["git checkout"]);
-// A small inspection set is safe to use without a prompt even in manual
-// mode. Other read-only utilities remain approval-gated there, matching the
-// explicit manual-mode contract while removing the noisy Git inspection flow.
-const MANUAL_SAFE = /^(git\s+(status|diff|log|show|branch|remote|blame|rev-parse|ls-files|ls-tree|describe|merge-base|rev-list|shortlog|cat-file|show-ref|for-each-ref|name-rev|check-ignore|version|help|reflog|stash\s+(list|show)|config\s+--(?:get|get-all|get-regexp|list)|config\s+-l|worktree\s+list|submodule\s+status|tag\s+(--list|-l)))(?:\s|$)/;
+// Strict read-only Git inspection runs without a prompt even in manual mode;
+// other read-only utilities remain approval-gated there.
+const MANUAL_SAFE =
+    /^(git\s+(status|diff|log|show|branch|remote|blame|rev-parse|ls-files|ls-tree|describe|merge-base|rev-list|shortlog|cat-file|show-ref|for-each-ref|name-rev|check-ignore|version|help|reflog|stash\s+(list|show)|config\s+--(?:get|get-all|get-regexp|list)|config\s+-l|worktree\s+list|submodule\s+status|tag\s+(--list|-l)))(?:\s|$)/;
 
 function isGitDualUseBase(base: string): boolean {
     return (
@@ -349,7 +370,12 @@ export function isStrictReadOnly(command: string): boolean {
     if (containsShellSyntax(normalized)) return false;
 
     const parts = normalized.split(/\s+/);
-    if ((parts[0] === "date" && parts.length > 1) || (parts[0] === "xxd" && parts.includes("-r")) || (parts[0] === "uniq" && parts.filter((part) => !part.startsWith("-")).length > 2)) return false;
+    if (
+        (parts[0] === "date" && parts.length > 1) ||
+        (parts[0] === "xxd" && parts.includes("-r")) ||
+        (parts[0] === "uniq" && parts.filter((part) => !part.startsWith("-")).length > 2)
+    )
+        return false;
     if (parts.length === 0) return false;
 
     const first = parts[0] ?? "";
@@ -385,7 +411,11 @@ export interface CommandEvaluationContext {
     language?: ShellLanguage;
 }
 
-function authorizedDirectory(target: string, cwd: string, roots: readonly string[]): string | undefined {
+function authorizedDirectory(
+    target: string,
+    cwd: string,
+    roots: readonly string[],
+): string | undefined {
     try {
         // Canonicalize the target before later relative changes: symlinks must
         // not turn a lexically contained path into an external working directory.
@@ -393,96 +423,396 @@ function authorizedDirectory(target: string, cwd: string, roots: readonly string
         if (!statSync(absolute).isDirectory()) return undefined;
         return roots.some((root) => {
             const rel = relative(realpathSync(root), absolute);
-            return rel === "" || (rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(rel));
-        }) ? absolute : undefined;
-    } catch { return undefined; }
+            return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+        })
+            ? absolute
+            : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
-function canonical(node: ParsedShellNode): string { return node.argv.join(" "); }
-function nodeRisk(node: ParsedShellNode): Pick<CommandEvaluation, "risk" | "reason"> {
-    const value = evaluatePart(canonical(node));
-    if (value.risk === "privilegeEscape" || value.risk === "destructive" || value.risk === "externalSideEffect") return value;
-    return node.redirects || node.dynamic ? { risk: "workspaceWrite", reason: "shell syntax can change state" } : value;
+/**
+ * Commands that execute their arguments as another command. The inner command
+ * is invisible to risk classification, so they always ask, like shell wrappers.
+ */
+const COMMAND_RUNNERS: ReadonlySet<string> = new Set([
+    "eval",
+    "exec",
+    "source",
+    ".",
+    "xargs",
+    "nohup",
+    "time",
+    "nice",
+    "timeout",
+    "watch",
+    "command",
+    "builtin",
+    "parallel",
+    "stdbuf",
+    "setsid",
+    "invoke-expression",
+    "iex",
+    "invoke-command",
+    "icm",
+    "start-process",
+    "saps",
+    "start",
+    "start-job",
+]);
+
+function isCommandRunner(argv: readonly string[]): boolean {
+    const first = argv[0]?.toLowerCase() ?? "";
+    // `command -v node` only looks a command up.
+    if (first === "command" && /^-[vV]$/.test(argv[1] ?? "")) return false;
+    return COMMAND_RUNNERS.has(first);
+}
+
+// Git globals whose value is a separate token; the subcommand follows them.
+const GIT_GLOBALS_WITH_VALUE: ReadonlySet<string> = new Set([
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--exec-path",
+    "--super-prefix",
+    "--config-env",
+]);
+
+/** `git -C . push` → `git push`, so global options cannot hide a risky subcommand. */
+function withoutGitGlobals(argv: readonly string[]): string[] {
+    if (argv[0]?.toLowerCase() !== "git") return [...argv];
+    let index = 1;
+    for (let arg = argv[index]; arg?.startsWith("-"); arg = argv[index]) {
+        index += GIT_GLOBALS_WITH_VALUE.has(arg) ? 2 : 1;
+    }
+    return ["git", ...argv.slice(index)];
+}
+
+const POWERSHELL_REMOVE = new Set(["remove-item", "ri", "rm", "rmdir", "rd", "del", "erase"]);
+const POWERSHELL_WEB = new Set(["invoke-webrequest", "iwr", "invoke-restmethod", "irm"]);
+
+/** Argument-order-insensitive checks the regex tables cannot express. */
+function argvRisk(
+    argv: readonly string[],
+    language: ShellLanguage,
+): Pick<CommandEvaluation, "risk" | "reason"> | undefined {
+    const first = argv[0]?.toLowerCase() ?? "";
+    const args = argv.slice(1);
+    if (
+        (isShellWrapperCommand(first) || isCommandRunner(argv)) &&
+        args.some((arg) => /^(?:sudo|doas)\b/i.test(arg))
+    ) {
+        return { risk: "privilegeEscape", reason: "requires elevated system privileges" };
+    }
+    if (language === "powershell") {
+        const params = args.map((arg) => arg.toLowerCase());
+        if (first === "format-volume" || first === "clear-disk")
+            return { risk: "privilegeEscape", reason: "may erase a disk" };
+        if (
+            POWERSHELL_REMOVE.has(first) &&
+            params.some((p) => p.length > 1 && "-recurse".startsWith(p))
+        ) {
+            return { risk: "destructive", reason: "may recursively remove files" };
+        }
+        if (
+            POWERSHELL_WEB.has(first) &&
+            params.some(
+                (p, i) =>
+                    p === "-body" ||
+                    p === "-infile" ||
+                    (p === "-method" && !/^(get|head|options)$/i.test(params[i + 1] ?? "")),
+            )
+        ) {
+            return {
+                risk: "externalSideEffect",
+                reason: "may change remote state or send network data",
+            };
+        }
+        return undefined;
+    }
+    if (first === "rm") {
+        const end = args.indexOf("--");
+        const flags = (end === -1 ? args : args.slice(0, end)).filter((arg) => arg.startsWith("-"));
+        const short = flags.filter((flag) => !flag.startsWith("--")).join("");
+        const recursive = /[rR]/.test(short) || flags.includes("--recursive");
+        const force = short.includes("f") || flags.includes("--force");
+        if (recursive && force)
+            return { risk: "destructive", reason: "may recursively force-remove files" };
+    }
+    return undefined;
+}
+
+const RISK_FLOOR: ReadonlySet<CommandRisk> = new Set(["destructive", "externalSideEffect"]);
+
+function canonical(node: ParsedShellNode): string {
+    return node.argv.join(" ");
+}
+function higherRisk<T extends Pick<CommandEvaluation, "risk">>(a: T, b: T | undefined): T {
+    return b && RISK_ORDER[b.risk] > RISK_ORDER[a.risk] ? b : a;
+}
+function nodeRisk(
+    node: ParsedShellNode,
+    language: ShellLanguage,
+): Pick<CommandEvaluation, "risk" | "reason"> {
+    const stripped = withoutGitGlobals(node.argv);
+    let value = evaluatePart(canonical(node));
+    if (stripped.length !== node.argv.length)
+        value = higherRisk(value, evaluatePart(stripped.join(" ")));
+    value = higherRisk(value, argvRisk(stripped, language));
+    if (
+        value.risk === "privilegeEscape" ||
+        value.risk === "destructive" ||
+        value.risk === "externalSideEffect"
+    )
+        return value;
+    return node.redirects || node.dynamic
+        ? { risk: "workspaceWrite", reason: "shell syntax can change state" }
+        : value;
 }
 const behaviorRank = { allow: 0, ask: 1, deny: 2 };
 function aggregate(values: CommandEvaluation[]): CommandEvaluation {
-    const highest = values.reduce((a, b) => behaviorRank[b.behavior] > behaviorRank[a.behavior] ||
-        (behaviorRank[b.behavior] === behaviorRank[a.behavior] && b.matchedList === "deny") ? b : a);
-    const risk = values.reduce((a, b) => RISK_ORDER[b.risk] > RISK_ORDER[a] ? b.risk : a, highest.risk);
+    const highest = values.reduce((a, b) =>
+        behaviorRank[b.behavior] > behaviorRank[a.behavior] ||
+        (behaviorRank[b.behavior] === behaviorRank[a.behavior] && b.matchedList === "deny")
+            ? b
+            : a,
+    );
+    const risk = values.reduce(
+        (a, b) => (RISK_ORDER[b.risk] > RISK_ORDER[a] ? b.risk : a),
+        highest.risk,
+    );
     return { ...highest, risk };
 }
 
 /** All callers share AST traversal; readonly callers never consult mode or rules. */
-function evaluateParsed(command: string, config: CommandPermissionConfig, context: CommandEvaluationContext = {}, readOnly = false): CommandEvaluation {
+function evaluateParsed(
+    command: string,
+    config: CommandPermissionConfig,
+    context: CommandEvaluationContext = {},
+    readOnly = false,
+): CommandEvaluation {
     const parsed = parseShellCommand(command, context.language);
     const values: CommandEvaluation[] = [];
-    const roots = [...(context.cwd ? [context.cwd] : []), ...(context.allowedRoots ?? []), ...(readOnly ? [] : config.allowedDirectories ?? [])];
+    const roots = [
+        ...(context.cwd ? [context.cwd] : []),
+        ...(context.allowedRoots ?? []),
+        ...(readOnly ? [] : (config.allowedDirectories ?? [])),
+    ];
     let cwds = [context.cwd ?? process.cwd()];
     let successfulCd: string[] | undefined;
+    const allowRules = config.allow ?? config.rules ?? [];
     const wholeDeny = matchingRule(command, config.deny ?? [], true);
-    const wholeAllow = matchingRule(command, config.allow ?? config.rules ?? []);
-    for (let index = 0; index < parsed.nodes.length; index++) {
-        const node = parsed.nodes[index]!;
+    // Wildcard allow rules match per command only: `*` would otherwise span
+    // `&&`, `;` and newlines and approve unrelated trailing commands.
+    const wholeAllow = exactCommandRule(command, allowRules);
+    for (const [index, node] of parsed.nodes.entries()) {
         const text = canonical(node);
-        const risk = nodeRisk(node);
-        const result = (behavior: CommandEvaluation["behavior"], reason: string, extra: Partial<CommandEvaluation> = {}): CommandEvaluation => ({ behavior, ...risk, reason, triggeringCommand: node.text, ...extra });
+        const gitStripped = withoutGitGlobals(node.argv).join(" ");
+        const risk = nodeRisk(node, parsed.language);
+        const result = (
+            behavior: CommandEvaluation["behavior"],
+            reason: string,
+            extra: Partial<CommandEvaluation> = {},
+        ): CommandEvaluation => ({
+            behavior,
+            ...risk,
+            reason,
+            triggeringCommand: node.text,
+            ...extra,
+        });
         // Evaluate every node before reducing, including commands nested in
         // unsupported syntax, so an earlier ask never masks a hard refusal.
-        if (risk.risk === "privilegeEscape") { values.push(result("deny", risk.reason)); continue; }
-        const denied = wholeDeny ?? matchingRule(text, config.deny ?? [], true);
-        if (!readOnly && denied) values.push(result("ask", "command matched deny list", { source: "rule", matchedList: "deny", matchedRule: denied }));
+        if (risk.risk === "privilegeEscape") {
+            values.push(result("deny", risk.reason));
+            continue;
+        }
+        const denied =
+            wholeDeny ??
+            matchingRule(text, config.deny ?? [], true) ??
+            matchingRule(gitStripped, config.deny ?? [], true);
+        if (!readOnly && denied)
+            values.push(
+                result("ask", "command matched deny list", {
+                    source: "rule",
+                    matchedList: "deny",
+                    matchedRule: denied,
+                }),
+            );
+        // A runner's inner command is opaque, so only an exact persisted
+        // approval of that very command lets it through.
+        if (
+            node.kind === "command" &&
+            !node.dynamic &&
+            isCommandRunner(node.argv) &&
+            !RISK_FLOOR.has(risk.risk)
+        ) {
+            const exact = exactCommandRule(text, allowRules) ?? wholeAllow;
+            values.push(
+                exact
+                    ? result("allow", "command matched allow list", {
+                          source: "rule",
+                          matchedList: "allow",
+                          matchedRule: exact,
+                      })
+                    : result(readOnly ? "deny" : "ask", "command runs another command"),
+            );
+            continue;
+        }
         if (node.kind === "unknown" || node.dynamic || isShellWrapperCommand(node.argv[0] ?? "")) {
-            values.push(result(readOnly ? "deny" : "ask", "unsupported or dynamic shell command")); continue;
+            values.push(result(readOnly ? "deny" : "ask", "unsupported or dynamic shell command"));
+            continue;
         }
         if (successfulCd && node.operator === "&&") cwds = successfulCd;
         successfulCd = undefined;
         if (node.kind === "cd") {
             const piped = node.operator === "|" || parsed.nodes[index + 1]?.operator === "|";
-            const destinations = node.cwd ? cwds.map((cwd) => authorizedDirectory(node.cwd!, cwd, roots)) : [];
-            const safe = !piped && destinations.length > 0 && destinations.every((path) => path !== undefined);
-            if (!safe) { values.push(result(readOnly ? "deny" : "ask", "directory change cannot be proven inside authorized directories")); continue; }
+            const target = node.cwd;
+            const destinations = target
+                ? cwds.map((cwd) => authorizedDirectory(target, cwd, roots))
+                : [];
+            const safe =
+                !piped &&
+                destinations.length > 0 &&
+                destinations.every((path) => path !== undefined);
+            if (!safe) {
+                values.push(
+                    result(
+                        readOnly ? "deny" : "ask",
+                        "directory change cannot be proven inside authorized directories",
+                    ),
+                );
+                continue;
+            }
             successfulCd = destinations as string[];
             // A successful `cd` changes the process cwd for the following
             // sequential command; retaining the old alternatives would let a
             // later relative `cd` resolve from the wrong branch.
             cwds = [...new Set(successfulCd)];
-            values.push(result("allow", "authorized directory change", { risk: "readOnly", source: "mode" }));
+            values.push(
+                result("allow", "authorized directory change", {
+                    risk: "readOnly",
+                    source: "mode",
+                }),
+            );
             continue;
         }
         const strict = !node.redirects && isStrictReadOnly(text);
-        if (readOnly) { values.push(result(strict ? "allow" : "deny", strict ? "recognized read-only command" : "read-only execution refuses mutating commands", { risk: strict ? "readOnly" : risk.risk })); continue; }
-        if (denied) continue;
-        const allowed = matchingRule(text, config.allow ?? config.rules ?? []) ?? wholeAllow;
-        if (allowed) { values.push(result("allow", "command matched allow list", { source: "rule", matchedList: "allow", matchedRule: allowed })); continue; }
-        if (strict && (config.mode === "auto" || MANUAL_SAFE.test(text))) { values.push(result("allow", "recognized read-only command", { source: "mode", risk: "readOnly" })); continue; }
-        if (config.mode !== "auto" && (node.redirects || (risk.risk === "readOnly" && !strict))) {
-            values.push(result("ask", "read-only command has unsafe arguments", { source: "mode" }));
+        if (readOnly) {
+            values.push(
+                result(
+                    strict ? "allow" : "deny",
+                    strict
+                        ? "recognized read-only command"
+                        : "read-only execution refuses mutating commands",
+                    { risk: strict ? "readOnly" : risk.risk },
+                ),
+            );
             continue;
         }
-        values.push(result(config.mode === "auto" ? "allow" : "ask", risk.reason, { source: "mode" }));
+        if (denied) continue;
+        // Built-in denylist: the pre-allowlist safety floor. No rule or mode
+        // overrides it, and its approvals stay once-only via matchedList.
+        if (RISK_FLOOR.has(risk.risk)) {
+            values.push(result("ask", risk.reason, { source: "mode", matchedList: "deny" }));
+            continue;
+        }
+        const allowed = matchingRule(text, allowRules) ?? wholeAllow;
+        if (allowed) {
+            values.push(
+                result("allow", "command matched allow list", {
+                    source: "rule",
+                    matchedList: "allow",
+                    matchedRule: allowed,
+                }),
+            );
+            continue;
+        }
+        if (strict && (config.mode === "auto" || MANUAL_SAFE.test(text))) {
+            values.push(
+                result("allow", "recognized read-only command", {
+                    source: "mode",
+                    risk: "readOnly",
+                }),
+            );
+            continue;
+        }
+        if (config.mode !== "auto" && (node.redirects || (risk.risk === "readOnly" && !strict))) {
+            values.push(
+                result("ask", "read-only command has unsafe arguments", { source: "mode" }),
+            );
+            continue;
+        }
+        values.push(
+            result(config.mode === "auto" ? "allow" : "ask", risk.reason, { source: "mode" }),
+        );
     }
-    if (!parsed.complete || !parsed.nodes.length) values.push({ behavior: readOnly ? "deny" : "ask", risk: "workspaceWrite", reason: parsed.reason ?? "command could not be parsed" });
+    if (!parsed.complete || !parsed.nodes.length)
+        values.push({
+            behavior: readOnly ? "deny" : "ask",
+            risk: "workspaceWrite",
+            reason: parsed.reason ?? "command could not be parsed",
+        });
     return aggregate(values);
 }
 
-export function evaluateCommand(command: string, config: CommandPermissionConfig, context?: CommandEvaluationContext): CommandEvaluation {
+export function evaluateCommand(
+    command: string,
+    config: CommandPermissionConfig,
+    context?: CommandEvaluationContext,
+): CommandEvaluation {
     // Preserve the hard privilege boundary even when the parser marks an
     // enclosing substitution or unsupported construct as incomplete.
     const privilege = PRIVILEGE_ESCAPE.find(([pattern]) => pattern.test(command));
-    if (privilege) return { behavior: "deny", risk: "privilegeEscape", reason: privilege[1], triggeringCommand: command };
+    if (privilege)
+        return {
+            behavior: "deny",
+            risk: "privilegeEscape",
+            reason: privilege[1],
+            triggeringCommand: command,
+        };
     return evaluateParsed(command, config, context);
 }
-export function evaluateReadOnlyCommand(command: string, context?: CommandEvaluationContext): CommandEvaluation {
+export function evaluateReadOnlyCommand(
+    command: string,
+    context?: CommandEvaluationContext,
+): CommandEvaluation {
     return evaluateParsed(command, { mode: "ask", allow: [], deny: [] }, context, true);
 }
 
 /** IM keeps its narrower channel capability boundary and shares AST semantics. */
-export function evaluateCommandForImWorkspace(command: string, config: CommandPermissionConfig, policy: ImCommandPolicy, context?: CommandEvaluationContext): CommandEvaluation {
+export function evaluateCommandForImWorkspace(
+    command: string,
+    config: CommandPermissionConfig,
+    policy: ImCommandPolicy,
+    context?: CommandEvaluationContext,
+): CommandEvaluation {
     const base = evaluateCommand(command, config, context);
     if (base.behavior === "deny") return base;
     const parsed = parseShellCommand(command, context?.language);
-    const denied = matchingRule(command, policy.deny ?? [], true) ?? parsed.nodes.map((node) => matchingRule(canonical(node), policy.deny ?? [], true)).find(Boolean);
-    if (denied) return { ...base, behavior: "deny", source: "channel", reason: "denied by channel rule", matchedList: "deny", matchedRule: denied };
+    const denied =
+        matchingRule(command, policy.deny ?? [], true) ??
+        parsed.nodes
+            .map((node) => matchingRule(canonical(node), policy.deny ?? [], true))
+            .find(Boolean);
+    if (denied)
+        return {
+            ...base,
+            behavior: "deny",
+            source: "channel",
+            reason: "denied by channel rule",
+            matchedList: "deny",
+            matchedRule: denied,
+        };
+    // Checked before the deny-list return: built-in denylist hits carry
+    // matchedList "deny", and an auto chat has no one to answer the prompt.
+    if (
+        policy.mode !== "ask" &&
+        (base.risk === "destructive" || base.risk === "externalSideEffect")
+    )
+        return { ...base, behavior: "deny", source: "channel" };
     if (base.matchedList === "deny" || !parsed.complete) return base;
     if (policy.mode === "ask") {
         // IM's ask channel has no implicit safe-command bypass: only an
@@ -492,16 +822,36 @@ export function evaluateCommandForImWorkspace(command: string, config: CommandPe
             ? { ...base, behavior: "ask", reason: "interactive channel approval required" }
             : base;
     }
-    if (base.risk === "destructive" || base.risk === "externalSideEffect") return { ...base, behavior: "deny", source: "channel" };
     if (policy.allow) {
-        if (!parsed.nodes.every((node) => matchingRule(canonical(node), policy.allow ?? []))) return { ...base, behavior: "deny", source: "channel", reason: "command not allowed by channel allow list" };
-        const channel = evaluateCommand(command, { ...config, allow: policy.allow, rules: undefined, mode: "ask" }, context);
+        if (!parsed.nodes.every((node) => matchingRule(canonical(node), policy.allow ?? [])))
+            return {
+                ...base,
+                behavior: "deny",
+                source: "channel",
+                reason: "command not allowed by channel allow list",
+            };
+        const channel = evaluateCommand(
+            command,
+            { ...config, allow: policy.allow, rules: undefined, mode: "ask" },
+            context,
+        );
         return { ...channel, source: "channel" };
     }
     // An unconstrained global auto mode must not silently widen an IM channel.
     const constrained = evaluateCommand(command, { ...config, mode: "ask" }, context);
-    const strict = parsed.complete && parsed.nodes.length > 0 && parsed.nodes.every((node) =>
-        node.kind === "command" && !node.redirects && isStrictReadOnly(canonical(node)),
-    );
-    return strict ? { ...constrained, behavior: "allow", source: "channel", reason: "recognized read-only command" } : constrained;
+    const strict =
+        parsed.complete &&
+        parsed.nodes.length > 0 &&
+        parsed.nodes.every(
+            (node) =>
+                node.kind === "command" && !node.redirects && isStrictReadOnly(canonical(node)),
+        );
+    return strict
+        ? {
+              ...constrained,
+              behavior: "allow",
+              source: "channel",
+              reason: "recognized read-only command",
+          }
+        : constrained;
 }

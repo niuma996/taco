@@ -83,7 +83,7 @@ Common patches:
 - `customProviders` — array of `{ id, name, api, baseUrl, models: [{ id }] }`. `api` is `"chatcomplete"` for OpenAI-compatible endpoints.
 - `mcpServers` — array of `{ id, transport, enabled, command?, args?, url?, env?, alwaysLoaded? }`. `transport` is `"stdio" | "http"`. `alwaysLoaded` is an array of tool names that should always be in the toolset (skip lazy discovery).
 - `channels` — array of `{ channelId, manifest: { name, version }, config: Record<string, unknown> }`. `channelId` must match `/^[a-z0-9][a-z0-9-]*$/`. Channel credentials live separately at `$TACO_HOME/channels/<channelId>.json` under the SDK's own key — don't write secrets into `taco.json`.
-- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`. Allow and deny entries are glob-shaped patterns. Deny matches require approval and take precedence; unmatched commands ask in `ask` mode and auto-pass in `auto` mode. Legacy `rules` entries are read as allow entries. Shell parsing failures and unauthorized directory changes require approval.
+- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`. Glob patterns; deny wins and asks. Unmatched commands ask in `ask`, pass in `auto`. Built-in high-risk commands (force delete/push, publish, uploads), parse failures and unauthorized `cd` always ask.
 - `instructions` — `{ enabled: boolean, files: { claudeMd?: boolean, agentsMd?: boolean, designMd?: boolean }, inheritToSubagents: boolean }`.
 - `extensions` / `disabledExtensions` — arrays of extension package names.
 

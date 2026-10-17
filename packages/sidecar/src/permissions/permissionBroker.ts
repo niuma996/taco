@@ -9,7 +9,13 @@ import type {
 } from "@taco-ai/protocol";
 import { asSessionId, asToolCallId } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
-import { evaluateCommand, evaluateCommandForImWorkspace, evaluateReadOnlyCommand } from "./commandPolicy.ts";
+import {
+    type CommandEvaluationContext,
+    evaluateCommand,
+    evaluateCommandForImWorkspace,
+    evaluateReadOnlyCommand,
+} from "./commandPolicy.ts";
+import type { ShellLanguage } from "./shellParser.ts";
 
 interface PendingRequest {
     request: CommandPermissionRequest;
@@ -35,7 +41,7 @@ export interface PermissionBrokerOptions {
      *  Used by read-only subagents (e.g. explorer) so that a user's
      *  root-session allowlist cannot leak into the child's shell execution. */
     readOnly?: boolean;
-    commandContext?: { cwd?: string; allowedRoots?: readonly string[] };
+    commandContext?: Pick<CommandEvaluationContext, "cwd" | "allowedRoots">;
 }
 
 export class PermissionBroker extends EventEmitter {
@@ -64,7 +70,7 @@ export class PermissionBroker extends EventEmitter {
         toolCallId: string;
         command: string;
         cwd?: string;
-        language?: "bash" | "powershell";
+        language?: ShellLanguage;
         signal?: AbortSignal;
     }): Promise<CommandPermissionDecision> {
         const config = this.globalConfig();
@@ -94,10 +100,16 @@ export class PermissionBroker extends EventEmitter {
                 : [];
         // readOnly: drop every rule source so a user's allowlist cannot leak
         // into read-only subagents (explorer).
-        const allow = this.readOnly ? [] : [...(config.allow ?? config.rules ?? []), ...ownRules, ...inheritedRules];
+        const allow = this.readOnly
+            ? []
+            : [...(config.allow ?? config.rules ?? []), ...ownRules, ...inheritedRules];
         const baseConfig = { ...config, allow };
         const imPolicy = this.imCommandPolicy?.();
-        const context = { ...this.commandContext, ...(args.cwd ? { cwd: args.cwd } : {}), ...(args.language ? { language: args.language } : {}) };
+        const context = {
+            ...this.commandContext,
+            ...(args.cwd ? { cwd: args.cwd } : {}),
+            ...(args.language ? { language: args.language } : {}),
+        };
         const evaluation = this.readOnly
             ? evaluateReadOnlyCommand(args.command, context)
             : imPolicy
