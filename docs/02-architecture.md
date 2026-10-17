@@ -267,7 +267,9 @@ The channel layer is **independent** of the regular workspace layer:
 IM workspaces use a virtual `im://` cwd, share the same
 `SidecarServer`, but get a separate `WorkspaceRuntime` with FS tools
 disabled. IM policy is layered on top of the global command permission
-broker and the per-channel defaults.
+broker and the per-channel defaults: `commands.mode` uses the same
+manual/automatic semantics and replaces the global mode, while
+`commands.allow` / `commands.deny` are appended to the global lists.
 
 ### 2.6 Configuration loading
 

@@ -92,7 +92,7 @@ export class WorkspaceExtensionSet {
     }
 
     /** Extension-contributed shell allow-rules, deduped. Merged after the
-     *  user's `commandPermissions.rules` by the workspace's permission thunk. */
+     *  user's `commandPermissions.allow` by the workspace's permission thunk. */
     commandPermissionRules(): string[] {
         return Array.from(new Set(this._commandPermissionRules));
     }

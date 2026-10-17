@@ -55,8 +55,10 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                     ),
                 },
             },
-        }).catch(() => {});
-        setNewRule("");
+        })
+            // Keep the input on failure so the rule is not lost; the hook shows the error.
+            .then(() => setNewRule(""))
+            .catch(() => {});
     }
 
     function removeRule(index: number) {

@@ -782,76 +782,26 @@ export function evaluateReadOnlyCommand(
     return evaluateParsed(command, { mode: "ask", allow: [], deny: [] }, context, true);
 }
 
-/** IM keeps its narrower channel capability boundary and shares AST semantics. */
+/**
+ * IM channels use the same manual/automatic semantics as the global policy.
+ * The channel mode replaces the global mode; channel allow/deny rules are
+ * appended to the global lists, so a channel can only add rules.
+ */
 export function evaluateCommandForImWorkspace(
     command: string,
     config: CommandPermissionConfig,
     policy: ImCommandPolicy,
     context?: CommandEvaluationContext,
 ): CommandEvaluation {
-    const base = evaluateCommand(command, config, context);
-    if (base.behavior === "deny") return base;
-    const parsed = parseShellCommand(command, context?.language);
-    const denied =
-        matchingRule(command, policy.deny ?? [], true) ??
-        parsed.nodes
-            .map((node) => matchingRule(canonical(node), policy.deny ?? [], true))
-            .find(Boolean);
-    if (denied)
-        return {
-            ...base,
-            behavior: "deny",
-            source: "channel",
-            reason: "denied by channel rule",
-            matchedList: "deny",
-            matchedRule: denied,
-        };
-    // Checked before the deny-list return: built-in denylist hits carry
-    // matchedList "deny", and an auto chat has no one to answer the prompt.
-    if (
-        policy.mode !== "ask" &&
-        (base.risk === "destructive" || base.risk === "externalSideEffect")
-    )
-        return { ...base, behavior: "deny", source: "channel" };
-    if (base.matchedList === "deny" || !parsed.complete) return base;
-    if (policy.mode === "ask") {
-        // IM's ask channel has no implicit safe-command bypass: only an
-        // explicit allow rule or a caller-provided session/global rule can
-        // skip its approval prompt.
-        return base.source === "mode" && base.risk === "readOnly"
-            ? { ...base, behavior: "ask", reason: "interactive channel approval required" }
-            : base;
-    }
-    if (policy.allow) {
-        if (!parsed.nodes.every((node) => matchingRule(canonical(node), policy.allow ?? [])))
-            return {
-                ...base,
-                behavior: "deny",
-                source: "channel",
-                reason: "command not allowed by channel allow list",
-            };
-        const channel = evaluateCommand(
-            command,
-            { ...config, allow: policy.allow, rules: undefined, mode: "ask" },
-            context,
-        );
-        return { ...channel, source: "channel" };
-    }
-    // An unconstrained global auto mode must not silently widen an IM channel.
-    const constrained = evaluateCommand(command, { ...config, mode: "ask" }, context);
-    const strict =
-        parsed.complete &&
-        parsed.nodes.length > 0 &&
-        parsed.nodes.every(
-            (node) =>
-                node.kind === "command" && !node.redirects && isStrictReadOnly(canonical(node)),
-        );
-    return strict
-        ? {
-              ...constrained,
-              behavior: "allow",
-              source: "channel",
-              reason: "recognized read-only command",
-          }
-        : constrained;
+    return evaluateCommand(
+        command,
+        {
+            ...config,
+            mode: policy.mode,
+            allow: [...(config.allow ?? config.rules ?? []), ...(policy.allow ?? [])],
+            deny: [...(config.deny ?? []), ...(policy.deny ?? [])],
+            rules: undefined,
+        },
+        context,
+    );
 }

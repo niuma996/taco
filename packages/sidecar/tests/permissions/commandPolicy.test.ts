@@ -705,7 +705,7 @@ describe("PermissionBroker", () => {
 });
 
 describe("evaluateCommandForImWorkspace", () => {
-    const GLOBAL: CommandPermissionConfig = { mode: "ask", rules: [] };
+    const GLOBAL: CommandPermissionConfig = { mode: "ask", allow: [], deny: [] };
 
     it("denies privilege escalation even when the command is allow-listed", () => {
         const ev = evaluateCommandForImWorkspace("sudo ls", GLOBAL, {
@@ -716,98 +716,77 @@ describe("evaluateCommandForImWorkspace", () => {
         assert.equal(ev.risk, "privilegeEscape");
     });
 
-    it("denies a channel deny-rule match", () => {
-        const ev = evaluateCommandForImWorkspace("git push", GLOBAL, {
-            mode: "auto",
-            allow: ["git *"],
-            deny: ["git push *"],
-        });
-        assert.equal(ev.behavior, "deny");
+    it("uses the channel mode with the same manual/automatic semantics", () => {
+        assert.equal(
+            evaluateCommandForImWorkspace("pnpm build", GLOBAL, { mode: "auto" }).behavior,
+            "allow",
+        );
+        assert.equal(
+            evaluateCommandForImWorkspace(
+                "pnpm build",
+                { ...GLOBAL, mode: "auto" },
+                { mode: "ask" },
+            ).behavior,
+            "ask",
+        );
+        for (const cmd of ["pnpm build", "touch x", "git commit -m x"]) {
+            assert.deepEqual(
+                evaluateCommandForImWorkspace(cmd, GLOBAL, { mode: "ask" }),
+                evaluateCommand(cmd, GLOBAL),
+                cmd,
+            );
+        }
+    });
+
+    it("appends channel allow rules to the global allowlist", () => {
+        assert.equal(
+            evaluateCommandForImWorkspace("pnpm build", GLOBAL, { mode: "ask", allow: ["pnpm *"] })
+                .behavior,
+            "allow",
+        );
+        assert.equal(
+            evaluateCommandForImWorkspace(
+                "pnpm build",
+                { ...GLOBAL, allow: ["pnpm *"] },
+                { mode: "ask" },
+            ).behavior,
+            "allow",
+        );
+    });
+
+    it("appends channel deny rules to the global denylist", () => {
+        const cases: Array<[string, CommandPermissionConfig, string[]]> = [
+            ["git push", GLOBAL, ["git push *"]],
+            ["git -C . commit -m x", GLOBAL, ["git commit *"]],
+            ["ls && cat /etc/passwd", GLOBAL, ["cat *"]],
+            ["ls | cat", GLOBAL, ["cat *"]],
+            ["pnpm build", { ...GLOBAL, deny: ["pnpm *"] }, ["git *"]],
+        ];
+        for (const [cmd, global, channelDeny] of cases) {
+            const ev = evaluateCommandForImWorkspace(cmd, global, {
+                mode: "auto",
+                allow: ["*"],
+                deny: channelDeny,
+            });
+            assert.equal(ev.behavior, "ask", cmd);
+            assert.equal(ev.matchedList, "deny", cmd);
+        }
     });
 
     it("does not let a deny rule for rm swallow rmdir", () => {
         const ev = evaluateCommandForImWorkspace("rmdir empty", GLOBAL, {
-            mode: "auto",
+            mode: "ask",
             allow: ["rmdir *"],
             deny: ["rm *"],
         });
         assert.equal(ev.behavior, "allow");
     });
 
-    it("denies destructive and external-side-effect commands under auto", () => {
+    it("keeps the built-in denylist in automatic channels", () => {
         for (const cmd of ["rm -rf build", "npm publish"]) {
-            const ev = evaluateCommandForImWorkspace(cmd, GLOBAL, {
-                mode: "auto",
-                allow: ["* *"],
-            });
-            assert.equal(ev.behavior, "deny", cmd);
+            const ev = evaluateCommandForImWorkspace(cmd, GLOBAL, { mode: "auto", allow: ["*"] });
+            assert.equal(ev.behavior, "ask", cmd);
+            assert.equal(ev.matchedList, "deny", cmd);
         }
-    });
-
-    it("denies anything outside the allow list", () => {
-        const ev = evaluateCommandForImWorkspace("cat f", GLOBAL, {
-            mode: "auto",
-            allow: ["ls"],
-        });
-        assert.equal(ev.behavior, "deny");
-    });
-
-    it("allows an allow-listed benign command under auto", () => {
-        const ev = evaluateCommandForImWorkspace("pnpm build", GLOBAL, {
-            mode: "auto",
-            allow: ["pnpm *"],
-        });
-        assert.equal(ev.behavior, "allow");
-    });
-
-    it("with auto and no allow list, only strict read-only commands pass", () => {
-        assert.equal(
-            evaluateCommandForImWorkspace("pwd", GLOBAL, { mode: "auto" }).behavior,
-            "allow",
-        );
-        assert.equal(
-            evaluateCommandForImWorkspace("pnpm build", GLOBAL, { mode: "auto" }).behavior,
-            "ask",
-        );
-    });
-
-    // Regression: matchesRule anchors on the start of the string it is given,
-    // so checking deny against the whole compound command let a denied segment
-    // through (`ls && cat x` did not match a `cat:*` deny rule). Every segment
-    // must be checked independently. These cases carry no privilegeEscape /
-    // destructive risk, so nothing else would catch them.
-    it("applies deny rules to every segment, not just the first", () => {
-        const policy = {
-            mode: "auto" as const,
-            allow: ["ls", "cat *"],
-            deny: ["cat *"],
-        };
-        for (const cmd of [
-            "cat /etc/passwd",
-            "ls && cat /etc/passwd",
-            "ls; cat /etc/passwd",
-            "ls | cat",
-        ]) {
-            assert.equal(
-                evaluateCommandForImWorkspace(cmd, GLOBAL, policy).behavior,
-                "deny",
-                `expected deny for: ${cmd}`,
-            );
-        }
-    });
-
-    it("ask mode reproduces the global evaluator", () => {
-        assert.deepEqual(
-            evaluateCommandForImWorkspace("pnpm build", GLOBAL, { mode: "ask" }),
-            evaluateCommand("pnpm build", GLOBAL),
-        );
-    });
-
-    it("always carries a risk and reports channel-sourced verdicts", () => {
-        const ev = evaluateCommandForImWorkspace("cat f", GLOBAL, {
-            mode: "auto",
-            allow: ["ls"],
-        });
-        assert.equal(ev.source, "channel");
     });
 });

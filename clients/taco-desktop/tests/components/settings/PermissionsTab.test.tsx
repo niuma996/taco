@@ -136,3 +136,25 @@ describe("PermissionsTab — blacklist editing", () => {
         );
     });
 });
+
+describe("PermissionsTab — failed save", () => {
+    it("keeps the typed rule when saving fails", async () => {
+        const client = {
+            settingsGet: async () => ({
+                global: { commandPermissions: { mode: "ask", allow: [], deny: [] } },
+            }),
+            settingsWrite: vi.fn(async () => {
+                throw new Error("disk full");
+            }),
+        } as unknown as TacoClient;
+        const { loadGlobalConfig } = await import("../../../src/lib/globalConfig");
+        await loadGlobalConfig(client);
+        const user = userEvent.setup();
+        render(<PermissionsTab client={client} />);
+        const input = screen.getByRole("textbox") as HTMLInputElement;
+        await user.type(input, "pnpm test");
+        await user.click(screen.getByRole("button", { name: "settings.permissionsAddRule" }));
+        await waitFor(() => expect(screen.getByText("disk full")).toBeTruthy());
+        expect(input.value).toBe("pnpm test");
+    });
+});

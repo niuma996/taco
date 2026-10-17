@@ -276,7 +276,8 @@ class AttachedSession {
 channel 层与常规 workspace 层是**相互独立**的：IM workspace 使用虚拟的
 `im://` cwd，共用同一个 `SidecarServer`，但拿到的是一个单独且关掉了 FS
 工具的 `WorkspaceRuntime`。IM 策略叠加在全局 command permission broker
-与 per-channel 默认值之上。
+与 per-channel 默认值之上：`commands.mode` 与全局同为手动 / 自动审批并替换全局模式，
+`commands.allow` / `commands.deny` 追加到全局白名单 / 黑名单之后。
 
 ### 2.6 配置加载
 
