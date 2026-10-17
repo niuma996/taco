@@ -1,4 +1,4 @@
-import type { CommandPermissionMode } from "@taco-ai/protocol";
+import { BUILTIN_READ_ONLY_COMMANDS, type CommandPermissionMode } from "@taco-ai/protocol";
 import { X } from "lucide-react";
 import { useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
@@ -91,6 +91,17 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                 />
             </div>
             <p className="settings-tab-desc">{t("settings.permissionsRules")}</p>
+            <details className="permission-builtin">
+                <summary>{t("settings.permissionsBuiltinAllowList")}</summary>
+                <p className="settings-tab-desc">{t("settings.permissionsBuiltinAllowListDesc")}</p>
+                <ul className="permission-builtin-list">
+                    {BUILTIN_READ_ONLY_COMMANDS.map((command) => (
+                        <li key={command}>
+                            <code>{command}</code>
+                        </li>
+                    ))}
+                </ul>
+            </details>
             <div className="settings-row">
                 <Select
                     value={list}

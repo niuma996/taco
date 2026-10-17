@@ -716,24 +716,15 @@ export class WorkspaceRuntime extends EventEmitter {
      * Resolve the workspace default model, with one policy shared by the
      * constructor and `setDefaultModel`.
      *
-     * A configured default that no longer resolves is expected, not exceptional:
-     * its provider can be deleted, or the model removed from a provider's list
-     * (an extra dropped, a static hidden, a custom provider's list edited).
-     * Falling back to the catalog keeps session creation and attach working
-     * instead of failing every prompt with a message that points at the wrong
-     * thing. The constructor used to return undefined here (app bricked) while
-     * the hot-reload path kept the previous value (looked fine, broke on the
-     * next restart) — the two disagreed, which is what made this hard to read.
+     * A configured default that no longer resolves is expected: its provider
+     * may be deleted, or the model removed or hidden. Falling back to the
+     * catalog keeps session creation and attach working. A cleared API key is
+     * different: the catalog remains resident, so the request surfaces
+     * "Provider is not configured" and fallback would hide the actual problem.
      *
-     * A cleared API key is deliberately NOT one of these: the catalog is fully
-     * resident and never filtered by key presence, so the model still resolves
-     * and the failure surfaces per-request as "Provider is not configured",
-     * which names the actual problem. Falling back would only hide that.
-     *
-     * The fallback is the same `all[0]` used when no default is configured, and
-     * deliberately not "first provider with a key": `ProviderKeyStore` only
-     * knows about `apiKeys`, so a provider keyed via a shell env var would look
-     * unconfigured and get skipped.
+     * The fallback is the same `all[0]` used without a default, not the first
+     * provider with a key: `ProviderKeyStore` only knows `apiKeys`, so a
+     * provider keyed through the environment would be skipped incorrectly.
      */
     private lookupDefaultModel(
         defaultModel: string | Model<Api> | undefined,

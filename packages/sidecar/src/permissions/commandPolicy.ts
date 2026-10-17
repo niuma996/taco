@@ -6,6 +6,7 @@ import type {
     CommandPermissionRule,
     CommandRisk,
 } from "@taco-ai/protocol";
+import { BUILTIN_READ_ONLY_COMMANDS } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
 import { executableName, nestedExecution } from "./commandExecution.ts";
 import type { ParsedShellNode, ShellLanguage } from "./shellParser.ts";
@@ -25,87 +26,11 @@ const RISK_ORDER: Record<CommandRisk, number> = {
 };
 
 /**
- * Exact commands (after normalization) that are considered read-only and safe.
- * Arguments must also be safe literals: no redirects, pipes, command
- * substitution, globs, semicolons, or backticks. Tokens that mutate the
- * filesystem or spawn processes live in {@link READ_ONLY_FORBIDDEN_FLAGS} and
- * are rejected by {@link isStrictReadOnly} regardless of base.
+ * Exact command prefixes considered read-only. Remaining arguments still have
+ * to be safe literals; mutating flags are rejected by
+ * {@link READ_ONLY_FORBIDDEN_FLAGS} regardless of the base.
  */
-const READ_ONLY = new Set([
-    "pwd",
-    "ls",
-    "which",
-    "find",
-    "cat",
-    "head",
-    "tail",
-    "wc",
-    "file",
-    "stat",
-    "du",
-    "df",
-    "echo",
-    "grep",
-    "diff",
-    "sort",
-    "uniq",
-    "cut",
-    "tr",
-    "basename",
-    "dirname",
-    "realpath",
-    "readlink",
-    "date",
-    "hostname",
-    "uname",
-    "whoami",
-    "id",
-    "md5sum",
-    "sha256sum",
-    "xxd",
-    "od",
-    "git status",
-    "git diff",
-    "git log",
-    "git show",
-    "git branch",
-    "git remote",
-    "git remote -v",
-    "git remote get-url",
-    "git blame",
-    "git rev-parse",
-    "git ls-files",
-    "git ls-tree",
-    "git describe",
-    "git merge-base",
-    "git rev-list",
-    "git shortlog",
-    "git cat-file",
-    "git show-ref",
-    "git for-each-ref",
-    "git name-rev",
-    "git check-ignore",
-    "git version",
-    "git --version",
-    "git help",
-    "git reflog",
-    // Dual-use parents (`git stash`, `git config`, `git tag`, `git worktree`)
-    // stay out of the set except the listed read-only forms, so mutating
-    // siblings (`stash apply`, `config user.email x`, `tag v1`) keep asking.
-    // `git branch` is in the set so a bare listing auto-allows; extra
-    // positional args still create a branch and are rejected below.
-    "git stash list",
-    "git stash show",
-    "git config --get",
-    "git config --get-all",
-    "git config --get-regexp",
-    "git config --list",
-    "git config -l",
-    "git worktree list",
-    "git submodule status",
-    "git tag --list",
-    "git tag -l",
-]);
+const READ_ONLY = new Set<string>(BUILTIN_READ_ONLY_COMMANDS);
 
 /**
  * Flags that mutate the filesystem or execute arbitrary commands. Listed

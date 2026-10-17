@@ -44,6 +44,7 @@ export type {
     CheckpointsRestoreParams,
     CheckpointsRestoreResult,
 } from "./checkpoints.js";
+export { BUILTIN_READ_ONLY_COMMANDS } from "./commandPermissions.js";
 // taco.json + settings + custom providers + commands + extensions.
 export type {
     ChannelInstanceConfigView,

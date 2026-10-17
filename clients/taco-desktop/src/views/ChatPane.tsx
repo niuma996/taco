@@ -14,12 +14,11 @@ import type {
 } from "@taco-ai/protocol";
 import { ArrowUp, ImageIcon, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { EmptyChatState } from "../components/EmptyChatState";
 import { Message } from "../components/Message";
-import { PendingPermissionsModal } from "../components/PendingPermissionsModal";
 import { QueueBar } from "../components/QueueBar";
 import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
@@ -167,15 +166,6 @@ export function ChatPane(props: ChatPaneProps) {
     // that was just created via "New chat" but never prompted.
     const isEmptyChat = (ws?.messages ?? []).length === 0;
 
-    // Workspace-level rather than per-session: a background subagent's approval
-    // routinely arrives while the user is elsewhere, so the entry point cannot
-    // hang off the session that happens to be on screen.
-    const pendingPermissionRequests = ws?.pendingCommandPermissions;
-    const pendingPermissionCount = pendingPermissionRequests
-        ? Object.keys(pendingPermissionRequests).length
-        : 0;
-    const [permissionsOpen, setPermissionsOpen] = useState(false);
-
     // Auto-follow lives on the <main> ChatPane renders itself, so the
     // observers go away with it on a tab switch (see useStickToBottom).
     const mainRef = useRef<HTMLDivElement | null>(null);
@@ -222,9 +212,6 @@ export function ChatPane(props: ChatPaneProps) {
                 onToggleSubagents={onToggleSubagents}
                 subagentsOpen={subagentsOpen}
                 subagentDot={subagentDot}
-                pendingPermissionCount={pendingPermissionCount}
-                pendingPermissionsOpen={permissionsOpen}
-                onTogglePendingPermissions={() => setPermissionsOpen((v) => !v)}
                 onNewSession={onNewSession}
                 newSessionDisabled={newSessionDisabled}
                 isIm={isIm}
@@ -242,7 +229,7 @@ export function ChatPane(props: ChatPaneProps) {
                                 isLastInTurn={isLastInTurn(messages, i)}
                                 isTurnInProgress={isTurnInProgress(messages, i, busy)}
                                 onCommandPermission={onCommandPermission}
-                                pendingPermissionRequests={pendingPermissionRequests}
+                                pendingPermissionRequests={ws?.pendingCommandPermissions}
                             />
                         ));
                     })()
@@ -437,15 +424,6 @@ export function ChatPane(props: ChatPaneProps) {
                     {llmDumpDock}
                 </footer>
             </main>
-            {pendingPermissionRequests && (
-                <PendingPermissionsModal
-                    open={permissionsOpen}
-                    onClose={() => setPermissionsOpen(false)}
-                    requests={pendingPermissionRequests}
-                    sessions={ws?.sessions ?? []}
-                    onResolve={onCommandPermission}
-                />
-            )}
         </div>
     );
 }

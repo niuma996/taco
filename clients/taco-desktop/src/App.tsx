@@ -16,6 +16,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { FilesDrawer } from "./components/FilesDrawer";
 import { LlmDumpDock } from "./components/LlmDumpPanel";
 import { OnboardingModal } from "./components/onboarding/OnboardingModal.js";
+import { PendingPermissionsModal } from "./components/PendingPermissionsModal";
 import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { SubagentPanel } from "./components/panels/SubagentPanel";
 import { TaskPanel } from "./components/panels/TaskPanel";
@@ -85,6 +86,7 @@ export default function App() {
         () => readPersistedSidebarCollapsed() ?? false,
     );
     const rightPanel = useRightPanel(sidebarCollapsed);
+    const [pendingPermissionsOpen, setPendingPermissionsOpen] = useState(false);
     // Selected child session for SubagentPanel; pushed in via the SubagentProvider's
     // openInPanel callback when an agent card is opened. SubagentPanel below reads it.
     const [selectedSubSessionId, setSelectedSubSessionId] = useState<string | null>(null);
@@ -134,6 +136,21 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
+    const pendingPermissionCount = ws ? Object.keys(ws.pendingCommandPermissions).length : 0;
+    useEffect(() => {
+        if (pendingPermissionCount === 0) setPendingPermissionsOpen(false);
+    }, [pendingPermissionCount]);
+    const resolveCommandPermission = useCallback(
+        async (requestId: string, approved: boolean, scope: CommandPermissionScope) => {
+            if (!activeCwd) return;
+            await client.commandPermissionResolve(asWorkspaceId(activeCwd), {
+                requestId,
+                approved,
+                scope,
+            });
+        },
+        [activeCwd, client],
+    );
     // runInFlight = the active session has a turn in flight (run_start without
     // its run_end). busy additionally covers agent-tool cards streaming from
     // background sessions: Stop stays visible for those, but the composer only
@@ -613,6 +630,8 @@ export default function App() {
                     <div className="drag-spacer" data-tauri-drag-region />
                     <TopbarQuickActions
                         notifications={notifications}
+                        pendingApprovalCount={pendingPermissionCount}
+                        onOpenPendingApprovals={() => setPendingPermissionsOpen(true)}
                         onDismissNotification={dismissNotification}
                         onClearNotifications={clearNotifications}
                         onNewNotification={toastNewNotification}
@@ -794,21 +813,7 @@ export default function App() {
                                                     }
                                                 />
                                             }
-                                            onCommandPermission={async (
-                                                requestId,
-                                                approved,
-                                                scope: CommandPermissionScope,
-                                            ) => {
-                                                if (!activeCwd) return;
-                                                await client.commandPermissionResolve(
-                                                    asWorkspaceId(activeCwd),
-                                                    {
-                                                        requestId,
-                                                        approved,
-                                                        scope,
-                                                    },
-                                                );
-                                            }}
+                                            onCommandPermission={resolveCommandPermission}
                                         />
                                         {activeCwd && activeSid && (
                                             <TaskPanel
@@ -1036,6 +1041,15 @@ export default function App() {
                 }}
                 onCancel={() => setPendingRenameSession(null)}
             />
+            {ws && (
+                <PendingPermissionsModal
+                    open={pendingPermissionsOpen}
+                    onClose={() => setPendingPermissionsOpen(false)}
+                    requests={ws.pendingCommandPermissions}
+                    sessions={ws.sessions}
+                    onResolve={resolveCommandPermission}
+                />
+            )}
             <ChannelBindDialog
                 open={bindingChannelId !== null}
                 channel={

@@ -200,6 +200,8 @@
     "permissionsAuto": "Automatic approval",
     "permissionsBypass": "Bypass non-critical prompts",
     "permissionsRules": "Allowlisted commands run automatically. Denylisted commands require approval and take priority over the allowlist. Unparseable commands and paths outside authorized directories also require approval.",
+    "permissionsBuiltinAllowList": "Built-in read-only allowlist",
+    "permissionsBuiltinAllowListDesc": "Automatic mode runs these command bases without a prompt when their arguments are safe literals. Manual mode skips the prompt only for the Git inspection commands. Redirects, pipes, command substitution, mutating flags and paths outside authorized directories still require approval.",
     "permissionsRuleType": "Rule list",
     "permissionsAllowList": "Allowlist",
     "permissionsDenyList": "Denylist",

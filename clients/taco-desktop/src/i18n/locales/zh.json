@@ -199,6 +199,8 @@
     "permissionsAuto": "自动审批",
     "permissionsBypass": "跳过非关键确认",
     "permissionsRules": "白名单自动放行，黑名单需要审批，黑名单优先。无法解析的命令和超出授权目录的路径也需要审批。",
+    "permissionsBuiltinAllowList": "内置只读白名单",
+    "permissionsBuiltinAllowListDesc": "自动审批模式下，参数均为安全字面量时这些命令无需确认；手动审批模式仅对 Git 查看命令免确认。重定向、管道、命令替换、可变参数以及授权目录之外的路径仍需审批。",
     "permissionsRuleType": "规则列表",
     "permissionsAllowList": "白名单",
     "permissionsDenyList": "黑名单",

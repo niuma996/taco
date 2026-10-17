@@ -157,6 +157,38 @@
     color: var(--fg);
     flex: 1;
 }
+.permission-builtin {
+    margin: 0.8rem 0;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+}
+.permission-builtin summary {
+    cursor: pointer;
+    color: var(--fg);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+.permission-builtin .settings-tab-desc {
+    margin: 0.55rem 0;
+}
+.permission-builtin-list {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+}
+.permission-builtin-list code {
+    display: inline-block;
+    padding: 0.15rem 0.35rem;
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
 .settings-btn {
     display: inline-flex;
     align-items: center;

@@ -49,13 +49,7 @@ export function PendingPermissionsModal({
                         <li key={request.requestId}>
                             <PermissionRow
                                 request={request}
-                                sessionName={
-                                    sessions.find(
-                                        (s) =>
-                                            s.id ===
-                                            (request.displaySessionId ?? request.sessionId),
-                                    )?.name
-                                }
+                                sessionLabel={sessionLabel(request, sessions)}
                                 onResolve={onResolve}
                             />
                         </li>
@@ -66,13 +60,18 @@ export function PendingPermissionsModal({
     );
 }
 
+function sessionLabel(request: CommandPermissionRequest, sessions: readonly SessionMeta[]): string {
+    const sessionId = request.displaySessionId ?? request.sessionId;
+    return sessions.find((session) => session.id === sessionId)?.name ?? sessionId.slice(0, 8);
+}
+
 function PermissionRow({
     request,
-    sessionName,
+    sessionLabel,
     onResolve,
 }: {
     request: CommandPermissionRequest;
-    sessionName: string | undefined;
+    sessionLabel: string;
     onResolve: (requestId: string, approved: boolean, scope: CommandPermissionScope) => void;
 }) {
     const { t } = useT();
@@ -82,13 +81,11 @@ function PermissionRow({
             onResolve={onResolve}
             className="pending-permission"
         >
-            {/* A subagent's approval blocks that child, not the visible session —
-                naming the origin is what makes a cross-session row readable. */}
-            {sessionName && (
-                <div className="pending-permission-source">
-                    {t("session.pendingPermissionsFrom")}: {sessionName}
-                </div>
-            )}
+            {/* A subagent's approval blocks that child, not the visible session.
+                Always name the origin; unnamed sessions fall back to a short id. */}
+            <div className="pending-permission-source">
+                {t("session.pendingPermissionsFrom")}: {sessionLabel}
+            </div>
         </CommandPermissionPrompt>
     );
 }

@@ -136,4 +136,28 @@ describe("TopbarQuickActions", () => {
             expect.objectContaining({ id: 1, text: "Prompt failed: boom" }),
         );
     });
+
+    it("opens workspace approvals from a button left of notifications", async () => {
+        const user = userEvent.setup();
+        const onOpenPendingApprovals = vi.fn();
+        render(
+            <TopbarQuickActions
+                {...noNotifications}
+                pendingApprovalCount={2}
+                onOpenPendingApprovals={onOpenPendingApprovals}
+            />,
+        );
+
+        const approvals = screen.getByRole("button", {
+            name: /session\.pendingPermissions/,
+        });
+        const bell = screen.getByRole("button", { name: "app.notifications" });
+        expect(approvals.compareDocumentPosition(bell) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+            0,
+        );
+        expect(document.querySelector(".workspace-approval-button__count")?.textContent).toBe("2");
+
+        await user.click(approvals);
+        expect(onOpenPendingApprovals).toHaveBeenCalledOnce();
+    });
 });

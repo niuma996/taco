@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -118,7 +118,9 @@ describe("PermissionsTab — blacklist editing", () => {
             await screen.findByRole("option", { name: "settings.permissionsDenyList" }),
         );
         expect(screen.getByText("git reset *")).toBeTruthy();
-        expect(screen.queryByText("git diff")).toBeNull();
+        const editableRules = document.querySelector<HTMLElement>(".permission-rule-list");
+        if (!editableRules) throw new Error("expected editable permission rules");
+        expect(within(editableRules).queryByText("git diff")).toBeNull();
         await user.type(screen.getByRole("textbox"), "bash *");
         await user.click(screen.getByRole("button", { name: "settings.permissionsAddRule" }));
         await waitFor(() =>
@@ -160,5 +162,26 @@ describe("PermissionsTab — failed save", () => {
         await user.click(screen.getByRole("button", { name: "settings.permissionsAddRule" }));
         await waitFor(() => expect(screen.getByText("disk full")).toBeTruthy());
         expect(input.value).toBe("pnpm test");
+    });
+});
+
+describe("PermissionsTab — built-in allowlist", () => {
+    it("shows built-in read-only commands separately from editable rules", () => {
+        const client = {
+            settingsGet: async () => ({
+                global: { commandPermissions: { mode: "ask", allow: [], deny: [] } },
+            }),
+            settingsWrite: vi.fn(),
+        } as unknown as TacoClient;
+
+        return import("../../../src/lib/globalConfig").then(async ({ loadGlobalConfig }) => {
+            await loadGlobalConfig(client);
+            render(<PermissionsTab client={client} />);
+            expect(screen.getByText("settings.permissionsBuiltinAllowList")).toBeTruthy();
+            expect(screen.getByText("git status")).toBeTruthy();
+            expect(screen.getByText("git diff")).toBeTruthy();
+            expect(screen.getByText("settings.permissionsBuiltinAllowListDesc")).toBeTruthy();
+            expect(screen.queryAllByRole("button", { name: REMOVE })).toHaveLength(0);
+        });
     });
 });
