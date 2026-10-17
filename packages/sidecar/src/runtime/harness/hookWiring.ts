@@ -57,6 +57,7 @@ import type {
     ThinkingLevel,
 } from "../pi/types.ts";
 import { recordPromptCacheFingerprint } from "./promptCacheFingerprint.ts";
+import { capToolResult } from "./toolResultCap.ts";
 
 const log = createLogger("taco-ext");
 
@@ -518,6 +519,9 @@ export async function wireHarnessHooks(
     for (const hook of extToolResultHooks.external) {
         disposers.push(onToolResult(wrapHook(hook, "tool_result:external")));
     }
+    // Registered last: pi chains after_tool handlers in order, so the cap sees
+    // what extensions produced and nothing after it can re-inflate the result.
+    disposers.push(onToolResult(capToolResult));
 
     // ── prompt-cache fingerprint (always on; hashes only, no payload body) ──
     // Logs system / tools / messages[0] hashes so a later cacheRead≈128 miss
