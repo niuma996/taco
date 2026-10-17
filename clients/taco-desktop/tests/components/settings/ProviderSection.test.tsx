@@ -90,7 +90,9 @@ describe("ProviderSection — deleting the default custom provider", () => {
         expect(patch.apiKeys).toEqual({ [RELAY.id]: "" });
         // defaultModel is kept — only the now-dangling provider qualifier goes.
         expect("defaultProvider" in patch).toBe(true);
-        expect(patch.defaultProvider).toBeUndefined();
+        // JSON-RPC needs an explicit null to clear the persisted scalar;
+        // undefined-valued properties are omitted during serialization.
+        expect(patch.defaultProvider).toBeNull();
     });
 
     it("leaves defaultProvider alone when it names a different provider", async () => {
