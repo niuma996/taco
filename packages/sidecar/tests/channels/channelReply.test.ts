@@ -165,3 +165,34 @@ describe("chunkText", () => {
         assert.equal(joined, text);
     });
 });
+
+it("relays the localized command-approval notice and drops frames without one", () => {
+    const frame = {
+        method: PushMethods.CommandPermissionRequested,
+        workspace: "im://wechat/u1/u1",
+        session: "s1",
+        params: {
+            requestId: "r1",
+            command: "rm -rf build",
+            text: "Approval required. Session: s1",
+        },
+    } as unknown as ServerPush;
+    assert.equal(extractReplyText(frame), "Approval required. Session: s1");
+    assert.equal(
+        extractReplyText({ ...frame, params: { requestId: "r1", command: "rm -rf build" } }),
+        undefined,
+    );
+    assert.equal(
+        extractReplyText({
+            ...frame,
+            method: PushMethods.CommandPermissionResolved,
+            params: {
+                requestId: "r1",
+                approved: false,
+                denialReason: "timeout",
+                text: " Timed out. ",
+            },
+        }),
+        "Timed out.",
+    );
+});

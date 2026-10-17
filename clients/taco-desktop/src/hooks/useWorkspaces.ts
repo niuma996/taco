@@ -8,9 +8,10 @@
  */
 
 import type { AgentMessage, ImageInput, ThinkingLevel } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
+import { useT } from "../i18n/useI18n";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
 import {
     type WorkspaceAction,
@@ -184,6 +185,7 @@ const MAX_NOTIFICATIONS = 50;
 const COALESCE_WINDOW_MS = 10_000;
 
 export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
+    const { t } = useT();
     const [workspaces, dispatchWs] = useReducer(workspacesReducer, {});
     // Active cwd is read from desktop.json (via the IPC) inside initFromStorage;
     // the lazy initializer can only return a synchronous value, so we seed with
@@ -208,6 +210,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             if (
                 head &&
                 head.text === text &&
+                head.approval?.requestId === opts.approval?.requestId &&
                 head.kind === kind &&
                 head.source === source &&
                 head.level === level &&
@@ -220,7 +223,16 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 // a repeat as the row it already announced, not a new arrival.
                 return [{ ...head, at, count: head.count + 1 }, ...prev.slice(1)];
             }
-            const entry: AppNotification = { id, text, at, count: 1, kind, source, level };
+            const entry: AppNotification = {
+                id,
+                text,
+                at,
+                count: 1,
+                kind,
+                source,
+                level,
+                ...(opts.approval ? { approval: opts.approval } : {}),
+            };
             return [entry, ...prev].slice(0, MAX_NOTIFICATIONS);
         });
     }, []);
@@ -365,6 +377,22 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             } else if (action.type === "ATTACHED") {
                 dispatchWs({ type: "ATTACHED_PUSH", cwd: action.cwd, sid: action.sid });
             } else if (action.type === "COMMAND_PERMISSION_REQUESTED") {
+                if (
+                    action.cwd.startsWith(IM_CWD_PREFIX) &&
+                    !workspacesRef.current[action.cwd]?.pendingCommandPermissions[
+                        action.request.requestId
+                    ]
+                ) {
+                    pushNotification(t("session.imApprovalRequired"), {
+                        source: "sidecar",
+                        level: "warn",
+                        approval: {
+                            cwd: action.cwd,
+                            sessionId: action.request.displaySessionId ?? action.sid,
+                            requestId: action.request.requestId,
+                        },
+                    });
+                }
                 dispatchWs({
                     type: "COMMAND_PERMISSION_REQUESTED",
                     cwd: action.cwd,
@@ -372,6 +400,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     request: action.request,
                 });
             } else if (action.type === "COMMAND_PERMISSION_RESOLVED") {
+                setNotifications((prev) =>
+                    prev.filter((n) => n.approval?.requestId !== action.requestId),
+                );
                 dispatchWs({
                     type: "COMMAND_PERMISSION_RESOLVED",
                     cwd: action.cwd,
@@ -451,7 +482,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         // attachSessionRef is a stable ref object; its .current is read at call
         // time on purpose, so it must not be a dependency.
-        [settings, attachSessionRef, pushNotification],
+        [settings, attachSessionRef, pushNotification, t],
     );
 
     const beginPendingNewSession = useCallback((cwd: string): void => {

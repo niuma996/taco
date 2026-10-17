@@ -172,7 +172,12 @@ export class PermissionBroker extends EventEmitter {
     ): CommandPermissionDecision | undefined {
         const pending = this.pending.get(requestId);
         if (!pending) return undefined;
-        if (approved && pending.request.evaluation.matchedList === "deny") scope = "once";
+        if (
+            approved &&
+            (pending.request.evaluation.matchedList === "deny" ||
+                pending.request.evaluation.persistentAllowed === false)
+        )
+            scope = "once";
         const decision: CommandPermissionDecision = {
             approved,
             scope,

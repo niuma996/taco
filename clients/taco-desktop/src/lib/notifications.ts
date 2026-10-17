@@ -30,7 +30,14 @@ export type AppNotificationSource = "client" | "sidecar";
 /** `warn` rows are degradations (a skipped file, a rebuilt cache), not failures. */
 export type AppNotificationLevel = "error" | "warn";
 
+export interface ApprovalNotificationTarget {
+    cwd: string;
+    sessionId: string;
+    requestId: string;
+}
+
 export interface AppNotification {
+    approval?: ApprovalNotificationTarget;
     id: number;
     text: string;
     /** `Date.now()` at push time — the clock shown next to the row. */
@@ -47,6 +54,7 @@ export interface AppNotification {
 }
 
 export interface PushNotificationOptions {
+    approval?: ApprovalNotificationTarget;
     kind?: AppNotificationKind;
     source?: AppNotificationSource;
     level?: AppNotificationLevel;

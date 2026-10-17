@@ -26,7 +26,7 @@ import { SUPPORTED_UI_LANGUAGES, type SupportedUiLanguage } from "../i18n/index.
 import { useT, useUiLanguage } from "../i18n/useI18n.ts";
 import type { ThemePreference } from "../lib/clientSettings.ts";
 import { writeClientSettings } from "../lib/globalConfig.ts";
-import type { AppNotification } from "../lib/notifications.ts";
+import type { AppNotification, ApprovalNotificationTarget } from "../lib/notifications.ts";
 import { NotificationBell } from "./NotificationBell.tsx";
 import { IconButton } from "./ui/IconButton.tsx";
 
@@ -90,6 +90,7 @@ function QuickMenu({
 
 export interface TopbarQuickActionsProps {
     notifications: AppNotification[];
+    onOpenApproval?: (target: ApprovalNotificationTarget) => void;
     onDismissNotification: (id: number) => void;
     onClearNotifications: () => void;
     /**
@@ -104,6 +105,7 @@ export function TopbarQuickActions({
     onDismissNotification,
     onClearNotifications,
     onNewNotification,
+    onOpenApproval,
 }: TopbarQuickActionsProps) {
     const { t } = useT();
     const uiLanguage = useUiLanguage();
@@ -116,6 +118,7 @@ export function TopbarQuickActions({
                 onDismiss={onDismissNotification}
                 onClearAll={onClearNotifications}
                 onNewArrival={onNewNotification}
+                onOpenApproval={onOpenApproval}
             />
             <QuickMenu
                 label={t("app.language")}

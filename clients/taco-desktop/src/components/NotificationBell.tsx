@@ -22,12 +22,17 @@ import { Bell, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNow } from "../hooks/useNow.ts";
 import { useT, useUiLanguage } from "../i18n/useI18n.ts";
-import { type AppNotification, toastsOnArrival } from "../lib/notifications.ts";
+import {
+    type AppNotification,
+    type ApprovalNotificationTarget,
+    toastsOnArrival,
+} from "../lib/notifications.ts";
 import { formatRelativeTime } from "../lib/relativeTime.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 
 export interface NotificationBellProps {
     notifications: AppNotification[];
+    onOpenApproval?: (target: ApprovalNotificationTarget) => void;
     onDismiss: (id: number) => void;
     onClearAll: () => void;
     /**
@@ -43,6 +48,7 @@ export function NotificationBell({
     onDismiss,
     onClearAll,
     onNewArrival,
+    onOpenApproval,
 }: NotificationBellProps) {
     const { t } = useT();
     const lng = useUiLanguage();
@@ -148,6 +154,18 @@ export function NotificationBell({
                                         {formatRelativeTime(n.at, lng, nowMs)}
                                     </span>
                                     <span className="notification-row__text">{n.text}</span>
+                                    {n.approval && onOpenApproval && (
+                                        <button
+                                            type="button"
+                                            className="notification-popover__clear"
+                                            onClick={() => {
+                                                if (n.approval) onOpenApproval(n.approval);
+                                                setOpen(false);
+                                            }}
+                                        >
+                                            {t("session.openApproval")}
+                                        </button>
+                                    )}
                                     {n.count > 1 && (
                                         <span
                                             className="notification-row__count"

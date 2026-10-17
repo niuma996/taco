@@ -806,6 +806,35 @@ export function saveGlobalConfig(patch: GlobalConfigPatch): TacoGlobalConfigShap
     if ("commandPermissions" in patch) {
         next.commandPermissions = validateCommandPermissions(patch.commandPermissions, "patch");
     }
+    if ("commandPermissionsEdit" in patch) {
+        if ("commandPermissions" in patch)
+            throw new Error("Cannot replace and edit command permissions together");
+        const edit = patch.commandPermissionsEdit;
+        if (!edit || typeof edit !== "object" || Array.isArray(edit))
+            throw new Error("Invalid command permission edit");
+        if (edit.mode !== undefined && edit.mode !== "ask" && edit.mode !== "auto")
+            throw new Error("Invalid command permission mode");
+        for (const key of ["addAllow", "removeAllow", "addDeny", "removeDeny"] as const) {
+            if (
+                edit[key] !== undefined &&
+                (!Array.isArray(edit[key]) || edit[key].some((rule) => typeof rule !== "string"))
+            )
+                throw new Error(`Invalid permission edit: ${key}`);
+        }
+        const latest = validateCommandPermissions(current.commandPermissions, "current");
+        const update = (rules: string[], add: string[] = [], remove: string[] = []) => [
+            ...new Set([...rules.filter((rule) => !remove.includes(rule)), ...add]),
+        ];
+        next.commandPermissions = validateCommandPermissions(
+            {
+                ...latest,
+                mode: edit.mode ?? latest.mode,
+                allow: update(latest.allow ?? [], edit.addAllow, edit.removeAllow),
+                deny: update(latest.deny ?? [], edit.addDeny, edit.removeDeny),
+            },
+            "patch",
+        );
+    }
     if ("anthropicApiKey" in patch) next.anthropicApiKey = cleared(patch.anthropicApiKey);
     if ("openaiApiKey" in patch) next.openaiApiKey = cleared(patch.openaiApiKey);
     if ("thinkingLevel" in patch) {

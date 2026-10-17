@@ -12,7 +12,15 @@ afterEach(cleanup);
 
 describe("CommandPermissionModeSelector", () => {
     it("persists the selected global mode while preserving both lists and migrating legacy rules", async () => {
-        const settingsWrite = vi.fn(async (patch) => ({ global: patch.global }));
+        const settingsWrite = vi.fn(async (patch) => ({
+            global: {
+                commandPermissions: {
+                    mode: patch.global.commandPermissionsEdit.mode,
+                    allow: ["git diff"],
+                    deny: ["git reset *"],
+                },
+            },
+        }));
         const client = {
             settingsGet: async () => ({
                 global: {
@@ -37,12 +45,7 @@ describe("CommandPermissionModeSelector", () => {
         await waitFor(() =>
             expect(settingsWrite).toHaveBeenCalledWith({
                 global: {
-                    commandPermissions: {
-                        mode: "auto",
-                        allow: ["git diff"],
-                        deny: ["git reset *"],
-                        allowedDirectories: ["/workspace/extra"],
-                    },
+                    commandPermissionsEdit: { mode: "auto" },
                 },
             }),
         );
@@ -71,9 +74,17 @@ describe("CommandPermissionModeSelector", () => {
     });
 });
 
-it("preserves rules saved by a global approval after the composer was mounted", async () => {
+it("only sends the mode so concurrent global approvals cannot be overwritten", async () => {
     let current = { mode: "ask", allow: [] as string[], deny: ["git reset *"] };
-    const settingsWrite = vi.fn(async (patch) => ({ global: patch.global }));
+    const settingsWrite = vi.fn(async (patch) => ({
+        global: {
+            commandPermissions: {
+                mode: patch.global.commandPermissionsEdit.mode,
+                allow: ["git diff"],
+                deny: ["git reset *"],
+            },
+        },
+    }));
     const client = {
         settingsGet: async () => ({ global: { commandPermissions: current } }),
         settingsWrite,
@@ -87,7 +98,7 @@ it("preserves rules saved by a global approval after the composer was mounted", 
     await waitFor(() =>
         expect(settingsWrite).toHaveBeenCalledWith({
             global: {
-                commandPermissions: { mode: "auto", allow: ["pnpm test"], deny: ["git reset *"] },
+                commandPermissionsEdit: { mode: "auto" },
             },
         }),
     );

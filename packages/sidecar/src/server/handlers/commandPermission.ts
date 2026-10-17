@@ -8,11 +8,7 @@ import type { CommandPermissionResolveParams } from "@taco-ai/protocol";
 import { commandPermissionResolveSchema } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 
-import {
-    readGlobalConfig,
-    saveGlobalConfig,
-    validateCommandPermissions,
-} from "../../config/config.ts";
+import { saveGlobalConfig } from "../../config/config.ts";
 import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
 
 export function registerCommandPermissionHandlers(): void {
@@ -27,27 +23,18 @@ export function registerCommandPermissionHandlers(): void {
                 request &&
                 request.evaluation.matchedList !== "deny"
             ) {
-                const current = validateCommandPermissions(
-                    readGlobalConfig().commandPermissions,
-                    "taco.json",
-                );
-                if (!(current.allow ?? []).some((rule) => rule === request.command)) {
+                if (request.evaluation.persistentAllowed !== false) {
                     try {
-                        await saveGlobalConfig({
-                            commandPermissions: {
-                                ...current,
-                                allow: [...(current.allow ?? []), request.command],
-                            },
+                        saveGlobalConfig({
+                            commandPermissionsEdit: { addAllow: [request.command] },
                         });
                     } catch (e) {
-                        // Persisting the global rule failed; do not leave the shell
-                        // waiting. Resolve the request as a one-time denial so the
-                        // caller gets feedback, then surface the original error.
                         workspace.permissionBroker.resolve(params.requestId, false, "once");
                         throw e;
                     }
                 }
             }
+
             const resolved =
                 workspace.permissionBroker.resolve(
                     params.requestId,

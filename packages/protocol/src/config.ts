@@ -131,6 +131,8 @@ export interface CommandEvaluation {
     matchedList?: "allow" | "deny";
     matchedRule?: CommandPermissionRule;
     triggeringCommand?: string;
+    /** False when a stored approval cannot safely apply to this syntax. */
+    persistentAllowed?: boolean;
 }
 export interface CommandPermissionRequest {
     requestId: string;
@@ -424,6 +426,14 @@ export type GlobalConfigPatch = Partial<
         | "openaiApiKey"
     >
 > & {
+    /** Incremental permission changes applied atomically to the latest disk state. */
+    commandPermissionsEdit?: {
+        mode?: CommandPermissionMode;
+        addAllow?: CommandPermissionRule[];
+        removeAllow?: CommandPermissionRule[];
+        addDeny?: CommandPermissionRule[];
+        removeDeny?: CommandPermissionRule[];
+    };
     defaultModel?: string | null;
     defaultProvider?: string | null;
     sessionsRoot?: string | null;

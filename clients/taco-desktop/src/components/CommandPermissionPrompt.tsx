@@ -14,7 +14,12 @@ export interface CommandPermissionPromptRequest {
     command: string;
     evaluation: Pick<
         CommandEvaluation,
-        "risk" | "reason" | "matchedList" | "matchedRule" | "triggeringCommand"
+        | "risk"
+        | "reason"
+        | "matchedList"
+        | "matchedRule"
+        | "triggeringCommand"
+        | "persistentAllowed"
     >;
 }
 
@@ -39,8 +44,9 @@ export function CommandPermissionPrompt({
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // A persistent allow rule cannot override a blacklist match.
-    const persistentDisabled = request.evaluation.matchedList === "deny";
+    // Blacklist matches and unsupported syntax only support one-time approval.
+    const persistentDisabled =
+        request.evaluation.matchedList === "deny" || request.evaluation.persistentAllowed === false;
 
     const handle = async (approved: boolean, scope: CommandPermissionScope) => {
         setSubmitting(true);

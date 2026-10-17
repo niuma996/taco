@@ -332,6 +332,8 @@ export interface EventParams {
  *  secret-shaped literals (API keys, bearer tokens). Shape mirrors the
  *  internal permission request schema. */
 export interface CommandPermissionRequestedParams {
+    /** Channel-facing notice localized by the desktop `uiLocale`; absent when no client is attached. */
+    text?: string;
     [extension: string]: unknown;
 }
 
@@ -340,6 +342,8 @@ export interface CommandPermissionResolvedParams {
     requestId: string;
     approved: boolean;
     denialReason?: CommandPermissionDenialReason;
+    /** Channel-facing notice localized by the desktop `uiLocale`; absent when no client is attached. */
+    text?: string;
 }
 
 /** `subagent.spawned` params — runtime emits when a parent session spawns

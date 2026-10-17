@@ -126,9 +126,10 @@ function literal(node: Node, language: "bash" | "powershell"): { value: string; 
                 dynamic = true;
                 break;
             }
-            if (language === "bash" && quote && !["$", "`", '"', "\\", "\n"].includes(next))
+            if (language === "bash" && quote && !["$", "`", '"', "\\", "\n"].includes(next)) {
                 value += ch;
-            else {
+                continue;
+            } else {
                 if (next !== "\n") {
                     if (language === "powershell") {
                         const special: Record<string, string> = {
@@ -235,8 +236,6 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
                     } else if (lang === "bash" && child.type !== "variable_assignment") add(child);
                     else dynamic = true;
                 }
-                if (argv[0]?.includes("/") || (lang === "powershell" && argv[0]?.includes("\\")))
-                    dynamic = true;
                 const first = argv[0]?.toLowerCase();
                 const cd = first === "cd" || (lang === "powershell" && first === "set-location");
                 let cwd: string | undefined;

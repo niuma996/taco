@@ -129,3 +129,29 @@ describe("CommandPermissionPrompt persistent approvals", () => {
         ).toBe(false);
     });
 });
+
+it("disables persistent approval for unsupported syntax", () => {
+    render(
+        <CommandPermissionPrompt
+            request={{
+                ...request,
+                evaluation: { ...request.evaluation, persistentAllowed: false },
+            }}
+            onResolve={() => {}}
+        />,
+    );
+    expect(
+        (
+            screen.getByRole("button", {
+                name: "settings.permissionsAlwaysAllow",
+            }) as HTMLButtonElement
+        ).disabled,
+    ).toBe(true);
+    expect(
+        (
+            screen.getByRole("button", {
+                name: "settings.permissionsAllowSession",
+            }) as HTMLButtonElement
+        ).disabled,
+    ).toBe(true);
+});

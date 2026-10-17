@@ -19,19 +19,10 @@ export function CommandPermissionModeSelector({ client }: { client: TacoClient }
         setReading(true);
         setReadError(null);
         try {
-            // A global approval can have added rules since this view last refreshed.
-            const latest = (await client.settingsGet()).global.commandPermissions;
             await save({
                 kind: "global",
                 patch: {
-                    commandPermissions: {
-                        mode: next,
-                        allow: latest?.allow ?? latest?.rules ?? [],
-                        deny: latest?.deny ?? [],
-                        ...(latest?.allowedDirectories
-                            ? { allowedDirectories: latest.allowedDirectories }
-                            : {}),
-                    },
+                    commandPermissionsEdit: { mode: next },
                 },
             });
         } catch (failure) {

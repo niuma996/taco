@@ -23,13 +23,6 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
     const allow = config.allow ?? config.rules ?? [];
     const deny = config.deny ?? [];
 
-    const canonicalConfig = {
-        mode: config.mode,
-        allow,
-        deny,
-        ...(config.allowedDirectories ? { allowedDirectories: config.allowedDirectories } : {}),
-    };
-
     const safeMode: "ask" | "auto" = config.mode === "auto" ? "auto" : "ask";
 
     const [newRule, setNewRule] = useState("");
@@ -48,11 +41,8 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
         void save({
             kind: "global",
             patch: {
-                commandPermissions: {
-                    ...canonicalConfig,
-                    [list]: Array.from(
-                        new Set([...(list === "allow" ? allow : deny), result.canonical]),
-                    ),
+                commandPermissionsEdit: {
+                    [list === "allow" ? "addAllow" : "addDeny"]: [result.canonical],
                 },
             },
         })
@@ -62,13 +52,14 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
     }
 
     function removeRule(index: number) {
-        const current = list === "allow" ? allow : deny;
-        const next = [...current];
-        next.splice(index, 1);
+        const rule = (list === "allow" ? allow : deny)[index];
+        if (rule === undefined) return;
         void save({
             kind: "global",
             patch: {
-                commandPermissions: { ...canonicalConfig, [list]: next },
+                commandPermissionsEdit: {
+                    [list === "allow" ? "removeAllow" : "removeDeny"]: [rule],
+                },
             },
         }).catch(() => {});
     }
@@ -86,8 +77,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                         void save({
                             kind: "global",
                             patch: {
-                                commandPermissions: {
-                                    ...canonicalConfig,
+                                commandPermissionsEdit: {
                                     mode: v as CommandPermissionMode,
                                 },
                             },

@@ -616,6 +616,10 @@ export default function App() {
                         onDismissNotification={dismissNotification}
                         onClearNotifications={clearNotifications}
                         onNewNotification={toastNewNotification}
+                        onOpenApproval={(target) => {
+                            void openImConversation(target.cwd, target.sessionId);
+                            setMainView("chat");
+                        }}
                     />
                 </header>
                 <div

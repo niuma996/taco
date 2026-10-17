@@ -307,3 +307,20 @@ describe("NotificationBell", () => {
         expect(screen.getByRole("button", { name: /app\.notificationsUnread:2/ })).not.toBeNull();
     });
 });
+
+it("opens the originating conversation from an approval notification", async () => {
+    const onOpenApproval = vi.fn();
+    const approval = { cwd: "im://wechat/u1/u1", sessionId: "s1", requestId: "r1" };
+    render(
+        <NotificationBell
+            notifications={[{ ...entry(1, "Approval needed", Date.now()), approval }]}
+            onDismiss={() => {}}
+            onClearAll={() => {}}
+            onOpenApproval={onOpenApproval}
+        />,
+    );
+    const user = userEvent.setup();
+    await user.click(trigger());
+    await user.click(screen.getByRole("button", { name: "session.openApproval" }));
+    expect(onOpenApproval).toHaveBeenCalledWith(approval);
+});

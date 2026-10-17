@@ -283,6 +283,38 @@ function imToolsEnabledNotice(locale: SupportedLocale | undefined): string {
     return IM_TOOLS_ENABLED_NOTICES[locale ?? "en"] ?? IM_TOOLS_ENABLED_NOTICES.en;
 }
 
+type ImPermissionNotice = "requested" | "approved" | "timeout" | "denied";
+
+/**
+ * Command-approval notices sent to IM peers. Keyed by the same desktop
+ * `uiLocale` as IM_TOOLS_ENABLED_NOTICES — the peer has no locale of its own.
+ * The `requested` text ends at the session label; the caller appends the id.
+ */
+const IM_PERMISSION_NOTICES: Readonly<
+    Record<ImPermissionNotice, Readonly<Record<SupportedLocale, string>>>
+> = {
+    requested: {
+        en: "This command needs human approval. Open the notification in the Taco desktop app and handle it in this conversation; the command will not run while waiting. Session: ",
+        zh: "此命令需要人工审批。请在 Taco 桌面端打开通知，进入此会话处理；等待期间命令不会执行。会话：",
+    },
+    approved: {
+        en: "The command was approved and will continue.",
+        zh: "命令已获批准，继续执行。",
+    },
+    timeout: {
+        en: "Command approval timed out; the command was not run. Open this conversation in the desktop app and try again.",
+        zh: "命令审批已超时，未执行。请在桌面端打开此会话后重试。",
+    },
+    denied: {
+        en: "Command approval was rejected or cancelled; the command was not run.",
+        zh: "命令审批已拒绝或取消，未执行。",
+    },
+};
+
+function imPermissionNotice(kind: ImPermissionNotice, locale: SupportedLocale | undefined): string {
+    return IM_PERMISSION_NOTICES[kind][locale ?? "en"] ?? IM_PERMISSION_NOTICES[kind].en;
+}
+
 /** How long a deleted session's tombstone stays in the replay log. */
 const TOMBSTONE_TTL_MS = 60_000;
 
@@ -1284,12 +1316,10 @@ export class SidecarServer implements ServerRpcSurface {
         ws.permissionBroker.on("requested", (request) => {
             const [redacted] = redactCommandPermissionRequest(request);
             const routingSession = request.displaySessionId ?? request.sessionId;
-            this.emitPush(
-                PushMethods.CommandPermissionRequested,
-                workspaceKey,
-                routingSession,
-                redacted,
-            );
+            this.emitPush(PushMethods.CommandPermissionRequested, workspaceKey, routingSession, {
+                ...redacted,
+                text: `${imPermissionNotice("requested", this.clientUiLocale)}${routingSession}`,
+            });
         });
         ws.permissionBroker.on(
             "resolved",
@@ -1308,6 +1338,14 @@ export class SidecarServer implements ServerRpcSurface {
                         requestId: request.requestId,
                         approved: decision.approved,
                         ...(decision.denialReason ? { denialReason: decision.denialReason } : {}),
+                        text: imPermissionNotice(
+                            decision.approved
+                                ? "approved"
+                                : decision.denialReason === "timeout"
+                                  ? "timeout"
+                                  : "denied",
+                            this.clientUiLocale,
+                        ),
                     },
                 );
             },

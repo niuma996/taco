@@ -58,17 +58,15 @@ describe("PermissionsTab — removeRule", () => {
         if (!secondRemove) throw new Error("expected at least two remove buttons");
         await user.click(secondRemove);
 
-        // Saving a legacy list must write canonical fields only.
+        // Send only the removed rule; the server preserves newer rules.
         await waitFor(() => {
             expect(settingsWrite).toHaveBeenCalledTimes(1);
             const calls = settingsWrite.mock.calls;
             const firstCall = calls[0];
             if (!firstCall) throw new Error("expected settingsWrite to be called");
-            const arg = firstCall[0] as {
-                global: { commandPermissions: { allow: string[]; rules?: string[] } };
-            };
-            expect(arg.global.commandPermissions.allow).toEqual(["a", "c"]);
-            expect(arg.global.commandPermissions).not.toHaveProperty("rules");
+            expect(firstCall[0]).toEqual({
+                global: { commandPermissionsEdit: { removeAllow: ["b"] } },
+            });
         });
 
         // UI must update to reflect the new state.
@@ -81,7 +79,23 @@ describe("PermissionsTab — removeRule", () => {
 
 describe("PermissionsTab — blacklist editing", () => {
     it("adds and removes blacklist rules without changing the whitelist", async () => {
-        const settingsWrite = vi.fn(async (patch) => ({ global: patch.global }));
+        let permissions = {
+            mode: "ask",
+            allowedDirectories: ["/workspace/extra"],
+            allow: ["git diff"],
+            deny: ["git reset *"],
+        };
+        const settingsWrite = vi.fn(async (patch) => {
+            const edit = patch.global.commandPermissionsEdit;
+            permissions = {
+                ...permissions,
+                deny: [
+                    ...permissions.deny.filter((r) => !(edit.removeDeny ?? []).includes(r)),
+                    ...(edit.addDeny ?? []),
+                ],
+            };
+            return { global: { commandPermissions: permissions } };
+        });
         const client = {
             settingsGet: async () => ({
                 global: {
@@ -110,12 +124,7 @@ describe("PermissionsTab — blacklist editing", () => {
         await waitFor(() =>
             expect(settingsWrite).toHaveBeenLastCalledWith({
                 global: {
-                    commandPermissions: {
-                        mode: "ask",
-                        allowedDirectories: ["/workspace/extra"],
-                        allow: ["git diff"],
-                        deny: ["git reset *", "bash *"],
-                    },
+                    commandPermissionsEdit: { addDeny: ["bash *"] },
                 },
             }),
         );
@@ -125,12 +134,7 @@ describe("PermissionsTab — blacklist editing", () => {
         await waitFor(() =>
             expect(settingsWrite).toHaveBeenLastCalledWith({
                 global: {
-                    commandPermissions: {
-                        mode: "ask",
-                        allow: ["git diff"],
-                        deny: ["bash *"],
-                        allowedDirectories: ["/workspace/extra"],
-                    },
+                    commandPermissionsEdit: { removeDeny: ["git reset *"] },
                 },
             }),
         );

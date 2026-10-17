@@ -20,9 +20,13 @@ interface MessageEndEvent {
  * the frame carries nothing a peer should see.
  */
 export function extractReplyText(frame: ServerPush): string | undefined {
-    // A workspace-dimensioned notice (e.g. im.tools_enabled) carries its own
-    // text and is addressed to the chat directly — not to a conversation turn.
-    if (frame.method === PushMethods.ImToolsEnabled) {
+    // Workspace notices and command-approval frames carry their own localized
+    // text; the peer has no locale of its own, so the server picks it.
+    if (
+        frame.method === PushMethods.ImToolsEnabled ||
+        frame.method === PushMethods.CommandPermissionRequested ||
+        frame.method === PushMethods.CommandPermissionResolved
+    ) {
         const text = (frame.params as { text?: unknown } | undefined)?.text;
         if (typeof text === "string" && text.trim().length > 0) return text.trim();
         return undefined;

@@ -7,6 +7,7 @@ import type {
     CommandRisk,
 } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
+import { executableName, nestedExecution } from "./commandExecution.ts";
 import type { ParsedShellNode, ShellLanguage } from "./shellParser.ts";
 import { parseShellCommand } from "./shellParser.ts";
 import {
@@ -300,9 +301,7 @@ function exactCommandRule(
     rules: readonly CommandPermissionRule[],
 ): CommandPermissionRule | undefined {
     const trimmed = command.trim();
-    return rules.find(
-        (rule) => parsePermissionRule(rule).type === "exact" && rule.trim() === trimmed,
-    );
+    return rules.find((rule) => rule.trim() === trimmed);
 }
 
 function matchingRule(
@@ -556,9 +555,18 @@ function higherRisk<T extends Pick<CommandEvaluation, "risk">>(a: T, b: T | unde
 function nodeRisk(
     node: ParsedShellNode,
     language: ShellLanguage,
+    depth = 0,
 ): Pick<CommandEvaluation, "risk" | "reason"> {
-    const stripped = withoutGitGlobals(node.argv);
+    const stripped = withoutGitGlobals([executableName(node.argv[0] ?? ""), ...node.argv.slice(1)]);
     let value = evaluatePart(canonical(node));
+    const base = executableName(node.argv[0] ?? "");
+    value = higherRisk(value, evaluatePart([base, ...node.argv.slice(1)].join(" ")));
+    const nested = nestedExecution(node.argv);
+    if (nested.command && depth < 8) {
+        for (const child of parseShellCommand(nested.command, language).nodes) {
+            value = higherRisk(value, nodeRisk(child, language, depth + 1));
+        }
+    }
     if (stripped.length !== node.argv.length)
         value = higherRisk(value, evaluatePart(stripped.join(" ")));
     value = higherRisk(value, argvRisk(stripped, language));
@@ -584,7 +592,11 @@ function aggregate(values: CommandEvaluation[]): CommandEvaluation {
         (a, b) => (RISK_ORDER[b.risk] > RISK_ORDER[a] ? b.risk : a),
         highest.risk,
     );
-    return { ...highest, risk };
+    return {
+        ...highest,
+        risk,
+        ...(values.some((v) => v.persistentAllowed === false) ? { persistentAllowed: false } : {}),
+    };
 }
 
 /** All callers share AST traversal; readonly callers never consult mode or rules. */
@@ -593,6 +605,7 @@ function evaluateParsed(
     config: CommandPermissionConfig,
     context: CommandEvaluationContext = {},
     readOnly = false,
+    depth = 0,
 ): CommandEvaluation {
     const parsed = parseShellCommand(command, context.language);
     const values: CommandEvaluation[] = [];
@@ -610,7 +623,13 @@ function evaluateParsed(
     const wholeAllow = exactCommandRule(command, allowRules);
     for (const [index, node] of parsed.nodes.entries()) {
         const text = canonical(node);
-        const gitStripped = withoutGitGlobals(node.argv).join(" ");
+        const executableText = [executableName(node.argv[0] ?? ""), ...node.argv.slice(1)].join(
+            " ",
+        );
+        const gitStripped = withoutGitGlobals([
+            executableName(node.argv[0] ?? ""),
+            ...node.argv.slice(1),
+        ]).join(" ");
         const risk = nodeRisk(node, parsed.language);
         const result = (
             behavior: CommandEvaluation["behavior"],
@@ -632,6 +651,7 @@ function evaluateParsed(
         const denied =
             wholeDeny ??
             matchingRule(text, config.deny ?? [], true) ??
+            matchingRule(executableText, config.deny ?? [], true) ??
             matchingRule(gitStripped, config.deny ?? [], true);
         if (!readOnly && denied)
             values.push(
@@ -646,10 +666,42 @@ function evaluateParsed(
         if (
             node.kind === "command" &&
             !node.dynamic &&
-            isCommandRunner(node.argv) &&
+            !isShellWrapperCommand(executableName(node.argv[0] ?? "")) &&
+            (isCommandRunner(node.argv) ||
+                nestedExecution(node.argv).opaque ||
+                /[\\/]/.test(node.argv[0] ?? "")) &&
             !RISK_FLOOR.has(risk.risk)
         ) {
-            const exact = exactCommandRule(text, allowRules) ?? wholeAllow;
+            const execution = nestedExecution(node.argv);
+            if (execution.complete === false) {
+                values.push(
+                    result(readOnly ? "deny" : "ask", "execution options cannot be analyzed", {
+                        persistentAllowed: false,
+                    }),
+                );
+                continue;
+            }
+            const inner = execution.command;
+            if (depth >= 8) {
+                values.push(
+                    result(readOnly ? "deny" : "ask", "nested execution exceeds analysis limit", {
+                        persistentAllowed: false,
+                    }),
+                );
+                continue;
+            }
+            if (inner && depth < 8) {
+                const innerResult = evaluateParsed(inner, config, context, readOnly, depth + 1);
+                if (
+                    innerResult.behavior === "deny" ||
+                    innerResult.matchedList === "deny" ||
+                    innerResult.persistentAllowed === false
+                ) {
+                    values.push({ ...innerResult, triggeringCommand: node.text });
+                    continue;
+                }
+            }
+            const exact = exactCommandRule(node.text, allowRules) ?? wholeAllow;
             values.push(
                 exact
                     ? result("allow", "command matched allow list", {
@@ -661,8 +713,16 @@ function evaluateParsed(
             );
             continue;
         }
-        if (node.kind === "unknown" || node.dynamic || isShellWrapperCommand(node.argv[0] ?? "")) {
-            values.push(result(readOnly ? "deny" : "ask", "unsupported or dynamic shell command"));
+        if (
+            node.kind === "unknown" ||
+            node.dynamic ||
+            isShellWrapperCommand(executableName(node.argv[0] ?? ""))
+        ) {
+            values.push(
+                result(readOnly ? "deny" : "ask", "unsupported or dynamic shell command", {
+                    persistentAllowed: false,
+                }),
+            );
             continue;
         }
         if (successfulCd && node.operator === "&&") cwds = successfulCd;
@@ -682,6 +742,7 @@ function evaluateParsed(
                     result(
                         readOnly ? "deny" : "ask",
                         "directory change cannot be proven inside authorized directories",
+                        { persistentAllowed: false },
                     ),
                 );
                 continue;
@@ -754,6 +815,7 @@ function evaluateParsed(
             behavior: readOnly ? "deny" : "ask",
             risk: "workspaceWrite",
             reason: parsed.reason ?? "command could not be parsed",
+            persistentAllowed: false,
         });
     return aggregate(values);
 }

@@ -191,3 +191,28 @@ describe("useWorkspaces — notification list", () => {
         assert.equal(new Set(ids).size, ids.length);
     });
 });
+
+it("keeps unopened IM approvals actionable and removes the notice after resolution", async () => {
+    const { result } = renderStore();
+    const cwd = "im://wechat/u1/u1";
+    const request = {
+        requestId: "r1",
+        sessionId: "s1",
+        toolCallId: "t1",
+        command: "rm -rf build",
+        evaluation: { behavior: "ask", risk: "destructive", reason: "risk", matchedList: "deny" },
+    } as never;
+    await act(async () =>
+        result.current.dispatch({ type: "COMMAND_PERMISSION_REQUESTED", cwd, sid: "s1", request }),
+    );
+    assert.ok(result.current.workspaces[cwd]?.pendingCommandPermissions.r1);
+    assert.deepEqual(result.current.notifications[0]?.approval, {
+        cwd,
+        sessionId: "s1",
+        requestId: "r1",
+    });
+    await act(async () =>
+        result.current.dispatch({ type: "COMMAND_PERMISSION_RESOLVED", cwd, requestId: "r1" }),
+    );
+    assert.equal(result.current.notifications.length, 0);
+});

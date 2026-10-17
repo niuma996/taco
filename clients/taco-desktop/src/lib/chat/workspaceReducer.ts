@@ -595,19 +595,25 @@ export function workspacesReducer(
             // history — causing blank first-open or stale messages on new sessions.
             return state;
         case "COMMAND_PERMISSION_REQUESTED":
-            return updateWs(state, action.cwd, (existing) => ({
-                pendingCommandPermissions: {
-                    ...existing.pendingCommandPermissions,
-                    [action.request.requestId]: action.request,
-                },
-                // Only the session on screen has messages to patch. The entry above is
-                // written regardless, so a session switch can no longer strand a
-                // request that is still holding a subagent's shell call open.
-                messages:
-                    existing.activeSession === action.sid
-                        ? attachCommandPermission(existing.messages, action.request)
-                        : existing.messages,
-            }));
+            return updateWs(
+                state[action.cwd]
+                    ? state
+                    : { ...state, [action.cwd]: createEmptyWorkspace(action.cwd) },
+                action.cwd,
+                (existing) => ({
+                    pendingCommandPermissions: {
+                        ...existing.pendingCommandPermissions,
+                        [action.request.requestId]: action.request,
+                    },
+                    // Only the session on screen has messages to patch. The entry above is
+                    // written regardless, so a session switch can no longer strand a
+                    // request that is still holding a subagent's shell call open.
+                    messages:
+                        existing.activeSession === action.sid
+                            ? attachCommandPermission(existing.messages, action.request)
+                            : existing.messages,
+                }),
+            );
         case "COMMAND_PERMISSION_RESOLVED":
             return updateWs(state, action.cwd, (existing) => ({
                 pendingCommandPermissions: omitKey(
