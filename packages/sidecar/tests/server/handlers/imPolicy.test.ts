@@ -27,7 +27,7 @@ function fakeImPolicy(overrides: Partial<ImPolicyControl> = {}): {
         clearChatOverride: [],
     };
     const control: ImPolicyControl = {
-        get: (params) => {
+        get: async (params) => {
             calls.get.push(params);
             const result: ImPolicyGetResult = {
                 channelId: params.channelId,

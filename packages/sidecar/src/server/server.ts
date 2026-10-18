@@ -952,7 +952,7 @@ export class SidecarServer implements ServerRpcSurface {
             if (toolsGranted && exec.shared) {
                 log.warn(
                     `IM chat ${cwd} now has local tools but shares ${executionCwd} with every other ` +
-                        `chat on channel ${parsedIm.channelId} — set perChatScratch or a binding to isolate it.`,
+                        `chat on channel ${parsedIm.channelId} — set executionDir to per-chat or custom to isolate it.`,
                 );
             }
         }
@@ -1666,9 +1666,40 @@ export class SidecarServer implements ServerRpcSurface {
      *  drive bind error paths, and `readonly` is compile-time only. */
     readonly channels: ChannelControl;
 
+    /**
+     * The global rules an IM workspace on `channelId` evaluates against: the
+     * user's `commandPermissions` plus extension allow-rules, merged the same
+     * way the workspace permission thunk does. A malformed taco.json yields no
+     * global rules instead of failing the whole policy editor.
+     */
+    private async imPolicyGlobalRules(
+        channelId: string,
+    ): Promise<{ allow: string[]; deny: string[] }> {
+        let allow: string[] = [];
+        let deny: string[] = [];
+        try {
+            const base = validateCommandPermissions(
+                readGlobalConfig().commandPermissions,
+                "taco.json",
+            );
+            allow = base.allow ?? base.rules ?? [];
+            deny = base.deny ?? [];
+        } catch (e) {
+            log.warn(`imPolicy.get: ignoring invalid commandPermissions: ${String(e)}`);
+        }
+        const extensions = await activateExtensions(this.extensionRegistry, {
+            cwd: join(makeImSessionsRoot(tacoHome(), channelId), "scratch"),
+            isIm: true,
+        });
+        return {
+            allow: Array.from(new Set([...allow, ...extensions.commandPermissionRules()])),
+            deny,
+        };
+    }
+
     /** IM workspace policy control surface consumed by the `imPolicy.*` handlers. */
     readonly imPolicy: ImPolicyControl = {
-        get: (params) => {
+        get: async (params) => {
             const channelId = params.channelId;
             // The stored document may still hold legacy `binding` /
             // `perChatScratch` fields; normalize on read so the editor only
@@ -1702,10 +1733,7 @@ export class SidecarServer implements ServerRpcSurface {
                       chatId: chatId as string,
                   }
                 : null;
-            const commandPermissions = validateCommandPermissions(
-                readGlobalConfig().commandPermissions,
-                "taco.json",
-            );
+            const commandPermissions = await this.imPolicyGlobalRules(channelId);
             return {
                 channelId,
                 scope: wantsChat ? "chat" : "channel",
@@ -1715,10 +1743,7 @@ export class SidecarServer implements ServerRpcSurface {
                 hasOverride: chatOverride !== null,
                 overrides,
                 sources: describeImPolicySources(doc, route),
-                rules: describeImPolicyRules(doc, route, {
-                    allow: commandPermissions.allow ?? commandPermissions.rules ?? [],
-                    deny: commandPermissions.deny ?? [],
-                }),
+                rules: describeImPolicyRules(doc, route, commandPermissions),
             };
         },
         setChannelDefault: (channelId, patch) => this.setImChannelDefault(channelId, patch),

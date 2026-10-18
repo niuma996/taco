@@ -116,7 +116,14 @@
     --rail-width: 56px;
     --rail-item-size: 36px;
 
+    /* Spacing scale (4px base). Hairline borders stay literal 1px. */
+    --space-px: 1px;
+    --space-0-5: 0.125rem;
+    --space-1: 0.25rem;
+    --space-1-5: 0.375rem;
     --space-2: 0.5rem;
+    --space-2-5: 0.625rem;
+    --space-3: 0.75rem;
 
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */
@@ -137,6 +144,9 @@
     --text-md: 0.95rem;
     --text-lg: 1.15rem;
     --text-xl: 1.4rem;
+
+    /* Line-height for multi-line secondary text. */
+    --leading-normal: 1.5;
 
     /* Mono font stack — consolidates scattered ui-monospace,... hardcoded values. */
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;

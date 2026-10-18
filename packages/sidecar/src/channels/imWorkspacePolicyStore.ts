@@ -41,6 +41,21 @@ function notifiedPath(home: string): string {
     return path.join(imWorkspacePoliciesDir(home), "notified.json");
 }
 
+/**
+ * Migrate legacy `binding` / `perChatScratch` layers to `executionDir` as part
+ * of a write. Layers that fail validation are kept verbatim: `resolve()`
+ * already ignores them, and dropping them on an unrelated write would destroy
+ * hand-edited grants without telling anyone.
+ */
+function migrateDocument(doc: ImWorkspacePolicyDocument): ImWorkspacePolicyDocument {
+    const out = normalizePolicyDocument(doc);
+    if (doc.default !== undefined && out.default === undefined) out.default = doc.default;
+    for (const [key, layer] of Object.entries(doc.chats ?? {})) {
+        if (out.chats?.[key] === undefined) out.chats = { ...out.chats, [key]: layer };
+    }
+    return out;
+}
+
 export class ImWorkspacePolicyStore {
     private readonly home: string;
     private readonly policiesDir: string;
@@ -78,14 +93,11 @@ export class ImWorkspacePolicyStore {
      */
     async setChannelDefault(channelId: string, patch: ImWorkspacePolicyPatch): Promise<void> {
         validatePartial(patch, `channel-default:${channelId}`);
-        const doc = this.patchDocument(channelId, (d) =>
-            // Normalizing here migrates any legacy `binding` / `perChatScratch`
-            // layers to the canonical `executionDir` in the same write.
-            normalizePolicyDocument({
-                ...d,
-                default: mergeImWorkspacePolicyPatch(d.default ?? {}, patch),
-            }),
-        );
+        const doc = this.patchDocument(channelId, (d) => {
+            const merged = mergeImWorkspacePolicyPatch(d.default ?? {}, patch);
+            validatePartial(merged, `channel-default:${channelId}`);
+            return migrateDocument({ ...d, default: merged });
+        });
         await this.persist(channelId, doc);
     }
 
@@ -93,15 +105,11 @@ export class ImWorkspacePolicyStore {
     async setChatOverride(route: ImRoute, patch: ImWorkspacePolicyPatch): Promise<void> {
         validatePartial(patch, `chat-override:${route.channelId}`);
         const key = chatPolicyKey(route);
-        const doc = this.patchDocument(route.channelId, (d) =>
-            normalizePolicyDocument({
-                ...d,
-                chats: {
-                    ...(d.chats ?? {}),
-                    [key]: mergeImWorkspacePolicyPatch(d.chats?.[key] ?? {}, patch),
-                },
-            }),
-        );
+        const doc = this.patchDocument(route.channelId, (d) => {
+            const merged = mergeImWorkspacePolicyPatch(d.chats?.[key] ?? {}, patch);
+            validatePartial(merged, `chat-override:${route.channelId}`);
+            return migrateDocument({ ...d, chats: { ...(d.chats ?? {}), [key]: merged } });
+        });
         await this.persist(route.channelId, doc);
     }
 

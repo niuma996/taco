@@ -66,7 +66,7 @@ export interface ChannelControl {
  * atomically with the persist.
  */
 export interface ImPolicyControl {
-    get(params: ImPolicyGetParams): ImPolicyGetResult;
+    get(params: ImPolicyGetParams): Promise<ImPolicyGetResult>;
     setChannelDefault(channelId: string, patch: ImWorkspacePolicyPatch): Promise<void>;
     setChatOverride(route: ImRoute, patch: ImWorkspacePolicyPatch): Promise<void>;
     /**

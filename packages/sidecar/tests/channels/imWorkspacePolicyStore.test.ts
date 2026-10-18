@@ -198,6 +198,36 @@ describe("ImWorkspacePolicyStore", () => {
         );
     });
 
+    it("keeps invalid layers verbatim instead of dropping them on an unrelated write", async () => {
+        const otherKey = chatPolicyKey({ ...ROUTE, chatId: "c2" });
+        const badChat = { commands: { deny: ["rm *", 42] } };
+        fs.mkdirSync(path.dirname(policyPath("wechat")), { recursive: true });
+        fs.writeFileSync(
+            policyPath("wechat"),
+            JSON.stringify({ default: { perChatScratch: true }, chats: { [otherKey]: badChat } }),
+        );
+
+        await store.setChatOverride(ROUTE, { tools: { shell: "allow" } });
+
+        const doc = store.readDocument("wechat");
+        assert.deepEqual(doc.chats?.[otherKey], badChat);
+        assert.deepEqual(doc.chats?.[chatKey], { tools: { shell: "allow" } });
+        // Valid layers still migrate in the same write.
+        assert.deepEqual(doc.default, { executionDir: { mode: "per-chat" } });
+    });
+
+    it("rejects a write whose merged target layer is invalid and leaves the file untouched", async () => {
+        const bad = { tools: { shell: "allow" }, commands: { allow: ["git status", 1] } };
+        fs.mkdirSync(path.dirname(policyPath("wechat")), { recursive: true });
+        fs.writeFileSync(policyPath("wechat"), JSON.stringify({ default: bad }));
+
+        await assert.rejects(
+            store.setChannelDefault("wechat", { tools: { fsTools: "allow" } }),
+            /allow/,
+        );
+        assert.deepEqual(store.readDocument("wechat"), { default: bad });
+    });
+
     it("namespaces per channelId", async () => {
         await store.setChannelDefault("wechat", { tools: { shell: "allow" } });
         assert.equal(store.resolve({ ...ROUTE, channelId: "feishu" }).tools.shell, "deny");
