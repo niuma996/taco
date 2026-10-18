@@ -29,10 +29,12 @@ import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 const ASK_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "allow" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 const AUTO_ALLOW_LS_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "allow" },
     commands: { mode: "auto", allow: ["ls"] },
+    executionDir: { mode: "shared" },
 };
 
 /** Pull the broker's private `imCommandPolicy` thunk out of a workspace. */

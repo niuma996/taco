@@ -39,10 +39,12 @@ const defs: AgentDefinition[] = [
 const SHELL_DENY_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "deny" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 const SHELL_ALLOW_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "allow" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 
 describe("AgentSpawner parent-toolset inheritance", () => {

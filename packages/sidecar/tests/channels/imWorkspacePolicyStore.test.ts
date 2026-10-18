@@ -52,40 +52,42 @@ describe("ImWorkspacePolicyStore", () => {
         await store.setChannelDefault("wechat", { tools: { shell: "deny" } });
         await store.setChatOverride(ROUTE, {
             tools: { shell: "allow" },
-            perChatScratch: true,
+            executionDir: { mode: "per-chat" },
         });
 
         assert.equal(store.resolve(ROUTE).tools.shell, "allow");
-        assert.equal(store.resolve(ROUTE).perChatScratch, true);
+        assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
         assert.equal(store.resolve({ ...ROUTE, chatId: "c2" }).tools.shell, "deny");
-        assert.equal(store.resolve({ ...ROUTE, chatId: "c2" }).perChatScratch, undefined);
+        assert.deepEqual(store.resolve({ ...ROUTE, chatId: "c2" }).executionDir, {
+            mode: "shared",
+        });
     });
 
     // Regression: the setters take a *patch*. Replacing the stored value
     // wholesale meant editing one field silently revoked unrelated grants
-    // (e.g. setting perChatScratch dropped an existing shell: allow).
+    // (e.g. setting the execution dir dropped an existing shell: allow).
     it("setChannelDefault merges, preserving fields the patch omits", async () => {
         await store.setChannelDefault("wechat", {
             tools: { shell: "allow" },
             commands: { mode: "auto", allow: ["ls"] },
         });
-        await store.setChannelDefault("wechat", { perChatScratch: true });
+        await store.setChannelDefault("wechat", { executionDir: { mode: "per-chat" } });
 
         const resolved = store.resolve(ROUTE);
         assert.equal(resolved.tools.shell, "allow");
         assert.equal(resolved.commands.mode, "auto");
         assert.deepEqual(resolved.commands.allow, ["ls"]);
-        assert.equal(resolved.perChatScratch, true);
+        assert.deepEqual(resolved.executionDir, { mode: "per-chat" });
     });
 
     it("setChatOverride merges, and an explicit tightening still wins", async () => {
         await store.setChatOverride(ROUTE, { tools: { shell: "allow" } });
-        await store.setChatOverride(ROUTE, { perChatScratch: true });
+        await store.setChatOverride(ROUTE, { executionDir: { mode: "per-chat" } });
         assert.equal(store.resolve(ROUTE).tools.shell, "allow");
 
         await store.setChatOverride(ROUTE, { tools: { shell: "deny" } });
         assert.equal(store.resolve(ROUTE).tools.shell, "deny");
-        assert.equal(store.resolve(ROUTE).perChatScratch, true);
+        assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
     });
 
     it("clearChatOverride is idempotent and falls back to channel default", async () => {
@@ -104,7 +106,7 @@ describe("ImWorkspacePolicyStore", () => {
         });
         await store.setChatOverride(ROUTE, {
             tools: { shell: "deny" },
-            perChatScratch: true,
+            executionDir: { mode: "per-chat" },
         });
 
         await store.setChatOverride(ROUTE, { tools: { shell: null } });
@@ -112,9 +114,40 @@ describe("ImWorkspacePolicyStore", () => {
         const resolved = store.resolve(ROUTE);
         assert.equal(resolved.tools.shell, "allow", "cleared chat field falls back to channel");
         assert.equal(resolved.tools.fsTools, "allow");
-        assert.equal(resolved.perChatScratch, true, "sibling chat overrides survive");
+        assert.deepEqual(resolved.executionDir, { mode: "per-chat" }, "sibling overrides survive");
         assert.equal(resolved.commands.mode, "auto");
-        assert.deepEqual(store.readDocument("wechat").chats?.[chatKey], { perChatScratch: true });
+        assert.deepEqual(store.readDocument("wechat").chats?.[chatKey], {
+            executionDir: { mode: "per-chat" },
+        });
+    });
+
+    it("migrates legacy working-directory fields on the next write", async () => {
+        // A policy file written before the canonical `executionDir` field.
+        fs.mkdirSync(path.dirname(policyPath("wechat")), { recursive: true });
+        fs.writeFileSync(
+            policyPath("wechat"),
+            JSON.stringify({ default: { perChatScratch: true } }),
+        );
+
+        await store.setChannelDefault("wechat", { tools: { shell: "allow" } });
+
+        const doc = store.readDocument("wechat");
+        assert.deepEqual(doc.default?.executionDir, { mode: "per-chat" });
+        assert.equal(doc.default?.perChatScratch, undefined);
+        assert.equal(doc.default?.binding, undefined);
+    });
+
+    it("lets a chat override a channel directory with the canonical field", async () => {
+        await store.setChannelDefault("wechat", {
+            executionDir: { mode: "custom", path: "/tmp/project" },
+        });
+        await store.setChatOverride(ROUTE, { executionDir: { mode: "per-chat" } });
+
+        assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
+        assert.deepEqual(store.resolve({ ...ROUTE, chatId: "c2" }).executionDir, {
+            mode: "custom",
+            path: "/tmp/project",
+        });
     });
 
     // Hand-editing the JSON is currently the only way to configure a policy,
@@ -191,7 +224,8 @@ describe("ImWorkspacePolicyStore", () => {
         assert.equal(keys.length, 1);
         const firstKey = keys[0];
         assert.ok(firstKey, "expected one chat key");
-        assert.deepEqual(chats[firstKey], { perChatScratch: true });
+        // The write also migrates the legacy field to the canonical shape.
+        assert.deepEqual(chats[firstKey], { executionDir: { mode: "per-chat" } });
     });
 
     it("clearChatOverrideByKey drops an orphan override without a route", async () => {

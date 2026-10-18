@@ -52,6 +52,7 @@ import {
     describeImChatOverrides,
     describeImPolicyRules,
     describeImPolicySources,
+    normalizePolicyDocument,
     resolveChannelDefaultFromDocument,
 } from "../channels/imWorkspacePolicy.ts";
 import { ImWorkspacePolicyStore } from "../channels/imWorkspacePolicyStore.ts";
@@ -1669,7 +1670,10 @@ export class SidecarServer implements ServerRpcSurface {
     readonly imPolicy: ImPolicyControl = {
         get: (params) => {
             const channelId = params.channelId;
-            const doc = this.imPolicyStore.readDocument(channelId);
+            // The stored document may still hold legacy `binding` /
+            // `perChatScratch` fields; normalize on read so the editor only
+            // ever sees the canonical `executionDir` shape.
+            const doc = normalizePolicyDocument(this.imPolicyStore.readDocument(channelId));
             const conversations = this.conversationRouter?.listAll(channelId) ?? [];
             const overrides = describeImChatOverrides(doc, channelId, conversations);
             const peerId = params.peerId;

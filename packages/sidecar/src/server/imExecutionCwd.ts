@@ -3,9 +3,14 @@
  * the workspace policy. The session storage cwd is NEVER changed by this —
  * JsonlSessionRepo partitions JSONL by it, so it is fixed per workspace.
  *
- * Priority: valid binding > perChatScratch > default channel scratch.
- * A binding that fails validation (missing dir, not a directory, unwritable)
- * falls back to the default scratch with a `warning` so the caller can log it.
+ * The policy names one working directory per scope:
+ * - `custom`: the configured absolute path, when it is a writable directory.
+ * - `per-chat`: one directory per conversation.
+ * - `shared`: one directory for the whole channel.
+ *
+ * A custom path that fails validation (missing dir, not a directory,
+ * unwritable) falls back to the shared scratch with a `warning` so the caller
+ * can log it.
  */
 
 import { accessSync, constants, mkdirSync, realpathSync, statSync } from "node:fs";
@@ -41,19 +46,19 @@ export function resolveImExecutionCwd(input: {
     const defaultScratch = join(sessionsRoot, "scratch");
     mkdirSync(defaultScratch, { recursive: true });
 
-    const binding = policy.binding?.executionCwd;
-    if (binding) {
-        if (isValidWritableDir(binding)) {
-            return { executionCwd: binding, shared: false };
+    const dir = policy.executionDir;
+    if (dir.mode === "custom" && dir.path) {
+        if (isValidWritableDir(dir.path)) {
+            return { executionCwd: dir.path, shared: false };
         }
         return {
             executionCwd: defaultScratch,
             shared: true,
-            warning: `binding executionCwd ${binding} is not a writable directory, falling back to ${defaultScratch}`,
+            warning: `executionDir ${dir.path} is not a writable directory, falling back to ${defaultScratch}`,
         };
     }
 
-    if (policy.perChatScratch) {
+    if (dir.mode === "per-chat") {
         const perChat = join(sessionsRoot, "chats", chatPolicyKey(route), "scratch");
         mkdirSync(perChat, { recursive: true });
         return { executionCwd: perChat, shared: false };

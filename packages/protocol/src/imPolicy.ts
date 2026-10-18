@@ -34,13 +34,30 @@ export interface ImCommandPolicy {
     deny?: CommandPermissionRule[];
 }
 
+/**
+ * Where a channel's tools actually run.
+ *
+ * - `shared`: one directory shared by every conversation on the channel.
+ * - `per-chat`: one directory per conversation.
+ * - `custom`: a fixed absolute path.
+ *
+ * This replaced the old `binding` + `perChatScratch` pair, which described
+ * one outcome through two independent fields and made the UI show two
+ * conflicting "active" settings.
+ */
+export type ImExecutionDirMode = "shared" | "per-chat" | "custom";
+
+export interface ImExecutionDir {
+    mode: ImExecutionDirMode;
+    /** Absolute path. Required when `mode` is `custom`, ignored otherwise. */
+    path?: string;
+}
+
 export interface ImWorkspacePolicy {
     tools: ImToolPolicy;
     commands: ImCommandPolicy;
-    /** Absolute local directory to run tools in. Overrides perChatScratch. */
-    binding?: { executionCwd: string };
-    /** Give this chat its own scratch dir instead of the channel-shared one. */
-    perChatScratch?: boolean;
+    /** Effective working directory for the resolved scope. */
+    executionDir: ImExecutionDir;
 }
 
 /**
@@ -68,7 +85,20 @@ export interface ImCommandPolicyPatch {
 export interface ImWorkspacePolicyPatch {
     tools?: ImToolPolicyPatch;
     commands?: ImCommandPolicyPatch;
+    /**
+     * Canonical working-directory choice. `null` clears it at this layer so
+     * the parent layer decides again.
+     */
+    executionDir?: ImExecutionDir | null;
+    /**
+     * Legacy: absolute cwd binding. Still read from existing policy files;
+     * superseded by `executionDir` and dropped when that field is written.
+     */
     binding?: { executionCwd: string } | null;
+    /**
+     * Legacy: per-chat scratch flag. Still read from existing policy files;
+     * superseded by `executionDir` and dropped when that field is written.
+     */
     perChatScratch?: boolean | null;
 }
 
@@ -92,9 +122,7 @@ export interface ImPolicySources {
     fsTools: ImPolicyField<ImToolPolicy["fsTools"]>;
     shell: ImPolicyField<ImToolPolicy["shell"]>;
     commandMode: ImPolicyField<ImCommandPolicy["mode"]>;
-    perChatScratch: ImPolicyField<boolean>;
-    /** `undefined` means "use the scratch directory", not an absolute binding. */
-    executionCwd: ImPolicyField<string | undefined>;
+    executionDir: ImPolicyField<ImExecutionDir>;
 }
 
 export interface ImPolicyRulesView {

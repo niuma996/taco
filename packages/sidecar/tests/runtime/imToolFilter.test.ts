@@ -8,6 +8,7 @@ import type { TacoTool } from "../../src/tools/index.ts";
 const DEFAULT_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "deny" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 
 /** Fake tools covering both the fs/process group and unrelated tools. */
@@ -58,6 +59,7 @@ describe("filterToolsForImPolicy", () => {
         const policy: ImWorkspacePolicy = {
             tools: { fsTools: "deny", shell: "allow" },
             commands: { mode: "ask" },
+            executionDir: { mode: "shared" },
         };
         const out = filterToolsForImPolicy(makeTools(true), policy);
         const n = names(out);
@@ -71,6 +73,7 @@ describe("filterToolsForImPolicy", () => {
         const policy: ImWorkspacePolicy = {
             tools: { fsTools: "allow", shell: "deny" },
             commands: { mode: "ask" },
+            executionDir: { mode: "shared" },
         };
         const out = filterToolsForImPolicy(makeTools(false), policy);
         const n = names(out);
@@ -84,6 +87,7 @@ describe("filterToolsForImPolicy", () => {
         const policy: ImWorkspacePolicy = {
             tools: { fsTools: "allow", shell: "allow" },
             commands: { mode: "ask" },
+            executionDir: { mode: "shared" },
         };
         const out = filterToolsForImPolicy(makeTools(false), policy);
         assert.equal(out.length, makeTools(false).length);
@@ -94,6 +98,7 @@ describe("filterToolsForImPolicy", () => {
         const policy: ImWorkspacePolicy = {
             tools: { fsTools: "allow", shell: "allow" },
             commands: { mode: "ask" },
+            executionDir: { mode: "shared" },
         };
         const out = filterToolsForImPolicy(input, policy);
         assert.equal(out, input); // same reference — no copy when nothing dropped

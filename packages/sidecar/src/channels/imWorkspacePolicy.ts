@@ -20,10 +20,13 @@ import {
     type ImCommandPolicy,
     type ImCommandPolicyPatch,
     type ImConversationEntry,
+    type ImExecutionDir,
+    type ImExecutionDirMode,
     type ImPolicyChatOverrideEntry,
     type ImPolicyField,
     type ImPolicyRuleGroup,
     type ImPolicyRulesView,
+    type ImPolicySource,
     type ImPolicySources,
     type ImRoute,
     type ImToolPolicy,
@@ -54,9 +57,15 @@ const log = createLogger("channel:im-policy");
 export const DEFAULT_IM_WORKSPACE_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "deny" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 
 const TOOL_VERDICTS = ["deny", "allow"] as const;
+const EXECUTION_DIR_MODES: ReadonlySet<ImExecutionDirMode> = new Set([
+    "shared",
+    "per-chat",
+    "custom",
+]);
 
 /** Stable full-length sha256 over the wire-format route key. No truncation,
  *  so no collision-disambiguation branch is needed. */
@@ -137,7 +146,29 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
         };
     }
 
-    let binding: ImWorkspacePolicy["binding"] | null;
+    let executionDir: ImExecutionDir | null | undefined;
+    if (raw.executionDir === null) {
+        executionDir = null;
+    } else if (raw.executionDir !== undefined) {
+        if (!isRecord(raw.executionDir)) invalid(source, "executionDir", raw.executionDir);
+        const mode = (raw.executionDir as Record<string, unknown>).mode;
+        if (!EXECUTION_DIR_MODES.has(mode as ImExecutionDirMode))
+            invalid(source, "executionDir.mode", mode);
+        const dirPath = (raw.executionDir as Record<string, unknown>).path;
+        if (mode === "custom") {
+            if (typeof dirPath !== "string" || !path.isAbsolute(dirPath))
+                invalid(
+                    source,
+                    "executionDir.path",
+                    `expected absolute path, got ${JSON.stringify(dirPath)}`,
+                );
+            executionDir = { mode: "custom", path: dirPath };
+        } else {
+            executionDir = { mode: mode as ImExecutionDirMode };
+        }
+    }
+
+    let binding: { executionCwd: string } | null | undefined;
     if (raw.binding === null) {
         binding = null;
     } else if (raw.binding !== undefined) {
@@ -164,6 +195,7 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
     const out: ImWorkspacePolicyPatch = {};
     if (Object.keys(tools).length > 0) out.tools = tools;
     if (Object.keys(commands).length > 0) out.commands = commands;
+    if (executionDir !== undefined) out.executionDir = executionDir;
     if (binding !== undefined) out.binding = binding;
     if (perChatScratch !== undefined) out.perChatScratch = perChatScratch;
     return out;
@@ -208,21 +240,33 @@ export function mergeImWorkspacePolicyPatch(
     }
     if (Object.keys(commands).length > 0) out.commands = commands;
 
-    if (patch.binding === null) {
-        // clear
-    } else if (patch.binding !== undefined) {
-        out.binding = patch.binding;
-    } else if (base.binding !== undefined) {
-        out.binding = base.binding;
+    // The canonical field supersedes the legacy pair: writing it replaces the
+    // layer's working-directory choice outright, clearing it hands the choice
+    // back to the parent layer.
+    if (patch.executionDir !== undefined) {
+        if (patch.executionDir !== null) out.executionDir = patch.executionDir;
+    } else if (base.executionDir !== undefined) {
+        out.executionDir = base.executionDir;
     }
 
-    const perChatScratch =
-        patch.perChatScratch === null
-            ? undefined
-            : patch.perChatScratch !== undefined
-              ? patch.perChatScratch
-              : base.perChatScratch;
-    if (perChatScratch !== undefined) out.perChatScratch = perChatScratch;
+    if (patch.executionDir === undefined) {
+        if (patch.binding === null) {
+            // clear
+        } else if (patch.binding !== undefined) {
+            out.binding = patch.binding;
+        } else if (base.binding !== undefined) {
+            out.binding = base.binding;
+        }
+
+        const perChatScratch =
+            patch.perChatScratch === null
+                ? undefined
+                : patch.perChatScratch !== undefined
+                  ? patch.perChatScratch
+                  : base.perChatScratch;
+        if (perChatScratch !== undefined) out.perChatScratch = perChatScratch;
+    }
+
     return out;
 }
 
@@ -253,17 +297,54 @@ export function mergeImWorkspacePolicy(
             ...(allow.length > 0 ? { allow } : {}),
             ...(deny.length > 0 ? { deny } : {}),
         },
-        ...(patch.binding !== undefined && patch.binding !== null
-            ? { binding: patch.binding }
-            : base.binding !== undefined
-              ? { binding: base.binding }
-              : {}),
-        ...(patch.perChatScratch !== undefined && patch.perChatScratch !== null
-            ? { perChatScratch: patch.perChatScratch }
-            : base.perChatScratch !== undefined
-              ? { perChatScratch: base.perChatScratch }
-              : {}),
+        executionDir:
+            patch.executionDir !== undefined && patch.executionDir !== null
+                ? patch.executionDir
+                : base.executionDir,
     };
+}
+
+/**
+ * The working directory a single layer asks for, ignoring the parent.
+ *
+ * The canonical `executionDir` wins. The legacy `binding` / `perChatScratch`
+ * pair is only consulted for policy files written before the merge, and
+ * `binding` still outranks `perChatScratch` there because that is how those
+ * files behaved.
+ */
+function deriveLayerExecutionDir(
+    patch: ImWorkspacePolicyPatch,
+): { value: ImExecutionDir; explicit: boolean } | undefined {
+    if (patch.executionDir !== undefined && patch.executionDir !== null) {
+        return { value: patch.executionDir, explicit: true };
+    }
+    if (patch.binding && path.isAbsolute(patch.binding.executionCwd)) {
+        return { value: { mode: "custom", path: patch.binding.executionCwd }, explicit: false };
+    }
+    if (patch.perChatScratch === true) return { value: { mode: "per-chat" }, explicit: false };
+    if (patch.perChatScratch === false) return { value: { mode: "shared" }, explicit: false };
+    return undefined;
+}
+
+/**
+ * Resolve the working directory for one layer.
+ *
+ * `parent` carries the value and the layer that produced it. A legacy
+ * `perChatScratch` on a child layer is inert when an ancestor already pinned
+ * a custom directory — that was the old runtime rule, and keeping it means
+ * existing policy files keep behaving exactly as before.
+ */
+function resolveLayerExecutionDir(
+    patch: ImWorkspacePolicyPatch,
+    parent: { value: ImExecutionDir; source: ImPolicySource },
+    source: ImPolicySource,
+): { value: ImExecutionDir; source: ImPolicySource } {
+    const derived = deriveLayerExecutionDir(patch);
+    if (!derived) return parent;
+    if (!derived.explicit && parent.value.mode === "custom" && derived.value.mode !== "custom") {
+        return parent;
+    }
+    return { value: derived.value, source };
 }
 
 function dedupeRules(rules: readonly CommandPermissionRule[]): CommandPermissionRule[] {
@@ -286,12 +367,15 @@ function mergeDocumentLayers(raw: unknown, route: ImRoute | null): ImWorkspacePo
     }
     const doc = raw as ImWorkspacePolicyDocument;
     let policy = DEFAULT_IM_WORKSPACE_POLICY;
+    let dir: { value: ImExecutionDir; source: ImPolicySource } = {
+        value: DEFAULT_IM_WORKSPACE_POLICY.executionDir,
+        source: "default",
+    };
     if (doc.default !== undefined) {
         try {
-            policy = mergeImWorkspacePolicy(
-                policy,
-                validatePartial(doc.default, "channel-default"),
-            );
+            const patch = validatePartial(doc.default, "channel-default");
+            dir = resolveLayerExecutionDir(patch, dir, "channel");
+            policy = mergeImWorkspacePolicy(policy, { ...patch, executionDir: dir.value });
         } catch (e) {
             log.warn(
                 `im policy channel-default invalid ${route ? `for ${route.channelId}` : ""}, using DEFAULT for this layer: ${e}`,
@@ -302,10 +386,9 @@ function mergeDocumentLayers(raw: unknown, route: ImRoute | null): ImWorkspacePo
         const chatOverride = doc.chats?.[chatPolicyKey(route)];
         if (chatOverride !== undefined) {
             try {
-                policy = mergeImWorkspacePolicy(
-                    policy,
-                    validatePartial(chatOverride, "chat-override"),
-                );
+                const patch = validatePartial(chatOverride, "chat-override");
+                const chatDir = resolveLayerExecutionDir(patch, dir, "chat");
+                policy = mergeImWorkspacePolicy(policy, { ...patch, executionDir: chatDir.value });
             } catch (e) {
                 log.warn(
                     `im policy chat-override invalid for ${route.channelId}/${route.chatId}, using parent layer only: ${e}`,
@@ -373,13 +456,35 @@ export function describeImPolicySources(raw: unknown, route: ImRoute | null): Im
         return { value: fallback, source: "default" };
     };
 
+    const dir = resolveExecutionDirChain(channel, chat);
+
     return {
         fsTools: pick(chat?.tools?.fsTools, channel.tools?.fsTools, "deny"),
         shell: pick(chat?.tools?.shell, channel.tools?.shell, "deny"),
         commandMode: pick(chat?.commands?.mode, channel.commands?.mode, "ask"),
-        perChatScratch: pick(chat?.perChatScratch, channel.perChatScratch, false),
-        executionCwd: pick(chat?.binding?.executionCwd, channel.binding?.executionCwd, undefined),
+        executionDir: { value: dir.value, source: dir.source },
     };
+}
+
+/**
+ * Walk the channel and chat layers and decide which one owns the working
+ * directory. The chat layer wins when it sets the field; a legacy
+ * `perChatScratch` there stays inert when the channel already pinned a
+ * custom directory.
+ */
+function resolveExecutionDirChain(
+    channel: ImWorkspacePolicyPatch,
+    chat: ImWorkspacePolicyPatch | null,
+): { value: ImExecutionDir; source: ImPolicySource } {
+    let dir = resolveLayerExecutionDir(
+        channel,
+        { value: DEFAULT_IM_WORKSPACE_POLICY.executionDir, source: "default" },
+        "channel",
+    );
+    if (chat) {
+        dir = resolveLayerExecutionDir(chat, dir, "chat");
+    }
+    return dir;
 }
 
 /**
@@ -418,6 +523,81 @@ export function describeImPolicyRules(
         return out;
     };
     return { allow: groups("allow"), deny: groups("deny") };
+}
+
+/**
+ * Rewrite a policy document into the canonical shape: every layer's working
+ * directory becomes a single `executionDir`, and the legacy `binding` /
+ * `perChatScratch` fields are dropped.
+ *
+ * A legacy `perChatScratch` on a chat layer is dropped without a replacement
+ * when the channel already pinned a custom directory — that combination was
+ * inert under the old runtime rules, and turning it into an explicit choice
+ * would silently move where that chat's tools run.
+ */
+export function normalizePolicyDocument(raw: unknown): ImWorkspacePolicyDocument {
+    if (!isRecord(raw)) return {};
+    const doc = raw as ImWorkspacePolicyDocument;
+    const out: ImWorkspacePolicyDocument = {};
+
+    const channel = normalizeLayerPatch(doc.default);
+    if (channel !== undefined) out.default = channel;
+
+    let channelDir: { value: ImExecutionDir; source: ImPolicySource } = {
+        value: DEFAULT_IM_WORKSPACE_POLICY.executionDir,
+        source: "default",
+    };
+    if (doc.default !== undefined) {
+        const patch = safeValidatePartial(doc.default, "channel-default");
+        if (patch) {
+            channelDir = resolveLayerExecutionDir(patch, channelDir, "channel");
+        }
+    }
+
+    const chats: Record<string, ImWorkspacePolicyPatch> = {};
+    for (const [key, rawPatch] of Object.entries(doc.chats ?? {})) {
+        const normalized = normalizeLayerPatch(rawPatch, channelDir);
+        if (normalized !== undefined) chats[key] = normalized;
+    }
+    if (Object.keys(chats).length > 0) out.chats = chats;
+    return out;
+}
+
+function normalizeLayerPatch(
+    raw: unknown,
+    ancestorDir?: { value: ImExecutionDir; source: ImPolicySource },
+): ImWorkspacePolicyPatch | undefined {
+    if (!isRecord(raw)) return undefined;
+    const patch = safeValidatePartial(raw, "normalize");
+    if (!patch) return undefined;
+
+    const out: ImWorkspacePolicyPatch = { ...patch };
+    if (patch.executionDir === undefined) {
+        const derived = deriveLayerExecutionDir(patch);
+        if (derived) {
+            const inert =
+                !derived.explicit &&
+                ancestorDir?.value.mode === "custom" &&
+                derived.value.mode !== "custom";
+            if (!inert) out.executionDir = derived.value;
+        }
+    } else if (patch.executionDir === null) {
+        // "cleared at this layer" and "not set at this layer" mean the same
+        // thing once stored, so keep only the absent form.
+        delete out.executionDir;
+    }
+    delete out.binding;
+    delete out.perChatScratch;
+    return out;
+}
+
+function safeValidatePartial(raw: unknown, source: string): ImWorkspacePolicyPatch | undefined {
+    try {
+        return validatePartial(raw, source);
+    } catch (e) {
+        log.warn(`im policy layer invalid while normalizing (${source}): ${String(e)}`);
+        return undefined;
+    }
 }
 
 /**

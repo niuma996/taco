@@ -11,10 +11,12 @@ import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 const DEFAULT_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "deny" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 const SHELL_ALLOW_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "allow" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 
 function makeRuntime(

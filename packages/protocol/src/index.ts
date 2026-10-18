@@ -131,6 +131,8 @@ export {
 export type {
     ImCommandPolicy,
     ImCommandPolicyPatch,
+    ImExecutionDir,
+    ImExecutionDirMode,
     ImPolicyChatOverrideEntry,
     ImPolicyClearChatOverrideParams,
     ImPolicyField,

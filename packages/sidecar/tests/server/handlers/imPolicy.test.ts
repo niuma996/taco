@@ -36,6 +36,7 @@ function fakeImPolicy(overrides: Partial<ImPolicyControl> = {}): {
                 resolved: {
                     tools: { fsTools: "deny", shell: "deny" },
                     commands: { mode: "ask" },
+                    executionDir: { mode: "shared" },
                 },
                 chatOverride: null,
                 hasOverride: false,
@@ -44,8 +45,7 @@ function fakeImPolicy(overrides: Partial<ImPolicyControl> = {}): {
                     fsTools: { value: "deny", source: "default" },
                     shell: { value: "deny", source: "default" },
                     commandMode: { value: "ask", source: "default" },
-                    perChatScratch: { value: false, source: "default" },
-                    executionCwd: { value: undefined, source: "default" },
+                    executionDir: { value: { mode: "shared" }, source: "default" },
                 },
                 rules: { allow: [], deny: [] },
             };
@@ -86,6 +86,7 @@ describe("imPolicy.get", () => {
             resolved: {
                 tools: { fsTools: "deny", shell: "deny" },
                 commands: { mode: "ask" },
+                executionDir: { mode: "shared" },
             },
             chatOverride: null,
             hasOverride: false,
@@ -94,8 +95,7 @@ describe("imPolicy.get", () => {
                 fsTools: { value: "deny", source: "default" },
                 shell: { value: "deny", source: "default" },
                 commandMode: { value: "ask", source: "default" },
-                perChatScratch: { value: false, source: "default" },
-                executionCwd: { value: undefined, source: "default" },
+                executionDir: { value: { mode: "shared" }, source: "default" },
             },
             rules: { allow: [], deny: [] },
         });

@@ -8,6 +8,7 @@ import {
     describeImPolicyRules,
     describeImPolicySources,
     mergeImWorkspacePolicyPatch,
+    normalizePolicyDocument,
     resolveChannelDefaultFromDocument,
     resolveImWorkspacePolicyFromDocument,
     validateImWorkspacePolicy,
@@ -33,19 +34,19 @@ describe("imWorkspacePolicy", () => {
             chats: {
                 [chatPolicyKey(ROUTE)]: {
                     tools: { fsTools: "allow" as const, shell: "allow" as const },
-                    perChatScratch: true,
+                    executionDir: { mode: "per-chat" as const },
                 },
             },
         };
         const resolved = resolveImWorkspacePolicyFromDocument(doc, ROUTE);
         assert.equal(resolved.tools.shell, "allow");
         assert.equal(resolved.tools.fsTools, "allow");
-        assert.equal(resolved.perChatScratch, true);
+        assert.deepEqual(resolved.executionDir, { mode: "per-chat" });
         // A different chat on the same channel only sees the channel default.
         const other = resolveImWorkspacePolicyFromDocument(doc, { ...ROUTE, chatId: "c2" });
         assert.equal(other.tools.shell, "allow");
         assert.equal(other.tools.fsTools, "deny");
-        assert.equal(other.perChatScratch, undefined);
+        assert.deepEqual(other.executionDir, { mode: "shared" });
     });
 
     it("fails closed to defaults when the document is corrupt", () => {
@@ -92,15 +93,23 @@ describe("imWorkspacePolicy", () => {
         assert.throws(() => validateImWorkspacePolicy({ commands: { mode: "yolo" } }, "t"), /mode/);
     });
 
-    it("validate requires an absolute binding path", () => {
+    it("validate requires an absolute path for a custom execution directory", () => {
         assert.throws(
-            () => validateImWorkspacePolicy({ binding: { executionCwd: "rel/path" } }, "t"),
+            () =>
+                validateImWorkspacePolicy(
+                    { executionDir: { mode: "custom", path: "rel/path" } },
+                    "t",
+                ),
             /absolute/,
         );
-        assert.equal(
-            validateImWorkspacePolicy({ binding: { executionCwd: "/tmp/ws" } }, "t").binding
-                ?.executionCwd,
-            "/tmp/ws",
+        assert.throws(
+            () => validateImWorkspacePolicy({ executionDir: { mode: "nope" } }, "t"),
+            /executionDir/,
+        );
+        assert.deepEqual(
+            validateImWorkspacePolicy({ executionDir: { mode: "custom", path: "/tmp/ws" } }, "t")
+                .executionDir,
+            { mode: "custom", path: "/tmp/ws" },
         );
     });
 
@@ -247,7 +256,7 @@ describe("imWorkspacePolicy", () => {
             chats: {
                 [chatPolicyKey(ROUTE)]: {
                     perChatScratch: true,
-                    binding: { executionCwd: "/tmp/chat" },
+                    executionDir: { mode: "custom", path: "/tmp/chat" },
                 },
             },
         };
@@ -256,13 +265,90 @@ describe("imWorkspacePolicy", () => {
         assert.deepEqual(channelSources.shell, { value: "allow", source: "channel" });
         assert.deepEqual(channelSources.fsTools, { value: "deny", source: "default" });
         assert.deepEqual(channelSources.commandMode, { value: "ask", source: "default" });
-        assert.deepEqual(channelSources.perChatScratch, { value: false, source: "default" });
-        assert.deepEqual(channelSources.executionCwd, { value: undefined, source: "default" });
+        assert.deepEqual(channelSources.executionDir, {
+            value: { mode: "shared" },
+            source: "default",
+        });
 
         const chatSources = describeImPolicySources(doc, ROUTE);
         assert.deepEqual(chatSources.shell, { value: "allow", source: "channel" });
-        assert.deepEqual(chatSources.perChatScratch, { value: true, source: "chat" });
-        assert.deepEqual(chatSources.executionCwd, { value: "/tmp/chat", source: "chat" });
+        assert.deepEqual(chatSources.executionDir, {
+            value: { mode: "custom", path: "/tmp/chat" },
+            source: "chat",
+        });
+    });
+
+    it("derives the working directory from legacy binding and perChatScratch fields", () => {
+        const legacyBinding = resolveImWorkspacePolicyFromDocument(
+            { default: { binding: { executionCwd: "/tmp/project" } } },
+            ROUTE,
+        );
+        assert.deepEqual(legacyBinding.executionDir, {
+            mode: "custom",
+            path: "/tmp/project",
+        });
+
+        const legacyScratch = resolveImWorkspacePolicyFromDocument(
+            { default: { perChatScratch: true } },
+            ROUTE,
+        );
+        assert.deepEqual(legacyScratch.executionDir, { mode: "per-chat" });
+    });
+
+    // The old runtime let a channel-level binding win over a chat's
+    // perChatScratch flag. Keeping that means existing policy files behave
+    // exactly as before after the migration.
+    it("keeps a legacy perChatScratch inert when the channel pinned a directory", () => {
+        const doc = {
+            default: { binding: { executionCwd: "/tmp/project" } },
+            chats: { [chatPolicyKey(ROUTE)]: { perChatScratch: true } },
+        };
+        const resolved = resolveImWorkspacePolicyFromDocument(doc, ROUTE);
+        assert.deepEqual(resolved.executionDir, { mode: "custom", path: "/tmp/project" });
+    });
+
+    it("lets a chat override a channel directory with the canonical field", () => {
+        const doc = {
+            default: { executionDir: { mode: "custom" as const, path: "/tmp/project" } },
+            chats: { [chatPolicyKey(ROUTE)]: { executionDir: { mode: "per-chat" as const } } },
+        };
+        const resolved = resolveImWorkspacePolicyFromDocument(doc, ROUTE);
+        assert.deepEqual(resolved.executionDir, { mode: "per-chat" });
+    });
+
+    it("reports which layer owns the working directory", () => {
+        const doc = {
+            default: { executionDir: { mode: "shared" as const } },
+            chats: { [chatPolicyKey(ROUTE)]: { executionDir: { mode: "per-chat" as const } } },
+        };
+        assert.deepEqual(describeImPolicySources(doc, null).executionDir, {
+            value: { mode: "shared" },
+            source: "channel",
+        });
+        assert.deepEqual(describeImPolicySources(doc, ROUTE).executionDir, {
+            value: { mode: "per-chat" },
+            source: "chat",
+        });
+    });
+
+    it("normalizes legacy fields into the canonical execution directory", () => {
+        const normalized = normalizePolicyDocument({
+            default: { binding: { executionCwd: "/tmp/project" } },
+            chats: { [chatPolicyKey(ROUTE)]: { perChatScratch: true } },
+        });
+        assert.deepEqual(normalized.default, {
+            executionDir: { mode: "custom", path: "/tmp/project" },
+        });
+        // The chat's legacy flag was inert under the channel binding, so it
+        // disappears instead of silently becoming an explicit choice.
+        assert.deepEqual(normalized.chats?.[chatPolicyKey(ROUTE)], {});
+    });
+
+    it("normalizes a legacy perChatScratch into an explicit per-chat directory", () => {
+        const normalized = normalizePolicyDocument({
+            default: { perChatScratch: true },
+        });
+        assert.deepEqual(normalized.default, { executionDir: { mode: "per-chat" } });
     });
 
     it("groups rules by contributing layer and marks only the edited layer editable", () => {

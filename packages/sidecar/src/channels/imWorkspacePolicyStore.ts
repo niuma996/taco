@@ -24,6 +24,7 @@ import {
     type ImWorkspacePolicyDocument,
     type ImWorkspacePolicyPatch,
     mergeImWorkspacePolicyPatch,
+    normalizePolicyDocument,
     resolveImWorkspacePolicyFromDocument,
     validatePartial,
 } from "./imWorkspacePolicy.ts";
@@ -77,10 +78,14 @@ export class ImWorkspacePolicyStore {
      */
     async setChannelDefault(channelId: string, patch: ImWorkspacePolicyPatch): Promise<void> {
         validatePartial(patch, `channel-default:${channelId}`);
-        const doc = this.patchDocument(channelId, (d) => ({
-            ...d,
-            default: mergeImWorkspacePolicyPatch(d.default ?? {}, patch),
-        }));
+        const doc = this.patchDocument(channelId, (d) =>
+            // Normalizing here migrates any legacy `binding` / `perChatScratch`
+            // layers to the canonical `executionDir` in the same write.
+            normalizePolicyDocument({
+                ...d,
+                default: mergeImWorkspacePolicyPatch(d.default ?? {}, patch),
+            }),
+        );
         await this.persist(channelId, doc);
     }
 
@@ -88,13 +93,15 @@ export class ImWorkspacePolicyStore {
     async setChatOverride(route: ImRoute, patch: ImWorkspacePolicyPatch): Promise<void> {
         validatePartial(patch, `chat-override:${route.channelId}`);
         const key = chatPolicyKey(route);
-        const doc = this.patchDocument(route.channelId, (d) => ({
-            ...d,
-            chats: {
-                ...(d.chats ?? {}),
-                [key]: mergeImWorkspacePolicyPatch(d.chats?.[key] ?? {}, patch),
-            },
-        }));
+        const doc = this.patchDocument(route.channelId, (d) =>
+            normalizePolicyDocument({
+                ...d,
+                chats: {
+                    ...(d.chats ?? {}),
+                    [key]: mergeImWorkspacePolicyPatch(d.chats?.[key] ?? {}, patch),
+                },
+            }),
+        );
         await this.persist(route.channelId, doc);
     }
 

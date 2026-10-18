@@ -10,6 +10,7 @@ const ROUTE = { channelId: "wechat", peerId: "u1", chatId: "c1" };
 const DEFAULT_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "deny" },
     commands: { mode: "ask" },
+    executionDir: { mode: "shared" },
 };
 
 describe("resolveImExecutionCwd", () => {
@@ -25,12 +26,12 @@ describe("resolveImExecutionCwd", () => {
         assert.equal(out.warning, undefined);
     });
 
-    it("perChatScratch isolates to a per-chat dir and creates it", () => {
+    it("per-chat mode isolates to a per-chat dir and creates it", () => {
         const home = mkdtempSync(join(tmpdir(), "im-exec-"));
         const out = resolveImExecutionCwd({
             sessionsRoot: join(home, "sessions", "im", "wechat"),
             route: ROUTE,
-            policy: { ...DEFAULT_POLICY, perChatScratch: true },
+            policy: { ...DEFAULT_POLICY, executionDir: { mode: "per-chat" } },
         });
         assert.equal(out.shared, false);
         assert.ok(out.executionCwd.includes("chats"));
@@ -39,7 +40,7 @@ describe("resolveImExecutionCwd", () => {
         assert.ok(existsSync(out.executionCwd));
     });
 
-    it("a valid writable binding wins over perChatScratch", () => {
+    it("a custom directory is used as-is", () => {
         const home = mkdtempSync(join(tmpdir(), "im-exec-"));
         const bound = mkdtempSync(join(tmpdir(), "im-bound-"));
         const out = resolveImExecutionCwd({
@@ -47,35 +48,34 @@ describe("resolveImExecutionCwd", () => {
             route: ROUTE,
             policy: {
                 ...DEFAULT_POLICY,
-                perChatScratch: true,
-                binding: { executionCwd: bound },
+                executionDir: { mode: "custom", path: bound },
             },
         });
         assert.equal(out.executionCwd, bound);
         assert.equal(out.shared, false);
     });
 
-    it("a binding pointing at a file falls back to the shared scratch with a warning", () => {
+    it("a custom directory pointing at a file falls back to the shared scratch with a warning", () => {
         const home = mkdtempSync(join(tmpdir(), "im-exec-"));
         const file = join(home, "not-a-dir");
         writeFileSync(file, "x");
         const out = resolveImExecutionCwd({
             sessionsRoot: join(home, "sessions", "im", "wechat"),
             route: ROUTE,
-            policy: { ...DEFAULT_POLICY, binding: { executionCwd: file } },
+            policy: { ...DEFAULT_POLICY, executionDir: { mode: "custom", path: file } },
         });
         assert.equal(out.shared, true);
         assert.ok(out.warning);
         assert.ok(out.warning.includes(file));
     });
 
-    it("a binding pointing at a nonexistent path falls back with a warning", () => {
+    it("a custom directory pointing at a nonexistent path falls back with a warning", () => {
         const home = mkdtempSync(join(tmpdir(), "im-exec-"));
         const missing = join(home, "no", "such", "dir");
         const out = resolveImExecutionCwd({
             sessionsRoot: join(home, "sessions", "im", "wechat"),
             route: ROUTE,
-            policy: { ...DEFAULT_POLICY, binding: { executionCwd: missing } },
+            policy: { ...DEFAULT_POLICY, executionDir: { mode: "custom", path: missing } },
         });
         assert.equal(out.shared, true);
         assert.ok(out.warning);
