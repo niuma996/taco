@@ -86,9 +86,8 @@ interface ResolvedDeps {
  * stdio entry point and the daemon-mode socket entry point — both code paths
  * need the same shared state, only the transport binding differs.
  */
-async function resolveDeps(): Promise<ResolvedDeps> {
-    const args = parseArgs();
-    const cfg = resolveConfig({
+function resolveCliConfig(args: ReturnType<typeof parseArgs>): ReturnType<typeof resolveConfig> {
+    return resolveConfig({
         defaultModel: args["default-model"],
         sessionsRoot: args["sessions-root"],
         systemPrompt: args["system-prompt"],
@@ -96,6 +95,11 @@ async function resolveDeps(): Promise<ResolvedDeps> {
         anthropicApiKey: args["anthropic-api-key"],
         openaiApiKey: args["openai-api-key"],
     });
+}
+
+async function resolveDeps(): Promise<ResolvedDeps> {
+    const args = parseArgs();
+    const cfg = resolveCliConfig(args);
     const providerKeyStore = new ProviderKeyStore(cfg.apiKeys ?? {});
     const extensionRegistry = await loadExtensions({
         extensions: cfg.extensions ?? [],
@@ -461,6 +465,20 @@ async function runDaemon(
             pushLog,
         };
 
+        const currentSharedDeps = () => {
+            try {
+                return {
+                    ...sharedDeps,
+                    ...toSharedSidecarDeps({ ...deps, cfg: resolveCliConfig(deps.args) }),
+                };
+            } catch (err) {
+                log.warn(
+                    `config re-read failed, using boot config for this connection: ${String(err)}`,
+                );
+                return sharedDeps;
+            }
+        };
+
         // Stale-socket cleanup before we try to bind. A previous daemon that
         // crashed (kill -9 / power loss) leaves the socket file on disk; bind()
         // would fail with EADDRINUSE forever. probeNdjsonSocket → "stale" means
@@ -473,7 +491,10 @@ async function runDaemon(
 
         ndjsonServer = createNetServer((socket: Socket) => {
             const transport = new StdioTransport(socket, socket);
-            const started = startServer(sharedDeps, transport);
+            // Re-resolve config per connection: settings.write only reaches
+            // servers that already exist, so boot-time catalog fields would
+            // make a reconnecting desktop save a stale model list back to disk.
+            const started = startServer(currentSharedDeps(), transport);
             started.ready.catch((err) => {
                 log.error(`connection failed to start: ${err?.stack ?? err}`);
                 socket.destroy();
