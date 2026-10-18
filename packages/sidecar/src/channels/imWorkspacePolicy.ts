@@ -18,10 +18,16 @@ import {
     type CommandPermissionMode,
     type CommandPermissionRule,
     type ImCommandPolicy,
+    type ImCommandPolicyPatch,
     type ImConversationEntry,
     type ImPolicyChatOverrideEntry,
+    type ImPolicyField,
+    type ImPolicyRuleGroup,
+    type ImPolicyRulesView,
+    type ImPolicySources,
     type ImRoute,
     type ImToolPolicy,
+    type ImToolPolicyPatch,
     type ImWorkspacePolicy,
     type ImWorkspacePolicyDocument,
     type ImWorkspacePolicyPatch,
@@ -72,8 +78,9 @@ function validateCommandRules(
     raw: unknown,
     source: string,
     field: "allow" | "deny",
-): CommandPermissionRule[] | undefined {
+): CommandPermissionRule[] | null | undefined {
     if (raw === undefined) return undefined;
+    if (raw === null) return null;
     if (!Array.isArray(raw)) invalid(source, `commands.${field}`, raw);
     const rules: CommandPermissionRule[] = [];
     for (const item of raw) {
@@ -89,34 +96,40 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
     if (raw === undefined) return {};
     if (!isRecord(raw)) invalid(source, "root", raw);
 
-    let tools: Partial<ImToolPolicy> = {};
+    let tools: ImToolPolicyPatch = {};
     if (raw.tools !== undefined) {
         if (!isRecord(raw.tools)) invalid(source, "tools", raw.tools);
         const t = raw.tools as Record<string, unknown>;
-        if (
-            t.fsTools !== undefined &&
-            !(TOOL_VERDICTS as readonly string[]).includes(String(t.fsTools))
-        )
-            invalid(source, "tools.fsTools", t.fsTools);
-        if (
-            t.shell !== undefined &&
-            !(TOOL_VERDICTS as readonly string[]).includes(String(t.shell))
-        )
-            invalid(source, "tools.shell", t.shell);
+        const verdict = (
+            field: "fsTools" | "shell",
+        ): ImToolPolicy["fsTools"] | null | undefined => {
+            const value = t[field];
+            if (value === undefined) return undefined;
+            if (value === null) return null;
+            if (!(TOOL_VERDICTS as readonly string[]).includes(String(value)))
+                invalid(source, `tools.${field}`, value);
+            return value as ImToolPolicy["fsTools"];
+        };
+        const fsTools = verdict("fsTools");
+        const shell = verdict("shell");
         tools = {
-            ...(t.fsTools === undefined ? {} : { fsTools: t.fsTools as ImToolPolicy["fsTools"] }),
-            ...(t.shell === undefined ? {} : { shell: t.shell as ImToolPolicy["shell"] }),
+            ...(fsTools === undefined ? {} : { fsTools }),
+            ...(shell === undefined ? {} : { shell }),
         };
     }
 
-    let commands: Partial<ImCommandPolicy> = {};
+    let commands: ImCommandPolicyPatch = {};
     if (raw.commands !== undefined) {
         if (!isRecord(raw.commands)) invalid(source, "commands", raw.commands);
         const c = raw.commands as Record<string, unknown>;
-        if (c.mode !== undefined && !COMMAND_PERMISSION_MODES.has(c.mode as CommandPermissionMode))
+        if (
+            c.mode !== undefined &&
+            c.mode !== null &&
+            !COMMAND_PERMISSION_MODES.has(c.mode as CommandPermissionMode)
+        )
             invalid(source, "commands.mode", c.mode);
         commands = {
-            ...(c.mode === undefined ? {} : { mode: c.mode as ImCommandPolicy["mode"] }),
+            ...(c.mode === undefined ? {} : { mode: c.mode as ImCommandPolicy["mode"] | null }),
             ...(c.allow === undefined
                 ? {}
                 : { allow: validateCommandRules(c.allow, source, "allow") }),
@@ -124,8 +137,10 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
         };
     }
 
-    let binding: ImWorkspacePolicy["binding"];
-    if (raw.binding !== undefined) {
+    let binding: ImWorkspacePolicy["binding"] | null;
+    if (raw.binding === null) {
+        binding = null;
+    } else if (raw.binding !== undefined) {
         if (!isRecord(raw.binding)) invalid(source, "binding", raw.binding);
         const executionCwd = (raw.binding as Record<string, unknown>).executionCwd;
         if (typeof executionCwd !== "string" || !path.isAbsolute(executionCwd))
@@ -137,8 +152,10 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
         binding = { executionCwd };
     }
 
-    let perChatScratch: boolean | undefined;
-    if (raw.perChatScratch !== undefined) {
+    let perChatScratch: boolean | null | undefined;
+    if (raw.perChatScratch === null) {
+        perChatScratch = null;
+    } else if (raw.perChatScratch !== undefined) {
         if (typeof raw.perChatScratch !== "boolean")
             invalid(source, "perChatScratch", raw.perChatScratch);
         perChatScratch = raw.perChatScratch;
@@ -147,7 +164,7 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
     const out: ImWorkspacePolicyPatch = {};
     if (Object.keys(tools).length > 0) out.tools = tools;
     if (Object.keys(commands).length > 0) out.commands = commands;
-    if (binding) out.binding = binding;
+    if (binding !== undefined) out.binding = binding;
     if (perChatScratch !== undefined) out.perChatScratch = perChatScratch;
     return out;
 }
@@ -169,13 +186,42 @@ export function mergeImWorkspacePolicyPatch(
     patch: ImWorkspacePolicyPatch,
 ): ImWorkspacePolicyPatch {
     const out: ImWorkspacePolicyPatch = {};
-    const tools = { ...base.tools, ...patch.tools };
+    const tools: ImToolPolicyPatch = { ...base.tools };
+    for (const field of ["fsTools", "shell"] as const) {
+        const value = patch.tools?.[field];
+        if (value === undefined) continue;
+        if (value === null) delete tools[field];
+        else tools[field] = value;
+    }
     if (Object.keys(tools).length > 0) out.tools = tools;
-    const commands = { ...base.commands, ...patch.commands };
+
+    const commands: ImCommandPolicyPatch = { ...base.commands };
+    if (patch.commands?.mode !== undefined) {
+        if (patch.commands.mode === null) delete commands.mode;
+        else commands.mode = patch.commands.mode;
+    }
+    for (const field of ["allow", "deny"] as const) {
+        const value = patch.commands?.[field];
+        if (value === undefined) continue;
+        if (value === null) delete commands[field];
+        else commands[field] = value;
+    }
     if (Object.keys(commands).length > 0) out.commands = commands;
-    const binding = patch.binding ?? base.binding;
-    if (binding !== undefined) out.binding = binding;
-    const perChatScratch = patch.perChatScratch ?? base.perChatScratch;
+
+    if (patch.binding === null) {
+        // clear
+    } else if (patch.binding !== undefined) {
+        out.binding = patch.binding;
+    } else if (base.binding !== undefined) {
+        out.binding = base.binding;
+    }
+
+    const perChatScratch =
+        patch.perChatScratch === null
+            ? undefined
+            : patch.perChatScratch !== undefined
+              ? patch.perChatScratch
+              : base.perChatScratch;
     if (perChatScratch !== undefined) out.perChatScratch = perChatScratch;
     return out;
 }
@@ -186,20 +232,42 @@ export function mergeImWorkspacePolicy(
     base: ImWorkspacePolicy,
     patch: ImWorkspacePolicyPatch,
 ): ImWorkspacePolicy {
+    const allow = dedupeRules([...(base.commands.allow ?? []), ...(patch.commands?.allow ?? [])]);
+    const deny = dedupeRules([...(base.commands.deny ?? []), ...(patch.commands?.deny ?? [])]);
+    const fsTools =
+        patch.tools?.fsTools === undefined || patch.tools.fsTools === null
+            ? base.tools.fsTools
+            : patch.tools.fsTools;
+    const shell =
+        patch.tools?.shell === undefined || patch.tools.shell === null
+            ? base.tools.shell
+            : patch.tools.shell;
+    const mode =
+        patch.commands?.mode === undefined || patch.commands.mode === null
+            ? base.commands.mode
+            : patch.commands.mode;
     return {
-        tools: { ...base.tools, ...patch.tools },
-        commands: { ...base.commands, ...patch.commands },
-        ...(patch.binding !== undefined
+        tools: { fsTools, shell },
+        commands: {
+            mode,
+            ...(allow.length > 0 ? { allow } : {}),
+            ...(deny.length > 0 ? { deny } : {}),
+        },
+        ...(patch.binding !== undefined && patch.binding !== null
             ? { binding: patch.binding }
             : base.binding !== undefined
               ? { binding: base.binding }
               : {}),
-        ...(patch.perChatScratch !== undefined
+        ...(patch.perChatScratch !== undefined && patch.perChatScratch !== null
             ? { perChatScratch: patch.perChatScratch }
             : base.perChatScratch !== undefined
               ? { perChatScratch: base.perChatScratch }
               : {}),
     };
+}
+
+function dedupeRules(rules: readonly CommandPermissionRule[]): CommandPermissionRule[] {
+    return Array.from(new Set(rules));
 }
 
 /**
@@ -246,6 +314,110 @@ function mergeDocumentLayers(raw: unknown, route: ImRoute | null): ImWorkspacePo
         }
     }
     return policy;
+}
+
+interface PolicyLayerPatches {
+    channel: ImWorkspacePolicyPatch;
+    chat: ImWorkspacePolicyPatch | null;
+}
+
+/**
+ * Read the raw channel/chat patches for display purposes. Each layer is
+ * validated independently: a corrupt layer is ignored instead of blanking
+ * the whole panel, matching the resolver's fail-closed behaviour.
+ */
+function readPolicyLayers(raw: unknown, route: ImRoute | null): PolicyLayerPatches {
+    if (!isRecord(raw)) return { channel: {}, chat: route ? {} : null };
+    const doc = raw as ImWorkspacePolicyDocument;
+    const label = route ? `${route.channelId}/${route.chatId}` : "channel";
+
+    let channel: ImWorkspacePolicyPatch = {};
+    if (doc.default !== undefined) {
+        try {
+            channel = validatePartial(doc.default, `channel-default:${label}`);
+        } catch (e) {
+            log.warn(`im policy channel-default invalid while describing ${label}: ${String(e)}`);
+        }
+    }
+
+    let chat: ImWorkspacePolicyPatch | null = route ? {} : null;
+    if (route) {
+        const rawChat = doc.chats?.[chatPolicyKey(route)];
+        if (rawChat !== undefined) {
+            try {
+                chat = validatePartial(rawChat, `chat-override:${label}`);
+            } catch (e) {
+                log.warn(`im policy chat-override invalid while describing ${label}: ${String(e)}`);
+            }
+        }
+    }
+    return { channel, chat };
+}
+
+/**
+ * Report where each resolved single-value field came from. `route === null`
+ * describes the channel scope; otherwise the chat override wins, then the
+ * channel default, then the built-in default.
+ */
+export function describeImPolicySources(raw: unknown, route: ImRoute | null): ImPolicySources {
+    const { channel, chat } = readPolicyLayers(raw, route);
+    const pick = <T>(
+        chatValue: T | null | undefined,
+        channelValue: T | null | undefined,
+        fallback: T,
+    ): ImPolicyField<T> => {
+        if (chatValue !== undefined && chatValue !== null)
+            return { value: chatValue, source: "chat" };
+        if (channelValue !== undefined && channelValue !== null)
+            return { value: channelValue, source: "channel" };
+        return { value: fallback, source: "default" };
+    };
+
+    return {
+        fsTools: pick(chat?.tools?.fsTools, channel.tools?.fsTools, "deny"),
+        shell: pick(chat?.tools?.shell, channel.tools?.shell, "deny"),
+        commandMode: pick(chat?.commands?.mode, channel.commands?.mode, "ask"),
+        perChatScratch: pick(chat?.perChatScratch, channel.perChatScratch, false),
+        executionCwd: pick(chat?.binding?.executionCwd, channel.binding?.executionCwd, undefined),
+    };
+}
+
+/**
+ * Group allow/deny rules by the layer that contributed them. Inherited
+ * groups are read-only; the current scope's group is the only editable one.
+ */
+export function describeImPolicyRules(
+    raw: unknown,
+    route: ImRoute | null,
+    globalRules: {
+        allow?: readonly CommandPermissionRule[];
+        deny?: readonly CommandPermissionRule[];
+    } = {},
+): ImPolicyRulesView {
+    const { channel, chat } = readPolicyLayers(raw, route);
+    const groups = (field: "allow" | "deny"): ImPolicyRuleGroup[] => {
+        const out: ImPolicyRuleGroup[] = [];
+        const globalList = [...(globalRules[field] ?? [])];
+        if (globalList.length > 0)
+            out.push({ source: "global", rules: globalList, editable: false });
+
+        const channelList = [...(channel.commands?.[field] ?? [])];
+        if (route === null) {
+            out.push({ source: "channel", rules: channelList, editable: true });
+        } else if (channelList.length > 0) {
+            out.push({ source: "channel", rules: channelList, editable: false });
+        }
+
+        if (route !== null) {
+            out.push({
+                source: "chat",
+                rules: [...(chat?.commands?.[field] ?? [])],
+                editable: true,
+            });
+        }
+        return out;
+    };
+    return { allow: groups("allow"), deny: groups("deny") };
 }
 
 /**

@@ -5,6 +5,9 @@ import {
     chatPolicyKey,
     DEFAULT_IM_WORKSPACE_POLICY,
     describeImChatOverrides,
+    describeImPolicyRules,
+    describeImPolicySources,
+    mergeImWorkspacePolicyPatch,
     resolveChannelDefaultFromDocument,
     resolveImWorkspacePolicyFromDocument,
     validateImWorkspacePolicy,
@@ -186,6 +189,107 @@ describe("imWorkspacePolicy", () => {
     it("describeImChatOverrides returns [] for missing chats map", () => {
         assert.deepEqual(describeImChatOverrides({}, "wechat", []), []);
         assert.deepEqual(describeImChatOverrides(undefined, "wechat", []), []);
+    });
+
+    it("appends chat command rules to channel rules instead of replacing them", () => {
+        const doc = {
+            default: {
+                commands: { allow: ["ls"], deny: ["rm -rf *"] },
+            },
+            chats: {
+                [chatPolicyKey(ROUTE)]: {
+                    commands: { allow: ["git status"], deny: ["git push *"] },
+                },
+            },
+        };
+        const resolved = resolveImWorkspacePolicyFromDocument(doc, ROUTE);
+        assert.deepEqual(resolved.commands.allow, ["ls", "git status"]);
+        assert.deepEqual(resolved.commands.deny, ["rm -rf *", "git push *"]);
+    });
+
+    it("deduplicates appended rules across layers", () => {
+        const doc = {
+            default: { commands: { allow: ["ls"] } },
+            chats: { [chatPolicyKey(ROUTE)]: { commands: { allow: ["ls", "pwd"] } } },
+        };
+        assert.deepEqual(resolveImWorkspacePolicyFromDocument(doc, ROUTE).commands.allow, [
+            "ls",
+            "pwd",
+        ]);
+    });
+
+    it("clears a field at the stored layer when the patch value is null", () => {
+        const merged = mergeImWorkspacePolicyPatch(
+            {
+                tools: { shell: "allow" },
+                commands: { mode: "auto", allow: ["ls"] },
+                perChatScratch: true,
+            },
+            {
+                tools: { shell: null },
+                perChatScratch: null,
+            },
+        );
+        assert.deepEqual(merged, { commands: { mode: "auto", allow: ["ls"] } });
+    });
+
+    it("clears a whole binding with null", () => {
+        const merged = mergeImWorkspacePolicyPatch(
+            { binding: { executionCwd: "/tmp/ws" } },
+            { binding: null },
+        );
+        assert.deepEqual(merged, {});
+    });
+
+    it("describes the winning layer for each single-value field", () => {
+        const doc = {
+            default: { tools: { shell: "allow" } },
+            chats: {
+                [chatPolicyKey(ROUTE)]: {
+                    perChatScratch: true,
+                    binding: { executionCwd: "/tmp/chat" },
+                },
+            },
+        };
+
+        const channelSources = describeImPolicySources(doc, null);
+        assert.deepEqual(channelSources.shell, { value: "allow", source: "channel" });
+        assert.deepEqual(channelSources.fsTools, { value: "deny", source: "default" });
+        assert.deepEqual(channelSources.commandMode, { value: "ask", source: "default" });
+        assert.deepEqual(channelSources.perChatScratch, { value: false, source: "default" });
+        assert.deepEqual(channelSources.executionCwd, { value: undefined, source: "default" });
+
+        const chatSources = describeImPolicySources(doc, ROUTE);
+        assert.deepEqual(chatSources.shell, { value: "allow", source: "channel" });
+        assert.deepEqual(chatSources.perChatScratch, { value: true, source: "chat" });
+        assert.deepEqual(chatSources.executionCwd, { value: "/tmp/chat", source: "chat" });
+    });
+
+    it("groups rules by contributing layer and marks only the edited layer editable", () => {
+        const doc = {
+            default: { commands: { allow: ["ls"], deny: [] } },
+            chats: {
+                [chatPolicyKey(ROUTE)]: { commands: { allow: ["git status"] } },
+            },
+        };
+        const globalRules = { allow: ["pnpm test"], deny: ["bash *"] };
+
+        const channelRules = describeImPolicyRules(doc, null, globalRules);
+        assert.deepEqual(channelRules.allow, [
+            { source: "global", rules: ["pnpm test"], editable: false },
+            { source: "channel", rules: ["ls"], editable: true },
+        ]);
+        assert.deepEqual(channelRules.deny, [
+            { source: "global", rules: ["bash *"], editable: false },
+            { source: "channel", rules: [], editable: true },
+        ]);
+
+        const chatRules = describeImPolicyRules(doc, ROUTE, globalRules);
+        assert.deepEqual(chatRules.allow, [
+            { source: "global", rules: ["pnpm test"], editable: false },
+            { source: "channel", rules: ["ls"], editable: false },
+            { source: "chat", rules: ["git status"], editable: true },
+        ]);
     });
 });
 

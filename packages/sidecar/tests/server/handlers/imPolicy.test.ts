@@ -31,6 +31,7 @@ function fakeImPolicy(overrides: Partial<ImPolicyControl> = {}): {
             calls.get.push(params);
             const result: ImPolicyGetResult = {
                 channelId: params.channelId,
+                scope: params.peerId && params.chatId ? "chat" : "channel",
                 channelDefault: {},
                 resolved: {
                     tools: { fsTools: "deny", shell: "deny" },
@@ -39,6 +40,14 @@ function fakeImPolicy(overrides: Partial<ImPolicyControl> = {}): {
                 chatOverride: null,
                 hasOverride: false,
                 overrides: [],
+                sources: {
+                    fsTools: { value: "deny", source: "default" },
+                    shell: { value: "deny", source: "default" },
+                    commandMode: { value: "ask", source: "default" },
+                    perChatScratch: { value: false, source: "default" },
+                    executionCwd: { value: undefined, source: "default" },
+                },
+                rules: { allow: [], deny: [] },
             };
             return result;
         },
@@ -72,6 +81,7 @@ describe("imPolicy.get", () => {
         assert.deepEqual(calls.get, [{ channelId: "wechat" }]);
         assert.deepEqual(result, {
             channelId: "wechat",
+            scope: "channel",
             channelDefault: {},
             resolved: {
                 tools: { fsTools: "deny", shell: "deny" },
@@ -80,6 +90,14 @@ describe("imPolicy.get", () => {
             chatOverride: null,
             hasOverride: false,
             overrides: [],
+            sources: {
+                fsTools: { value: "deny", source: "default" },
+                shell: { value: "deny", source: "default" },
+                commandMode: { value: "ask", source: "default" },
+                perChatScratch: { value: false, source: "default" },
+                executionCwd: { value: undefined, source: "default" },
+            },
+            rules: { allow: [], deny: [] },
         });
     });
 

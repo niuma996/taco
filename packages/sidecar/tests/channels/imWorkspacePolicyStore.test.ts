@@ -3,10 +3,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { DEFAULT_IM_WORKSPACE_POLICY } from "../../src/channels/imWorkspacePolicy.ts";
+import {
+    chatPolicyKey,
+    DEFAULT_IM_WORKSPACE_POLICY,
+} from "../../src/channels/imWorkspacePolicy.ts";
 import { ImWorkspacePolicyStore } from "../../src/channels/imWorkspacePolicyStore.ts";
 
 const ROUTE = { channelId: "wechat", peerId: "u1", chatId: "c1" };
+const chatKey = chatPolicyKey(ROUTE);
 
 let home: string;
 let store: ImWorkspacePolicyStore;
@@ -91,6 +95,26 @@ describe("ImWorkspacePolicyStore", () => {
         await store.clearChatOverride(ROUTE); // idempotent
 
         assert.equal(store.resolve(ROUTE).tools.shell, "allow");
+    });
+
+    it("clears a single field with null and keeps the layer's other overrides", async () => {
+        await store.setChannelDefault("wechat", {
+            tools: { shell: "allow", fsTools: "allow" },
+            commands: { mode: "auto" },
+        });
+        await store.setChatOverride(ROUTE, {
+            tools: { shell: "deny" },
+            perChatScratch: true,
+        });
+
+        await store.setChatOverride(ROUTE, { tools: { shell: null } });
+
+        const resolved = store.resolve(ROUTE);
+        assert.equal(resolved.tools.shell, "allow", "cleared chat field falls back to channel");
+        assert.equal(resolved.tools.fsTools, "allow");
+        assert.equal(resolved.perChatScratch, true, "sibling chat overrides survive");
+        assert.equal(resolved.commands.mode, "auto");
+        assert.deepEqual(store.readDocument("wechat").chats?.[chatKey], { perChatScratch: true });
     });
 
     // Hand-editing the JSON is currently the only way to configure a policy,

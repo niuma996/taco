@@ -43,12 +43,63 @@ export interface ImWorkspacePolicy {
     perChatScratch?: boolean;
 }
 
+/**
+ * Wire-form tool patch. `null` means "remove this field from the current
+ * layer" so the value falls back to the parent layer; `undefined` means
+ * "leave the stored value untouched".
+ */
+export interface ImToolPolicyPatch {
+    fsTools?: ImToolPolicy["fsTools"] | null;
+    shell?: ImToolPolicy["shell"] | null;
+}
+
+/**
+ * Wire-form command patch. `null` clears the field at the current layer.
+ * Rule lists are per-layer additions; the resolver concatenates them with
+ * the parent layers instead of replacing them.
+ */
+export interface ImCommandPolicyPatch {
+    mode?: ImCommandPolicy["mode"] | null;
+    allow?: CommandPermissionRule[] | null;
+    deny?: CommandPermissionRule[] | null;
+}
+
 /** A partial policy — any subset of fields, for channel defaults and chat overrides. */
 export interface ImWorkspacePolicyPatch {
-    tools?: Partial<ImToolPolicy>;
-    commands?: Partial<ImCommandPolicy>;
-    binding?: { executionCwd: string };
-    perChatScratch?: boolean;
+    tools?: ImToolPolicyPatch;
+    commands?: ImCommandPolicyPatch;
+    binding?: { executionCwd: string } | null;
+    perChatScratch?: boolean | null;
+}
+
+/** Layer that supplied a resolved field value. */
+export type ImPolicySource = "default" | "global" | "channel" | "chat";
+
+export interface ImPolicyField<T> {
+    value: T;
+    source: ImPolicySource;
+}
+
+/** One layer's contribution to an allow or deny rule list. */
+export interface ImPolicyRuleGroup {
+    source: "global" | "channel" | "chat";
+    rules: CommandPermissionRule[];
+    /** True only for the layer currently being edited. */
+    editable: boolean;
+}
+
+export interface ImPolicySources {
+    fsTools: ImPolicyField<ImToolPolicy["fsTools"]>;
+    shell: ImPolicyField<ImToolPolicy["shell"]>;
+    commandMode: ImPolicyField<ImCommandPolicy["mode"]>;
+    perChatScratch: ImPolicyField<boolean>;
+    /** `undefined` means "use the scratch directory", not an absolute binding. */
+    executionCwd: ImPolicyField<string | undefined>;
+}
+
+export interface ImPolicyRulesView {
+    allow: ImPolicyRuleGroup[];
+    deny: ImPolicyRuleGroup[];
 }
 
 export interface ImWorkspacePolicyDocument {
@@ -87,6 +138,8 @@ export interface ImPolicyChatOverrideEntry {
 
 export interface ImPolicyGetResult {
     channelId: string;
+    /** Scope the sources/rules below describe. */
+    scope: "channel" | "chat";
     /** Raw stored channel-default patch ({ } when none). */
     channelDefault: ImWorkspacePolicyPatch;
     /**
@@ -100,6 +153,10 @@ export interface ImPolicyGetResult {
     hasOverride: boolean;
     /** All chat overrides for the channel (live + orphan). */
     overrides: ImPolicyChatOverrideEntry[];
+    /** Where each resolved single-value field came from. */
+    sources: ImPolicySources;
+    /** Per-layer rule contributions, inherited groups first. */
+    rules: ImPolicyRulesView;
 }
 
 export interface ImPolicySetChannelDefaultParams {

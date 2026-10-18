@@ -50,6 +50,8 @@ import type { ImRoute, ImWorkspacePolicy } from "../channels/imWorkspacePolicy.t
 import {
     chatPolicyKey,
     describeImChatOverrides,
+    describeImPolicyRules,
+    describeImPolicySources,
     resolveChannelDefaultFromDocument,
 } from "../channels/imWorkspacePolicy.ts";
 import { ImWorkspacePolicyStore } from "../channels/imWorkspacePolicyStore.ts";
@@ -65,6 +67,7 @@ import {
     type ResolvedCompaction,
     readGlobalConfig,
     type SkillDirInput,
+    validateCommandPermissions,
 } from "../config/config.ts";
 import { tacoHome } from "../config/tacoHome.ts";
 import { activateExtensions } from "../extensions/activation.ts";
@@ -1688,13 +1691,30 @@ export class SidecarServer implements ServerRpcSurface {
                       chatId: chatId as string,
                   })
                 : resolveChannelDefaultFromDocument(doc);
+            const route: ImRoute | null = wantsChat
+                ? {
+                      channelId,
+                      peerId: peerId as string,
+                      chatId: chatId as string,
+                  }
+                : null;
+            const commandPermissions = validateCommandPermissions(
+                readGlobalConfig().commandPermissions,
+                "taco.json",
+            );
             return {
                 channelId,
+                scope: wantsChat ? "chat" : "channel",
                 channelDefault: doc.default ?? {},
                 resolved,
                 chatOverride,
                 hasOverride: chatOverride !== null,
                 overrides,
+                sources: describeImPolicySources(doc, route),
+                rules: describeImPolicyRules(doc, route, {
+                    allow: commandPermissions.allow ?? commandPermissions.rules ?? [],
+                    deny: commandPermissions.deny ?? [],
+                }),
             };
         },
         setChannelDefault: (channelId, patch) => this.setImChannelDefault(channelId, patch),
