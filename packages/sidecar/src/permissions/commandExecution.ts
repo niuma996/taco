@@ -33,7 +33,14 @@ export function nestedExecution(argv: readonly string[]): {
                 i++;
             } else if (arg.startsWith("--config-env=") || arg.startsWith("--exec-path="))
                 opaque = true;
-            if (config !== undefined && !/^color\.[^=]+=/.test(config)) {
+            // Allowlist, not denylist: too many keys (pager, fsmonitor, filters,
+            // credential helpers, include.path, ...) can run programs.
+            if (
+                config !== undefined &&
+                !/^(?:color\.[^=]+|advice\.[^=]+|user\.(?:name|email)|protocol\.version|init\.defaultbranch|core\.quotepath)=/i.test(
+                    config,
+                )
+            ) {
                 opaque = true;
                 const value = config.slice(config.indexOf("=") + 1);
                 if (/^alias\./i.test(config) && value.startsWith("!"))
@@ -133,6 +140,8 @@ export function nestedExecution(argv: readonly string[]): {
             "--init",
             "--read-only",
         ]);
+        const shortFlags = new Set("dit");
+        const shortWithValue = new Set("uwevp");
         let entrypoint: string | undefined;
         let i = sub + 1;
         while (argv[i]?.startsWith("-")) {
@@ -142,6 +151,17 @@ export function nestedExecution(argv: readonly string[]): {
             else if (arg && withValue.has(arg)) {
                 if (arg === "--entrypoint") entrypoint = argv[i];
                 i++;
+            } else if (arg && /^-[^-]/.test(arg) && !flags.has(arg)) {
+                // Combined short options (`-it`, `-itu root`) must not hide the
+                // command boundary from the inner-command analysis.
+                for (let index = 1; index < arg.length; index++) {
+                    const flag = arg[index] ?? "";
+                    if (shortWithValue.has(flag)) {
+                        if (index === arg.length - 1) i++;
+                        break;
+                    }
+                    if (!shortFlags.has(flag)) return { opaque: true, complete: false };
+                }
             } else if (arg && !flags.has(arg) && !arg.includes("=")) {
                 return { opaque: true, complete: false };
             }

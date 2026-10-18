@@ -213,3 +213,59 @@ it("requires once-only approval for SSH options that execute commands", () => {
         assert.equal(evaluation.persistentAllowed, false, command);
     }
 });
+
+it("keeps container combined short options from hiding the inner command", () => {
+    for (const command of [
+        "docker exec -it c sudo ls",
+        "docker run -it img sudo ls",
+        "podman exec -it c sudo ls",
+        "docker exec -itu root c sudo ls",
+        "docker exec -itu1000 c sudo ls",
+        "docker run --rm -itp 8080:80 img sudo ls",
+    ]) {
+        assert.equal(
+            evaluateCommand(command, { ...auto, allow: [command] }).behavior,
+            "deny",
+            command,
+        );
+    }
+    for (const command of ["docker exec -it c ls", "docker exec -itu root c ls"]) {
+        assert.equal(
+            evaluateCommand(command, { ...auto, allow: [command] }).behavior,
+            "allow",
+            command,
+        );
+    }
+    const blocked = "docker exec -it c blocked";
+    assert.equal(
+        evaluateCommand(blocked, { ...auto, allow: [blocked], deny: ["blocked"] }).matchedList,
+        "deny",
+    );
+    const unknown = "docker exec -itX c ls";
+    const evaluation = evaluateCommand(unknown, { ...auto, allow: [unknown] });
+    assert.equal(evaluation.behavior, "ask");
+    assert.equal(evaluation.persistentAllowed, false);
+});
+
+it("lets benign git -c keys match wildcard approval while program-running keys stay opaque", () => {
+    const config = { ...auto, allow: ["git *"] };
+    for (const command of [
+        "git -c protocol.version=2 fetch",
+        "git -c user.name=bot -c user.email=bot@example.com commit -m x",
+        "git -c advice.detachedHead=false checkout main",
+        "git -c init.defaultBranch=main init",
+    ]) {
+        assert.equal(evaluateCommand(command, config).behavior, "allow", command);
+    }
+    for (const command of [
+        "git -c core.pager=evil log",
+        "git -c core.fsmonitor=evil status",
+        "git -c core.hooksPath=/tmp/h commit -m x",
+        "git -c credential.helper=evil fetch",
+        "git -c include.path=/tmp/cfg log",
+        "git -c filter.x.smudge=evil checkout .",
+        "git -c user.name.x=evil log",
+    ]) {
+        assert.equal(evaluateCommand(command, config).behavior, "ask", command);
+    }
+});
