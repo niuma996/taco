@@ -42,7 +42,7 @@
     ],
     "externalBin": ["binaries/taco-sidecar-node"],
     "resources": {
-      "generated/sidecar/lib/index.mjs": "sidecar/lib/index.mjs",
+      "generated/sidecar/lib": "sidecar/lib",
       "generated/sidecar/agents": "sidecar/agents",
       "generated/sidecar/skills": "sidecar/skills",
       "generated/sidecar/extensions": "sidecar/extensions",

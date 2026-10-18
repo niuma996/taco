@@ -46,3 +46,15 @@ test("bundled shell parser loads both grammars without a node_modules directory"
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test("desktop bundle ships the whole sidecar lib directory, grammars included", () => {
+    const conf = JSON.parse(
+        readFileSync(
+            new URL("../../../../clients/taco-desktop/src-tauri/tauri.conf.json", import.meta.url),
+            "utf8",
+        ),
+    ) as { bundle: { resources: Record<string, string> } };
+    // Mapping only lib/index.mjs drops lib/grammars/, and the shell parser then
+    // fails closed on every command in the installed app.
+    assert.equal(conf.bundle.resources["generated/sidecar/lib"], "sidecar/lib");
+});

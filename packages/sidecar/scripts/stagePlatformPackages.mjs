@@ -81,8 +81,8 @@ function main() {
             copyFileSync(join(srcDir, "taco-sidecar"), join(binDir, "taco-sidecar"));
         }
 
-        // lib/: bundle + manifest
-        copyFileSync(join(srcDir, "lib", "index.mjs"), join(libDir, "index.mjs"));
+        // lib/: bundle + adjacent shell-parser grammars + manifest
+        cpSync(join(srcDir, "lib"), libDir, { recursive: true });
         copyFileSync(join(srcDir, "manifest.json"), join(outDir, "manifest.json"));
 
         // agents/ + skills/
