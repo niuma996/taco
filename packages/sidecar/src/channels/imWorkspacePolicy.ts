@@ -591,6 +591,34 @@ function normalizeLayerPatch(
     return out;
 }
 
+export const IM_POLICY_DOCUMENT_VERSION = 2 as const;
+
+/**
+ * Before 0.2.11 IM `auto` only auto-passed strict read-only commands (and,
+ * with an `allow` list, refused everything outside it). `auto` now allows
+ * every command outside the deny lists, so reading an old file verbatim
+ * would silently widen it. Every `auto` layer becomes `ask` instead; allow
+ * lists keep auto-passing, and chat layers that inherited `auto` now inherit
+ * the migrated `ask`.
+ */
+export function migrateLegacyImPolicyDocument(
+    doc: ImWorkspacePolicyDocument,
+): ImWorkspacePolicyDocument {
+    if (doc.version !== undefined) return doc;
+    const migrate = (layer: ImWorkspacePolicyPatch): ImWorkspacePolicyPatch =>
+        isRecord(layer) && isRecord(layer.commands) && layer.commands.mode === "auto"
+            ? { ...layer, commands: { ...layer.commands, mode: "ask" } }
+            : layer;
+    const out: ImWorkspacePolicyDocument = { ...doc };
+    if (doc.default) out.default = migrate(doc.default);
+    if (doc.chats) {
+        out.chats = Object.fromEntries(
+            Object.entries(doc.chats).map(([key, layer]) => [key, migrate(layer)]),
+        );
+    }
+    return out;
+}
+
 function safeValidatePartial(raw: unknown, source: string): ImWorkspacePolicyPatch | undefined {
     try {
         return validatePartial(raw, source);

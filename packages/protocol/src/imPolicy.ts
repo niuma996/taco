@@ -131,6 +131,12 @@ export interface ImPolicyRulesView {
 }
 
 export interface ImWorkspacePolicyDocument {
+    /**
+     * Absent on files written before 0.2.11, where `mode: "auto"` with an
+     * `allow` list meant "only these commands". Readers migrate such layers
+     * to `mode: "ask"`; every write stamps the current version.
+     */
+    version?: 2;
     default?: ImWorkspacePolicyPatch;
     chats?: Record<string, ImWorkspacePolicyPatch>;
 }

@@ -272,3 +272,45 @@ describe("ImWorkspacePolicyStore", () => {
         assert.equal(store.resolve(ROUTE).tools.shell, "deny", "channel default kicks in");
     });
 });
+
+describe("legacy IM auto migration", () => {
+    function writeRaw(doc: unknown): void {
+        fs.mkdirSync(path.dirname(policyPath("wechat")), { recursive: true });
+        fs.writeFileSync(policyPath("wechat"), JSON.stringify(doc));
+    }
+
+    it("turns a pre-0.2.11 auto whitelist into manual approval, keeping the allow list", () => {
+        writeRaw({ default: { commands: { mode: "auto", allow: ["ls *"] } } });
+        assert.deepEqual(store.resolve(ROUTE).commands, { mode: "ask", allow: ["ls *"] });
+    });
+
+    it("migrates plain auto layers too, since old auto only passed read-only commands", () => {
+        writeRaw({
+            default: { commands: { mode: "auto" } },
+            chats: { [chatKey]: { commands: { allow: ["git *"] } } },
+        });
+        assert.equal(store.resolve(ROUTE).commands.mode, "ask");
+        assert.equal(store.resolve({ ...ROUTE, chatId: "other" }).commands.mode, "ask");
+    });
+
+    it("migrates an explicit auto chat layer under a non-auto channel", () => {
+        writeRaw({ chats: { [chatKey]: { commands: { mode: "auto" } } } });
+        assert.equal(store.resolve(ROUTE).commands.mode, "ask");
+    });
+
+    it("leaves versioned files untouched", () => {
+        writeRaw({ version: 2, default: { commands: { mode: "auto", allow: ["ls *"] } } });
+        assert.equal(store.resolve(ROUTE).commands.mode, "auto");
+    });
+
+    it("writes the migration back on first read", async () => {
+        writeRaw({ default: { commands: { mode: "auto", allow: ["ls *"] } } });
+        store.resolve(ROUTE);
+        // Flush the store's write chain with a no-op write on another channel.
+        await store.clearChatOverrideByKey("other", "none");
+        const doc = JSON.parse(fs.readFileSync(policyPath("wechat"), "utf8"));
+        assert.equal(doc.version, 2);
+        assert.equal(doc.default.commands.mode, "ask");
+        assert.deepEqual(doc.default.commands.allow, ["ls *"]);
+    });
+});

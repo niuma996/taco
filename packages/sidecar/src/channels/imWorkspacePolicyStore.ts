@@ -16,18 +16,23 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { tacoHome } from "../config/tacoHome.ts";
 import { restrictOwner } from "../lib/fsPermissions.ts";
+import { createLogger } from "../lib/logger.ts";
 import {
     chatPolicyKey,
     DEFAULT_IM_WORKSPACE_POLICY,
+    IM_POLICY_DOCUMENT_VERSION,
     type ImRoute,
     type ImWorkspacePolicy,
     type ImWorkspacePolicyDocument,
     type ImWorkspacePolicyPatch,
     mergeImWorkspacePolicyPatch,
+    migrateLegacyImPolicyDocument,
     normalizePolicyDocument,
     resolveImWorkspacePolicyFromDocument,
     validatePartial,
 } from "./imWorkspacePolicy.ts";
+
+const log = createLogger("channel:im-policy-store");
 
 export function imWorkspacePoliciesDir(home: string = tacoHome()): string {
     return path.join(home, "im-workspace-policies");
@@ -160,7 +165,15 @@ export class ImWorkspacePolicyStore {
             const raw = fs.readFileSync(imWorkspacePoliciesPath(channelId, this.home), "utf8");
             const parsed: unknown = JSON.parse(raw);
             if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-                return parsed as ImWorkspacePolicyDocument;
+                const doc = parsed as ImWorkspacePolicyDocument;
+                if (doc.version !== undefined) return doc;
+                // Write the migration back once so the file on disk stops
+                // describing the pre-0.2.11 (wider) auto semantics.
+                const migrated = migrateLegacyImPolicyDocument(doc);
+                this.persist(channelId, migrated).catch((e: unknown) =>
+                    log.warn(`im policy migration write-back failed for ${channelId}: ${e}`),
+                );
+                return migrated;
             }
         } catch {
             // Missing or corrupt file resolves to defaults — never fatal.
@@ -181,7 +194,10 @@ export class ImWorkspacePolicyStore {
             const filePath = imWorkspacePoliciesPath(channelId, this.home);
             await fs.promises.mkdir(this.policiesDir, { recursive: true, mode: 0o700 });
             const tmp = `${filePath}.tmp-${process.pid}`;
-            await fs.promises.writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { mode: 0o600 });
+            const stamped = { ...doc, version: IM_POLICY_DOCUMENT_VERSION };
+            await fs.promises.writeFile(tmp, `${JSON.stringify(stamped, null, 2)}\n`, {
+                mode: 0o600,
+            });
             try {
                 await fs.promises.rename(tmp, filePath);
             } catch (e) {
