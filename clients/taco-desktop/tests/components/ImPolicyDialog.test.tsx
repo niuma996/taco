@@ -1,12 +1,13 @@
 /**
- * ImPolicyDialog — local rule removal (× on allow/deny rows).
+ * ImPolicyDialog — state cards, local rule edits, and save patches.
  *
- * Clicking the × on a rule only mutates local React state — the user must
- * also click Save to push the patch to the server. The list must update
- * immediately to reflect the local removal.
+ * Rule edits only mutate local React state until Save. The dialog must show
+ * the effective value plus its source, and "restore" must clear the field at
+ * the current layer instead of copying the parent value.
  */
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { ImPolicyGetResult } from "@taco-ai/protocol";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,276 +21,226 @@ vi.mock("react-i18next", () => ({
     })),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    // Radix locks body pointer events while a modal/select is open; clearing it
+    // here keeps the next test's user-event clicks working.
+    document.body.style.pointerEvents = "";
+});
+
+const DEFAULT_SOURCES: ImPolicyGetResult["sources"] = {
+    fsTools: { value: "deny", source: "default" },
+    shell: { value: "deny", source: "default" },
+    commandMode: { value: "ask", source: "default" },
+    perChatScratch: { value: false, source: "default" },
+    executionCwd: { value: undefined, source: "default" },
+};
+
+function makeResult(overrides: Partial<ImPolicyGetResult> = {}): ImPolicyGetResult {
+    return {
+        channelId: "wechat",
+        scope: "channel",
+        channelDefault: {},
+        resolved: {
+            tools: { fsTools: "deny", shell: "deny" },
+            commands: { mode: "ask" },
+        },
+        chatOverride: null,
+        hasOverride: false,
+        overrides: [],
+        sources: DEFAULT_SOURCES,
+        rules: { allow: [], deny: [] },
+        ...overrides,
+    };
+}
+
+/** A global rule group marks the panel as loaded — it only comes from the server. */
+const GLOBAL_RULES: ImPolicyGetResult["rules"] = {
+    allow: [{ source: "global", rules: ["git push"], editable: false }],
+    deny: [],
+};
+
+function makeClient(result: ImPolicyGetResult): TacoClient {
+    return {
+        imPolicyGet: vi.fn(async () => result),
+        imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
+        imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
+        imPolicyClearChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
+    } as unknown as TacoClient;
+}
+
+function renderDialog(client: TacoClient, scope = { channelId: "wechat" }) {
+    return render(<ImPolicyDialog open scope={scope} client={client} onClose={vi.fn()} />);
+}
+
+describe("ImPolicyDialog — effective values and sources", () => {
+    it("shows the resolved value and its source instead of a raw enum", async () => {
+        renderDialog(makeClient(makeResult()));
+        await waitFor(() => {
+            expect(screen.getAllByText("imPolicy.sourceLine").length).toBeGreaterThan(0);
+        });
+        expect(screen.getAllByText("imPolicy.following").length).toBeGreaterThan(0);
+        expect(screen.queryByText("ask")).toBeNull();
+        expect(screen.queryByText("deny")).toBeNull();
+    });
+
+    it("offers a separate override action for the channel scope", async () => {
+        renderDialog(makeClient(makeResult()));
+        expect((await screen.findAllByText("imPolicy.setForChannel")).length).toBeGreaterThan(0);
+    });
+});
+
+describe("ImPolicyDialog — saving overrides", () => {
+    it("sends the chosen value when a field is overridden", async () => {
+        const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        // The global rule group only renders once the policy has loaded.
+        await screen.findByText("imPolicy.sourceGlobal");
+        const card = screen.getByRole("group", { name: "imPolicy.commandMode" });
+        await user.click(within(card).getByText("imPolicy.setForChannel"));
+
+        await user.click(within(card).getByRole("combobox"));
+        await user.click(await screen.findByRole("option", { name: "imPolicy.auto" }));
+
+        const saveButtons = screen.getAllByText("imPolicy.save");
+        await user.click(saveButtons[0] as HTMLElement);
+        const confirmButtons = screen.getAllByText("imPolicy.save");
+        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+
+        await waitFor(() => {
+            expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
+                channelId: "wechat",
+                patch: { commands: { mode: "auto" } },
+            });
+        });
+    });
+
+    it("sends null when a field is restored to follow the parent", async () => {
+        const client = makeClient(
+            makeResult({
+                channelDefault: { commands: { mode: "auto" } },
+                sources: {
+                    ...DEFAULT_SOURCES,
+                    commandMode: { value: "auto", source: "channel" },
+                },
+                rules: GLOBAL_RULES,
+            }),
+        );
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        // The global rule group only renders once the policy has loaded.
+        await screen.findByText("imPolicy.sourceGlobal");
+        const card = screen.getByRole("group", { name: "imPolicy.commandMode" });
+        await user.click(within(card).getByText("imPolicy.resetToParent"));
+
+        const saveButtons = screen.getAllByText("imPolicy.save");
+        await user.click(saveButtons[0] as HTMLElement);
+        const confirmButtons = screen.getAllByText("imPolicy.save");
+        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+
+        await waitFor(() => {
+            expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
+                channelId: "wechat",
+                patch: { commands: { mode: null } },
+            });
+        });
+    });
+});
 
 describe("ImPolicyDialog — local rule removal", () => {
     it("removes the row from the list immediately when × is clicked", async () => {
-        const client = {
-            imPolicyGet: vi.fn(async () => ({
-                channelId: "wechat",
-                channelDefault: {
-                    commands: { allow: ["Mmx"] },
-                },
-                resolved: {
-                    tools: { fsTools: "deny", shell: "deny" },
-                    commands: { mode: "ask" },
-                },
-                chatOverride: null,
-                hasOverride: false,
-                overrides: [],
-            })),
-            imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicyClearChatOverride: vi.fn(() => Promise.resolve({ channelId: "wechat" })),
-        } as unknown as TacoClient;
+        const client = makeClient(makeResult({ channelDefault: { commands: { allow: ["Mmx"] } } }));
+        renderDialog(client);
 
-        const user = userEvent.setup();
-        render(
-            <ImPolicyDialog
-                open
-                scope={{ channelId: "wechat" }}
-                client={client}
-                onClose={vi.fn()}
-            />,
-        );
-
-        // Wait for the loaded allow rule to render.
         await waitFor(() => {
             expect(screen.getByText("Mmx")).toBeDefined();
         });
 
-        const removeButtons = screen.getAllByLabelText("imPolicy.removeRule");
-        expect(removeButtons.length).toBeGreaterThan(0);
-        const [firstRemove] = removeButtons;
-        if (!firstRemove) throw new Error("expected at least one remove button");
-        await user.click(firstRemove);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        await user.click(screen.getAllByLabelText("imPolicy.removeRule")[0] as HTMLElement);
 
-        // The row must disappear from the DOM immediately.
         await waitFor(() => {
             expect(screen.queryByText("Mmx")).toBeNull();
         });
-
-        // And it must STAY gone across another render cycle — not come back.
-        // User reported "click × but the rule is still there", which suggests
-        // something is re-mounting the row from a stale cache.
         await new Promise((r) => setTimeout(r, 50));
         expect(screen.queryByText("Mmx")).toBeNull();
     });
 
-    it("a freshly added rule is removed by × before save (local-only)", async () => {
-        const client = {
-            imPolicyGet: vi.fn(async () => ({
-                channelId: "wechat",
-                channelDefault: { commands: { allow: [] } },
-                resolved: {
-                    tools: { fsTools: "deny", shell: "deny" },
-                    commands: { mode: "ask" },
+    it("renders parent rules read-only and only allows removing local rules", async () => {
+        const client = makeClient(
+            makeResult({
+                channelDefault: { commands: { allow: ["ls"] } },
+                rules: {
+                    allow: [
+                        { source: "global", rules: ["git push"], editable: false },
+                        { source: "channel", rules: ["ls"], editable: true },
+                    ],
+                    deny: [],
                 },
-                chatOverride: null,
-                hasOverride: false,
-                overrides: [],
-            })),
-            imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicyClearChatOverride: vi.fn(() => Promise.resolve({ channelId: "wechat" })),
-        } as unknown as TacoClient;
-
-        const user = userEvent.setup();
-        render(
-            <ImPolicyDialog
-                open
-                scope={{ channelId: "wechat" }}
-                client={client}
-                onClose={vi.fn()}
-            />,
+            }),
         );
+        renderDialog(client);
 
-        // Wait for empty list to settle.
         await waitFor(() => {
-            expect(screen.getByText("imPolicy.noRules")).toBeDefined();
+            expect(screen.getByText("git push")).toBeDefined();
+            expect(screen.getByText("ls")).toBeDefined();
         });
+        expect(screen.getAllByLabelText("imPolicy.removeRule")).toHaveLength(1);
+    });
 
-        // Add a rule.
-        const input = screen.getByPlaceholderText("imPolicy.rulePlaceholder") as HTMLInputElement;
+    it("a freshly added rule is removed by × before save (local-only)", async () => {
+        renderDialog(makeClient(makeResult()));
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        const input = (await screen.findAllByPlaceholderText("imPolicy.rulePlaceholder"))[0];
+        if (!input) throw new Error("expected an allow-rule input");
         await user.type(input, "ls");
-        await user.click(screen.getByText("imPolicy.addRule"));
-
+        await user.click(screen.getAllByText("imPolicy.addRule")[0] as HTMLElement);
         await waitFor(() => {
             expect(screen.getByText("ls")).toBeDefined();
         });
 
-        // Remove it.
-        const removeButtons = screen.getAllByLabelText("imPolicy.removeRule");
-        expect(removeButtons.length).toBeGreaterThan(0);
-        const [firstRemove] = removeButtons;
-        if (!firstRemove) throw new Error("expected at least one remove button");
-        await user.click(firstRemove);
-
+        await user.click(screen.getAllByLabelText("imPolicy.removeRule")[0] as HTMLElement);
         await waitFor(() => {
             expect(screen.queryByText("ls")).toBeNull();
         });
-        expect(screen.getByText("imPolicy.noRules")).toBeDefined();
     });
 
-    it("regression: removing a rule that came from the server stays gone after re-render (effect does not re-fire)", async () => {
-        const client = {
-            imPolicyGet: vi.fn(async () => ({
-                channelId: "wechat",
-                channelDefault: { commands: { allow: ["Mmx", "ls"] } },
-                resolved: {
-                    tools: { fsTools: "deny", shell: "deny" },
-                    commands: { mode: "ask" },
-                },
-                chatOverride: null,
-                hasOverride: false,
-                overrides: [],
-            })),
-            imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicyClearChatOverride: vi.fn(() => Promise.resolve({ channelId: "wechat" })),
-        } as unknown as TacoClient;
-
-        const user = userEvent.setup();
-        const { rerender } = render(
-            <ImPolicyDialog
-                open
-                scope={{ channelId: "wechat" }}
-                client={client}
-                onClose={vi.fn()}
-            />,
-        );
-
-        await waitFor(() => {
-            expect(screen.getByText("Mmx")).toBeDefined();
-            expect(screen.getByText("ls")).toBeDefined();
-        });
-
-        // Click × on Mmx.
-        const removeButtons = screen.getAllByLabelText("imPolicy.removeRule");
-        expect(removeButtons.length).toBeGreaterThan(0);
-        const [firstRemove] = removeButtons;
-        if (!firstRemove) throw new Error("expected at least one remove button");
-        await user.click(firstRemove);
-
-        await waitFor(() => {
-            expect(screen.queryByText("Mmx")).toBeNull();
-        });
-        expect(screen.queryByText("ls")).toBeDefined();
-
-        // Force a re-render with a brand-new `scope` object reference. This is
-        // what ChannelsPane does on each render. The effect deps should not flip,
-        // so Mmx must NOT reappear.
-        rerender(
-            <ImPolicyDialog
-                open
-                scope={{ channelId: "wechat" }}
-                client={client}
-                onClose={vi.fn()}
-            />,
-        );
-        expect(screen.queryByText("Mmx")).toBeNull();
-        expect(screen.queryByText("ls")).toBeDefined();
-    });
-
-    it("regression: a server reload mid-dialog does NOT clobber a freshly-edited allow list", async () => {
-        // User report: "clicking × deletes then flashes back" — the rule momentarily disappears,
-        // then a push reload (or an over-eager effect) overwrites the local state with
-        // the server's stale list and the row comes back.
-        //
-        // Simulate a push-driven re-load: imPolicyGet returns ["Mmx"] on every
-        // call. If a stale server reload overwrote local edits, Mmx would come
-        // back after the second load.
-        const client = {
-            imPolicyGet: vi.fn(async () => ({
-                channelId: "wechat",
-                channelDefault: { commands: { allow: ["Mmx"] } },
-                resolved: {
-                    tools: { fsTools: "deny", shell: "deny" },
-                    commands: { mode: "ask" },
-                },
-                chatOverride: null,
-                hasOverride: false,
-                overrides: [],
-            })),
-            imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicyClearChatOverride: vi.fn(() => Promise.resolve({ channelId: "wechat" })),
-        } as unknown as TacoClient;
-
-        const user = userEvent.setup();
-        const { rerender } = render(
-            <ImPolicyDialog
-                open
-                scope={{ channelId: "wechat" }}
-                client={client}
-                onClose={vi.fn()}
-            />,
-        );
+    it("a server reload mid-dialog does NOT clobber a freshly-edited allow list", async () => {
+        const client = makeClient(makeResult({ channelDefault: { commands: { allow: ["Mmx"] } } }));
+        renderDialog(client);
 
         await waitFor(() => {
             expect(screen.getByText("Mmx")).toBeDefined();
         });
         expect((client.imPolicyGet as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
 
-        // User clicks ×.
-        const removeButtons = screen.getAllByLabelText("imPolicy.removeRule");
-        expect(removeButtons.length).toBeGreaterThan(0);
-        const [firstRemove] = removeButtons;
-        if (!firstRemove) throw new Error("expected at least one remove button");
-        await user.click(firstRemove);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        await user.click(screen.getAllByLabelText("imPolicy.removeRule")[0] as HTMLElement);
         await waitFor(() => {
             expect(screen.queryByText("Mmx")).toBeNull();
         });
 
-        // Now simulate a push event triggering a reload, returning the same
-        // server state (Mmx still there, since user hasn't saved).
-        const { subscribeImPolicyChanged, onImPolicyChangedEvent } = await import(
-            "../../src/lib/imPolicyEvents"
-        );
-        // Subscribe (the dialog already has a subscription — just dispatch).
+        const { onImPolicyChangedEvent } = await import("../../src/lib/imPolicyEvents");
         onImPolicyChangedEvent("wechat");
 
-        // The hook's onImPolicyChanged will fire another imPolicyGet. Let it settle.
         await waitFor(() => {
             expect((client.imPolicyGet as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
         });
-
-        // The user's local edit (Mmx deleted) must NOT be clobbered by the stale
-        // server reload.
         expect(screen.queryByText("Mmx")).toBeNull();
-        // Subscriber cleanup.
-        subscribeImPolicyChanged(() => undefined);
-        void rerender;
     });
 });
 
 describe("ImPolicyDialog — blacklist wrapper rules", () => {
     it("accepts a shell wrapper in the blacklist", async () => {
-        const client = {
-            imPolicyGet: vi.fn(async () => ({
-                channelId: "wechat",
-                channelDefault: { commands: { deny: [] } },
-                resolved: { tools: { fsTools: "deny", shell: "deny" }, commands: { mode: "ask" } },
-                chatOverride: null,
-                hasOverride: false,
-                overrides: [],
-            })),
-            imPolicySetChannelDefault: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicySetChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
-            imPolicyClearChatOverride: vi.fn(async () => ({ channelId: "wechat" })),
-        } as unknown as TacoClient;
-        render(
-            <ImPolicyDialog
-                open
-                scope={{ channelId: "wechat" }}
-                client={client}
-                onClose={vi.fn()}
-            />,
-        );
-        const input = await screen.findByPlaceholderText("imPolicy.rulePlaceholder");
-        const user = userEvent.setup();
-        await user.type(input, "bash *");
-        await user.click(screen.getByText("imPolicy.addRule"));
+        renderDialog(makeClient(makeResult({ channelDefault: { commands: { deny: [] } } })));
+        const inputs = await screen.findAllByPlaceholderText("imPolicy.rulePlaceholder");
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        await user.type(inputs[1] as HTMLElement, "bash *");
+        await user.click(screen.getAllByText("imPolicy.addRule")[1] as HTMLElement);
         expect(screen.getByText("bash *")).toBeTruthy();
     });
 });

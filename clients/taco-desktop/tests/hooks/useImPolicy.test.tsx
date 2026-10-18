@@ -10,6 +10,7 @@ function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
         imPolicyGet: vi.fn(async () => {
             const result: ImPolicyGetResult = {
                 channelId: "wechat",
+                scope: "channel",
                 channelDefault: {},
                 resolved: {
                     tools: { fsTools: "deny", shell: "deny" },
@@ -18,6 +19,14 @@ function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
                 chatOverride: null,
                 hasOverride: false,
                 overrides: [],
+                sources: {
+                    fsTools: { value: "deny", source: "default" },
+                    shell: { value: "deny", source: "default" },
+                    commandMode: { value: "ask", source: "default" },
+                    perChatScratch: { value: false, source: "default" },
+                    executionCwd: { value: undefined, source: "default" },
+                },
+                rules: { allow: [], deny: [] },
             };
             return result;
         }),

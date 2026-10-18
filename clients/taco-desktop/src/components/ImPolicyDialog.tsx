@@ -1,35 +1,39 @@
 /**
- * ImPolicyDialog — edit a channel's IM workspace policy (channel default or
+ * ImPolicyDialog — edit an IM channel's workspace policy (channel default or
  * a specific chat override).
  *
- * Form semantics: every field is tri-state. The Select for fsTools / shell /
- * mode prepends an `inherit (current resolved value)` option; choosing
- * "inherit" omits the field from the patch so the next layer wins. Rule
- * lists (allow / deny) get an explicit "override this list" Switch — when
- * off, the list is omitted from the patch (inherited); when on, the rule
- * list replaces the inherited one. `binding.executionCwd` is a TextInput
- * where empty = inherit. `perChatScratch` is a tri-state Select (inheriting
- * the boolean) rather than a Switch, because the value is genuinely tri-state.
- *
- * Channel-scope mode additionally lists every chat override for the channel
- * (live + orphan) with a two-step Clear affordance.
+ * Each single-value field is a state card: it shows the effective value and
+ * the layer that supplied it. The current layer either follows its parent or
+ * overrides it; "restore" clears the field at that layer instead of copying
+ * the parent's value. Allow/deny rules are always appended to the parent
+ * layers, so the rule editor only lets the user add or remove rules owned by
+ * the current scope.
  */
 
-import type { ImPolicyChatOverrideEntry, ImRoute, ImWorkspacePolicyPatch } from "@taco-ai/protocol";
+import type {
+    ImCommandPolicyPatch,
+    ImPolicyChatOverrideEntry,
+    ImPolicyRuleGroup,
+    ImPolicySource,
+    ImPolicySources,
+    ImRoute,
+    ImToolPolicyPatch,
+    ImWorkspacePolicyPatch,
+} from "@taco-ai/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useImPolicy } from "../hooks/useImPolicy.ts";
 import { useT } from "../i18n/useI18n.ts";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
-import type { ClientRuleValidationError } from "../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../lib/commandPermissionRuleClient.ts";
 import { subscribeImPolicyChanged } from "../lib/imPolicyEvents.ts";
 import { ConfirmModal } from "./ConfirmModal.tsx";
-import { ImPolicyRuleListField } from "./ImPolicyRuleListField.tsx";
+import { PolicyRuleLayers } from "./imPolicy/PolicyRuleLayers.tsx";
+import { PolicyValueCard } from "./imPolicy/PolicyValueCard.tsx";
 import { Button } from "./ui/Button.tsx";
-import { FormField } from "./ui/FormField.tsx";
 import { Modal } from "./ui/Modal.tsx";
 import { Select } from "./ui/Select.tsx";
 import { TextInput } from "./ui/TextInput.tsx";
+
 export interface ImPolicyDialogProps {
     open: boolean;
     /** Pass `channelId` alone for channel-default mode; pass `peerId+chatId`
@@ -40,23 +44,21 @@ export interface ImPolicyDialogProps {
     onClose: () => void;
 }
 
-/** Sentinel for "omit this field from the patch". Kept module-local so the
- *  serialized Select values never collide with the legitimate `deny`/`allow`/
- *  `ask`/`auto`/`on`/`off` values. */
-const INHERIT = "__inherit__";
+const SOURCE_KEYS: Record<ImPolicySource, string> = {
+    default: "imPolicy.sourceDefault",
+    global: "imPolicy.sourceGlobal",
+    channel: "imPolicy.sourceChannel",
+    chat: "imPolicy.sourceChat",
+};
 
-/** Stable empty patch — avoids new-object references on every render that
- *  would otherwise re-fire the patch-reset effect during the initial load. */
-const EMPTY_PATCH: ImWorkspacePolicyPatch = Object.freeze({}) as ImWorkspacePolicyPatch;
+const RULE_SOURCE_KEYS: Record<"global" | "channel" | "chat", string> = {
+    global: "imPolicy.sourceGlobal",
+    channel: "imPolicy.sourceChannel",
+    chat: "imPolicy.sourceChat",
+};
 
-type TriString = typeof INHERIT | "deny" | "allow" | "ask" | "auto" | "on" | "off";
-
-function triValue(v: string | undefined): TriString {
-    return (v as TriString | undefined) ?? INHERIT;
-}
-
-function isInherit(tri: TriString): boolean {
-    return tri === INHERIT;
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+    return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement | null {
@@ -74,21 +76,14 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     const policyRef = useRef(policy);
     policyRef.current = policy;
 
-    // Re-load when the dialog opens (or the scope changes mid-flight). Depends on
-    // the raw scope fields, not the `scope` object: ChannelsPane rebuilds that
-    // object on every render, which would otherwise re-fire this effect and
-    // (via setData) start an infinite render loop. Adding `scope` to the deps
-    // is therefore wrong even though react-hooks would prefer it.
+    const scopeKey = scope ? `${scope.channelId}|${scope.peerId ?? ""}|${scope.chatId ?? ""}` : "";
+
     // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
     useEffect(() => {
         if (!open || !scope) return;
         void policyRef.current.load(scope.channelId, scope.peerId, scope.chatId);
     }, [open, scope?.channelId, scope?.peerId, scope?.chatId]);
 
-    // Wire the `im.policy_changed` push to a silent re-load while the dialog
-    // is open. App.tsx forwards the push to a tiny pub-sub emitter; this dialog
-    // subscribes for the duration of its mount and reloads when the channel
-    // matches.
     useEffect(() => {
         if (!open) return;
         return subscribeImPolicyChanged((channelId) => {
@@ -101,104 +96,180 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     const rawPatch: ImWorkspacePolicyPatch | null | undefined = isChannelScope
         ? data?.channelDefault
         : data?.chatOverride;
-    // Use a stable reference for the "no patch yet" branch so the reset
-    // effect below doesn't re-fire on every render during the initial load.
-    const editingPatch: ImWorkspacePolicyPatch = rawPatch ?? EMPTY_PATCH;
+    const editingPatch: ImWorkspacePolicyPatch = rawPatch ?? {};
+    const resolved = data?.resolved;
 
-    // Tri-state mirrors of the patch. Initialized from `editingPatch`; reset
-    // whenever the underlying patch changes (e.g. after a push re-load).
-    const [fsTools, setFsTools] = useState<TriString>(INHERIT);
-    const [shell, setShell] = useState<TriString>(INHERIT);
-    const [mode, setMode] = useState<TriString>(INHERIT);
-    const [allowEnabled, setAllowEnabled] = useState(false);
-    const [allow, setAllow] = useState<string[]>([]);
-    const [denyEnabled, setDenyEnabled] = useState(false);
-    const [deny, setDeny] = useState<string[]>([]);
+    // Local drafts. `null` / empty string means "follow the parent"; the raw
+    // layer patch tells us whether that means "omit" or "send null to clear".
+    const [fsTools, setFsTools] = useState<"deny" | "allow" | null>(null);
+    const [shell, setShell] = useState<"deny" | "allow" | null>(null);
+    const [mode, setMode] = useState<"ask" | "auto" | null>(null);
+    const [perChatScratch, setPerChatScratch] = useState<boolean | null>(null);
     const [cwd, setCwd] = useState("");
-    const [perChatScratch, setPerChatScratch] = useState<TriString>(INHERIT);
-    const [newAllowRule, setNewAllowRule] = useState("");
-    const [newDenyRule, setNewDenyRule] = useState("");
-    const [allowRuleError, setAllowRuleError] = useState<ClientRuleValidationError | null>(null);
-    const [denyRuleError, setDenyRuleError] = useState<ClientRuleValidationError | null>(null);
-    const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
-    // Surface client-side validation errors (e.g. cwd not absolute) that
-    // `buildPatch` returns as a string. Distinct from `policy.error` which
-    // carries RPC failures.
+    const [allowDraft, setAllowDraft] = useState<string[]>([]);
+    const [denyDraft, setDenyDraft] = useState<string[]>([]);
+
     const [clientError, setClientError] = useState<string | null>(null);
-    // Save applies the policy immediately and may interrupt in-progress
-    // conversations on this channel — gate it behind a ConfirmModal (matches
-    // the dialog's own Radix-Dialog UI; no system modal on macOS Tauri).
+    const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
     const [confirmingSave, setConfirmingSave] = useState(false);
 
-    // Reset the local edit state when the underlying patch changes (push reload).
+    // Once the user edits, a push-driven reload must not clobber their draft.
+    const dirtyRef = useRef(false);
+    const loadedKeyRef = useRef("");
+    const markDirty = useCallback(() => {
+        dirtyRef.current = true;
+    }, []);
+
     useEffect(() => {
-        setFsTools(triValue(editingPatch.tools?.fsTools));
-        setShell(triValue(editingPatch.tools?.shell));
-        setMode(triValue(editingPatch.commands?.mode));
-        setAllowEnabled(editingPatch.commands?.allow !== undefined);
-        setAllow(editingPatch.commands?.allow ?? []);
-        setDenyEnabled(editingPatch.commands?.deny !== undefined);
-        setDeny(editingPatch.commands?.deny ?? []);
+        if (loadedKeyRef.current !== scopeKey) {
+            loadedKeyRef.current = scopeKey;
+            dirtyRef.current = false;
+        }
+        if (dirtyRef.current) return;
+        setFsTools(editingPatch.tools?.fsTools ?? null);
+        setShell(editingPatch.tools?.shell ?? null);
+        setMode(editingPatch.commands?.mode ?? null);
+        setPerChatScratch(editingPatch.perChatScratch ?? null);
         setCwd(editingPatch.binding?.executionCwd ?? "");
-        setPerChatScratch(
-            triValue(
-                editingPatch.perChatScratch === undefined
-                    ? undefined
-                    : editingPatch.perChatScratch
-                      ? "on"
-                      : "off",
-            ),
-        );
-        // A push reload invalidates any client-side validation message left
-        // over from a previous edit (e.g. cwd-not-absolute) — the server's
-        // new patch is canonical.
+        setAllowDraft(editingPatch.commands?.allow ?? []);
+        setDenyDraft(editingPatch.commands?.deny ?? []);
         setClientError(null);
         setConfirmingKey(null);
-        // Depend on the source field (`rawPatch`) so the effect re-fires only
-        // when the server actually delivers a new patch — not on every render.
     }, [
+        scopeKey,
         editingPatch.tools?.fsTools,
-        editingPatch.perChatScratch,
-        editingPatch.commands?.allow,
         editingPatch.tools?.shell,
         editingPatch.commands?.mode,
+        editingPatch.commands?.allow,
         editingPatch.commands?.deny,
+        editingPatch.perChatScratch,
         editingPatch.binding?.executionCwd,
     ]);
 
-    const resolved = data?.resolved;
-    const resolvedFsTools = resolved?.tools.fsTools ?? "deny";
-    const resolvedShell = resolved?.tools.shell ?? "deny";
-    const resolvedMode = resolved?.commands.mode ?? "ask";
-    const resolvedScratch = resolved?.perChatScratch ? "on" : "off";
+    const fallbackSources: ImPolicySources = {
+        fsTools: { value: resolved?.tools.fsTools ?? "deny", source: "default" },
+        shell: { value: resolved?.tools.shell ?? "deny", source: "default" },
+        commandMode: { value: resolved?.commands.mode ?? "ask", source: "default" },
+        perChatScratch: { value: resolved?.perChatScratch ?? false, source: "default" },
+        executionCwd: { value: resolved?.binding?.executionCwd, source: "default" },
+    };
+    const sources = data?.sources ?? fallbackSources;
 
-    // Disable the form during the initial load: editing now would clobber
-    // local state when the server's first patch arrives.
+    const withLocalGroup = (groups: ImPolicyRuleGroup[]): ImPolicyRuleGroup[] =>
+        groups.some((group) => group.editable)
+            ? groups
+            : [
+                  ...groups,
+                  { source: isChannelScope ? "channel" : "chat", rules: [], editable: true },
+              ];
+    const allowGroups = withLocalGroup(data?.rules?.allow ?? []);
+    const denyGroups = withLocalGroup(data?.rules?.deny ?? []);
+
+    const sourceLabel = (source: ImPolicySource): string => t(SOURCE_KEYS[source]);
+    const ruleSourceLabels = {
+        global: t(RULE_SOURCE_KEYS.global),
+        channel: t(RULE_SOURCE_KEYS.channel),
+        chat: t(RULE_SOURCE_KEYS.chat),
+    };
+    const stateLabel = isChannelScope ? t("imPolicy.overrideChannel") : t("imPolicy.overrideChat");
+    const currentSource: ImPolicySource = isChannelScope ? "channel" : "chat";
+    const overrideLabel = isChannelScope ? t("imPolicy.setForChannel") : t("imPolicy.setForChat");
+
+    const toolLabel = (value: "deny" | "allow"): string =>
+        value === "allow" ? t("imPolicy.allow") : t("imPolicy.deny");
+    const modeLabel = (value: "ask" | "auto"): string =>
+        value === "auto" ? t("imPolicy.auto") : t("imPolicy.ask");
+
     const formDisabled = policy.loading || policy.saving;
 
     const buildPatch = useCallback((): ImWorkspacePolicyPatch | string => {
         const patch: ImWorkspacePolicyPatch = {};
-        const tools: ImWorkspacePolicyPatch["tools"] = {};
-        if (!isInherit(fsTools)) tools.fsTools = fsTools as "deny" | "allow";
-        if (!isInherit(shell)) tools.shell = shell as "deny" | "allow";
-        if (Object.keys(tools).length > 0) patch.tools = tools;
 
-        const commands: ImWorkspacePolicyPatch["commands"] = {};
-        if (!isInherit(mode)) commands.mode = mode as "ask" | "auto";
-        if (allowEnabled) commands.allow = allow;
-        if (denyEnabled) commands.deny = deny;
-        if (Object.keys(commands).length > 0) patch.commands = commands;
+        const tools: ImToolPolicyPatch = {};
+        let toolsChanged = false;
+        const originalFsTools = editingPatch.tools?.fsTools ?? undefined;
+        const originalShell = editingPatch.tools?.shell ?? undefined;
+        if (fsTools === null) {
+            if (originalFsTools !== undefined) {
+                tools.fsTools = null;
+                toolsChanged = true;
+            }
+        } else if (fsTools !== originalFsTools) {
+            tools.fsTools = fsTools;
+            toolsChanged = true;
+        }
+        if (shell === null) {
+            if (originalShell !== undefined) {
+                tools.shell = null;
+                toolsChanged = true;
+            }
+        } else if (shell !== originalShell) {
+            tools.shell = shell;
+            toolsChanged = true;
+        }
+        if (toolsChanged) patch.tools = tools;
 
-        if (cwd.trim().length > 0) {
-            if (!cwd.startsWith("/")) return t("imPolicy.invalidCwd");
-            patch.binding = { executionCwd: cwd.trim() };
+        const commands: ImCommandPolicyPatch = {};
+        let commandsChanged = false;
+        const originalMode = editingPatch.commands?.mode ?? undefined;
+        if (mode === null) {
+            if (originalMode !== undefined) {
+                commands.mode = null;
+                commandsChanged = true;
+            }
+        } else if (mode !== originalMode) {
+            commands.mode = mode;
+            commandsChanged = true;
         }
 
-        if (!isInherit(perChatScratch)) {
-            patch.perChatScratch = perChatScratch === "on";
+        const originalAllow = editingPatch.commands?.allow ?? [];
+        if (!sameList(allowDraft, originalAllow)) {
+            commands.allow = allowDraft;
+            commandsChanged = true;
         }
+        const originalDeny = editingPatch.commands?.deny ?? [];
+        if (!sameList(denyDraft, originalDeny)) {
+            commands.deny = denyDraft;
+            commandsChanged = true;
+        }
+        if (commandsChanged) patch.commands = commands;
+
+        const trimmedCwd = cwd.trim();
+        if (trimmedCwd.length > 0 && !trimmedCwd.startsWith("/")) {
+            return t("imPolicy.invalidCwd");
+        }
+        const originalCwd = editingPatch.binding?.executionCwd ?? "";
+        if (trimmedCwd === "") {
+            if (editingPatch.binding !== undefined) patch.binding = null;
+        } else if (trimmedCwd !== originalCwd) {
+            patch.binding = { executionCwd: trimmedCwd };
+        }
+
+        const originalScratch = editingPatch.perChatScratch ?? undefined;
+        if (perChatScratch === null) {
+            if (originalScratch !== undefined) patch.perChatScratch = null;
+        } else if (perChatScratch !== originalScratch) {
+            patch.perChatScratch = perChatScratch;
+        }
+
         return patch;
-    }, [fsTools, shell, mode, allowEnabled, allow, denyEnabled, deny, cwd, perChatScratch, t]);
+    }, [
+        editingPatch.binding,
+        editingPatch.commands?.allow,
+        editingPatch.commands?.deny,
+        editingPatch.commands?.mode,
+        editingPatch.perChatScratch,
+        editingPatch.tools?.fsTools,
+        editingPatch.tools?.shell,
+        allowDraft,
+        cwd,
+        denyDraft,
+        fsTools,
+        mode,
+        perChatScratch,
+        shell,
+        t,
+    ]);
 
     const save = useCallback(async () => {
         if (!scope) return;
@@ -217,34 +288,35 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         }
     }, [scope, buildPatch, isChannelScope, policy, onClose, routeScope]);
 
-    const visibleError = clientError ?? policy.error;
-
     const addRule = useCallback(
-        (kind: "allow" | "deny") => {
-            const raw = kind === "allow" ? newAllowRule : newDenyRule;
-            const set = kind === "allow" ? setAllow : setDeny;
-            const setError = kind === "allow" ? setAllowRuleError : setDenyRuleError;
-            const setRaw = kind === "allow" ? setNewAllowRule : setNewDenyRule;
-            const result = validatePermissionRuleClient(raw, {
-                allowShellWrapper: kind === "deny",
-            });
-            if (!result.valid) {
-                setError(result.reason);
-                return;
-            }
-            setError(null);
-            if (!set) return;
-            set((prev) => Array.from(new Set([...prev, result.canonical])));
-            setRaw("");
-        },
-        [newAllowRule, newDenyRule],
+        (kind: "allow" | "deny") =>
+            (raw: string): string | null => {
+                const result = validatePermissionRuleClient(raw, {
+                    allowShellWrapper: kind === "deny",
+                });
+                if (!result.valid) {
+                    return result.reason.kind === "empty"
+                        ? t("imPolicy.ruleErrorEmpty")
+                        : t("imPolicy.ruleErrorShellWrapper", { shell: result.reason.shell });
+                }
+                markDirty();
+                const append = (prev: string[]): string[] =>
+                    Array.from(new Set([...prev, result.canonical]));
+                if (kind === "allow") setAllowDraft(append);
+                else setDenyDraft(append);
+                return null;
+            },
+        [markDirty, t],
     );
 
-    const removeRule = useCallback((kind: "allow" | "deny", rule: string) => {
-        const set = kind === "allow" ? setAllow : setDeny;
-        if (!set) return;
-        set((prev) => prev.filter((r) => r !== rule));
-    }, []);
+    const removeRule = useCallback(
+        (kind: "allow" | "deny", rule: string) => {
+            markDirty();
+            if (kind === "allow") setAllowDraft((prev) => prev.filter((r) => r !== rule));
+            else setDenyDraft((prev) => prev.filter((r) => r !== rule));
+        },
+        [markDirty],
+    );
 
     const clearOverrideEntry = useCallback(
         async (entry: ImPolicyChatOverrideEntry) => {
@@ -252,7 +324,6 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
             const ok = await policy.clearChatOverrideByKey(scope.channelId, entry.key);
             if (ok) {
                 setConfirmingKey(null);
-                // Re-load the channel view so the cleared row disappears.
                 await policy.load(scope.channelId);
             }
         },
@@ -261,6 +332,12 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
 
     if (!scope) return null;
 
+    const effectiveFsTools = fsTools ?? sources.fsTools.value;
+    const effectiveShell = shell ?? sources.shell.value;
+    const effectiveMode = mode ?? sources.commandMode.value;
+    const effectiveScratch = perChatScratch ?? sources.perChatScratch.value;
+    const effectiveCwd = cwd !== "" ? cwd : sources.executionCwd.value;
+
     return (
         <Modal
             open={open}
@@ -268,7 +345,12 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
             title={
                 isChannelScope
                     ? t("imPolicy.titleChannel", { channel: scope.channelId })
-                    : t("imPolicy.titleChat")
+                    : t("imPolicy.titleChat", { peer: scope.peerId ?? "" })
+            }
+            description={
+                isChannelScope
+                    ? t("imPolicy.parentChannel")
+                    : t("imPolicy.parentChat", { channel: scope.channelId })
             }
             className="im-policy-modal"
             actions={
@@ -287,127 +369,216 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
             }
         >
             <p className="im-policy-desc">{t("imPolicy.desc")}</p>
-            {visibleError && <div className="error-banner">{visibleError}</div>}
+            {clientError !== null && <div className="error-banner">{clientError}</div>}
+            {policy.error !== null && <div className="error-banner">{policy.error}</div>}
             {policy.loading && <div className="pane-loading">{t("imPolicy.loading")}</div>}
 
-            {/* fsTools */}
-            <FormField label={t("imPolicy.fsTools")}>
+            <PolicyValueCard
+                label={t("imPolicy.fsTools")}
+                value={toolLabel(effectiveFsTools)}
+                source={t("imPolicy.sourceLine", {
+                    source: sourceLabel(fsTools === null ? sources.fsTools.source : currentSource),
+                })}
+                state={fsTools === null ? t("imPolicy.following") : stateLabel}
+                overridden={fsTools !== null}
+                overrideLabel={overrideLabel}
+                resetLabel={t("imPolicy.resetToParent")}
+                onOverride={() => {
+                    markDirty();
+                    setFsTools(effectiveFsTools);
+                }}
+                onReset={() => {
+                    markDirty();
+                    setFsTools(null);
+                }}
+                disabled={formDisabled}
+            >
                 <Select
-                    value={fsTools}
-                    onValueChange={(v) => setFsTools(v as TriString)}
+                    value={effectiveFsTools}
+                    onValueChange={(value) => {
+                        markDirty();
+                        setFsTools(value === "allow" ? "allow" : "deny");
+                    }}
                     disabled={formDisabled}
-                    options={[
-                        {
-                            value: INHERIT,
-                            label: t("imPolicy.inherit", { value: resolvedFsTools }),
-                        },
-                        { value: "deny", label: t("imPolicy.deny") },
-                        { value: "allow", label: t("imPolicy.allow") },
-                    ]}
                     label={t("imPolicy.fsTools")}
-                />
-            </FormField>
-
-            {/* shell */}
-            <FormField label={t("imPolicy.shell")}>
-                <Select
-                    value={shell}
-                    onValueChange={(v) => setShell(v as TriString)}
-                    disabled={formDisabled}
                     options={[
-                        {
-                            value: INHERIT,
-                            label: t("imPolicy.inherit", { value: resolvedShell }),
-                        },
                         { value: "deny", label: t("imPolicy.deny") },
                         { value: "allow", label: t("imPolicy.allow") },
                     ]}
-                    label={t("imPolicy.shell")}
                 />
-            </FormField>
+            </PolicyValueCard>
 
-            {/* commands.mode */}
-            <FormField label={t("imPolicy.commandMode")}>
+            <PolicyValueCard
+                label={t("imPolicy.shell")}
+                value={toolLabel(effectiveShell)}
+                source={t("imPolicy.sourceLine", {
+                    source: sourceLabel(shell === null ? sources.shell.source : currentSource),
+                })}
+                state={shell === null ? t("imPolicy.following") : stateLabel}
+                overridden={shell !== null}
+                overrideLabel={overrideLabel}
+                resetLabel={t("imPolicy.resetToParent")}
+                onOverride={() => {
+                    markDirty();
+                    setShell(effectiveShell);
+                }}
+                onReset={() => {
+                    markDirty();
+                    setShell(null);
+                }}
+                disabled={formDisabled}
+            >
                 <Select
-                    value={mode}
-                    onValueChange={(v) => setMode(v as TriString)}
+                    value={effectiveShell}
+                    onValueChange={(value) => {
+                        markDirty();
+                        setShell(value === "allow" ? "allow" : "deny");
+                    }}
                     disabled={formDisabled}
+                    label={t("imPolicy.shell")}
                     options={[
-                        {
-                            value: INHERIT,
-                            label: t("imPolicy.inherit", { value: resolvedMode }),
-                        },
+                        { value: "deny", label: t("imPolicy.deny") },
+                        { value: "allow", label: t("imPolicy.allow") },
+                    ]}
+                />
+            </PolicyValueCard>
+
+            <PolicyValueCard
+                label={t("imPolicy.commandMode")}
+                value={modeLabel(effectiveMode)}
+                source={t("imPolicy.sourceLine", {
+                    source: sourceLabel(mode === null ? sources.commandMode.source : currentSource),
+                })}
+                state={mode === null ? t("imPolicy.following") : stateLabel}
+                overridden={mode !== null}
+                overrideLabel={overrideLabel}
+                resetLabel={t("imPolicy.resetToParent")}
+                onOverride={() => {
+                    markDirty();
+                    setMode(effectiveMode);
+                }}
+                onReset={() => {
+                    markDirty();
+                    setMode(null);
+                }}
+                disabled={formDisabled}
+            >
+                <Select
+                    value={effectiveMode}
+                    onValueChange={(value) => {
+                        markDirty();
+                        setMode(value === "auto" ? "auto" : "ask");
+                    }}
+                    disabled={formDisabled}
+                    label={t("imPolicy.commandMode")}
+                    options={[
                         { value: "ask", label: t("imPolicy.ask") },
                         { value: "auto", label: t("imPolicy.auto") },
                     ]}
-                    label={t("imPolicy.commandMode")}
                 />
-            </FormField>
+            </PolicyValueCard>
 
-            {/* allow rules */}
-            <ImPolicyRuleListField
+            <PolicyRuleLayers
                 title={t("imPolicy.allowRules")}
-                enabled={allowEnabled}
-                onEnabledChange={setAllowEnabled}
-                rules={allow}
-                input={newAllowRule}
-                onInputChange={setNewAllowRule}
-                onAdd={() => addRule("allow")}
-                onRemove={(r: string) => removeRule("allow", r)}
-                error={allowRuleError}
-                disabled={formDisabled}
+                hint={t("imPolicy.rulesAppendHint")}
+                groups={allowGroups}
+                localRules={allowDraft}
+                sourceLabels={ruleSourceLabels}
+                emptyLabel={t("imPolicy.noLocalRules")}
                 addLabel={t("imPolicy.addRule")}
                 removeLabel={t("imPolicy.removeRule")}
                 inputPlaceholder={t("imPolicy.rulePlaceholder")}
-                emptyLabel={t("imPolicy.noRules")}
+                disabled={formDisabled}
+                onAdd={addRule("allow")}
+                onRemove={(rule) => removeRule("allow", rule)}
             />
 
-            {/* deny rules */}
-            <ImPolicyRuleListField
+            <PolicyRuleLayers
                 title={t("imPolicy.denyRules")}
-                enabled={denyEnabled}
-                onEnabledChange={setDenyEnabled}
-                rules={deny}
-                input={newDenyRule}
-                onInputChange={setNewDenyRule}
-                onAdd={() => addRule("deny")}
-                onRemove={(r: string) => removeRule("deny", r)}
-                error={denyRuleError}
-                disabled={formDisabled}
+                hint={t("imPolicy.rulesAppendHint")}
+                groups={denyGroups}
+                localRules={denyDraft}
+                sourceLabels={ruleSourceLabels}
+                emptyLabel={t("imPolicy.noLocalRules")}
                 addLabel={t("imPolicy.addRule")}
                 removeLabel={t("imPolicy.removeRule")}
                 inputPlaceholder={t("imPolicy.rulePlaceholder")}
-                emptyLabel={t("imPolicy.noRules")}
+                disabled={formDisabled}
+                onAdd={addRule("deny")}
+                onRemove={(rule) => removeRule("deny", rule)}
             />
 
-            {/* binding.executionCwd */}
-            <FormField label={t("imPolicy.executionCwd")}>
+            <PolicyValueCard
+                label={t("imPolicy.executionCwd")}
+                value={
+                    effectiveCwd ??
+                    (effectiveScratch ? t("imPolicy.scratchPerChat") : t("imPolicy.scratchShared"))
+                }
+                source={t("imPolicy.sourceLine", {
+                    source: sourceLabel(cwd !== "" ? currentSource : sources.executionCwd.source),
+                })}
+                state={cwd === "" ? t("imPolicy.following") : stateLabel}
+                overridden={cwd !== ""}
+                overrideLabel={overrideLabel}
+                resetLabel={t("imPolicy.resetToParent")}
+                onOverride={() => {
+                    markDirty();
+                    setCwd(effectiveCwd ?? "");
+                }}
+                onReset={() => {
+                    markDirty();
+                    setCwd("");
+                }}
+                disabled={formDisabled}
+            >
                 <TextInput
                     type="text"
                     value={cwd}
                     disabled={formDisabled}
                     placeholder={t("imPolicy.executionCwdPlaceholder")}
-                    onChange={(e) => setCwd(e.target.value)}
+                    onChange={(e) => {
+                        markDirty();
+                        setCwd(e.target.value);
+                    }}
                 />
-            </FormField>
+            </PolicyValueCard>
 
-            {/* perChatScratch */}
-            <FormField label={t("imPolicy.perChatScratch")}>
+            <PolicyValueCard
+                label={t("imPolicy.perChatScratch")}
+                value={effectiveScratch ? t("imPolicy.on") : t("imPolicy.off")}
+                source={t("imPolicy.sourceLine", {
+                    source: sourceLabel(
+                        perChatScratch === null ? sources.perChatScratch.source : currentSource,
+                    ),
+                })}
+                state={perChatScratch === null ? t("imPolicy.following") : stateLabel}
+                overridden={perChatScratch !== null}
+                overrideLabel={overrideLabel}
+                resetLabel={t("imPolicy.resetToParent")}
+                onOverride={() => {
+                    markDirty();
+                    setPerChatScratch(effectiveScratch);
+                }}
+                onReset={() => {
+                    markDirty();
+                    setPerChatScratch(null);
+                }}
+                disabled={formDisabled}
+            >
                 <Select
-                    value={perChatScratch}
-                    onValueChange={(v) => setPerChatScratch(v as TriString)}
+                    value={effectiveScratch ? "on" : "off"}
+                    onValueChange={(value) => {
+                        markDirty();
+                        setPerChatScratch(value === "on");
+                    }}
                     disabled={formDisabled}
+                    label={t("imPolicy.perChatScratch")}
                     options={[
-                        {
-                            value: INHERIT,
-                            label: t("imPolicy.inherit", { value: resolvedScratch }),
-                        },
                         { value: "on", label: t("imPolicy.on") },
                         { value: "off", label: t("imPolicy.off") },
                     ]}
-                    label={t("imPolicy.perChatScratch")}
                 />
-            </FormField>
+            </PolicyValueCard>
 
             {/* Channel-scope only: list every chat override so the
                         admin can see and clear orphan grants. */}
