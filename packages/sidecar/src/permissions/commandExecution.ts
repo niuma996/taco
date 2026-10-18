@@ -9,6 +9,10 @@ export function executableName(value: string): string {
     );
 }
 
+function quoteArg(arg: string): string {
+    return /^[A-Za-z0-9_./=:@%+,{}-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`;
+}
+
 export function nestedExecution(argv: readonly string[]): {
     opaque: boolean;
     command?: string;
@@ -48,6 +52,19 @@ export function nestedExecution(argv: readonly string[]): {
             }
         }
         return { opaque, command: commands.length ? commands.join("\n") : undefined };
+    }
+    if (first === "find") {
+        // `-exec`/`-execdir`/`-ok`/`-okdir` run their arguments up to `;`/`+`.
+        const commands: string[] = [];
+        for (let i = 1; i < argv.length; i++) {
+            if (!["-exec", "-execdir", "-ok", "-okdir"].includes(argv[i] ?? "")) continue;
+            const start = i + 1;
+            while (i + 1 < argv.length && argv[i + 1] !== ";" && argv[i + 1] !== "+") i++;
+            const inner = argv.slice(start, i + 1);
+            if (inner.length) commands.push(inner.map(quoteArg).join(" "));
+            i++;
+        }
+        return commands.length ? { opaque: true, command: commands.join("\n") } : { opaque: false };
     }
     if (first === "ssh") {
         const withValue = new Set([

@@ -434,11 +434,9 @@ describe("evaluateCommand", () => {
         }
     });
 
-    it("auto-allows non-blacklisted find operations", () => {
-        // Behavior=ask is the contract: isStrictReadOnly rejects -delete/-exec/…
-        // because they are absent from READ_ONLY_FLAG_RESTRICTIONS. Risk
-        // varies (readOnly for plain -delete/-fprint, workspaceWrite when the
-        // command carries shell metacharacters like the `{}` -exec requires).
+    it("asks for find predicates that delete or run commands", () => {
+        // -delete is destructive; -exec/-ok run an inner command, so they ask
+        // like any other command runner. -fprint* only write a file.
         for (const cmd of [
             "find . -delete",
             "find . -name foo -delete",
@@ -454,7 +452,9 @@ describe("evaluateCommand", () => {
             const result = evaluateCommand(cmd, { mode: "auto", rules: [] });
             assert.equal(
                 result.behavior,
-                cmd.includes("-exec") || cmd.includes("-ok") ? "ask" : "allow",
+                cmd.includes("-exec") || cmd.includes("-ok") || cmd.includes("-delete")
+                    ? "ask"
+                    : "allow",
                 cmd,
             );
         }

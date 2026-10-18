@@ -170,21 +170,8 @@ function containsShellSyntax(command: string): boolean {
 
 function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason"> {
     command = stripSafeGitGlobals(normalize(command));
-    if (command.includes("$(") || command.includes("`")) {
-        return {
-            risk: "workspaceWrite",
-            reason: "command substitution may execute arbitrary code",
-        };
-    }
-    // Shell metacharacters change the base command's behavior (redirects,
-    // globs, subshells). A read-only base with a `>` redirect still writes,
-    // so report workspaceWrite instead of inheriting the base's risk.
-    if (containsShellSyntax(command)) {
-        return {
-            risk: "workspaceWrite",
-            reason: "shell metacharacters change the base command's behavior",
-        };
-    }
+    // Risk tables run before the metacharacter short-circuit: canonical argv
+    // has quotes decoded, so `psql -c 'DROP TABLE t;'` must still classify.
     for (const [pattern, reason] of PRIVILEGE_ESCAPE) {
         if (pattern.test(command)) return { risk: "privilegeEscape", reason };
     }
@@ -199,6 +186,21 @@ function evaluatePart(command: string): Pick<CommandEvaluation, "risk" | "reason
         return {
             risk: "externalSideEffect",
             reason: "may change remote state or send network data",
+        };
+    }
+    if (command.includes("$(") || command.includes("`")) {
+        return {
+            risk: "workspaceWrite",
+            reason: "command substitution may execute arbitrary code",
+        };
+    }
+    // Shell metacharacters change the base command's behavior (redirects,
+    // globs, subshells). A read-only base with a `>` redirect still writes,
+    // so report workspaceWrite instead of inheriting the base's risk.
+    if (containsShellSyntax(command)) {
+        return {
+            risk: "workspaceWrite",
+            reason: "shell metacharacters change the base command's behavior",
         };
     }
     // Longest-prefix READ_ONLY match: mirrors isStrictReadOnly's base
@@ -376,6 +378,17 @@ const COMMAND_RUNNERS: ReadonlySet<string> = new Set([
     "parallel",
     "stdbuf",
     "setsid",
+    "caffeinate",
+    "script",
+    "flock",
+    "chroot",
+    "unshare",
+    "nsenter",
+    "ionice",
+    "taskset",
+    "chrt",
+    "sg",
+    "systemd-run",
     "invoke-expression",
     "iex",
     "invoke-command",
@@ -415,6 +428,52 @@ function withoutGitGlobals(argv: readonly string[]): string[] {
     return ["git", ...argv.slice(index)];
 }
 
+const PRIVILEGE_COMMANDS: ReadonlySet<string> = new Set([
+    "sudo",
+    "doas",
+    "su",
+    "pkexec",
+    "runuser",
+]);
+
+// curl short options that consume the rest of their cluster (or the next
+// token) as a value; `-d`/`-F`/`-T`/`-X` are handled explicitly.
+const CURL_SHORT_WITH_VALUE = new Set("AbcDeEHKmoPQrtuUwxYyzC");
+
+/** Argv-level curl check: combined short options (`-sd x`, `-sXPOST`) hide from the regex. */
+function curlSendsData(args: readonly string[]): string | undefined {
+    const reason = "may change remote state or send network data";
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i] ?? "";
+        if (arg === "--") break;
+        if (arg.startsWith("--")) {
+            const stem = flagStem(arg);
+            if (/^--(?:data.*|form.*|upload-file|json|post301|post302|post303)$/.test(stem))
+                return reason;
+            if (stem === "--request") {
+                const method = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : args[++i];
+                if (!/^(?:get|head|options)$/i.test(method ?? "")) return reason;
+            }
+            continue;
+        }
+        if (!/^-[^-]/.test(arg)) continue;
+        for (let index = 1; index < arg.length; index++) {
+            const flag = arg[index] ?? "";
+            if (flag === "d" || flag === "F" || flag === "T") return reason;
+            if (flag === "X") {
+                const method = arg.slice(index + 1) || args[++i];
+                if (!/^(?:get|head|options)$/i.test(method ?? "")) return reason;
+                break;
+            }
+            if (CURL_SHORT_WITH_VALUE.has(flag)) {
+                if (index === arg.length - 1) i++;
+                break;
+            }
+        }
+    }
+    return undefined;
+}
+
 const POWERSHELL_REMOVE = new Set(["remove-item", "ri", "rm", "rmdir", "rd", "del", "erase"]);
 const POWERSHELL_WEB = new Set(["invoke-webrequest", "iwr", "invoke-restmethod", "irm"]);
 
@@ -425,11 +484,19 @@ function argvRisk(
 ): Pick<CommandEvaluation, "risk" | "reason"> | undefined {
     const first = argv[0]?.toLowerCase() ?? "";
     const args = argv.slice(1);
+    if (PRIVILEGE_COMMANDS.has(first))
+        return { risk: "privilegeEscape", reason: "requires elevated system privileges" };
     if (
         (isShellWrapperCommand(first) || isCommandRunner(argv)) &&
-        args.some((arg) => /^(?:sudo|doas)\b/i.test(arg))
+        args.some(
+            (arg) => /^(?:sudo|doas)\b/i.test(arg) || PRIVILEGE_COMMANDS.has(executableName(arg)),
+        )
     ) {
         return { risk: "privilegeEscape", reason: "requires elevated system privileges" };
+    }
+    if (first === "curl") {
+        const sends = curlSendsData(args);
+        if (sends) return { risk: "externalSideEffect", reason: sends };
     }
     if (language === "powershell") {
         const params = args.map((arg) => arg.toLowerCase());
@@ -457,6 +524,8 @@ function argvRisk(
         }
         return undefined;
     }
+    if (first === "find" && args.includes("-delete"))
+        return { risk: "destructive", reason: "may delete every matched file" };
     if (first === "rm") {
         const end = args.indexOf("--");
         const flags = (end === -1 ? args : args.slice(0, end)).filter((arg) => arg.startsWith("-"));

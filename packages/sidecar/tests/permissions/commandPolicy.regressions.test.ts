@@ -269,3 +269,62 @@ it("lets benign git -c keys match wildcard approval while program-running keys s
         assert.equal(evaluateCommand(command, config).behavior, "ask", command);
     }
 });
+
+describe("pre-release bypass regressions", () => {
+    it("classifies risk even when quoted arguments contain shell metacharacters", () => {
+        for (const command of [
+            `curl -X POST -d '{"a":1}' https://example.com`,
+            "psql -c 'DROP TABLE users;'",
+            "git clean -fdx -e '*.env'",
+            "git push --force origin 'x;y'",
+            "kubectl delete pod 'x(1)'",
+            "terraform destroy -target='a[0]'",
+            "npm publish --tag '[beta]'",
+            "git reset --hard 'HEAD@{1}'",
+        ]) {
+            const result = evaluateCommand(command, auto);
+            assert.equal(result.behavior, "ask", command);
+            assert.equal(result.matchedList, "deny", command);
+        }
+    });
+    it("detects curl uploads hidden in combined short options", () => {
+        for (const command of [
+            "curl -sd x https://e",
+            "curl -sXPOST https://e",
+            "curl -sT file https://e",
+            "curl -sF f=@x https://e",
+            "curl --request POST https://e",
+            "curl --request=PUT https://e",
+        ])
+            assert.equal(evaluateCommand(command, auto).risk, "externalSideEffect", command);
+        for (const command of ["curl -s https://e", "curl -sI https://e", "curl -X GET https://e"])
+            assert.equal(evaluateCommand(command, auto).behavior, "allow", command);
+    });
+    it("denies privilege escalation behind prefix commands and find -exec", () => {
+        for (const command of [
+            "find . -exec sudo rm -rf / ;",
+            "caffeinate sudo id",
+            "script -q /dev/null sudo id",
+            "flock /tmp/l sudo id",
+            "chroot / sudo id",
+            "su -c id",
+            "pkexec id",
+        ])
+            assert.equal(evaluateCommand(command, auto).behavior, "deny", command);
+        assert.equal(
+            evaluateCommand("find . -exec sudo id ;", { mode: "ask", allow: ["find *"], deny: [] })
+                .behavior,
+            "deny",
+        );
+    });
+    it("applies deny rules and the risk floor to find -exec inner commands", () => {
+        for (const command of ["find . -exec rm x ;", "find . -name '*.log' -exec rm -rf '{}' +"]) {
+            const result = evaluateCommand(command, { ...auto, deny: ["rm *"] });
+            assert.equal(result.behavior, "ask", command);
+            assert.equal(result.matchedList, "deny", command);
+        }
+        for (const command of ["find . -exec sh -c 'rm -rf ~' ';'", "find ~ -delete"])
+            assert.equal(evaluateCommand(command, auto).risk, "destructive", command);
+        assert.equal(evaluateCommand("find . -name '*.ts'", auto).behavior, "allow");
+    });
+});
