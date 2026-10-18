@@ -12,6 +12,7 @@
 
 import type {
     ImCommandPolicyPatch,
+    ImExecutionDir,
     ImPolicyChatOverrideEntry,
     ImPolicyRuleGroup,
     ImPolicySource,
@@ -27,12 +28,12 @@ import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { validatePermissionRuleClient } from "../lib/commandPermissionRuleClient.ts";
 import { subscribeImPolicyChanged } from "../lib/imPolicyEvents.ts";
 import { ConfirmModal } from "./ConfirmModal.tsx";
+import { PolicyExecutionDirPicker } from "./imPolicy/PolicyExecutionDirPicker.tsx";
 import { PolicyRuleLayers } from "./imPolicy/PolicyRuleLayers.tsx";
 import { PolicyValueCard } from "./imPolicy/PolicyValueCard.tsx";
 import { Button } from "./ui/Button.tsx";
 import { Modal } from "./ui/Modal.tsx";
 import { Select } from "./ui/Select.tsx";
-import { TextInput } from "./ui/TextInput.tsx";
 
 export interface ImPolicyDialogProps {
     open: boolean;
@@ -104,8 +105,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     const [fsTools, setFsTools] = useState<"deny" | "allow" | null>(null);
     const [shell, setShell] = useState<"deny" | "allow" | null>(null);
     const [mode, setMode] = useState<"ask" | "auto" | null>(null);
-    const [perChatScratch, setPerChatScratch] = useState<boolean | null>(null);
-    const [cwd, setCwd] = useState("");
+    const [execDir, setExecDir] = useState<ImExecutionDir | null>(null);
     const [allowDraft, setAllowDraft] = useState<string[]>([]);
     const [denyDraft, setDenyDraft] = useState<string[]>([]);
 
@@ -129,8 +129,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         setFsTools(editingPatch.tools?.fsTools ?? null);
         setShell(editingPatch.tools?.shell ?? null);
         setMode(editingPatch.commands?.mode ?? null);
-        setPerChatScratch(editingPatch.perChatScratch ?? null);
-        setCwd(editingPatch.binding?.executionCwd ?? "");
+        setExecDir(editingPatch.executionDir ?? null);
         setAllowDraft(editingPatch.commands?.allow ?? []);
         setDenyDraft(editingPatch.commands?.deny ?? []);
         setClientError(null);
@@ -142,16 +141,14 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         editingPatch.commands?.mode,
         editingPatch.commands?.allow,
         editingPatch.commands?.deny,
-        editingPatch.perChatScratch,
-        editingPatch.binding?.executionCwd,
+        editingPatch.executionDir,
     ]);
 
     const fallbackSources: ImPolicySources = {
         fsTools: { value: resolved?.tools.fsTools ?? "deny", source: "default" },
         shell: { value: resolved?.tools.shell ?? "deny", source: "default" },
         commandMode: { value: resolved?.commands.mode ?? "ask", source: "default" },
-        perChatScratch: { value: resolved?.perChatScratch ?? false, source: "default" },
-        executionCwd: { value: resolved?.binding?.executionCwd, source: "default" },
+        executionDir: { value: resolved?.executionDir ?? { mode: "shared" }, source: "default" },
     };
     const sources = data?.sources ?? fallbackSources;
 
@@ -179,6 +176,11 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         value === "allow" ? t("imPolicy.allow") : t("imPolicy.deny");
     const modeLabel = (value: "ask" | "auto"): string =>
         value === "auto" ? t("imPolicy.auto") : t("imPolicy.ask");
+    const executionDirLabel = (dir: ImExecutionDir): string => {
+        if (dir.mode === "custom") return dir.path ?? t("imPolicy.executionDirCustom");
+        if (dir.mode === "per-chat") return t("imPolicy.executionDirPerChat");
+        return t("imPolicy.executionDirShared");
+    };
 
     const formDisabled = policy.loading || policy.saving;
 
@@ -234,39 +236,38 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         }
         if (commandsChanged) patch.commands = commands;
 
-        const trimmedCwd = cwd.trim();
-        if (trimmedCwd.length > 0 && !trimmedCwd.startsWith("/")) {
-            return t("imPolicy.invalidCwd");
-        }
-        const originalCwd = editingPatch.binding?.executionCwd ?? "";
-        if (trimmedCwd === "") {
-            if (editingPatch.binding !== undefined) patch.binding = null;
-        } else if (trimmedCwd !== originalCwd) {
-            patch.binding = { executionCwd: trimmedCwd };
-        }
-
-        const originalScratch = editingPatch.perChatScratch ?? undefined;
-        if (perChatScratch === null) {
-            if (originalScratch !== undefined) patch.perChatScratch = null;
-        } else if (perChatScratch !== originalScratch) {
-            patch.perChatScratch = perChatScratch;
+        const originalDir = editingPatch.executionDir ?? undefined;
+        if (execDir === null) {
+            if (originalDir !== undefined) patch.executionDir = null;
+        } else {
+            if (execDir.mode === "custom") {
+                const dirPath = (execDir.path ?? "").trim();
+                if (dirPath.length === 0 || !dirPath.startsWith("/")) {
+                    return t("imPolicy.invalidCwd");
+                }
+                if (dirPath !== execDir.path) {
+                    patch.executionDir = { mode: "custom", path: dirPath };
+                } else if (originalDir?.mode !== "custom" || originalDir.path !== dirPath) {
+                    patch.executionDir = { mode: "custom", path: dirPath };
+                }
+            } else if (originalDir?.mode !== execDir.mode) {
+                patch.executionDir = { mode: execDir.mode };
+            }
         }
 
         return patch;
     }, [
-        editingPatch.binding,
         editingPatch.commands?.allow,
         editingPatch.commands?.deny,
         editingPatch.commands?.mode,
-        editingPatch.perChatScratch,
+        editingPatch.executionDir,
         editingPatch.tools?.fsTools,
         editingPatch.tools?.shell,
         allowDraft,
-        cwd,
         denyDraft,
+        execDir,
         fsTools,
         mode,
-        perChatScratch,
         shell,
         t,
     ]);
@@ -335,8 +336,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     const effectiveFsTools = fsTools ?? sources.fsTools.value;
     const effectiveShell = shell ?? sources.shell.value;
     const effectiveMode = mode ?? sources.commandMode.value;
-    const effectiveScratch = perChatScratch ?? sources.perChatScratch.value;
-    const effectiveCwd = cwd !== "" ? cwd : sources.executionCwd.value;
+    const effectiveDir = execDir ?? sources.executionDir.value;
 
     return (
         <Modal
@@ -510,73 +510,42 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
 
             <PolicyValueCard
                 label={t("imPolicy.executionCwd")}
-                value={
-                    effectiveCwd ??
-                    (effectiveScratch ? t("imPolicy.scratchPerChat") : t("imPolicy.scratchShared"))
-                }
-                source={t("imPolicy.sourceLine", {
-                    source: sourceLabel(cwd !== "" ? currentSource : sources.executionCwd.source),
-                })}
-                state={cwd === "" ? t("imPolicy.following") : stateLabel}
-                overridden={cwd !== ""}
-                overrideLabel={overrideLabel}
-                resetLabel={t("imPolicy.resetToParent")}
-                onOverride={() => {
-                    markDirty();
-                    setCwd(effectiveCwd ?? "");
-                }}
-                onReset={() => {
-                    markDirty();
-                    setCwd("");
-                }}
-                disabled={formDisabled}
-            >
-                <TextInput
-                    type="text"
-                    value={cwd}
-                    disabled={formDisabled}
-                    placeholder={t("imPolicy.executionCwdPlaceholder")}
-                    onChange={(e) => {
-                        markDirty();
-                        setCwd(e.target.value);
-                    }}
-                />
-            </PolicyValueCard>
-
-            <PolicyValueCard
-                label={t("imPolicy.perChatScratch")}
-                value={effectiveScratch ? t("imPolicy.on") : t("imPolicy.off")}
+                value={executionDirLabel(effectiveDir)}
                 source={t("imPolicy.sourceLine", {
                     source: sourceLabel(
-                        perChatScratch === null ? sources.perChatScratch.source : currentSource,
+                        execDir === null ? sources.executionDir.source : currentSource,
                     ),
                 })}
-                state={perChatScratch === null ? t("imPolicy.following") : stateLabel}
-                overridden={perChatScratch !== null}
+                state={execDir === null ? t("imPolicy.following") : stateLabel}
+                overridden={execDir !== null}
                 overrideLabel={overrideLabel}
                 resetLabel={t("imPolicy.resetToParent")}
                 onOverride={() => {
                     markDirty();
-                    setPerChatScratch(effectiveScratch);
+                    setExecDir(effectiveDir);
                 }}
                 onReset={() => {
                     markDirty();
-                    setPerChatScratch(null);
+                    setExecDir(null);
                 }}
                 disabled={formDisabled}
             >
-                <Select
-                    value={effectiveScratch ? "on" : "off"}
-                    onValueChange={(value) => {
+                <PolicyExecutionDirPicker
+                    value={effectiveDir}
+                    onChange={(next) => {
                         markDirty();
-                        setPerChatScratch(value === "on");
+                        setExecDir(next);
                     }}
                     disabled={formDisabled}
-                    label={t("imPolicy.perChatScratch")}
-                    options={[
-                        { value: "on", label: t("imPolicy.on") },
-                        { value: "off", label: t("imPolicy.off") },
-                    ]}
+                    labels={{
+                        shared: t("imPolicy.executionDirShared"),
+                        perChat: t("imPolicy.executionDirPerChat"),
+                        custom: t("imPolicy.executionDirCustom"),
+                        sharedHint: t("imPolicy.executionDirSharedHint"),
+                        perChatHint: t("imPolicy.executionDirPerChatHint"),
+                        customHint: t("imPolicy.executionDirCustomHint"),
+                        pathPlaceholder: t("imPolicy.executionCwdPlaceholder"),
+                    }}
                 />
             </PolicyValueCard>
 

@@ -32,8 +32,7 @@ const DEFAULT_SOURCES: ImPolicyGetResult["sources"] = {
     fsTools: { value: "deny", source: "default" },
     shell: { value: "deny", source: "default" },
     commandMode: { value: "ask", source: "default" },
-    perChatScratch: { value: false, source: "default" },
-    executionCwd: { value: undefined, source: "default" },
+    executionDir: { value: { mode: "shared" }, source: "default" },
 };
 
 function makeResult(overrides: Partial<ImPolicyGetResult> = {}): ImPolicyGetResult {
@@ -44,6 +43,7 @@ function makeResult(overrides: Partial<ImPolicyGetResult> = {}): ImPolicyGetResu
         resolved: {
             tools: { fsTools: "deny", shell: "deny" },
             commands: { mode: "ask" },
+            executionDir: { mode: "shared" },
         },
         chatOverride: null,
         hasOverride: false,
@@ -145,6 +145,75 @@ describe("ImPolicyDialog — saving overrides", () => {
             expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
                 channelId: "wechat",
                 patch: { commands: { mode: null } },
+            });
+        });
+    });
+});
+
+describe("ImPolicyDialog — working directory", () => {
+    it("shows the effective working directory and its source", async () => {
+        renderDialog(
+            makeClient(
+                makeResult({
+                    sources: {
+                        ...DEFAULT_SOURCES,
+                        executionDir: { value: { mode: "per-chat" }, source: "channel" },
+                    },
+                }),
+            ),
+        );
+        await waitFor(() => {
+            expect(screen.getAllByText("imPolicy.executionDirPerChat").length).toBeGreaterThan(0);
+        });
+    });
+
+    it("sends the chosen working directory when the field is overridden", async () => {
+        const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        await screen.findByText("imPolicy.sourceGlobal");
+        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
+        await user.click(within(card).getByText("imPolicy.setForChannel"));
+
+        await user.click(within(card).getByRole("radio", { name: /imPolicy.executionDirPerChat/ }));
+
+        const saveButtons = screen.getAllByText("imPolicy.save");
+        await user.click(saveButtons[0] as HTMLElement);
+        const confirmButtons = screen.getAllByText("imPolicy.save");
+        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+
+        await waitFor(() => {
+            expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
+                channelId: "wechat",
+                patch: { executionDir: { mode: "per-chat" } },
+            });
+        });
+    });
+
+    it("sends null when the working directory is restored to follow the parent", async () => {
+        const client = makeClient(
+            makeResult({
+                channelDefault: { executionDir: { mode: "per-chat" } },
+                rules: GLOBAL_RULES,
+            }),
+        );
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        await screen.findByText("imPolicy.sourceGlobal");
+        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
+        await user.click(within(card).getByText("imPolicy.resetToParent"));
+
+        const saveButtons = screen.getAllByText("imPolicy.save");
+        await user.click(saveButtons[0] as HTMLElement);
+        const confirmButtons = screen.getAllByText("imPolicy.save");
+        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+
+        await waitFor(() => {
+            expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
+                channelId: "wechat",
+                patch: { executionDir: null },
             });
         });
     });

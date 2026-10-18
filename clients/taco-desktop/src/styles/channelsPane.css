@@ -325,6 +325,50 @@
     display: flex;
     gap: 8px;
 }
+.im-policy-dir {
+    margin-top: 4px;
+}
+.im-policy-dir-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.im-policy-dir-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.im-policy-dir-option:hover {
+    border-color: var(--accent-border);
+}
+.im-policy-dir-option.is-selected {
+    border-color: var(--accent-border);
+    background: var(--accent-bg-hover);
+}
+.im-policy-dir-option input {
+    margin-top: 2px;
+    accent-color: var(--accent);
+}
+.im-policy-dir-option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.im-policy-dir-option-label {
+    font-size: 13px;
+    color: var(--fg);
+}
+.im-policy-dir-option-hint {
+    font-size: 12px;
+    color: var(--fg-dim);
+}
+.im-policy-dir-path {
+    margin-top: 8px;
+}
 .im-policy-rules {
     margin: 8px 0 12px 0;
     padding: 8px 10px;

@@ -15,6 +15,7 @@ function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
                 resolved: {
                     tools: { fsTools: "deny", shell: "deny" },
                     commands: { mode: "ask" },
+                    executionDir: { mode: "shared" },
                 },
                 chatOverride: null,
                 hasOverride: false,
@@ -23,8 +24,7 @@ function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
                     fsTools: { value: "deny", source: "default" },
                     shell: { value: "deny", source: "default" },
                     commandMode: { value: "ask", source: "default" },
-                    perChatScratch: { value: false, source: "default" },
-                    executionCwd: { value: undefined, source: "default" },
+                    executionDir: { value: { mode: "shared" }, source: "default" },
                 },
                 rules: { allow: [], deny: [] },
             };
