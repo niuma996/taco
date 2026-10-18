@@ -1166,6 +1166,14 @@ export class SidecarServer implements ServerRpcSurface {
                     return route ? () => this.imPolicyStore.resolve(route) : undefined;
                 })(),
                 toolRegistry,
+                // IM prompts fan out to every connected desktop, so any one can
+                // answer. Other workspaces only reach this server's transport:
+                // the daemon's scheduler runtime sits on a NullTransport, where
+                // an ask would otherwise wait out the full broker timeout.
+                hasApprover:
+                    paths.imRoute && this.clientSinkRegistry
+                        ? () => this.clientSinkRegistry?.hasClient() ?? true
+                        : () => this.getTransport().interactive !== false,
                 // Hot-reload wiring: only the user-writable dirs are watched —
                 // the builtin dir ships with the binary and only changes via
                 // an app upgrade (a full restart), not hot-editing. Passing

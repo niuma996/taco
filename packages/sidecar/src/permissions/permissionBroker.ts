@@ -42,6 +42,9 @@ export interface PermissionBrokerOptions {
      *  root-session allowlist cannot leak into the child's shell execution. */
     readOnly?: boolean;
     commandContext?: Pick<CommandEvaluationContext, "cwd" | "allowedRoots">;
+    /** False when no client can answer a prompt (IM with no desktop connected);
+     *  an ask then denies at once instead of blocking the turn until timeout. */
+    hasApprover?: () => boolean;
 }
 
 export class PermissionBroker extends EventEmitter {
@@ -52,6 +55,7 @@ export class PermissionBroker extends EventEmitter {
     private readonly imCommandPolicy?: PermissionBrokerOptions["imCommandPolicy"];
     private readonly readOnly: boolean;
     private readonly commandContext: PermissionBrokerOptions["commandContext"];
+    private readonly hasApprover: () => boolean;
 
     constructor(
         private readonly globalConfig: () => CommandPermissionConfig,
@@ -63,6 +67,7 @@ export class PermissionBroker extends EventEmitter {
         this.imCommandPolicy = options?.imCommandPolicy;
         this.readOnly = options?.readOnly ?? false;
         this.commandContext = options?.commandContext;
+        this.hasApprover = options?.hasApprover ?? (() => true);
     }
 
     async evaluateAndRequest(args: {
@@ -127,6 +132,9 @@ export class PermissionBroker extends EventEmitter {
         }
         if (evaluation.behavior !== "ask") {
             return { approved: evaluation.behavior === "allow", scope: "once", evaluation };
+        }
+        if (!this.hasApprover()) {
+            return { approved: false, scope: "once", evaluation, denialReason: "no_approver" };
         }
 
         const request: CommandPermissionRequest = {

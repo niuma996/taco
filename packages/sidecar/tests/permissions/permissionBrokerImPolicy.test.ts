@@ -72,3 +72,36 @@ describe("PermissionBroker IM policy", () => {
         assert.equal(next.approved, true);
     });
 });
+
+describe("PermissionBroker without an approver", () => {
+    it("denies an ask at once instead of waiting for the timeout", async () => {
+        const broker = new PermissionBroker(() => GLOBAL, {
+            imCommandPolicy: () => ({ mode: "ask" }),
+            hasApprover: () => false,
+            requestTimeoutMs: 60_000,
+        });
+        let requested = 0;
+        broker.on("requested", () => requested++);
+        const decision = await broker.evaluateAndRequest({
+            sessionId: "s1",
+            toolCallId: "t1",
+            command: "pnpm build",
+        });
+        assert.equal(decision.approved, false);
+        assert.equal(decision.denialReason, "no_approver");
+        assert.equal(requested, 0);
+    });
+
+    it("still allows commands that need no approval", async () => {
+        const broker = new PermissionBroker(() => GLOBAL, {
+            imCommandPolicy: () => ({ mode: "ask", allow: ["pnpm build"] }),
+            hasApprover: () => false,
+        });
+        const decision = await broker.evaluateAndRequest({
+            sessionId: "s1",
+            toolCallId: "t1",
+            command: "pnpm build",
+        });
+        assert.equal(decision.approved, true);
+    });
+});

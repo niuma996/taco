@@ -49,6 +49,12 @@ export class ClientSinkRegistry {
         return this.sinks.size;
     }
 
+    /** True when a client that can answer prompts is connected. */
+    hasClient(): boolean {
+        for (const sink of this.sinks) if (sink.interactive !== false) return true;
+        return false;
+    }
+
     /** Send `frame` to every registered sink. Best-effort per sink. */
     fanout(frame: ServerFrame): void {
         for (const sink of this.sinks) {

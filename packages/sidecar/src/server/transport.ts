@@ -12,6 +12,9 @@ export type ServerFrame = ServerPush | RpcResponse;
  * emitPush with workspace-based routing.
  */
 export interface Transport {
+    /** `false` when no client sits behind this transport to answer prompts. Absent = interactive. */
+    readonly interactive?: false;
+
     /** Start inbound listener. send() is valid once open() resolves. */
     open(): Promise<void>;
 

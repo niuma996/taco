@@ -40,7 +40,11 @@ type ShellToolResult = {
     details: {
         exitCode: number;
         interrupted: boolean;
-        reason?: "permission_denied" | "permission_timeout" | "permission_aborted";
+        reason?:
+            | "permission_denied"
+            | "permission_timeout"
+            | "permission_aborted"
+            | "permission_no_approver";
     };
     isError: boolean;
 };
@@ -57,7 +61,21 @@ type ShellToolResult = {
  * (deny rule, read-only broker, IM channel), where there is no user to ask —
  * so that path explains and stops instead.
  */
-function deniedResult(reason: "user_denied" | "timeout" | "aborted" | undefined): ShellToolResult {
+function deniedResult(
+    reason: "user_denied" | "timeout" | "aborted" | "no_approver" | undefined,
+): ShellToolResult {
+    if (reason === "no_approver") {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: "[command denied] This command needs approval in the Taco desktop app, and no desktop app is connected right now. Do not retry it or work around it. Tell the user it needs approval in the Taco desktop app, then continue without it or stop.",
+                },
+            ],
+            details: { exitCode: -1, interrupted: false, reason: "permission_no_approver" },
+            isError: true,
+        };
+    }
     if (reason === "timeout") {
         return {
             content: [

@@ -145,7 +145,8 @@ export interface CommandPermissionRequest {
     /** Root agent toolCallId — == toolCallId for main-session requests. */
     displayToolCallId?: ToolCallId;
 }
-export type CommandPermissionDenialReason = "user_denied" | "timeout" | "aborted";
+/** `no_approver`: an IM request with no desktop client connected to answer it. */
+export type CommandPermissionDenialReason = "user_denied" | "timeout" | "aborted" | "no_approver";
 export interface CommandPermissionDecision {
     approved: boolean;
     scope: CommandPermissionScope;

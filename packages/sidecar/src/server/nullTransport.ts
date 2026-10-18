@@ -9,6 +9,8 @@
 import type { ServerFrame, Transport } from "./transport.ts";
 
 export class NullTransport implements Transport {
+    readonly interactive = false;
+
     async open(): Promise<void> {}
 
     async close(): Promise<void> {}

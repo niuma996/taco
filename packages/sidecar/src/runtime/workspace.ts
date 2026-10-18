@@ -201,6 +201,8 @@ export interface WorkspaceRuntimeOptions {
      * permission change would only reach conversations started afterwards.
      */
     resolveImPolicy?: () => ImWorkspacePolicy | undefined;
+    /** Whether a client can answer command approvals now. See PermissionBrokerOptions.hasApprover. */
+    hasApprover?: () => boolean;
     /** Where tools run (shell, fs tools, plan files). Defaults to the session cwd. */
     executionCwd?: string;
     /**
@@ -523,6 +525,7 @@ export class WorkspaceRuntime extends EventEmitter {
                 // call, not just the next turn's tool list.
                 imCommandPolicy: () => this.resolveImPolicy()?.commands,
                 commandContext: { cwd: this.executionCwd, allowedRoots: [this.executionCwd] },
+                hasApprover: options.hasApprover,
             },
         );
         const toolContext = this.buildToolContextThunk(options);
