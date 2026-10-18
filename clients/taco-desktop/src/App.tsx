@@ -16,7 +16,10 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { FilesDrawer } from "./components/FilesDrawer";
 import { LlmDumpDock } from "./components/LlmDumpPanel";
 import { OnboardingModal } from "./components/onboarding/OnboardingModal.js";
-import { PendingPermissionsModal } from "./components/PendingPermissionsModal";
+import {
+    collectPendingPermissions,
+    PendingPermissionsModal,
+} from "./components/PendingPermissionsModal";
 import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { SubagentPanel } from "./components/panels/SubagentPanel";
 import { TaskPanel } from "./components/panels/TaskPanel";
@@ -136,20 +139,28 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
-    const pendingPermissionCount = ws ? Object.keys(ws.pendingCommandPermissions).length : 0;
-    useEffect(() => {
-        if (pendingPermissionCount === 0) setPendingPermissionsOpen(false);
-    }, [pendingPermissionCount]);
-    const resolveCommandPermission = useCallback(
-        async (requestId: string, approved: boolean, scope: CommandPermissionScope) => {
-            if (!activeCwd) return;
-            await client.commandPermissionResolve(asWorkspaceId(activeCwd), {
+    const pendingPermissionCount = collectPendingPermissions(workspaces).length;
+    const resolveCommandPermissionIn = useCallback(
+        async (
+            cwd: string,
+            requestId: string,
+            approved: boolean,
+            scope: CommandPermissionScope,
+        ) => {
+            await client.commandPermissionResolve(asWorkspaceId(cwd), {
                 requestId,
                 approved,
                 scope,
             });
         },
-        [activeCwd, client],
+        [client],
+    );
+    const resolveCommandPermission = useCallback(
+        async (requestId: string, approved: boolean, scope: CommandPermissionScope) => {
+            if (!activeCwd) return;
+            await resolveCommandPermissionIn(activeCwd, requestId, approved, scope);
+        },
+        [activeCwd, resolveCommandPermissionIn],
     );
     // runInFlight = the active session has a turn in flight (run_start without
     // its run_end). busy additionally covers agent-tool cards streaming from
@@ -1041,15 +1052,12 @@ export default function App() {
                 }}
                 onCancel={() => setPendingRenameSession(null)}
             />
-            {ws && (
-                <PendingPermissionsModal
-                    open={pendingPermissionsOpen}
-                    onClose={() => setPendingPermissionsOpen(false)}
-                    requests={ws.pendingCommandPermissions}
-                    sessions={ws.sessions}
-                    onResolve={resolveCommandPermission}
-                />
-            )}
+            <PendingPermissionsModal
+                open={pendingPermissionsOpen}
+                onClose={() => setPendingPermissionsOpen(false)}
+                workspaces={workspaces}
+                onResolve={resolveCommandPermissionIn}
+            />
             <ChannelBindDialog
                 open={bindingChannelId !== null}
                 channel={

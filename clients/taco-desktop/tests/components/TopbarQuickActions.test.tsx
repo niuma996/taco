@@ -161,3 +161,24 @@ describe("TopbarQuickActions", () => {
         expect(onOpenPendingApprovals).toHaveBeenCalledOnce();
     });
 });
+
+describe("TopbarQuickActions approvals button", () => {
+    it("stays visible with no pending approvals and hides only the count", async () => {
+        const user = userEvent.setup();
+        const onOpenPendingApprovals = vi.fn();
+        render(
+            <TopbarQuickActions
+                {...noNotifications}
+                pendingApprovalCount={0}
+                onOpenPendingApprovals={onOpenPendingApprovals}
+            />,
+        );
+
+        const approvals = screen.getByRole("button", { name: /session\.pendingPermissions/ });
+        expect(document.querySelector(".workspace-approval-button__count")).toBeNull();
+        expect(approvals.className).not.toContain("workspace-approval-button--pending");
+
+        await user.click(approvals);
+        expect(onOpenPendingApprovals).toHaveBeenCalledOnce();
+    });
+});

@@ -327,7 +327,8 @@ header.topbar .topbar-picker-group {
     display: inline-flex;
 }
 
-.workspace-approval-button {
+/* Always visible; only tinted while something is waiting. */
+.workspace-approval-button--pending {
     color: var(--accent);
 }
 

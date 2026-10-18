@@ -2,8 +2,8 @@
  * TopbarQuickActions — workspace approvals, notification bell, and language /
  * theme shortcuts in the title bar.
  *
- * Pending approvals come before the bell because they belong to the active
- * workspace; the notification list remains the outer, cross-workspace stream.
+ * The approvals button sits left of the bell and is always shown, so there is
+ * one fixed place to check for commands blocked in any workspace.
  * Language and theme each open a Radix dropdown (same pattern as
  * WorkspacePicker) and write through `writeClientSettings`, so AppearanceTab,
  * useTheme, and i18n subscribers update in place — no sidecar RPC.
@@ -117,19 +117,25 @@ export function TopbarQuickActions({
 
     return (
         <div className="topbar-quick-actions">
-            {pendingApprovalCount > 0 && onOpenPendingApprovals && (
+            {onOpenPendingApprovals && (
                 <IconButton
                     size="lg"
-                    className="workspace-approval-button"
+                    className={
+                        pendingApprovalCount > 0
+                            ? "workspace-approval-button workspace-approval-button--pending"
+                            : "workspace-approval-button"
+                    }
                     aria-label={t("session.pendingPermissions")}
                     title={t("session.pendingPermissions")}
                     onClick={onOpenPendingApprovals}
                 >
                     <span className="workspace-approval-button__icon">
                         <ShieldAlert size={14} aria-hidden="true" />
-                        <span className="workspace-approval-button__count" aria-hidden="true">
-                            {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
-                        </span>
+                        {pendingApprovalCount > 0 && (
+                            <span className="workspace-approval-button__count" aria-hidden="true">
+                                {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
+                            </span>
+                        )}
                     </span>
                 </IconButton>
             )}
