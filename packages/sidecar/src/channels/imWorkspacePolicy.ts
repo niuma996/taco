@@ -444,25 +444,40 @@ function readPolicyLayers(raw: unknown, route: ImRoute | null): PolicyLayerPatch
  */
 export function describeImPolicySources(raw: unknown, route: ImRoute | null): ImPolicySources {
     const { channel, chat } = readPolicyLayers(raw, route);
+    // `inherited` is the value one layer up from the scope being described:
+    // the built-in default for the channel scope, the channel result for a chat.
     const pick = <T>(
         chatValue: T | null | undefined,
         channelValue: T | null | undefined,
         fallback: T,
     ): ImPolicyField<T> => {
+        const fromDefault = { value: fallback, source: "default" as const };
+        const fromChannel =
+            channelValue !== undefined && channelValue !== null
+                ? { value: channelValue, source: "channel" as const }
+                : fromDefault;
+        const inherited = route === null ? fromDefault : fromChannel;
         if (chatValue !== undefined && chatValue !== null)
-            return { value: chatValue, source: "chat" };
-        if (channelValue !== undefined && channelValue !== null)
-            return { value: channelValue, source: "channel" };
-        return { value: fallback, source: "default" };
+            return { value: chatValue, source: "chat", inherited };
+        return { ...fromChannel, inherited };
     };
 
+    const defaultDir = {
+        value: DEFAULT_IM_WORKSPACE_POLICY.executionDir,
+        source: "default" as const,
+    };
+    const channelDir = resolveLayerExecutionDir(channel, defaultDir, "channel");
     const dir = resolveExecutionDirChain(channel, chat);
 
     return {
         fsTools: pick(chat?.tools?.fsTools, channel.tools?.fsTools, "deny"),
         shell: pick(chat?.tools?.shell, channel.tools?.shell, "deny"),
         commandMode: pick(chat?.commands?.mode, channel.commands?.mode, "ask"),
-        executionDir: { value: dir.value, source: dir.source },
+        executionDir: {
+            value: dir.value,
+            source: dir.source,
+            inherited: route === null ? defaultDir : channelDir,
+        },
     };
 }
 

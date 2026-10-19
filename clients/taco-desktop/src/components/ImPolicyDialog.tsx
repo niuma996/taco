@@ -13,7 +13,9 @@
 import type {
     ImCommandPolicyPatch,
     ImExecutionDir,
+    ImExecutionDirMode,
     ImPolicyChatOverrideEntry,
+    ImPolicyField,
     ImPolicyRuleGroup,
     ImPolicySource,
     ImPolicySources,
@@ -21,6 +23,7 @@ import type {
     ImToolPolicyPatch,
     ImWorkspacePolicyPatch,
 } from "@taco-ai/protocol";
+import { Layers } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useImPolicy } from "../hooks/useImPolicy.ts";
 import { useT } from "../i18n/useI18n.ts";
@@ -144,13 +147,46 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         editingPatch.executionDir,
     ]);
 
-    const fallbackSources: ImPolicySources = {
-        fsTools: { value: resolved?.tools.fsTools ?? "deny", source: "default" },
-        shell: { value: resolved?.tools.shell ?? "deny", source: "default" },
-        commandMode: { value: resolved?.commands.mode ?? "ask", source: "default" },
-        executionDir: { value: resolved?.executionDir ?? { mode: "shared" }, source: "default" },
+    const fallbackField = <T,>(value: T): ImPolicyField<T> => ({
+        value,
+        source: "default",
+        inherited: { value, source: "default" },
+    });
+    // A sidecar older than this client omits `inherited`. Rebuild it from what
+    // the old payload does say: a value owned by an outer layer is the parent
+    // value as-is; a value owned by the layer being edited hides its parent, so
+    // fall back to the built-in default. That guess is exact for the channel
+    // scope and never tags this layer's own override as "inherited" — which
+    // would make re-picking it silently clear the override on save.
+    const editedLayer: ImPolicySource = isChannelScope ? "channel" : "chat";
+    const withInherited = <T,>(
+        field: ImPolicyField<T> | undefined,
+        resolvedValue: T,
+        builtIn: T,
+    ): ImPolicyField<T> => {
+        if (field === undefined) return fallbackField(resolvedValue);
+        if (field.inherited !== undefined) return field;
+        const inherited =
+            field.source === editedLayer
+                ? { value: builtIn, source: "default" as const }
+                : { value: field.value, source: field.source };
+        return { ...field, inherited };
     };
-    const sources = data?.sources ?? fallbackSources;
+    const rawSources = data?.sources;
+    const sources: ImPolicySources = {
+        fsTools: withInherited(rawSources?.fsTools, resolved?.tools.fsTools ?? "deny", "deny"),
+        shell: withInherited(rawSources?.shell, resolved?.tools.shell ?? "deny", "deny"),
+        commandMode: withInherited(
+            rawSources?.commandMode,
+            resolved?.commands.mode ?? "ask",
+            "ask",
+        ),
+        executionDir: withInherited(
+            rawSources?.executionDir,
+            resolved?.executionDir ?? { mode: "shared" },
+            { mode: "shared" },
+        ),
+    };
 
     const withLocalGroup = (groups: ImPolicyRuleGroup[]): ImPolicyRuleGroup[] =>
         groups.some((group) => group.editable)
@@ -168,19 +204,23 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         channel: t(RULE_SOURCE_KEYS.channel),
         chat: t(RULE_SOURCE_KEYS.chat),
     };
-    const stateLabel = isChannelScope ? t("imPolicy.overrideChannel") : t("imPolicy.overrideChat");
-    const currentSource: ImPolicySource = isChannelScope ? "channel" : "chat";
-    const overrideLabel = isChannelScope ? t("imPolicy.setForChannel") : t("imPolicy.setForChat");
-
-    const toolLabel = (value: "deny" | "allow"): string =>
-        value === "allow" ? t("imPolicy.allow") : t("imPolicy.deny");
-    const modeLabel = (value: "ask" | "auto"): string =>
-        value === "auto" ? t("imPolicy.auto") : t("imPolicy.ask");
-    const executionDirLabel = (dir: ImExecutionDir): string => {
-        if (dir.mode === "custom") return dir.path ?? t("imPolicy.executionDirCustom");
-        if (dir.mode === "per-chat") return t("imPolicy.executionDirPerChat");
-        return t("imPolicy.executionDirShared");
-    };
+    // Tag for the option the parent layer supplies, named after that layer
+    // ("系统默认", "全局权限策略", "渠道策略").
+    const inheritedBadge = (field: ImPolicyField<unknown>): string =>
+        sourceLabel(field.inherited.source);
+    /** Options for a two-value field, with the inherited one tagged. */
+    const choiceOptions = <V extends string>(
+        field: ImPolicyField<V>,
+        choices: ReadonlyArray<{ value: V; label: string }>,
+    ) =>
+        choices.map((choice) =>
+            choice.value === field.inherited.value
+                ? { ...choice, badge: inheritedBadge(field) }
+                : choice,
+        );
+    /** Picking the inherited value means "follow the parent" (null draft). */
+    const pick = <V extends string>(field: ImPolicyField<V>, next: V): V | null =>
+        next === field.inherited.value ? null : next;
 
     const formDisabled = policy.loading || policy.saving;
 
@@ -333,25 +373,33 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
 
     if (!scope) return null;
 
-    const effectiveFsTools = fsTools ?? sources.fsTools.value;
-    const effectiveShell = shell ?? sources.shell.value;
-    const effectiveMode = mode ?? sources.commandMode.value;
-    const effectiveDir = execDir ?? sources.executionDir.value;
+    // A null draft follows the parent, so it shows the parent's value — not
+    // `sources.*.value`, which still holds this layer's stored override.
+    const effectiveFsTools = fsTools ?? sources.fsTools.inherited.value;
+    const effectiveShell = shell ?? sources.shell.inherited.value;
+    const effectiveMode = mode ?? sources.commandMode.inherited.value;
+    const effectiveDir = execDir ?? sources.executionDir.inherited.value;
 
     return (
         <Modal
             open={open}
             onClose={onClose}
             title={
-                isChannelScope
-                    ? t("imPolicy.titleChannel", { channel: scope.channelId })
-                    : t("imPolicy.titleChat", { peer: scope.peerId ?? "" })
+                <span className="im-policy-title">
+                    <span className="im-policy-title-text">
+                        {isChannelScope
+                            ? t("imPolicy.titleChannel", { channel: scope.channelId })
+                            : t("imPolicy.titleChat", { peer: scope.peerId ?? "" })}
+                    </span>
+                    <span className="im-policy-scope">
+                        <Layers size={12} aria-hidden="true" />
+                        {isChannelScope
+                            ? t("imPolicy.parentChannel")
+                            : t("imPolicy.parentChat", { channel: scope.channelId })}
+                    </span>
+                </span>
             }
-            description={
-                isChannelScope
-                    ? t("imPolicy.parentChannel")
-                    : t("imPolicy.parentChat", { channel: scope.channelId })
-            }
+            description={t("imPolicy.desc")}
             className="im-policy-modal"
             actions={
                 <>
@@ -368,223 +416,185 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                 </>
             }
         >
-            <p className="im-policy-desc">{t("imPolicy.desc")}</p>
             {clientError !== null && <div className="error-banner">{clientError}</div>}
             {policy.error !== null && <div className="error-banner">{policy.error}</div>}
             {policy.loading && <div className="pane-loading">{t("imPolicy.loading")}</div>}
 
-            <PolicyValueCard
-                label={t("imPolicy.fsTools")}
-                value={toolLabel(effectiveFsTools)}
-                source={t("imPolicy.sourceLine", {
-                    source: sourceLabel(fsTools === null ? sources.fsTools.source : currentSource),
-                })}
-                state={fsTools === null ? t("imPolicy.following") : stateLabel}
-                overridden={fsTools !== null}
-                overrideLabel={overrideLabel}
-                resetLabel={t("imPolicy.resetToParent")}
-                onOverride={() => {
-                    markDirty();
-                    setFsTools(effectiveFsTools);
-                }}
-                onReset={() => {
-                    markDirty();
-                    setFsTools(null);
-                }}
-                disabled={formDisabled}
-            >
-                <Select
-                    value={effectiveFsTools}
-                    onValueChange={(value) => {
-                        markDirty();
-                        setFsTools(value === "allow" ? "allow" : "deny");
-                    }}
-                    disabled={formDisabled}
-                    label={t("imPolicy.fsTools")}
-                    options={[
-                        { value: "deny", label: t("imPolicy.deny") },
-                        { value: "allow", label: t("imPolicy.allow") },
-                    ]}
-                />
-            </PolicyValueCard>
+            <div className="im-policy-body">
+                <h4 className="pane-section-title">{t("imPolicy.sectionFields")}</h4>
+                <div className="im-policy-fields">
+                    <PolicyValueCard label={t("imPolicy.fsTools")} overridden={fsTools !== null}>
+                        <Select
+                            value={effectiveFsTools}
+                            onValueChange={(value) => {
+                                markDirty();
+                                setFsTools(
+                                    pick(sources.fsTools, value === "allow" ? "allow" : "deny"),
+                                );
+                            }}
+                            disabled={formDisabled}
+                            label={t("imPolicy.fsTools")}
+                            className="im-policy-select"
+                            options={choiceOptions(sources.fsTools, [
+                                { value: "deny", label: t("imPolicy.deny") },
+                                { value: "allow", label: t("imPolicy.allow") },
+                            ])}
+                        />
+                    </PolicyValueCard>
 
-            <PolicyValueCard
-                label={t("imPolicy.shell")}
-                value={toolLabel(effectiveShell)}
-                source={t("imPolicy.sourceLine", {
-                    source: sourceLabel(shell === null ? sources.shell.source : currentSource),
-                })}
-                state={shell === null ? t("imPolicy.following") : stateLabel}
-                overridden={shell !== null}
-                overrideLabel={overrideLabel}
-                resetLabel={t("imPolicy.resetToParent")}
-                onOverride={() => {
-                    markDirty();
-                    setShell(effectiveShell);
-                }}
-                onReset={() => {
-                    markDirty();
-                    setShell(null);
-                }}
-                disabled={formDisabled}
-            >
-                <Select
-                    value={effectiveShell}
-                    onValueChange={(value) => {
-                        markDirty();
-                        setShell(value === "allow" ? "allow" : "deny");
-                    }}
-                    disabled={formDisabled}
-                    label={t("imPolicy.shell")}
-                    options={[
-                        { value: "deny", label: t("imPolicy.deny") },
-                        { value: "allow", label: t("imPolicy.allow") },
-                    ]}
-                />
-            </PolicyValueCard>
+                    <PolicyValueCard label={t("imPolicy.shell")} overridden={shell !== null}>
+                        <Select
+                            value={effectiveShell}
+                            onValueChange={(value) => {
+                                markDirty();
+                                setShell(pick(sources.shell, value === "allow" ? "allow" : "deny"));
+                            }}
+                            disabled={formDisabled}
+                            label={t("imPolicy.shell")}
+                            className="im-policy-select"
+                            options={choiceOptions(sources.shell, [
+                                { value: "deny", label: t("imPolicy.deny") },
+                                { value: "allow", label: t("imPolicy.allow") },
+                            ])}
+                        />
+                    </PolicyValueCard>
 
-            <PolicyValueCard
-                label={t("imPolicy.commandMode")}
-                value={modeLabel(effectiveMode)}
-                source={t("imPolicy.sourceLine", {
-                    source: sourceLabel(mode === null ? sources.commandMode.source : currentSource),
-                })}
-                state={mode === null ? t("imPolicy.following") : stateLabel}
-                overridden={mode !== null}
-                overrideLabel={overrideLabel}
-                resetLabel={t("imPolicy.resetToParent")}
-                onOverride={() => {
-                    markDirty();
-                    setMode(effectiveMode);
-                }}
-                onReset={() => {
-                    markDirty();
-                    setMode(null);
-                }}
-                disabled={formDisabled}
-            >
-                <Select
-                    value={effectiveMode}
-                    onValueChange={(value) => {
-                        markDirty();
-                        setMode(value === "auto" ? "auto" : "ask");
-                    }}
-                    disabled={formDisabled}
-                    label={t("imPolicy.commandMode")}
-                    options={[
-                        { value: "ask", label: t("imPolicy.ask") },
-                        { value: "auto", label: t("imPolicy.auto") },
-                    ]}
-                />
-            </PolicyValueCard>
+                    <PolicyValueCard label={t("imPolicy.commandMode")} overridden={mode !== null}>
+                        <Select
+                            value={effectiveMode}
+                            onValueChange={(value) => {
+                                markDirty();
+                                setMode(
+                                    pick(sources.commandMode, value === "auto" ? "auto" : "ask"),
+                                );
+                            }}
+                            disabled={formDisabled}
+                            label={t("imPolicy.commandMode")}
+                            className="im-policy-select"
+                            options={choiceOptions(sources.commandMode, [
+                                { value: "ask", label: t("imPolicy.ask") },
+                                { value: "auto", label: t("imPolicy.auto") },
+                            ])}
+                        />
+                    </PolicyValueCard>
 
-            <PolicyRuleLayers
-                title={t("imPolicy.allowRules")}
-                hint={t("imPolicy.rulesAppendHint")}
-                groups={allowGroups}
-                localRules={allowDraft}
-                sourceLabels={ruleSourceLabels}
-                emptyLabel={t("imPolicy.noLocalRules")}
-                addLabel={t("imPolicy.addRule")}
-                removeLabel={t("imPolicy.removeRule")}
-                inputPlaceholder={t("imPolicy.rulePlaceholder")}
-                disabled={formDisabled}
-                onAdd={addRule("allow")}
-                onRemove={(rule) => removeRule("allow", rule)}
-            />
-
-            <PolicyRuleLayers
-                title={t("imPolicy.denyRules")}
-                hint={t("imPolicy.rulesAppendHint")}
-                groups={denyGroups}
-                localRules={denyDraft}
-                sourceLabels={ruleSourceLabels}
-                emptyLabel={t("imPolicy.noLocalRules")}
-                addLabel={t("imPolicy.addRule")}
-                removeLabel={t("imPolicy.removeRule")}
-                inputPlaceholder={t("imPolicy.rulePlaceholder")}
-                disabled={formDisabled}
-                onAdd={addRule("deny")}
-                onRemove={(rule) => removeRule("deny", rule)}
-            />
-
-            <PolicyValueCard
-                label={t("imPolicy.executionCwd")}
-                value={executionDirLabel(effectiveDir)}
-                source={t("imPolicy.sourceLine", {
-                    source: sourceLabel(
-                        execDir === null ? sources.executionDir.source : currentSource,
-                    ),
-                })}
-                state={execDir === null ? t("imPolicy.following") : stateLabel}
-                overridden={execDir !== null}
-                overrideLabel={overrideLabel}
-                resetLabel={t("imPolicy.resetToParent")}
-                onOverride={() => {
-                    markDirty();
-                    setExecDir(effectiveDir);
-                }}
-                onReset={() => {
-                    markDirty();
-                    setExecDir(null);
-                }}
-                disabled={formDisabled}
-            >
-                <PolicyExecutionDirPicker
-                    value={effectiveDir}
-                    onChange={(next) => {
-                        markDirty();
-                        setExecDir(next);
-                    }}
-                    disabled={formDisabled}
-                    labels={{
-                        shared: t("imPolicy.executionDirShared"),
-                        perChat: t("imPolicy.executionDirPerChat"),
-                        custom: t("imPolicy.executionDirCustom"),
-                        sharedHint: t("imPolicy.executionDirSharedHint"),
-                        perChatHint: t("imPolicy.executionDirPerChatHint"),
-                        customHint: t("imPolicy.executionDirCustomHint"),
-                        pathPlaceholder: t("imPolicy.executionCwdPlaceholder"),
-                    }}
-                />
-            </PolicyValueCard>
-
-            {/* Channel-scope only: list every chat override so the
-                        admin can see and clear orphan grants. */}
-            {isChannelScope && data && data.overrides.length > 0 && (
-                <div className="im-policy-overrides">
-                    <h4 className="im-policy-overrides-title">{t("imPolicy.overridesTitle")}</h4>
-                    <ul className="im-policy-overrides-list">
-                        {data.overrides.map((entry) => {
-                            const label = entry.route ? entry.route.peerId : t("imPolicy.orphan");
-                            const confirming = confirmingKey === entry.key;
-                            return (
-                                <li key={entry.key} className="im-policy-overrides-row">
-                                    <span className="im-policy-overrides-label" title={entry.key}>
-                                        {label}
-                                    </span>
-                                    <Button
-                                        size="sm"
-                                        variant={confirming ? "danger" : "ghost"}
-                                        disabled={formDisabled}
-                                        onClick={() => {
-                                            if (confirming) {
-                                                void clearOverrideEntry(entry);
-                                            } else {
-                                                setConfirmingKey(entry.key);
-                                            }
-                                        }}
-                                    >
-                                        {confirming
-                                            ? t("imPolicy.confirmClear")
-                                            : t("imPolicy.clearOverride")}
-                                    </Button>
-                                </li>
-                            );
-                        })}
-                    </ul>
+                    <PolicyValueCard
+                        label={t("imPolicy.executionCwd")}
+                        className="im-policy-field-wide"
+                        overridden={execDir !== null}
+                    >
+                        <PolicyExecutionDirPicker
+                            value={effectiveDir}
+                            inheritedMode={sources.executionDir.inherited.value.mode}
+                            inheritedBadge={inheritedBadge(sources.executionDir)}
+                            onModeChange={(next: ImExecutionDirMode) => {
+                                markDirty();
+                                const inherited = sources.executionDir.inherited.value;
+                                // Custom always pins a path of its own, even when the
+                                // parent is custom too — the user is about to type one.
+                                if (next === inherited.mode && next !== "custom") {
+                                    setExecDir(null);
+                                } else if (next === "custom") {
+                                    setExecDir({
+                                        mode: "custom",
+                                        path:
+                                            effectiveDir.mode === "custom" ? effectiveDir.path : "",
+                                    });
+                                } else {
+                                    setExecDir({ mode: next });
+                                }
+                            }}
+                            onPathChange={(path) => {
+                                markDirty();
+                                setExecDir({ mode: "custom", path });
+                            }}
+                            disabled={formDisabled}
+                            labels={{
+                                field: t("imPolicy.executionCwd"),
+                                shared: t("imPolicy.executionDirShared"),
+                                perChat: t("imPolicy.executionDirPerChat"),
+                                custom: t("imPolicy.executionDirCustom"),
+                                pathPlaceholder: t("imPolicy.executionCwdPlaceholder"),
+                            }}
+                        />
+                    </PolicyValueCard>
                 </div>
-            )}
+
+                <h4 className="pane-section-title">{t("imPolicy.sectionRules")}</h4>
+                <div className="im-policy-rules-grid">
+                    <PolicyRuleLayers
+                        title={t("imPolicy.allowRules")}
+                        hint={t("imPolicy.rulesAppendHint")}
+                        groups={allowGroups}
+                        localRules={allowDraft}
+                        sourceLabels={ruleSourceLabels}
+                        emptyLabel={t("imPolicy.noLocalRules")}
+                        addLabel={t("imPolicy.addRule")}
+                        removeLabel={t("imPolicy.removeRule")}
+                        inputPlaceholder={t("imPolicy.rulePlaceholder")}
+                        disabled={formDisabled}
+                        onAdd={addRule("allow")}
+                        onRemove={(rule) => removeRule("allow", rule)}
+                    />
+
+                    <PolicyRuleLayers
+                        title={t("imPolicy.denyRules")}
+                        hint={t("imPolicy.rulesAppendHint")}
+                        groups={denyGroups}
+                        localRules={denyDraft}
+                        sourceLabels={ruleSourceLabels}
+                        emptyLabel={t("imPolicy.noLocalRules")}
+                        addLabel={t("imPolicy.addRule")}
+                        removeLabel={t("imPolicy.removeRule")}
+                        inputPlaceholder={t("imPolicy.rulePlaceholder")}
+                        disabled={formDisabled}
+                        onAdd={addRule("deny")}
+                        onRemove={(rule) => removeRule("deny", rule)}
+                    />
+                </div>
+
+                {/* Channel-scope only: list every chat override so the
+                        admin can see and clear orphan grants. */}
+                {isChannelScope && data && data.overrides.length > 0 && (
+                    <div className="im-policy-overrides">
+                        <h4 className="pane-section-title">{t("imPolicy.overridesTitle")}</h4>
+                        <ul className="im-policy-overrides-list">
+                            {data.overrides.map((entry) => {
+                                const label = entry.route
+                                    ? entry.route.peerId
+                                    : t("imPolicy.orphan");
+                                const confirming = confirmingKey === entry.key;
+                                return (
+                                    <li key={entry.key} className="im-policy-overrides-row">
+                                        <span
+                                            className="im-policy-overrides-label"
+                                            title={entry.key}
+                                        >
+                                            {label}
+                                        </span>
+                                        <Button
+                                            size="sm"
+                                            variant={confirming ? "danger" : "ghost"}
+                                            disabled={formDisabled}
+                                            onClick={() => {
+                                                if (confirming) {
+                                                    void clearOverrideEntry(entry);
+                                                } else {
+                                                    setConfirmingKey(entry.key);
+                                                }
+                                            }}
+                                        >
+                                            {confirming
+                                                ? t("imPolicy.confirmClear")
+                                                : t("imPolicy.clearOverride")}
+                                        </Button>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </div>
+                )}
+            </div>
 
             <ConfirmModal
                 open={confirmingSave}

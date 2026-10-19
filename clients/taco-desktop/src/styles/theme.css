@@ -124,6 +124,7 @@
     --space-2: 0.5rem;
     --space-2-5: 0.625rem;
     --space-3: 0.75rem;
+    --space-4: 1rem;
 
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */

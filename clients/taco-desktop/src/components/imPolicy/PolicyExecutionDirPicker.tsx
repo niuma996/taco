@@ -5,39 +5,41 @@
  * One choice, one meaning: the previous model split this into a "binding"
  * plus a "per-chat scratch" flag, so two independent settings could both
  * claim the same outcome.
+ *
+ * Rendered as the same dropdown as the other policy fields; the custom mode
+ * reveals a path input below it.
  */
 
 import type { ImExecutionDir, ImExecutionDirMode } from "@taco-ai/protocol";
-import { useId } from "react";
+import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
 export interface PolicyExecutionDirPickerProps {
     value: ImExecutionDir;
-    onChange: (value: ImExecutionDir) => void;
+    /** Mode the parent layer supplies — tagged in the list. */
+    inheritedMode: ImExecutionDirMode;
+    inheritedBadge: string;
+    onModeChange: (mode: ImExecutionDirMode) => void;
+    onPathChange: (path: string) => void;
     disabled: boolean;
     labels: {
+        field: string;
         shared: string;
         perChat: string;
         custom: string;
-        sharedHint: string;
-        perChatHint: string;
-        customHint: string;
         pathPlaceholder: string;
     };
-    error?: string | null;
 }
 
 const MODES: readonly ImExecutionDirMode[] = ["shared", "per-chat", "custom"];
 
-export function PolicyExecutionDirPicker(props: PolicyExecutionDirPickerProps): React.ReactElement {
-    const { value, onChange, disabled, labels, error } = props;
-    const groupName = useId();
+function isMode(value: string): value is ImExecutionDirMode {
+    return (MODES as readonly string[]).includes(value);
+}
 
-    const hintFor = (mode: ImExecutionDirMode): string => {
-        if (mode === "shared") return labels.sharedHint;
-        if (mode === "per-chat") return labels.perChatHint;
-        return labels.customHint;
-    };
+export function PolicyExecutionDirPicker(props: PolicyExecutionDirPickerProps): React.ReactElement {
+    const { value, inheritedMode, inheritedBadge, onModeChange, onPathChange, disabled, labels } =
+        props;
     const labelFor = (mode: ImExecutionDirMode): string => {
         if (mode === "shared") return labels.shared;
         if (mode === "per-chat") return labels.perChat;
@@ -46,47 +48,29 @@ export function PolicyExecutionDirPicker(props: PolicyExecutionDirPickerProps): 
 
     return (
         <div className="im-policy-dir">
-            <div className="im-policy-dir-options" role="radiogroup">
-                {MODES.map((mode) => {
-                    const selected = value.mode === mode;
-                    return (
-                        <label
-                            key={mode}
-                            className={
-                                selected
-                                    ? "im-policy-dir-option is-selected"
-                                    : "im-policy-dir-option"
-                            }
-                        >
-                            <input
-                                type="radio"
-                                name={groupName}
-                                value={mode}
-                                checked={selected}
-                                disabled={disabled}
-                                onChange={() => onChange({ mode })}
-                            />
-                            <span className="im-policy-dir-option-body">
-                                <span className="im-policy-dir-option-label">{labelFor(mode)}</span>
-                                <span className="im-policy-dir-option-hint">{hintFor(mode)}</span>
-                            </span>
-                        </label>
-                    );
-                })}
-            </div>
+            <Select
+                value={value.mode}
+                onValueChange={(next) => {
+                    if (isMode(next)) onModeChange(next);
+                }}
+                disabled={disabled}
+                label={labels.field}
+                className="im-policy-select"
+                options={MODES.map((mode) => ({
+                    value: mode,
+                    label: labelFor(mode),
+                    ...(mode === inheritedMode ? { badge: inheritedBadge } : {}),
+                }))}
+            />
             {value.mode === "custom" && (
-                <div className="im-policy-dir-path">
-                    <TextInput
-                        type="text"
-                        value={value.path ?? ""}
-                        disabled={disabled}
-                        placeholder={labels.pathPlaceholder}
-                        onChange={(e) => onChange({ mode: "custom", path: e.target.value })}
-                    />
-                </div>
-            )}
-            {error !== undefined && error !== null && (
-                <span className="ui-form-error">{error}</span>
+                <TextInput
+                    type="text"
+                    value={value.path ?? ""}
+                    disabled={disabled}
+                    placeholder={labels.pathPlaceholder}
+                    aria-label={labels.custom}
+                    onChange={(e) => onPathChange(e.target.value)}
+                />
             )}
         </div>
     );

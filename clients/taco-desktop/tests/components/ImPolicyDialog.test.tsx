@@ -1,9 +1,9 @@
 /**
  * ImPolicyDialog — state cards, local rule edits, and save patches.
  *
- * Rule edits only mutate local React state until Save. The dialog must show
- * the effective value plus its source, and "restore" must clear the field at
- * the current layer instead of copying the parent value.
+ * Rule edits only mutate local React state until Save. Each single-value
+ * field is one dropdown that tags the parent's value; picking that tagged
+ * option must clear the field at the current layer instead of copying it.
  */
 
 import type { ImPolicyGetResult } from "@taco-ai/protocol";
@@ -29,11 +29,37 @@ afterEach(() => {
 });
 
 const DEFAULT_SOURCES: ImPolicyGetResult["sources"] = {
-    fsTools: { value: "deny", source: "default" },
-    shell: { value: "deny", source: "default" },
-    commandMode: { value: "ask", source: "default" },
-    executionDir: { value: { mode: "shared" }, source: "default" },
+    fsTools: { value: "deny", source: "default", inherited: { value: "deny", source: "default" } },
+    shell: { value: "deny", source: "default", inherited: { value: "deny", source: "default" } },
+    commandMode: {
+        value: "ask",
+        source: "default",
+        inherited: { value: "ask", source: "default" },
+    },
+    executionDir: {
+        value: { mode: "shared" },
+        source: "default",
+        inherited: { value: { mode: "shared" }, source: "default" },
+    },
 };
+
+/** Opens a field's dropdown and picks an option by its accessible name. */
+async function choose(
+    user: ReturnType<typeof userEvent.setup>,
+    field: string,
+    option: RegExp | string,
+): Promise<void> {
+    const card = screen.getByRole("group", { name: field });
+    await user.click(within(card).getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: option }));
+}
+
+async function saveAndConfirm(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    const saveButtons = screen.getAllByText("imPolicy.save");
+    await user.click(saveButtons[0] as HTMLElement);
+    const confirmButtons = screen.getAllByText("imPolicy.save");
+    await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+}
 
 function makeResult(overrides: Partial<ImPolicyGetResult> = {}): ImPolicyGetResult {
     return {
@@ -69,45 +95,73 @@ function makeClient(result: ImPolicyGetResult): TacoClient {
     } as unknown as TacoClient;
 }
 
-function renderDialog(client: TacoClient, scope = { channelId: "wechat" }) {
+function renderDialog(
+    client: TacoClient,
+    scope: { channelId: string; peerId?: string; chatId?: string } = { channelId: "wechat" },
+) {
     return render(<ImPolicyDialog open scope={scope} client={client} onClose={vi.fn()} />);
 }
 
-describe("ImPolicyDialog — effective values and sources", () => {
-    it("shows the resolved value and its source instead of a raw enum", async () => {
+describe("ImPolicyDialog — one dropdown per field", () => {
+    it("shows the effective value in the trigger instead of a raw enum", async () => {
         renderDialog(makeClient(makeResult()));
+        const card = await screen.findByRole("group", { name: "imPolicy.commandMode" });
         await waitFor(() => {
-            expect(screen.getAllByText("imPolicy.sourceLine").length).toBeGreaterThan(0);
+            expect(within(card).getByRole("combobox").textContent).toContain("imPolicy.ask");
         });
-        expect(screen.getAllByText("imPolicy.following").length).toBeGreaterThan(0);
         expect(screen.queryByText("ask")).toBeNull();
         expect(screen.queryByText("deny")).toBeNull();
     });
 
-    it("offers a separate override action for the channel scope", async () => {
-        renderDialog(makeClient(makeResult()));
-        expect((await screen.findAllByText("imPolicy.setForChannel")).length).toBeGreaterThan(0);
+    it("tags the parent's option with the layer it comes from", async () => {
+        renderDialog(makeClient(makeResult({ rules: GLOBAL_RULES })));
+        await screen.findByText("imPolicy.sourceGlobal");
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const card = screen.getByRole("group", { name: "imPolicy.commandMode" });
+        await user.click(within(card).getByRole("combobox"));
+
+        const ask = await screen.findByRole("option", { name: /imPolicy\.ask/ });
+        const auto = screen.getByRole("option", { name: /imPolicy\.auto/ });
+        expect(ask.textContent).toContain("imPolicy.sourceDefault");
+        expect(auto.textContent).not.toContain("imPolicy.sourceDefault");
+    });
+
+    it("tags the channel layer when editing a chat that inherits from it", async () => {
+        renderDialog(
+            makeClient(
+                makeResult({
+                    scope: "chat",
+                    sources: {
+                        ...DEFAULT_SOURCES,
+                        shell: {
+                            value: "allow",
+                            source: "channel",
+                            inherited: { value: "allow", source: "channel" },
+                        },
+                    },
+                }),
+            ),
+            { channelId: "wechat", peerId: "peer-1", chatId: "chat-1" },
+        );
+        const card = await screen.findByRole("group", { name: "imPolicy.shell" });
+        await waitFor(() => {
+            const trigger = within(card).getByRole("combobox");
+            expect(trigger.textContent).toContain("imPolicy.allow");
+            expect(trigger.textContent).toContain("imPolicy.sourceChannel");
+        });
     });
 });
 
 describe("ImPolicyDialog — saving overrides", () => {
-    it("sends the chosen value when a field is overridden", async () => {
+    it("sends the chosen value when a non-parent option is picked", async () => {
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
         const user = userEvent.setup({ pointerEventsCheck: 0 });
 
         // The global rule group only renders once the policy has loaded.
         await screen.findByText("imPolicy.sourceGlobal");
-        const card = screen.getByRole("group", { name: "imPolicy.commandMode" });
-        await user.click(within(card).getByText("imPolicy.setForChannel"));
-
-        await user.click(within(card).getByRole("combobox"));
-        await user.click(await screen.findByRole("option", { name: "imPolicy.auto" }));
-
-        const saveButtons = screen.getAllByText("imPolicy.save");
-        await user.click(saveButtons[0] as HTMLElement);
-        const confirmButtons = screen.getAllByText("imPolicy.save");
-        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+        await choose(user, "imPolicy.commandMode", /imPolicy\.auto/);
+        await saveAndConfirm(user);
 
         await waitFor(() => {
             expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
@@ -117,13 +171,17 @@ describe("ImPolicyDialog — saving overrides", () => {
         });
     });
 
-    it("sends null when a field is restored to follow the parent", async () => {
+    it("sends null when the parent's option is picked", async () => {
         const client = makeClient(
             makeResult({
                 channelDefault: { commands: { mode: "auto" } },
                 sources: {
                     ...DEFAULT_SOURCES,
-                    commandMode: { value: "auto", source: "channel" },
+                    commandMode: {
+                        value: "auto",
+                        source: "channel",
+                        inherited: { value: "ask", source: "default" },
+                    },
                 },
                 rules: GLOBAL_RULES,
             }),
@@ -131,15 +189,9 @@ describe("ImPolicyDialog — saving overrides", () => {
         renderDialog(client);
         const user = userEvent.setup({ pointerEventsCheck: 0 });
 
-        // The global rule group only renders once the policy has loaded.
         await screen.findByText("imPolicy.sourceGlobal");
-        const card = screen.getByRole("group", { name: "imPolicy.commandMode" });
-        await user.click(within(card).getByText("imPolicy.resetToParent"));
-
-        const saveButtons = screen.getAllByText("imPolicy.save");
-        await user.click(saveButtons[0] as HTMLElement);
-        const confirmButtons = screen.getAllByText("imPolicy.save");
-        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+        await choose(user, "imPolicy.commandMode", /imPolicy\.ask/);
+        await saveAndConfirm(user);
 
         await waitFor(() => {
             expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
@@ -151,37 +203,38 @@ describe("ImPolicyDialog — saving overrides", () => {
 });
 
 describe("ImPolicyDialog — working directory", () => {
-    it("shows the effective working directory and its source", async () => {
+    it("shows the effective working directory in the trigger", async () => {
         renderDialog(
             makeClient(
                 makeResult({
+                    channelDefault: { executionDir: { mode: "per-chat" } },
                     sources: {
                         ...DEFAULT_SOURCES,
-                        executionDir: { value: { mode: "per-chat" }, source: "channel" },
+                        executionDir: {
+                            value: { mode: "per-chat" },
+                            source: "channel",
+                            inherited: { value: { mode: "shared" }, source: "default" },
+                        },
                     },
                 }),
             ),
         );
+        const card = await screen.findByRole("group", { name: "imPolicy.executionCwd" });
         await waitFor(() => {
-            expect(screen.getAllByText("imPolicy.executionDirPerChat").length).toBeGreaterThan(0);
+            expect(within(card).getByRole("combobox").textContent).toContain(
+                "imPolicy.executionDirPerChat",
+            );
         });
     });
 
-    it("sends the chosen working directory when the field is overridden", async () => {
+    it("sends the chosen working directory", async () => {
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
         const user = userEvent.setup({ pointerEventsCheck: 0 });
 
         await screen.findByText("imPolicy.sourceGlobal");
-        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
-        await user.click(within(card).getByText("imPolicy.setForChannel"));
-
-        await user.click(within(card).getByRole("radio", { name: /imPolicy.executionDirPerChat/ }));
-
-        const saveButtons = screen.getAllByText("imPolicy.save");
-        await user.click(saveButtons[0] as HTMLElement);
-        const confirmButtons = screen.getAllByText("imPolicy.save");
-        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+        await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirPerChat/);
+        await saveAndConfirm(user);
 
         await waitFor(() => {
             expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
@@ -191,10 +244,18 @@ describe("ImPolicyDialog — working directory", () => {
         });
     });
 
-    it("sends null when the working directory is restored to follow the parent", async () => {
+    it("sends null when the parent's working directory is picked", async () => {
         const client = makeClient(
             makeResult({
                 channelDefault: { executionDir: { mode: "per-chat" } },
+                sources: {
+                    ...DEFAULT_SOURCES,
+                    executionDir: {
+                        value: { mode: "per-chat" },
+                        source: "channel",
+                        inherited: { value: { mode: "shared" }, source: "default" },
+                    },
+                },
                 rules: GLOBAL_RULES,
             }),
         );
@@ -202,13 +263,8 @@ describe("ImPolicyDialog — working directory", () => {
         const user = userEvent.setup({ pointerEventsCheck: 0 });
 
         await screen.findByText("imPolicy.sourceGlobal");
-        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
-        await user.click(within(card).getByText("imPolicy.resetToParent"));
-
-        const saveButtons = screen.getAllByText("imPolicy.save");
-        await user.click(saveButtons[0] as HTMLElement);
-        const confirmButtons = screen.getAllByText("imPolicy.save");
-        await user.click(confirmButtons[confirmButtons.length - 1] as HTMLElement);
+        await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirShared/);
+        await saveAndConfirm(user);
 
         await waitFor(() => {
             expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
@@ -216,6 +272,54 @@ describe("ImPolicyDialog — working directory", () => {
                 patch: { executionDir: null },
             });
         });
+    });
+});
+
+// A sidecar built before `inherited` existed sends the bare { value, source }
+// shape. The dialog must still open, and must not tag this layer's own
+// override as the parent's value.
+describe("ImPolicyDialog — sidecar without inherited sources", () => {
+    const legacySources = {
+        fsTools: { value: "deny", source: "default" },
+        shell: { value: "allow", source: "channel" },
+        commandMode: { value: "ask", source: "default" },
+        executionDir: { value: { mode: "shared" }, source: "default" },
+    } as unknown as ImPolicyGetResult["sources"];
+
+    it("opens and shows the effective values", async () => {
+        renderDialog(
+            makeClient(
+                makeResult({
+                    channelDefault: { tools: { shell: "allow" } },
+                    sources: legacySources,
+                }),
+            ),
+        );
+        const card = await screen.findByRole("group", { name: "imPolicy.shell" });
+        await waitFor(() => {
+            expect(within(card).getByRole("combobox").textContent).toContain("imPolicy.allow");
+        });
+    });
+
+    it("tags the built-in default, not this layer's override", async () => {
+        renderDialog(
+            makeClient(
+                makeResult({
+                    channelDefault: { tools: { shell: "allow" } },
+                    sources: legacySources,
+                    rules: GLOBAL_RULES,
+                }),
+            ),
+        );
+        await screen.findByText("imPolicy.sourceGlobal");
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const card = screen.getByRole("group", { name: "imPolicy.shell" });
+        await user.click(within(card).getByRole("combobox"));
+
+        const deny = await screen.findByRole("option", { name: /imPolicy\.deny/ });
+        const allow = screen.getByRole("option", { name: /imPolicy\.allow/ });
+        expect(deny.textContent).toContain("imPolicy.sourceDefault");
+        expect(allow.textContent).not.toContain("imPolicy.source");
     });
 });
 

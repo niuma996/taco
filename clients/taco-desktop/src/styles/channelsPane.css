@@ -252,9 +252,12 @@
 }
 
 /* ── IM policy dialog ── */
-/* Base .ui-modal only sets max-width; without an explicit width the dialog stays narrow. */
+/* Three labelled bands under one header: the single-value fields in a 3-up
+   grid, the allow/deny rule editors side by side, and the channel's chat
+   overrides. Bands are labelled rather than boxed — only the things that
+   behave like cards (a field, a rule list) carry a border. */
 .im-policy-modal {
-    width: 560px;
+    width: 900px;
     max-width: calc(100vw - 4rem);
     max-height: 86vh;
     overflow-y: auto;
@@ -262,189 +265,284 @@
        the content height increase adds the scrollbar without causing layout reflow. */
     scrollbar-gutter: stable;
 }
-.im-policy-desc {
-    margin: 0 0 12px 0;
-    font-size: 12px;
+
+/* Header — the title carries the scope chip, the message is the lede. */
+.im-policy-modal .ui-modal-title {
+    font-size: var(--text-lg);
+    letter-spacing: -0.01em;
+}
+.im-policy-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+.im-policy-scope {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.1rem 0.55rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--surface-tint);
     color: var(--fg-dim);
-    line-height: 1.5;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    white-space: nowrap;
+}
+.im-policy-modal .ui-modal-message {
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+    max-width: 72ch;
+}
+.im-policy-modal .ui-modal-actions {
+    margin-top: var(--space-4);
+}
+
+.im-policy-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2-5);
+}
+.im-policy-body > .pane-section-title {
+    margin-top: var(--space-2);
+}
+.im-policy-body > .pane-section-title:first-child {
+    margin-top: 0;
+}
+
+/* ── Field band ── */
+/* Three dropdown fields in a row; the working directory spans the full width
+   below them — its option labels ("Shared channel directory · Default") are
+   too long for a quarter column. */
+.im-policy-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2-5);
+}
+.im-policy-field-wide {
+    grid-column: 1 / -1;
 }
 .im-policy-field {
-    margin: var(--space-2) 0 var(--space-3) 0;
-    padding: var(--space-2-5) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--input-bg);
-    /* fieldset defaults to min-content width, which breaks the modal layout. */
     min-inline-size: 0;
 }
+/* The only state cue left: an accent edge while this layer overrides the parent. */
 .im-policy-field.is-override {
     border-color: var(--accent-border);
 }
-.im-policy-field-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-}
 .im-policy-field-label {
     font-size: var(--text-base);
+    font-weight: 600;
+    /* Fixed line box so Latin ("Shell") and CJK labels sit at the same height. */
+    line-height: 1.4;
     color: var(--fg);
-}
-.im-policy-field-badge {
-    padding: var(--space-px) var(--space-1-5);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    font-size: var(--text-xs);
-    color: var(--fg-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
-.im-policy-field-badge.is-override {
-    border-color: var(--accent-border);
-    color: var(--accent);
-}
-.im-policy-field-value {
-    margin-top: var(--space-1-5);
-    font-size: var(--text-md);
-    color: var(--fg);
-}
-.im-policy-field-source {
-    margin-top: var(--space-0-5);
-    font-size: var(--text-sm);
-    color: var(--fg-dim);
-}
 .im-policy-field-control {
-    margin-top: var(--space-2);
+    min-inline-size: 0;
 }
-.im-policy-field-hint {
-    margin-top: var(--space-1-5);
+/* Option text stays a step below the field label (base 0.85rem → sm 0.8rem),
+   in the trigger and in the open list. */
+.ui-select-trigger.im-policy-select {
+    width: 100%;
     font-size: var(--text-sm);
-    color: var(--fg-dim);
+    line-height: 1.5;
+    background: var(--bg);
 }
-.im-policy-field-actions {
-    margin-top: var(--space-2);
-    display: flex;
-    gap: var(--space-2);
+/* The value (label + tag) stays on one line and truncates — a wrapped tag
+   would make this card taller than its neighbours. Buttons centre wrapped
+   text by default, so pin it left too. */
+.ui-select-trigger.im-policy-select > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
 }
+.ui-select-content.im-policy-select .ui-select-item {
+    font-size: var(--text-sm);
+}
+
+/* ── Working directory ── */
 .im-policy-dir {
-    margin-top: var(--space-1);
-}
-.im-policy-dir-options {
     display: flex;
     flex-direction: column;
     gap: var(--space-1-5);
 }
-.im-policy-dir-option {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-2-5);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-}
-.im-policy-dir-option:hover {
-    border-color: var(--accent-border);
-}
-.im-policy-dir-option.is-selected {
-    border-color: var(--accent-border);
-    background: var(--accent-bg-hover);
-}
-.im-policy-dir-option input {
-    margin-top: var(--space-0-5);
-    accent-color: var(--accent);
-}
-.im-policy-dir-option-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-0-5);
-}
-.im-policy-dir-option-label {
-    font-size: var(--text-base);
-    color: var(--fg);
-}
-.im-policy-dir-option-hint {
+.im-policy-dir .ui-input {
     font-size: var(--text-sm);
-    color: var(--fg-dim);
 }
-.im-policy-dir-path {
-    margin-top: var(--space-2);
+
+/* ── Rule band ── */
+.im-policy-rules-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2-5);
+    /* Both cards share the taller one's height, so the two composers below
+       them end on the same line. */
+    align-items: stretch;
 }
 .im-policy-rules {
-    margin: 8px 0 12px 0;
-    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin: 0;
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--input-bg);
+    border-radius: var(--radius-md);
+    min-inline-size: 0;
 }
 .im-policy-rules-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 6px;
     font-size: 13px;
     color: var(--fg);
 }
+.im-policy-rules-title {
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--fg);
+}
 .im-policy-rules-hint {
-    margin: 0 0 var(--space-2) 0;
-    font-size: var(--text-sm);
+    margin: 0;
+    font-size: var(--text-xs);
     color: var(--fg-dim);
     line-height: var(--leading-normal);
 }
+.im-policy-rule-groups {
+    display: flex;
+    flex-direction: column;
+}
 .im-policy-rule-group {
-    margin-top: var(--space-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-1-5);
 }
 .im-policy-rule-group-title {
-    margin-bottom: var(--space-1);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     color: var(--fg-dim);
 }
 .im-policy-rule-empty {
-    margin: 0 0 var(--space-1) 0;
+    margin: 0;
     font-size: var(--text-sm);
     color: var(--fg-dim);
 }
+/* Rule chips — mono on a tinted surface, distinct from the orange inline-code
+   style used in chat. The chip is the list item, so an editable rule keeps its
+   remove button inside the chip instead of beside it. */
+.im-policy-rules .permission-rule-list {
+    display: flex;
+    /* The shared .permission-rule-list stacks its rows; here the rules are
+       chips that flow sideways and wrap. */
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0;
+    padding: 0;
+}
+.im-policy-rules .permission-rule-list li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.05rem 0.2rem 0.05rem 0.45rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-tint);
+}
+.im-policy-rules .permission-rule-text {
+    flex: none;
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    color: var(--fg);
+}
+.im-policy-rules .permission-rule-text code {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    line-height: 1.7;
+}
+/* Composer docked to the bottom of the card, so both rule cards end on the
+   same line no matter how many rules each one holds. */
 .im-policy-rule-add {
     display: flex;
     gap: var(--space-1-5);
-    margin-top: var(--space-1-5);
+    margin-top: auto;
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-subtle);
 }
 .im-policy-rule-add input {
     flex: 1;
+    min-inline-size: 0;
 }
+
+/* ── Chat override band ── */
 .im-policy-overrides {
-    margin: 12px 0;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--input-bg);
-}
-.im-policy-overrides-title {
-    margin: 0 0 6px 0;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
 }
 .im-policy-overrides-list {
     list-style: none;
     margin: 0;
     padding: 0;
+    /* Peer overrides are short labels — two columns keep the list from
+       pushing the whole dialog into a second screen. */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-4);
 }
 .im-policy-overrides-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 4px 0;
-    border-top: 1px solid var(--border);
-    font-size: 13px;
-}
-.im-policy-overrides-row:first-child {
-    border-top: 0;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    font-size: var(--text-sm);
 }
 .im-policy-overrides-label {
     color: var(--fg);
     font-family: var(--mono);
+    font-size: var(--text-xs);
+    padding: 0.1rem 0.45rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-tint);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 70%;
+}
+
+/* Narrow windows — the app's minimum inner width is 800px — fall back to the
+   original dialog width: fields go two-up, the rule editors stack. */
+@media (max-width: 880px) {
+    .im-policy-modal {
+        width: 560px;
+    }
+    .im-policy-fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .im-policy-rules-grid,
+    .im-policy-overrides-list {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }

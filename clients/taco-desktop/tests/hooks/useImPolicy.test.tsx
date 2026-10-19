@@ -21,10 +21,26 @@ function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
                 hasOverride: false,
                 overrides: [],
                 sources: {
-                    fsTools: { value: "deny", source: "default" },
-                    shell: { value: "deny", source: "default" },
-                    commandMode: { value: "ask", source: "default" },
-                    executionDir: { value: { mode: "shared" }, source: "default" },
+                    fsTools: {
+                        value: "deny",
+                        source: "default",
+                        inherited: { value: "deny", source: "default" },
+                    },
+                    shell: {
+                        value: "deny",
+                        source: "default",
+                        inherited: { value: "deny", source: "default" },
+                    },
+                    commandMode: {
+                        value: "ask",
+                        source: "default",
+                        inherited: { value: "ask", source: "default" },
+                    },
+                    executionDir: {
+                        value: { mode: "shared" },
+                        source: "default",
+                        inherited: { value: { mode: "shared" }, source: "default" },
+                    },
                 },
                 rules: { allow: [], deny: [] },
             };

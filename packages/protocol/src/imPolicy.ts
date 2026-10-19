@@ -108,6 +108,12 @@ export type ImPolicySource = "default" | "global" | "channel" | "chat";
 export interface ImPolicyField<T> {
     value: T;
     source: ImPolicySource;
+    /**
+     * What the field would resolve to if the scope being described cleared
+     * it — the parent layer's value. Lets an editor mark the "follow parent"
+     * choice even while the current layer overrides it.
+     */
+    inherited: { value: T; source: ImPolicySource };
 }
 
 /** One layer's contribution to an allow or deny rule list. */

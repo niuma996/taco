@@ -261,20 +261,41 @@ describe("imWorkspacePolicy", () => {
             },
         };
 
+        const fromDefault = <T>(value: T) => ({ value, source: "default" as const });
         const channelSources = describeImPolicySources(doc, null);
-        assert.deepEqual(channelSources.shell, { value: "allow", source: "channel" });
-        assert.deepEqual(channelSources.fsTools, { value: "deny", source: "default" });
-        assert.deepEqual(channelSources.commandMode, { value: "ask", source: "default" });
+        assert.deepEqual(channelSources.shell, {
+            value: "allow",
+            source: "channel",
+            // The channel scope's parent is the built-in default.
+            inherited: fromDefault("deny"),
+        });
+        assert.deepEqual(channelSources.fsTools, {
+            value: "deny",
+            source: "default",
+            inherited: fromDefault("deny"),
+        });
+        assert.deepEqual(channelSources.commandMode, {
+            value: "ask",
+            source: "default",
+            inherited: fromDefault("ask"),
+        });
         assert.deepEqual(channelSources.executionDir, {
             value: { mode: "shared" },
             source: "default",
+            inherited: fromDefault({ mode: "shared" }),
         });
 
         const chatSources = describeImPolicySources(doc, ROUTE);
-        assert.deepEqual(chatSources.shell, { value: "allow", source: "channel" });
+        assert.deepEqual(chatSources.shell, {
+            value: "allow",
+            source: "channel",
+            // A chat's parent is the channel result.
+            inherited: { value: "allow", source: "channel" },
+        });
         assert.deepEqual(chatSources.executionDir, {
             value: { mode: "custom", path: "/tmp/chat" },
             source: "chat",
+            inherited: fromDefault({ mode: "shared" }),
         });
     });
 
@@ -324,10 +345,12 @@ describe("imWorkspacePolicy", () => {
         assert.deepEqual(describeImPolicySources(doc, null).executionDir, {
             value: { mode: "shared" },
             source: "channel",
+            inherited: { value: { mode: "shared" }, source: "default" },
         });
         assert.deepEqual(describeImPolicySources(doc, ROUTE).executionDir, {
             value: { mode: "per-chat" },
             source: "chat",
+            inherited: { value: { mode: "shared" }, source: "channel" },
         });
     });
 
