@@ -6,6 +6,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.0] — 2026-10-20
+
+A release about knowing what the agent is about to do: shell approvals are
+decided from the parsed command instead of its text, the approvals waiting on
+you are visible from anywhere in the app, and provider settings — key,
+endpoint, model list — live in one place with a test that exercises the path
+a session really uses.
+
+### Added
+
+**Approvals that read the command, not the string.** The sidecar parses bash
+and PowerShell before it decides whether a command may run, so a quoted
+metacharacter, a `sudo` prefix, a `find -exec`, a combined container option
+or a benign `git -c` no longer slips past a rule meant to catch it.
+`commandPermissions` grows separate `allow` and `deny` lists and an
+`allowedDirectories` field, and the shell grammars ship inside the sidecar
+and desktop bundles.
+
+**Approvals you can find.** An always-visible button lists the approvals
+every workspace is holding, a modal shows the command and the reason behind
+each one, and the sidecar denies the whole batch as soon as no client can
+answer instead of waiting on a request that would never arrive. IM approval
+requests surface the same way.
+
+**One control per IM policy field.** The parent layer's value is tagged with
+that layer's name, so a single dropdown can say what it inherited and what
+you are overriding. The two working-directory fields collapse into one
+`shared` / `per-chat` / `custom` picker.
+
+**Provider settings in one panel, with a connection test.** Built-in and
+custom providers share one card and one editor. The test sends one minimal
+chat turn through the same path a session uses, so a pass means the key, the
+endpoint, the protocol and the model id all work together — many relays
+answer `/models` while refusing chat, or the other way round. Failures are
+classified so the panel can name the fix, and a saved key can be revealed in
+place while staying masked by default.
+
+### Changed
+
+- The harness runtime now lives in `@taco-ai/pi-harness`. Pi 1.0 removed
+  `AgentHarness` from `pi-agent-core` and left no stable replacement, so the
+  surface moved into a package this project publishes itself; `pi-ai` moves
+  from 0.99.2 to 1.3.0. The on-disk session format is unchanged.
+- The wire protocol advances 2.1 → 2.2. `provider.listModels` takes
+  `{ providerId }`, `settings.write` carries `providerExtraModels` /
+  `providerHiddenModels`, and `providers.revealKey` is new. A 2.2 client
+  refuses a 2.1 daemon at handshake — a 2.1 daemon answers `settings.write`
+  with `ok` while dropping those fields, so model-list edits were being lost
+  silently. Keep the desktop and the sidecar on the same release line.
+- `auto` mode approves more than it used to. It used to auto-pass strictly
+  read-only commands only, and anything that could change the workspace asked
+  first; the decision now comes from the parsed command, and what always asks
+  is a built-in floor — privilege escape, destructive commands, external side
+  effects. Everything else passes without a prompt in `auto` mode.
+- An IM policy file written by 0.2.10 or earlier migrates to `ask` the first time
+  it is loaded, because `auto` in an IM policy now allows every command outside
+  the deny lists and reading an old file verbatim would have widened it
+  silently. The working directory is one field now: `binding` and
+  `perChatScratch` are replaced by `executionDir`, and the old fields are
+  still read from existing files.
+- Tool results are capped by size before they enter the session, and grep
+  caps by bytes rather than by line count, so one verbose command can no
+  longer push a whole conversation past the model's context window.
+
+### Fixed
+
+- A default model that stops resolving no longer bricks the workspace. When
+  the catalog moved under it, construction returned nothing — every
+  `session.create` failed with "no model configured" pointing at the wrong
+  thing — while the hot-reload path kept the previous value and looked fine
+  until the next restart. Both now fall back to the first catalog model, and
+  deleting the default provider clears the default instead of leaving it
+  dangling.
+- An IM channel that lost its network connection reconnects on its own
+  instead of waiting for the app.
+- A failed subagent now reports how far it got and whether it can be resumed.
+- The edit card renders from the harness's unified patch, so the line numbers
+  on it are real.
+
 ## [0.2.10] — 2026-10-16
 
 A one-line fix: the input box goes back to the bottom of the window, where
