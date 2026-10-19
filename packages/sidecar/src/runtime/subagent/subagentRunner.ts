@@ -17,6 +17,7 @@ import type { AttachedSession } from "../harness/attachedSession.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
 import {
     assistantText,
+    failedResult,
     neutralizeControlTags,
     partialResult,
     SUBAGENT_STOPPED_TEXT,
@@ -99,11 +100,16 @@ export async function runAttachedSubagent(
     // capped run degrades to a partial answer instead of an error.
     const cap = args.maxTurns !== undefined && args.maxTurns > 0 ? args.maxTurns : undefined;
     let turnsUsed = 0;
+    let lastTurnText: string | undefined;
     let hitCap = false;
     let acceptingUpdates = true;
     const onTurnEnd = (event: HarnessEvent): void => {
         if (event.type !== "turn_end") return;
         turnsUsed++;
+        // The failing turn is usually an empty error message; keep the last
+        // turn that actually said something.
+        const turnText = assistantText(event.message);
+        if (turnText.trim() !== "") lastTurnText = turnText;
         if (cap !== undefined && turnsUsed >= cap && !hitCap) {
             hitCap = true;
             void attached.abort();
@@ -119,7 +125,7 @@ export async function runAttachedSubagent(
                 subSessionId,
                 agentType,
                 turns: turnsUsed,
-                lastText: assistantText(event.message),
+                lastText: turnText,
             }),
         );
     };
@@ -161,7 +167,13 @@ export async function runAttachedSubagent(
         }
         return {
             subSessionId,
-            resultText: e instanceof Error ? e.message : String(e),
+            resultText: failedResult({
+                error: e instanceof Error ? e.message : String(e),
+                subSessionId,
+                turns: turnsUsed,
+                lastText: lastTurnText,
+                resumability: args.resumability ?? "not_resumable",
+            }),
             isError: true,
         };
     } finally {

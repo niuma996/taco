@@ -150,6 +150,43 @@ export function subagentStartedResult(args: {
     };
 }
 
+/**
+ * Result text for a child that failed after it may have done some work.
+ *
+ * The bare error says nothing about how far the child got, so the model could
+ * only respawn from scratch or give up. This adds the turn count and a tail of
+ * its last message, plus the follow-up that actually works for this runtime:
+ * `agentContinue` for a resumable child, a fresh call otherwise (Claude Code
+ * and skill subagents cannot be resumed). The child's own text is scrubbed of
+ * control tags before it reaches the parent.
+ */
+export function failedResult(args: {
+    error: string;
+    subSessionId: SessionId;
+    turns: number;
+    lastText?: string;
+    resumability: SubagentResumability;
+}): string {
+    const { error, subSessionId, turns, resumability } = args;
+    // Nothing ran, so there is no progress to describe and no session worth resuming.
+    if (turns === 0) return error;
+    const tail =
+        args.lastText === undefined ? "" : neutralizeControlTags(tailOf(args.lastText)).text;
+    const progress =
+        `It ran ${turns} turn${turns === 1 ? "" : "s"} before failing.` +
+        (tail.length > 0 ? ` Its last message ended with:\n${tail}` : "");
+    const followUp =
+        resumability === "resumable"
+            ? `Its work so far is kept in session ${subSessionId}. If the user wants to pick up ` +
+              "where it stopped, call agentContinue with that subSessionId instead of spawning a " +
+              "new subagent — and if the failure came from the task itself (for example a search " +
+              "too broad for the context window), tell it to narrow the approach when you resume."
+            : `Its transcript is in session ${subSessionId}, but this subagent cannot be resumed — ` +
+              "agentContinue will reject it. If the user wants to retry, call the tool again with a " +
+              "prompt that says what was already done, so the new run does not repeat it.";
+    return `${error}\n\n${progress}\n\n${followUp}`;
+}
+
 /** One live turn update: turn count plus a bounded tail of the child's latest message. */
 export function subagentTurnResult(args: {
     subSessionId: SessionId;

@@ -36,6 +36,7 @@ import { createLogger } from "../../../lib/logger.ts";
 import { scrubbedProcessEnv } from "../../models/providerKeyStore.ts";
 import type { AgentMessage, AgentToolResult } from "../../pi/types.ts";
 import {
+    failedResult,
     partialResult,
     SUBAGENT_STOPPED_TEXT,
     subagentStartedResult,
@@ -211,13 +212,25 @@ export async function runClaudeCodeSubagent(
     if (result?.subtype === "error_max_turns") {
         return { subSessionId, resultText: partialResult(lastText, maxTurns), isError: false };
     }
+    // A run can fail after real work (an API error mid-task), so the failure
+    // carries how far it got. Claude Code sessions are never resumable.
+    const failAfter = (error: string) =>
+        fail(
+            failedResult({
+                error,
+                subSessionId,
+                turns,
+                lastText,
+                resumability: "not_resumable",
+            }),
+        );
     if (thrown !== undefined)
-        return fail(thrown instanceof Error ? thrown.message : String(thrown));
-    if (result === undefined) return fail("Claude Code ended without a result");
+        return failAfter(thrown instanceof Error ? thrown.message : String(thrown));
+    if (result === undefined) return failAfter("Claude Code ended without a result");
     // The CLI reports some failures (e.g. "Not logged in") as a successful
     // result whose text is the error, with no assistant reply to read.
     if (result.isError || result.subtype !== "success") {
-        return fail(result.text || `Claude Code failed: ${result.subtype}`);
+        return failAfter(result.text || `Claude Code failed: ${result.subtype}`);
     }
     if (lastText.trim() === "") return fail("subagent returned an empty response");
     return { subSessionId, resultText: lastText, isError: false };

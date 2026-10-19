@@ -211,4 +211,28 @@ describe("runClaudeCodeSubagent", () => {
         assert.equal(r.isError, true);
         assert.match(r.resultText, /deliberate interruption/);
     });
+
+    it("reports progress on a mid-run failure without offering agentContinue", async () => {
+        async function* failsLate(): AsyncIterable<SdkMessage> {
+            yield {
+                type: "assistant",
+                message: { id: "a1", content: [{ type: "text", text: "patched src/b.ts" }] },
+            };
+            yield {
+                type: "result",
+                subtype: "error_during_execution",
+                is_error: true,
+                result: "API Error: 529 overloaded",
+                num_turns: 1,
+            };
+        }
+        const r = await runClaudeCodeSubagent(baseArgs(fakeSdk(failsLate)));
+        assert.equal(r.isError, true);
+        assert.match(r.resultText, /529 overloaded/);
+        assert.match(r.resultText, /ran 1 turn before failing/);
+        assert.match(r.resultText, /patched src\/b\.ts/);
+        // Claude Code runs are never resumable; agentContinue rejects them.
+        assert.match(r.resultText, /cannot be resumed/);
+        assert.match(r.resultText, /call the tool again/);
+    });
 });

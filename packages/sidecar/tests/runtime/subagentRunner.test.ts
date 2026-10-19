@@ -238,4 +238,67 @@ describe("runAttachedSubagent — progress", () => {
         assert.equal(result.aborted, true);
         assert.match(result.resultText, /deliberate\s+interruption, not a failure/);
     });
+
+    it("reports how far a failed child got and how to resume it", async () => {
+        const attached = new FakeAttached();
+        attached.prompt = async () => {
+            attached.emit(turnEnd("found the hook in src/a.ts:42"));
+            // The overflowing turn produces an empty assistant message.
+            attached.emit(turnEnd(""));
+            throw new Error("Assistant request exceeded the context window");
+        };
+        const result = await runAttachedSubagent({
+            subSessionId: asSessionId("sub-6"),
+            attached: attached.asSession(),
+            prompt: "go",
+            agentType: "explorer",
+            resumability: "resumable",
+            readLastAssistantText: finalText,
+        });
+
+        assert.equal(result.isError, true);
+        assert.match(result.resultText, /exceeded the context window/);
+        assert.match(result.resultText, /ran 2 turns/);
+        // The empty failing turn must not hide the last useful message.
+        assert.match(result.resultText, /src\/a\.ts:42/);
+        assert.match(result.resultText, /agentContinue/);
+        assert.match(result.resultText, /sub-6/);
+    });
+
+    it("does not offer agentContinue for a non-resumable child that failed", async () => {
+        const attached = new FakeAttached();
+        attached.prompt = async () => {
+            attached.emit(turnEnd("partway"));
+            throw new Error("boom");
+        };
+        const result = await runAttachedSubagent({
+            subSessionId: asSessionId("sub-7"),
+            attached: attached.asSession(),
+            prompt: "go",
+            agentType: "skill:refactor",
+            resumability: "not_resumable",
+            readLastAssistantText: finalText,
+        });
+
+        assert.match(result.resultText, /cannot be resumed/);
+        assert.match(result.resultText, /agentContinue will reject it/);
+        assert.match(result.resultText, /call the tool again/);
+    });
+
+    it("returns the bare error when the child failed before any turn", async () => {
+        const attached = new FakeAttached();
+        attached.prompt = async () => {
+            throw new Error("no model configured");
+        };
+        const result = await runAttachedSubagent({
+            subSessionId: asSessionId("sub-8"),
+            attached: attached.asSession(),
+            prompt: "go",
+            agentType: "explorer",
+            resumability: "resumable",
+            readLastAssistantText: finalText,
+        });
+
+        assert.equal(result.resultText, "no model configured");
+    });
 });

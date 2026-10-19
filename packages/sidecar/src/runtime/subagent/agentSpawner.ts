@@ -1502,7 +1502,7 @@ export class AgentSpawner extends EventEmitter {
             result.outcome === "aborted"
                 ? "This task was stopped deliberately — by the user or by its own time limit. Tell the user in one sentence that it was stopped, and do not restart or respawn it unless they ask."
                 : result.outcome === "error"
-                  ? "Tell the user in one sentence that this background task failed, then propose a next step. Do not present its output as a result."
+                  ? "Read that file before replying: it holds the error and, if the subagent got partway, how far it got and whether it can be resumed. Then tell the user in one sentence that this background task failed, and propose a next step based on what you read. Do not present its output as a result."
                   : "Read that file with the read tool now, before you reply. Then tell the user, in your own words, that this background task came back and what it found — do not just hand them the path, and do not claim it is still running. If what you read changes what you were doing, say so.";
         const lateness = result.late
             ? " This notice is late — it could not be delivered when the subagent actually" +
