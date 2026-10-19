@@ -17,9 +17,10 @@ attach to ongoing turns. The agent runtime comes from Pi
 Taco started as a greenfield repository. The motivation:
 
 - **A general client protocol for agent harnesses is missing.**
-  Pi has already dropped the agent engine into `pi-agent-core`
+  Pi has already dropped the agent engine into a standalone harness
   (`AgentHarness` provides multi-hook events; session persistence is
-  abstracted by `pi-agent-core/harness/session`).
+  abstracted by its `harness/session` module). Pi 1.0 removed that
+  package, so Taco carries the `0.99.2` surface as `@taco-ai/pi-harness`.
 - **The Tauri + NDJSON pattern is already proven.** A prior
   experiment showed "Tauri + NDJSON over stdio" works, just bound to
   one project's own sidecar.

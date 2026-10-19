@@ -14,8 +14,9 @@
 工程是空仓库从零搭建。背景：
 
 - **Pi 有引擎，但没有通用客户端协议。** Pi 团队已经把 agent 引擎下沉到
-  `pi-agent-core`（AgentHarness 提供多 hook 事件，session 持久化由
-  `pi-agent-core/harness/session` 抽象）。
+  独立的 harness 包（AgentHarness 提供多 hook 事件，session 持久化由其
+  `harness/session` 抽象）。Pi 1.0 移除了该包，因此 Taco 把 `0.99.2`
+  的接口面以 `@taco-ai/pi-harness` 承接下来。
 - **Tauri + NDJSON 模式已经验证可行。** 另一个工具的 `desktop` 子项目走通
   了 "Tauri + NDJSON over stdio" 模式，但耦合到那个项目自己的 sidecar
   实现，没有把这部分能力通用化。
@@ -67,7 +68,7 @@
         ╚══════════════════════════════════════════╝
                           ↓ depends on
         ┌──────────────────────────────────────────┐
-        │  pi-agent-core (AgentHarness, Session…)   │
+        │  pi-harness (AgentHarness, Session…)      │
         │  pi-ai        (Models, streamSimple…)     │
         └──────────────────────────────────────────┘
 ```
