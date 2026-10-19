@@ -57,7 +57,7 @@ export interface TacoToolMetadata {
     readonly mutates?: boolean;
 }
 
-declare module "@earendil-works/pi-agent-core" {
+declare module "@taco-ai/pi-harness" {
     // Augments `AgentTool` (an interface in pi-agent-core's barrel). Every
     // `AgentHarnessTool` extends `AgentTool` via `Omit<…, "execute"> & …`,
     // so the new field carries through to the `TacoTool` alias used by all

@@ -45,7 +45,7 @@ async function reloadFromDisk(tmpCwd: string): Promise<{
     skills: TacoSkill[];
     diagnostics: SkillDiagnosticEntry[];
 }> {
-    const { loadSourcedSkills } = await import("@earendil-works/pi-agent-core");
+    const { loadSourcedSkills } = await import("@taco-ai/pi-harness");
     const { defaultSkillDirs } = await import("../../../src/config/config.ts");
     const skillEnv = new SlashNormalizedExecutionEnv({ cwd: tmpCwd });
     const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(

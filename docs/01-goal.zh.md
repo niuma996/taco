@@ -5,7 +5,7 @@
 ## 一句话定义
 
 **Taco** 是一个**最小可用的 sidecar 协议层 + 多客户端调试终端**，封装 Pi 的
-`@earendil-works/pi-agent-core` AgentHarness 与 `@earendil-works/pi-ai` Models，
+`@taco-ai/pi-harness` AgentHarness 与 `@earendil-works/pi-ai` Models，
 对外暴露一套**基于 NDJSON over stdio 的 JSON-RPC 协议**，让任何语言、任何
 进程的客户端都能发起多 workspace 多 session 的对话、查询历史、订阅流式增量。
 

@@ -12,7 +12,7 @@ Taco 在 Pi 的 harness 之上补了什么，从代码里能看到的：
 - **Prompt tag 体系。** 每个 `<tag>` 块带 `compression` 策略（`pin` / `pinOnce` / `summarize` / `drop`）与 `tuiVisibility`（`visible` / `hidden` / `ephemeral`）；感知 pin 的 compact hook 直接读这张注册表。
 - **扩展系统。** 新能力以扩展的形式接入，而不是写死进运行时；workspace 激活时把进程级与 workspace 级贡献合并为一个冻结的 `WorkspaceExtensionSet`，扩展可自带 tag。
 - **JSONL 存储。** session / history / event log 全部走 `JsonlSessionStorage` + `JsonlSessionRepo` —— 只追加、可回放、无 schema 迁移。
-- **Pi 作为依赖。** `pi-agent-core` 与 `pi-ai` 锁在 `0.99.2`；直接消费上游 API。这是 Pi 1.0 把 agent harness 从 `pi-agent-core` 挪到重新设计的 `pi-durable` 包之前的最后一个版本。
+- **Pi 作为依赖。** `@taco-ai/pi-harness` `0.1.0` 与 `pi-ai` `1.3.0`；直接消费上游 API。`pi-harness` 承载了 Pi 1.0 从 `pi-agent-core` 移除的 `AgentHarness` API，接口面冻结在 `0.99.2`，运行在当前 `pi-ai` 版本线上。
 - **独立部署。** `@taco-ai/sidecar` 是带自己 bin 的独立 npm 包，支持两种运行模式 —— 直接的 `NDJSON over stdio`（任何语言都能这么驱动它）与 `taco start` 及 Tauri 桌面端所用的常驻 daemon 模式。见 §2.8。
 - **单 daemon 多 workspace。** 一个 daemon 服务 UI 打开的每一个 workspace，按 `cwd` 路由；同一条 NDJSON socket 还能并发承载多个客户端的流量。
 

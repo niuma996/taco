@@ -37,6 +37,6 @@ Taco 是**面向个人使用的本地工具**——预期部署形态是单个�
 
 ## 不在范围内
 
-- 上游依赖（`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`、
+- 上游依赖（`@taco-ai/pi-harness`、`@earendil-works/pi-ai`、
   `@modelcontextprotocol/sdk`）的 bug — 请向对应项目报告。
 - 用户主动添加的第三方 agent / skill / extension frontmatter 中的问题。

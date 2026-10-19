@@ -7,7 +7,7 @@
  * reshapes a value symbol, the churn stays in this one file plus a tsc sweep.
  *
  * Scope: every non-lazy, non-provider value we import from
- * `@earendil-works/pi-agent-core` or `@earendil-works/pi-ai`. Provider
+ * `@taco-ai/pi-harness` or `@earendil-works/pi-ai`. Provider
  * factories (`pi-ai/providers/*`), lazy API loaders (`pi-ai/api/*.lazy`),
  * faux test providers (`pi-ai/providers/faux`), and the compat surface
  * (`pi-ai/compat`) are deliberately excluded — those keep their direct
@@ -27,6 +27,8 @@
  * those, use the wrapper. The re-export is here so tests can construct and
  * assert on the upstream value without punching through the boundary rule.
  */
+
+export { createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
 export {
     AgentHarness,
     BACKGROUND_CONTEXT,
@@ -54,6 +56,4 @@ export {
     uuidv7,
     value,
     withAbortSignal,
-} from "@earendil-works/pi-agent-core";
-
-export { createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
+} from "@taco-ai/pi-harness";

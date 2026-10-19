@@ -1,7 +1,7 @@
 # `@taco-ai/sidecar`
 
 The Taco sidecar: an NDJSON-over-stdio JSON-RPC server wrapping Pi's
-`@earendil-works/pi-agent-core` AgentHarness. One process hosts many
+`@taco-ai/pi-harness` AgentHarness. One process hosts many
 workspaces and many sessions; the desktop / CLI / Python / TUI
 clients all drive it via the same protocol.
 

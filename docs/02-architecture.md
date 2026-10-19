@@ -13,7 +13,7 @@ What Taco adds on top of Pi's harness, from the code:
 - **Prompt tag system.** Each `<tag>` block carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`); the pin-aware compact hook reads that registry.
 - **Extension system.** Capabilities plug in as extensions rather than being built into the runtime; workspace activation merges process and workspace contributions into one frozen `WorkspaceExtensionSet`, and an extension can contribute its own tags.
 - **JSONL storage.** Sessions / history / event logs go through `JsonlSessionStorage` + `JsonlSessionRepo` — append-only, replayable, no schema migrations.
-- **Pi as a dependency.** `pi-agent-core` and `pi-ai` pinned at `0.99.2`; consumes upstream APIs directly. This is the last release before Pi 1.0 moves the agent harness out of `pi-agent-core` into a redesigned `pi-durable` package.
+- **Pi as a dependency.** `@taco-ai/pi-harness` `0.1.0` and `pi-ai` `1.3.0`; consumes upstream APIs directly. `pi-harness` carries the `AgentHarness` API that Pi 1.0 removed from `pi-agent-core`, frozen at the `0.99.2` surface and running on the current `pi-ai` line.
 - **Standalone deploy.** `@taco-ai/sidecar` is a standalone npm package with its own bin. It supports two running modes — direct `NDJSON over stdio` (any language can drive it that way) and the long-lived daemon mode used by `taco start` and the Tauri desktop. See §2.8.
 - **One daemon, many workspaces.** One daemon serves every workspace the UI has open, routed by `cwd`, and the same NDJSON socket carries traffic from multiple clients concurrently.
 

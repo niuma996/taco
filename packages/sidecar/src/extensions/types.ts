@@ -12,7 +12,7 @@
  * Reuse from existing modules — do not re-define:
  *   - TacoTool (from this package) — replacement for AgentTool in extensions
  *   - AgentMessage / TextContent / ImageContent / Usage (from
- *     @earendil-works/pi-agent-core)
+ *     @taco-ai/pi-harness)
  *   - SystemPromptContributor (from ../prompts/buildSystemPrompt.ts)
  */
 

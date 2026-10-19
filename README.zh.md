@@ -6,7 +6,7 @@
   <img src="assets/taco.png" alt="Taco Logo" width="200" />
 </p>
 
-Taco 是一个极简 sidecar 协议层 + 多客户端调试终端，基于 Pi 的 `pi-agent-core` AgentHarness 构建，以 NDJSON-over-stdio JSON-RPC 接口暴露，使任何语言、任何客户端都能驱动多工作区、多会话的 agent 对话。
+Taco 是一个极简 sidecar 协议层 + 多客户端调试终端，基于 Pi 的 `AgentHarness` 构建，以 NDJSON-over-stdio JSON-RPC 接口暴露，使任何语言、任何客户端都能驱动多工作区、多会话的 agent 对话。
 
 包含：sidecar 服务端（`@taco-ai/sidecar`）、Node 类型化客户端（`@taco-ai/shared`）、协议合约（`@taco-ai/protocol`）和 Tauri 2 + React 桌面端（`@taco-ai/desktop`）。
 
@@ -18,7 +18,7 @@ Taco 是一个极简 sidecar 协议层 + 多客户端调试终端，基于 Pi �
 - **Prompt tag 系统。** 每个 `<tag>` 声明 `compression`（`pin` / `pinOnce` / `summarize` / `drop`）和 `tuiVisibility`（`visible` / `hidden` / `ephemeral`）。
 - **扩展系统。** 新能力以扩展的形式接入，而不是写死进运行时 —— 进程级与 workspace 级贡献合并为一个冻结集合，扩展可自带 tag。
 - **JSONL 存储。** Session / 历史 / event log 走 `JsonlSessionStorage` + `JsonlSessionRepo`，append-only、可重放、无 schema 迁移。
-- **Pi 为依赖。** `pi-agent-core` 与 `pi-ai` 锁定 `0.99.2`，直接消费上游 API。
+- **Pi 为依赖。** `@taco-ai/pi-harness` `0.1.0` 与 `pi-ai` `1.3.0`，直接消费上游 API。`pi-harness` 是我们为 Pi 1.0 从 `pi-agent-core` 移除的 `AgentHarness` 提供的兼容包。
 - **独立部署。** `@taco-ai/sidecar` 是独立 npm 包，有自己的 bin；支持两种运行模式 —— 直接 `NDJSON over stdio`（任何语言都能这样驱动）和 `taco start` / 桌面端使用的常驻 daemon 模式。daemon 模式下的租户隔离是「换一个 control endpoint」，不是「再起一个进程」。
 - **一 daemon 多 workspace。** 桌面端 daemon 服务 UI 中打开的所有 workspace，按 `cwd` 路由；同一 NDJSON socket 可承载多客户端并发。
 

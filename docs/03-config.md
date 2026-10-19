@@ -11,7 +11,7 @@ pnpm install
 
 `pnpm install` resolves the workspace packages (`@taco-ai/sidecar`,
 `@taco-ai/shared`, `@taco-ai/desktop`) and pulls
-`@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and
+`@taco-ai/pi-harness`, `@earendil-works/pi-ai`, and
 `@modelcontextprotocol/sdk` from npm.
 
 If pnpm reports `[ERR_PNPM_IGNORED_BUILDS]`, allow the build scripts in
