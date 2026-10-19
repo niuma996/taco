@@ -1531,12 +1531,19 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "tray.quit", "Quit Taco", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
-    let _tray = TrayIconBuilder::with_id("taco-tray")
-        .icon(icon)
+    // macOS menu-bar extras are monochrome: a template image lets the system
+    // tint it for light/dark bars and the selected-highlight state.
+    #[cfg(target_os = "macos")]
+    let builder = TrayIconBuilder::with_id("taco-tray")
+        .icon(tauri::include_image!("icons/tray-template.png"))
+        .icon_as_template(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = TrayIconBuilder::with_id("taco-tray").icon(
+        app.default_window_icon()
+            .cloned()
+            .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?,
+    );
+    let _tray = builder
         .tooltip("Taco")
         .menu(&menu)
         .show_menu_on_left_click(false)
