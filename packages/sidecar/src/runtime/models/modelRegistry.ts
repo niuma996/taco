@@ -9,7 +9,6 @@
  * Custom providers (via `buildCustomProvider`) also stay in the catalog.
  */
 
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { MutableModels, Provider } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
@@ -23,6 +22,7 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 import { zaiCodingCnProvider } from "@earendil-works/pi-ai/providers/zai-coding-cn";
+import type { ThinkingLevel } from "@taco-ai/pi-harness";
 import type {
     CustomModelEntry,
     CustomProviderApi,

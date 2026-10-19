@@ -73,7 +73,7 @@ describe("skills.list surfaces inlineOnly", () => {
     });
 
     it("inlineOnly skills are flagged in the list response", async () => {
-        const { loadSourcedSkills } = await import("@earendil-works/pi-agent-core");
+        const { loadSourcedSkills } = await import("@taco-ai/pi-harness");
         const { defaultSkillDirs } = await import("../../../src/config/config.ts");
         const { SlashNormalizedExecutionEnv } = await import(
             "../../../src/runtime/harness/slashNormalizedEnv.ts"

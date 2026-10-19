@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentTool } from "@taco-ai/pi-harness";
 import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts";
 import { filterToolsForImPolicy } from "../../src/runtime/toolAssembly.ts";
 import type { TacoTool } from "../../src/tools/index.ts";

@@ -45,7 +45,7 @@ machine. The threat model is scoped to that:
 
 ## Out of scope
 
-- Bugs in upstream dependencies (`@earendil-works/pi-agent-core`,
+- Bugs in upstream dependencies (`@taco-ai/pi-harness`,
   `@earendil-works/pi-ai`, `@modelcontextprotocol/sdk`) — report to
   those projects.
 - Issues in third-party agent / skill / extension frontmatter the

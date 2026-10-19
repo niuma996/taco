@@ -9,7 +9,7 @@ terminal** that drives multi-workspace, multi-session agent
 conversations over an **NDJSON-over-stdio JSON-RPC protocol**, so any
 client in any language can pull history, subscribe to push events, and
 attach to ongoing turns. The agent runtime comes from Pi
-(`@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`); see
+(`@taco-ai/pi-harness`, `@earendil-works/pi-ai`); see
 [Dependencies & roadmap](#dependencies--roadmap) for the split.
 
 ## Why this project exists

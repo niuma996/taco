@@ -2,7 +2,7 @@
  * Single re-export point for upstream pi type aliases consumed by the sidecar.
  *
  * Why this exists: every file that needs a pi type used to import it directly
- * from `@earendil-works/pi-agent-core` or `@earendil-works/pi-ai`. When the
+ * from `@taco-ai/pi-harness` or `@earendil-works/pi-ai`. When the
  * upstream package renames a type (e.g. `ContextEvent` → `Entry` in 0.85), the
  * churn scatters across every importer. Routing types through this barrel
  * keeps the rename cost to one edit here plus a tsc sweep.
@@ -13,6 +13,21 @@
  * See `runtime/pi/values.ts` for cross-domain value re-exports and
  * `runtime/pi/node.ts` for types that live under `pi-agent-core/node`.
  */
+
+export type {
+    Api,
+    Credential,
+    CredentialInfo,
+    CredentialStore,
+    ImageContent,
+    Model,
+    Models,
+    MutableModels,
+    Provider,
+    RetryPolicy,
+    TextContent,
+    Usage,
+} from "@earendil-works/pi-ai";
 export type {
     AgentHarness,
     AgentHarnessResources,
@@ -37,19 +52,4 @@ export type {
     Session,
     Skill,
     ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-
-export type {
-    Api,
-    Credential,
-    CredentialInfo,
-    CredentialStore,
-    ImageContent,
-    Model,
-    Models,
-    MutableModels,
-    Provider,
-    RetryPolicy,
-    TextContent,
-    Usage,
-} from "@earendil-works/pi-ai";
+} from "@taco-ai/pi-harness";

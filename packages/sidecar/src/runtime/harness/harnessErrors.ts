@@ -14,7 +14,7 @@
  * with `instanceof HarnessFault`.
  */
 
-import { LaneBusy } from "@earendil-works/pi-agent-core";
+import { LaneBusy } from "@taco-ai/pi-harness";
 
 /** Any pi tagged error, seen through its discriminant. */
 interface TaggedLike {

@@ -1,5 +1,5 @@
 /**
- * Re-export point for `@earendil-works/pi-agent-core/node`.
+ * Re-export point for `@taco-ai/pi-harness/node`.
  *
  * Separated from `./types.ts` so the bare-package barrel stays a pure
  * `pi-agent-core` re-export, preserving the upstream module's split between
@@ -10,5 +10,5 @@
  * inline `type` markers keep working) without touching the upstream subpath.
  */
 
-export type { FileError, FileInfo, Result } from "@earendil-works/pi-agent-core/node";
-export { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+export type { FileError, FileInfo, Result } from "@taco-ai/pi-harness/node";
+export { NodeExecutionEnv } from "@taco-ai/pi-harness/node";

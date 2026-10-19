@@ -10,7 +10,7 @@ pnpm install
 ```
 
 `pnpm install` 一次性安装所有 workspace package（`@taco-ai/sidecar` + `@taco-ai/shared` +
-`@taco-ai/desktop`）并把 pi-agent-core/pi-ai 从 npm 拉下来。
+`@taco-ai/desktop`）并把 pi-harness/pi-ai 从 npm 拉下来。
 
 如果遇到 `Ignored build scripts` 警告，先去 `pnpm-workspace.yaml` 中允许：
 

@@ -13,7 +13,7 @@
  * when the sidecar grows a real per-request context, only this file changes.
  */
 
-import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "@taco-ai/pi-harness";
 
 /**
  * Root context for harness/session work that outlives any single RPC.
