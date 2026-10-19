@@ -299,12 +299,12 @@ export class WeComChannelHandle implements ChannelHandle {
         this.broker.setState(this.ctx.channelId, "unbound");
     }
 
-    /** Reconnect using whatever credentials are already on disk. After the
-     *  SDK's reconnect budget is exhausted (10 attempts), no further
-     *  automatic retries happen and a passive UI is stuck on error. This
-     *  rebuilds the client from scratch — the cached WSClient can no longer
-     *  be coaxed into another attempt — using the same botId/secret, then
-     *  starts the SDK's reconnect cycle over. */
+    /** Reconnect using whatever credentials are already on disk. Network
+     *  drops reconnect on their own; this is the way back once the SDK stops
+     *  for good (auth-failure budget exhausted, or kicked by a newer
+     *  connection). Rebuilds the client from scratch — the cached WSClient
+     *  can no longer be coaxed into another attempt — using the same
+     *  botId/secret. */
     async retryWithStoredCreds(): Promise<void> {
         const stored = this.ctx.config.get<ChannelsBindCreds>(CREDENTIALS_KEY);
         if (!stored?.botId || !stored?.secret) {
@@ -327,6 +327,11 @@ function defaultCreateClient(opts: WeComClientFactoryOptions): WeComClientLike {
         botId: opts.botId,
         secret: opts.secret,
         logger: opts.logger,
+        // The SDK's default budget (10 attempts, ~3 min of back-off) gives up
+        // on any outage longer than that, leaving the channel dead until a
+        // manual retry. Auth failures keep their own finite budget, so a wrong
+        // secret still stops.
+        maxReconnectAttempts: -1,
     });
     return client as unknown as WeComClientLike;
 }

@@ -141,7 +141,18 @@ export class WeChatChannel implements Channel {
     async start(ctx: ChannelContext): Promise<ChannelHandle> {
         const { broker, resolveRoute, listPeers } = this.options;
         const log = ctx.logger;
-        const storage = createStorageAdapter(ctx);
+        // The poller retries network errors forever but emits nothing when one
+        // succeeds again, so an `error` set by a blip would outlive the outage.
+        // A cursor write (or an inbound message) proves a poll got through.
+        // Only `error` is lifted: a mid-bind state belongs to the QR flow.
+        const markHealthy = () => {
+            if (broker.status(ctx.channelId).state === "error") {
+                broker.setState(ctx.channelId, "connected");
+            }
+        };
+        const storage = createStorageAdapter(ctx, (key) => {
+            if (key === CURSOR_KEY) markHealthy();
+        });
 
         const bot = (this.options.createBot ?? defaultCreateBot)({
             storage,
@@ -157,7 +168,13 @@ export class WeChatChannel implements Channel {
 
         bot.on("login", () => broker.setState(ctx.channelId, "connected"));
         bot.on("poll:start", () => broker.setState(ctx.channelId, "connected"));
-        bot.on("session:expired", () => broker.setState(ctx.channelId, "unbound"));
+        // iLink revoked the token: the SDK wipes the stored credentials, so no
+        // retry can recover — only a fresh QR scan.
+        bot.on("session:expired", () =>
+            broker.setState(ctx.channelId, "unbound", {
+                message: "WeChat login expired — bind again to scan a new QR code",
+            }),
+        );
         bot.on("session:restored", () => broker.setState(ctx.channelId, "connected"));
         bot.on("error", (e: unknown) => {
             const message = e instanceof Error ? e.message : String(e);
@@ -166,6 +183,7 @@ export class WeChatChannel implements Channel {
         });
 
         bot.onMessage(async (msg) => {
+            markHealthy();
             // chatId groups a conversation: a group shares one session, a 1:1
             // chat falls back to the peer's own id.
             //
@@ -296,11 +314,18 @@ class WeChatChannelHandle implements ChannelHandle {
     }
 }
 
+/** The SDK's storage key for the long-poll cursor (STORAGE_KEYS.CURSOR, not
+ *  exported); rewritten after every successful poll. */
+const CURSOR_KEY = "cursor";
+
 /** Bridges the SDK's async Storage onto the synchronous ChannelConfigStore. */
-function createStorageAdapter(ctx: ChannelContext): SdkStorage {
+function createStorageAdapter(ctx: ChannelContext, onSet: (key: string) => void): SdkStorage {
     return {
         get: async <T>(key: string) => ctx.config.get<T>(key),
-        set: async <T>(key: string, value: T) => ctx.config.set(key, value),
+        set: async <T>(key: string, value: T) => {
+            await ctx.config.set(key, value);
+            onSet(key);
+        },
         delete: async (key: string) => ctx.config.set(key, undefined),
         has: async (key: string) => ctx.config.get(key) !== undefined,
         // SDK contract: clear() wipes everything, not just credentials.

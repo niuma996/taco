@@ -19,8 +19,8 @@ export interface UseChannelsPaneResult {
     bindChannel: (channelId: string, force?: boolean, creds?: ChannelsBindCreds) => Promise<void>;
     unbindChannel: (channelId: string) => Promise<void>;
     /** Reconnect using already-stored credentials. The only path back from a
-     *  SDK-exhausted error (e.g. WeCom's "Max reconnect attempts exceeded")
-     *  without forcing the user to retype the secret. */
+     *  SDK that stopped retrying (e.g. WeCom's auth-failure budget) without
+     *  forcing the user to retype the secret. */
     retryChannel: (channelId: string) => Promise<void>;
     submitVerifyCode: (requestId: string, code: string) => Promise<boolean>;
     createChannel: (name: string) => Promise<void>;

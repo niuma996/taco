@@ -10,7 +10,7 @@ const WECOM_MAX_MESSAGE_LENGTH = 2048;
 
 export const wecomChannelManifest: ChannelManifest = {
     name: CHANNEL_NAME_WECOM,
-    version: "0.1.0",
+    version: "0.1.1",
     description:
         "WeCom (企业微信) smart-bot channel over the official aibot WebSocket SDK. Bind by pasting botId + secret from the admin console (no QR flow). Requires the optional @wecom/aibot-node-sdk dependency.",
     capabilities: {

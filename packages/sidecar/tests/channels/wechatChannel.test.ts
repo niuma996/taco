@@ -93,6 +93,8 @@ interface Harness {
     broker: ChannelBindBroker;
     bot: FakeBot;
     submitted: ChannelInboundMessage[];
+    /** The storage adapter handed to the SDK; set once start() runs. */
+    factoryOpts?: WeChatBotFactoryOptions;
 }
 
 function harness(
@@ -101,13 +103,17 @@ function harness(
     const bot = new FakeBot();
     const broker = new ChannelBindBroker();
     const submitted: ChannelInboundMessage[] = [];
+    const h = {} as Harness;
     const channel = new WeChatChannel({
         broker,
         resolveRoute: () =>
             opts.peer === undefined
                 ? undefined
                 : { channelId: "wechat", peerId: opts.peer, chatId: opts.peer },
-        createBot: (_o: WeChatBotFactoryOptions) => bot,
+        createBot: (o: WeChatBotFactoryOptions) => {
+            h.factoryOpts = o;
+            return bot;
+        },
         listPeers: (_channelId: string) => opts.listPeers ?? [],
     });
     const ctx: ChannelContext = {
@@ -121,7 +127,7 @@ function harness(
             },
         },
     };
-    return { channel, ctx, broker, bot, submitted };
+    return Object.assign(h, { channel, ctx, broker, bot, submitted });
 }
 
 function replyFrame(text: string, session = "s1"): ServerPush {
@@ -212,6 +218,41 @@ describe("WeChatChannel.start", () => {
         const status = h.broker.status("wechat");
         assert.equal(status.state, "error");
         assert.equal(status.message, "poll exploded");
+    });
+
+    // The SDK poller retries network errors forever but emits nothing when a
+    // poll succeeds again; the cursor write after each good poll is the signal.
+    it("recovers from a poll error to connected once the cursor advances", async () => {
+        const h = harness({ credentials: true });
+        await h.channel.start(h.ctx);
+        h.bot.emit("poll:start");
+        h.bot.emit("error", new Error("Network error: fetch failed"));
+        assert.equal(h.broker.status("wechat").state, "error");
+
+        await h.factoryOpts?.storage.set("cursor", "next");
+        assert.equal(h.broker.status("wechat").state, "connected");
+    });
+
+    it("recovers from a poll error to connected on an inbound message", async () => {
+        const h = harness({ credentials: true });
+        await h.channel.start(h.ctx);
+        h.bot.emit("error", new Error("Network error: fetch failed"));
+        await h.bot.deliver({
+            userId: "u1",
+            text: "hi",
+            raw: { message_id: 1, create_time_ms: 1 },
+        });
+        assert.equal(h.broker.status("wechat").state, "connected");
+    });
+
+    it("a cursor write does not override a bind in progress", async () => {
+        const h = harness();
+        const handle = await h.channel.start(h.ctx);
+        await handle.login?.();
+        h.bot.loginCallbacks[0]?.onQrUrl("https://qr.example/xyz");
+
+        await h.factoryOpts?.storage.set("cursor", "next");
+        assert.equal(h.broker.status("wechat").state, "awaiting_scan");
     });
 });
 

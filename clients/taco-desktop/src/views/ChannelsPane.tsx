@@ -406,10 +406,11 @@ function ConfiguredCard(props: {
     const { entry, saving, onBind, onRebind, onRetry, onUnbind, onOpenPolicy, t } = props;
     const tone = STATE_TONE[entry.state];
     const isConnected = entry.state === "connected";
-    // Only WeCom's SDK caches credentials in its long-poll client and refuses
-    // to retry past 10 attempts, so this affordance is meaningless for wechat
-    // (iLink retries on its own). Surfaced only in the error state where the
-    // alternative is "open Bind dialog and retype the secret".
+    // Only WeCom's SDK can stop for good with valid stored credentials (auth
+    // retries exhausted, kicked by a newer connection), so this affordance is
+    // meaningless for wechat (iLink retries on its own). Surfaced only in the
+    // error state where the alternative is "open Bind dialog and retype the
+    // secret".
     const showRetry = entry.state === "error" && entry.name === CHANNEL_NAME_WECOM;
 
     return (

@@ -330,8 +330,8 @@ describe("WeComChannel", () => {
     });
 
     it("retryWithStoredCreds rebuilds the client with the on-disk credentials", async () => {
-        // After the SDK's reconnect budget is exhausted, a passive UI is
-        // stuck on error because the cached WSClient refuses to retry.
+        // Once the SDK stops retrying (auth budget exhausted, kicked by a
+        // newer connection), the cached WSClient refuses another attempt.
         // retryWithStoredCreds is the manual escape hatch: it rebuilds
         // from scratch using the same botId/secret so the SDK's counter
         // starts over.
