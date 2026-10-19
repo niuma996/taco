@@ -220,8 +220,9 @@ export interface UiToolCall {
     resultText?: string;
     /**
      * Tool-specific structured details (passed through from
-     * tool_end.result.details on the server). The edit tool writes
-     * { edits: number, lines: LineInfo[] } etc.; the front-end parses by
+     * tool_end.result.details on the server). Shape is per tool — the edit tool
+     * writes { diff, patch, firstChangedLine }, askUser writes { questions },
+     * the subagent tools write { subSessionId, status }. The front-end parses by
      * tool.name. `stringifyResult` does not read this field — `resultText`
      * and `details` are complementary.
      */

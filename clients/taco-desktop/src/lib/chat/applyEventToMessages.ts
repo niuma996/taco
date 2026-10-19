@@ -364,7 +364,7 @@ function handleToolEnd(
     // don't prepend "✓ name:" — that prefix is for fallback rows.
     clonedTool.resultText = stringifyResult(ev.result);
     // Pass through structured `details` — front-end views parse by
-    // tool.name (e.g. edit's details.lines for absolute line numbers).
+    // tool.name (e.g. edit's details.patch for absolute line numbers).
     //
     // askUser / planExit's second tool_end loses fields,
     // so we merge from the previous frame's tool card:

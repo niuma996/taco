@@ -17,7 +17,8 @@
     border-top: 1px solid var(--border);
 }
 .tool-card-diff-old,
-.tool-card-diff-new {
+.tool-card-diff-new,
+.tool-card-diff-ctx {
     display: grid;
     grid-template-columns: auto auto 1fr;
     align-items: start;
@@ -33,13 +34,21 @@
     background: var(--diff-new-bg);
     color: var(--diff-new-fg);
 }
+/* Unchanged lines inside a hunk — no tint, so the +/- bands stay the only
+   colored rows. */
+.tool-card-diff-ctx {
+    color: var(--fg-dim);
+}
+.tool-card-diff-ctx .tool-card-diff-text {
+    color: var(--fg-dim);
+}
 .tool-card-diff-ln {
     user-select: none;
-    text-align: right;
+    text-align: left;
     padding: 0 0.4rem;
     color: var(--diff-gutter-fg);
-    background: rgba(0, 0, 0, 0.18);
-    /* Narrow line-number column with stable width — enough for 3 digits + dot. */
+    /* Fixed-width gutter keeps the code column aligned across rows; the numbers
+       themselves sit flush left with no band behind them. */
     min-width: 2.5em;
     font-variant-numeric: tabular-nums;
 }
@@ -54,6 +63,11 @@
     overflow-wrap: anywhere;
     color: var(--fg);
     padding-right: 0.5rem;
+}
+.tool-card-diff-gap {
+    padding: 0 0.4rem;
+    color: var(--fg-dim);
+    text-align: center;
 }
 .tool-card-diff-summary {
     display: flex;
@@ -76,6 +90,19 @@
     color: var(--fg-dim);
     font-size: 0.85em;
     font-style: italic;
+}
+/* Outcome line under the diff. No box and no card-body indent: it reads as a
+   footnote to the block above, aligned with that block's own text column. */
+.tool-card-diff-note {
+    margin: 0.3rem 0 0 0;
+    padding: 0 0.4rem;
+    color: var(--fg-dim);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.tool-card-diff-note.streaming {
+    color: var(--fg);
 }
 .tool-card-diff-summary-absolute {
     margin-left: auto;
