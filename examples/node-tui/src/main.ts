@@ -10,7 +10,7 @@
  */
 
 import { createInterface } from "node:readline";
-import type { ServerPush } from "@taco-ai/protocol";
+import { asWorkspaceId, type ServerPush } from "@taco-ai/protocol";
 import { TacoClient } from "@taco-ai/shared/node";
 import { createDefaultSidecarSpawn } from "@taco-ai/shared/spawn";
 import { Terminal } from "./terminal.js";
@@ -18,7 +18,12 @@ import { Terminal } from "./terminal.js";
 const cwd = process.argv[2] ?? process.cwd();
 const term = new Terminal();
 
-const client = new TacoClient(createDefaultSidecarSpawn({ command: "taco-sidecar", args: [] }));
+const client = new TacoClient(
+    createDefaultSidecarSpawn({
+        command: process.env.TACO_SIDECAR_CMD ?? "taco-sidecar",
+        args: process.env.TACO_SIDECAR_ARGS ? process.env.TACO_SIDECAR_ARGS.split(" ") : [],
+    }),
+);
 
 // ── Push routing ───────────────────────────────────────────────────────────────
 // RPC responses are delivered by awaiting the typed methods below — they never
@@ -47,7 +52,10 @@ async function main() {
 
     // Create a session in `cwd`. Without an initialPrompt the session is created
     // but not attached, so we pass one to attach + get the first reply in one call.
-    const created = await client.sessionCreate({ workspace: cwd, initialPrompt: "hello" });
+    const created = await client.sessionCreate({
+        workspace: asWorkspaceId(cwd),
+        initialPrompt: "hello",
+    });
     const sessionId = created.sessionId;
     term.print(`[session] created + attached: ${sessionId}`);
 
@@ -64,7 +72,7 @@ async function main() {
 
         term.print(`[sending] ${text}`);
         try {
-            const result = await client.sessionPrompt(cwd, sessionId, text);
+            const result = await client.sessionPrompt(asWorkspaceId(cwd), sessionId, text);
             term.print(`[response] ${JSON.stringify(result).slice(0, 200)}`);
         } catch (err) {
             term.print(`[ERROR] ${err instanceof Error ? err.message : String(err)}`);

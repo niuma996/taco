@@ -68,6 +68,8 @@ def read_response(fd, req_id: str) -> dict:
 def main() -> None:
     cwd = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
     cmd = os.environ.get("TACO_SIDECAR_CMD", "taco-sidecar").split()
+    if os.environ.get("TACO_SIDECAR_ARGS"):
+        cmd += os.environ["TACO_SIDECAR_ARGS"].split()
 
     print(f"[python-cli] Starting taco-sidecar (cwd={cwd})…")
     proc = subprocess.Popen(
@@ -83,6 +85,11 @@ def main() -> None:
     # Without this step every subsequent RPC would be rejected with
     # `not_initialized`. The response carries serverVersion / pid /
     # instanceId — same identity fields the v1 hello frame used to push.
+    #
+    # `minor: 0` is deliberate: the server accepts a client whose major
+    # matches and whose minor is <= its own, so 2.0 works against every
+    # 2.x sidecar (including the newest, which answers 2.1/2.2). A higher
+    # minor would be rejected by an older published sidecar.
     init_req = send(
         proc.stdin,
         "initialize",

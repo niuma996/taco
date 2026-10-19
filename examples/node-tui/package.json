@@ -11,8 +11,8 @@
   "license": "MIT",
   "repository": "github:niuma996/taco",
   "dependencies": {
-    "@taco-ai/protocol": "^0.1.0",
-    "@taco-ai/shared": "^0.1.0"
+    "@taco-ai/protocol": "^0.2.10",
+    "@taco-ai/shared": "^0.2.10"
   },
   "devDependencies": {
     "tsx": "^4.19.0"

@@ -16,14 +16,21 @@ Sidecar resolution follows the same rules as the full client:
   - $TACO_SIDECAR_CMD (split on whitespace) overrides PATH lookup
   - falls back to `taco-sidecar` on PATH
 
+The sidecar runs against a throwaway $TACO_HOME: without it the smoke
+run would read the real ~/.taco (IM channel credentials — the sidecar
+would connect to the user's live channels) and write into the real
+session store.
+
 Usage:
     python3 examples/snippets/stdio_smoke.py [cwd]
 """
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 
 
@@ -54,16 +61,29 @@ def main() -> int:
         cmd += os.environ["TACO_SIDECAR_ARGS"].split()
 
     print(f"[stdio_smoke] spawn: {' '.join(cmd)} (cwd={cwd})")
+    home = tempfile.mkdtemp(prefix="taco-smoke-home-")
+    env = {
+        **os.environ,
+        "TACO_HOME": home,
+        # TACO_SESSIONS_ROOT wins over the TACO_HOME-derived path, so pin it
+        # too — a user-set value would otherwise write into the real store.
+        "TACO_SESSIONS_ROOT": os.path.join(home, "sessions"),
+    }
+    print(f"[stdio_smoke] TACO_HOME: {home}")
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,
+        env=env,
         text=True,
     )
 
     try:
+        # `minor: 0` is the floor every 2.x server accepts: the server
+        # rejects a client whose major differs or whose minor is newer
+        # than its own.
         init = read_response(proc.stdout, send(proc.stdin, "initialize", {
             "protocolVersion": {"major": 2, "minor": 0},
             "clientCapabilities": {},
@@ -102,6 +122,7 @@ def main() -> int:
         err = proc.stderr.read().strip()
         if err:
             print(f"[stdio_smoke] stderr: {err}")
+        shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -15,35 +15,49 @@ npx tsx src/index.ts
 
 # Terminal 2
 cd packages/sidecar
-echo '{"id":"1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}' | npx tsx src/index.ts
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}'
+  echo '{"id":"2","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}'
+  sleep 3
+} | npx tsx src/index.ts
 ```
 
 期望 stderr/stdout 输出（顺序）：
 
 ```
-{"id":"<uuid>","ok":true,"result":{"serverVersion":"0.1.0","protocolVersion":{"major":2,"minor":0},"pid":...,"instanceId":"..."}}
+{"id":"1","ok":true,"result":{"serverVersion":"0.2.10","protocolVersion":{"major":2,"minor":2},"pid":...,"instanceId":"..."}}
 [sidecar] listening on stdio. sessionsRoot=~/.taco/sessions, agentConfig=~/.taco/taco.json
-{"id":"1","ok":true,"result":{"cwd":"/tmp/x","sessionsRoot":"~/.taco/sessions"}}
+{"id":"2","ok":true,"result":{"cwd":"/tmp/x"}}
 ```
+
+> `initialize` 必须是连接上的第一帧，否则服务端对任何其它 RPC 一律回
+> `not_initialized`。`workspace.ensure` 的返回体只有 `cwd` 一个字段。
+>
+> 末尾的 `sleep` 不能太短：`workspace.ensure` 要加载 skill，实测约 1s，
+> 管道 EOF 早于响应写出时该响应就丢了。
+
+这段流程已经封装成两个可直接跑的脚本：`examples/snippets/stdio_smoke.py`
+（手写 NDJSON）和 `examples/snippets/typed_smoke.ts`（typed client）。
 
 **这是当前已经验证通过的最简链路。**
 
 ### 1.2 Tier 2：协议层完整测试（无需 API key）
 
 ```bash
-{ echo '{"id":"1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}'
-  sleep 0.3
-  echo '{"id":"2","method":"session.list","params":{"workspace":"/tmp/x"}}'
-  sleep 0.3
-  echo '{"id":"3","method":"session.listModels","params":{"workspace":"/tmp/x"}}'
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}'
   sleep 1
+  echo '{"id":"2","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}'
+  sleep 1
+  echo '{"id":"3","method":"session.list","params":{"workspace":"/tmp/x"}}'
+  sleep 1
+  echo '{"id":"4","method":"session.listModels","params":{"workspace":"/tmp/x"}}'
+  sleep 3
 } | npx tsx src/index.ts
 ```
 
 期望：
 
-- 三条响应都 `ok: true`
-- `session.list` → `{workspace:"/tmp/x", sessions:[]}`（空 array 是首次运行）
+- 四条响应都 `ok: true`
+- `session.list` → `{workspace:"/tmp/x", sessions:[], total:0}`（空 array 是首次运行）
 - `session.listModels` → `{models:[...]}` 或空（视 API key 状态）
 
 ### 1.3 Tier 3：Node 客户端冒烟
@@ -86,16 +100,28 @@ e2e.ts 已经被示例代码处理过，验证时观察 stderr 即可。
 ```bash
 # 1. 启动 sidecar（带 API key）
 export ANTHROPIC_API_KEY=sk-ant-...
-echo '{"id":"1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}' | npx tsx src/index.ts
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}'
+  echo '{"id":"2","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}'
+  sleep 3
+} | npx tsx src/index.ts
 
 # 2. session.create + prompt (同 context)
-echo '{"id":"2","method":"session.create","params":{"workspace":"/tmp/x","initialPrompt":"hi"}}' | npx tsx src/index.ts
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}'
+  echo '{"id":"2","method":"session.create","params":{"workspace":"/tmp/x","initialPrompt":"hi"}}'
+  sleep 3
+} | npx tsx src/index.ts
 
 # 3. session.listModels
-echo '{"id":"3","method":"session.listModels","params":{"workspace":"/tmp/x"}}' | npx tsx src/index.ts
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}'
+  echo '{"id":"2","method":"session.listModels","params":{"workspace":"/tmp/x"}}'
+  sleep 3
+} | npx tsx src/index.ts
 
 # 4. setModel 切换
-echo '{"id":"4","method":"session.setModel","params":{"workspace":"/tmp/x","sessionId":"...","provider":"anthropic","modelId":"claude-haiku-4-5"}}' | npx tsx src/index.ts
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}'
+  echo '{"id":"2","method":"session.setModel","params":{"workspace":"/tmp/x","sessionId":"...","provider":"anthropic","modelId":"claude-haiku-4-5"}}'
+  sleep 3
+} | npx tsx src/index.ts
 ```
 
 > **注意**：每次 `npx tsx src/index.ts` 是新进程，所以 sessionId 不会跨进程持续。如果想做"切换前后对比"需要保留同一个 sidecar 进程。
@@ -123,7 +149,7 @@ Tauri WebView 打开后，左 sidebar 列 workspace + session，右侧 chat pane
 ```bash
 # 一次性看 stdout + stderr + 保存到 log
 cd packages/sidecar
-{ echo '{"id":"1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}' ; sleep 5 ; } \
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}' ; sleep 5 ; } \
   | npx tsx src/index.ts 2>&1 | tee /tmp/taco-log.txt
 ```
 

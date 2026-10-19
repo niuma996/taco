@@ -53,6 +53,13 @@ python3 taco_client.py [cwd]
 > In v2 the v1 `sidecar.hello` push frame was retired; the identity
 > fields moved onto the `initialize` response, which is now the
 > readiness signal.
+>
+> **Which version to declare.** The script sends `protocolVersion
+> {major: 2, minor: 0}` — the floor every 2.x server accepts. The server
+> rejects a client whose major differs or whose minor is *newer* than
+> its own, so declaring the lowest 2.x minor keeps the script working
+> against every published sidecar. A server answers with its own
+> version, which is the authoritative one.
 
 ## Minimal stdio round-trip
 

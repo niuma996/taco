@@ -19,8 +19,8 @@ cd examples/node-tui
 pnpm install
 ```
 
-`pnpm install` resolves `@taco-ai/protocol@^0.2.0` and
-`@taco-ai/shared@^0.2.0` from npm.
+`pnpm install` resolves `@taco-ai/protocol@^0.2.10` and
+`@taco-ai/shared@^0.2.10` from npm.
 
 ### Running against a monorepo checkout
 
@@ -52,6 +52,7 @@ with `Ctrl-C`.
 ## Typed client at a glance
 
 ```ts
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { TacoClient } from "@taco-ai/shared/node";
 import { createDefaultSidecarSpawn } from "@taco-ai/shared/spawn";
 
@@ -63,17 +64,16 @@ const client = new TacoClient(
 );
 
 await client.start();
-await client.handshake({
-    protocolVersion: { major: 2, minor: 0 },
-    clientCapabilities: {},
-});
+// The typed client sends its own protocol version; only the capability
+// declaration is passed in.
+await client.handshake();
 client.onPush((frame) => console.log("[push]", frame.method));
 
 const { sessionId } = await client.sessionCreate({
-    workspace: process.cwd(),
+    workspace: asWorkspaceId(process.cwd()),
     initialPrompt: "hello",
 });
-await client.sessionPrompt(process.cwd(), sessionId, "echo ping");
+await client.sessionPrompt(asWorkspaceId(process.cwd()), sessionId, "echo ping");
 
 await client.dispose();
 ```

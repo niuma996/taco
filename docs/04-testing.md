@@ -13,12 +13,14 @@ cd packages/sidecar
 pnpm dev    # starts sidecar with stdio transport
 ```
 
-In a second terminal, drive the protocol manually (see
-`scripts/pack-smoke.mjs` for the canonical example). Expect:
+In a second terminal, drive the protocol manually. The runnable
+versions of this are `examples/snippets/stdio_smoke.py` (hand-rolled
+NDJSON) and `examples/snippets/typed_smoke.ts` (typed client) — both
+drive the same frame sequence. Expect:
 
 - `initialize` response with `serverCapabilities` (and identity:
   `serverVersion` / `pid` / `instanceId`)
-- `workspace.ensure` returns `{ ok: true, result: { cwd, sessionsRoot } }`
+- `workspace.ensure` returns `{ ok: true, result: { cwd } }`
 
 > Protocol v2 retired the `sidecar.hello` push frame; readiness and
 > identity now travel on the `initialize` response.
@@ -63,7 +65,7 @@ backend on first `workspace_ensure`.
 
 ```bash
 cd packages/sidecar
-{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":1,"minor":3}}}' ; sleep 5 ; } \
+{ echo '{"id":"1","method":"initialize","params":{"protocolVersion":{"major":2,"minor":0},"clientCapabilities":{}}}' ; sleep 5 ; } \
   | pnpm exec tsx src/index.ts 2>&1 | tee /tmp/taco-log.txt
 ```
 
