@@ -187,10 +187,10 @@ export function registerSettingsHandlers(): void {
                     // the hide filter and the extras append in the same wrapper, so
                     // pushing only the changed half would drop the other one's
                     // effect. Unchanged halves come from the merged `next`.
-                    if (
+                    const modelListsChanged =
                         "providerExtraModels" in globalPatch ||
-                        "providerHiddenModels" in globalPatch
-                    ) {
+                        "providerHiddenModels" in globalPatch;
+                    if (modelListsChanged) {
                         fanoutSetter(
                             server,
                             serverRegistry,
@@ -254,7 +254,17 @@ export function registerSettingsHandlers(): void {
                     // a valid default. Fire when either field is in the patch —
                     // defaultProvider scopes the defaultModel lookup, so a change
                     // to either must re-resolve.
-                    if ("defaultModel" in globalPatch || "defaultProvider" in globalPatch) {
+                    //
+                    // A model-list edit moves the catalog under the default too:
+                    // renaming an extra model leaves `defaultModel` pointing at
+                    // an id that is gone, and the workspace would keep serving
+                    // the stale model object. Re-resolve after the catalog has
+                    // been rewritten (the model-edit fanout above runs first).
+                    if (
+                        "defaultModel" in globalPatch ||
+                        "defaultProvider" in globalPatch ||
+                        modelListsChanged
+                    ) {
                         fanoutSetter(
                             server,
                             serverRegistry,

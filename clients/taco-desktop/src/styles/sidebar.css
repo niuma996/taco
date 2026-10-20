@@ -331,40 +331,6 @@ button svg > * {
     visibility: visible;
 }
 
-/* Overflow menu for the views collapsed behind the "more" button. */
-.activity-rail-menu {
-    min-width: 148px;
-    padding: 4px;
-    background: var(--bg-elevated);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 8px 24px var(--shadow-color);
-    z-index: 300;
-}
-
-.activity-rail-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    border-radius: var(--radius-xs);
-    font-size: 0.82rem;
-    color: var(--fg-dim);
-    cursor: pointer;
-    outline: none;
-}
-
-.activity-rail-menu-item:hover,
-.activity-rail-menu-item:focus-visible {
-    background: var(--hover-overlay);
-    color: var(--fg);
-}
-
-.activity-rail-menu-label {
-    flex: 1;
-}
-
 /* lucide SVG fill none inheritance. */
 .activity-rail-item svg > * {
     fill: none;

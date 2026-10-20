@@ -33,11 +33,7 @@
     min-width: 22rem;
     max-height: 22rem;
     overflow-y: auto;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: 0 6px 18px var(--shadow-color);
-    z-index: 200;
+    box-sizing: border-box;
 }
 /* settings pane: trigger is near the top, flip to downward popup to avoid pane overflow clipping. */
 .model-menu--down .model-menu-popup {
@@ -49,7 +45,7 @@
     position: sticky;
     top: 0;
     padding: 0.4rem;
-    background: var(--bg);
+    background: var(--bg-elevated);
     border-bottom: 1px solid var(--border);
     z-index: 1;
 }
@@ -76,35 +72,6 @@
     padding: 0.6rem;
     font-size: var(--text-sm);
     color: var(--fg-dim);
-}
-.model-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.6rem;
-    background: transparent;
-    border: 0;
-    color: var(--fg);
-    font-size: 0.85rem;
-    text-align: left;
-    cursor: pointer;
-}
-.model-menu-item:hover {
-    background: var(--bg-hover);
-}
-.model-menu-item.selected {
-    background: var(--bg-hover);
-}
-.model-menu-item.selected .model-menu-item-name {
-    color: var(--brand-orange);
-    font-weight: 600;
-}
-.model-menu-item-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 .model-menu-divider {
     height: 1px;

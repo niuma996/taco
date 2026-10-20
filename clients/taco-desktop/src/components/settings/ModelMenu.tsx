@@ -8,6 +8,7 @@
  */
 
 import type { ThinkingLevel } from "@taco-ai/protocol";
+import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { TextInput } from "../ui/TextInput.tsx";
@@ -29,6 +30,8 @@ interface ModelMenuProps {
     /** Popover placement: up (default; chat input) or down (settings pane — its top
      * space is too tight for an upward expand, and the pane overflow would clip it). */
     placement?: "up" | "down";
+    /** Chat-input variant: flat borderless pill sized to its content. */
+    compact?: boolean;
 }
 
 export function ModelMenu(props: ModelMenuProps) {
@@ -102,7 +105,7 @@ export function ModelMenu(props: ModelMenuProps) {
         >
             <button
                 type="button"
-                className="prompt-button model-trigger"
+                className={`prompt-button model-trigger${props.compact ? " model-trigger--compact" : ""}`}
                 aria-haspopup="menu"
                 aria-expanded={open}
                 disabled={props.disabled}
@@ -115,7 +118,7 @@ export function ModelMenu(props: ModelMenuProps) {
                 )}
             </button>
             {open && (
-                <div className="model-menu-popup" role="menu">
+                <div className="ui-menu model-menu-popup" role="menu">
                     <div className="model-menu-search">
                         <TextInput
                             type="text"
@@ -143,7 +146,7 @@ export function ModelMenu(props: ModelMenuProps) {
                                             type="button"
                                             role="menuitemradio"
                                             aria-checked={selected}
-                                            className={`model-menu-item${selected ? " selected" : ""}`}
+                                            className="ui-menu-item"
                                             onClick={() => {
                                                 props.onModelChange({
                                                     provider: opt.provider,
@@ -152,9 +155,10 @@ export function ModelMenu(props: ModelMenuProps) {
                                                 setOpen(false);
                                             }}
                                         >
-                                            <span className="model-menu-item-name">
+                                            <span className="ui-menu-label">
                                                 {opt.name ?? opt.id}
                                             </span>
+                                            {selected && <Check size={14} aria-hidden="true" />}
                                         </button>
                                     );
                                 })}

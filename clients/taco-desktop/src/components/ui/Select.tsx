@@ -27,24 +27,31 @@ export interface SelectProps {
     label?: string;
     /** Feature modifier added to both the trigger and the (portalled) list. */
     className?: string;
+    /** "menu": caret-less trigger whose list uses the shared `.ui-menu` look and opens upward. */
+    variant?: "field" | "menu";
 }
 
 export function Select(props: SelectProps): ReactElement {
     const { value, onValueChange, options, placeholder, disabled, label, className } = props;
+    const menu = props.variant === "menu";
     const withClass = (base: string): string => (className ? `${base} ${className}` : base);
     return (
         <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
             <SelectPrimitive.Trigger className={withClass("ui-select-trigger")} aria-label={label}>
                 <SelectPrimitive.Value placeholder={placeholder} />
-                <SelectPrimitive.Icon className="ui-select-caret" asChild>
-                    <ChevronDown size={14} aria-hidden="true" />
-                </SelectPrimitive.Icon>
+                {!menu && (
+                    <SelectPrimitive.Icon className="ui-select-caret" asChild>
+                        <ChevronDown size={14} aria-hidden="true" />
+                    </SelectPrimitive.Icon>
+                )}
             </SelectPrimitive.Trigger>
             <SelectPrimitive.Portal>
                 <SelectPrimitive.Content
-                    className={withClass("ui-select-content")}
+                    className={withClass(menu ? "ui-menu" : "ui-select-content")}
                     position="popper"
-                    sideOffset={4}
+                    side={menu ? "top" : "bottom"}
+                    align={menu ? "start" : "center"}
+                    sideOffset={menu ? 6 : 4}
                 >
                     <SelectPrimitive.Viewport>
                         {options.map((opt) => {
@@ -55,18 +62,22 @@ export function Select(props: SelectProps): ReactElement {
                                 <SelectPrimitive.Item
                                     key={value}
                                     value={value}
-                                    className="ui-select-item"
+                                    className={menu ? "ui-menu-item" : "ui-select-item"}
                                 >
                                     {/* The badge sits inside ItemText so Radix mirrors it into
                                         the trigger along with the label. */}
-                                    <SelectPrimitive.ItemText>
-                                        {text}
-                                        {badge !== undefined && (
-                                            <span className="ui-select-item-badge">{badge}</span>
-                                        )}
-                                    </SelectPrimitive.ItemText>
+                                    <span className={menu ? "ui-menu-label" : undefined}>
+                                        <SelectPrimitive.ItemText>
+                                            {text}
+                                            {badge !== undefined && (
+                                                <span className="ui-select-item-badge">
+                                                    {badge}
+                                                </span>
+                                            )}
+                                        </SelectPrimitive.ItemText>
+                                    </span>
                                     <SelectPrimitive.ItemIndicator className="ui-select-item-check">
-                                        <Check size={12} aria-hidden="true" />
+                                        <Check size={menu ? 14 : 12} aria-hidden="true" />
                                     </SelectPrimitive.ItemIndicator>
                                 </SelectPrimitive.Item>
                             );

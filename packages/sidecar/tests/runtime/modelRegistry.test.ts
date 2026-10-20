@@ -539,6 +539,26 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.equal(extra?.provider, "stub-a");
         });
 
+        it("an added model carries the context window the user declared", () => {
+            const store = new ProviderKeyStore({});
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: STUBS,
+                providerExtraModels: {
+                    "stub-a": [{ id: "extra-1", contextWindow: 999_999 }, { id: "extra-2" }],
+                },
+            });
+            assert.equal(models.getModel("stub-a", "extra-1")?.contextWindow, 999_999);
+            // The provider view is what the settings UI renders and edits.
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            assert.equal(view?.models.find((m) => m.id === "extra-1")?.contextWindow, 999_999);
+            // An undeclared window stays undeclared — the server default applies
+            // and the settings UI must not write that default into the config.
+            assert.equal(view?.models.find((m) => m.id === "extra-2")?.contextWindow, undefined);
+        });
+
         it("keeps the static model canonical when an extra reuses its id", () => {
             const store = new ProviderKeyStore({});
             const mr = new ModelRegistry({

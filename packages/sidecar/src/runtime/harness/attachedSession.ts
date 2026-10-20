@@ -433,6 +433,48 @@ export class AttachedSession extends EventEmitter {
         // session has no history; an existing branch is adopted as-is.
         const lane = await harness.lane(MAIN_BRANCH, { createAt: null }, harnessContext);
 
+        // The lane's persisted model identity outranks the attach-time seed —
+        // pi restores it from the session file — so a catalog that moved on
+        // (extra model renamed, static model hidden, provider deleted) leaves
+        // the lane pointing at a model that no longer exists. Every turn then
+        // fails with `model_unavailable` and the context panel reports an
+        // empty model name and a zero window. Re-point the lane at a live
+        // model when the persisted one is dead.
+        const laneModel = await lane.getModel(harnessContext);
+        if (laneModel === undefined) {
+            // Prefer a sibling of the dead model from the same provider: the
+            // common case is a model that was renamed or hidden, and that
+            // provider is still there — configured, and the one the session
+            // was talking to. Jumping to another provider would move the
+            // session off its endpoint for no reason.
+            //
+            // A provider that is gone entirely falls back to the catalog's
+            // first model — the same fallback the workspace uses when a
+            // configured default no longer resolves (see
+            // WorkspaceRuntime.lookupDefaultModel): a provider keyed through
+            // the environment is invisible to ProviderKeyStore, so "first
+            // provider with a key" would skip a usable one.
+            const live =
+                args.models.getModel(args.model.provider, args.model.id) ??
+                args.models.getModels(args.model.provider)[0] ??
+                args.models.getModels()[0];
+            if (live === undefined) {
+                log.error("session model is gone and the catalog is empty", {
+                    sessionId: args.session.metadata.id,
+                    modelId: args.model.id,
+                    provider: args.model.provider,
+                });
+            } else {
+                const { configuredModel } = await lane.inspectExecution(harnessContext);
+                log.warn("session model is no longer in the catalog — re-pointed", {
+                    sessionId: args.session.metadata.id,
+                    was: `${configuredModel.provider}/${configuredModel.modelId}`,
+                    now: `${live.provider}/${live.id}`,
+                });
+                await lane.setModel({ provider: live.provider, modelId: live.id }, harnessContext);
+            }
+        }
+
         // Bind the tool surface — controller constructed first, bound after:
         // breaks the cycle. Tool definitions live on the harness, the active
         // set on the lane, so the controller gets a facade over both.

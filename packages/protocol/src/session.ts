@@ -387,6 +387,14 @@ export interface ProviderView {
          * settings UI can offer a restore action.
          */
         origin?: "builtin" | "extra" | "custom" | "hidden";
+        /**
+         * Context window in tokens. A user-added model carries the value the
+         * user declared; a catalog model carries pi's own. Absent when the
+         * model declares none.
+         */
+        contextWindow?: number;
+        /** Per-output cap in tokens. Absent when the model declares none. */
+        maxTokens?: number;
     }>;
 }
 

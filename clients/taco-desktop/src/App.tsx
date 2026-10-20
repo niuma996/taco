@@ -370,13 +370,23 @@ export default function App() {
 
     // Fallback chain mirrors activeLevel:
     //   1. per-session override (already shown)
-    //   2. global default from settings (TacoGlobalConfigShape.defaultModel)
-    //   3. first catalog option (last-resort)
-    //   4. null (no options loaded yet, no default, no session)
+    //   2. the attached session's real model, as the sidecar reports it
+    //   3. global default from settings (TacoGlobalConfigShape.defaultModel)
+    //   4. first catalog option (last-resort)
+    //   5. null (no options loaded yet, no default, no session)
+    //
+    // (2) comes first because the global default is not the session's model:
+    // a session keeps the model it was created with, and the sidecar is the
+    // only side that knows it. Without it the chip names a model the session
+    // does not run on.
     const globalConfigState = lifecycle.globalConfigState;
     const defaultModel = defaultModelForNewSession(globalConfigState.global);
+    const sessionModel = contextInfo.info?.modelId
+        ? { provider: contextInfo.info.provider, id: contextInfo.info.modelId }
+        : null;
     const activeModelWithFallback =
         activeModel ??
+        sessionModel ??
         (defaultModel ? { provider: defaultModel.provider, id: defaultModel.id } : null) ??
         filteredOptions[0] ??
         null;
@@ -406,6 +416,10 @@ export default function App() {
             if (cwd === activeCwd) {
                 refreshModels();
                 refreshProviders();
+                // A model-list edit can change the session model's declared
+                // context window — the usage ring reads that value, so the
+                // indicator must re-pull, not just the picker.
+                void contextInfo.refresh();
             }
         },
         // Indirected through a ref: useChannelsPane is declared further down,

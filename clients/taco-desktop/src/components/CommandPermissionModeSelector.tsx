@@ -36,6 +36,7 @@ export function CommandPermissionModeSelector({ client }: { client: TacoClient }
         <div className="input-permission-mode" title={t("input.commandPermissionModeHint")}>
             <Select
                 value={mode}
+                variant="menu"
                 disabled={!loaded || saving || reading}
                 label={t("settings.permissionsMode")}
                 options={[

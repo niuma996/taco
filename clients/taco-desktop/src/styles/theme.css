@@ -133,12 +133,15 @@
     --radius-md: 10px;
     --radius-lg: 14px;
     --radius-pill: 999px;
+    /* One height for every control in the composer row (attach, model, mode, send/stop). */
+    --composer-control-height: 1.5rem;
     --radius-circle: 50%;
     --radius-line: 1px;
 
     /* Font size scale — consolidates scattered 0.65rem~1.2rem hardcoded values. Tiers:
        xs (badge/metadata) < sm (secondary text) < base (body default) < md (subheading)
        < lg (section heading) < xl (page heading). */
+    --text-2xs: 0.62rem;
     --text-xs: 0.72rem;
     --text-sm: 0.8rem;
     --text-base: 0.85rem;

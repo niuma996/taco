@@ -330,6 +330,53 @@
     color: inherit;
 }
 
+/* ── Menu ── */
+
+/* Popover list shell shared by the activity-rail overflow menu and the
+   composer pickers (model, approval mode). Works for Radix DropdownMenu /
+   Select items and plain buttons alike. */
+.ui-menu {
+    min-width: 148px;
+    padding: 4px;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px var(--shadow-color);
+    z-index: 300;
+}
+.ui-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem 0.5rem;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-xs);
+    font: inherit;
+    font-size: 0.82rem;
+    color: var(--fg-dim);
+    text-align: left;
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+}
+.ui-menu-item:hover,
+.ui-menu-item:focus-visible,
+.ui-menu-item[data-highlighted] {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+.ui-menu-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ── Slider (Radix) ── */
 
 .ui-slider {

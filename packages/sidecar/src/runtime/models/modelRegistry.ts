@@ -44,6 +44,10 @@ export interface ModelInfo {
     name?: string;
     /** Provenance tag for the settings UI ("builtin" static / "extra" user-added / "custom" provider-owned / "hidden" removed static). */
     origin?: "builtin" | "extra" | "custom" | "hidden";
+    /** Context window in tokens — the model's own, or the user's declared value for an added model. */
+    contextWindow?: number;
+    /** Per-output cap in tokens. */
+    maxTokens?: number;
 }
 
 /** Per-provider availability view (used by the UI to render provider rows and filter models). */
@@ -357,7 +361,13 @@ export class ModelRegistry {
     /** Lists every model in the catalog (across all permanent providers). */
     listAvailableModels(provider?: string): ModelInfo[] {
         const all = this.models.getModels(provider);
-        return all.map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
+        return all.map((m) => ({
+            provider: m.provider,
+            id: m.id,
+            name: m.name,
+            contextWindow: m.contextWindow,
+            maxTokens: m.maxTokens,
+        }));
     }
 
     /**
@@ -378,10 +388,26 @@ export class ModelRegistry {
                     .filter((e) => !staticIds.has(e.id) || hiddenIdsForProvider.has(e.id))
                     .map((e) => e.id),
             );
-            const models: ModelInfo[] = this.listAvailableModels(id).map((m) => ({
-                ...m,
-                origin: extraIds.has(m.id) ? ("extra" as const) : ("builtin" as const),
-            }));
+            // An added model reports the window the user *declared*, not the
+            // catalog's effective one: the effective value is the server-side
+            // default, and the settings UI would otherwise write that default
+            // into the config on every save.
+            const declaredExtras = new Map((this.extraModels[id] ?? []).map((e) => [e.id, e]));
+            const models: ModelInfo[] = this.listAvailableModels(id).map((m) => {
+                if (!extraIds.has(m.id)) {
+                    return { ...m, origin: "builtin" as const };
+                }
+                const { contextWindow: _w, maxTokens: _t, ...rest } = m;
+                const declared = declaredExtras.get(m.id);
+                return {
+                    ...rest,
+                    origin: "extra" as const,
+                    ...(declared?.contextWindow === undefined
+                        ? {}
+                        : { contextWindow: declared.contextWindow }),
+                    ...(declared?.maxTokens === undefined ? {} : { maxTokens: declared.maxTokens }),
+                };
+            });
             // One factory instance serves both reads below: the endpoint the
             // settings UI displays, and the static list the hidden ids filter.
             const built = factory();
@@ -400,6 +426,8 @@ export class ModelRegistry {
                             id: m.id,
                             name: m.name,
                             origin: "hidden" as const,
+                            contextWindow: m.contextWindow,
+                            maxTokens: m.maxTokens,
                         });
                     }
                 }
@@ -414,18 +442,33 @@ export class ModelRegistry {
                 models,
             };
         });
-        const customs: ProviderInfo[] = this.customProviders.map((cfg) => ({
-            id: cfg.id,
-            name: cfg.name,
-            configured: this.providerKeyStore.has(cfg.id),
-            custom: true,
-            baseUrl: cfg.baseUrl,
-            api: cfg.api,
-            models: this.listAvailableModels(cfg.id).map((m) => ({
-                ...m,
-                origin: "custom" as const,
-            })),
-        }));
+        const customs: ProviderInfo[] = this.customProviders.map((cfg) => {
+            // Same rule as the built-in extras: report the declared window,
+            // not the effective default.
+            const declaredModels = new Map(cfg.models.map((m) => [m.id, m]));
+            return {
+                id: cfg.id,
+                name: cfg.name,
+                configured: this.providerKeyStore.has(cfg.id),
+                custom: true,
+                baseUrl: cfg.baseUrl,
+                api: cfg.api,
+                models: this.listAvailableModels(cfg.id).map((m) => {
+                    const { contextWindow: _w, maxTokens: _t, ...rest } = m;
+                    const declared = declaredModels.get(m.id);
+                    return {
+                        ...rest,
+                        origin: "custom" as const,
+                        ...(declared?.contextWindow === undefined
+                            ? {}
+                            : { contextWindow: declared.contextWindow }),
+                        ...(declared?.maxTokens === undefined
+                            ? {}
+                            : { maxTokens: declared.maxTokens }),
+                    };
+                }),
+            };
+        });
         return [...builtins, ...customs];
     }
 

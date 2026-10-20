@@ -342,6 +342,201 @@ describe("ProviderDetailModal — built-in provider", () => {
         );
     });
 
+    /** Open the window editor of one model row and switch it to free text. */
+    async function openCustomWindowInput(
+        user: ReturnType<typeof userEvent.setup>,
+        modelId: string,
+    ) {
+        const row = within(modelList())
+            .getByText(modelId)
+            .closest(".provider-detail-model-row") as HTMLElement;
+        await user.click(
+            within(row).getByRole("button", { name: "settings.providerModelWindowEdit" }),
+        );
+        await user.click(within(row.parentElement as HTMLElement).getByRole("combobox"));
+        await user.click(
+            await screen.findByRole("option", { name: "settings.providerModelWindowCustom" }),
+        );
+        return within(row.parentElement as HTMLElement).getByPlaceholderText(
+            "settings.providerModelWindowPlaceholder",
+        ) as HTMLInputElement;
+    }
+
+    it("keeps a declared context window when the provider panel is saved", async () => {
+        const user = userEvent.setup();
+        const { onSaveBuiltin } = renderBuiltin();
+        const windowInput = await openCustomWindowInput(user, "MiniMax-M3.1");
+        await user.type(windowInput, "999999");
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(
+                undefined,
+                [{ id: "MiniMax-M3.1", contextWindow: 999999 }],
+                [],
+            ),
+        );
+    });
+
+    it("expands k/m shorthand in the context window field", async () => {
+        const user = userEvent.setup();
+        const { onSaveBuiltin } = renderBuiltin();
+        const windowInput = await openCustomWindowInput(user, "MiniMax-M3.1");
+        await user.type(windowInput, "1024k");
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(
+                undefined,
+                [{ id: "MiniMax-M3.1", contextWindow: 1024000 }],
+                [],
+            ),
+        );
+    });
+
+    it("shows the declared context window as a chip on the model row", () => {
+        const withWindow: ProviderView = {
+            ...provider,
+            models: [
+                { provider: "minimax", id: "MiniMax-M2", origin: "builtin" },
+                {
+                    provider: "minimax",
+                    id: "MiniMax-M3.1",
+                    origin: "extra",
+                    contextWindow: 1_000_000,
+                },
+            ],
+        };
+        const client = { providersRevealKey: vi.fn() } as unknown as TacoClient;
+        render(
+            <ProviderDetailModal
+                client={client}
+                workspace={WS}
+                provider={withWindow}
+                existingIds={[]}
+                mask="sk-ant-…AbCd"
+                saving={false}
+                onSaveBuiltin={vi.fn()}
+                onClose={vi.fn()}
+            />,
+        );
+        const row = within(modelList())
+            .getByText("MiniMax-M3.1")
+            .closest(".provider-detail-model-row") as HTMLElement;
+        expect(within(row).getByTitle("settings.providerModelWindow").textContent).toContain("1m");
+    });
+
+    it("a preset choice declares that window on save", async () => {
+        const user = userEvent.setup();
+        const { onSaveBuiltin } = renderBuiltin();
+        const row = within(modelList())
+            .getByText("MiniMax-M3.1")
+            .closest(".provider-detail-model-row") as HTMLElement;
+        await user.click(
+            within(row).getByRole("button", { name: "settings.providerModelWindowEdit" }),
+        );
+        const scope = row.parentElement as HTMLElement;
+        await user.click(within(scope).getByRole("combobox"));
+        await user.click(await screen.findByRole("option", { name: "1m" }));
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(
+                undefined,
+                [{ id: "MiniMax-M3.1", contextWindow: 1000000 }],
+                [],
+            ),
+        );
+    });
+
+    it("switching back to the default option clears the declared window", async () => {
+        const user = userEvent.setup();
+        const withWindow: ProviderView = {
+            ...provider,
+            models: [
+                { provider: "minimax", id: "MiniMax-M2", origin: "builtin" },
+                {
+                    provider: "minimax",
+                    id: "MiniMax-M3.1",
+                    origin: "extra",
+                    contextWindow: 1_000_000,
+                },
+            ],
+        };
+        const client = { providersRevealKey: vi.fn() } as unknown as TacoClient;
+        const onSaveBuiltin = vi.fn().mockResolvedValue(undefined);
+        render(
+            <ProviderDetailModal
+                client={client}
+                workspace={WS}
+                provider={withWindow}
+                existingIds={[]}
+                mask="sk-ant-…AbCd"
+                saving={false}
+                onSaveBuiltin={onSaveBuiltin}
+                onClose={vi.fn()}
+            />,
+        );
+        const row = within(modelList())
+            .getByText("MiniMax-M3.1")
+            .closest(".provider-detail-model-row") as HTMLElement;
+        await user.click(
+            within(row).getByRole("button", { name: "settings.providerModelWindowEdit" }),
+        );
+        const scope = row.parentElement as HTMLElement;
+        await user.click(within(scope).getByRole("combobox"));
+        await user.click(
+            await screen.findByRole("option", { name: "settings.providerModelWindowDefault" }),
+        );
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(undefined, [{ id: "MiniMax-M3.1" }], []),
+        );
+    });
+
+    it("keeps a declared display name when the provider panel is saved", async () => {
+        const user = userEvent.setup();
+        const withName: ProviderView = {
+            ...provider,
+            models: [
+                { provider: "minimax", id: "MiniMax-M2", origin: "builtin" },
+                {
+                    provider: "minimax",
+                    id: "MiniMax-M3.1",
+                    origin: "extra",
+                    name: "My Model",
+                },
+            ],
+        };
+        const client = { providersRevealKey: vi.fn() } as unknown as TacoClient;
+        const onSaveBuiltin = vi.fn().mockResolvedValue(undefined);
+        render(
+            <ProviderDetailModal
+                client={client}
+                workspace={WS}
+                provider={withName}
+                existingIds={[]}
+                mask="sk-ant-…AbCd"
+                saving={false}
+                onSaveBuiltin={onSaveBuiltin}
+                onClose={vi.fn()}
+            />,
+        );
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        // The catalog reports the id as the name when none was declared, so a
+        // name that differs is a real one — and opening the panel must not
+        // rewrite the entry as a bare id.
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(
+                undefined,
+                [{ id: "MiniMax-M3.1", name: "My Model" }],
+                [],
+            ),
+        );
+    });
+
     it("lists a pre-hidden static in the removed section with a restore action", () => {
         const withHidden: ProviderView = {
             ...provider,

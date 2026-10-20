@@ -116,7 +116,7 @@ footer.input textarea:focus {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 0.5rem;
+    gap: var(--space-1);
 }
 
 /* send / stop button: icon + text, fixed min-width to prevent jitter during state transitions. */
@@ -129,6 +129,15 @@ footer.input textarea:focus {
     /* button UA default font-size (~13.3px) is smaller than icon 16px — setting it prevents the icon looking bigger than the text. */
     font-size: 0.85rem;
     transition: background 0.12s ease;
+}
+
+/* Every control in the row shares one height so chips, icon and send line up. */
+.input-controls .prompt-button,
+.input-permission-mode .ui-select-trigger {
+    height: var(--composer-control-height);
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
 }
 
 /* Right area of controls: context indicator + send/stop button, pushed right via margin-left: auto. */
@@ -168,6 +177,22 @@ footer.input textarea:focus {
     font-size: 0.85rem;
     gap: 0.25rem;
 }
+/* Chat-input variant: flat borderless pill, only as wide as name + provider. */
+.prompt-button.model-trigger.model-trigger--compact {
+    min-width: 0;
+    gap: var(--space-1);
+    padding: 0 var(--space-3);
+    border: none;
+    border-radius: var(--radius-pill);
+    font-size: var(--text-xs);
+}
+.model-trigger--compact .model-trigger-provider {
+    font-size: var(--text-2xs);
+}
+.prompt-button.model-trigger.model-trigger--compact:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
 .prompt-button.model-trigger:hover:not(:disabled) {
     background: var(--bg-hover);
     color: var(--fg);
@@ -195,18 +220,26 @@ footer.input textarea:focus {
     color: var(--bg);
 }
 
-/* Attach button (paperclip) — icon only, narrower than send, not dominant.
-   Background uses --pane-list-bg, matching the left session list bg. */
+/* Attach button — the bare glyph at full row height; only the color reacts to hover. */
 .prompt-button.attach {
     min-width: 0;
-    padding: 0.4rem 0.55rem;
-    background: var(--pane-list-bg);
-    border: 1px solid var(--border);
+    width: auto;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
     color: var(--fg-dim);
+}
+.prompt-button.attach svg {
+    width: var(--composer-control-height);
+    height: var(--composer-control-height);
+    /* lucide strokes scale with the icon (24-unit canvas); at 24px, 1.33 matches
+       the ~1.33px rendered stroke of the row's 16px icons instead of 2px. */
+    stroke-width: 1.33;
 }
 
 .prompt-button.attach:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: transparent;
     color: var(--fg);
 }
 
@@ -263,7 +296,22 @@ footer.input textarea:focus {
     min-width: 0;
 }
 
+/* Flat borderless pill — matches the compact model trigger. */
 .input-permission-mode .ui-select-trigger {
     min-width: 0;
     max-width: 100%;
+    gap: var(--space-1);
+    padding: 0 var(--space-3);
+    background: var(--pane-list-bg);
+    border: none;
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+.input-permission-mode .ui-select-trigger:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--fg);
+}
+.input-permission-mode .ui-select-trigger:focus-visible {
+    box-shadow: var(--focus-ring);
 }

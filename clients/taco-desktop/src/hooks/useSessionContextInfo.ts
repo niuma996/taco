@@ -76,6 +76,17 @@ export function useSessionContextInfo(
     sessionId: string | undefined,
 ): UseSessionContextInfoApi {
     const [info, setInfo] = useState<SessionContextInfoResult | null>(null);
+    // The session the snapshot belongs to. A snapshot fetched for another
+    // session is not this session's usage — the model and the token counts
+    // would both be wrong — so it is withheld until the current session's own
+    // snapshot lands.
+    const [infoSessionId, setInfoSessionId] = useState<string | undefined>(undefined);
+    // The session the newest in-flight refresh was issued for. A response
+    // that lands after the user switched sessions is dropped: writing it
+    // would overwrite the new session's snapshot, and the `infoSessionId`
+    // gate would then hide the fresh data as well — the indicator stays
+    // blank until the next push event re-pulls.
+    const pendingSessionRef = useRef<string | undefined>(undefined);
     const [loading, setLoading] = useState<boolean>(false);
     const [compacting, setCompacting] = useState<boolean>(false);
     const [lastCompactionFinished, setLastCompactionFinished] =
@@ -105,15 +116,22 @@ export function useSessionContextInfo(
     const refresh = useCallback(async (): Promise<void> => {
         if (!activeCwd || !sessionId) {
             setInfo(null);
+            setInfoSessionId(undefined);
+            pendingSessionRef.current = undefined;
             return;
         }
+        pendingSessionRef.current = sessionId;
         setLoading(true);
         try {
             const result = await client.sessionContextInfo(
                 asWorkspaceId(activeCwd),
                 asSessionId(sessionId),
             );
+            // A newer refresh for another session started while this one was
+            // in flight — its snapshot is the current one; this one is stale.
+            if (pendingSessionRef.current !== sessionId) return;
             setInfo(result);
+            setInfoSessionId(sessionId);
         } catch (e) {
             // Not-attached is an expected race, not a failure: refresh fires on
             // mount and on turn_end pushes before session.attach lands, and
@@ -215,7 +233,7 @@ export function useSessionContextInfo(
     }, [activeCwd, sessionId, client, refresh, startWatchdog, stopWatchdog]);
 
     return {
-        info,
+        info: infoSessionId === sessionId ? info : null,
         loading,
         compacting,
         lastCompactionFinished,

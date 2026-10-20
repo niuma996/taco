@@ -350,6 +350,7 @@ export function ChatPane(props: ChatPaneProps) {
                                     disabled={busy}
                                     pendingNote={busy}
                                     onOpen={onRefreshModels}
+                                    compact
                                 />
                             )}
                             <CommandPermissionModeSelector client={props.client} />

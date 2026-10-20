@@ -161,7 +161,7 @@ export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityR
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Portal>
                         <DropdownMenu.Content
-                            className="activity-rail-menu"
+                            className="ui-menu"
                             side="right"
                             sideOffset={6}
                             align="start"
@@ -169,11 +169,11 @@ export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityR
                             {OVERFLOW_ITEMS.map(({ type, icon: Icon, labelKey }) => (
                                 <DropdownMenu.Item
                                     key={type}
-                                    className="activity-rail-menu-item"
+                                    className="ui-menu-item"
                                     onSelect={() => onSelect(type)}
                                 >
                                     <Icon size={16} aria-hidden="true" />
-                                    <span className="activity-rail-menu-label">{t(labelKey)}</span>
+                                    <span className="ui-menu-label">{t(labelKey)}</span>
                                     {activeView === type ? (
                                         <Check size={14} aria-hidden="true" />
                                     ) : null}

@@ -637,8 +637,10 @@ button.topbar-context-indicator {
     bottom: calc(100% + 6px);
     right: 0;
     z-index: 1000;
-    background: var(--tooltip-bg);
-    color: var(--tooltip-fg);
+    /* Opaque surface — the tooltip token is translucent, and text showing
+       through the chat behind the usage numbers hurts readability. */
+    background: var(--bg-secondary);
+    color: var(--fg);
     border-radius: var(--radius-sm);
     padding: 0.5rem 0.75rem;
     min-width: 180px;
@@ -669,7 +671,7 @@ button.topbar-context-indicator {
     justify-content: flex-end;
     margin-top: 0.5rem;
     padding-top: 0.4rem;
-    border-top: 1px solid color-mix(in srgb, var(--tooltip-fg) 18%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
 }
 
 .context-indicator-popover__compact {
@@ -677,10 +679,10 @@ button.topbar-context-indicator {
     align-items: center;
     gap: 0.25rem;
     padding: 0.15rem 0.4rem;
-    border: 1px solid color-mix(in srgb, var(--tooltip-fg) 22%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     border-radius: var(--radius-xs);
     background: transparent;
-    color: var(--tooltip-fg);
+    color: var(--fg);
     font: inherit;
     font-size: var(--text-xs);
     line-height: 1.2;
@@ -688,7 +690,7 @@ button.topbar-context-indicator {
 }
 
 .context-indicator-popover__compact:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--tooltip-fg) 12%, transparent);
+    background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
 .context-indicator-popover__compact:focus-visible {

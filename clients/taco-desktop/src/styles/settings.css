@@ -433,6 +433,40 @@
     text-overflow: ellipsis;
     font-family: var(--mono);
 }
+/* Declared context window for a user-added model — narrow so the id keeps
+   the row, and the number input's spinners stay out of the way. */
+.provider-detail-model-window {
+    flex: 0 0 7rem;
+    font-size: var(--text-sm);
+}
+.provider-detail-model-window::-webkit-inner-spin-button,
+.provider-detail-model-window::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+}
+/* Expanded editor under a model row: labeled like a settings field, indented
+   to read as belonging to the row above it. */
+.provider-detail-model-editor {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.1rem 0 0.3rem 0.75rem;
+    padding: 0.3rem 0.5rem;
+    border-left: 2px solid var(--border);
+}
+.provider-detail-model-editor-label {
+    flex-shrink: 0;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+}
+.provider-detail-model-editor .provider-detail-model-window,
+.provider-detail-model-editor .ui-select-trigger {
+    flex: 1;
+    min-width: 0;
+    max-width: 12rem;
+    font-size: var(--text-sm);
+}
 .provider-detail-empty {
     padding: 0.4rem 0.25rem;
     color: var(--fg-dim);
