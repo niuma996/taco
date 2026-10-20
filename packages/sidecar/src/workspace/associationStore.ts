@@ -29,6 +29,7 @@
  * shared machine does not leak the directory layout.
  */
 
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -42,6 +43,9 @@ const log = createLogger("workspace:associations");
 
 /** On-disk schema version. Bumped when the document shape changes. */
 const ASSOCIATIONS_DOCUMENT_VERSION = 1;
+/** A crashed writer must not leave every later association write blocked. */
+const ASSOCIATIONS_LOCK_STALE_MS = 60_000;
+const ASSOCIATIONS_LOCK_RETRY_MS = 10;
 
 export interface WorkspaceAssociationsDocument {
     version?: number;
@@ -207,19 +211,28 @@ export class WorkspaceAssociationStore {
     async set(key: WorkspaceAssociationKey, roots: readonly string[]): Promise<string[]> {
         const validated = this.validate(key, roots);
         const run = this.chain.then(async () => {
-            const doc = this.load();
-            const bucket = key.scope === "channel" ? "channels" : "workspaces";
-            const next: WorkspaceAssociationsDocument = { ...doc };
-            const entries = { ...(next[bucket] ?? {}) };
-            const id = normalizeKey(key);
-            if (validated.length === 0) {
-                delete entries[id];
-            } else {
-                entries[id] = validated;
+            const release = await this.acquireFileLock();
+            try {
+                // The lock must cover the read as well as the write. Separate
+                // store instances are used by daemon connections, so a lock
+                // only around persist() would still allow stale read-modify-
+                // writes to discard another connection's entry.
+                const doc = this.load();
+                const bucket = key.scope === "channel" ? "channels" : "workspaces";
+                const next: WorkspaceAssociationsDocument = { ...doc };
+                const entries = { ...(next[bucket] ?? {}) };
+                const id = normalizeKey(key);
+                if (validated.length === 0) {
+                    delete entries[id];
+                } else {
+                    entries[id] = validated;
+                }
+                next[bucket] = entries;
+                next.version = ASSOCIATIONS_DOCUMENT_VERSION;
+                await this.persist(next);
+            } finally {
+                await release();
             }
-            next[bucket] = entries;
-            next.version = ASSOCIATIONS_DOCUMENT_VERSION;
-            await this.persist(next);
         });
         this.chain = run.catch(() => {});
         await run;
@@ -358,7 +371,7 @@ export class WorkspaceAssociationStore {
 
     private async persist(doc: WorkspaceAssociationsDocument): Promise<void> {
         await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-        const tmp = `${this.filePath}.tmp-${process.pid}`;
+        const tmp = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
         await fs.promises.writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { mode: 0o600 });
         await restrictOwner(tmp, 0o600);
         try {
@@ -366,6 +379,54 @@ export class WorkspaceAssociationStore {
         } catch (e) {
             await fs.promises.rm(tmp, { force: true });
             throw e;
+        }
+    }
+
+    /**
+     * Acquire an inter-process lock using mkdir's atomic creation semantics.
+     * The lock is intentionally a sibling of the document so all store
+     * instances in a daemon, and separate Taco processes, coordinate.
+     */
+    private async acquireFileLock(): Promise<() => Promise<void>> {
+        const lockPath = `${this.filePath}.lock`;
+        while (true) {
+            try {
+                await fs.promises.mkdir(lockPath, { mode: 0o700 });
+                const owner = randomUUID();
+                await fs.promises.writeFile(path.join(lockPath, "owner"), owner, {
+                    encoding: "utf8",
+                    mode: 0o600,
+                    flag: "wx",
+                });
+                return async () => {
+                    try {
+                        const currentOwner = await fs.promises.readFile(
+                            path.join(lockPath, "owner"),
+                            "utf8",
+                        );
+                        if (currentOwner === owner) {
+                            await fs.promises.rm(lockPath, { recursive: true, force: true });
+                        }
+                    } catch (e) {
+                        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+                    }
+                };
+            } catch (e) {
+                if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+                try {
+                    const stat = await fs.promises.stat(lockPath);
+                    if (Date.now() - stat.mtimeMs > ASSOCIATIONS_LOCK_STALE_MS) {
+                        await fs.promises.rm(lockPath, { recursive: true, force: true });
+                        continue;
+                    }
+                } catch (statError) {
+                    // A competing writer may have released the lock between
+                    // mkdir and stat. Retry acquisition in that case.
+                    if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+                    continue;
+                }
+                await new Promise((resolve) => setTimeout(resolve, ASSOCIATIONS_LOCK_RETRY_MS));
+            }
         }
     }
 }

@@ -185,6 +185,19 @@ describe("WorkspaceAssociationStore", () => {
         assert.deepEqual(stored, [otherDir]);
     });
 
+    it("serializes read-modify-write across store instances", async () => {
+        const first = new WorkspaceAssociationStore({ home });
+        const second = new WorkspaceAssociationStore({ home });
+
+        await Promise.all([
+            first.set({ scope: "workspace", id: workspaceDir }, [otherDir]),
+            second.set({ scope: "channel", id: "shared-channel" }, [workspaceDir]),
+        ]);
+
+        assert.deepEqual(first.get({ scope: "workspace", id: workspaceDir }), [otherDir]);
+        assert.deepEqual(second.get({ scope: "channel", id: "shared-channel" }), [workspaceDir]);
+    });
+
     it("survives a corrupt document without throwing", () => {
         writeFileSync(join(home, "workspace-associations.json"), "{ not json");
         const fresh = new WorkspaceAssociationStore({ home });
