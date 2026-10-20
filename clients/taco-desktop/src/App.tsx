@@ -7,7 +7,13 @@
  */
 
 import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    ErrorCodes,
+    IM_CWD_PREFIX,
+    makeImCwd,
+} from "@taco-ai/protocol";
 
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
@@ -29,6 +35,7 @@ import { SchedulesTab } from "./components/settings/SchedulesTab.tsx";
 import { TopbarQuickActions } from "./components/TopbarQuickActions";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
+import { WorkspaceAssociationsDialog } from "./components/WorkspaceAssociationsDialog";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
@@ -66,6 +73,7 @@ import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
+import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
@@ -430,6 +438,7 @@ export default function App() {
         // The ImPolicyDialog confirms before saving, so no active warning is
         // needed here; reserved for a future desktop notice.
         onImWorkspacesInvalidated: (_channelId) => {},
+        onWorkspaceAssociationsChanged: (key) => onWorkspaceAssociationsChangedEvent(key),
     });
 
     // Chat input + modal orchestration lives in its own hook (eight sibling
@@ -555,6 +564,8 @@ export default function App() {
     onConversationsChangedRef.current = onConversationsChanged;
     /** channelId whose bind dialog is open; null closes it. */
     const [bindingChannelId, setBindingChannelId] = useState<string | null>(null);
+    /** Workspace whose associated-directories dialog is open; null closes it. */
+    const [associationsCwd, setAssociationsCwd] = useState<string | null>(null);
     const isWeComChannel = (channelId: string): boolean =>
         channelsStatus?.configured.find((c) => c.channelId === channelId)?.name ===
         CHANNEL_NAME_WECOM;
@@ -636,12 +647,37 @@ export default function App() {
                 <header className="topbar" data-tauri-drag-region>
                     <div className="topbar-picker-group">
                         <WorkspacePicker
-                            workspaces={Object.values(workspaces)
-                                .filter((w) => !w.cwd.startsWith(IM_CWD_PREFIX))
-                                .map((w) => ({ cwd: w.cwd }))}
+                            workspaces={[
+                                ...Object.values(workspaces)
+                                    .filter((w) => !w.cwd.startsWith(IM_CWD_PREFIX))
+                                    .map((w) => ({ cwd: w.cwd })),
+                                // IM conversations sit in the same list as
+                                // directories — the dropdown answers "what am
+                                // I talking to", and a conversation is the
+                                // same kind of answer as a project folder.
+                                ...(conversations ?? []).map((c) => ({
+                                    cwd: makeImCwd(c.channelId, c.peerId, c.chatId),
+                                    label: c.peerId,
+                                    isIm: true,
+                                })),
+                            ]}
                             activeCwd={activeCwd}
-                            onChange={(cwd) => void switchWorkspace(cwd)}
+                            onChange={(cwd) => {
+                                // An IM conversation is opened through its own
+                                // path (it pulls history and switches to the
+                                // chat view); a directory is a plain switch.
+                                const conv = (conversations ?? []).find(
+                                    (c) => makeImCwd(c.channelId, c.peerId, c.chatId) === cwd,
+                                );
+                                if (conv) {
+                                    void openImConversation(cwd, conv.sessionId);
+                                    setMainView("chat");
+                                } else {
+                                    void switchWorkspace(cwd);
+                                }
+                            }}
                             onOpenFolder={() => void browseAndOpen()}
+                            onManageAssociations={(cwd) => setAssociationsCwd(cwd)}
                         />
                     </div>
                     {/* ContextIndicator moved to ChatPane input-controls */}
@@ -1090,6 +1126,12 @@ export default function App() {
                     void bindChannel(id, force, creds);
                 }}
                 onCancel={() => setBindingChannelId(null)}
+            />
+            <WorkspaceAssociationsDialog
+                open={associationsCwd !== null}
+                onClose={() => setAssociationsCwd(null)}
+                client={client}
+                workspace={associationsCwd ?? ""}
             />
             {lifecycle.desktopConfig !== null &&
                 isOnboardingRequired(lifecycle.desktopConfig) &&

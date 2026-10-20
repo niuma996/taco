@@ -151,7 +151,7 @@ export const PATH_SEMANTICS_DEFAULT = `<path_semantics>
 Paths in tool arguments follow two rules — getting them right the first time saves a rejection round-trip:
 
 - Relative paths resolve against the session's working directory. Prefer relative paths — they survive the workspace being moved and are unambiguous about which file you mean.
-- Absolute paths are accepted but must be inside the workspace root. If you must use an absolute path, write the full filesystem path (e.g. /Users/me/project/src/foo.ts on macOS, a Windows-style absolute path on Windows).
+- Absolute paths are accepted but must be inside the workspace root or one of the associated directories named in <associated_workspaces>. If you must use an absolute path, write the full filesystem path (e.g. /Users/me/project/src/foo.ts on macOS, a Windows-style absolute path on Windows).
 - When a tool rejects a path or a write, the error message includes the reason (outside workspace / plan-mode violation / unsafe command). Read the reason, fix the path or the plan, then retry — do not blind-retry with the same arguments.
 </path_semantics>`;
 

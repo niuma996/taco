@@ -93,6 +93,22 @@ const BUILTIN_TAG_REGISTRY = {
         description: "User-level memory context — appended from ~/.taco/memory/MEMORY.md",
     }),
 
+    /** Directories the workspace is associated with — injected per turn. */
+    associated_workspaces: defineTag({
+        name: "associated_workspaces",
+        scope: "user-context",
+        // Resident, not pinned: the hook re-injects at the tail on every
+        // context build and the tag never persists into history, so
+        // compaction never sees it. Matches the sibling transform-injected
+        // tags — a stale copy in history is dropped and the fresh injection
+        // wins.
+        compression: { kind: "drop" },
+        tuiVisibility: "hidden",
+        parser: { kind: "xml-balanced" },
+        description:
+            "Directories associated with this workspace — the model may cd into them and read files there",
+    }),
+
     /** Continuation guidance for unfinished tasks. */
     active_tasks: defineTag({
         name: "active_tasks",

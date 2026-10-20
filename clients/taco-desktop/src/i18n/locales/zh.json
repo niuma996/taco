@@ -172,6 +172,7 @@
     "toolRawArgs": "查看原始入参",
     "switchWorkspace": "切换工作区",
     "openFolder": "打开文件夹",
+    "manageAssociations": "关联目录…",
     "contentLabel": "内容",
     "skillsEmptyState": "未发现 skill。",
     "skillsEmptyHint": "请在 ~/.taco/skills/ 或 <cwd>/.taco/skills/ 中添加 SKILL.md 文件（也支持 ~/.pi/skills/、<cwd>/.pi/skills/）。",
@@ -785,5 +786,22 @@
     "addCc": "Claude Code 子代理",
     "addCcHint": "在本机 Claude Code 上运行，可读写代码",
     "detailNoPrompt": "没有系统提示词——该子代理不自带角色。"
+  },
+  "associations": {
+    "title": "关联目录 — {{workspace}}",
+    "description": "Agent 可以 cd 进这些目录并在其中执行命令。这不会合并其他工作区的配置：工具、MCP 服务和子代理仍以工作区自身的目录为准。",
+    "empty": "没有关联目录。",
+    "loading": "加载中…",
+    "add": "添加",
+    "addDirectory": "添加目录",
+    "browse": "浏览…",
+    "remove": "移除目录",
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "取消",
+    "pathPlaceholder": "/绝对路径",
+    "scopeLabel": "作用范围",
+    "scopeConversation": "当前对话",
+    "scopeChannel": "整个渠道"
   }
 }

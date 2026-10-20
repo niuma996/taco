@@ -63,6 +63,18 @@ function pathArg(input: Record<string, unknown>): string | undefined {
 export interface MutationGateOptions {
     /** Workspace root; every `write` / `edit` target must resolve inside it. */
     readonly root: string;
+    /**
+     * The workspace's associated directories, resolved on every call.
+     *
+     * They widen exactly ONE thing: the set of directories a shell command
+     * may `cd` into. The `write` / `edit` fence and the unknown-tool path
+     * fence are unaffected — an association is a grant of command scope,
+     * not a merge of another workspace's tool configuration.
+     *
+     * The set is read per call so a grant added or removed mid-session
+     * reaches the next command.
+     */
+    readonly getAssociatedRoots?: () => readonly string[];
     readonly getPlanState: () => PlanModeState;
     /**
      * Additional directories built-in `write` / `edit` may target outside
@@ -118,9 +130,13 @@ export function createMutationGateHook(
             // command refused regardless of how the user has tuned their
             // shell rules. The classifier still recognises built-in read-only
             // commands (`git log`, `ls`, ...), so inspection stays available.
+            //
+            // The authorized directories include the workspace's associated
+            // ones, so `cd <associated> && ls` stays inspectable in plan
+            // mode — the same scope the command has outside plan mode.
             const readOnly = evaluateReadOnlyCommand(command, {
                 cwd: opts.root,
-                allowedRoots: [opts.root],
+                allowedRoots: [opts.root, ...(opts.getAssociatedRoots?.() ?? [])],
             });
             if (readOnly.behavior === "allow") return undefined;
             return {

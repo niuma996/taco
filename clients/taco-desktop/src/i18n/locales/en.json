@@ -173,6 +173,7 @@
     "toolRawArgs": "Show raw input",
     "switchWorkspace": "Switch workspace",
     "openFolder": "Open folder",
+    "manageAssociations": "Associated directories…",
     "contentLabel": "Content",
     "skillsEmptyState": "No skills found.",
     "skillsEmptyHint": "Add a SKILL.md file in ~/.taco/skills/ or <cwd>/.taco/skills/ (also scans ~/.pi/skills/, <cwd>/.pi/skills/).",
@@ -788,5 +789,22 @@
     "addCc": "Claude Code subagent",
     "addCcHint": "Runs on your local Claude Code, can read and write code",
     "detailNoPrompt": "No system prompt — this subagent runs with no role of its own."
+  },
+  "associations": {
+    "title": "Associated directories — {{workspace}}",
+    "description": "The agent may cd into these directories and run commands there. This does not merge another workspace's configuration: tools, MCP servers and subagents stay anchored to the workspace's own directory.",
+    "empty": "No associated directories.",
+    "loading": "Loading…",
+    "add": "Add",
+    "addDirectory": "Add directory",
+    "browse": "Browse…",
+    "remove": "Remove directory",
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "pathPlaceholder": "/absolute/path",
+    "scopeLabel": "Applies to",
+    "scopeConversation": "This conversation",
+    "scopeChannel": "The whole channel"
   }
 }

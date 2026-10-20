@@ -210,6 +210,13 @@ export interface SessionRegistryOptions {
      */
     readonly getImChannelContext?: () => ImChannelContext | undefined;
     /**
+     * The workspace's associated directories, resolved on every use so a
+     * grant added or removed mid-session reaches the next turn. Forwarded to
+     * every AttachedSession so the `<associated_workspaces>` context hook can
+     * read it on each LLM call.
+     */
+    readonly getAssociatedRoots?: () => readonly string[];
+    /**
      * Per-turn tool context provider. Threaded straight through to every
      * AttachedSession's harness — the harness calls it once per turn to
      * resolve the `TacoToolContext` snapshot for that turn's tool calls.
@@ -252,6 +259,11 @@ export class SessionRegistry extends EventEmitter {
     readonly getInstructionsConfig?: () => InstructionsConfig | undefined;
     /** Lazy accessor for the current IM channel identity (see options below). */
     readonly getImChannelContext?: () => ImChannelContext | undefined;
+    /**
+     * The workspace's associated directories, resolved on every use so a
+     * grant added or removed mid-session reaches the next turn.
+     */
+    readonly getAssociatedRoots?: () => readonly string[];
     /** Per-turn tool context provider (see options below). */
     readonly getToolContext: () => TacoToolContext;
 
@@ -352,6 +364,7 @@ export class SessionRegistry extends EventEmitter {
         this.toolRegistry = options.toolRegistry;
         this.getInstructionsConfig = options.getInstructionsConfig;
         this.getImChannelContext = options.getImChannelContext;
+        this.getAssociatedRoots = options.getAssociatedRoots;
         this.getToolContext = options.getToolContext;
         this.spawnSubagent = options.spawnSubagent;
         this.resumeSubagent = options.resumeSubagent;
@@ -898,6 +911,7 @@ export class SessionRegistry extends EventEmitter {
                     : undefined,
             getInstructionsConfig: this.getInstructionsConfig,
             getImChannelContext: this.getImChannelContext,
+            getAssociatedRoots: this.getAssociatedRoots,
             getToolContext: this.getToolContext,
             sessionCwd: this.sessionCwd,
             sessionKind,

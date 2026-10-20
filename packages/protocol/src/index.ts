@@ -208,6 +208,7 @@ export type {
     ToolCallEndParams,
     ToolCallStartParams,
     ToolCallUpdateParams,
+    WorkspaceAssociationsChangedParams,
 } from "./push.js";
 export { PushMethods } from "./push.js";
 // RPC param schemas (typebox) — wire validators consumed by registerMethod.
@@ -296,3 +297,14 @@ export type {
     ToolsListParams,
     ToolsListResult,
 } from "./tools.js";
+// Workspace association types — directories a workspace may reach beyond its root.
+export type {
+    WorkspaceAssociationKey,
+    WorkspaceAssociationScope,
+    WorkspaceAssociationsGetParams,
+    WorkspaceAssociationsGetResult,
+    WorkspaceAssociationsResolveParams,
+    WorkspaceAssociationsResolveResult,
+    WorkspaceAssociationsSetParams,
+    WorkspaceAssociationsSetResult,
+} from "./workspace.js";

@@ -201,6 +201,22 @@ export interface WorkspaceRuntimeOptions {
      * permission change would only reach conversations started afterwards.
      */
     resolveImPolicy?: () => ImWorkspacePolicy | undefined;
+    /**
+     * The directories associated with this workspace — the ones a shell
+     * command may `cd` into, beyond the workspace's own root.
+     *
+     * A thunk, not a value: the set is user configuration that can change
+     * while a session is live, and a captured list would keep refusing a
+     * `cd` into a directory the user has since associated.
+     *
+     * This widens the COMMAND SCOPE only. The command itself is still
+     * evaluated against the allow/deny rules, so associating a directory
+     * does not make a mutating command auto-allowed. Tool configuration,
+     * MCP servers and subagent toolsets stay anchored to the workspace's
+     * own root — an association is not a merge of another workspace's
+     * configuration.
+     */
+    resolveAssociatedRoots?: () => readonly string[];
     /** Whether a client can answer command approvals now. See PermissionBrokerOptions.hasApprover. */
     hasApprover?: () => boolean;
     /** Where tools run (shell, fs tools, plan files). Defaults to the session cwd. */
@@ -297,6 +313,11 @@ export class WorkspaceRuntime extends EventEmitter {
     tools: TacoTool[];
     /** Re-resolves the IM policy at assembly time — see the constructor. */
     private readonly resolveImPolicy: () => ImWorkspacePolicy | undefined;
+    /**
+     * The workspace's associated directories, resolved per use — see
+     * `WorkspaceRuntimeOptions.resolveAssociatedRoots`.
+     */
+    private readonly resolveAssociatedRoots: () => readonly string[];
     /** Per-session tool builder, retained so `refreshToolset()` can re-run the
      *  same assembly a turn is about to use. */
     private readonly toolsBuilder: (
@@ -499,6 +520,7 @@ export class WorkspaceRuntime extends EventEmitter {
         // constructor-time value is reused, which is what every non-IM
         // workspace and every test wants.
         this.resolveImPolicy = options.resolveImPolicy ?? (() => imPolicy);
+        this.resolveAssociatedRoots = options.resolveAssociatedRoots ?? (() => []);
         this.permissionBroker = new PermissionBroker(
             () => {
                 const base = validateCommandPermissions(
@@ -524,7 +546,18 @@ export class WorkspaceRuntime extends EventEmitter {
                 // `mode`, `allow` — reaches command evaluation on the next
                 // call, not just the next turn's tool list.
                 imCommandPolicy: () => this.resolveImPolicy()?.commands,
-                commandContext: { cwd: this.executionCwd, allowedRoots: [this.executionCwd] },
+                // The directories a shell command may `cd` into: the
+                // workspace's own root plus the directories the user
+                // associated with it.
+                //
+                // A thunk, not a value — the association set is user
+                // configuration that can change while a session is live, and
+                // a captured list would keep refusing a `cd` into a
+                // directory the user has since associated.
+                commandContext: () => ({
+                    cwd: this.executionCwd,
+                    allowedRoots: [this.executionCwd, ...this.resolveAssociatedRoots()],
+                }),
                 hasApprover: options.hasApprover,
             },
         );
@@ -632,6 +665,10 @@ export class WorkspaceRuntime extends EventEmitter {
             getImChannelContext: imChannelId
                 ? () => options.resolveImChannel?.(imChannelId)
                 : undefined,
+            // The workspace's associated directories — the `<associated_workspaces>`
+            // tag names them for the model, and the permission broker's
+            // allowedRoots lets a shell command `cd` into them.
+            getAssociatedRoots: () => this.resolveAssociatedRoots(),
         });
 
         this.agentSpawner = new AgentSpawner({

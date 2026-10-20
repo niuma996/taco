@@ -36,6 +36,7 @@ import {
     type SkillDiagnosticEntry,
     type SupportedLocale,
     WORKSPACE_ANY,
+    type WorkspaceAssociationKey,
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
@@ -89,6 +90,7 @@ import type {
     ImPolicyControl,
     JobsControl,
     ServerRpcSurface,
+    WorkspaceAssociationsControl,
 } from "../runtime/serverRpcSurface.ts";
 import { WorkspaceRuntime } from "../runtime/workspace.ts";
 import { dedupeSkillsByNameWithDuplicates } from "../skills/dedupeSkills.ts";
@@ -106,6 +108,7 @@ import {
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
+import { WorkspaceAssociationStore } from "../workspace/associationStore.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CommandIdempotencyGate } from "./commandIdempotency.ts";
@@ -339,6 +342,13 @@ export class SidecarServer implements ServerRpcSurface {
     /** IM workspace policy store — admin-granted, survives channel unbind. */
     readonly imPolicyStore: ImWorkspacePolicyStore;
     /**
+     * Workspace directory associations — the directories a workspace may
+     * reach beyond its own root. Read on every use (the store is uncached),
+     * so a change made by one client reaches every other workspace in the
+     * process without a rebuild.
+     */
+    readonly associationStore: WorkspaceAssociationStore;
+    /**
      * Whether the connected client has completed the `initialize` handshake.
      * Every RPC except `initialize` is rejected with `not_initialized` while
      * this is false. Reset to false in `stop()` so a re-`start()` requires
@@ -530,6 +540,7 @@ export class SidecarServer implements ServerRpcSurface {
         this.instructionsConfig = options.instructionsConfig;
         this.mcpServers = options.mcpServers ?? [];
         this.imPolicyStore = new ImWorkspacePolicyStore();
+        this.associationStore = new WorkspaceAssociationStore();
         // No `pushLog` → ring only. Servers whose frames no client observes
         // (the daemon's scheduler sidecar on a NullTransport) deliberately get
         // no tail: they have no cursor to preserve, and their seqs would
@@ -1165,6 +1176,13 @@ export class SidecarServer implements ServerRpcSurface {
                     const route = paths.imRoute;
                     return route ? () => this.imPolicyStore.resolve(route) : undefined;
                 })(),
+                // The directories associated with this workspace — the ones a
+                // shell command may `cd` into, beyond the workspace's own
+                // root. Resolved per use (the store is uncached), so a grant
+                // added or removed reaches a live conversation on its next
+                // message without rebuilding the workspace.
+                resolveAssociatedRoots: () =>
+                    this.associationStore.resolve(paths.workspaceKey).roots,
                 toolRegistry,
                 // IM prompts fan out to every connected desktop, so any one can
                 // answer. Other workspaces only reach this server's transport:
@@ -1759,6 +1777,29 @@ export class SidecarServer implements ServerRpcSurface {
         clearChatOverride: (input, channelId) => this.clearImChatOverride(input, channelId),
     };
 
+    /**
+     * Workspace directory-association control surface, consumed by the
+     * `workspace.associations.*` handlers.
+     *
+     * The store is file-backed and read on every use, so a write takes
+     * effect for every workspace in the process at once — no invalidation
+     * pass, and no stale copy to reconcile. What still needs the server is
+     * the push fan-out: the affected workspaces must be addressed by the
+     * server that owns them, and in daemon mode the IM workspaces live on
+     * the resident host rather than on the connection server that received
+     * the request.
+     */
+    readonly associations: WorkspaceAssociationsControl = {
+        get: (key) => this.associationStore.get(key),
+        set: async (key, roots) => {
+            const stored = await this.associationStore.set(key, roots);
+            this.broadcastAssociationsChanged(key);
+            return stored;
+        },
+        resolve: (workspace) => this.associationStore.resolve(workspace),
+        broadcastChanged: (key) => this.broadcastAssociationsChanged(key),
+    };
+
     /** Fans a channel binding transition out to every workspace. Binding is
      *  process-level, but push frames are workspace-routed, so each open
      *  workspace gets a copy — the client dedupes by channelId. IM workspaces
@@ -1814,6 +1855,52 @@ export class SidecarServer implements ServerRpcSurface {
             if (cwd.startsWith(IM_CWD_PREFIX)) continue;
             this.emitPush(PushMethods.ImPolicyChanged, cwd, undefined, { channelId });
         }
+    }
+
+    /**
+     * Announce that an association set changed.
+     *
+     * The push is workspace-dimensioned, so it fans out over the live
+     * workspaces whose effective set could have moved:
+     *  - a workspace-scope change touches exactly that workspace;
+     *  - a channel-scope change touches every IM conversation on the
+     *    channel, plus the fs workspaces that could inherit it — none
+     *    today, since only IM workspaces fall back to a channel.
+     *
+     * The frame's `workspace` field names the affected workspace, so a
+     * client can refresh the panel it is showing without re-pulling every
+     * workspace. The `key` in the params says which set moved, for a
+     * client that shows a channel-level and a conversation-level editor
+     * side by side.
+     *
+     * In daemon mode the IM workspaces live on the resident host, not on
+     * the connection server that received the request — so the IM half of
+     * the fan-out is delegated there. (Enforcement needs no delegation:
+     * the store is read on every tool call, so a change already applies
+     * everywhere. Only the push is workspace-addressed.)
+     */
+    broadcastAssociationsChanged(key: WorkspaceAssociationKey): void {
+        if (!this.ownsChannels) {
+            void this.imHost?.associations?.broadcastChanged(key);
+        }
+        for (const cwd of this.workspaces.keys()) {
+            if (!this.associationAffects(cwd, key)) continue;
+            this.emitPush(PushMethods.WorkspaceAssociationsChanged, cwd, undefined, { key });
+        }
+    }
+
+    /**
+     * Whether a workspace's effective association set can change when the
+     * given key's set changes.
+     */
+    private associationAffects(cwd: WorkspaceId, key: WorkspaceAssociationKey): boolean {
+        if (key.scope === "workspace") return cwd === key.id;
+        // Channel scope: only IM conversations inherit a channel's set. An fs
+        // workspace's cwd is not a routing key, so it has no channel to
+        // fall back to.
+        if (!cwd.startsWith(IM_CWD_PREFIX)) return false;
+        const route = parseImCwd(cwd);
+        return route?.channelId === key.id;
     }
 
     private emitPush<M extends PushMethodName>(

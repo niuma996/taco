@@ -263,8 +263,7 @@ header.topbar .topbar-picker-group {
 }
 
 .topbar-workspace-item[data-highlighted] {
-    background: var(--accent);
-    color: var(--bg);
+    background: var(--hover-overlay);
 }
 
 .topbar-workspace-item-label {
@@ -273,6 +272,31 @@ header.topbar .topbar-picker-group {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Per-row association editor shortcut — revealed only while the row is
+   hovered or keyboard-highlighted so the menu stays a plain list. */
+.topbar-workspace-item-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 2px;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0;
+}
+
+.topbar-workspace-item[data-highlighted] .topbar-workspace-item-action,
+.topbar-workspace-item-action:focus-visible {
+    opacity: 1;
+}
+
+.topbar-workspace-item-action:hover {
+    background: var(--hover-overlay);
 }
 
 .topbar-workspace-separator {

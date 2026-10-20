@@ -140,6 +140,8 @@
     --radius-pill: 999px;
     /* One height for every control in the composer row (attach, model, mode, send/stop). */
     --composer-control-height: 1.5rem;
+    /* One height for a dialog form row (input + icon button + text button). */
+    --control-height-md: 2rem;
     --radius-circle: 50%;
     --radius-line: 1px;
 

@@ -113,6 +113,13 @@ import type {
     TasksUpdatedParams,
     ThinkingLevel,
     ToolsListResult,
+    WorkspaceAssociationKey,
+    WorkspaceAssociationsGetParams,
+    WorkspaceAssociationsGetResult,
+    WorkspaceAssociationsResolveParams,
+    WorkspaceAssociationsResolveResult,
+    WorkspaceAssociationsSetParams,
+    WorkspaceAssociationsSetResult,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { asToolCallId } from "@taco-ai/protocol";
@@ -154,6 +161,17 @@ export interface TypedRpc {
     workspaceList(): Promise<WorkspaceId[]>;
     workspaceEnsure(cwd: WorkspaceId): Promise<{ cwd: WorkspaceId }>;
     workspaceDispose(cwd: WorkspaceId): Promise<null>;
+    /** Read the associated-directory set stored at one key. */
+    workspaceAssociationsGet(key: WorkspaceAssociationKey): Promise<WorkspaceAssociationsGetResult>;
+    /** Replace the associated-directory set stored at one key. */
+    workspaceAssociationsSet(
+        key: WorkspaceAssociationKey,
+        roots: readonly string[],
+    ): Promise<WorkspaceAssociationsSetResult>;
+    /** The effective associated-directory set for a workspace, after the scope fallback. */
+    workspaceAssociationsResolve(
+        workspace: WorkspaceId,
+    ): Promise<WorkspaceAssociationsResolveResult>;
 
     // ── session ──
     sessionList(
@@ -508,6 +526,27 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             call<{ cwd: WorkspaceId }, { cwd: WorkspaceId }>(RPC.workspaceEnsure, cwd, { cwd }),
         workspaceDispose: (cwd) =>
             call<{ cwd: WorkspaceId }, null>(RPC.workspaceDispose, cwd, { cwd }),
+
+        // Association get/set are process-level: the key names a workspace OR a
+        // channel, and a channel is not a routing key.
+        workspaceAssociationsGet: (key) =>
+            callProcess<WorkspaceAssociationsGetParams, WorkspaceAssociationsGetResult>(
+                RPC.workspaceAssociationsGet,
+                { key },
+            ),
+        workspaceAssociationsSet: (key, roots) =>
+            callProcess<WorkspaceAssociationsSetParams, WorkspaceAssociationsSetResult>(
+                RPC.workspaceAssociationsSet,
+                { key, roots },
+            ),
+        // Resolve is workspace-scoped: the client asks "what applies to this
+        // workspace" and the sidecar applies the scope fallback.
+        workspaceAssociationsResolve: (workspace) =>
+            call<WorkspaceAssociationsResolveParams, WorkspaceAssociationsResolveResult>(
+                RPC.workspaceAssociationsResolve,
+                workspace,
+                { workspace },
+            ),
 
         // ── session ──
         sessionList: (workspace, opts) =>

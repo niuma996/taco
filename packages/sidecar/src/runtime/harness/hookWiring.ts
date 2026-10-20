@@ -31,6 +31,7 @@ import { buildMemoryContextHook } from "../../memory/memoryTag.ts";
 import { createMutationGateHook } from "../../permissions/mutationGate.ts";
 import { buildSkillReinjector, type SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import {
+    buildAssociatedWorkspacesContextHook,
     buildCompactionReminderHook,
     buildDropPolicyContextHook,
     buildEnvContextHook,
@@ -102,6 +103,12 @@ export interface HookWiringOptions {
      * reconfigures a channel is reflected on the next turn.
      */
     getImChannelContext?: () => ImChannelContext | undefined;
+    /**
+     * The workspace's associated directories, resolved on every LLM call so
+     * a grant added or removed mid-session reaches the next turn. The
+     * `<associated_workspaces>` context tag names them for the model.
+     */
+    getAssociatedRoots?: () => readonly string[];
     /** Extension context hooks (builtins + external); undefined treated as empty. */
     extensionContextHooks?: ContextHookBuckets;
     /** Extension tool_call interceptors; undefined treated as empty. */
@@ -153,6 +160,12 @@ export interface HookWiringOptions {
      * them; AttachedSession grants them to local main sessions only.
      */
     mutationGateExtraWriteRoots?: readonly string[];
+    /**
+     * The workspace's associated directories (see
+     * `MutationGateOptions.getAssociatedRoots`). They widen the set of
+     * directories a shell command may `cd` into — nothing else.
+     */
+    getMutationGateAssociatedRoots?: () => readonly string[];
     /**
      * Turn-scoped pre-write snapshots. When present, the mutation gate captures
      * each allowed `write` / `edit` target before it changes, so a turn's edits
@@ -360,6 +373,14 @@ export async function wireHarnessHooks(
     );
     // 3. append `<env>` (current local time) to every LLM context.
     disposers.push(onContext(buildEnvContextHook()));
+    // 3a. append `<associated_workspaces>` — the directories the workspace is
+    //     associated with. The model needs to know they exist to use them;
+    //     the hook injects nothing when the set is empty.
+    if (opts.getAssociatedRoots) {
+        disposers.push(
+            onContext(buildAssociatedWorkspacesContextHook({ getRoots: opts.getAssociatedRoots })),
+        );
+    }
     // 3b. append `<im_channel>` (channel type + id) for IM sessions only. The
     //     getter yields undefined for non-IM workspaces so this is a no-op there.
     if (opts.getImChannelContext) {
@@ -486,6 +507,7 @@ export async function wireHarnessHooks(
         const gate = createMutationGateHook({
             root: opts.mutationGateRoot,
             extraWriteRoots: opts.mutationGateExtraWriteRoots,
+            getAssociatedRoots: opts.getMutationGateAssociatedRoots,
             getPlanState: () => getActiveTasksState().planState,
             captureBeforeWrite: checkpoints
                 ? (path) => checkpoints.captureBeforeWrite(path)

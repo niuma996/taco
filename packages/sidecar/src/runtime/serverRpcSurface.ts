@@ -29,6 +29,7 @@ import type {
     SessionEventsGetResult,
     SessionId,
     SidecarCapabilities,
+    WorkspaceAssociationKey,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
@@ -56,6 +57,26 @@ export interface ChannelControl {
      *  refuses to retry past its reconnect budget — the only path back from
      *  error without retyping the secret. */
     retry(channelId: string): Promise<ChannelsRetryResult>;
+}
+
+/**
+ * The workspace directory-association operations the `workspace.associations.*`
+ * handlers need. Mirrors `ImPolicyControl`: handlers reach this through
+ * `server.associations`, not through the store.
+ *
+ * The store itself is file-backed and read on every use, so the *enforcement*
+ * of a change is immediate everywhere in the process — no invalidation
+ * needed. What the control adds is the push fan-out: the server that owns
+ * the affected workspaces is the one that can address them, and in daemon
+ * mode the IM workspaces live on the resident host rather than on the
+ * connection server that received the request.
+ */
+export interface WorkspaceAssociationsControl {
+    get(key: WorkspaceAssociationKey): string[];
+    set(key: WorkspaceAssociationKey, roots: readonly string[]): Promise<string[]>;
+    resolve(workspace: WorkspaceId): { roots: string[]; source?: WorkspaceAssociationKey };
+    /** Announce that a set changed, to every workspace it affects. */
+    broadcastChanged(key: WorkspaceAssociationKey): void;
 }
 
 /**
@@ -218,6 +239,13 @@ export interface ServerRpcSurface {
      * (tests) need not implement it.
      */
     readonly imPolicy?: ImPolicyControl;
+    /**
+     * Workspace directory-association control surface, consumed by the
+     * `workspace.associations.*` handlers. Present on every server — the
+     * store is file-backed, so every server in the process sees the same
+     * sets.
+     */
+    readonly associations: WorkspaceAssociationsControl;
     /**
      * Whether the sidecar is currently compacting (during auto-compaction summary LLM call).
      * Handler entry checks this to decide whether to take the short-circuit path.

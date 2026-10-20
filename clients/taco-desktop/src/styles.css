@@ -24,5 +24,6 @@
 @import "./styles/channelsPane.css";
 @import "./styles/memoryPane.css";
 @import "./styles/checkpointsPane.css";
+@import "./styles/workspaceAssociations.css";
 @import "./styles/overlays.css";
 @import "./styles/settings.css";

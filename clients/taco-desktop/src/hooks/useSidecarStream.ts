@@ -19,6 +19,7 @@ import type {
     ToolCallEndParams,
     ToolCallStartParams,
     ToolCallUpdateParams,
+    WorkspaceAssociationKey,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -129,6 +130,8 @@ export interface UseSidecarStreamOpts {
      * the ImPolicyDialog already confirms before saving.
      */
     onImWorkspacesInvalidated?: (channelId: string) => void;
+    /** Invalidate: a workspace's associated-directory set was written. */
+    onWorkspaceAssociationsChanged?: (key: WorkspaceAssociationKey) => void;
 }
 
 const LLM_DUMP_PREFIX = "[taco:llm]";
@@ -340,6 +343,9 @@ export function useSidecarStream(
     const onImWorkspacesInvalidatedRef = useStableCallback((channelId: string) =>
         opts.onImWorkspacesInvalidated?.(channelId),
     );
+    const onWorkspaceAssociationsChangedRef = useStableCallback((key: WorkspaceAssociationKey) =>
+        opts.onWorkspaceAssociationsChanged?.(key),
+    );
 
     const processorRef = useRef<SessionPushProcessor | undefined>(undefined);
     const processingRef = useRef<Promise<void>>(Promise.resolve());
@@ -405,6 +411,14 @@ export function useSidecarStream(
                 if (params?.channelId) onImWorkspacesInvalidatedRef(params.channelId);
                 return;
             }
+            if (push.method === PushMethods.WorkspaceAssociationsChanged) {
+                // The affected set moved. The payload names WHICH key changed
+                // — a channel-scoped change names the channel, a workspace-
+                // scoped one the workspace.
+                const params = push.params as { key?: WorkspaceAssociationKey } | undefined;
+                if (params?.key) onWorkspaceAssociationsChangedRef(params.key);
+                return;
+            }
             processingRef.current = processingRef.current
                 .then(() => processorRef.current?.process(push))
                 .catch((error) => {
@@ -464,6 +478,7 @@ export function useSidecarStream(
         onConversationsChangedRef,
         onImPolicyChangedRef,
         onImWorkspacesInvalidatedRef,
+        onWorkspaceAssociationsChangedRef,
         onLlmDumpLineRef,
         onLogLineRef,
         onModelsChangedRef,

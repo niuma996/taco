@@ -155,6 +155,11 @@ export interface AttachedSessionOptions {
      * so a settings.write reconfiguration is reflected on the next turn.
      */
     getImChannelContext?: () => ImChannelContext | undefined;
+    /**
+     * The workspace's associated directories, resolved on every LLM call so
+     * a grant added or removed mid-session reaches the next turn.
+     */
+    getAssociatedRoots?: () => readonly string[];
     /** User-level memory store — drives extraction + context injection. */
     memoryStore?: MemoryStore;
     /** True for IM workspaces; disables memory extraction and title summarization. */
@@ -583,6 +588,9 @@ export class AttachedSession extends EventEmitter {
                 // Lazy accessor — yields undefined for non-IM workspaces; the
                 // im_channel hook injects nothing there.
                 getImChannelContext: args.getImChannelContext,
+                // The workspace's associated directories — the `<associated_workspaces>`
+                // tag names them for the model.
+                getAssociatedRoots: args.getAssociatedRoots,
                 extensionContextHooks: args.extensionContextHooks,
                 extensionToolCallHooks: args.extensionToolCallHooks,
                 extensionToolResultHooks: args.extensionToolResultHooks,
@@ -606,6 +614,11 @@ export class AttachedSession extends EventEmitter {
                     args.sessionKind === "main" && !args.isIm
                         ? [join(tacoHome(), "skills"), join(tacoHome(), "agents")]
                         : undefined,
+                // The workspace's associated directories — they widen the set
+                // of directories a shell command may `cd` into, and nothing
+                // else. Subagents inherit them: the grant belongs to the
+                // workspace, not to one session.
+                getMutationGateAssociatedRoots: args.getAssociatedRoots,
                 checkpointManager: attached.checkpoints,
                 // Passed through, not currently read: keeps the pinOnce wiring
                 // live end-to-end so a future pinOnce tag only touches its hook.

@@ -8,6 +8,7 @@ import type { ChannelStatusChangedParams } from "./channels.js";
 import type { CommandPermissionDenialReason } from "./config.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 import type { SubagentSettledPayload } from "./tools.js";
+import type { WorkspaceAssociationKey } from "./workspace.js";
 
 // Push event payloads
 
@@ -152,6 +153,18 @@ export const PushMethods = {
      * adapter broadcasts the interrupt notice to every routed peer.
      */
     ImWorkspacesInvalidated: "im.workspaces_invalidated",
+    /**
+     * Emitted when a workspace's associated-directory set changes. Workspace-
+     * dimensioned (no session): the frame's `workspace` field carries the
+     * affected workspace, so a channel-scoped change fans out to every
+     * conversation on that channel.
+     *
+     * Invalidate-not-delta, like ModelsChanged / ImPolicyChanged — the client
+     * re-pulls `workspace.resolveAssociations` to repopulate the editor. A
+     * change to the set can change what the model may write, so clients that
+     * show the current permissions need to learn about it without a poll.
+     */
+    WorkspaceAssociationsChanged: "workspace.associations_changed",
 } as const;
 
 /**
@@ -420,6 +433,18 @@ export interface ImWorkspacesInvalidatedParams {
 }
 
 /**
+ * `workspace.associations_changed` push params — invalidate signal; the
+ * client re-pulls `workspace.resolveAssociations`. The push frame's
+ * `workspace` field already carries the affected workspace, so the params
+ * only need to say WHICH key changed — a channel-scoped change names the
+ * channel, a workspace-scoped change names the workspace.
+ */
+export interface WorkspaceAssociationsChangedParams {
+    /** The storage key whose set changed. */
+    key: WorkspaceAssociationKey;
+}
+
+/**
  * Per-method params map — single source of truth for the push wire contract.
  * `emitPush(method, ...)` uses `PushParams<typeof method>` to type its
  * `params` argument, so a stray field name or a missing required field
@@ -449,6 +474,7 @@ export interface PushParamsByMethod {
     [PushMethods.ImToolsEnabled]: ImToolsEnabledParams;
     [PushMethods.ImPolicyChanged]: ImPolicyChangedParams;
     [PushMethods.ImWorkspacesInvalidated]: ImWorkspacesInvalidatedParams;
+    [PushMethods.WorkspaceAssociationsChanged]: WorkspaceAssociationsChangedParams;
 }
 
 export type PushMethodName = (typeof PushMethods)[keyof typeof PushMethods];

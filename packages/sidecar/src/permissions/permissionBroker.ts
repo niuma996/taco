@@ -41,7 +41,19 @@ export interface PermissionBrokerOptions {
      *  Used by read-only subagents (e.g. explorer) so that a user's
      *  root-session allowlist cannot leak into the child's shell execution. */
     readOnly?: boolean;
-    commandContext?: Pick<CommandEvaluationContext, "cwd" | "allowedRoots">;
+    /**
+     * The directories a shell command may `cd` into.
+     *
+     * A thunk, not a value: the set grows with the workspace's associated
+     * directories, which the user can change while a session is live. A
+     * captured list would keep refusing a `cd` into a directory the user
+     * has since associated (or allow one they have since detached).
+     *
+     * This is the ONLY thing an association widens. The command itself is
+     * still evaluated against the allow/deny rules, so an associated
+     * directory does not make a mutating command auto-allowed.
+     */
+    commandContext?: () => Pick<CommandEvaluationContext, "cwd" | "allowedRoots">;
     /** False when no client can answer a prompt (IM with no desktop connected);
      *  an ask then denies at once instead of blocking the turn until timeout. */
     hasApprover?: () => boolean;
@@ -111,7 +123,7 @@ export class PermissionBroker extends EventEmitter {
         const baseConfig = { ...config, allow };
         const imPolicy = this.imCommandPolicy?.();
         const context = {
-            ...this.commandContext,
+            ...this.commandContext?.(),
             ...(args.cwd ? { cwd: args.cwd } : {}),
             ...(args.language ? { language: args.language } : {}),
         };

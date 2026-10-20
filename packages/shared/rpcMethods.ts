@@ -13,6 +13,12 @@ export const RPC = {
     workspaceList: "workspace.list",
     workspaceEnsure: "workspace.ensure",
     workspaceDispose: "workspace.dispose",
+    /** Read the associated-directory set stored at one key (workspace or channel scope). */
+    workspaceAssociationsGet: "workspace.associations.get",
+    /** Replace the associated-directory set stored at one key. */
+    workspaceAssociationsSet: "workspace.associations.set",
+    /** The effective associated-directory set for a workspace, after the scope fallback. */
+    workspaceAssociationsResolve: "workspace.associations.resolve",
     // session.*
     sessionList: "session.list",
     sessionCreate: "session.create",
@@ -119,6 +125,8 @@ export type RpcMethodName = (typeof RPC)[keyof typeof RPC];
  */
 export const FAST_RPC_METHODS: ReadonlySet<string> = new Set<string>([
     RPC.workspaceList,
+    RPC.workspaceAssociationsGet,
+    RPC.workspaceAssociationsResolve,
     RPC.sessionList,
     RPC.sessionHistory,
     RPC.sessionEventsGet,

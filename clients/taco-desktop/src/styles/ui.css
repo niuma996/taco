@@ -296,16 +296,12 @@
     user-select: none;
     outline: none;
 }
+/* Same hover language as .ui-menu-item — a tinted overlay, not an accent fill. */
 .ui-select-item[data-highlighted] {
-    background: var(--accent);
-    color: var(--bg);
+    background: var(--hover-overlay);
 }
 .ui-select-item[data-state="checked"] {
     font-weight: 600;
-    color: var(--accent);
-}
-.ui-select-item[data-highlighted][data-state="checked"] {
-    color: var(--bg);
 }
 .ui-select-item-check {
     display: inline-flex;
@@ -324,10 +320,6 @@
     font-weight: 500;
     line-height: 1.5;
     white-space: nowrap;
-}
-.ui-select-item[data-highlighted] .ui-select-item-badge {
-    background: transparent;
-    color: inherit;
 }
 
 /* ── Menu ── */

@@ -14,6 +14,10 @@ export {
     parseAskUserContext,
     rehydrateAskUserDetails,
 } from "./askUserRehydrate.ts";
+export {
+    type BuildAssociatedWorkspacesContextHookOptions,
+    buildAssociatedWorkspacesContextHook,
+} from "./associatedWorkspacesContext.ts";
 export { tagWrap } from "./builder.ts";
 export {
     buildCompactionReminderHook,

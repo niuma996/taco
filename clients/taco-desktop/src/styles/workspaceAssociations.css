@@ -1,0 +1,105 @@
+/* workspaceAssociations.css — the associated-directories dialog. Feature
+   styles only; the modal shell, buttons, inputs and select come from
+   ui.css. */
+
+.workspace-associations-modal {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.workspace-associations-scope {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.workspace-associations-scope-label {
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+    white-space: nowrap;
+}
+
+.workspace-associations-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    min-height: 48px;
+}
+
+.workspace-associations-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* A saved entry reads as a card: subtle surface, one line, remove on the
+   right. The add-row (input + buttons) stays borderless. */
+.workspace-associations-entry {
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    background: var(--surface-tint);
+}
+
+.workspace-associations-entry:hover {
+    background: var(--hover-overlay);
+}
+
+/* The path is the identity of the row — it must not wrap into an
+   unreadable block, and it must not shrink the remove button away. */
+.workspace-associations-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: var(--text-sm);
+    color: var(--fg);
+}
+
+.workspace-associations-row .ui-input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Input, browse and Add share one explicit height, and the browse button is
+   a square of that size. Explicit rather than stretch + aspect-ratio: WebKit
+   does not transfer a flex-stretched height into width, which left the
+   button's hover background hugging the icon. */
+.workspace-associations-add-row .ui-input,
+.workspace-associations-add-row .ui-btn {
+    height: var(--control-height-md);
+}
+
+.workspace-associations-add-row .ui-icon-btn {
+    width: var(--control-height-md);
+    height: var(--control-height-md);
+}
+
+.workspace-associations-empty {
+    padding: var(--space-3) 0;
+    text-align: center;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+}
+
+/* Dashed full-width add row — an affordance, not another entry card. */
+.workspace-associations-add {
+    width: 100%;
+    justify-content: center;
+    gap: var(--space-1-5);
+    padding: var(--space-2) 0;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+}
+
+.workspace-associations-add:hover {
+    border-color: var(--border-strong);
+    color: var(--fg);
+}
