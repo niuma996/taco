@@ -177,11 +177,15 @@ footer.input textarea:focus {
     font-size: 0.85rem;
     gap: 0.25rem;
 }
-/* Chat-input variant: flat borderless pill, only as wide as name + provider. */
+/* Chat-input variant: flat borderless pill, only as wide as name + provider.
+   Its own surface — the inherited --pane-list-bg is a near-neighbour of the
+   row's --input-bg, and the pill has to read as a control, not as part of
+   the row. */
 .prompt-button.model-trigger.model-trigger--compact {
     min-width: 0;
     gap: var(--space-1);
     padding: 0 var(--space-3);
+    background: var(--composer-chip-bg);
     border: none;
     border-radius: var(--radius-pill);
     font-size: var(--text-xs);
@@ -220,22 +224,19 @@ footer.input textarea:focus {
     color: var(--bg);
 }
 
-/* Attach button — the bare glyph at full row height; only the color reacts to hover. */
+/* Attach button — the bare glyph in a full-height button; only the color reacts
+   to hover. The glyph keeps lucide's own 16px: the *button* carries the row
+   height, so the icon must not outgrow the row's other icons (send/stop are
+   16px), and at 16px lucide's stroke-width 2 already renders at the ~1.33px
+   the rest of the row shows. */
 .prompt-button.attach {
     min-width: 0;
     width: auto;
-    padding: 0;
+    padding: 0 var(--space-2);
     background: transparent;
     border: none;
     border-radius: 0;
     color: var(--fg-dim);
-}
-.prompt-button.attach svg {
-    width: var(--composer-control-height);
-    height: var(--composer-control-height);
-    /* lucide strokes scale with the icon (24-unit canvas); at 24px, 1.33 matches
-       the ~1.33px rendered stroke of the row's 16px icons instead of 2px. */
-    stroke-width: 1.33;
 }
 
 .prompt-button.attach:hover:not(:disabled) {
@@ -302,7 +303,7 @@ footer.input textarea:focus {
     max-width: 100%;
     gap: var(--space-1);
     padding: 0 var(--space-3);
-    background: var(--pane-list-bg);
+    background: var(--composer-chip-bg);
     border: none;
     border-radius: var(--radius-pill);
     color: var(--fg-dim);

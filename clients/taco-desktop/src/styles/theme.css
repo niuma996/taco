@@ -67,6 +67,11 @@
 
     /* Secondary surface — above --bg-elevated. Used by .skills-detail-content / .askuser-option. */
     --bg-secondary: #1f2229;
+    /* Composer chips — the model trigger and the permission-mode pill sit on
+       --input-bg, which is near-black in dark. --pane-list-bg is a
+       near-neighbour of it, so the chips carry their own surface: a step wide
+       enough to read as raised, and the same step as the light theme's. */
+    --composer-chip-bg: #252a32;
     /* List row hover overlay — fainter than --accent-bg-hover, pure transparent white. */
     --hover-overlay: rgba(255, 255, 255, 0.05);
     /* Error text color — same as --error but as a distinct token for semantic clarity. */
@@ -246,6 +251,8 @@
 
     /* Secondary surface — same neutral scale as the main application surfaces. */
     --bg-secondary: var(--warm-gray-2);
+    /* Composer chips — one step above --input-bg, matching the dark theme's step. */
+    --composer-chip-bg: var(--warm-gray-2);
     /* Hover overlay on light theme — light gray semi-transparent. */
     --hover-overlay: rgba(0, 0, 0, 0.04);
     --danger: var(--error);
