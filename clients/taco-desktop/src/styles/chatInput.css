@@ -224,23 +224,23 @@ footer.input textarea:focus {
     color: var(--bg);
 }
 
-/* Attach button — the bare glyph in a full-height button; only the color reacts
-   to hover. The glyph keeps lucide's own 16px: the *button* carries the row
-   height, so the icon must not outgrow the row's other icons (send/stop are
-   16px), and at 16px lucide's stroke-width 2 already renders at the ~1.33px
-   the rest of the row shows. */
+/* Attach button — a round chip that sits with the model pill: the same
+   composer-chip-bg surface, the same control height, the same dim ink. The
+   glyph stays lucide's own 16px — the *chip* carries the affordance, and at
+   16px lucide's stroke-width 2 already renders at the ~1.33px the rest of
+   the row shows. */
 .prompt-button.attach {
     min-width: 0;
-    width: auto;
-    padding: 0 var(--space-2);
-    background: transparent;
+    width: var(--composer-control-height);
+    padding: 0;
+    background: var(--composer-chip-bg);
     border: none;
-    border-radius: 0;
+    border-radius: var(--radius-circle);
     color: var(--fg-dim);
 }
 
 .prompt-button.attach:hover:not(:disabled) {
-    background: transparent;
+    background: var(--bg-hover);
     color: var(--fg);
 }
 
