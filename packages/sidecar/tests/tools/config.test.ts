@@ -90,7 +90,11 @@ describe("config tools", () => {
             const ctx = sessionToolContext({
                 call: async <P, R>(method: string, _workspace: string, params: P): Promise<R> => {
                     calls.push({ method, params: params as unknown });
-                    return { approved: false, fields: ["defaultModel"] } as R;
+                    return {
+                        approved: false,
+                        fields: ["defaultModel"],
+                        denialReason: "user_denied",
+                    } as R;
                 },
             });
             const result = await invokeTool(
@@ -99,8 +103,75 @@ describe("config tools", () => {
                 ctx,
             );
             const text = (result.content[0] as { text: string }).text;
-            assert.match(text, /declined/);
+            assert.match(text, /user denied/);
             assert.equal((result.details as { approved: boolean }).approved, false);
+        });
+
+        it("tells the model a user denial is final — no retry, no workaround", async () => {
+            const { configPatch } = createConfigTools();
+            const ctx = sessionToolContext({
+                call: async <R>(): Promise<R> =>
+                    ({
+                        approved: false,
+                        fields: ["defaultModel"],
+                        denialReason: "user_denied",
+                    }) as R,
+            });
+            const result = await invokeTool(
+                configPatch,
+                { patch: { defaultModel: "claude-opus-5" } },
+                ctx,
+            );
+            const text = (result.content[0] as { text: string }).text;
+            assert.match(text, /user denied/);
+            // The point of the message: a denial is about the intent, so a
+            // smaller or differently-shaped attempt is still the denied action.
+            assert.match(text, /Do not retry/);
+            assert.match(text, /another route/);
+            // Marked as an error so the model treats it as a failed action.
+            assert.equal((result as { isError?: boolean }).isError, true);
+        });
+
+        it("distinguishes a timeout from a user denial", async () => {
+            const { configPatch } = createConfigTools();
+            const ctx = sessionToolContext({
+                call: async <R>(): Promise<R> =>
+                    ({
+                        approved: false,
+                        fields: ["defaultModel"],
+                        denialReason: "timeout",
+                    }) as R,
+            });
+            const result = await invokeTool(
+                configPatch,
+                { patch: { defaultModel: "claude-opus-5" } },
+                ctx,
+            );
+            const text = (result.content[0] as { text: string }).text;
+            assert.match(text, /timed out/);
+            // A timeout is nobody having answered, so asking is still fine.
+            assert.doesNotMatch(text, /The user denied/);
+        });
+
+        it("tells the model not to edit taco.json when no approver exists", async () => {
+            const { configPatch } = createConfigTools();
+            const ctx = sessionToolContext({
+                call: async <R>(): Promise<R> =>
+                    ({
+                        approved: false,
+                        fields: ["defaultModel"],
+                        denialReason: "no_approver",
+                    }) as R,
+            });
+            const result = await invokeTool(
+                configPatch,
+                { patch: { defaultModel: "claude-opus-5" } },
+                ctx,
+            );
+            const text = (result.content[0] as { text: string }).text;
+            assert.match(text, /no desktop app is connected/);
+            // The workaround this blocks: editing the file the tool guards.
+            assert.match(text, /taco\.json by hand/);
         });
 
         it("refuses an IM session", async () => {

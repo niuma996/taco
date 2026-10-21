@@ -53,7 +53,10 @@ export function registerConfigHandlers(): void {
                 fields,
             });
             if (!decision.approved) {
-                return { approved: false, fields };
+                // The reason travels with the result: the tool turns it into
+                // guidance, and "the user said no" and "nobody answered" call
+                // for different behaviour.
+                return { approved: false, fields, denialReason: decision.denialReason };
             }
 
             try {

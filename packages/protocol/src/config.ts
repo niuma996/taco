@@ -528,6 +528,15 @@ export interface ConfigPatchResult {
     approved: boolean;
     /** The config fields the patch touched. */
     fields: string[];
+    /**
+     * Why the change was not approved. Absent when `approved` is true.
+     *
+     * The tool turns this into guidance, and the difference matters: a
+     * `user_denied` means the user said no (do not retry, do not work around
+     * it), while `timeout` or `no_approver` means nobody answered (ask, or
+     * tell the user to approve it in the desktop app).
+     */
+    denialReason?: CommandPermissionDenialReason;
     /** Config view after the write (masked). Absent when declined. */
     global?: TacoGlobalConfigView;
 }

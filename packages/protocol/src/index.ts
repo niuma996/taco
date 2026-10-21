@@ -51,6 +51,7 @@ export type {
     CommandEvaluation,
     CommandPermissionConfig,
     CommandPermissionDecision,
+    CommandPermissionDenialReason,
     CommandPermissionMode,
     CommandPermissionRequest,
     CommandPermissionResolveParams,

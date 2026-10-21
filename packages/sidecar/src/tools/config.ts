@@ -24,7 +24,12 @@
  * holds even if something else reaches the RPC).
  */
 
-import type { GlobalConfigPatch, SettingsGetResult, TacoGlobalConfigView } from "@taco-ai/protocol";
+import type {
+    ConfigPatchResult,
+    GlobalConfigPatch,
+    SettingsGetResult,
+    TacoGlobalConfigView,
+} from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { TacoToolContext } from "./context.ts";
@@ -157,6 +162,63 @@ function createConfigGet(): TacoTool {
     };
 }
 
+/**
+ * The guidance for a change that was not approved.
+ *
+ * The wording follows the shell tool's denial text: it widens "do not retry"
+ * to "do not attempt the same outcome by another route", because a model
+ * otherwise reads a denial as "use a different tool" and goes and edits
+ * `taco.json` by hand — or splits the change across two patches so each
+ * looks smaller than the one that was refused.
+ *
+ * The reason changes what the model should do next. A `user_denied` is a
+ * decision, not a hiccup: re-asking the same thing is nagging. A timeout or
+ * a missing approver is nobody having answered, so asking is reasonable.
+ */
+function denialText(reason: string | undefined): string {
+    if (reason === "timeout") {
+        return (
+            "[config change not applied] The approval request timed out before the user responded. " +
+            "Do not retry automatically. If you still need the configuration change, call " +
+            "`askUser` to ask the user — or, if you have no `askUser` tool (you are a subagent), " +
+            "report it in your final reply; otherwise wait for a new instruction."
+        );
+    }
+    if (reason === "aborted") {
+        return (
+            "[config change not applied] The change was not written because the current turn was " +
+            "cancelled while waiting for approval. Do not retry automatically."
+        );
+    }
+    if (reason === "no_approver") {
+        return (
+            "[config change not applied] This change needs approval in the Taco desktop app, and no " +
+            "desktop app is connected right now. Do not retry it or work around it — do not edit " +
+            "taco.json by hand. Tell the user it needs approval in the Taco desktop app, then " +
+            "continue without it or stop."
+        );
+    }
+    if (reason === undefined) {
+        // No reason means the request never reached the UI — blocked by policy
+        // rather than by a person. There is no user to ask, so explain and stop.
+        return (
+            "[config change not applied] This change was blocked by the workspace's permission " +
+            "policy, not by the user. Do not retry it, and do not attempt the same outcome by " +
+            "another route — editing taco.json by hand, or splitting the change into smaller " +
+            "patches, is still the blocked action. Explain why it was blocked and stop."
+        );
+    }
+    return (
+        "[config change not applied] The user denied the configuration change. Do not retry it, " +
+        "and do not attempt the same outcome by another route — editing taco.json directly, or " +
+        "splitting the change into smaller patches so each looks less consequential, is still " +
+        "the denied action. The denial is about the intent, not the exact patch. If you still " +
+        "need that outcome, stop and call `askUser` to ask how the user wants to proceed — or, if " +
+        "you have no `askUser` tool (you are a subagent), report the denial in your final reply; " +
+        "otherwise wait for a new instruction."
+    );
+}
+
 function createConfigPatch(): TacoTool {
     return {
         name: "configPatch",
@@ -178,37 +240,40 @@ function createConfigPatch(): TacoTool {
             params: ConfigPatchToolInput,
             _onUpdate: unknown,
             ctx: TacoToolContext,
-        ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
+        ): Promise<{
+            content: { type: "text"; text: string }[];
+            details: unknown;
+            isError?: boolean;
+        }> {
             if (!configToolsAllowed(ctx)) throw new Error(REFUSAL);
             if (!ctx.call) {
                 throw new Error("configPatch: no self-RPC dispatcher in this workspace");
             }
             const patch = params.patch as GlobalConfigPatch;
-            const result = await ctx.call<
-                unknown,
-                { approved: boolean; global: TacoGlobalConfigView }
-            >("config.patch", ctx.workspace, {
-                workspace: ctx.workspace,
-                sessionId: ctx.sessionId,
-                toolCallId,
-                patch,
-            });
+            const result = await ctx.call<unknown, ConfigPatchResult>(
+                "config.patch",
+                ctx.workspace,
+                {
+                    workspace: ctx.workspace,
+                    sessionId: ctx.sessionId,
+                    toolCallId,
+                    patch,
+                },
+            );
             if (!result.approved) {
                 return {
-                    content: [
-                        {
-                            type: "text",
-                            text: "The user declined the configuration change. Nothing was written.",
-                        },
-                    ],
+                    content: [{ type: "text", text: denialText(result.denialReason) }],
                     details: result,
+                    // Marked as an error so the model treats it as a failed
+                    // action, not a normal return it can build on.
+                    isError: true,
                 };
             }
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Configuration updated.\n\n${summarizeConfig(result.global)}`,
+                        text: `Configuration updated.\n\n${summarizeConfig(result.global ?? {})}`,
                     },
                 ],
                 details: result,
