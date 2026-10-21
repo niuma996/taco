@@ -8,8 +8,10 @@
  * servers and subagent toolsets stay anchored to the workspace's own root.
  *
  * The store lives on the sidecar, so every client sees the same sets and a
- * change made in one reaches the others. The `workspace.associations_changed`
- * push callback re-loads so other desktop windows stay in sync.
+ * change made in one reaches the others. The subscribing component listens
+ * for `workspace.associations_changed` itself (see
+ * `WorkspaceAssociationsDialog`), because only it knows which key is on
+ * screen.
  *
  * Same gating/error pattern as `useImPolicy`: a local `error` string,
  * auto-cleared after 4s, and no callback ever throws.
@@ -20,8 +22,6 @@ import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UseWorkspaceAssociationsResult {
-    /** The directories stored at the key, as absolute paths. */
-    roots: string[];
     loading: boolean;
     saving: boolean;
     error: string | null;
@@ -33,17 +33,11 @@ export interface UseWorkspaceAssociationsResult {
      * a read-modify-write whose result could be stale by the time it lands.
      */
     save: (key: WorkspaceAssociationKey, roots: string[]) => Promise<boolean>;
-    /** Called from the `workspace.associations_changed` push handler. */
-    onAssociationsChanged: (key: WorkspaceAssociationKey) => void;
 }
 
 export function useWorkspaceAssociations(client: TacoClient): UseWorkspaceAssociationsResult {
-    const [roots, setRoots] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
-    // The key the dialog last pulled. The push reload compares against it,
-    // so a change to another key does not disturb what is on screen.
-    const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
     const { error, fail: failWith } = useAutoClearError();
 
@@ -52,8 +46,6 @@ export function useWorkspaceAssociations(client: TacoClient): UseWorkspaceAssoci
             setLoading(true);
             try {
                 const result = await client.workspaceAssociationsGet(key);
-                setRoots([...result.roots]);
-                setLoadedKey(`${key.scope}:${key.id}`);
                 return [...result.roots];
             } catch (e) {
                 failWith(e);
@@ -81,21 +73,11 @@ export function useWorkspaceAssociations(client: TacoClient): UseWorkspaceAssoci
         [client, failWith],
     );
 
-    const onAssociationsChanged = useCallback(
-        (key: WorkspaceAssociationKey) => {
-            if (`${key.scope}:${key.id}` !== loadedKey) return;
-            void load(key);
-        },
-        [loadedKey, load],
-    );
-
     return {
-        roots,
         loading,
         saving,
         error,
         load,
         save,
-        onAssociationsChanged,
     };
 }
