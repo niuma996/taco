@@ -296,21 +296,6 @@ export default function App() {
         contextInfo.clearCompactionToast,
     ]);
 
-    // Entering an IM workspace → one-shot warning toast that the reply goes
-    // straight to WeChat. Floating, not a banner — it must not eat chat layout.
-    const lastImPeerRef = useRef<string | null>(null);
-    useEffect(() => {
-        if (!activeCwd?.startsWith(IM_CWD_PREFIX)) {
-            lastImPeerRef.current = null;
-            return;
-        }
-        const peer = decodeURIComponent(activeCwd.split("/")[3] ?? "") || activeCwd;
-        // Same peer re-attaches (e.g. sidebar re-click) should not re-fire.
-        if (lastImPeerRef.current === peer) return;
-        lastImPeerRef.current = peer;
-        showToast(t("channels.imBanner", { peer }), "warn");
-    }, [activeCwd, showToast, t]);
-
     // sidecar push routing: normalize + dedup → reducer action
     const llmDump = useLlmDump();
     const { clear: clearLlmDump } = llmDump;
