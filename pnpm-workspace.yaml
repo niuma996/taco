@@ -22,6 +22,9 @@ minimumReleaseAgeExclude:
   # @taco-ai/pi-harness is published alongside this change, so it is inside the
   # 24h gate on the day it lands. Drop this entry once that version is older.
   - '@taco-ai/pi-harness@0.1.0'
+  # lucide-react 1.61.0 was published less than 24h before the upgrade landed.
+  # Drop this entry once that version is older.
+  - lucide-react@1.61.0
 peerDependencyRules:
   ignoreMissing:
     - "@earendil-works/*"
