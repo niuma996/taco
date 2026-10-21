@@ -249,6 +249,9 @@
     --switch-track-off: #dad6d0;
     --switch-thumb: #ffffff;
     --bg-elevated: var(--warm-gray-1);
+    /* Segmented-control active segment: warm-gray-1 is too close to white
+       against the tinted track, so step one shade down the warm scale. */
+    --segment-active-bg: var(--warm-gray-3);
     --surface-tint: rgba(0, 0, 0, 0.02);
 
     /* Secondary surface — same neutral scale as the main application surfaces. */

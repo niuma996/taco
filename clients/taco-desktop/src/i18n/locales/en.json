@@ -145,7 +145,7 @@
   "workspaceMode": {
     "label": "Workspace kind",
     "workspace": "Workspaces",
-    "im": "IM channel conversations",
+    "im": "Channels",
     "imNone": "No IM channel conversations yet — they appear once a channel receives a message.",
     "imLoadFailed": "Failed to load IM channel conversations"
   },

@@ -171,7 +171,12 @@ header.topbar .topbar-picker-group {
 /* Directory / IM switch in front of the picker: a pill track whose active
    segment is raised onto a solid surface. */
 .workspace-mode-tabs {
-    display: inline-flex;
+    /* Grid with two 1fr columns: in an auto-width container both tracks size
+       to the widest label, so the two segments stay equal width in any
+       language. */
+    display: inline-grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
     align-items: center;
     flex: 0 0 auto;
     gap: var(--space-0-5);
@@ -186,11 +191,13 @@ header.topbar .topbar-picker-group {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--composer-control-height);
+    /* Text segment: width follows the label instead of the old icon square. */
     height: var(--composer-control-height);
-    padding: 0;
+    padding: 0 0.55rem;
     border: 0;
     border-radius: var(--radius-xs);
+    font-size: var(--text-sm);
+    white-space: nowrap;
     background: transparent;
     color: var(--fg-dim);
     cursor: pointer;
@@ -205,7 +212,7 @@ header.topbar .topbar-picker-group {
 }
 
 .workspace-mode-tab--active {
-    background: var(--bg-elevated);
+    background: var(--segment-active-bg, var(--bg-elevated));
     color: var(--fg);
     box-shadow: 0 1px 2px var(--shadow-color);
 }

@@ -8,7 +8,6 @@
  * never restores an `im://` workspace) lands on directories.
  */
 
-import { Folder, MessageSquare } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { useT } from "../i18n/useI18n";
 
@@ -21,9 +20,9 @@ export interface WorkspaceModeTabsProps {
 
 export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps) {
     const { t } = useT();
-    const tabs: { value: WorkspaceMode; label: string; icon: typeof Folder }[] = [
-        { value: "workspace", label: t("workspaceMode.workspace"), icon: Folder },
-        { value: "im", label: t("workspaceMode.im"), icon: MessageSquare },
+    const tabs: { value: WorkspaceMode; label: string }[] = [
+        { value: "workspace", label: t("workspaceMode.workspace") },
+        { value: "im", label: t("workspaceMode.im") },
     ];
 
     // Arrow keys move between the two segments, as a radio group does.
@@ -40,10 +39,10 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
             aria-label={t("workspaceMode.label")}
             onKeyDown={onKeyDown}
         >
-            {tabs.map(({ value, label, icon: Icon }) => {
+            {tabs.map(({ value, label }) => {
                 const active = value === mode;
                 return (
-                    // biome-ignore lint/a11y/useSemanticElements: a two-segment switch styled as a pill; native radio inputs cannot carry the icon-only segment styling
+                    // biome-ignore lint/a11y/useSemanticElements: a two-segment switch styled as a pill; native radio inputs cannot carry the segment styling
                     <button
                         key={value}
                         type="button"
@@ -55,7 +54,7 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
                         className={`workspace-mode-tab${active ? " workspace-mode-tab--active" : ""}`}
                         onClick={() => onModeChange(value)}
                     >
-                        <Icon size={14} aria-hidden="true" />
+                        {label}
                     </button>
                 );
             })}
