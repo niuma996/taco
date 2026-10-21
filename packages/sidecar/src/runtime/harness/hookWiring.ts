@@ -163,7 +163,7 @@ export interface HookWiringOptions {
     /**
      * The workspace's associated directories (see
      * `MutationGateOptions.getAssociatedRoots`). They widen the set of
-     * directories a shell command may `cd` into — nothing else.
+     * directories a write may target and a shell command may `cd` into.
      */
     getMutationGateAssociatedRoots?: () => readonly string[];
     /**

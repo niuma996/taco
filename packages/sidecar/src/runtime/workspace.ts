@@ -202,12 +202,12 @@ export interface WorkspaceRuntimeOptions {
      */
     resolveImPolicy?: () => ImWorkspacePolicy | undefined;
     /**
-     * The directories associated with this workspace — the ones a shell
-     * command may `cd` into, beyond the workspace's own root.
+     * The directories associated with this workspace — the ones it may write
+     * to and `cd` into, beyond the workspace's own root.
      *
      * A thunk, not a value: the set is user configuration that can change
      * while a session is live, and a captured list would keep refusing a
-     * `cd` into a directory the user has since associated.
+     * directory the user has since associated.
      *
      * This widens the COMMAND SCOPE only. The command itself is still
      * evaluated against the allow/deny rules, so associating a directory
@@ -546,14 +546,14 @@ export class WorkspaceRuntime extends EventEmitter {
                 // `mode`, `allow` — reaches command evaluation on the next
                 // call, not just the next turn's tool list.
                 imCommandPolicy: () => this.resolveImPolicy()?.commands,
-                // The directories a shell command may `cd` into: the
-                // workspace's own root plus the directories the user
+                // The directories the workspace may write to and `cd` into:
+                // the workspace's own root plus the directories the user
                 // associated with it.
                 //
                 // A thunk, not a value — the association set is user
                 // configuration that can change while a session is live, and
-                // a captured list would keep refusing a `cd` into a
-                // directory the user has since associated.
+                // a captured list would keep refusing a directory the user
+                // has since associated.
                 commandContext: () => ({
                     cwd: this.executionCwd,
                     allowedRoots: [this.executionCwd, ...this.resolveAssociatedRoots()],
@@ -666,8 +666,9 @@ export class WorkspaceRuntime extends EventEmitter {
                 ? () => options.resolveImChannel?.(imChannelId)
                 : undefined,
             // The workspace's associated directories — the `<associated_workspaces>`
-            // tag names them for the model, and the permission broker's
-            // allowedRoots lets a shell command `cd` into them.
+            // tag names them for the model, the permission broker's
+            // allowedRoots lets a shell command `cd` into them, and the
+            // mutation gate lets a write target land in them.
             getAssociatedRoots: () => this.resolveAssociatedRoots(),
         });
 

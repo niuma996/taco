@@ -110,3 +110,50 @@ export async function resolveWithinRoot(root: string, rawPath: string): Promise<
     }
     return { ok: true, absolutePath };
 }
+
+/**
+ * Resolve `rawPath` against a workspace root plus the directories the user
+ * associated with it, and accept it if it lands in either.
+ *
+ * A relative path resolves against the PRIMARY root only. The model's cwd is
+ * the primary root, so "the file called `x`" means one specific thing; letting
+ * an associated root re-anchor a relative path would make the same argument
+ * mean different files depending on the grant. Associated roots therefore
+ * only ever MATCH a path — one that resolves (relative to the primary root)
+ * into the associated directory.
+ *
+ * Every root is compared through `realpathThroughExistingAncestor`, so a
+ * symlinked root or a symlinked ancestor of the target cannot turn a
+ * lexically-inside path into an outside one.
+ */
+export async function resolveWithinRootSet(
+    primary: string,
+    associated: readonly string[],
+    rawPath: string,
+): Promise<BoundaryResult> {
+    if (rawPath.trim() === "") {
+        return { ok: false, reason: "path must not be empty" };
+    }
+    const absolutePath = resolve(primary, rawPath);
+    const realTarget = await realpathThroughExistingAncestor(absolutePath);
+
+    const realPrimary = await realpathThroughExistingAncestor(primary);
+    if (isContained(realPrimary, realTarget)) {
+        return { ok: true, absolutePath };
+    }
+
+    for (const root of associated) {
+        const realRoot = await realpathThroughExistingAncestor(root);
+        if (isContained(realRoot, realTarget)) {
+            return { ok: true, absolutePath };
+        }
+    }
+
+    return {
+        ok: false,
+        reason:
+            associated.length === 0
+                ? `path resolves outside the workspace root (${primary}): ${rawPath}`
+                : `path resolves outside the workspace root (${primary}) and its associated directories: ${rawPath}`,
+    };
+}

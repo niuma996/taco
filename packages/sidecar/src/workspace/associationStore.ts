@@ -243,8 +243,8 @@ export class WorkspaceAssociationStore {
      * Reject a root that must not become associated.
      *
      * The rules exist because an association IS a permission grant: the
-     * model's `write` / `edit` / MCP path fence widens to cover it. Each
-     * rule closes a way that grant could reach further than the user meant.
+     * model's `write` / `edit` fence widens to cover it. Each rule closes a
+     * way that grant could reach further than the user meant.
      */
     private validate(key: WorkspaceAssociationKey, roots: readonly string[]): string[] {
         const out: string[] = [];

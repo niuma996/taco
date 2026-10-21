@@ -4,8 +4,9 @@
  * Three guarantees that a system prompt cannot provide, because the model is
  * free to ignore prose:
  *   1. Plan mode is read-only. Only the plan document may be written.
- *   2. `write` / `edit` targets stay inside the workspace root, or inside one
- *      of the caller-supplied `extraWriteRoots`.
+ *   2. `write` / `edit` targets stay inside the workspace root, inside one of
+ *      the workspace's associated directories, or inside one of the
+ *      caller-supplied `extraWriteRoots`.
  *   3. Absolute path arguments of unknown tools (MCP servers, extensions) stay
  *      inside the workspace root — the tool may do anything with them, but a
  *      target that escapes the root (including via a symlinked ancestor) is
@@ -25,6 +26,7 @@ import {
     expandHomeAndFileUrl,
     normalizeBuiltinToolPath,
     resolveWithinRoot,
+    resolveWithinRootSet,
 } from "./workspaceBoundary.ts";
 
 export interface ToolCallGateEvent {
@@ -66,10 +68,12 @@ export interface MutationGateOptions {
     /**
      * The workspace's associated directories, resolved on every call.
      *
-     * They widen exactly ONE thing: the set of directories a shell command
-     * may `cd` into. The `write` / `edit` fence and the unknown-tool path
-     * fence are unaffected — an association is a grant of command scope,
-     * not a merge of another workspace's tool configuration.
+     * They widen the set of directories the workspace may write to: a
+     * `write` / `edit` target inside one of them is allowed, and a shell
+     * command may `cd` into one. They do NOT merge another workspace's tool
+     * configuration — MCP servers, tool sets and subagent toolsets stay
+     * anchored to the workspace's own root — and they do not widen the
+     * unknown-tool path fence.
      *
      * The set is read per call so a grant added or removed mid-session
      * reaches the next command.
@@ -158,7 +162,11 @@ export function createMutationGateHook(
             // decodes `file://…` before writing, so checking the raw string
             // let `~/.taco/taco.json` pass as if it were inside the root.
             const target = normalizeBuiltinToolPath(raw);
-            let resolved = await resolveWithinRoot(opts.root, target);
+            let resolved = await resolveWithinRootSet(
+                opts.root,
+                opts.getAssociatedRoots?.() ?? [],
+                target,
+            );
             // Outside the workspace: try the extra roots, never in plan mode.
             // Resolve against `root` first — pi resolves a relative path
             // against cwd, so an extra root must only ever match an absolute

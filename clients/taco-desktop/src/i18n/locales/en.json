@@ -799,7 +799,7 @@
   },
   "associations": {
     "title": "Associated directories — {{workspace}}",
-    "description": "The agent may cd into these directories and run commands there. This does not merge another workspace's configuration: tools, MCP servers and subagents stay anchored to the workspace's own directory.",
+    "description": "The agent may read and write files in these directories, cd into them, and run commands there. This does not merge another workspace's configuration: tools, MCP servers and subagents stay anchored to the workspace's own directory.",
     "empty": "No associated directories.",
     "loading": "Loading…",
     "add": "Add",

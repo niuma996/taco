@@ -1176,8 +1176,8 @@ export class SidecarServer implements ServerRpcSurface {
                     const route = paths.imRoute;
                     return route ? () => this.imPolicyStore.resolve(route) : undefined;
                 })(),
-                // The directories associated with this workspace — the ones a
-                // shell command may `cd` into, beyond the workspace's own
+                // The directories associated with this workspace — the ones it
+                // may write to and `cd` into, beyond the workspace's own
                 // root. Resolved per use (the store is uncached), so a grant
                 // added or removed reaches a live conversation on its next
                 // message without rebuilding the workspace.

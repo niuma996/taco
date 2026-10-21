@@ -615,8 +615,8 @@ export class AttachedSession extends EventEmitter {
                         ? [join(tacoHome(), "skills"), join(tacoHome(), "agents")]
                         : undefined,
                 // The workspace's associated directories — they widen the set
-                // of directories a shell command may `cd` into, and nothing
-                // else. Subagents inherit them: the grant belongs to the
+                // of directories a write may target and a shell command may
+                // `cd` into. Subagents inherit them: the grant belongs to the
                 // workspace, not to one session.
                 getMutationGateAssociatedRoots: args.getAssociatedRoots,
                 checkpointManager: attached.checkpoints,

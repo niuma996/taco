@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
     normalizeBuiltinToolPath,
     resolveWithinRoot,
+    resolveWithinRootSet,
 } from "../../src/permissions/workspaceBoundary.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createWriteTool } from "../../src/runtime/pi/values.ts";
@@ -104,6 +105,83 @@ describe("resolveWithinRoot", () => {
         writeFileSync(sibling, "nope");
         const result = await resolveWithinRoot(linkedRoot, join("..", "outside.txt"));
         assert.equal(result.ok, false);
+    });
+});
+
+describe("resolveWithinRootSet", () => {
+    let root: string;
+    let associated: string;
+    let outside: string;
+
+    beforeEach(() => {
+        const base = mkdtempSync(join(tmpdir(), "taco-rootset-"));
+        root = join(base, "workspace");
+        associated = join(base, "associated");
+        outside = join(base, "outside");
+        mkdirSync(root, { recursive: true });
+        mkdirSync(associated, { recursive: true });
+        mkdirSync(outside, { recursive: true });
+    });
+
+    afterEach(() => {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(associated, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+    });
+
+    it("allows a path inside the primary root", async () => {
+        const result = await resolveWithinRootSet(root, [associated], "src/index.ts");
+        assert.equal(result.ok, true);
+    });
+
+    it("allows an absolute path inside an associated root", async () => {
+        const result = await resolveWithinRootSet(root, [associated], join(associated, "a.ts"));
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.absolutePath, join(associated, "a.ts"));
+    });
+
+    it("rejects a path that is in neither root", async () => {
+        const result = await resolveWithinRootSet(root, [associated], join(outside, "a.ts"));
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.match(result.reason, /associated directories/);
+    });
+
+    it("does not re-anchor a relative path onto an associated root", async () => {
+        // "notes.md" means the workspace's own notes.md. It must not resolve
+        // to associated/notes.md just because the directory is associated.
+        const result = await resolveWithinRootSet(root, [associated], "notes.md");
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.absolutePath, join(root, "notes.md"));
+    });
+
+    it("allows a relative traversal that lands inside an associated root", async () => {
+        // The path still resolves against the primary root; the associated
+        // root only decides whether the result is permitted.
+        const result = await resolveWithinRootSet(root, [associated], "../associated/a.ts");
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.absolutePath, join(associated, "a.ts"));
+    });
+
+    it("rejects a path that escapes an associated root through a symlink", async () => {
+        symlinkSync(outside, join(associated, "escape"), "dir");
+        const result = await resolveWithinRootSet(
+            root,
+            [associated],
+            join(associated, "escape", "a.ts"),
+        );
+        assert.equal(result.ok, false);
+    });
+
+    it("rejects an empty path", async () => {
+        const result = await resolveWithinRootSet(root, [associated], "  ");
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.match(result.reason, /must not be empty/);
+    });
+
+    it("keeps the plain reason when no associated root is given", async () => {
+        const result = await resolveWithinRootSet(root, [], join(outside, "a.ts"));
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.doesNotMatch(result.reason, /associated directories/);
     });
 });
 

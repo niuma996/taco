@@ -796,7 +796,7 @@
   },
   "associations": {
     "title": "关联目录 — {{workspace}}",
-    "description": "Agent 可以 cd 进这些目录并在其中执行命令。这不会合并其他工作区的配置：工具、MCP 服务和子代理仍以工作区自身的目录为准。",
+    "description": "Agent 可以在这些目录里读写文件、cd 进去执行命令。这不会合并其他工作区的配置：工具、MCP 服务和子代理仍以工作区自身的目录为准。",
     "empty": "没有关联目录。",
     "loading": "加载中…",
     "add": "添加",

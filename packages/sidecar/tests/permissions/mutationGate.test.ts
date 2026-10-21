@@ -163,6 +163,76 @@ describe("mutation gate", () => {
             });
         });
 
+        describe("associated directories", () => {
+            let associated: string;
+            let withAssociated: ReturnType<typeof createMutationGateHook>;
+            beforeEach(() => {
+                associated = join(outside, "project");
+                mkdirSync(associated, { recursive: true });
+                withAssociated = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    isKnownReadOnly,
+                    getAssociatedRoots: () => [associated],
+                });
+            });
+
+            it("allows an absolute write or edit inside an associated root", async () => {
+                for (const toolName of ["write", "edit"]) {
+                    const result = await withAssociated({
+                        toolName,
+                        input: { path: join(associated, "a.ts") },
+                    });
+                    assert.equal(result, undefined, `${toolName} should be allowed`);
+                }
+            });
+
+            it("still blocks a path that is in neither root", async () => {
+                const result = await withAssociated({
+                    toolName: "write",
+                    input: { path: join(outside, "elsewhere.ts") },
+                });
+                assert.equal(result?.block, true);
+                assert.match(result?.reason ?? "", /associated directories/);
+            });
+
+            it("resolves relative paths against the workspace, never the associated root", async () => {
+                const result = await withAssociated({
+                    toolName: "write",
+                    input: { path: "notes.md" },
+                });
+                assert.equal(result, undefined);
+            });
+
+            it("blocks a write that escapes the associated root through a symlink", async () => {
+                const elsewhere = join(outside, "nested");
+                mkdirSync(elsewhere, { recursive: true });
+                symlinkSync(elsewhere, join(associated, "out"), "dir");
+                const result = await withAssociated({
+                    toolName: "write",
+                    input: { path: join(associated, "out", "a.txt") },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("refuses associated directories in plan mode", async () => {
+                enterPlanMode(planState, "plan");
+                const result = await withAssociated({
+                    toolName: "write",
+                    input: { path: join(associated, "a.ts") },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("does not widen the unknown-tool fence", async () => {
+                const result = await withAssociated({
+                    toolName: "mcp__fs__write_file",
+                    input: { path: join(associated, "a.ts") },
+                });
+                assert.equal(result?.block, true);
+            });
+        });
+
         it("blocks a mutating call with a non-string path", async () => {
             const result = await gate({ toolName: "write", input: { path: 42 } });
             assert.equal(result?.block, true);
