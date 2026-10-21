@@ -13,15 +13,15 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
     Bot,
-    Brain,
     CalendarClock,
     Check,
-    History,
+    Ellipsis,
     MessageSquare,
-    MoreHorizontal,
-    Plug,
-    Radio,
-    Server,
+    MessagesCircle,
+    NotebookDot,
+    Puzzle,
+    RotateCcwClock,
+    ServerCog,
     Settings,
     Sparkles,
     Wrench,
@@ -57,14 +57,14 @@ const TOP_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "agents", icon: Bot, labelKey: "activity.agents" },
     { type: "skills", icon: Sparkles, labelKey: "activity.skills" },
     { type: "tools", icon: Wrench, labelKey: "activity.tools" },
-    { type: "mcp", icon: Server, labelKey: "activity.mcp" },
-    { type: "plugins", icon: Plug, labelKey: "activity.plugins" },
-    { type: "channels", icon: Radio, labelKey: "activity.channels" },
+    { type: "mcp", icon: ServerCog, labelKey: "activity.mcp" },
+    { type: "plugins", icon: Puzzle, labelKey: "activity.plugins" },
+    { type: "channels", icon: MessagesCircle, labelKey: "activity.channels" },
 ];
 
 const OVERFLOW_ITEMS: ReadonlyArray<ItemDef> = [
-    { type: "memory", icon: Brain, labelKey: "activity.memory" },
-    { type: "checkpoints", icon: History, labelKey: "activity.checkpoints" },
+    { type: "memory", icon: NotebookDot, labelKey: "activity.memory" },
+    { type: "checkpoints", icon: RotateCcwClock, labelKey: "activity.checkpoints" },
     { type: "schedules", icon: CalendarClock, labelKey: "activity.schedules" },
 ];
 
@@ -152,7 +152,7 @@ export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityR
                         >
                             <span className="activity-rail-bg" aria-hidden="true" />
                             <span className="activity-rail-content">
-                                <MoreHorizontal size={20} aria-hidden="true" />
+                                <Ellipsis size={20} aria-hidden="true" />
                             </span>
                             <span className="activity-rail-tooltip" role="tooltip">
                                 {t("activity.more")}

@@ -20,7 +20,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-    Bot,
     Check,
     ChevronLeft,
     ChevronRight,
@@ -30,6 +29,7 @@ import {
     Info,
     ListTodo,
     Plus,
+    UsersRoundCollaboration,
 } from "lucide-react";
 import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
@@ -281,7 +281,7 @@ export function SessionInfo({
                     aria-pressed={subagentsOpen ?? false}
                     onClick={onToggleSubagents}
                 >
-                    <Bot size={14} aria-hidden="true" />
+                    <UsersRoundCollaboration size={14} aria-hidden="true" />
                     {subagentDot !== undefined && subagentDot !== "none" && !subagentsOpen && (
                         <span
                             className={`session-info-tasks-dot${subagentDot === "active" ? " session-info-tasks-dot--active" : ""}`}

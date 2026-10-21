@@ -10,7 +10,7 @@
  */
 
 import type { AskUserQuestion } from "@taco-ai/protocol";
-import { CheckCircle2 } from "lucide-react";
+import { CircleCheck } from "lucide-react";
 import { useState } from "react";
 import { type AskUserAnswers, useAskUser } from "../../hooks/useAskUser";
 import { type ToolViewProps, toolViews } from "./registry";
@@ -177,7 +177,7 @@ export function AskUserToolView({ tool }: ToolViewProps) {
                                             )}
                                         </div>
                                         {isSelected && (
-                                            <CheckCircle2
+                                            <CircleCheck
                                                 size={12}
                                                 className="askuser-check"
                                                 aria-hidden="true"

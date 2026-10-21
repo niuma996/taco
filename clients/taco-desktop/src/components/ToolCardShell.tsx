@@ -8,7 +8,7 @@
  * toolViews/registry.
  */
 
-import { CheckCircle2, ChevronRight, Loader2, XCircle } from "lucide-react";
+import { ChevronRight, CircleCheck, CircleX, LoaderCircle } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useT } from "../i18n/useI18n";
 import type { UiToolCall } from "../lib/chat/chatUtils";
@@ -49,7 +49,7 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
 
     const isRunning = tool.status === "running";
     const isError = tool.status === "error";
-    const Icon = isRunning ? Loader2 : isError ? XCircle : CheckCircle2;
+    const Icon = isRunning ? LoaderCircle : isError ? CircleX : CircleCheck;
     const statusClass = isRunning
         ? "tool-card running"
         : isError

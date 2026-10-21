@@ -4,7 +4,7 @@
  */
 
 import type { McpServerConfigView, McpServerView } from "@taco-ai/protocol";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash } from "lucide-react";
 import { useT } from "../../i18n/useI18n.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Switch } from "../ui/Switch.tsx";
@@ -99,7 +99,7 @@ export function McpServerCard(props: McpServerCardProps) {
                         aria-label={t("settings.mcpServerDelete")}
                         onClick={() => props.onDelete(cfg.id)}
                     >
-                        <Trash2 size={14} aria-hidden="true" />
+                        <Trash size={14} aria-hidden="true" />
                     </IconButton>
                 </div>
             </div>

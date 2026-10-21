@@ -11,7 +11,7 @@
  */
 
 import type { CheckpointEntry } from "@taco-ai/protocol";
-import { History, RefreshCw } from "lucide-react";
+import { RefreshCw, RotateCcwClock } from "lucide-react";
 import { useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { IconButton } from "../components/ui/IconButton";
@@ -45,7 +45,7 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
         <div className="checkpoints-pane">
             <div className="pane-header">
                 <div className="pane-header-title">
-                    <History size={16} aria-hidden="true" />
+                    <RotateCcwClock size={16} aria-hidden="true" />
                     {t("checkpoints.title")}
                 </div>
                 <IconButton

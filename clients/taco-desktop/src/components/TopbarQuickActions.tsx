@@ -18,7 +18,7 @@
  */
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Check, Languages, Monitor, Moon, ShieldAlert, Sun } from "lucide-react";
+import { Check, Languages, Monitor, Moon, ShieldQuestionMark, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useGlobalConfig } from "../hooks/primitives/useGlobalConfig.ts";
@@ -130,7 +130,7 @@ export function TopbarQuickActions({
                     onClick={onOpenPendingApprovals}
                 >
                     <span className="workspace-approval-button__icon">
-                        <ShieldAlert size={14} aria-hidden="true" />
+                        <ShieldQuestionMark size={14} aria-hidden="true" />
                         {pendingApprovalCount > 0 && (
                             <span className="workspace-approval-button__count" aria-hidden="true">
                                 {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}

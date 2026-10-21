@@ -7,7 +7,7 @@
  * { code: "memory.conflict", data } the conflict UI takes over.
  */
 
-import { Pencil, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Pencil, RefreshCw, Save, Trash } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
@@ -296,7 +296,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                                 className="memory-delete-btn"
                                 onClick={() => setConfirmDeleteId(selectedTopic.id)}
                             >
-                                <Trash2 size={14} aria-hidden="true" />
+                                <Trash size={14} aria-hidden="true" />
                                 {t("memory.delete")}
                             </button>
                         </div>

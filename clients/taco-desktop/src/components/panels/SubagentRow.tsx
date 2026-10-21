@@ -6,7 +6,7 @@
  * lead nowhere.
  */
 
-import { CheckCircle2, Circle, Loader2, Square, XCircle } from "lucide-react";
+import { Circle, CircleCheck, CircleX, LoaderCircle, Square } from "lucide-react";
 import type { ReactElement } from "react";
 import { useT } from "../../i18n/useI18n";
 import type { SubagentEntry, SubagentStatus } from "../../lib/chat/subagentList";
@@ -16,7 +16,7 @@ function StatusIcon({ status }: { status: SubagentStatus }): ReactElement {
     switch (status) {
         case "running":
             return (
-                <Loader2
+                <LoaderCircle
                     size={13}
                     className="subagent-row-icon subagent-row-icon--running spin"
                     aria-hidden="true"
@@ -26,17 +26,17 @@ function StatusIcon({ status }: { status: SubagentStatus }): ReactElement {
         // working". The distinction is only in where liveness came from.
         case "background":
             return (
-                <Loader2
+                <LoaderCircle
                     size={13}
                     className="subagent-row-icon subagent-row-icon--running spin"
                     aria-hidden="true"
                 />
             );
         case "ok":
-            return <CheckCircle2 size={13} className="subagent-row-icon" aria-hidden="true" />;
+            return <CircleCheck size={13} className="subagent-row-icon" aria-hidden="true" />;
         case "error":
             return (
-                <XCircle
+                <CircleX
                     size={13}
                     className="subagent-row-icon subagent-row-icon--error"
                     aria-hidden="true"

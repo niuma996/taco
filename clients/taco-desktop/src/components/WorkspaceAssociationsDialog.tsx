@@ -24,7 +24,7 @@
 import type { WorkspaceAssociationKey, WorkspaceAssociationScope } from "@taco-ai/protocol";
 import { parseImCwd } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, FolderPlus, Trash2 } from "lucide-react";
+import { FolderOpen, FolderPlus, Trash } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWorkspaceAssociations } from "../hooks/useWorkspaceAssociations";
 import { useT } from "../i18n/useI18n";
@@ -187,7 +187,7 @@ export function WorkspaceAssociationsDialog({
                                 aria-label={t("associations.remove")}
                                 onClick={() => removeRoot(root)}
                             >
-                                <Trash2 size={12} aria-hidden="true" />
+                                <Trash size={12} aria-hidden="true" />
                             </IconButton>
                         </div>
                     ))}

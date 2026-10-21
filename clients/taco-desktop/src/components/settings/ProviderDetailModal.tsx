@@ -18,7 +18,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
-import { CircleCheck, CircleX, Eye, EyeOff, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { CircleCheck, CircleX, Eye, EyeOff, Pencil, Plus, Trash, Undo2 } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
@@ -592,7 +592,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                                 disabled={props.saving}
                                 onClick={() => hideModel(m.id)}
                             >
-                                <Trash2 size={12} aria-hidden="true" />
+                                <Trash size={12} aria-hidden="true" />
                             </IconButton>
                         </div>
                     ))}
@@ -635,7 +635,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                                     disabled={props.saving}
                                     onClick={() => removeModel(m.id)}
                                 >
-                                    <Trash2 size={12} aria-hidden="true" />
+                                    <Trash size={12} aria-hidden="true" />
                                 </IconButton>
                             </div>
                             {editedModel === m.id && (

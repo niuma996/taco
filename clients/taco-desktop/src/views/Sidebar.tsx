@@ -6,7 +6,7 @@
  * and the expand affordance lives in the topbar next to the workspace picker.
  */
 
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash } from "lucide-react";
 import { IconButton } from "../components/ui/IconButton";
 import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
@@ -73,7 +73,7 @@ export function Sidebar(props: SidebarProps) {
                                     onDelete(s.id);
                                 }}
                             >
-                                <Trash2 size={14} aria-hidden="true" />
+                                <Trash size={14} aria-hidden="true" />
                             </IconButton>
                         </div>
                     </div>

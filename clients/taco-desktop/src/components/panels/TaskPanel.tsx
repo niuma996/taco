@@ -1,5 +1,12 @@
 import { asSessionId, type TaskItem, type WorkspaceId } from "@taco-ai/protocol";
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, XCircle } from "lucide-react";
+import {
+    ChevronDown,
+    ChevronRight,
+    Circle,
+    CircleCheck,
+    CircleX,
+    LoaderCircle,
+} from "lucide-react";
 import { useState } from "react";
 import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
@@ -108,15 +115,15 @@ function TaskRow({ task }: { task: TaskItem }) {
 function StatusIcon({ status }: { status: TaskItem["status"] }) {
     switch (status) {
         case "in_progress":
-            return <Loader2 size={14} className="task-icon spinning" aria-label="进行中" />;
+            return <LoaderCircle size={14} className="task-icon spinning" aria-label="进行中" />;
         case "pending":
             return <Circle size={14} className="task-icon" aria-label="待办" />;
         case "completed":
             return (
-                <CheckCircle2 size={14} className="task-icon task-icon-done" aria-label="已完成" />
+                <CircleCheck size={14} className="task-icon task-icon-done" aria-label="已完成" />
             );
         case "failed":
-            return <XCircle size={14} className="task-icon task-icon-failed" aria-label="已失败" />;
+            return <CircleX size={14} className="task-icon task-icon-failed" aria-label="已失败" />;
     }
 }
 

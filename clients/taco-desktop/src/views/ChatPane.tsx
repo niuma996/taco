@@ -12,7 +12,7 @@ import type {
     SessionContextInfoResult,
     ThinkingLevel,
 } from "@taco-ai/protocol";
-import { ArrowUp, ImageIcon, Square } from "lucide-react";
+import { ArrowUp, Image, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef } from "react";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
@@ -335,7 +335,7 @@ export function ChatPane(props: ChatPaneProps) {
                                 // its handler refuses new input until the compaction settles.
                                 disabled={compacting || attachments.length >= MAX_ATTACHMENTS}
                             >
-                                <ImageIcon size={16} aria-hidden="true" />
+                                <Image size={16} aria-hidden="true" />
                             </button>
                             {activeModel && (
                                 <ModelMenu

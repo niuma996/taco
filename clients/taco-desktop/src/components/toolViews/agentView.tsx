@@ -7,7 +7,7 @@
  * subSessionId; that card renders unclickable rather than leading nowhere.
  */
 
-import { Loader2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import type { ReactElement } from "react";
 import { useSubagent } from "../../hooks/useSubagent";
 import { type ToolViewProps, toolViews } from "./registry";
@@ -52,7 +52,7 @@ export function AgentToolView({ tool }: ToolViewProps): ReactElement {
                 {description.length > 0 && <span className="agent-card-desc">{description}</span>}
                 {isRunning && (
                     <span className="agent-card-running">
-                        <Loader2 size={11} className="spin" aria-hidden="true" />
+                        <LoaderCircle size={11} className="spin" aria-hidden="true" />
                         running
                     </span>
                 )}
