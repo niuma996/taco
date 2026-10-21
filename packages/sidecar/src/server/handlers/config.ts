@@ -14,9 +14,10 @@
  */
 
 import type { ConfigPatchParams, ConfigPatchResult, GlobalConfigPatch } from "@taco-ai/protocol";
-import { configPatchSchema, ErrorCodes } from "@taco-ai/protocol";
+import { asSessionId, configPatchSchema, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 import { createLogger } from "../../lib/logger.ts";
+import { patchFields } from "../../tools/config.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { applyGlobalConfigPatch } from "./settings.ts";
 
@@ -27,15 +28,41 @@ export function registerConfigHandlers(): void {
         RPC.configPatch,
         true,
         async ({
+            cwd,
             workspace,
             params,
             server,
             serverRegistry,
         }: MethodCtx<ConfigPatchParams>): Promise<ConfigPatchResult> => {
+            // Defense-in-depth for the configPatch tool's own main-session
+            // check: the RPC is also reachable from any client with a
+            // dispatcher, so re-verify the claimed workspace is local and the
+            // session is main-kind there. The workspace param is
+            // caller-supplied routing (as in every method) — the binding
+            // barrier against a hostile caller remains the user approval
+            // below, not this check.
+            const { sessionId } = params;
+            if (sessionId.trim() === "") {
+                // The schema allows any minLength-1 string; " " would make
+                // asSessionId throw a TypeError that surfaces as an internal
+                // error instead of a parameter problem.
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidParams,
+                    "config.patch: sessionId must be a non-empty string",
+                );
+            }
+            if (
+                cwd.startsWith(IM_CWD_PREFIX) ||
+                workspace.getSessionKind(asSessionId(sessionId)) !== "main"
+            ) {
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidState,
+                    "config.patch: global configuration can only be changed from a local main session",
+                );
+            }
+
             const patch = params.patch as GlobalConfigPatch;
-            const fields = Object.keys(patch).filter(
-                (key) => patch[key as keyof GlobalConfigPatch] !== undefined,
-            );
+            const fields = patchFields(patch);
             if (fields.length === 0) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,

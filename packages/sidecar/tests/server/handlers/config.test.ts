@@ -47,7 +47,12 @@ afterEach(() => {
  * always answer.
  */
 function makeBroker(answer: (requestId: string) => void): PermissionBroker {
-    const broker = new PermissionBroker(() => ({ mode: "ask" }) as const);
+    // Short timeout: a test that never gets its answer (e.g. a regressed
+    // guard that lets the request through to the broker) fails in 50ms
+    // instead of the 10-minute default.
+    const broker = new PermissionBroker(() => ({ mode: "ask" }) as const, {
+        requestTimeoutMs: 50,
+    });
     broker.on("requested", (request) => {
         // The approval is a prompt the user sees; answer it on the next tick
         // so the request is registered before it is resolved.
@@ -56,11 +61,11 @@ function makeBroker(answer: (requestId: string) => void): PermissionBroker {
     return broker;
 }
 
-function makeCtx(workspace: Partial<WorkspaceRuntime>, params: unknown) {
+function makeCtx(workspace: Partial<WorkspaceRuntime>, params: unknown, cwd = "/tmp/ws") {
     return {
         id: "test-id",
-        workspace: workspace as WorkspaceRuntime,
-        cwd: "/tmp/ws",
+        workspace: { getSessionKind: () => "main", ...workspace } as WorkspaceRuntime,
+        cwd,
         server: { providerKeyStore: { update: () => {} } },
         serverRegistry: undefined,
         params,
@@ -125,6 +130,27 @@ describe("config.patch", () => {
                     ),
                 ),
             /touches no fields/,
+        );
+    });
+
+    it("refuses subagent and IM sessions without asking the user", async () => {
+        const broker = makeBroker(() => {});
+        const handler = getRegisteredMethod("config.patch");
+        assert.ok(handler);
+
+        await assert.rejects(
+            () =>
+                handler.handler(
+                    makeCtx(
+                        { permissionBroker: broker, getSessionKind: () => "subagent" },
+                        patchParams,
+                    ),
+                ),
+            /local main session/,
+        );
+        await assert.rejects(
+            () => handler.handler(makeCtx({ permissionBroker: broker }, patchParams, "im://c/p/t")),
+            /local main session/,
         );
     });
 });
