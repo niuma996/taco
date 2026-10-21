@@ -109,7 +109,10 @@ import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { configToolCandidates } from "../tools/configCandidates.ts";
-import { WorkspaceAssociationStore } from "../workspace/associationStore.ts";
+import {
+    associationAffectsWorkspace,
+    WorkspaceAssociationStore,
+} from "../workspace/associationStore.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CommandIdempotencyGate } from "./commandIdempotency.ts";
@@ -1879,29 +1882,20 @@ export class SidecarServer implements ServerRpcSurface {
      * the fan-out is delegated there. (Enforcement needs no delegation:
      * the store is read on every tool call, so a change already applies
      * everywhere. Only the push is workspace-addressed.)
+     *
+     * The pushed key keeps the caller's spelling — the wire contract is
+     * raw strings, and the client matches what it sent. Which workspaces
+     * the push reaches is decided by `associationAffectsWorkspace`, which
+     * normalizes both sides.
      */
     broadcastAssociationsChanged(key: WorkspaceAssociationKey): void {
         if (!this.ownsChannels) {
             void this.imHost?.associations?.broadcastChanged(key);
         }
         for (const cwd of this.workspaces.keys()) {
-            if (!this.associationAffects(cwd, key)) continue;
+            if (!associationAffectsWorkspace(cwd, key)) continue;
             this.emitPush(PushMethods.WorkspaceAssociationsChanged, cwd, undefined, { key });
         }
-    }
-
-    /**
-     * Whether a workspace's effective association set can change when the
-     * given key's set changes.
-     */
-    private associationAffects(cwd: WorkspaceId, key: WorkspaceAssociationKey): boolean {
-        if (key.scope === "workspace") return cwd === key.id;
-        // Channel scope: only IM conversations inherit a channel's set. An fs
-        // workspace's cwd is not a routing key, so it has no channel to
-        // fall back to.
-        if (!cwd.startsWith(IM_CWD_PREFIX)) return false;
-        const route = parseImCwd(cwd);
-        return route?.channelId === key.id;
     }
 
     private emitPush<M extends PushMethodName>(

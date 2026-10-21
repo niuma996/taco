@@ -123,10 +123,33 @@ export interface AssociationStoreOptions {
  *
  * A channel-scope key is a channel id, not a path, so it is left alone.
  */
-function normalizeKey(key: WorkspaceAssociationKey): string {
+export function normalizeAssociationKey(key: WorkspaceAssociationKey): string {
     if (key.scope === "channel") return key.id;
     if (key.id.startsWith(IM_CWD_PREFIX)) return key.id;
     return path.resolve(key.id);
+}
+
+/**
+ * Whether a workspace's effective association set can change when the given
+ * key's set changes — the push fan-out predicate.
+ *
+ * Registry keys carry the client's spelling of a directory, association
+ * keys the writer's; the same directory spelled differently must still fan
+ * out. The wire payload keeps the caller's raw key either way — matching
+ * happens here, on normalized forms.
+ */
+export function associationAffectsWorkspace(cwd: string, key: WorkspaceAssociationKey): boolean {
+    if (key.scope === "workspace") {
+        return (
+            normalizeAssociationKey({ scope: "workspace", id: cwd }) ===
+            normalizeAssociationKey(key)
+        );
+    }
+    // Channel scope: only IM conversations inherit a channel's set. An fs
+    // workspace's cwd is not a routing key, so it has no channel to
+    // fall back to.
+    if (!cwd.startsWith(IM_CWD_PREFIX)) return false;
+    return parseImCwd(cwd)?.channelId === key.id;
 }
 
 /**
@@ -154,7 +177,7 @@ export class WorkspaceAssociationStore {
     get(key: WorkspaceAssociationKey): string[] {
         const doc = this.load();
         const bucket = key.scope === "channel" ? doc.channels : doc.workspaces;
-        const entry = bucket?.[normalizeKey(key)];
+        const entry = bucket?.[normalizeAssociationKey(key)];
         if (!Array.isArray(entry)) return [];
         return entry.filter((v): v is string => typeof v === "string");
     }
@@ -175,7 +198,7 @@ export class WorkspaceAssociationStore {
      * a routing key, so there is nothing to inherit.
      */
     resolve(workspace: WorkspaceId): { roots: string[]; source?: WorkspaceAssociationKey } {
-        const id = normalizeKey({ scope: "workspace", id: workspace });
+        const id = normalizeAssociationKey({ scope: "workspace", id: workspace });
         const own: WorkspaceAssociationKey = { scope: "workspace", id };
         const doc = this.load();
         const ownEntry = doc.workspaces?.[id];
@@ -221,7 +244,7 @@ export class WorkspaceAssociationStore {
                 const bucket = key.scope === "channel" ? "channels" : "workspaces";
                 const next: WorkspaceAssociationsDocument = { ...doc };
                 const entries = { ...(next[bucket] ?? {}) };
-                const id = normalizeKey(key);
+                const id = normalizeAssociationKey(key);
                 if (validated.length === 0) {
                     delete entries[id];
                 } else {

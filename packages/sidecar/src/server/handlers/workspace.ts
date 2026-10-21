@@ -14,6 +14,7 @@ import type {
     WorkspaceAssociationsSetParams,
 } from "@taco-ai/protocol";
 import {
+    asWorkspaceId,
     workspaceAssociationsGetSchema,
     workspaceAssociationsResolveSchema,
     workspaceAssociationsSetSchema,
@@ -129,7 +130,7 @@ export function registerWorkspaceHandlers(): void {
             if (typeof workspace !== "string" || workspace.length === 0) {
                 throw new RpcHandlerError("invalid_params", "workspace is required");
             }
-            const resolved = server.associations.resolve(workspace as never);
+            const resolved = server.associations.resolve(asWorkspaceId(workspace));
             return resolved.source
                 ? { roots: resolved.roots, source: resolved.source }
                 : { roots: resolved.roots };
