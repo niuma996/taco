@@ -95,18 +95,16 @@ export class PermissionBroker extends EventEmitter {
 
         // Resolve display context — where the UI should surface this prompt.
         // Main-session: { sessionId, undefined }. Subagent: { rootSid, rootAgentTcid }.
-        // Resolver failure falls back to main-session shape; never blocks the prompt.
-        let displaySessionId = args.sessionId;
-        let displayToolCallId: string | undefined;
-        if (this.resolveDisplayContext) {
-            try {
-                const ctx = await this.resolveDisplayContext(args.sessionId);
-                displaySessionId = ctx.displaySessionId;
-                displayToolCallId = ctx.displayToolCallId;
-            } catch {
-                // keep main-session fallback shape
-            }
-        }
+        // The no-resolver branch must not await: the pending request is
+        // registered before the first await, so a same-tick
+        // cleanupSession()/cleanupAll() can still abort it. Resolver
+        // failure falls back to the main-session shape.
+        const resolver = this.resolveDisplayContext;
+        const display = resolver
+            ? await resolver(args.sessionId).catch(() => undefined)
+            : undefined;
+        const displaySessionId = display?.displaySessionId ?? args.sessionId;
+        const displayToolCallId = display?.displayToolCallId;
 
         // Inherit rules from the display session (root) when the caller is a
         // subagent — so an approval stored against the root survives across
@@ -196,18 +194,14 @@ export class PermissionBroker extends EventEmitter {
         }
 
         // Same display-context resolution as the command path, so a
-        // subagent's request lands on the root agent's tool card.
-        let displaySessionId = args.sessionId;
-        let displayToolCallId: string | undefined;
-        if (this.resolveDisplayContext) {
-            try {
-                const ctx = await this.resolveDisplayContext(args.sessionId);
-                displaySessionId = ctx.displaySessionId;
-                displayToolCallId = ctx.displayToolCallId;
-            } catch {
-                // keep main-session fallback shape
-            }
-        }
+        // subagent's request lands on the root agent's tool card. Stay
+        // synchronous without a resolver — same reason as above.
+        const resolver = this.resolveDisplayContext;
+        const display = resolver
+            ? await resolver(args.sessionId).catch(() => undefined)
+            : undefined;
+        const displaySessionId = display?.displaySessionId ?? args.sessionId;
+        const displayToolCallId = display?.displayToolCallId;
 
         const request: CommandPermissionRequest = {
             requestId: randomUUID(),
