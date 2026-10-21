@@ -56,6 +56,10 @@ const TAG_GUIDANCE =
 const COMMIT_LIMIT = 5;
 /** `--stat` line cap (number of files shown per commit). */
 const STAT_FILE_LIMIT = 8;
+/** `--stat` total line width; wide enough that typical repo paths aren't elided. */
+const STAT_WIDTH = 160;
+/** Default `core.quotePath` octal-escapes non-ASCII paths (`"\344\270\255.md"`). */
+const UNQUOTED_PATHS = ["-c", "core.quotePath=false"] as const;
 
 interface Commit {
     readonly hash: string;
@@ -113,7 +117,7 @@ async function probeGit(cwd: string): Promise<GitProbeResult> {
 /**
  * Read the last `n` commits in `cwd`. Output format (per commit, NUL-separated):
  *   hash\x1fsubject\x1fauthor\x1fdate
- * followed by a `--stat -n ${STAT_FILE_LIMIT}` summary for each.
+ * followed by a `--stat` summary (capped at `STAT_FILE_LIMIT` files) for each.
  */
 async function readRecentCommits(cwd: string, n: number): Promise<Commit[]> {
     // --no-pager avoids spawning the pager process when stdout is non-tty.
@@ -123,13 +127,16 @@ async function readRecentCommits(cwd: string, n: number): Promise<Commit[]> {
         [
             "-C",
             cwd,
+            ...UNQUOTED_PATHS,
             "--no-pager",
             "log",
             "-n",
             String(n),
             `--pretty=format:${fmt.join("")}`,
-            "--shortstat",
-            `--stat=${STAT_FILE_LIMIT}`,
+            // `--stat=<n>` is a column width, not a file count; `--stat-count` caps files.
+            `--stat=${STAT_WIDTH}`,
+            `--stat-count=${STAT_FILE_LIMIT}`,
+            "--stat-graph-width=10",
         ],
         {
             timeout: 5000,
@@ -196,7 +203,7 @@ interface UncommittedFiles {
  */
 export async function readUncommittedFiles(cwd: string): Promise<UncommittedFiles> {
     const run = (args: string[]): Promise<{ code: number; stdout: string }> =>
-        execFileAsync("git", ["-C", cwd, ...args], {
+        execFileAsync("git", ["-C", cwd, ...UNQUOTED_PATHS, ...args], {
             timeout: 3000,
             maxBuffer: 64 * 1024,
             env: scrubbedProcessEnv(),
@@ -334,7 +341,7 @@ export function buildGitContextActivator(): WorkspaceActivator {
 /** Builtin manifest — self-describes metadata, tag spec, and workspace activator. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
-    version: "0.1.0",
+    version: "0.1.1",
     description:
         "Injects <recent_git_commits> (last N commits: hash, subject, author, date, --stat) and <working_tree_changes> (staged, unstaged, untracked files) as hidden tags with inline usage guidance. Silently no-ops on non-git repos or when git is unavailable.",
     whenToUse:

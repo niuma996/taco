@@ -11,7 +11,7 @@
 
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -197,6 +197,52 @@ describe("builtin git-context extension — uncommitted files", () => {
         assert.equal(files.staged.length, 0);
         assert.equal(files.unstaged.length, 0);
         assert.equal(files.untracked.length, 0);
+    });
+});
+
+describe("builtin git-context extension — path rendering", () => {
+    let pathDir: string;
+    const deepFile = "packages/some-package/src/components/VeryLongComponentName.tsx";
+    const cjkFile = "文档/说明.md";
+
+    before(() => {
+        pathDir = mkdtempSync(join(tmpdir(), "taco-gitctx-paths-"));
+        execFileSync("git", ["init", "--initial-branch=main"], { cwd: pathDir, stdio: "ignore" });
+        execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: pathDir });
+        execFileSync("git", ["config", "user.name", "Test"], { cwd: pathDir });
+        mkdirSync(join(pathDir, "packages/some-package/src/components"), { recursive: true });
+        mkdirSync(join(pathDir, "文档"));
+        writeFileSync(join(pathDir, deepFile), "x\n");
+        writeFileSync(join(pathDir, cjkFile), "x\n");
+        execFileSync("git", ["add", "."], { cwd: pathDir });
+        execFileSync("git", ["commit", "-m", "paths"], { cwd: pathDir, stdio: "ignore" });
+        writeFileSync(join(pathDir, cjkFile), "y\n");
+        writeFileSync(join(pathDir, "新文件.txt"), "z\n");
+    });
+
+    after(() => {
+        if (pathDir) rmSync(pathDir, { recursive: true, force: true });
+    });
+
+    it("renders full, unescaped paths in the commit stat with a single summary line", async () => {
+        const hook = buildGitContextHook(pathDir);
+        const result = await hook({ messages: makeMessages() } as ContextEvent);
+        const text = (result?.messages ?? [])
+            .map((m) => (m as { content?: unknown }).content)
+            .map((c) =>
+                typeof c === "string" ? c : ((c as Array<{ text?: string }>)[0]?.text ?? ""),
+            )
+            .find((t) => t.startsWith("<recent_git_commits"));
+        assert.ok(text, "expected a <recent_git_commits> tag");
+        assert.ok(text.includes(deepFile), "long path must not be elided");
+        assert.ok(text.includes(cjkFile), "non-ASCII path must not be octal-escaped");
+        assert.equal(text.match(/files? changed/g)?.length, 1, "summary line must appear once");
+    });
+
+    it("readUncommittedFiles returns unescaped non-ASCII paths", async () => {
+        const files = await readUncommittedFiles(pathDir);
+        assert.ok(files.unstaged.some((s) => s.includes(cjkFile)));
+        assert.ok(files.untracked.includes("新文件.txt"));
     });
 });
 
