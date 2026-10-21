@@ -97,6 +97,7 @@ export function CommandPermissionPrompt({
             )}
             {children}
             <div className="permission-prompt-actions">
+                <div className="permission-prompt-buttons">
                 <button
                     type="button"
                     className="permission-allow"
@@ -152,6 +153,7 @@ export function CommandPermissionPrompt({
                 >
                     {t("settings.permissionsDeny")}
                 </button>
+                </div>
                 {error && <span className="permission-error">{error}</span>}
             </div>
         </div>

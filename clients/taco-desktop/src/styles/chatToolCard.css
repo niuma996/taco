@@ -131,31 +131,41 @@
     gap: 0.35rem;
     margin-top: 0.35rem;
 }
-.permission-prompt-actions button {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xs);
+/* The four approval buttons fuse into one borderless pill (segmented
+   control): the pill-shaped container provides the half-circle ends and the
+   shared surface, so individual buttons carry no border or radius of their
+   own. Buttons are separated by hairlines only, and approve/deny read from
+   text color alone — quieter than the old bordered chip set, which sat
+   awkwardly inside the tool card. */
+.permission-prompt-buttons {
+    display: inline-flex;
+    max-width: 100%;
+    border-radius: var(--radius-pill);
     background: var(--input-bg);
+    /* Clips hover fills and separators to the pill's curved ends. */
+    overflow: hidden;
+}
+.permission-prompt-buttons button {
+    border: none;
+    background: transparent;
     color: var(--fg);
     cursor: pointer;
-    padding: 0.2rem 0.4rem;
+    padding: 0.25rem 0.65rem;
+    white-space: nowrap;
 }
-/* Permission buttons: semantic color border + text — "clickable" and "approve/deny" are instantly distinguishable.
-   Background stays very faint to avoid competing with the dense tool-card stream. */
-.permission-prompt-actions button.permission-allow {
-    border-color: var(--success);
-    background: var(--success-bg);
+.permission-prompt-buttons button + button {
+    box-shadow: inset 1px 0 0 var(--border);
+}
+.permission-prompt-buttons button.permission-allow {
     color: var(--success);
 }
-.permission-prompt-actions button.permission-deny {
-    border-color: var(--error);
-    background: var(--error-bg);
+.permission-prompt-buttons button.permission-deny {
     color: var(--error);
 }
-.permission-prompt-actions button.permission-allow:hover:not(:disabled),
-.permission-prompt-actions button.permission-deny:hover:not(:disabled) {
-    filter: brightness(1.12);
+.permission-prompt-buttons button:hover:not(:disabled) {
+    background: var(--hover-overlay);
 }
-.permission-prompt-actions button:disabled {
+.permission-prompt-buttons button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
