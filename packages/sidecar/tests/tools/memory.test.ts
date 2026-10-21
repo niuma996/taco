@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { MemoryUpsertParams } from "@taco-ai/protocol";
-import { asWorkspaceId, MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import { createMemoryTool, type MemoryToolInput } from "../../src/tools/memory.ts";
@@ -141,6 +141,9 @@ describe("memory tool execute", () => {
                 captured = params as unknown as MemoryUpsertParams;
                 return { ok: true, outcome: "created" } as unknown as R;
             },
+            sessionId: asSessionId("test-session"),
+            sessionKind: "main",
+            isIm: false,
         };
 
         const result = await invokeTool(tool, VALID, ctx);
@@ -170,6 +173,9 @@ describe("memory tool execute", () => {
                 invokeTool(tool, VALID, {
                     env: undefined as never,
                     workspace: asWorkspaceId("/tmp/ws"),
+                    sessionId: asSessionId("test-session"),
+                    sessionKind: "main",
+                    isIm: false,
                 } as TacoToolContext),
             /no self-RPC dispatcher/,
         );

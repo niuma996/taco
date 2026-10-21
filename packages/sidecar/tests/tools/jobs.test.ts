@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { asWorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import { JOBS_RPC } from "../../src/scheduler/jobsRpc.ts";
 import type { Job } from "../../src/scheduler/types.ts";
@@ -43,6 +43,9 @@ function makeCtx(records: CallRecord[]): TacoToolContext {
         workspace: asWorkspaceId("/tmp/ws"),
         call,
         actor: { kind: "ide", workspace: "/tmp/ws" },
+        sessionId: asSessionId("test-session"),
+        sessionKind: "main",
+        isIm: false,
     };
 }
 
@@ -268,6 +271,9 @@ describe("jobs tools — execute dispatches + closes actor", () => {
                 invokeTool(tool, {}, {
                     env: undefined as never,
                     workspace: asWorkspaceId("/tmp/ws"),
+                    sessionId: asSessionId("test-session"),
+                    sessionKind: "main",
+                    isIm: false,
                 } as TacoToolContext),
             /no self-RPC dispatcher/,
         );
@@ -305,6 +311,9 @@ describe("jobs tools — list rendering", () => {
                 return stubResult as R;
             },
             actor: { kind: "ide", workspace: "/tmp/ws" },
+            sessionId: asSessionId("test-session"),
+            sessionKind: "main",
+            isIm: false,
         };
         const tool = createJobsListTool();
         const result = await invokeTool(tool, {}, ctx);
@@ -336,6 +345,9 @@ describe("jobs tools — list rendering", () => {
             workspace: asWorkspaceId("/tmp/ws"),
             call: async <_P, R>(): Promise<R> => stubResult as R,
             actor,
+            sessionId: asSessionId("test-session"),
+            sessionKind: "main",
+            isIm: false,
         });
         const tool = createJobsListTool();
         const imResult = await invokeTool(

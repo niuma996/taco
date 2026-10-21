@@ -108,6 +108,7 @@ import {
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
+import { configToolCandidates } from "../tools/configCandidates.ts";
 import { WorkspaceAssociationStore } from "../workspace/associationStore.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
@@ -1136,7 +1137,7 @@ export class SidecarServer implements ServerRpcSurface {
             log,
         });
         const toolRegistry = new DefaultDeferredToolRegistry({
-            candidates: mcpProvider.candidates(),
+            candidates: [...mcpProvider.candidates(), ...configToolCandidates()],
             dispose: () => mcpProvider.dispose(),
         });
 

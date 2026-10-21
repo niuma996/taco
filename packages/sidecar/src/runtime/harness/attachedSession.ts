@@ -40,7 +40,7 @@ import type { TacoSkill } from "../../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../../tags/index.ts";
 import type { TaskStore } from "../../tasks/taskTypes.ts";
 import { createAddToolsTool } from "../../tools/addTools.ts";
-import type { TacoToolContext } from "../../tools/context.ts";
+import type { TacoToolContext, TacoToolContextBase } from "../../tools/context.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import {
     COMPACTION_END_EVENT,
@@ -206,12 +206,14 @@ export interface AttachedSessionOptions {
         | { tools: TacoTool[]; removed: string[]; systemPrompt: string }
         | undefined;
     /**
-     * Per-turn `TacoToolContext` provider. The harness invokes it once per
+     * Per-turn tool context provider. The harness invokes it once per
      * turn snapshot and threads the result into every tool's `execute`.
      * Workspace-supplied; lazy so future hot-reload flows (imRouting /
      * dispatchRpc swaps) take effect on the next turn without reattaching.
+     *
+     * Returns the workspace-level part; the session identity is added here.
      */
-    getToolContext: () => TacoToolContext;
+    getToolContext: () => TacoToolContextBase;
     /** Workspace cwd the tool context should be anchored to. */
     sessionCwd: WorkspaceId;
     /**
@@ -414,7 +416,19 @@ export class AttachedSession extends EventEmitter {
                     args.models,
                     args.model.provider,
                 ),
-                toolContext: args.getToolContext,
+                toolContext: async () => {
+                    // The workspace supplies the environment and the self-RPC
+                    // entry; the session identity is added here, because a
+                    // tool that changes global state must know WHO is asking —
+                    // an IM conversation and a subagent are both refused.
+                    const base = await args.getToolContext();
+                    return {
+                        ...base,
+                        sessionId: asSessionId(args.session.metadata.id),
+                        sessionKind: args.sessionKind,
+                        isIm: args.isIm ?? false,
+                    };
+                },
             },
             harnessContext,
         );

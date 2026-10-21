@@ -1,19 +1,46 @@
 ---
 name: taco-configure
 description: Use when modifying taco configuration — creating or installing skills or agents, editing $TACO_HOME/taco.json (default model, providers, channels, MCP servers, instructions, command permissions), or downloading remote skills. For skill authoring alone, prefer the `create-skill` skill.
+metadata:
+  version: "1.1.0"
 ---
 
 # Configuring taco
 
-`create-skill` covers skill authoring in depth. This skill is the umbrella for everything else: skill install from a URL, agent authoring, and patches to the global config (`taco.json`). Reach for it when the user's ask crosses more than one of those surfaces, or when the change touches global state rather than a single SKILL.md.
+`create-skill` covers skill authoring in depth. This skill is the umbrella for everything else: skill install from a URL, agent authoring, and patches to the global config. Reach for it when the ask crosses more than one of those surfaces, or when the change touches global state rather than a single SKILL.md.
 
 ## Read first
 
 Before writing anything, find out what's already there. State lives in three places:
 
 - **Skills and agents** — read the directories directly. `$TACO_HOME/skills/`, `~/.claude/skills/`, `~/.pi/skills/`, `<cwd>/.taco/skills/`, and `<sidecar>/skills/builtin/` (read-only — never write here). Same set under `agents/` instead of `skills/`.
-- **Global config** — `~/.taco/taco.json` (or `$TACO_HOME/taco.json` when `TACO_HOME` is set). Read with the `read` tool before any patch.
-- **Desktop settings panes** — channel bindings and MCP servers live partly in `taco.json` and partly in the desktop app's binding state. The file is what the sidecar loads; the UI may have secrets in memory not yet written back.
+- **Global config** — read it with the `configGet` tool (see below).
+- **Desktop settings panes** — channel bindings and MCP servers live partly in the config file and partly in the desktop app's binding state. The file is what the sidecar loads; the UI may have secrets in memory not yet written back.
+## Global config: use the config tools
+
+Two deferred tools, not the filesystem:
+
+```
+addTools("configGet")     → read the current config (secrets come back masked)
+addTools("configPatch")   → change it (the user approves each change)
+```
+
+Load them with `addTools` first — they are not resident, so they are not in the tool list until then. Both work only in a local desktop session: unavailable in an IM conversation, and in a subagent.
+
+`configGet` masks every secret: API keys show as "configured" but never their value; MCP `env`/`headers`/`command`/`args`/`url` and channel `config` are omitted. A stored key can be confirmed present, never read back. Never read `~/.taco/taco.json` with the `read` tool — it holds API keys in plaintext, and reading it puts them in the conversation.
+
+`configPatch` takes a `patch` with only the fields to change; the rest keep their value. The user sees a prompt listing the changed fields and must approve before anything is written. The `allow` / `deny` arrays are **replaced wholesale**, not merged — send the complete list. Schema: `TacoGlobalConfigShape` in `packages/protocol/src/config.ts`.
+
+Accepted fields:
+
+- `defaultModel` / `defaultProvider` — single strings; no restart needed if hot-reload picks it up.
+- `systemPrompt` — free text. Quote carefully if it contains newlines or colons.
+- `thinkingLevel` — `"off" | "minimal" | "low" | "medium" | "high" | "xhigh"`.
+- `compaction` — `{ enabled, threshold }` with threshold in 0–1.
+- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`. Glob patterns; deny wins and asks. Unmatched commands ask in `ask`, pass in `auto`. Built-in high-risk commands, parse failures and unauthorized `cd` always ask.
+- `instructions` — `{ enabled: boolean, files: { claudeMd?: boolean, agentsMd?: boolean, designMd?: boolean }, inheritToSubagents: boolean }`.
+
+**Secrets cannot be set through these tools.** `configPatch` rejects API keys, MCP servers, and channels, because their secret fields are masked on read and a partial write would erase them. When the ask involves one of those — `customProviders` (array of `{ id, name, api, baseUrl, models: [{ id }] }`, `api` is `"chatcomplete"` for OpenAI-compatible endpoints), `mcpServers` (array of `{ id, transport, enabled, command?, args?, url?, env?, alwaysLoaded? }`, `transport` is `"stdio" | "http"`, `alwaysLoaded` lists tool names always in the toolset), or `channels` (array of `{ channelId, manifest: { name, version }, config }`, `channelId` must match `/^[a-z0-9][a-z0-9-]*$/`, credentials live separately at `$TACO_HOME/channels/<channelId>.json`) — stop and point the user at the desktop settings pane. That path writes the secret without echoing it back.
 
 ## Skills: directory choice
 
@@ -26,9 +53,7 @@ Four user-writable directories in priority order (first match by name wins):
 
 Default to **global** (option 2) when the user hasn't specified. Use `askUser` with `scope` as the header when ambiguous — Global first, Project-local second. Never write to `<sidecar>/skills/builtin/` — it ships with taco and is overwritten by upgrades.
 
-`write` reaches the workspace and `$TACO_HOME/{skills,agents}/` (local only); elsewhere needs user-approved `shell`.
-
-New skills only show up in `<available_skills>` after a new session (the system prompt is frozen at boot); the directory itself hot-reloads in ~300ms. For body composition, frontmatter keys, scripts-vs-body tradeoffs, and `runAs` / `inlineOnly` choices, defer to the `create-skill` skill.
+`write` reaches the workspace and `$TACO_HOME/{skills,agents}/` (local only); elsewhere needs user-approved `shell`. New skills only show up in `<available_skills>` after a new session (the system prompt is frozen at boot); the directory itself hot-reloads in ~300ms. For body composition, frontmatter keys, scripts-vs-body tradeoffs, and `runAs` / `inlineOnly` choices, defer to the `create-skill` skill.
 
 ## Agents: directory choice and layout
 
@@ -41,58 +66,22 @@ Agents live in `*.md` files in one of four user-writable directories (last-wins 
 
 Default to **global** (option 3) for personal agents. Use project-local only when the agent is bound to this repo's conventions. File name should match the `name` frontmatter so it's greppable.
 
-Frontmatter (all keys taco reads; pi loads with these but ignores unknowns):
+Frontmatter (all keys taco reads; pi loads with these but ignores unknowns): `name`, `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `context` (`independent`, or `fork` to give the subagent this conversation's transcript), and `fewShots` — a YAML list of `{ user, assistant }` pairs injected ahead of the body to demonstrate the contract.
 
-```yaml
----
-name: explorer
-description: Read-only codebase search specialist.
-whenToUse: "Use when the task is to find, search, locate, or trace code."
-tools: [read, grep, glob, shell]
-maxTurns: 30
-context: independent   # or "fork" — gives the subagent this conversation's transcript
----
-```
-
-`fewShots` is also supported: a YAML list of `{ user, assistant }` pairs injected ahead of the body to demonstrate the contract. Required: `name`, `description`. `whenToUse` is preferred over `description` — `agent` tool's hint block surfaces `whenToUse` when the model is choosing a subagent.
+`name` and `description` are required; `whenToUse` is preferred over `description` — the `agent` tool's hint block surfaces `whenToUse` when the model is choosing a subagent.
 
 ## Remote skill install
 
-The user points at a URL. Three common shapes:
+The user points at a URL. Three shapes: a public GitHub repo with a top-level `SKILL.md` (`git clone --depth 1`, then move `SKILL.md` into `<target>/<repoName>/`), a path inside a repo (fetch the tarball with `curl -L | tar -xz -C <staging>`, copy the named directory), or a bare tarball or git URL (same flow, treat the unpacked root as the candidate).
 
-- **A public GitHub repo with a top-level SKILL.md** — `git clone --depth 1 <url> <target>/<repoName>` then move `SKILL.md` into `<target>/<repoName>/`. Inspect the cloned tree first; the skill may live at the root or under `skills/<name>/`.
-- **A path inside a repo** — `https://github.com/<owner>/<repo>/tree/<ref>/<path>` — fetch the tarball (`curl -L | tar -xz -C <staging>`) and copy only the named directory.
-- **A bare tarball or git URL** — same flow, treat the unpacked root as the candidate.
+Stage into `mktemp -d` to keep the workspace clean, then copy just the skill directory into the target. Validate `name` + `description` in frontmatter before writing. If a higher-priority directory already has a skill with the same `name`, warn — first-wins means the new copy will be shadowed.
 
-Staging pattern that keeps the workspace clean: clone or fetch into `mktemp -d`, then copy just the skill directory into the target. Validate `name` + `description` in frontmatter before writing. If a higher-priority directory already has a skill with the same `name`, warn — first-wins means the new copy will be shadowed.
-
-Ask the user for the target directory with the same `scope` question used for local creation. Once installed, mention the new-session caveat.
-
-## Patching `$TACO_HOME/taco.json`
-
-The file is JSON. Read it, merge the changed fields, and write the full result back via `shell` (temp file + `mv`); partial writes drop fields. Permissions stay `0600`.
-
-Schema: `TacoGlobalConfigShape` in `packages/protocol/src/config.ts`. The masked IPC view (`TacoGlobalConfigView`) strips `anthropicApiKey`, `openaiApiKey`, `apiKeys.*`, `mcpServers[i].{env,headers,command,args,url,cwd}`, and `channels[i].config` — disk keeps plaintext, only IPC frames mask.
-
-Common patches:
-
-- `defaultModel` / `defaultProvider` — single strings, no restart needed if hot-reload picks up (workspaces built before the change keep their construction-time fallback).
-- `systemPrompt` — free text. Quote carefully if it contains newlines or colons.
-- `thinkingLevel` — `"off" | "minimal" | "low" | "medium" | "high" | "xhigh"`.
-- `compaction` — `{ enabled: boolean, threshold: number (0–1) }`.
-- `customProviders` — array of `{ id, name, api, baseUrl, models: [{ id }] }`. `api` is `"chatcomplete"` for OpenAI-compatible endpoints.
-- `mcpServers` — array of `{ id, transport, enabled, command?, args?, url?, env?, alwaysLoaded? }`. `transport` is `"stdio" | "http"`. `alwaysLoaded` is an array of tool names that should always be in the toolset (skip lazy discovery).
-- `channels` — array of `{ channelId, manifest: { name, version }, config: Record<string, unknown> }`. `channelId` must match `/^[a-z0-9][a-z0-9-]*$/`. Channel credentials live separately at `$TACO_HOME/channels/<channelId>.json` under the SDK's own key — don't write secrets into `taco.json`.
-- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`. Glob patterns; deny wins and asks. Unmatched commands ask in `ask`, pass in `auto`. Built-in high-risk commands (force delete/push, publish, uploads), parse failures and unauthorized `cd` always ask.
-- `instructions` — `{ enabled: boolean, files: { claudeMd?: boolean, agentsMd?: boolean, designMd?: boolean }, inheritToSubagents: boolean }`.
-- `extensions` / `disabledExtensions` — arrays of extension package names.
-
-For any change involving an API key or channel secret: do not paste it into the chat. Either edit `taco.json` via the `read`/`write` tools in a single session (the file is `0600`), or instruct the user to use the Settings pane in the desktop app — that flow writes secrets through the masked path and never echoes them back.
+Ask for the target directory with the same `scope` question used for local creation.
 
 ## The loop
 
-1. Read what's there — `~/.taco/taco.json`, the candidate skill/agent directories, any same-named entry that would be shadowed.
+1. Read what's there — the config via `configGet`, the candidate skill/agent directories, any same-named entry that would be shadowed.
 2. Confirm scope and target with `askUser` when ambiguous — no narration.
-3. Make the change. Skills/agents: write the file. `taco.json`: read, patch in memory, write atomically. Remote install: stage, validate, copy.
+3. Make the change. Skills/agents: write the file. Config: `configPatch`. Remote install: stage, validate, copy.
 4. Verify on a new session. Tell the user to start one before reporting a regression.
 5. If something doesn't load, read the sidecar log or ask what the SkillsPane diagnostics show — a missing or empty `description` is the most common reason a skill silently fails to load.

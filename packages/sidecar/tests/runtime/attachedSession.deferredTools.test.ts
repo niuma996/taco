@@ -27,7 +27,7 @@ import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Api, Model } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
-import type { TacoToolContext } from "../../src/tools/context.ts";
+import type { TacoToolContextBase } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 const fakeTool = (name: string): TacoTool =>
@@ -100,7 +100,7 @@ async function makeAttachedSession(
         sessionCwd: tmpDir as never,
         // Dynamic-tool tests don't exercise the tool context path; tools that
         // need `call`/`actor` are tested in their own files.
-        getToolContext: () => ({ env, workspace: tmpDir as never }) as TacoToolContext,
+        getToolContext: () => ({ env, workspace: tmpDir as never }) as TacoToolContextBase,
         sessionKind: "main",
     };
     return AttachedSession.create(opts);
@@ -235,7 +235,7 @@ describe("AttachedSession — dynamic tools", () => {
             tasksDir: tmpDir,
             toolRegistry: registry,
             sessionCwd: tmpDir as never,
-            getToolContext: (): TacoToolContext => ({
+            getToolContext: (): TacoToolContextBase => ({
                 env,
                 workspace: tmpDir as never,
             }),
@@ -305,7 +305,7 @@ describe("AttachedSession — dynamic tools", () => {
             tasksDir: tmpDir,
             toolRegistry: registry,
             sessionCwd: tmpDir as never,
-            getToolContext: (): TacoToolContext => ({ env, workspace: tmpDir as never }),
+            getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),
             sessionKind: "main" as const,
         } as AttachedSessionOptions;
 
@@ -372,7 +372,7 @@ describe("AttachedSession — dynamic tools", () => {
             tasksDir: tmpDir,
             toolRegistry: registry,
             sessionCwd: tmpDir as never,
-            getToolContext: (): TacoToolContext => ({ env, workspace: tmpDir as never }),
+            getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),
             sessionKind: "main",
             refreshToolset,
         } as AttachedSessionOptions);
@@ -425,7 +425,7 @@ describe("AttachedSession — dynamic tools", () => {
             tasksDir: tmpDir,
             toolRegistry: registry,
             sessionCwd: tmpDir as never,
-            getToolContext: (): TacoToolContext => ({ env, workspace: tmpDir as never }),
+            getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),
             sessionKind: "main",
             refreshToolset: () => {
                 if (!granted) return undefined;

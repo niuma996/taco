@@ -35,7 +35,7 @@ import type { ImChannelContext } from "../../tags/index.ts";
 import { type AgentTypeDescriptor, createAgentTool } from "../../tools/agent.ts";
 import { createAgentAbortTool } from "../../tools/agentAbort.ts";
 import { createAgentContinueTool } from "../../tools/agentContinue.ts";
-import type { TacoToolContext } from "../../tools/context.ts";
+import type { TacoToolContextBase } from "../../tools/context.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { AttachedSession } from "../harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "../harness/deferredToolRegistry.ts";
@@ -222,8 +222,11 @@ export interface SessionRegistryOptions {
      * resolve the `TacoToolContext` snapshot for that turn's tool calls.
      * WorkspaceRuntime wires this from `sessionCwd` + `dispatchRpc` +
      * `imRouting`; tests can pass an inline closure.
+     *
+     * Returns the workspace-level part only. The session identity is added
+     * by the AttachedSession, which is the layer that knows it.
      */
-    readonly getToolContext: () => TacoToolContext;
+    readonly getToolContext: () => TacoToolContextBase;
 }
 
 export class SessionRegistry extends EventEmitter {
@@ -265,7 +268,7 @@ export class SessionRegistry extends EventEmitter {
      */
     readonly getAssociatedRoots?: () => readonly string[];
     /** Per-turn tool context provider (see options below). */
-    readonly getToolContext: () => TacoToolContext;
+    readonly getToolContext: () => TacoToolContextBase;
 
     /** cwd → workspace metadata cache, based on list for this cwd */
     private _metadataCache: JsonlSessionMetadata[] | null = null;

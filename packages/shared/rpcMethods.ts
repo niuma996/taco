@@ -61,6 +61,10 @@ export const RPC = {
     // settings.*
     settingsGet: "settings.get",
     settingsWrite: "settings.write",
+    // config.* — the model's view of the global config. `config.patch` asks
+    // the user before writing; `settings.write` is the desktop's own path
+    // and needs no approval.
+    configPatch: "config.patch",
     // extensions.*
     extensionsStatus: "extensions.status",
     // channels.* — IM channel listing / binding.

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type {
+    CommandEvaluation,
     CommandPermissionConfig,
     CommandPermissionDecision,
     CommandPermissionRequest,
@@ -159,28 +160,104 @@ export class PermissionBroker extends EventEmitter {
             displayToolCallId:
                 displayToolCallId === undefined ? undefined : asToolCallId(displayToolCallId),
         };
-        return await new Promise<CommandPermissionDecision>((resolve) => {
+        return await this.awaitDecision(request, args.signal);
+    }
+
+    /**
+     * Request approval for a global-config change.
+     *
+     * Unlike a shell command there is nothing to evaluate against the
+     * allow/deny rules — a config patch is not a command, and the rules
+     * describe command text. So this asks unconditionally: the user sees the
+     * fields being changed and decides.
+     *
+     * Scope is deliberately "once" only. Persisting an approval would mean
+     * storing a config patch as a reusable rule, and the next patch would
+     * differ in the fields it touches — a stored match on "any
+     * commandPermissions change" is exactly the kind of blanket grant that
+     * lets a later turn widen its own permissions.
+     */
+    async requestConfigApproval(args: {
+        sessionId: string;
+        toolCallId: string;
+        /** Config fields the patch touches — shown on the approval prompt. */
+        fields: readonly string[];
+        signal?: AbortSignal;
+    }): Promise<CommandPermissionDecision> {
+        const evaluation: CommandEvaluation = {
+            behavior: "ask",
+            risk: "workspaceWrite",
+            reason: "changes the global taco configuration",
+            // Not persistable — see the method doc.
+            persistentAllowed: false,
+        };
+        if (!this.hasApprover()) {
+            return { approved: false, scope: "once", evaluation, denialReason: "no_approver" };
+        }
+
+        // Same display-context resolution as the command path, so a
+        // subagent's request lands on the root agent's tool card.
+        let displaySessionId = args.sessionId;
+        let displayToolCallId: string | undefined;
+        if (this.resolveDisplayContext) {
+            try {
+                const ctx = await this.resolveDisplayContext(args.sessionId);
+                displaySessionId = ctx.displaySessionId;
+                displayToolCallId = ctx.displayToolCallId;
+            } catch {
+                // keep main-session fallback shape
+            }
+        }
+
+        const request: CommandPermissionRequest = {
+            requestId: randomUUID(),
+            sessionId: asSessionId(args.sessionId),
+            toolCallId: asToolCallId(args.toolCallId),
+            command: `config: ${args.fields.join(", ")}`,
+            evaluation,
+            kind: "config",
+            configFields: args.fields,
+            displaySessionId: asSessionId(displaySessionId),
+            displayToolCallId:
+                displayToolCallId === undefined ? undefined : asToolCallId(displayToolCallId),
+        };
+        return await this.awaitDecision(request, args.signal);
+    }
+
+    /**
+     * Park a request until the user answers, the abort signal fires, or the
+     * timeout elapses. Every settle path funnels through `finish`, which is
+     * also how the UI learns about a non-user outcome.
+     */
+    private awaitDecision(
+        request: CommandPermissionRequest,
+        signal: AbortSignal | undefined,
+    ): Promise<CommandPermissionDecision> {
+        return new Promise<CommandPermissionDecision>((resolve) => {
             const finish = (decision: CommandPermissionDecision) => {
                 if (timer) clearTimeout(timer);
                 this.pending.delete(request.requestId);
-                args.signal?.removeEventListener("abort", onAbort);
+                signal?.removeEventListener("abort", onAbort);
                 resolve(decision);
-                // Every settle path (user, timeout, abort, cleanup) funnels
-                // through here — the UI's only way to learn about the non-user ones.
                 this.emit("resolved", { request, decision });
             };
             const onAbort = () =>
-                finish({ approved: false, scope: "once", evaluation, denialReason: "aborted" });
+                finish({
+                    approved: false,
+                    scope: "once",
+                    evaluation: request.evaluation,
+                    denialReason: "aborted",
+                });
             const timer = setTimeout(() => {
                 finish({
                     approved: false,
                     scope: "once",
-                    evaluation,
+                    evaluation: request.evaluation,
                     denialReason: "timeout",
                 });
             }, this.requestTimeoutMs);
             this.pending.set(request.requestId, { request, resolve: finish, timer });
-            args.signal?.addEventListener("abort", onAbort, { once: true });
+            signal?.addEventListener("abort", onAbort, { once: true });
             this.emit("requested", request);
         });
     }

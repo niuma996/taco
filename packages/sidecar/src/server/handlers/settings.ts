@@ -11,6 +11,7 @@
 
 import type {
     ChannelInstanceConfigView,
+    GlobalConfigPatch,
     SettingsGetParams,
     SettingsWriteParams,
     TacoGlobalConfigShape,
@@ -126,6 +127,133 @@ function fanoutSetter(
     }
 }
 
+/**
+ * Write a global-config patch and propagate it to every live workspace.
+ *
+ * Shared by `settings.write` (the desktop's own path — the user is at the
+ * settings pane) and `config.patch` (the model's path — the change is
+ * approved first). Both must land the same way: a config change that
+ * persists but does not reach the running workspaces would leave the app
+ * showing stale settings until the next restart.
+ *
+ * Returns the masked view of the config after the write.
+ */
+export function applyGlobalConfigPatch(
+    server: ServerRpcSurface,
+    serverRegistry: ServerRegistry | undefined,
+    globalPatch: GlobalConfigPatch,
+): TacoGlobalConfigView {
+    // Accept raw patch (may include raw key strings for write),
+    // persist as-is, but return a masked view.
+    const next = saveGlobalConfig(globalPatch);
+    // Hot-update apiKeys: push the latest merged apiKeys from disk
+    // into ProviderKeyStore. pi reads keys lazily via
+    // CredentialStore.read per provider id — no catalog recompute.
+    if (globalPatch.apiKeys !== undefined) {
+        server.providerKeyStore.update(next.apiKeys ?? {});
+    }
+    // Replace custom providers: push to existing workspaces'
+    // ModelRegistry for reconcile (add/remove custom ids, leave
+    // built-ins alone); new workspaces read the latest on creation.
+    // Only when the patch itself contains customProviders — since
+    // saveGlobalConfig is a merge, an unrelated field write would
+    // also make next.customProviders non-empty and trigger a
+    // pointless push.
+    if ("customProviders" in globalPatch) {
+        fanoutSetter(
+            server,
+            serverRegistry,
+            (s) => s.setCustomProviders?.(next.customProviders ?? []),
+            "setCustomProviders",
+        );
+    }
+    // Both model-list maps go through one call: the registry applies
+    // the hide filter and the extras append in the same wrapper, so
+    // pushing only the changed half would drop the other one's
+    // effect. Unchanged halves come from the merged `next`.
+    const modelListsChanged =
+        "providerExtraModels" in globalPatch || "providerHiddenModels" in globalPatch;
+    if (modelListsChanged) {
+        fanoutSetter(
+            server,
+            serverRegistry,
+            (s) =>
+                s.setProviderModelEdits?.(
+                    next.providerExtraModels ?? {},
+                    next.providerHiddenModels ?? {},
+                ),
+            "setProviderModelEdits",
+        );
+    }
+    // Notify the desktop that the model catalog may have changed
+    // (new apiKeys unlocked a provider, customProviders added/removed
+    // entries). Desktop re-pulls providers.list / session.listModels
+    // to refresh the Model menu without a restart.
+    if (
+        "apiKeys" in globalPatch ||
+        "customProviders" in globalPatch ||
+        "providerExtraModels" in globalPatch ||
+        "providerHiddenModels" in globalPatch
+    ) {
+        fanoutSetter(
+            server,
+            serverRegistry,
+            (s) => s.broadcastModelsChanged(),
+            "broadcastModelsChanged",
+        );
+    }
+    // Invalidate compaction caches across all workspaces: after
+    // a user changes the threshold, the current session's next
+    // `effectiveCompaction()` reads the new value immediately
+    // (no TTL wait). Only when the patch itself contains
+    // compaction — same merge-semantics reason as above.
+    if ("compaction" in globalPatch) {
+        fanoutSetter(
+            server,
+            serverRegistry,
+            (s) => s.invalidateCompactionCaches(),
+            "invalidateCompactionCaches",
+        );
+    }
+    // Hot-reload instructions config across all workspaces. The
+    // context hook reads via a lazy thunk on every LLM call, so
+    // no per-session invalidation is needed. Like compaction,
+    // only fire when the patch itself contains the field — a
+    // merge that happens to land on the key without the user
+    // editing it would otherwise trigger a pointless re-resolve.
+    if ("instructions" in globalPatch) {
+        fanoutSetter(
+            server,
+            serverRegistry,
+            (s) => s.refreshInstructions(next.instructions),
+            "refreshInstructions",
+        );
+    }
+    // Hot-reload the default model across all workspaces. Without
+    // this, a workspace built before the user picked a provider
+    // keeps its construction-time fallback (first catalog model,
+    // typically anthropic/*), so the next session.create fails
+    // with "Provider is not configured" even though the user set
+    // a valid default. Fire when either field is in the patch —
+    // defaultProvider scopes the defaultModel lookup, so a change
+    // to either must re-resolve.
+    //
+    // A model-list edit moves the catalog under the default too:
+    // renaming an extra model leaves `defaultModel` pointing at
+    // an id that is gone, and the workspace would keep serving
+    // the stale model object. Re-resolve after the catalog has
+    // been rewritten (the model-edit fanout above runs first).
+    if ("defaultModel" in globalPatch || "defaultProvider" in globalPatch || modelListsChanged) {
+        fanoutSetter(
+            server,
+            serverRegistry,
+            (s) => s.setDefaultModel?.(next.defaultModel, next.defaultProvider),
+            "setDefaultModel",
+        );
+    }
+    return toView(next);
+}
+
 export function registerSettingsHandlers(): void {
     let writeQueue: Promise<void> = Promise.resolve();
     registerMethod(
@@ -159,120 +287,7 @@ export function registerSettingsHandlers(): void {
                     );
                 }
                 try {
-                    // Accept raw patch (may include raw key strings for write),
-                    // persist as-is, but return a masked view.
-                    const next = saveGlobalConfig(globalPatch);
-                    // Hot-update apiKeys: push the latest merged apiKeys from disk
-                    // into ProviderKeyStore. pi reads keys lazily via
-                    // CredentialStore.read per provider id — no catalog recompute.
-                    if (globalPatch.apiKeys !== undefined) {
-                        server.providerKeyStore.update(next.apiKeys ?? {});
-                    }
-                    // Replace custom providers: push to existing workspaces'
-                    // ModelRegistry for reconcile (add/remove custom ids, leave
-                    // built-ins alone); new workspaces read the latest on creation.
-                    // Only when the patch itself contains customProviders — since
-                    // saveGlobalConfig is a merge, an unrelated field write would
-                    // also make next.customProviders non-empty and trigger a
-                    // pointless push.
-                    if ("customProviders" in globalPatch) {
-                        fanoutSetter(
-                            server,
-                            serverRegistry,
-                            (s) => s.setCustomProviders?.(next.customProviders ?? []),
-                            "setCustomProviders",
-                        );
-                    }
-                    // Both model-list maps go through one call: the registry applies
-                    // the hide filter and the extras append in the same wrapper, so
-                    // pushing only the changed half would drop the other one's
-                    // effect. Unchanged halves come from the merged `next`.
-                    const modelListsChanged =
-                        "providerExtraModels" in globalPatch ||
-                        "providerHiddenModels" in globalPatch;
-                    if (modelListsChanged) {
-                        fanoutSetter(
-                            server,
-                            serverRegistry,
-                            (s) =>
-                                s.setProviderModelEdits?.(
-                                    next.providerExtraModels ?? {},
-                                    next.providerHiddenModels ?? {},
-                                ),
-                            "setProviderModelEdits",
-                        );
-                    }
-                    // Notify the desktop that the model catalog may have changed
-                    // (new apiKeys unlocked a provider, customProviders added/removed
-                    // entries). Desktop re-pulls providers.list / session.listModels
-                    // to refresh the Model menu without a restart.
-                    if (
-                        "apiKeys" in globalPatch ||
-                        "customProviders" in globalPatch ||
-                        "providerExtraModels" in globalPatch ||
-                        "providerHiddenModels" in globalPatch
-                    ) {
-                        fanoutSetter(
-                            server,
-                            serverRegistry,
-                            (s) => s.broadcastModelsChanged(),
-                            "broadcastModelsChanged",
-                        );
-                    }
-                    // Invalidate compaction caches across all workspaces: after
-                    // a user changes the threshold, the current session's next
-                    // `effectiveCompaction()` reads the new value immediately
-                    // (no TTL wait). Only when the patch itself contains
-                    // compaction — same merge-semantics reason as above.
-                    if ("compaction" in globalPatch) {
-                        fanoutSetter(
-                            server,
-                            serverRegistry,
-                            (s) => s.invalidateCompactionCaches(),
-                            "invalidateCompactionCaches",
-                        );
-                    }
-                    // Hot-reload instructions config across all workspaces. The
-                    // context hook reads via a lazy thunk on every LLM call, so
-                    // no per-session invalidation is needed. Like compaction,
-                    // only fire when the patch itself contains the field — a
-                    // merge that happens to land on the key without the user
-                    // editing it would otherwise trigger a pointless re-resolve.
-                    if ("instructions" in globalPatch) {
-                        fanoutSetter(
-                            server,
-                            serverRegistry,
-                            (s) => s.refreshInstructions(next.instructions),
-                            "refreshInstructions",
-                        );
-                    }
-                    // Hot-reload the default model across all workspaces. Without
-                    // this, a workspace built before the user picked a provider
-                    // keeps its construction-time fallback (first catalog model,
-                    // typically anthropic/*), so the next session.create fails
-                    // with "Provider is not configured" even though the user set
-                    // a valid default. Fire when either field is in the patch —
-                    // defaultProvider scopes the defaultModel lookup, so a change
-                    // to either must re-resolve.
-                    //
-                    // A model-list edit moves the catalog under the default too:
-                    // renaming an extra model leaves `defaultModel` pointing at
-                    // an id that is gone, and the workspace would keep serving
-                    // the stale model object. Re-resolve after the catalog has
-                    // been rewritten (the model-edit fanout above runs first).
-                    if (
-                        "defaultModel" in globalPatch ||
-                        "defaultProvider" in globalPatch ||
-                        modelListsChanged
-                    ) {
-                        fanoutSetter(
-                            server,
-                            serverRegistry,
-                            (s) => s.setDefaultModel?.(next.defaultModel, next.defaultProvider),
-                            "setDefaultModel",
-                        );
-                    }
-                    return { global: toView(next) };
+                    return { global: applyGlobalConfigPatch(server, serverRegistry, globalPatch) };
                 } catch (e) {
                     throw new RpcHandlerError(
                         ErrorCodes.InvalidValue,

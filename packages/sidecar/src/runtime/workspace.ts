@@ -78,7 +78,7 @@ import {
     type TaskPushAdapter,
     type TaskSnapshotPublisher,
 } from "../tasks/taskPushAdapter.ts";
-import type { SelfRpcCall, TacoToolContext } from "../tools/context.ts";
+import type { SelfRpcCall, TacoToolContextBase } from "../tools/context.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
@@ -804,7 +804,7 @@ export class WorkspaceRuntime extends EventEmitter {
      * re-keyed actor after `setImChannel`) hot-update without reattaching
      * sessions; nothing it captures changes after construction today.
      */
-    private buildToolContextThunk(options: WorkspaceRuntimeOptions): () => TacoToolContext {
+    private buildToolContextThunk(options: WorkspaceRuntimeOptions): () => TacoToolContextBase {
         // Both memory.upsert and jobs.* close over this in their
         // constructor-free factory; tools read it from the harness's
         // `toolContext` instead of taking deps. id uses `self-${random}` so log

@@ -1,6 +1,8 @@
 ---
 name: create-skill
 description: Use when creating a new skill, adding scripts or reference files to one, editing an existing skill's behavior, or troubleshooting why a skill isn't loading or triggering.
+metadata:
+  version: "1.0.0"
 ---
 
 # Creating a skill

@@ -134,12 +134,28 @@ export interface CommandEvaluation {
     /** False when a stored approval cannot safely apply to this syntax. */
     persistentAllowed?: boolean;
 }
+/**
+ * What a pending approval is about.
+ *
+ * `command` is the default and the historical shape: a shell command the
+ * broker evaluated. `config` is a global-config change — there is no command
+ * to evaluate, so the broker asks unconditionally and the UI shows the fields
+ * being changed instead of a command line.
+ */
+export type PermissionRequestKind = "command" | "config";
 export interface CommandPermissionRequest {
     requestId: string;
     sessionId: SessionId;
     toolCallId: ToolCallId;
     command: string;
     evaluation: CommandEvaluation;
+    /** Absent means "command" — the shape every pre-config client expects. */
+    kind?: PermissionRequestKind;
+    /**
+     * For kind="config": the config fields being changed, for the approval
+     * prompt to show. Empty for kind="command".
+     */
+    configFields?: readonly string[];
     /** Root session id for UI routing — == sessionId for main-session requests. */
     displaySessionId?: SessionId;
     /** Root agent toolCallId — == toolCallId for main-session requests. */
@@ -485,6 +501,35 @@ export interface InstructionsConfig {
 export interface SettingsWriteResult {
     /** Sidecar global config view after write-back; key fields are masked. */
     global: TacoGlobalConfigView;
+}
+
+/**
+ * `config.patch` RPC params — the model's path to the global config.
+ *
+ * Distinct from `settings.write`: the desktop writes the config itself and
+ * needs no approval, while a change proposed by a model must be approved by
+ * the user first. A config change can disable the very approvals that would
+ * review it, so the write is gated here rather than by the caller.
+ */
+export interface ConfigPatchParams {
+    /** Workspace the calling session belongs to. */
+    workspace: WorkspaceId;
+    /** Session the change was proposed from — the approval prompt routes to it. */
+    sessionId: SessionId;
+    /** Tool call that proposed the change, so the prompt lands on its card. */
+    toolCallId: ToolCallId;
+    /** The fields to change. Only these are touched. */
+    patch: GlobalConfigPatch;
+}
+
+/** `config.patch` RPC result. */
+export interface ConfigPatchResult {
+    /** True when the user approved the change and it was written. */
+    approved: boolean;
+    /** The config fields the patch touched. */
+    fields: string[];
+    /** Config view after the write (masked). Absent when declined. */
+    global?: TacoGlobalConfigView;
 }
 
 /**

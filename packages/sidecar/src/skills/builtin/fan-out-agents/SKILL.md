@@ -3,6 +3,8 @@ name: fan-out-agents
 description: Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies. Dispatches one `agent` tool call per problem domain inside a single turn so each spawns its own sub-session and they execute concurrently. Inline only — must not be loaded as a subagent skill.
 runAs: inline
 inlineOnly: true
+metadata:
+  version: "1.0.0"
 ---
 
 # Fan-Out Agents

@@ -3,6 +3,8 @@ name: deep-review
 description: Use when reviewing a change too large or too interconnected for one pass — many files, several modules, or high blast radius. Dispatches 2-5 `reviewer` subagents in a single turn, each carrying a different lens (concern, module, or role), then cross-checks their findings against each other and the actual files and synthesizes one ranked review. Optionally pairs with `verification` to empirically settle testable claims. Inline only.
 runAs: inline
 inlineOnly: true
+metadata:
+  version: "1.0.0"
 ---
 
 # Deep Review

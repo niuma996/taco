@@ -192,6 +192,9 @@
     "loading": "Loading…",
     "badgeUpdateAvailable": "Update available"
   },
+  "configChange": {
+    "risk": "Config change"
+  },
   "settings": {
     "appearanceTitle": "Theme",
     "appearanceDesc": "Choose a light or dark theme, or follow your operating system.",

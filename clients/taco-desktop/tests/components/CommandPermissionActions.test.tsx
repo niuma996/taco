@@ -155,3 +155,43 @@ it("disables persistent approval for unsupported syntax", () => {
         ).disabled,
     ).toBe(true);
 });
+
+describe("CommandPermissionPrompt config changes", () => {
+    const configRequest: CommandPermissionRequest = {
+        requestId: "req-cfg",
+        sessionId: asSessionId("s1"),
+        toolCallId: asToolCallId("tc-1"),
+        command: "config: defaultModel",
+        evaluation: {
+            behavior: "ask",
+            risk: "workspaceWrite",
+            reason: "changes the global taco configuration",
+            persistentAllowed: false,
+        },
+        kind: "config",
+        configFields: ["defaultModel", "thinkingLevel"],
+    };
+
+    it("lists the fields being changed instead of a command", () => {
+        render(<CommandPermissionPrompt request={configRequest} onResolve={() => {}} />);
+        expect(screen.getByText("defaultModel")).toBeTruthy();
+        expect(screen.getByText("thinkingLevel")).toBeTruthy();
+    });
+
+    it("offers only one-time approval — a config change has no session scope", () => {
+        render(<CommandPermissionPrompt request={configRequest} onResolve={() => {}} />);
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "settings.permissionsAllowOnce",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(false);
+        expect(
+            screen.queryByRole("button", { name: "settings.permissionsAllowSession" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "settings.permissionsAlwaysAllow" }),
+        ).toBeNull();
+    });
+});

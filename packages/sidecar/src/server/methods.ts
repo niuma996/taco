@@ -11,6 +11,7 @@ import { registerCatalogHandlers } from "./handlers/catalog.ts";
 import { registerChannelsHandlers } from "./handlers/channels.ts";
 import { registerCheckpointsHandlers } from "./handlers/checkpoints.ts";
 import { registerCommandPermissionHandlers } from "./handlers/commandPermission.ts";
+import { registerConfigHandlers } from "./handlers/config.ts";
 import { registerExtensionsHandlers } from "./handlers/extensions.ts";
 import { registerImPolicyHandlers } from "./handlers/imPolicy.ts";
 import { registerInitializeHandler } from "./handlers/initialize.ts";
@@ -46,6 +47,7 @@ export function registerBuiltinMethods(): void {
     registerSubagentHandlers();
     registerCatalogHandlers();
     registerSettingsHandlers();
+    registerConfigHandlers();
     registerExtensionsHandlers();
     registerChannelsHandlers();
     registerImPolicyHandlers();

@@ -15,7 +15,7 @@
  * declared `unknown` when they exist only to reach a later position.
  */
 
-import type { WorkspaceId } from "@taco-ai/protocol";
+import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
 import type { Actor } from "../scheduler/types.ts";
 
@@ -27,7 +27,12 @@ import type { Actor } from "../scheduler/types.ts";
  */
 export type SelfRpcCall = <P, R>(method: string, workspace: WorkspaceId, params: P) => Promise<R>;
 
-export interface TacoToolContext {
+/**
+ * The part of the tool context the WORKSPACE supplies: the execution
+ * environment and the in-process RPC entry. The session identity is added
+ * on top by the attached session (see `TacoToolContext`).
+ */
+export interface TacoToolContextBase {
     /** pi execution env (fs + shell). Required — read / write / shell read it. */
     env: NodeExecutionEnv;
     /** Session cwd — every self-RPC call's `workspace` parameter. */
@@ -39,4 +44,17 @@ export interface TacoToolContext {
      *  (admin / test workspaces); JobsController treats undefined actor as
      *  "see everything". */
     actor?: Actor;
+}
+
+export interface TacoToolContext extends TacoToolContextBase {
+    /** The session this tool call belongs to. */
+    sessionId: SessionId;
+    /**
+     * Whether the caller is the user's own session or a delegated one.
+     * "subagent" means a child the model spawned — it runs without the
+     * user watching, so tools that change global state refuse it.
+     */
+    sessionKind: "main" | "subagent";
+    /** True for IM workspaces — a third party drives the conversation. */
+    isIm: boolean;
 }

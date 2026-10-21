@@ -116,6 +116,15 @@
     border-radius: var(--radius-xs);
     word-break: break-all;
 }
+/* A config change lists the fields it touches, one per line — there is no
+   command to show. */
+.config-change-field {
+    word-break: break-all;
+}
+
+.config-change-field + .config-change-field {
+    margin-top: 0.15rem;
+}
 .permission-prompt-actions {
     display: flex;
     flex-wrap: wrap;

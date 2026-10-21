@@ -191,6 +191,9 @@
     "loading": "加载中…",
     "badgeUpdateAvailable": "有可用更新"
   },
+  "configChange": {
+    "risk": "配置变更"
+  },
   "settings": {
     "appearanceTitle": "主题",
     "appearanceDesc": "选择浅色或深色主题,或跟随操作系统。",
