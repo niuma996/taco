@@ -633,6 +633,16 @@ export class AttachedSession extends EventEmitter {
                 // `cd` into. Subagents inherit them: the grant belongs to the
                 // workspace, not to one session.
                 getMutationGateAssociatedRoots: args.getAssociatedRoots,
+                // An IM conversation is driven by a third party, so its reads
+                // are fenced to the workspace's own directory plus the
+                // directories the user associated with it. A local session's
+                // reads stay unfenced.
+                mutationGateReadRoots: args.isIm
+                    ? {
+                          primary: args.env.cwd,
+                          getAssociated: args.getAssociatedRoots,
+                      }
+                    : undefined,
                 checkpointManager: attached.checkpoints,
                 // Passed through, not currently read: keeps the pinOnce wiring
                 // live end-to-end so a future pinOnce tag only touches its hook.

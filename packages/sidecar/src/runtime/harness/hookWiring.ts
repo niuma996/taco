@@ -167,6 +167,18 @@ export interface HookWiringOptions {
      */
     getMutationGateAssociatedRoots?: () => readonly string[];
     /**
+     * Where a read-only tool may reach (see `MutationGateOptions.readRoots`).
+     *
+     * Set for IM workspaces: a conversation driven by a third party may read
+     * only inside the workspace's own directory and the directories the user
+     * associated with it. Absent for local sessions, whose reads stay
+     * unfenced.
+     */
+    mutationGateReadRoots?: {
+        readonly primary: string;
+        readonly getAssociated?: () => readonly string[];
+    };
+    /**
      * Turn-scoped pre-write snapshots. When present, the mutation gate captures
      * each allowed `write` / `edit` target before it changes, so a turn's edits
      * can be rolled back. Absent → no snapshots (the gate still enforces
@@ -508,6 +520,7 @@ export async function wireHarnessHooks(
             root: opts.mutationGateRoot,
             extraWriteRoots: opts.mutationGateExtraWriteRoots,
             getAssociatedRoots: opts.getMutationGateAssociatedRoots,
+            readRoots: opts.mutationGateReadRoots,
             getPlanState: () => getActiveTasksState().planState,
             captureBeforeWrite: checkpoints
                 ? (path) => checkpoints.captureBeforeWrite(path)

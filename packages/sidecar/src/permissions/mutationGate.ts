@@ -105,6 +105,23 @@ export interface MutationGateOptions {
      */
     readonly isKnownReadOnly?: (toolName: string) => boolean | Promise<boolean>;
     /**
+     * The directories a read-only tool may reach, when set.
+     *
+     * `read` / `grep` / `glob` are exempt from the unknown-tool path fence
+     * (they legitimately take absolute paths), so without this they can read
+     * anywhere on the machine. An IM conversation is driven by a third party,
+     * so its reads are fenced to the workspace's own directory plus the
+     * directories the user associated with it.
+     *
+     * The primary is the workspace's execution directory; the associated
+     * roots come from `getAssociatedRoots`. Unset (a local session) leaves
+     * reads unfenced.
+     */
+    readonly readRoots?: {
+        readonly primary: string;
+        readonly getAssociated?: () => readonly string[];
+    };
+    /**
      * Snapshot the pre-write content of an allowed target. Invoked only after
      * containment and plan mode have passed, so a refused call never produces a
      * checkpoint. A snapshot failure does not block the write — it is reported
@@ -116,6 +133,43 @@ export interface MutationGateOptions {
         reason?: string;
     }>;
     readonly onSnapshotFailure?: (path: string, reason: string) => void;
+}
+
+/**
+ * The read-only tools whose `path` argument names a file or a search root.
+ * `read` takes a file; `grep` and `glob` take a directory to search in.
+ */
+const READ_PATH_TOOLS = new Set(["read", "grep", "glob"]);
+
+/**
+ * Refuse a read that lands outside the allowed roots.
+ *
+ * The allowed set is the workspace's execution directory plus the
+ * directories the user associated with it. A read outside is refused
+ * outright — the caller is told it has no access, and told not to try
+ * again, because a third-party-driven conversation that keeps retrying
+ * would otherwise turn a denial into a search loop.
+ *
+ * Returns undefined when the read is allowed (or when the tool takes no
+ * path argument).
+ */
+async function fenceReadPath(
+    event: ToolCallGateEvent,
+    roots: { primary: string; getAssociated?: () => readonly string[] },
+): Promise<ToolCallGateResult | undefined> {
+    if (!READ_PATH_TOOLS.has(event.toolName)) return undefined;
+    const raw = event.input.path;
+    // `read` requires a path; `grep` / `glob` default to the cwd, which is
+    // inside the primary root by construction.
+    if (typeof raw !== "string" || raw.trim() === "") return undefined;
+    const target = normalizeBuiltinToolPath(raw);
+    const associated = roots.getAssociated?.() ?? [];
+    const resolved = await resolveWithinRootSet(roots.primary, associated, target);
+    if (resolved.ok) return undefined;
+    return {
+        block: true,
+        reason: `${event.toolName} cannot read ${raw}: this session has no access outside its own directory. Do not retry it or look for another way to read the file — tell the user it is outside your access.`,
+    };
 }
 
 export function createMutationGateHook(
@@ -220,6 +274,15 @@ export function createMutationGateHook(
         // `../v2/endpoint`) while proving nothing about where the tool would
         // actually write. An absolute path has no such ambiguity. Relative
         // escapes are left to the tool's own sandbox by design.
+        //
+        // The read fence comes FIRST: a known-read-only tool is exempt from
+        // the unknown-tool fence below, so a read that skipped this check
+        // would reach anywhere on the machine.
+        if (opts.readRoots) {
+            const refusal = await fenceReadPath(event, opts.readRoots);
+            if (refusal) return refusal;
+        }
+
         if (await opts.isKnownReadOnly?.(event.toolName)) return undefined;
 
         for (const key of PATH_LIKE_KEYS) {

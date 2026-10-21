@@ -427,4 +427,78 @@ describe("mutation gate", () => {
             assert.equal(result?.block, true);
         });
     });
+
+    // An IM conversation is driven by a third party, so its reads are fenced
+    // to the workspace's own directory plus the directories the user
+    // associated with it. A local session's reads stay unfenced.
+    describe("read fence", () => {
+        let associated: string;
+        let fenced: ReturnType<typeof createMutationGateHook>;
+
+        beforeEach(() => {
+            associated = join(outside, "associated");
+            mkdirSync(associated, { recursive: true });
+            fenced = createMutationGateHook({
+                root,
+                getPlanState: () => planState,
+                isKnownReadOnly,
+                readRoots: { primary: root, getAssociated: () => [associated] },
+            });
+        });
+
+        it("allows a read inside the workspace", async () => {
+            const result = await fenced({ toolName: "read", input: { path: "src/a.ts" } });
+            assert.equal(result, undefined);
+        });
+
+        it("allows a read inside an associated directory", async () => {
+            const result = await fenced({
+                toolName: "read",
+                input: { path: join(associated, "a.ts") },
+            });
+            assert.equal(result, undefined);
+        });
+
+        it("refuses a read outside both, and says not to retry", async () => {
+            const result = await fenced({
+                toolName: "read",
+                input: { path: join(outside, "secret.txt") },
+            });
+            assert.equal(result?.block, true);
+            assert.match(result?.reason ?? "", /no access outside/);
+            assert.match(result?.reason ?? "", /Do not retry it/);
+        });
+
+        it("refuses a relative path that escapes the workspace", async () => {
+            const result = await fenced({
+                toolName: "read",
+                input: { path: "../outside/secret.txt" },
+            });
+            assert.equal(result?.block, true);
+        });
+
+        it("fences grep and glob search roots too", async () => {
+            for (const toolName of ["grep", "glob"]) {
+                const result = await fenced({
+                    toolName,
+                    input: { path: outside, pattern: "x" },
+                });
+                assert.equal(result?.block, true, `${toolName} must be fenced`);
+            }
+        });
+
+        it("leaves reads unfenced when no read roots are set", async () => {
+            const result = await gate({ toolName: "read", input: { path: join(outside, "a.ts") } });
+            assert.equal(result, undefined);
+        });
+
+        it("fences a read that escapes through a symlink", async () => {
+            symlinkSync(outside, join(root, "escape"), "dir");
+            const result = await fenced({
+                toolName: "read",
+                input: { path: join(root, "escape", "secret.txt") },
+            });
+            assert.equal(result?.block, true);
+        });
+    });
 });
