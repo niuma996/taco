@@ -43,19 +43,19 @@ export interface WorkspaceAssociationKey {
     readonly id: string;
 }
 
-/** `workspace.getAssociations` params — read the set stored at one key. */
+/** `workspace.associations.get` params — read the set stored at one key. */
 export interface WorkspaceAssociationsGetParams {
     readonly key: WorkspaceAssociationKey;
 }
 
-/** `workspace.getAssociations` result — the set stored at one key. */
+/** `workspace.associations.get` result — the set stored at one key. */
 export interface WorkspaceAssociationsGetResult {
     /** Absolute directory paths. Empty when the key has no entry. */
     readonly roots: readonly string[];
 }
 
 /**
- * `workspace.setAssociations` params — replace the set stored at one key.
+ * `workspace.associations.set` params — replace the set stored at one key.
  *
  * The whole set is replaced, not merged: the client sends the full list it
  * wants. A partial update would need a read-modify-write round trip whose
@@ -66,23 +66,23 @@ export interface WorkspaceAssociationsSetParams {
     readonly roots: readonly string[];
 }
 
-/** `workspace.setAssociations` result — the set as stored. */
+/** `workspace.associations.set` result — the set as stored. */
 export interface WorkspaceAssociationsSetResult {
     readonly roots: readonly string[];
 }
 
 /**
- * `workspace.resolveAssociations` params — the effective set for a workspace.
+ * `workspace.associations.resolve` params — the effective set for a workspace.
  *
- * Distinct from `getAssociations`: this applies the fallback rule (a
- * conversation's own entry wins over its channel's) so the client does not
+ * Distinct from `workspace.associations.get`: this applies the fallback rule
+ * (a conversation's own entry wins over its channel's) so the client does not
  * have to reimplement it.
  */
 export interface WorkspaceAssociationsResolveParams {
     readonly workspace: WorkspaceId;
 }
 
-/** `workspace.resolveAssociations` result. */
+/** `workspace.associations.resolve` result. */
 export interface WorkspaceAssociationsResolveResult {
     /** The effective roots — the conversation's own entry, else the channel's. */
     readonly roots: readonly string[];

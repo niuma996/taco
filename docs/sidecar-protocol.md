@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.2.10
+> **版本**: 0.3.0
 > **传输**: NDJSON over stdio
 > **来源**: 源码为唯一权威来源——`packages/shared/rpcMethods.ts`（RPC method 名）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -118,6 +118,9 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `workspace.list` | workspace.* |
 | `workspace.ensure` | workspace.* |
 | `workspace.dispose` | workspace.* |
+| `workspace.associations.get` | workspace.* |
+| `workspace.associations.set` | workspace.* |
+| `workspace.associations.resolve` | workspace.* |
 | `session.list` | session.* |
 | `session.create` | session.* |
 | `session.attach` | session.* |
@@ -149,6 +152,7 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `provider.testConnection` | provider.* |
 | `settings.get` | settings.* |
 | `settings.write` | settings.* |
+| `config.patch` | config.* |
 | `extensions.status` | extensions.* |
 | `channels.list` | channels.* |
 | `channels.listConversations` | channels.* |
@@ -238,6 +242,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `session.tool_call_update` | ToolCallUpdate |
 | `session.tool_call_end` | ToolCallEnd |
 | `command_permission.requested` | CommandPermissionRequested |
+| `command_permission.resolved` | CommandPermissionResolved |
 | `subagent.spawned` | SubagentSpawned |
 | `subagent.settled` | SubagentSettled |
 | `session.error` | Error |
@@ -253,6 +258,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `im.tools_enabled` | ImToolsEnabled |
 | `im.policy_changed` | ImPolicyChanged |
 | `im.workspaces_invalidated` | ImWorkspacesInvalidated |
+| `workspace.associations_changed` | WorkspaceAssociationsChanged |
 <!-- PUSH_TABLE_END -->
 
 **Push routing note**: `session.tool_call_*` frames carry a deduplication `id` equal to the `toolCallId`.  Clients may use this to merge incremental updates.  All other push frames should be accumulated by `workspace` + `session`.
