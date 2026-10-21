@@ -1,5 +1,6 @@
 /**
- * Handler-level unit tests for session.create rollback and setModel /
+ * Handler-level unit tests for session.create rollback (an `initialPrompt`
+ * failure removes only a transcript with no persisted message) and setModel /
  * setThinkingLevel error normalization.
  *
  * Uses a stub workspace to simulate attach/prompt/detach success/failure paths
@@ -43,6 +44,8 @@ interface WorkspaceStub {
     setSessionModel(id: SessionId, provider: string, modelId: string): Promise<void>;
     setSessionThinkingLevel(id: SessionId, level: string): Promise<void>;
     setPlaceholderTitle(id: SessionId, name: string): Promise<boolean>;
+    /** Last persisted message time; `undefined` models a transcript with no messages. */
+    getSessionActivityAt(id: SessionId): Promise<number | undefined>;
     /** Stub already resolved its default model. */
     defaultModel?: unknown;
 }
@@ -128,6 +131,15 @@ function makeStub(): WorkspaceStub {
             calls.push(`setPlaceholderTitle(${id},${name})`);
             return true;
         },
+        async getSessionActivityAt(id) {
+            calls.push(`getSessionActivityAt(${id})`);
+            const flags = attached as unknown as {
+                _activityAt?: number;
+                _failActivityProbe?: boolean;
+            };
+            if (flags._failActivityProbe) throw new Error("probe-boom");
+            return flags._activityAt;
+        },
         // Placeholder so session.create's defaultModel guard passes.
         defaultModel: { id: "stub-model" },
     };
@@ -148,72 +160,84 @@ before(() => {
     registerBuiltinMethods();
 });
 
+type StubFlags = {
+    _failAttach?: boolean;
+    _failPrompt?: boolean;
+    _activityAt?: number;
+    _failActivityProbe?: boolean;
+};
+
+function flagsOf(stub: WorkspaceStub): StubFlags {
+    return stub.attached as unknown as StubFlags;
+}
+
+async function createWithInitialPrompt(stub: WorkspaceStub, expectedMessage: string) {
+    const handler = getRegisteredMethod("session.create");
+    assert.ok(handler, "session.create should be registered");
+    const before = stub.calls.length;
+    await assert.rejects(
+        () =>
+            handler.handler(
+                makeCtx(stub, "session.create", {
+                    sessionId: "sess-1",
+                    cwd: "/tmp/test-ws",
+                    initialPrompt: "hello",
+                }),
+            ),
+        (e: unknown) => e instanceof Error && e.message === expectedMessage,
+    );
+    return stub.calls.slice(before);
+}
+
 describe("session.create rollback", () => {
-    it("rollback on prompt failure: detach + repo.delete + invalidate, no session.deleted", async () => {
+    it("removes the transcript when the turn failed before any message was persisted", async () => {
         const stub = makeStub();
-        // Make attach succeed, prompt fail
-        (stub.attached as unknown as { _failPrompt: boolean })._failPrompt = true;
-        const handler = getRegisteredMethod("session.create");
-        assert.ok(handler, "session.create should be registered");
-        const before = stub.calls.length;
-        await assert.rejects(
-            () =>
-                handler.handler(
-                    makeCtx(stub, "session.create", {
-                        sessionId: "sess-1",
-                        cwd: "/tmp/test-ws",
-                        initialPrompt: "hello",
-                    }),
-                ),
-            (e: unknown) => e instanceof Error && e.message === "boom",
-        );
-        const tail = stub.calls.slice(before);
-        // Order: attach -> prompt(fails) -> detach -> repo.delete -> invalidateListCache
-        const expectedAfterFail = ["detach(sess-1)", "repo.delete(sess-1)", "invalidateListCache"];
-        for (const expected of expectedAfterFail) {
-            assert.ok(
-                tail.includes(expected),
-                `expected call ${expected} in log, got: ${tail.join(", ")}`,
-            );
-        }
-        // Order guarantee: rollback sequence — detach -> repo.delete -> invalidateListCache.
-        // Uses lastIndexOf because the handler also calls invalidateListCache once after repo.create
-        // (on the success path cache refresh), which must not be confused with the rollback call.
+        flagsOf(stub)._failAttach = true;
+        const tail = await createWithInitialPrompt(stub, "attach-throw");
+        assert.ok(tail.includes("detach(sess-1)"), "detach should be called (idempotent)");
+        assert.ok(tail.includes("repo.delete(sess-1)"), "empty orphan jsonl should be deleted");
+        // The probe must read disk, not a cache that predates the failed turn.
         const iDetach = tail.indexOf("detach(sess-1)");
+        // The handler also invalidates once right after repo.create; only the
+        // call that follows the detach is the rollback's.
+        const iFirstInv = tail.indexOf("invalidateListCache", iDetach);
+        const iProbe = tail.indexOf("getSessionActivityAt(sess-1)");
         const iDelete = tail.indexOf("repo.delete(sess-1)");
-        const iInv = tail.lastIndexOf("invalidateListCache");
-        assert.ok(iDetach >= 0 && iDelete > iDetach && iInv > iDelete, "rollback order wrong");
-        // attach must precede prompt (verifies prompt was actually reached)
-        assert.ok(tail.indexOf("attach(sess-1)") < tail.indexOf("detach(sess-1)"));
+        assert.ok(iDetach >= 0 && iFirstInv > iDetach && iProbe > iFirstInv, "probe order wrong");
+        assert.ok(iDelete > iProbe, "repo.delete must come after the emptiness probe");
+        assert.ok(tail.lastIndexOf("invalidateListCache") > iDelete, "cache dropped after delete");
     });
 
-    it("rollback on attach failure: detach (no-op) + repo.delete + invalidate", async () => {
+    it("keeps the transcript when the prompt failed after messages were persisted", async () => {
         const stub = makeStub();
-        // Make attach itself throw
-        (stub.attached as unknown as { _failAttach: boolean })._failAttach = true;
-        const handler = getRegisteredMethod("session.create");
-        assert.ok(handler);
-        const before = stub.calls.length;
-        await assert.rejects(
-            () =>
-                handler.handler(
-                    makeCtx(stub, "session.create", {
-                        sessionId: "sess-1",
-                        cwd: "/tmp/test-ws",
-                        initialPrompt: "hello",
-                    }),
-                ),
-            (e: unknown) => e instanceof Error && e.message === "attach-throw",
+        flagsOf(stub)._failPrompt = true;
+        flagsOf(stub)._activityAt = Date.UTC(2026, 0, 1, 0, 5);
+        const tail = await createWithInitialPrompt(stub, "boom");
+        assert.ok(tail.indexOf("attach(sess-1)") < tail.indexOf("prompt(hello)"));
+        assert.ok(tail.includes("detach(sess-1)"), "the failed run's handle is still released");
+        assert.ok(
+            !tail.includes("repo.delete(sess-1)"),
+            `a conversation with persisted messages must survive, got: ${tail.join(", ")}`,
         );
-        const tail = stub.calls.slice(before);
-        // When attach fails, detach is a no-op (attached Map is empty) — still records the call
-        assert.ok(tail.includes("detach(sess-1)"), "detach should be called (idempotent)");
-        assert.ok(tail.includes("repo.delete(sess-1)"), "orphan jsonl should be deleted");
-        assert.ok(tail.includes("invalidateListCache"), "cache should be invalidated");
-        // Order: repo.delete must come after detach
-        const iDetach = tail.indexOf("detach(sess-1)");
-        const iDelete = tail.indexOf("repo.delete(sess-1)");
-        assert.ok(iDelete > iDetach, "repo.delete must come after detach");
+    });
+
+    it("keeps the transcript when the emptiness probe itself fails", async () => {
+        const stub = makeStub();
+        flagsOf(stub)._failPrompt = true;
+        flagsOf(stub)._failActivityProbe = true;
+        const tail = await createWithInitialPrompt(stub, "boom");
+        assert.ok(
+            !tail.includes("repo.delete(sess-1)"),
+            "an unreadable transcript cannot be proven empty, so it is not deleted",
+        );
+    });
+
+    it("never announces a deletion on failure (no session.deleted source)", async () => {
+        const stub = makeStub();
+        flagsOf(stub)._failPrompt = true;
+        flagsOf(stub)._activityAt = Date.UTC(2026, 0, 1, 0, 5);
+        const tail = await createWithInitialPrompt(stub, "boom");
+        assert.ok(!tail.some((c) => c.includes("deleteSession")));
     });
 
     it("happy path: no rollback calls, returns assistantMessage", async () => {

@@ -138,11 +138,17 @@ describe("createJobDispatcher — server resolver", () => {
             ok: true as const,
             result: { routedTo: "im" },
         }));
-        const fsServer = makeFakeServer(async (req) => ({
-            id: req.id,
-            ok: true as const,
-            result: { routedTo: "fs" },
-        }));
+        // The fs workspace defaults to `pin`, which probes for an existing
+        // session first; report none so the fire is a single create.
+        const fsServer = makeFakeServer(async (req) =>
+            req.method === "session.history"
+                ? {
+                      id: req.id,
+                      ok: false as const,
+                      error: { code: "not_found", message: "session not found" },
+                  }
+                : { id: req.id, ok: true as const, result: { routedTo: "fs" } },
+        );
         const dispatcher = createJobDispatcher((workspace) =>
             workspace.startsWith("im://") ? imServer : fsServer,
         );
@@ -155,8 +161,14 @@ describe("createJobDispatcher — server resolver", () => {
 
         assert.equal(imServer.calls.length, 2);
         assert.equal((imServer.calls[0].params as { workspace?: string }).workspace, imWorkspace);
-        assert.equal(fsServer.calls.length, 1);
-        assert.equal((fsServer.calls[0].params as { workspace?: string }).workspace, "/tmp/repo");
+        assert.deepEqual(
+            fsServer.calls.map((c) => (c.params as { workspace?: string }).workspace),
+            ["/tmp/repo", "/tmp/repo"],
+        );
+        assert.deepEqual(
+            fsServer.calls.map((c) => c.method),
+            ["session.history", "session.create"],
+        );
     });
 });
 
@@ -329,6 +341,13 @@ describe("createJobDispatcher — reuse strategy", () => {
 describe("createJobDispatcher — pin strategy", () => {
     it("first fire creates sched-pin-<jobId> and invokes onPinnedSessionCreated", async () => {
         const fake = makeFakeServer(async (req) => {
+            if (req.method === "session.history") {
+                return {
+                    id: req.id,
+                    ok: false as const,
+                    error: { code: "not_found", message: "session not found" },
+                };
+            }
             if (req.method === "session.create") {
                 const p = req.params as { sessionId?: string };
                 assert.equal(p.sessionId, "sched-pin-test-job");
@@ -386,6 +405,37 @@ describe("createJobDispatcher — pin strategy", () => {
         assert.deepEqual(methods, ["session.history", "session.attach", "session.prompt"]);
     });
 
+    it("adopts the session a failed first fire left behind instead of re-creating it", async () => {
+        // A first fire that is stopped or errors mid-turn keeps its transcript
+        // (session.create no longer deletes a session that has messages) but
+        // never reaches onPinnedSessionCreated. The next fire must reuse that
+        // session and pin it — session.create on the taken id would fail every
+        // tick from then on.
+        const fake = makeFakeServer(async (req) => {
+            if (req.method === "session.history") {
+                return { id: req.id, ok: true as const, result: { messages: [] } };
+            }
+            if (req.method === "session.attach" || req.method === "session.prompt") {
+                const p = req.params as { sessionId?: string };
+                assert.equal(p.sessionId, "sched-pin-test-job");
+                return { id: req.id, ok: true as const, result: null };
+            }
+            throw new Error(`unexpected method ${req.method}`);
+        });
+        let pinned: { jobId: string; sessionId: string } | undefined;
+        const dispatcher = createJobDispatcher(() => fake, {
+            onPinnedSessionCreated: async (jobId, sessionId) => {
+                pinned = { jobId, sessionId };
+            },
+        });
+        await dispatcher(invokeJob("/tmp/repo", "retry", { sessionStrategy: "pin" }));
+        assert.deepEqual(
+            fake.calls.map((c) => c.method),
+            ["session.history", "session.attach", "session.prompt"],
+        );
+        assert.deepEqual(pinned, { jobId: "test-job", sessionId: "sched-pin-test-job" });
+    });
+
     it("re-pins a fresh session when the pinned one is gone (self-heals)", async () => {
         // Previously this errored on every fire, forever: attach against a
         // deleted session throws an opaque `[upstream] Cannot read
@@ -422,10 +472,11 @@ describe("createJobDispatcher — pin strategy", () => {
                 pinnedSessionId: "sched-pin-gone",
             }),
         );
-        // Never attempted the attach against the dead id.
+        // Never attempted the attach against the dead id; the stored pin and
+        // the deterministic id are both probed before falling through.
         assert.deepEqual(
             fake.calls.map((c) => c.method),
-            ["session.history", "session.create"],
+            ["session.history", "session.history", "session.create"],
         );
         assert.deepEqual(repinned, { jobId: "test-job", sessionId: "sched-pin-test-job" });
     });

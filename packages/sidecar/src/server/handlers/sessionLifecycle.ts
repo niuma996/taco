@@ -160,13 +160,7 @@ export function registerSessionLifecycleHandlers(): void {
                     );
                     workspace.invalidateListCache();
                 } catch (e) {
-                    try {
-                        await workspace.detach(asSessionId(meta.id));
-                        await workspace.repo.delete(meta, harnessContext);
-                        workspace.invalidateListCache();
-                    } catch {
-                        // Cleanup is best-effort; swallow.
-                    }
+                    await rollbackCreatedSession(workspace, meta);
                     throw e;
                 }
             }
@@ -240,6 +234,39 @@ export function registerSessionLifecycleHandlers(): void {
 }
 
 // ───────── helpers (module-local; not exported) ─────────
+
+/**
+ * Undo `session.create` after its `initialPrompt` turn failed — but only while
+ * there is nothing to lose.
+ *
+ * The create+prompt pair is not atomic from the user's side: the prompt writes
+ * the user message (and tool calls, and any partial reply) to the transcript
+ * before the turn can fail, and an abort or a provider error fails it just the
+ * same. Deleting then would destroy a conversation the user watched happen —
+ * and for a scheduled run, the only record of what it did. So the transcript is
+ * removed only when no message was ever persisted (attach / model resolution
+ * failed first), which is the case this rollback exists for.
+ *
+ * Uncertainty keeps the session: if the probe itself fails we cannot tell an
+ * empty transcript from a full one, and a leftover empty session is cheap
+ * while a deleted one is not recoverable.
+ */
+async function rollbackCreatedSession(
+    workspace: WorkspaceRuntime,
+    meta: JsonlSessionMetadata,
+): Promise<void> {
+    const sessionId = asSessionId(meta.id);
+    try {
+        await workspace.detach(sessionId);
+        // The caches predate the failed turn; drop them so the probe reads disk.
+        workspace.invalidateListCache();
+        if ((await workspace.getSessionActivityAt(sessionId)) !== undefined) return;
+        await workspace.repo.delete(meta, harnessContext);
+        workspace.invalidateListCache();
+    } catch (err) {
+        log.error("session.create rollback failed; keeping the session", sessionId, err);
+    }
+}
 
 /**
  * How long a delete waits for each subagent it aborts to unwind before giving

@@ -17,6 +17,7 @@ export default defineConfig({
             "tests/hooks/useFilePreview.test.tsx",
             "tests/hooks/useImPolicy.test.tsx",
             "tests/hooks/useWorkspacesSteer.test.tsx",
+            "tests/hooks/useWorkspacesFirstTurn.test.tsx",
             "tests/hooks/useWorkspacesAttach.test.tsx",
             "tests/hooks/useWorkspacesNotifications.test.tsx",
             "tests/hooks/useWorkspacesDefaultCwdSettled.test.tsx",

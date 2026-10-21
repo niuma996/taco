@@ -260,10 +260,17 @@ describe("createJobDispatcher → session.create handler integration", () => {
         // Override dispatchRpc to also record the create order without
         // invoking the real handler (we want to assert call ORDER, not
         // jsonl shape — covered in the previous test). session.history
-        // is not in the chain because pinnedSessionId is unset, so the
-        // first call is session.create directly.
+        // probes the deterministic id even with no pinnedSessionId, so a
+        // transcript a failed first fire left behind is adopted, not re-created.
         server.dispatchRpc = async (req) => {
             callOrder.push(`rpc:${req.method}`);
+            if (req.method === "session.history") {
+                return {
+                    id: req.id,
+                    ok: false,
+                    error: { code: "not_found", message: "gone" },
+                } as RpcResponse;
+            }
             return {
                 id: req.id,
                 ok: true,
@@ -280,11 +287,10 @@ describe("createJobDispatcher → session.create handler integration", () => {
 
         await dispatcher(pinJob("/tmp/repo", { sessionStrategy: "pin" }));
 
-        // First-time pin fire with no pinnedSessionId skips the
-        // session.history probe — the dispatcher only probes when it
-        // has an id to validate. Callback lands strictly after the
-        // session.create rpc completes.
-        assert.deepEqual(callOrder, ["rpc:session.create", "callback"]);
+        // First-time pin fire probes the deterministic id, finds nothing, and
+        // creates. Callback lands strictly after the session.create rpc
+        // completes.
+        assert.deepEqual(callOrder, ["rpc:session.history", "rpc:session.create", "callback"]);
         assert.deepEqual(events, [{ jobId: "pin-job", sessionId: "sched-pin-pin-job" }]);
     });
 
@@ -322,7 +328,13 @@ describe("createJobDispatcher → session.create handler integration", () => {
             pinJob("/tmp/repo", { sessionStrategy: "pin", pinnedSessionId: "sched-pin-stale" }),
         );
 
-        assert.deepEqual(callOrder, ["rpc:session.history", "rpc:session.create", "callback"]);
+        // The stored pin and the deterministic id are both probed.
+        assert.deepEqual(callOrder, [
+            "rpc:session.history",
+            "rpc:session.history",
+            "rpc:session.create",
+            "callback",
+        ]);
     });
 });
 

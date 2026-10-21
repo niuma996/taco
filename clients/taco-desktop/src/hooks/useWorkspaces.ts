@@ -7,7 +7,7 @@
  * input / pendingDeleteSession / confirmNewSession stay in App.tsx (UI state).
  */
 
-import type { AgentMessage, ImageInput, ThinkingLevel } from "@taco-ai/protocol";
+import type { ImageInput, SupportedLocale, ThinkingLevel } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
@@ -518,13 +518,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // Double-Enter race: a second Enter before the first sessionCreate
             // resolves would read ws.activeSession === undefined again and
             // take this lazy branch, creating two server sessions. Bail out
-            // silently — the user's text stays in the input box.
+            // silently — the user's text stays in the input box. The guard is
+            // held until the turn settles: workspacesRef only catches up with
+            // ADD_SESSION on the next render, so releasing it right after the
+            // create would reopen the same window.
             if (pendingCreateRef.current) return false;
             pendingCreateRef.current = true;
-            // Hoisted out of the try: the id only exists once sessionCreate
-            // resolves, but every exit path after SET_PENDING(true) below has to
-            // be able to undo that pending slot — including the catch.
-            let createdSessionId: string | undefined;
             try {
                 // Optimistic user message: the user sees their input immediately
                 // while the session is being created. When the server's
@@ -546,108 +545,69 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 // menus keep showing them once the session exists.
                 const defaults = settingsRef.current.newSessionDefaults();
                 const initialModel = defaults.initialModel;
-                // Two-step create: allocate the session id first (no prompt), then
-                // send the prompt through the same blocking-but-push-friendly path
-                // that sessionPrompt uses for existing sessions. This keeps the
-                // streaming middle (tool calls, thinking deltas) visible because
-                // activeSession is set before the LLM starts — the reducer's
-                // APPLY_EVENT guard (activeSession !== action.sid) lets push
-                // events through instead of dropping them.
-                const created = await client.sessionCreate({
-                    workspace: asWorkspaceId(cwd),
-                    thinkingLevel: defaults.initialLevel,
-                });
-                settingsRef.current.adoptNewSession(created.sessionId, defaults);
-                dispatchWs({
-                    type: "ADD_SESSION",
-                    cwd,
-                    session: {
-                        id: created.sessionId,
-                        createdAt: new Date().toISOString(),
-                        filePath: created.filePath,
-                    },
-                    makeActive: true,
-                });
-                createdSessionId = created.sessionId;
-                dispatchWs({ type: "SET_PENDING", cwd, sid: created.sessionId, pending: true });
-                let reply: AgentMessage | null = null;
+                let createdSessionId: string;
                 try {
-                    reply = (
-                        await client.sessionPrompt(
-                            asWorkspaceId(cwd),
-                            asSessionId(created.sessionId),
-                            trimmed,
-                            images,
-                            uiLocale,
-                            initialModel ?? undefined,
-                        )
-                    ).assistantMessage;
-                } catch (promptErr) {
-                    // sessionPrompt failed AFTER the empty session was already
-                    // persisted server-side (sessionLifecycle.ts:84-91 always
-                    // runs repo.create). Best-effort cleanup so we don't leave
-                    // a phantom session in the sidebar or on disk.
-                    try {
-                        await client.sessionDelete(asWorkspaceId(cwd), created.sessionId);
-                    } catch (cleanupErr) {
-                        console.error(
-                            "[taco] cleanup after sessionPrompt failure failed",
-                            cleanupErr,
-                        );
-                    }
-                    throw promptErr;
-                }
-                if (reply) {
-                    dispatchWs({
-                        type: "APPEND_ASSISTANT_FINAL",
-                        cwd,
-                        sid: created.sessionId,
-                        reply,
+                    // Two-step create: allocate the session id first (no prompt),
+                    // then deliver the prompt through the same path an existing
+                    // session uses. activeSession is set before the LLM starts, so
+                    // the reducer's APPLY_EVENT guard lets the streaming middle
+                    // (tool calls, thinking deltas) through.
+                    const created = await client.sessionCreate({
+                        workspace: asWorkspaceId(cwd),
+                        thinkingLevel: defaults.initialLevel,
                     });
-                }
-                // Always clear pending explicitly, mirroring the existing-session
-                // branch below. APPEND_ASSISTANT_FINAL bails out when this sid is
-                // no longer activeSession, so relying on it alone leaks a stuck
-                // "running" dot whenever the user starts another session while
-                // this turn is still in flight (long tool / subagent runs).
-                dispatchWs({
-                    type: "SET_PENDING",
-                    cwd,
-                    sid: created.sessionId,
-                    pending: false,
-                });
-                // Same marker cleanup as the existing-session branch: a completed
-                // turn means no abort rejection is coming for it.
-                abortRequestedRef.current.delete(created.sessionId);
-                // Background refresh pulls the server-persisted auto-title and
-                // authoritative updatedAt into the sidebar — non-blocking, the
-                // optimistic row above is already correct.
-                void refreshSessionList(cwd);
-                return true;
-            } catch (err) {
-                console.error("[taco] sessionCreate/sessionPrompt failed", err);
-                // Same user-abort case as the existing-session branch below.
-                const abortedByUser =
-                    createdSessionId !== undefined &&
-                    abortRequestedRef.current.delete(createdSessionId);
-                if (!abortedByUser) {
+                    createdSessionId = created.sessionId;
+                    settingsRef.current.adoptNewSession(created.sessionId, defaults);
+                    dispatchWs({
+                        type: "ADD_SESSION",
+                        cwd,
+                        session: {
+                            id: created.sessionId,
+                            createdAt: new Date().toISOString(),
+                            filePath: created.filePath,
+                        },
+                        makeActive: true,
+                    });
+                } catch (err) {
+                    console.error("[taco] sessionCreate failed", err);
                     pushNotification(`Prompt failed: ${(err as Error).message}`);
+                    return false;
                 }
-                // sessionCreate may already have set this session's pending slot
-                // before the failure. Nothing else will ever clear it — the run
-                // never started, so no run_end frame is coming — so the composer
-                // would stay disabled until the app restarts.
-                if (createdSessionId) {
-                    dispatchWs({ type: "SET_PENDING", cwd, sid: createdSessionId, pending: false });
-                }
-                return false;
+                return await deliverPrompt(
+                    cwd,
+                    createdSessionId,
+                    text,
+                    trimmed,
+                    images,
+                    uiLocale,
+                    handoff,
+                    initialModel ?? undefined,
+                );
             } finally {
                 pendingCreateRef.current = false;
             }
         }
-        // Capture this turn's sid: clear must land on the session that started the turn, not on
-        // whatever activeSession is at clear time.
-        const promptSid = ws.activeSession;
+        return deliverPrompt(cwd, ws.activeSession, text, trimmed, images, uiLocale, handoff);
+    }
+
+    /**
+     * Deliver one prompt to a session that already exists on the server and
+     * settle the UI around the outcome. Shared by the first message of a new
+     * session and every later one: a failed turn never deletes the session,
+     * because by the time `session.prompt` fails the user's message is already
+     * on disk. Removing a session is the user's call (`deleteSession`), not a
+     * side effect of a turn ending badly — a Stop click rejects this RPC too.
+     */
+    async function deliverPrompt(
+        cwd: string,
+        promptSid: string,
+        text: string,
+        trimmed: string,
+        images: ImageInput[] | undefined,
+        uiLocale: SupportedLocale | undefined,
+        handoff: SteerHandoff,
+        model?: { provider: string; id: string },
+    ): Promise<boolean> {
         // Immediate UI feedback: move the current session to top before the
         // server turn completes. The real updatedAt will be overwritten by the
         // subsequent refreshSessionList once the turn ends.
@@ -662,10 +622,11 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             const reply = (
                 await client.sessionPrompt(
                     asWorkspaceId(cwd),
-                    asSessionId(ws.activeSession),
+                    asSessionId(promptSid),
                     trimmed,
                     images,
                     uiLocale,
+                    model,
                 )
             ).assistantMessage;
             // Auto-title is persisted inside server-side session.prompt and invalidateListCache'd,

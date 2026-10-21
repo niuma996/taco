@@ -139,6 +139,7 @@ async function invokeAgent(
             return;
         }
         case "pin": {
+            const id = `sched-pin-${job.id}`;
             const pinned = job.pinnedSessionId;
             // A pinned id can outlive its session: manual deletion, a
             // cleanup script, or a wiped sessions dir. Probe before
@@ -148,8 +149,18 @@ async function invokeAgent(
             // every fire forever with no path back to a working state.
             // Falling through to the create branch re-pins a fresh session
             // instead, so the job self-heals on its next tick.
-            if (pinned && (await sessionExists(server, workspace, pinned))) {
-                await attachAndPrompt(server, workspace, pinned, prompt);
+            //
+            // The deterministic id is probed too, not just the stored pin: a
+            // first fire that failed mid-turn (an abort, a provider error)
+            // leaves its transcript on disk but never reaches
+            // `onPinnedSessionCreated`, so `pinned` is still unset while the
+            // session exists — creating it again would fail on the taken id.
+            for (const candidate of new Set(pinned ? [pinned, id] : [id])) {
+                if (!(await sessionExists(server, workspace, candidate))) continue;
+                await attachAndPrompt(server, workspace, candidate, prompt);
+                if (candidate !== pinned && onPinnedSessionCreated) {
+                    await onPinnedSessionCreated(job.id, candidate);
+                }
                 return;
             }
             if (pinned) {
@@ -157,7 +168,6 @@ async function invokeAgent(
                     `pinned session ${pinned} for job ${job.id} no longer exists; re-creating`,
                 );
             }
-            const id = `sched-pin-${job.id}`;
             const res = await server.dispatchRpc({
                 id,
                 method: "session.create",
