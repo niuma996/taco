@@ -8,7 +8,7 @@
 
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { createLogger } from "../lib/logger.ts";
+import { denialGuidance } from "../permissions/denialGuidance.ts";
 import type { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type {
     AgentHarnessTool,
@@ -19,8 +19,6 @@ import type {
 import { DEFAULT_TIMEOUT_MS, runShell } from "./shell.ts";
 
 export type ShellTool = AgentHarnessTool<ExecutionToolContext>;
-
-const log = createLogger("shellTool");
 
 const shellSchema = Type.Object({
     command: Type.String({ description: "The shell command to execute." }),
@@ -52,85 +50,40 @@ type ShellToolResult = {
 /**
  * Build the denial result for a `CommandPermissionDecision`.
  *
- * The text widens "do not retry this command" to "do not attempt the same
- * outcome by another route": models otherwise read a denial as "use a different
- * string" and re-attempt it through a pipe or a sibling tool. A `user_denied`
- * routes the model to `askUser`, with a fallback for subagents (which have no
- * `askUser` — this tool cannot tell which kind of session it runs in); an
- * `undefined` reason means the command was blocked by policy before any UI
- * (deny rule, read-only broker, IM channel), where there is no user to ask —
- * so that path explains and stops instead.
+ * The text is shared with every other tool that goes through the permission
+ * broker (see `permissions/denialGuidance.ts`) — a model that learns "a
+ * denial is final" from one tool should not have to relearn it from
+ * another.
+ *
+ * A `user_denied` routes the model to `askUser`, with a fallback for
+ * subagents (which have no `askUser` — this tool cannot tell which kind of
+ * session it runs in); an `undefined` reason means the command was blocked
+ * by policy before any UI (deny rule, read-only broker, IM channel), where
+ * there is no user to ask — so that path explains and stops instead.
  */
 function deniedResult(
     reason: "user_denied" | "timeout" | "aborted" | "no_approver" | undefined,
 ): ShellToolResult {
-    if (reason === "no_approver") {
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: "[command denied] This command needs approval in the Taco desktop app, and no desktop app is connected right now. Do not retry it or work around it. Tell the user it needs approval in the Taco desktop app, then continue without it or stop.",
-                },
-            ],
-            details: { exitCode: -1, interrupted: false, reason: "permission_no_approver" },
-            isError: true,
-        };
-    }
-    if (reason === "timeout") {
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: "[command denied] The permission request timed out before the user responded. Do not retry automatically; if you still need this command, call `askUser` to ask the user — or, if you have no `askUser` tool (you are a subagent), report it in your final reply. Otherwise wait for a new instruction.",
-                },
-            ],
-            details: { exitCode: -1, interrupted: false, reason: "permission_timeout" },
-            isError: true,
-        };
-    }
-    if (reason === "aborted") {
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: "[command cancelled] The command was not executed because the current turn was cancelled while waiting for permission. Do not retry automatically.",
-                },
-            ],
-            details: { exitCode: -1, interrupted: false, reason: "permission_aborted" },
-            isError: true,
-        };
-    }
-    // No denialReason means the command never reached the UI — it was denied by
-    // policy (a deny rule, a read-only broker, an IM channel policy). There is
-    // no interactive user behind this denial, so do not route to `askUser`: a
-    // read-only subagent has no such tool. Explain and stop instead.
-    if (reason === undefined) {
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: "[command denied] This command was blocked by the workspace's permission policy, not by the user. Do not retry it, and do not attempt the same outcome by another route — a different command, a pipeline, or another tool that has the same effect is still blocked. Explain why it was blocked and stop; if it should be allowed, ask the user to change the policy.",
-                },
-            ],
-            details: { exitCode: -1, interrupted: false, reason: "permission_denied" },
-            isError: true,
-        };
-    }
-    if (reason !== "user_denied") {
-        // broker emitted a new reason this build doesn't know about — fall
-        // through to "user denied" text but flag it so it's visible in logs.
-        log.warn("unrecognised permission denial reason", { reason: String(reason) });
-    }
+    const text = denialGuidance(reason, {
+        action: "this command",
+        alternativeRoutes:
+            "a different command, a pipeline, or another tool (`write`/`edit`) that has the same effect",
+    });
     return {
-        content: [
-            {
-                type: "text",
-                text: "[command denied] The user denied this command. Do not retry it, and do not attempt the same outcome by another route — a different command, a pipeline, or another tool (`write`/`edit`) that has the same effect is still the denied action. The denial is about the intent, not the exact string. If you still need that outcome, stop and call `askUser` to ask how the user wants to proceed — or, if you have no `askUser` tool (you are a subagent), report the denial in your final reply; otherwise wait for a new instruction.",
-            },
-        ],
-        details: { exitCode: -1, interrupted: false, reason: "permission_denied" },
+        content: [{ type: "text", text }],
+        details: { exitCode: -1, interrupted: false, reason: denialReasonCode(reason) },
         isError: true,
     };
+}
+
+/** The machine-readable denial code carried in the tool result's details. */
+function denialReasonCode(
+    reason: "user_denied" | "timeout" | "aborted" | "no_approver" | undefined,
+): ShellToolResult["details"]["reason"] {
+    if (reason === "timeout") return "permission_timeout";
+    if (reason === "aborted") return "permission_aborted";
+    if (reason === "no_approver") return "permission_no_approver";
+    return "permission_denied";
 }
 
 export type ShellToolInput = Static<typeof shellSchema>;

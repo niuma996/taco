@@ -153,7 +153,7 @@ describe("config tools", () => {
             assert.doesNotMatch(text, /The user denied/);
         });
 
-        it("tells the model not to edit taco.json when no approver exists", async () => {
+        it("tells the model not to work around a missing approver", async () => {
             const { configPatch } = createConfigTools();
             const ctx = sessionToolContext({
                 call: async <R>(): Promise<R> =>
@@ -170,8 +170,7 @@ describe("config tools", () => {
             );
             const text = (result.content[0] as { text: string }).text;
             assert.match(text, /no desktop app is connected/);
-            // The workaround this blocks: editing the file the tool guards.
-            assert.match(text, /taco\.json by hand/);
+            assert.match(text, /Do not retry it or work around it/);
         });
 
         it("refuses an IM session", async () => {
