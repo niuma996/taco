@@ -40,6 +40,7 @@ vi.mock("../../src/hooks/useSidecarStream.ts", () => ({
 const CWD = "/ws";
 const SID = "s1";
 const GONE_SID = "s2";
+const IM_CWD = "im://wechat/peer/chat";
 
 function seedWorkspace(): WorkspaceState {
     return {
@@ -180,5 +181,34 @@ describe("useWorkspaces — attachSession failure handling", () => {
         // The surviving row is untouched.
         assert.ok(ws?.sessions.some((s) => s.id === SID));
         assert.ok(result.current.notifications.some((n) => n.text.includes("Cannot open session")));
+    });
+
+    it("does not activate or retain an IM workspace when its opener becomes stale", async () => {
+        let resolveImList: ((value: { sessions: []; total: number }) => void) | undefined;
+        const imList = new Promise<{ sessions: []; total: number }>((resolve) => {
+            resolveImList = resolve;
+        });
+        const client = makeClient({
+            sessionList: vi.fn(async (cwd: string) =>
+                cwd === IM_CWD ? imList : { sessions: [], total: 0 },
+            ),
+        });
+        const { result } = await renderSeeded(client);
+        let current = true;
+        let opening: Promise<void> | undefined;
+
+        await act(async () => {
+            opening = result.current.openImConversation(IM_CWD, SID, () => current);
+            await Promise.resolve();
+        });
+
+        current = false;
+        await act(async () => {
+            resolveImList?.({ sessions: [], total: 0 });
+            await opening;
+        });
+
+        assert.equal(result.current.activeCwd, CWD);
+        assert.equal(result.current.workspaces[IM_CWD], undefined);
     });
 });

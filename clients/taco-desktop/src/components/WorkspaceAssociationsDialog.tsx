@@ -63,15 +63,19 @@ export function WorkspaceAssociationsDialog({
     // directory has only one.
     const [scope, setScope] = useState<WorkspaceAssociationScope>("workspace");
 
-    const imRoute = workspace ? parseImCwd(workspace) : undefined;
+    // Memoized on the string: parseImCwd returns a fresh object each call, and
+    // `key` below feeds the load effect — an unstable route re-ran the load
+    // on every render, looping between "loading" and the loaded list.
+    const imRoute = useMemo(() => (workspace ? parseImCwd(workspace) : undefined), [workspace]);
     const canChooseScope = imRoute !== undefined;
+    const channelId = imRoute?.channelId;
 
     const key: WorkspaceAssociationKey = useMemo(
         () =>
-            scope === "channel" && imRoute
-                ? { scope: "channel", id: imRoute.channelId }
+            scope === "channel" && channelId
+                ? { scope: "channel", id: channelId }
                 : { scope: "workspace", id: workspace },
-        [scope, imRoute, workspace],
+        [scope, channelId, workspace],
     );
 
     useEffect(() => {

@@ -62,7 +62,7 @@ export interface UseWorkspaceLifecycleApi {
     browseAndOpen: () => Promise<void>;
     switchWorkspace: (cwd: string) => Promise<void>;
     attachSession: (cwd: string, sid: string) => Promise<void>;
-    openImConversation: (cwd: string, sid: string) => Promise<void>;
+    openImConversation: (cwd: string, sid: string, isCurrent?: () => boolean) => Promise<void>;
     restoreSessionSnapshot: (
         cwd: string,
         sid: string,
@@ -620,8 +620,14 @@ export function useWorkspaceLifecycle({
     }, [openWorkspace, pushNotification]);
 
     const openImConversation = useCallback(
-        async (cwd: string, sid: string): Promise<void> => {
+        async (cwd: string, sid: string, isCurrent: () => boolean = () => true): Promise<void> => {
             const addedNew = !workspacesRef.current[cwd];
+            const discardIfStale = (): boolean => {
+                if (isCurrent()) return false;
+                if (addedNew) dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
+                return true;
+            };
+            if (discardIfStale()) return;
             // Seed WorkspaceState FIRST — the ATTACH reducer is a no-op without
             // an existing entry, so the order is load-bearing.
             if (addedNew) {
@@ -642,17 +648,25 @@ export function useWorkspaceLifecycle({
                 // empty, so the Sidebar would render no sessions for an IM
                 // conversation even though the chat itself attached fine.
                 await loadWorkspaceSessions(cwd);
+                if (discardIfStale()) return;
+                await attachSession(cwd, sid);
+                if (discardIfStale()) return;
                 // Activate inline rather than via switchWorkspace: that helper
                 // auto-attaches sessions[0] when the workspace has no active
                 // session, which would attach the wrong conversation (or flash
                 // it) before our own attach lands. It also persists activeCwd,
                 // and an im:// key must not reach the desktop.json
                 // `workspaces.active` field — the next launch would resolve an
-                // activeCwd with no WorkspaceState.
+                // activeCwd with no WorkspaceState. Activation stays after the
+                // awaited work so an obsolete request can never take the UI
+                // back to IM while a newer mode switch is in progress.
                 setActiveCwd(cwd);
                 dispatchWs({ type: "SET_ACTIVE", cwd });
-                await attachSession(cwd, sid);
             } catch (err) {
+                if (!isCurrent()) {
+                    if (addedNew) dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
+                    return;
+                }
                 const msg = `Failed to open IM conversation: ${(err as Error).message}`;
                 console.error("[taco] openImConversation failed", cwd, err);
                 pushNotification(msg);

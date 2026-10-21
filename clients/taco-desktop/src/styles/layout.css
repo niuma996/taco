@@ -168,6 +168,53 @@ header.topbar .topbar-picker-group {
     max-width: calc(var(--pane-width) - 0.5rem - 4px);
 }
 
+/* Directory / IM switch in front of the picker: a pill track whose active
+   segment is raised onto a solid surface. */
+.workspace-mode-tabs {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: var(--space-0-5);
+    padding: var(--space-0-5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-tint);
+    -webkit-app-region: no-drag;
+}
+
+.workspace-mode-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--composer-control-height);
+    height: var(--composer-control-height);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
+}
+
+.workspace-mode-tab:hover:not(.workspace-mode-tab--active) {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+.workspace-mode-tab--active {
+    background: var(--bg-elevated);
+    color: var(--fg);
+    box-shadow: 0 1px 2px var(--shadow-color);
+}
+
+.workspace-mode-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .topbar-workspace-select {
     /* Text-button style (not an input): transparent bg, no border, faint hint on hover.
        Vertical padding 0.35rem; horizontal padding is slightly smaller (0.4rem) to give
@@ -272,6 +319,22 @@ header.topbar .topbar-picker-group {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Source channel of an IM conversation row. */
+.topbar-workspace-item-channel {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 var(--space-1-5);
+    border-radius: var(--radius-pill);
+    background: var(--surface-tint);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
 }
 
 /* Per-row association editor shortcut — revealed only while the row is

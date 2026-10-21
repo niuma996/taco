@@ -6,7 +6,11 @@
  * switching only; per-pane domain logic lives in the hooks.
  */
 
-import type { ChannelStatusEntry, CommandPermissionScope } from "@taco-ai/protocol";
+import type {
+    ChannelStatusEntry,
+    CommandPermissionScope,
+    ImConversationEntry,
+} from "@taco-ai/protocol";
 import {
     asSessionId,
     asWorkspaceId,
@@ -36,6 +40,7 @@ import { TopbarQuickActions } from "./components/TopbarQuickActions";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspaceAssociationsDialog } from "./components/WorkspaceAssociationsDialog";
+import { type WorkspaceMode, WorkspaceModeTabs } from "./components/WorkspaceModeTabs";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
@@ -72,6 +77,7 @@ import { writeToClipboard } from "./lib/clipboard";
 import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig.js";
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
+import { createLatestRequestGuard } from "./lib/latestRequest";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
@@ -560,8 +566,86 @@ export default function App() {
         unreadCount: conversationsUnread,
         onConversationsChanged,
         markConversationsSeen,
+        refreshConversations,
     } = useConversationsPane(client, mainView === "channels", activeCwd);
     onConversationsChangedRef.current = onConversationsChanged;
+    // The picker's mode follows the active workspace instead of being stored,
+    // so the tab always names what is on screen. Cold start never restores an
+    // im:// workspace, so the app opens on the directory tab.
+    const workspaceMode: WorkspaceMode = activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace";
+    const workspaceModeRequestGuardRef = useRef(createLatestRequestGuard());
+    const openImConversationFromUi = useCallback(
+        (cwd: string, sid: string): void => {
+            const isCurrent = workspaceModeRequestGuardRef.current.begin();
+            void openImConversation(cwd, sid, isCurrent);
+        },
+        [openImConversation],
+    );
+    const switchWorkspaceFromUi = useCallback(
+        (cwd: string): void => {
+            workspaceModeRequestGuardRef.current.begin();
+            void switchWorkspace(cwd);
+        },
+        [switchWorkspace],
+    );
+    // The conversation pane only fetches while it is open; the IM picker
+    // needs the list too. Pushes keep it fresh once loaded.
+    useEffect(() => {
+        if (workspaceMode === "im" && conversations === null) void refreshConversations();
+    }, [workspaceMode, conversations, refreshConversations]);
+    // Where the directory tab returns to after a detour through IM.
+    const lastDirectoryCwdRef = useRef<string>("");
+    if (activeCwd && !activeCwd.startsWith(IM_CWD_PREFIX)) {
+        lastDirectoryCwdRef.current = activeCwd;
+    }
+    const changeWorkspaceMode = useCallback(
+        async (next: WorkspaceMode): Promise<void> => {
+            const isCurrent = workspaceModeRequestGuardRef.current.begin();
+            if (next === "im") {
+                // Fetch fresh rather than trusting the cached list: it may
+                // never have loaded (the pane fetches only while open), and a
+                // stale empty list would make the click do nothing.
+                let list: ImConversationEntry[];
+                try {
+                    list = (await client.channelsListConversations({})).conversations;
+                } catch (e) {
+                    if (!isCurrent()) return;
+                    pushNotification(`${t("workspaceMode.imLoadFailed")}: ${(e as Error).message}`);
+                    return;
+                }
+                if (!isCurrent()) return;
+                void refreshConversations();
+                // Default to the first conversation (most recently used).
+                const first = list[0];
+                if (!first) {
+                    showToast(t("workspaceMode.imNone"), "warn");
+                    return;
+                }
+                await openImConversation(
+                    makeImCwd(first.channelId, first.peerId, first.chatId),
+                    first.sessionId,
+                    isCurrent,
+                );
+                if (!isCurrent()) return;
+                setMainView("chat");
+                return;
+            }
+            const back =
+                lastDirectoryCwdRef.current ||
+                Object.values(workspaces).find((w) => !w.cwd.startsWith(IM_CWD_PREFIX))?.cwd;
+            if (back && isCurrent()) await switchWorkspace(back);
+        },
+        [
+            client,
+            openImConversation,
+            pushNotification,
+            refreshConversations,
+            showToast,
+            switchWorkspace,
+            t,
+            workspaces,
+        ],
+    );
     /** channelId whose bind dialog is open; null closes it. */
     const [bindingChannelId, setBindingChannelId] = useState<string | null>(null);
     /** Workspace whose associated-directories dialog is open; null closes it. */
@@ -646,21 +730,23 @@ export default function App() {
             <div className="app-main">
                 <header className="topbar" data-tauri-drag-region>
                     <div className="topbar-picker-group">
+                        <WorkspaceModeTabs
+                            mode={workspaceMode}
+                            onModeChange={(next) => void changeWorkspaceMode(next)}
+                        />
                         <WorkspacePicker
-                            workspaces={[
-                                ...Object.values(workspaces)
-                                    .filter((w) => !w.cwd.startsWith(IM_CWD_PREFIX))
-                                    .map((w) => ({ cwd: w.cwd })),
-                                // IM conversations sit in the same list as
-                                // directories — the dropdown answers "what am
-                                // I talking to", and a conversation is the
-                                // same kind of answer as a project folder.
-                                ...(conversations ?? []).map((c) => ({
-                                    cwd: makeImCwd(c.channelId, c.peerId, c.chatId),
-                                    label: c.peerId,
-                                    isIm: true,
-                                })),
-                            ]}
+                            mode={workspaceMode}
+                            workspaces={
+                                workspaceMode === "im"
+                                    ? (conversations ?? []).map((c) => ({
+                                          cwd: makeImCwd(c.channelId, c.peerId, c.chatId),
+                                          label: c.peerId,
+                                          channel: c.channelId,
+                                      }))
+                                    : Object.values(workspaces)
+                                          .filter((w) => !w.cwd.startsWith(IM_CWD_PREFIX))
+                                          .map((w) => ({ cwd: w.cwd }))
+                            }
                             activeCwd={activeCwd}
                             onChange={(cwd) => {
                                 // An IM conversation is opened through its own
@@ -670,10 +756,10 @@ export default function App() {
                                     (c) => makeImCwd(c.channelId, c.peerId, c.chatId) === cwd,
                                 );
                                 if (conv) {
-                                    void openImConversation(cwd, conv.sessionId);
+                                    openImConversationFromUi(cwd, conv.sessionId);
                                     setMainView("chat");
                                 } else {
-                                    void switchWorkspace(cwd);
+                                    switchWorkspaceFromUi(cwd);
                                 }
                             }}
                             onOpenFolder={() => void browseAndOpen()}
@@ -697,7 +783,7 @@ export default function App() {
                         onClearNotifications={clearNotifications}
                         onNewNotification={toastNewNotification}
                         onOpenApproval={(target) => {
-                            void openImConversation(target.cwd, target.sessionId);
+                            openImConversationFromUi(target.cwd, target.sessionId);
                             setMainView("chat");
                         }}
                     />
@@ -969,7 +1055,7 @@ export default function App() {
                             conversationsUnread={conversationsUnread}
                             markConversationsSeen={markConversationsSeen}
                             onOpenConversation={(cwd, sid) => {
-                                void openImConversation(cwd, sid);
+                                openImConversationFromUi(cwd, sid);
                                 setMainView("chat");
                             }}
                             activeCwd={activeCwd}

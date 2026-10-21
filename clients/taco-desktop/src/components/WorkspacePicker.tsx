@@ -1,16 +1,17 @@
 /**
  * WorkspacePicker — topbar workspace dropdown backed by Radix UI DropdownMenu.
  *
- * Trigger shows the active workspace; the menu lists every workspace (current
- * one checked) plus an "open folder…" action at the bottom. Using a menu (not
- * Select) because the row set mixes value items with an action item, which
- * Select's single-value semantics can't express. Falls back to showing only
- * `activeCwd` when the list is empty.
+ * Trigger shows the active workspace; the menu lists the workspaces of one
+ * kind (current one checked). Using a menu (not Select) because the row set
+ * mixes value items with an action item, which Select's single-value
+ * semantics can't express. Falls back to showing only `activeCwd` when the
+ * list is empty.
  *
- * IM conversations appear in the same list as filesystem directories — the
- * dropdown answers "what am I talking to", and a conversation is the same
- * kind of answer as a project directory. The two are distinguished by a
- * label and an icon, not by living in different menus.
+ * The kind is chosen by WorkspaceModeTabs in front of the picker: project
+ * directories, or IM channel conversations. Conversation rows name their
+ * source channel, and the "open folder…" action is offered only for
+ * directories — a conversation is created by inbound messages, not by
+ * picking a path.
  *
  * Each row carries its own "associated directories…" action, so the entry
  * point sits next to the thing it configures.
@@ -26,13 +27,15 @@ export interface WorkspacePickerOption {
     cwd: string;
     /** Display name. Defaults to the path's last segment. */
     label?: string;
-    /** True for an IM conversation — rendered with a different icon. */
-    isIm?: boolean;
+    /** Source channel of an IM conversation, shown after the label. */
+    channel?: string;
 }
 
 export interface WorkspacePickerProps {
     workspaces: WorkspacePickerOption[];
     activeCwd: string;
+    /** Which kind of workspace the list holds. */
+    mode: "workspace" | "im";
     onChange: (cwd: string) => void;
     onOpenFolder: () => void;
     /** Open the associated-directories editor for a workspace. */
@@ -42,6 +45,7 @@ export interface WorkspacePickerProps {
 export function WorkspacePicker({
     workspaces,
     activeCwd,
+    mode,
     onChange,
     onOpenFolder,
     onManageAssociations,
@@ -51,7 +55,9 @@ export function WorkspacePicker({
     // opening the dialog — a modal over an open menu leaves two floating
     // surfaces stacked.
     const [open, setOpen] = useState(false);
+    const isIm = mode === "im";
     const options = workspaces.length > 0 ? workspaces : [{ cwd: activeCwd }];
+    const TriggerIcon = isIm ? MessageSquare : Folder;
     return (
         <DropdownMenu.Root open={open} onOpenChange={setOpen}>
             <DropdownMenu.Trigger
@@ -59,7 +65,11 @@ export function WorkspacePicker({
                 title={activeCwd}
                 aria-label={t("activity.switchWorkspace")}
             >
-                <Folder size={14} aria-hidden="true" className="topbar-workspace-select-icon" />
+                <TriggerIcon
+                    size={14}
+                    aria-hidden="true"
+                    className="topbar-workspace-select-icon"
+                />
                 <span className="topbar-workspace-select-label">
                     {options.find((o) => o.cwd === activeCwd)?.label ?? lastSegment(activeCwd)}
                 </span>
@@ -82,15 +92,14 @@ export function WorkspacePicker({
                             onSelect={() => onChange(opt.cwd)}
                         >
                             <span className="topbar-workspace-item-check">
-                                {opt.cwd === activeCwd ? (
-                                    <Check size={12} aria-hidden="true" />
-                                ) : opt.isIm ? (
-                                    <MessageSquare size={12} aria-hidden="true" />
-                                ) : null}
+                                {opt.cwd === activeCwd && <Check size={12} aria-hidden="true" />}
                             </span>
                             <span className="topbar-workspace-item-label">
                                 {opt.label ?? lastSegment(opt.cwd)}
                             </span>
+                            {opt.channel && (
+                                <span className="topbar-workspace-item-channel">{opt.channel}</span>
+                            )}
                             {onManageAssociations && (
                                 <button
                                     type="button"
@@ -113,15 +122,22 @@ export function WorkspacePicker({
                             )}
                         </DropdownMenu.Item>
                     ))}
-                    <DropdownMenu.Separator className="topbar-workspace-separator" />
-                    <DropdownMenu.Item className="topbar-workspace-item" onSelect={onOpenFolder}>
-                        <span className="topbar-workspace-item-check">
-                            <FolderOpen size={12} aria-hidden="true" />
-                        </span>
-                        <span className="topbar-workspace-item-label">
-                            {t("activity.openFolder")}
-                        </span>
-                    </DropdownMenu.Item>
+                    {!isIm && (
+                        <>
+                            <DropdownMenu.Separator className="topbar-workspace-separator" />
+                            <DropdownMenu.Item
+                                className="topbar-workspace-item"
+                                onSelect={onOpenFolder}
+                            >
+                                <span className="topbar-workspace-item-check">
+                                    <FolderOpen size={12} aria-hidden="true" />
+                                </span>
+                                <span className="topbar-workspace-item-label">
+                                    {t("activity.openFolder")}
+                                </span>
+                            </DropdownMenu.Item>
+                        </>
+                    )}
                 </DropdownMenu.Content>
             </DropdownMenu.Portal>
         </DropdownMenu.Root>

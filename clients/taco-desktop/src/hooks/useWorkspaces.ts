@@ -90,7 +90,7 @@ export interface UseWorkspacesApi {
      * WorkspaceState via INIT (required because attachSession's ATTACH
      * reducer case is a no-op when no entry exists for the cwd).
      */
-    openImConversation: (cwd: string, sid: string) => Promise<void>;
+    openImConversation: (cwd: string, sid: string, isCurrent?: () => boolean) => Promise<void>;
     /** Rebuild a session after the sidecar's bounded realtime replay window has expired. */
     restoreSessionSnapshot: (
         cwd: string,

@@ -142,6 +142,13 @@
     "searchLabel": "Search",
     "noMatch": "No matches"
   },
+  "workspaceMode": {
+    "label": "Workspace kind",
+    "workspace": "Workspaces",
+    "im": "IM channel conversations",
+    "imNone": "No IM channel conversations yet — they appear once a channel receives a message.",
+    "imLoadFailed": "Failed to load IM channel conversations"
+  },
   "activity": {
     "chat": "Chat",
     "memory": "Memory",
