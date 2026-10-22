@@ -99,6 +99,12 @@ describe("isValidWorkspaceCwd", () => {
         assert.equal(isValidWorkspaceCwd("/Users/me/.taco/workspace"), true);
         assert.equal(isValidWorkspaceCwd("./relative/dir"), true);
     });
+
+    it("rejects an IM conversation — it is a workspace identity, not a directory", () => {
+        // The opened list can never hold an `im://` URL, so persisting one as
+        // the active cwd only leaves a value the next launch has to reject.
+        assert.equal(isValidWorkspaceCwd("im://wechat/peer-1/chat-1"), false);
+    });
 });
 
 describe("lastSegment", () => {

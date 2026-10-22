@@ -375,6 +375,14 @@ header.topbar .topbar-picker-group {
     margin: 4px 0;
 }
 
+/* Empty state for the IM list — no conversation to switch to yet. */
+.topbar-workspace-empty {
+    padding: 0.45rem 0.8rem;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+}
+
 /* Language + theme shortcuts, pinned after the drag spacer so they sit
    at the topbar's right edge (Windows: just left of the window controls
    via the extra padding-right above). */

@@ -16,6 +16,7 @@
  * `pruneMissingCwds`.
  */
 
+import { IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { invoke } from "@tauri-apps/api/core";
 import { readDesktopConfig, writeDesktopConfig } from "./desktopConfig.ts";
 
@@ -134,11 +135,17 @@ export async function pruneMissingCwds(cwds: string[]): Promise<string[]> {
  * Both absolute and relative paths are accepted, as long as they don't contain characters that would
  * be misinterpreted by the shell or Rust.
  *
+ * Also rejects an IM conversation (`im://channel/peer/chat`). That URL is a workspace identity, not a
+ * directory: the opened list can never hold it, and the active cwd it names would resolve to nothing
+ * on the next launch. The sidecar still accepts `im://` as a workspace id — this is the desktop's
+ * storage-level rule.
+ *
  * Historical issue: a pasted `src-tauri/*` caused the frontend key to diverge from the Rust-side
  * normalized key, resulting in all session-level RPCs throwing "workspace not ensured".
  */
 export function isValidWorkspaceCwd(cwd: string): boolean {
     if (cwd.length === 0) return false;
+    if (cwd.startsWith(IM_CWD_PREFIX)) return false;
     return !/[*?[\]$`]/.test(cwd);
 }
 

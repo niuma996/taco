@@ -38,6 +38,7 @@ export default defineConfig({
             "tests/components/ContextIndicator.test.tsx",
             "tests/components/TopbarQuickActions.test.tsx",
             "tests/components/WorkspaceModeTabs.test.tsx",
+            "tests/components/WorkspacePicker.test.tsx",
             "tests/components/NotificationBell.test.tsx",
             "tests/components/PendingPermissionsModal.test.tsx",
             "tests/components/CommandPermissionActions.test.tsx",

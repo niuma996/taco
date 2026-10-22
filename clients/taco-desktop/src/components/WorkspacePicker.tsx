@@ -4,8 +4,10 @@
  * Trigger shows the active workspace; the menu lists the workspaces of one
  * kind (current one checked). Using a menu (not Select) because the row set
  * mixes value items with an action item, which Select's single-value
- * semantics can't express. Falls back to showing only `activeCwd` when the
- * list is empty.
+ * semantics can't express. In directory mode an empty list falls back to
+ * showing only `activeCwd`; in IM mode it shows an empty state instead — the
+ * conversation list is the only nameable thing there, and `activeCwd` would
+ * render as a raw chat id.
  *
  * The kind is chosen by WorkspaceModeTabs in front of the picker: project
  * directories, or IM channel conversations. Conversation rows name their
@@ -18,6 +20,7 @@
  */
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { parseImCwd } from "@taco-ai/protocol";
 import { Check, ChevronDown, Folder, FolderOpen, Link2, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import { useT } from "../i18n/useI18n";
@@ -56,7 +59,15 @@ export function WorkspacePicker({
     // surfaces stacked.
     const [open, setOpen] = useState(false);
     const isIm = mode === "im";
-    const options = workspaces.length > 0 ? workspaces : [{ cwd: activeCwd }];
+    // The IM list comes from the conversation list. When it is empty there is
+    // no conversation to name, and falling back to activeCwd would show the
+    // last path segment of an `im://` URL — the chat id, not the peer.
+    const parsedIm = isIm ? parseImCwd(activeCwd) : undefined;
+    const options = workspaces.length > 0 ? workspaces : isIm ? [] : [{ cwd: activeCwd }];
+    const activeLabel =
+        options.find((o) => o.cwd === activeCwd)?.label ??
+        parsedIm?.peerId ??
+        lastSegment(activeCwd);
     const TriggerIcon = isIm ? MessageSquare : Folder;
     return (
         <DropdownMenu.Root open={open} onOpenChange={setOpen}>
@@ -70,9 +81,7 @@ export function WorkspacePicker({
                     aria-hidden="true"
                     className="topbar-workspace-select-icon"
                 />
-                <span className="topbar-workspace-select-label">
-                    {options.find((o) => o.cwd === activeCwd)?.label ?? lastSegment(activeCwd)}
-                </span>
+                <span className="topbar-workspace-select-label">{activeLabel}</span>
                 <ChevronDown
                     size={14}
                     aria-hidden="true"
@@ -122,6 +131,9 @@ export function WorkspacePicker({
                             )}
                         </DropdownMenu.Item>
                     ))}
+                    {options.length === 0 && (
+                        <div className="topbar-workspace-empty">{t("workspaceMode.imEmpty")}</div>
+                    )}
                     {!isIm && (
                         <>
                             <DropdownMenu.Separator className="topbar-workspace-separator" />

@@ -146,7 +146,10 @@
     "workspace": "工作空间",
     "im": "渠道会话",
     "imNone": "还没有 IM 渠道会话，渠道收到消息后会出现在这里。",
-    "imLoadFailed": "加载 IM 渠道会话失败"
+    "imLoadFailed": "加载 IM 渠道会话失败",
+    "imNoChannel": "尚未配置渠道，请先在「渠道」面板添加并绑定渠道。",
+    "imNotConnected": "渠道尚未连接，请先在「渠道」面板绑定渠道。",
+    "imEmpty": "暂无渠道会话"
   },
   "activity": {
     "chat": "聊天",

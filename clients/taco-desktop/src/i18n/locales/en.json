@@ -147,7 +147,10 @@
     "workspace": "Workspaces",
     "im": "Channels",
     "imNone": "No IM channel conversations yet — they appear once a channel receives a message.",
-    "imLoadFailed": "Failed to load IM channel conversations"
+    "imLoadFailed": "Failed to load IM channel conversations",
+    "imNoChannel": "No channels configured yet — add and bind one in the Channels pane.",
+    "imNotConnected": "The channel is not connected yet — bind it in the Channels pane.",
+    "imEmpty": "No channel conversations yet"
   },
   "activity": {
     "chat": "Chat",

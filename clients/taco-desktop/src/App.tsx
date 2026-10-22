@@ -254,6 +254,15 @@ export default function App() {
         showSubagent: openInPanel,
     });
 
+    // An IM conversation has no filesystem to browse, so the file drawer has
+    // nothing to list — it would read the `im://` URL as a path and show a
+    // raw error. Close it instead, like the task/subagent panels do.
+    useEffect(() => {
+        if (activeCwd.startsWith(IM_CWD_PREFIX) && rightPanel.panel === "files") {
+            rightPanel.close();
+        }
+    }, [activeCwd, rightPanel.panel, rightPanel.close]);
+
     // Compaction-finished push → refresh ratio + clear one-shot state, and
     // report a failure. Input is frozen while compaction runs, so the user is
     // waiting on the outcome either way (auto or manual); a failure is reported
@@ -604,7 +613,26 @@ export default function App() {
                 // Default to the first conversation (most recently used).
                 const first = list[0];
                 if (!first) {
-                    showToast(t("workspaceMode.imNone"), "warn");
+                    // An empty list has three causes that need three different
+                    // answers: no channel declared at all, a channel that is
+                    // not connected yet, or a connected channel whose first
+                    // message has not arrived. Telling the user to "wait for a
+                    // message" when no channel exists is a dead end.
+                    const status = await client.channelsList().catch(() => null);
+                    if (!isCurrent()) return;
+                    if (!status) {
+                        showToast(t("workspaceMode.imLoadFailed"), "warn");
+                        return;
+                    }
+                    if (status.configured.length === 0) {
+                        showToast(t("workspaceMode.imNoChannel"), "warn");
+                        setMainView("channels");
+                    } else if (!status.configured.some((c) => c.state === "connected")) {
+                        showToast(t("workspaceMode.imNotConnected"), "warn");
+                        setMainView("channels");
+                    } else {
+                        showToast(t("workspaceMode.imNone"), "warn");
+                    }
                     return;
                 }
                 await openImConversation(
@@ -744,7 +772,11 @@ export default function App() {
                                 if (conv) {
                                     openImConversationFromUi(cwd, conv.sessionId);
                                     setMainView("chat");
-                                } else {
+                                } else if (!cwd.startsWith(IM_CWD_PREFIX)) {
+                                    // An im:// cwd with no matching conversation
+                                    // must NOT fall through to switchWorkspace:
+                                    // that path treats it as a directory and
+                                    // persists the URL as the active workspace.
                                     switchWorkspaceFromUi(cwd);
                                 }
                             }}
