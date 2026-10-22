@@ -272,6 +272,7 @@ export type {
     AgentContinueToolDetails,
     AgentEntry,
     AgentRuntime,
+    AgentScope,
     AgentsContentParams,
     AgentsContentResult,
     AgentsDeleteParams,

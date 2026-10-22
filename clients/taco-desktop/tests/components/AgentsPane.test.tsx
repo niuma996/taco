@@ -39,6 +39,8 @@ function paneProps(onDeleteAgent: () => Promise<void>, saving: boolean) {
         contentLoading: false,
         contentError: null,
         saving,
+        hasProjectDir: true,
+        cwdChoices: [],
         onSaveAgent: async () => {},
         onDeleteAgent,
     };

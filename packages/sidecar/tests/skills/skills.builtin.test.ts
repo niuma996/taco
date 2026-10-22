@@ -234,7 +234,7 @@ describe("taco-configure builtin skill", () => {
         // checklist; upper bound guards against it growing into a treatise.
         const words = tcBody().split(/\s+/).filter(Boolean).length;
         assert.ok(words > 400, `expected >400 words (substantive), got ${words}`);
-        assert.ok(words < 1100, `expected <1100 words (still lean), got ${words}`);
+        assert.ok(words < 1536, `expected <1536 words (still lean), got ${words}`);
     });
 });
 

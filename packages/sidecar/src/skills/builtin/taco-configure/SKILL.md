@@ -64,11 +64,15 @@ Agents live in `*.md` files in one of four user-writable directories (last-wins 
 3. `$TACO_HOME/agents/` (default `~/.taco/agents/`)
 4. `<cwd>/.taco/agents/` — highest priority; project-local wins
 
-Default to **global** (option 3) for personal agents. Use project-local only when the agent is bound to this repo's conventions. File name should match the `name` frontmatter so it's greppable.
+Default to **global** (option 3) for personal agents. Use project-local only when the agent is bound to this repo's conventions. Use `askUser` with `scope` as the header when ambiguous — Global first, Project-local second. In an IM conversation there is no project directory, so write global only. File name should match the `name` frontmatter so it's greppable.
 
-Frontmatter (all keys taco reads; pi loads with these but ignores unknowns): `name`, `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `context` (`independent`, or `fork` to give the subagent this conversation's transcript), and `fewShots` — a YAML list of `{ user, assistant }` pairs injected ahead of the body to demonstrate the contract.
+A project-local agent shadows a global one of the same name for this workspace only; check both directories first and tell the user when a copy would be shadowed.
+
+Frontmatter (all keys taco reads; pi loads with these but ignores unknowns): `name`, `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `context` (`independent`, or `fork` to give the subagent this conversation's transcript), `runtime`, `permissionMode`, `cwd`, and `fewShots` — a YAML list of `{ user, assistant }` pairs injected ahead of the body to demonstrate the contract.
 
 `name` and `description` are required; `whenToUse` is preferred over `description` — the `agent` tool's hint block surfaces `whenToUse` when the model is choosing a subagent.
+
+A `runtime: claude-code` agent takes `cwd`: the absolute directory it always runs in, fixed when the definition is written. Pick the workspace directory or one of its associated directories, and ask the user which one when it is not obvious. Omitted = the calling workspace's directory. The path applies from every workspace that calls the agent, so a global agent with a `cwd` sends every caller — IM conversations included — into that directory; say so to the user before writing one.
 
 ## Remote skill install
 

@@ -429,6 +429,11 @@ export class WorkspaceRuntime extends EventEmitter {
         return this.agentSpawner.agents;
     }
 
+    /** The workspace's associated directories, resolved now (they change while it lives). */
+    associatedRoots(): readonly string[] {
+        return this.resolveAssociatedRoots();
+    }
+
     /** IM routing triple, parsed from workspaceKey (im:// URL) if this is an IM workspace. */
     get imRouting(): { channelId: string; peerId: string; chatId: string } | undefined {
         const parsed = parseImCwd(this.workspaceKey);

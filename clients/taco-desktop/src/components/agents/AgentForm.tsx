@@ -1,5 +1,6 @@
 /**
- * AgentForm — create or edit a user agent definition under $TACO_HOME/agents.
+ * AgentForm — create or edit a user agent definition, stored globally
+ * ($TACO_HOME/agents) or in the current workspace (<workspace>/.taco/agents).
  *
  * One dialog per runtime, picked when the agent is created and fixed after:
  * a taco agent and a Claude Code agent share almost no settings beyond the
@@ -12,7 +13,7 @@
  *
  * The model never sees the runtime — it delegates by agent name only.
  */
-import type { AgentRuntime, ClaudeCodePermissionMode } from "@taco-ai/protocol";
+import type { AgentRuntime, AgentScope, ClaudeCodePermissionMode } from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
@@ -46,8 +47,11 @@ const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
     "inherit",
 ];
 
+const SCOPES: ReadonlyArray<AgentScope> = ["global", "workspace"];
+
 /** What the form produces; the pane adds `previousAgentType`. */
 export interface AgentFormValue {
+    scope: AgentScope;
     agentType: string;
     description: string;
     whenToUse?: string;
@@ -56,6 +60,8 @@ export interface AgentFormValue {
     systemPrompt: string;
     tools?: string[];
     permissionMode?: ClaudeCodePermissionMode;
+    /** `claude-code` only: the directory it runs in. */
+    cwd?: string;
 }
 
 export interface AgentFormProps {
@@ -65,6 +71,16 @@ export interface AgentFormProps {
     existing?: AgentFormValue;
     /** While saving, both action buttons are disabled to prevent double submits. */
     saving?: boolean;
+    /** False for IM conversations, which have no project directory to hold a workspace-scoped agent. */
+    hasProjectDir: boolean;
+    /** Names of global agents; saving a workspace agent under one of them shadows it. */
+    shadowedTypes: ReadonlyArray<string>;
+    /**
+     * Directories a Claude Code agent may run in: the workspace's own first
+     * (the default for a new agent, and for one saved before the field
+     * existed), then its associated directories.
+     */
+    cwdChoices: ReadonlyArray<string>;
     /** Save errors (RPC-level) are shown in the form so the draft survives. */
     error?: string | null;
     onSave: (value: AgentFormValue) => void;
@@ -85,6 +101,7 @@ export function AgentForm(props: AgentFormProps) {
     const isEdit = props.existing !== undefined;
     const isCc = props.runtime === "claude-code";
 
+    const [scope, setScope] = useState<AgentScope>(props.existing?.scope ?? "global");
     const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
     const [description, setDescription] = useState(props.existing?.description ?? "");
     const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
@@ -105,9 +122,24 @@ export function AgentForm(props: AgentFormProps) {
     const [permissionMode, setPermissionMode] = useState<ClaudeCodePermissionMode>(
         props.existing?.permissionMode ?? "auto",
     );
+    // Shown and saved even when the definition has none: an agent saved before
+    // this field existed already runs in the workspace directory, so that is
+    // what the picker states, and saving makes it explicit.
+    const [cwd, setCwd] = useState<string>(props.existing?.cwd ?? props.cwdChoices[0] ?? "");
+    // A directory saved from another workspace is kept as a choice so editing
+    // other fields here does not silently move the agent.
+    const cwdOptions =
+        cwd !== "" && !props.cwdChoices.includes(cwd)
+            ? [cwd, ...props.cwdChoices]
+            : props.cwdChoices;
 
     const trimmedType = agentType.trim();
     const typeValid = AGENT_TYPE_PATTERN.test(trimmedType);
+    // Moving a global agent to the workspace under its own name is a move, not a shadow.
+    const shadowsGlobal =
+        scope === "workspace" &&
+        trimmedType !== props.existing?.agentType &&
+        props.shadowedTypes.includes(trimmedType);
     const turns = Number.parseInt(maxTurns.trim(), 10);
     const turnsValid =
         Number.isInteger(turns) && turns >= 1 && turns <= 200 && String(turns) === maxTurns.trim();
@@ -135,13 +167,14 @@ export function AgentForm(props: AgentFormProps) {
     const save = () => {
         if (!canSave) return;
         props.onSave({
+            scope,
             agentType: trimmedType,
             description: description.trim(),
             whenToUse: whenToUse.trim() === "" ? undefined : whenToUse.trim(),
             runtime: props.runtime,
             maxTurns: turns,
             systemPrompt: noRolePrompt ? "" : systemPrompt,
-            ...(isCc ? { tools: toolList, permissionMode } : {}),
+            ...(isCc ? { tools: toolList, permissionMode, ...(cwd !== "" ? { cwd } : {}) } : {}),
         });
     };
 
@@ -172,6 +205,11 @@ export function AgentForm(props: AgentFormProps) {
         >
             {props.error ? <div className="error-banner">{props.error}</div> : null}
             {isCc && (
+                <div className="agent-form-notice agent-form-notice--warn" role="note">
+                    {t("agents.form.ccCwdNotice")}
+                </div>
+            )}
+            {isCc && (
                 <ul className="agent-form-rules" aria-label={t("agents.form.ccRulesLabel")}>
                     <li>{t("agents.form.ccRuleEngine")}</li>
                     <li>{t("agents.form.ccRulePermissions")}</li>
@@ -179,6 +217,28 @@ export function AgentForm(props: AgentFormProps) {
                     <li>{t("agents.form.ccRuleCheckpoints")}</li>
                     <li>{t("agents.form.ccRuleAskUser")}</li>
                 </ul>
+            )}
+            <FormField
+                label={t("agents.form.scope")}
+                hint={t(
+                    scope === "global"
+                        ? "agents.form.scopeGlobalHint"
+                        : "agents.form.scopeWorkspaceHint",
+                )}
+            >
+                <Select
+                    value={scope}
+                    onValueChange={(v) => setScope(v as AgentScope)}
+                    options={SCOPES.map((value) => ({
+                        value,
+                        label: t(`agents.scope.${value}`),
+                    }))}
+                    disabled={!props.hasProjectDir}
+                    label={t("agents.form.scope")}
+                />
+            </FormField>
+            {shadowsGlobal && (
+                <div className="agent-form-notice">{t("agents.form.shadowsGlobal")}</div>
             )}
             <FormField
                 label={t("agents.form.name")}
@@ -207,6 +267,21 @@ export function AgentForm(props: AgentFormProps) {
             </FormField>
             {isCc && (
                 <>
+                    <FormField label={t("agents.form.ccCwd")} hint={t("agents.form.ccCwdHint")}>
+                        <Select
+                            value={cwd}
+                            onValueChange={setCwd}
+                            options={cwdOptions.map((dir, i) => ({
+                                value: dir,
+                                label: dir,
+                                ...(dir === props.cwdChoices[0] && i === cwdOptions.indexOf(dir)
+                                    ? { badge: t("agents.form.ccCwdWorkspace") }
+                                    : {}),
+                            }))}
+                            disabled={cwdOptions.length === 0}
+                            label={t("agents.form.ccCwd")}
+                        />
+                    </FormField>
                     <FormField
                         label={t("agents.form.ccTools")}
                         hint={t("agents.form.ccToolsHint")}
@@ -232,6 +307,11 @@ export function AgentForm(props: AgentFormProps) {
                             label={t("agents.form.ccPermissionMode")}
                         />
                     </FormField>
+                    {permissionMode === "bypassPermissions" && (
+                        <div className="agent-form-notice agent-form-notice--warn" role="note">
+                            {t("agents.form.ccBypassImNotice")}
+                        </div>
+                    )}
                 </>
             )}
             <FormField

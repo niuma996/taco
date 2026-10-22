@@ -102,6 +102,12 @@ export interface AgentDefinition {
     runtime?: SubagentRuntime;
     /** `claude-code` only; ignored for other runtimes. Omitted = "auto". */
     permissionMode?: ClaudeCodePermissionMode;
+    /**
+     * `claude-code` only: absolute directory the CLI runs in. Omitted (every
+     * definition saved before this field existed) = the workspace's execution
+     * cwd at spawn time.
+     */
+    cwd?: string;
     /** Optional in-context examples. Injected into the child's system prompt
      *  ahead of `systemPrompt` (md body) so the examples establish tone and
      *  contract before the role body takes over. Keep total length under a

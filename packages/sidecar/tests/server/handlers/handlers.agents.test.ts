@@ -1,7 +1,7 @@
 /** Consolidated from 3 test files; behaviour unchanged. */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
@@ -14,6 +14,7 @@ import { PermissionBroker } from "../../../src/permissions/permissionBroker.ts";
 import type { ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
 import {
     AgentWriteError,
+    agentScopeOf,
     deleteUserAgent,
     isEditableAgent,
     userAgentsDir,
@@ -246,7 +247,254 @@ describe("agents.write", () => {
         });
     });
 
+    describe("agentsWrite scope", () => {
+        let home: string;
+        let project: string;
+        let prevHome: string | undefined;
+
+        beforeEach(() => {
+            home = mkdtempSync(join(tmpdir(), "taco-agents-home-"));
+            project = mkdtempSync(join(tmpdir(), "taco-agents-project-"));
+            prevHome = process.env.TACO_HOME;
+            process.env.TACO_HOME = home;
+        });
+        afterEach(() => {
+            if (prevHome === undefined) delete process.env.TACO_HOME;
+            else process.env.TACO_HOME = prevHome;
+            rmSync(home, { recursive: true, force: true });
+            rmSync(project, { recursive: true, force: true });
+        });
+
+        const projectAgentsDir = () => join(project, ".taco", "agents");
+        const ctx = () => ({ workspaceDir: project });
+        const inProject = (agentType: string) =>
+            def({ agentType, filePath: join(projectAgentsDir(), `${agentType}.md`) });
+
+        it("defaults to the global directory", async () => {
+            await writeUserAgent(params(), [], ctx());
+            assert.deepEqual(readdirSync(userAgentsDir()), ["my-cc.md"]);
+            assert.equal(existsSync(projectAgentsDir()), false);
+        });
+
+        it("writes a workspace-scoped agent under <workspace>/.taco/agents", async () => {
+            await writeUserAgent(params({ scope: "workspace" }), [], ctx());
+            assert.deepEqual(readdirSync(projectAgentsDir()), ["my-cc.md"]);
+            assert.equal(existsSync(userAgentsDir()), false);
+        });
+
+        it("refuses a workspace scope when the conversation has no project directory", async () => {
+            await assert.rejects(
+                writeUserAgent(params({ scope: "workspace" }), [], {}),
+                /project directory/,
+            );
+            assert.equal(existsSync(projectAgentsDir()), false);
+        });
+
+        it("lets a workspace agent shadow a global one but not the reverse", async () => {
+            const global = def({ agentType: "shared" });
+            await writeUserAgent(
+                params({ agentType: "shared", scope: "workspace" }),
+                [global],
+                ctx(),
+            );
+            assert.deepEqual(readdirSync(projectAgentsDir()), ["shared.md"]);
+
+            await assert.rejects(
+                writeUserAgent(
+                    params({ agentType: "shared", scope: "global" }),
+                    [inProject("shared")],
+                    ctx(),
+                ),
+                /already exists/,
+            );
+        });
+
+        it("still rejects shadowing a builtin or a hand-managed directory", async () => {
+            for (const filePath of [
+                "/pkg/builtin/explorer.md",
+                "/Users/x/.claude/agents/explorer.md",
+            ]) {
+                await assert.rejects(
+                    writeUserAgent(
+                        params({ agentType: "explorer", scope: "workspace" }),
+                        [def({ agentType: "explorer", filePath })],
+                        ctx(),
+                    ),
+                    /already exists/,
+                );
+            }
+        });
+
+        it("rejects a create that would overwrite a file the catalog does not show", async () => {
+            // The global copy is hidden behind a workspace one of the same name.
+            await writeUserAgent(params({ agentType: "hidden", scope: "global" }), [], ctx());
+            await writeUserAgent(
+                params({ agentType: "hidden", scope: "workspace" }),
+                [def({ agentType: "hidden" })],
+                ctx(),
+            );
+            await assert.rejects(
+                writeUserAgent(
+                    params({ agentType: "hidden", scope: "global" }),
+                    [inProject("hidden")],
+                    ctx(),
+                ),
+                /already exists/,
+            );
+        });
+
+        it("moves a definition between scopes: writes the new file, removes the old", async () => {
+            await writeUserAgent(params({ agentType: "mover" }), [], ctx());
+            await writeUserAgent(
+                params({ agentType: "mover", scope: "workspace", previousAgentType: "mover" }),
+                [def({ agentType: "mover" })],
+                ctx(),
+            );
+            assert.deepEqual(readdirSync(projectAgentsDir()), ["mover.md"]);
+            assert.deepEqual(readdirSync(userAgentsDir()), []);
+        });
+
+        it("edits in place when scope is omitted", async () => {
+            await writeUserAgent(params({ agentType: "stay", scope: "workspace" }), [], ctx());
+            await writeUserAgent(
+                params({ agentType: "stay", previousAgentType: "stay", description: "v2" }),
+                [inProject("stay")],
+                ctx(),
+            );
+            assert.match(readFileSync(join(projectAgentsDir(), "stay.md"), "utf-8"), /v2/);
+            assert.equal(existsSync(userAgentsDir()), false);
+        });
+
+        it("deletes from the scope the definition lives in", async () => {
+            await writeUserAgent(params({ agentType: "gone", scope: "workspace" }), [], ctx());
+            await writeUserAgent(params({ agentType: "gone", scope: "global" }), [], ctx()).catch(
+                () => undefined,
+            );
+            await deleteUserAgent("gone", [inProject("gone")], ctx());
+            assert.equal(existsSync(join(projectAgentsDir(), "gone.md")), false);
+        });
+
+        it("classifies scope by file location and ignores the project dir without a context", () => {
+            assert.equal(agentScopeOf(def(), ctx()), "global");
+            assert.equal(agentScopeOf(inProject("p"), ctx()), "workspace");
+            assert.equal(agentScopeOf(inProject("p")), undefined);
+            assert.equal(
+                agentScopeOf(def({ filePath: join(project, "elsewhere", "x.md") }), ctx()),
+                undefined,
+            );
+            assert.equal(
+                agentScopeOf(def({ filePath: `${projectAgentsDir()}-evil/x.md` }), ctx()),
+                undefined,
+            );
+        });
+    });
+
+    describe("agentsWrite claude-code cwd", () => {
+        let home: string;
+        let workspaceDir: string;
+        let associated: string;
+        let outside: string;
+        let prevHome: string | undefined;
+
+        beforeEach(() => {
+            home = mkdtempSync(join(tmpdir(), "taco-agents-cwd-home-"));
+            workspaceDir = mkdtempSync(join(tmpdir(), "taco-agents-cwd-ws-"));
+            associated = mkdtempSync(join(tmpdir(), "taco-agents-cwd-assoc-"));
+            outside = mkdtempSync(join(tmpdir(), "taco-agents-cwd-out-"));
+            prevHome = process.env.TACO_HOME;
+            process.env.TACO_HOME = home;
+        });
+        afterEach(() => {
+            if (prevHome === undefined) delete process.env.TACO_HOME;
+            else process.env.TACO_HOME = prevHome;
+            for (const d of [home, workspaceDir, associated, outside]) {
+                rmSync(d, { recursive: true, force: true });
+            }
+        });
+
+        const ctx = () => ({ workspaceDir, allowedCwds: [workspaceDir, associated] });
+        const read = (name: string) => readFileSync(join(userAgentsDir(), `${name}.md`), "utf-8");
+
+        it("writes the chosen directory and the loader reads it back", async () => {
+            await writeUserAgent(params({ agentType: "fixed", cwd: associated }), [], ctx());
+            const parsed = parseAgentMarkdown(read("fixed"), "x", "user");
+            assert.equal(parsed?.cwd, associated);
+        });
+
+        it("accepts the workspace directory and rejects anything outside the choices", async () => {
+            await writeUserAgent(params({ agentType: "home", cwd: workspaceDir }), [], ctx());
+            assert.match(read("home"), /cwd: /);
+            await assert.rejects(
+                writeUserAgent(params({ agentType: "out", cwd: outside }), [], ctx()),
+                /workspace directory or one of its associated directories/,
+            );
+            await assert.rejects(
+                writeUserAgent(
+                    params({ agentType: "sub", cwd: join(workspaceDir, "x") }),
+                    [],
+                    ctx(),
+                ),
+                /not an existing directory/,
+            );
+            await assert.rejects(
+                writeUserAgent(params({ agentType: "rel", cwd: "relative/dir" }), [], ctx()),
+                /absolute path/,
+            );
+        });
+
+        it("keeps an unchanged directory that is no longer a choice here", async () => {
+            // Fixed from another workspace: editing it here must not force a move.
+            const existing = def({ agentType: "keep", runtime: "claude-code", cwd: outside });
+            await writeUserAgent(
+                params({
+                    agentType: "keep",
+                    cwd: outside,
+                    previousAgentType: "keep",
+                    description: "v2",
+                }),
+                [existing],
+                ctx(),
+            );
+            assert.match(read("keep"), /v2/);
+            await assert.rejects(
+                writeUserAgent(
+                    params({
+                        agentType: "keep",
+                        cwd: join(outside, ".."),
+                        previousAgentType: "keep",
+                    }),
+                    [def({ agentType: "keep", runtime: "claude-code", cwd: outside })],
+                    ctx(),
+                ),
+                /workspace directory or one of its associated directories/,
+            );
+        });
+
+        it("never writes a directory for a standard agent", async () => {
+            await writeUserAgent(
+                params({ agentType: "std", runtime: "standard", cwd: associated }),
+                [],
+                ctx(),
+            );
+            assert.doesNotMatch(read("std"), /cwd:/);
+        });
+
+        it("omits the line when no directory is given", async () => {
+            await writeUserAgent(params({ agentType: "nodir" }), [], ctx());
+            assert.doesNotMatch(read("nodir"), /cwd:/);
+            assert.equal(parseAgentMarkdown(read("nodir"), "x", "user")?.cwd, undefined);
+        });
+    });
+
     describe("agents.write/delete server fan-out", () => {
+        /** The fields the agents handlers read off a workspace. */
+        const stubWorkspace = (agents: AgentDefinition[]) => ({
+            agents,
+            executionCwd: "/w",
+            imRouting: undefined,
+            associatedRoots: () => [],
+        });
+
         useTempTacoHome("agents-fanout");
 
         it("reloads every registered server after writing a definition", async () => {
@@ -264,7 +512,7 @@ describe("agents.write", () => {
             servers.forEach((server) => {
                 registry.add(server);
             });
-            const workspace = { agents: [] };
+            const workspace = stubWorkspace([]);
             await callMethod("agents.write", {
                 server: servers[0],
                 serverRegistry: registry,
@@ -296,7 +544,7 @@ describe("agents.write", () => {
                 server: servers[0],
                 serverRegistry: registry,
                 params: { workspace: "/w", agentType: "to-delete" },
-                workspace: { agents: [def({ agentType: "to-delete" })] },
+                workspace: stubWorkspace([def({ agentType: "to-delete" })]),
             });
 
             assert.deepEqual(calls, [1, 1, 1]);
@@ -314,7 +562,7 @@ describe("agents.write", () => {
             await callMethod("agents.write", {
                 server,
                 params: params({ agentType: "single" }),
-                workspace: { agents: [] },
+                workspace: stubWorkspace([]),
             });
             assert.equal(calls, 1);
         });

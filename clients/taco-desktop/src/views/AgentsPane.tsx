@@ -3,7 +3,7 @@
  *
  * Left: list (agentType + source) with a "new agent" action; right: detail
  * (description, whenToUse, rendered systemPrompt) with edit/delete for
- * user agents that live in $TACO_HOME/agents.
+ * user agents that live in a directory the editor owns (global or workspace).
  * Data fetching and mutations live in useAgentsPane (App.tsx).
  */
 
@@ -27,6 +27,10 @@ export interface AgentsPaneProps {
     contentLoading: boolean;
     contentError: string | null;
     saving: boolean;
+    /** False for IM conversations: they have no project directory to hold a workspace-scoped agent. */
+    hasProjectDir: boolean;
+    /** Directories a Claude Code agent may run in; the first is the default. */
+    cwdChoices: ReadonlyArray<string>;
     onSaveAgent: (input: AgentSaveInput, previousAgentType?: string) => Promise<void>;
     onDeleteAgent: (agentType: string) => Promise<void>;
 }
@@ -40,6 +44,8 @@ export function AgentsPane({
     contentLoading,
     contentError,
     saving,
+    hasProjectDir,
+    cwdChoices,
     onSaveAgent,
     onDeleteAgent,
 }: AgentsPaneProps): ReactElement {
@@ -129,6 +135,11 @@ export function AgentsPane({
                                 <span className="agents-list-item-source">
                                     {a.runtime === "claude-code" ? t("agents.runtimeCc") : a.source}
                                 </span>
+                                {a.scope === "workspace" && (
+                                    <span className="agents-list-item-source">
+                                        {t("agents.scope.workspace")}
+                                    </span>
+                                )}
                             </button>
                         ))
                     )}
@@ -173,7 +184,11 @@ export function AgentsPane({
                                         ? t("agents.runtimeCc")
                                         : t("agents.runtimeStandard")}
                                 </span>
-                                <span className="agents-detail-tag">{selectedAgent.source}</span>
+                                <span className="agents-detail-tag">
+                                    {selectedAgent.scope !== undefined
+                                        ? t(`agents.scope.${selectedAgent.scope}`)
+                                        : selectedAgent.source}
+                                </span>
                                 {selectedAgent.runtime === "claude-code" &&
                                     content?.agentType === selectedAgent.agentType && (
                                         <span className="agents-detail-tag">
@@ -230,6 +245,7 @@ export function AgentsPane({
                     existing={
                         formOpen.mode === "edit" && content && selectedAgent
                             ? {
+                                  scope: selectedAgent.scope ?? "global",
                                   agentType: selectedAgent.agentType,
                                   description: selectedAgent.description,
                                   whenToUse: selectedAgent.whenToUse,
@@ -240,10 +256,16 @@ export function AgentsPane({
                                   systemPrompt: content.systemPrompt,
                                   tools: content.tools,
                                   permissionMode: content.permissionMode,
+                                  cwd: content.cwd,
                               }
                             : undefined
                     }
                     saving={saving}
+                    hasProjectDir={hasProjectDir}
+                    cwdChoices={cwdChoices}
+                    shadowedTypes={agents
+                        .filter((a) => a.scope === "global")
+                        .map((a) => a.agentType)}
                     error={formError}
                     onSave={saveForm}
                     onCancel={() => setFormOpen(false)}

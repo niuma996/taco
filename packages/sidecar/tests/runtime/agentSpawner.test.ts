@@ -18,8 +18,9 @@
  */
 
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { asSessionId, type SessionId } from "@taco-ai/protocol";
@@ -970,6 +971,77 @@ describe("AgentSpawner — runtime: claude-code", () => {
         });
         assert.equal(r.isError, true);
         assert.match(r.resultText, /cannot be resumed/);
+    });
+
+    describe("fixed run directory", () => {
+        let fixedDir: string;
+        before(() => {
+            fixedDir = mkdtempSync(join(tmpdir(), "taco-cc-fixed-"));
+        });
+        after(() => rmSync(fixedDir, { recursive: true, force: true }));
+
+        function withCwd(cwdValue: string | undefined): () => void {
+            const original = ws.agentSpawner.agents;
+            ws.agentSpawner.replaceAgents(
+                original.map((a) =>
+                    a.agentType === "cc" ? { ...a, ...(cwdValue ? { cwd: cwdValue } : {}) } : a,
+                ),
+            );
+            return () => ws.agentSpawner.replaceAgents(original);
+        }
+
+        it("runs in the directory fixed in the definition", async () => {
+            frames = readThenAnswer;
+            const restore = withCwd(fixedDir);
+            try {
+                const r = await ws.agentSpawner.spawnSubagent({
+                    parentSessionId: await seedParent(),
+                    parentToolCallId: "call-fixed-1",
+                    agentType: "cc",
+                    prompt: "x",
+                });
+                assert.equal(r.isError, false, r.resultText);
+                assert.equal(lastOptions?.cwd, fixedDir);
+            } finally {
+                restore();
+            }
+        });
+
+        it("fails without starting the CLI when the fixed directory is gone", async () => {
+            frames = readThenAnswer;
+            const restore = withCwd(join(fixedDir, "missing"));
+            lastOptions = undefined;
+            try {
+                const r = await ws.agentSpawner.spawnSubagent({
+                    parentSessionId: await seedParent(),
+                    parentToolCallId: "call-fixed-2",
+                    agentType: "cc",
+                    prompt: "x",
+                });
+                assert.equal(r.isError, true);
+                assert.match(r.resultText, /not an existing directory/);
+                assert.equal(lastOptions, undefined);
+            } finally {
+                restore();
+            }
+        });
+
+        it("a definition without a directory falls back to the workspace", async () => {
+            frames = readThenAnswer;
+            const restore = withCwd(undefined);
+            try {
+                const r = await ws.agentSpawner.spawnSubagent({
+                    parentSessionId: await seedParent(),
+                    parentToolCallId: "call-fixed-3",
+                    agentType: "cc",
+                    prompt: "x",
+                });
+                assert.equal(r.isError, false, r.resultText);
+                assert.equal(lastOptions?.cwd, cwd);
+            } finally {
+                restore();
+            }
+        });
     });
 });
 

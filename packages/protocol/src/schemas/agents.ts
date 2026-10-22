@@ -22,8 +22,11 @@ const agentType = Type.String({
     pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*$",
 });
 
+const agentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")]);
+
 export const agentsWriteSchema = Type.Object({
     workspace: Type.String(),
+    scope: Type.Optional(agentScope),
     agentType,
     description: Type.String({ minLength: 1, maxLength: 1024 }),
     whenToUse: Type.Optional(Type.String({ maxLength: 2048 })),
@@ -43,6 +46,7 @@ export const agentsWriteSchema = Type.Object({
             Type.Literal("inherit"),
         ]),
     ),
+    cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
     systemPrompt: Type.String({ maxLength: 65536 }),
     previousAgentType: Type.Optional(agentType),
 });

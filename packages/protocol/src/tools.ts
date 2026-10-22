@@ -162,6 +162,13 @@ export interface AgentsListParams {
 export type AgentRuntime = "standard" | "claude-code";
 
 /**
+ * Where an editable agent definition lives: `global` is `$TACO_HOME/agents`
+ * (every workspace sees it), `workspace` is `<workspace>/.taco/agents` (only
+ * that workspace). Read-only sources (`~/.claude/agents`, builtins) have none.
+ */
+export type AgentScope = "global" | "workspace";
+
+/**
  * Claude Code permission mode of a `claude-code` agent. `inherit` = pass none
  * and let Claude Code pick its own. Absent = "auto".
  */
@@ -184,6 +191,8 @@ export interface AgentEntry {
     /** Engine from the definition's frontmatter; absent = "standard". UI-only, never model-visible. */
     runtime?: AgentRuntime;
     source: "builtin" | "user";
+    /** Absent for builtins and for hand-managed directories the editor cannot write. */
+    scope?: AgentScope;
     /** Whether `agents.write` / `agents.delete` may modify this definition. */
     editable: boolean;
 }
@@ -191,6 +200,13 @@ export interface AgentEntry {
 /** `agents.list` RPC result. */
 export interface AgentsListResult {
     agents: AgentEntry[];
+    /**
+     * Directories a claude-code agent may be fixed to from this workspace: the
+     * workspace's own directory first (the default), then its associated
+     * directories. Optional on the wire: a sidecar older than this field
+     * omits it, and the desktop may be paired with one.
+     */
+    cwdChoices?: string[];
 }
 
 /** `agents.content` RPC params — only `agentType` is required. */
@@ -213,16 +229,24 @@ export interface AgentsContentResult {
     tools?: string[];
     /** `claude-code` only. */
     permissionMode?: ClaudeCodePermissionMode;
+    /** `claude-code` only: the directory it runs in. Absent = the calling workspace's directory. */
+    cwd?: string;
     source: "builtin" | "user";
+    scope?: AgentScope;
     editable: boolean;
 }
 
 /**
- * `agents.write` RPC params — create or overwrite one agent definition in
- * `$TACO_HOME/agents/<agentType>.md`.
+ * `agents.write` RPC params — create or overwrite one agent definition as
+ * `<agentType>.md` in the directory `scope` names.
  */
 export interface AgentsWriteParams {
     workspace: WorkspaceId;
+    /**
+     * Omitted = "global" on create, unchanged on edit. "workspace" is rejected
+     * for IM conversations, which have no project directory.
+     */
+    scope?: AgentScope;
     agentType: string;
     description: string;
     whenToUse?: string;
@@ -235,11 +259,20 @@ export interface AgentsWriteParams {
      */
     tools?: string[];
     permissionMode?: ClaudeCodePermissionMode;
+    /**
+     * `claude-code` only: absolute directory the CLI runs in, fixed in the
+     * definition. Must be the workspace directory or one of its associated
+     * directories when saved. Omitted = the calling workspace's directory.
+     */
+    cwd?: string;
     systemPrompt: string;
     /**
      * Set when editing: the agentType being replaced. Renaming deletes the old
      * file once the new one is written. Absent = create, which fails if the
-     * agentType already exists in any source.
+     * agentType already exists in the same scope or in a source that cannot be
+     * shadowed (builtin, hand-managed directories); a workspace definition may
+     * shadow a global one. A `scope` different from the replaced definition's
+     * moves it: the old file is removed once the new one is written.
      */
     previousAgentType?: string;
 }
@@ -248,7 +281,7 @@ export interface AgentsWriteResult {
     ok: true;
 }
 
-/** `agents.delete` RPC params — only editable (`$TACO_HOME/agents`) definitions. */
+/** `agents.delete` RPC params — only editable (global or workspace scope) definitions. */
 export interface AgentsDeleteParams {
     workspace: WorkspaceId;
     agentType: string;

@@ -508,6 +508,7 @@ export default function App() {
     } = useSkillsPane(client, mainView === "skills", activeCwd);
     const {
         agents,
+        cwdChoices: agentCwdChoices,
         agentsError,
         selectedAgentType,
         setSelectedAgentType,
@@ -993,6 +994,8 @@ export default function App() {
                             contentLoading={agentContentLoading}
                             contentError={agentContentError}
                             saving={agentSaving}
+                            hasProjectDir={!activeCwd.startsWith(IM_CWD_PREFIX)}
+                            cwdChoices={agentCwdChoices}
                             onSaveAgent={saveAgent}
                             onDeleteAgent={deleteAgent}
                         />

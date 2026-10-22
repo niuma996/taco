@@ -3,7 +3,7 @@
  *
  * agents.list    — return available agent types (built-in + user-defined)
  * agents.content — return a single agent's systemPrompt + metadata by agentType
- * agents.write   — create/edit one definition under $TACO_HOME/agents
+ * agents.write   — create/edit one definition (global or workspace scope)
  * agents.delete  — remove one editable definition
  */
 
@@ -27,9 +27,15 @@ import { RPC } from "@taco-ai/shared";
 import type { AgentDefinition } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
+import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
 import type { ServerRegistry } from "../serverRegistry.ts";
-import { deleteUserAgent, isEditableAgent, writeUserAgent } from "./agentsWrite.ts";
+import {
+    type AgentScopeContext,
+    agentScopeOf,
+    deleteUserAgent,
+    writeUserAgent,
+} from "./agentsWrite.ts";
 
 const log = createLogger("agents");
 
@@ -49,21 +55,38 @@ async function reloadAgentsEverywhere(
     );
 }
 
+/**
+ * The project directory a workspace-scoped definition lives under: the one the
+ * catalog was scanned from (`executionCwd`, see `reloadAgents`). IM
+ * conversations have none — their cwd is a scratch directory, not a project.
+ */
+function scopeContext(workspace: WorkspaceRuntime): AgentScopeContext {
+    const allowedCwds = [workspace.executionCwd, ...workspace.associatedRoots()];
+    return workspace.imRouting !== undefined
+        ? { allowedCwds }
+        : { workspaceDir: workspace.executionCwd, allowedCwds };
+}
+
 export function registerAgentsHandlers(): void {
     registerMethod(
         RPC.agentsList,
         true,
         async ({ workspace }: MethodCtx<AgentsListParams>): Promise<AgentsListResult> => {
-            const agents = workspace.agents.map((a: AgentDefinition) => ({
-                agentType: a.agentType,
-                description: a.description,
-                whenToUse: a.whenToUse,
-                context: a.context,
-                runtime: a.runtime,
-                source: a.source,
-                editable: isEditableAgent(a),
-            }));
-            return { agents };
+            const ctx = scopeContext(workspace);
+            const agents = workspace.agents.map((a: AgentDefinition) => {
+                const scope = agentScopeOf(a, ctx);
+                return {
+                    agentType: a.agentType,
+                    description: a.description,
+                    whenToUse: a.whenToUse,
+                    context: a.context,
+                    runtime: a.runtime,
+                    source: a.source,
+                    ...(scope !== undefined ? { scope } : {}),
+                    editable: scope !== undefined,
+                };
+            });
+            return { agents, cwdChoices: [...(ctx.allowedCwds ?? [])] };
         },
         { schema: agentsListSchema },
     );
@@ -79,6 +102,7 @@ export function registerAgentsHandlers(): void {
             if (!def) {
                 throw new Error(`agent not found: ${params.agentType}`);
             }
+            const scope = agentScopeOf(def, scopeContext(workspace));
             return {
                 agentType: def.agentType,
                 systemPrompt: def.systemPrompt,
@@ -89,8 +113,10 @@ export function registerAgentsHandlers(): void {
                 maxTurns: def.maxTurns,
                 ...(def.tools !== undefined ? { tools: def.tools } : {}),
                 ...(def.permissionMode !== undefined ? { permissionMode: def.permissionMode } : {}),
+                ...(def.runtime === "claude-code" && def.cwd !== undefined ? { cwd: def.cwd } : {}),
                 source: def.source,
-                editable: isEditableAgent(def),
+                ...(scope !== undefined ? { scope } : {}),
+                editable: scope !== undefined,
             };
         },
         { schema: agentsContentSchema },
@@ -105,7 +131,7 @@ export function registerAgentsHandlers(): void {
             workspace,
             params,
         }: MethodCtx<AgentsWriteParams>): Promise<AgentsWriteResult> => {
-            await writeUserAgent(params, workspace.agents);
+            await writeUserAgent(params, workspace.agents, scopeContext(workspace));
             await reloadAgentsEverywhere(server, serverRegistry);
             return { ok: true };
         },
@@ -121,7 +147,7 @@ export function registerAgentsHandlers(): void {
             workspace,
             params,
         }: MethodCtx<AgentsDeleteParams>): Promise<AgentsDeleteResult> => {
-            await deleteUserAgent(params.agentType, workspace.agents);
+            await deleteUserAgent(params.agentType, workspace.agents, scopeContext(workspace));
             await reloadAgentsEverywhere(server, serverRegistry);
             return { ok: true };
         },

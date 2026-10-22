@@ -250,3 +250,19 @@
 .agent-form-rules li + li {
     margin-top: 0.2rem;
 }
+
+/* Notices above the fields: a shadowed name, or what a Claude Code agent can reach. */
+.agent-form-notice {
+    margin: 0 0 0.75rem 0;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface-tint);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    color: var(--fg-dim);
+    line-height: 1.5;
+}
+
+.agent-form-notice--warn {
+    border-color: var(--warning);
+}

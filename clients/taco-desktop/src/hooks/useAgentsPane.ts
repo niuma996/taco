@@ -1,6 +1,7 @@
 import {
     type AgentEntry,
     type AgentRuntime,
+    type AgentScope,
     type AgentsContentResult,
     asWorkspaceId,
     type ClaudeCodePermissionMode,
@@ -10,6 +11,7 @@ import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface AgentSaveInput {
+    scope: AgentScope;
     agentType: string;
     description: string;
     whenToUse?: string;
@@ -20,10 +22,14 @@ export interface AgentSaveInput {
     tools?: string[];
     /** `claude-code` only; omitted = "auto". */
     permissionMode?: ClaudeCodePermissionMode;
+    /** `claude-code` only: the directory it runs in. */
+    cwd?: string;
 }
 
 export interface UseAgentsPaneResult {
     agents: AgentEntry[];
+    /** Directories a Claude Code agent may run in: the workspace's own first, then its associations. */
+    cwdChoices: string[];
     /** Non-null when the agents list fetch failed; clears itself after a few seconds. */
     agentsError: string | null;
     selectedAgentType: string | null;
@@ -44,6 +50,7 @@ export function useAgentsPane(
     activeCwd: string | undefined,
 ): UseAgentsPaneResult {
     const [agents, setAgents] = useState<AgentEntry[]>([]);
+    const [cwdChoices, setCwdChoices] = useState<string[]>([]);
     const {
         error: agentsError,
         fail: failAgentsList,
@@ -59,6 +66,9 @@ export function useAgentsPane(
         if (!activeCwd) return;
         const r = await client.agentsList(asWorkspaceId(activeCwd));
         setAgents(r.agents);
+        // Absent from a sidecar older than the field; the form then saves no
+        // directory and the agent runs in the workspace, as before.
+        setCwdChoices(r.cwdChoices ?? []);
         setSelectedAgentType((prev) =>
             prev !== null && r.agents.some((a) => a.agentType === prev)
                 ? prev
@@ -143,6 +153,7 @@ export function useAgentsPane(
 
     return {
         agents,
+        cwdChoices,
         agentsError,
         selectedAgentType,
         setSelectedAgentType,

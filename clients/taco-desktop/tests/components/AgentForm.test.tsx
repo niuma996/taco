@@ -16,6 +16,12 @@ vi.spyOn(useI18n, "useT").mockReturnValue({
 
 afterEach(cleanup);
 
+const base = {
+    hasProjectDir: true,
+    shadowedTypes: [] as string[],
+    cwdChoices: ["/work/repo", "/work/assoc"],
+};
+
 async function fillRequired(name: string) {
     const user = userEvent.setup();
     const inputs = screen.getAllByRole("textbox");
@@ -29,7 +35,7 @@ async function fillRequired(name: string) {
 describe("AgentForm", () => {
     it("taco dialog: no Claude Code rules or fields, saves no Claude Code settings", async () => {
         const onSave = vi.fn<(v: AgentFormValue) => void>();
-        render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
         assert.equal(screen.queryByText("agents.form.ccRuleEngine"), null);
         assert.equal(screen.queryByText("agents.form.ccTools"), null);
         assert.equal(screen.queryByText("agents.form.ccPermissionMode"), null);
@@ -45,7 +51,7 @@ describe("AgentForm", () => {
 
     it("Claude Code dialog: shows the rules, defaults to the full preset and auto", async () => {
         const onSave = vi.fn<(v: AgentFormValue) => void>();
-        render(<AgentForm runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
         assert.ok(screen.getByText("agents.form.newCcTitle"));
         assert.ok(screen.getByText("agents.form.ccRuleEngine"));
         assert.ok(screen.getByText("agents.form.ccRulePermissions"));
@@ -61,7 +67,7 @@ describe("AgentForm", () => {
 
     it("Claude Code dialog: parses a tool list and blocks invalid names", async () => {
         const onSave = vi.fn<(v: AgentFormValue) => void>();
-        render(<AgentForm runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
         const user = await fillRequired("coder");
         const toolsInput = screen.getByPlaceholderText("Read, Grep, Glob, Edit, Bash");
 
@@ -80,7 +86,7 @@ describe("AgentForm", () => {
 
     it("refuses to save when the tool list names AskUserQuestion", async () => {
         const onSave = vi.fn<(v: AgentFormValue) => void>();
-        render(<AgentForm runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="claude-code" onSave={onSave} onCancel={() => {}} />);
         const user = await fillRequired("coder");
         await user.type(
             screen.getByPlaceholderText("Read, Grep, Glob, Edit, Bash"),
@@ -106,7 +112,7 @@ describe("AgentForm", () => {
     for (const [field, pick] of limitCases) {
         it(`disables save when ${field} exceeds the server limit`, () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
-            render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
             const inputs = screen.getAllByRole("textbox");
             fireEvent.change(inputs[0] as HTMLElement, { target: { value: "limits" } });
             fireEvent.change(inputs[1] as HTMLElement, { target: { value: "does things" } });
@@ -126,15 +132,15 @@ describe("AgentForm", () => {
     }
 
     it("starts a new definition at the runtime's default turn cap", () => {
-        render(<AgentForm runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
         assert.ok(screen.getByDisplayValue("50"));
         cleanup();
-        render(<AgentForm runtime="standard" onSave={() => {}} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="standard" onSave={() => {}} onCancel={() => {}} />);
         assert.ok(screen.getByDisplayValue("30"));
     });
 
     it("shows the no-user-questions rule in the Claude Code dialog", () => {
-        render(<AgentForm runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
+        render(<AgentForm {...base} runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
         assert.ok(screen.getByText("agents.form.ccRuleAskUser"));
         assert.ok(screen.getByText("agents.form.ccRuleCheckpoints"));
     });
@@ -142,8 +148,10 @@ describe("AgentForm", () => {
     it("edit prefills Claude Code settings from the definition", () => {
         render(
             <AgentForm
+                {...base}
                 runtime="claude-code"
                 existing={{
+                    scope: "global",
                     agentType: "coder",
                     description: "d",
                     runtime: "claude-code",
@@ -170,7 +178,7 @@ describe("AgentForm", () => {
     describe("no role body switch", () => {
         it("refuses to save an empty prompt while the switch is off", async () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
-            render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
             const user = userEvent.setup();
             const inputs = screen.getAllByRole("textbox");
             await user.type(inputs[0] as HTMLElement, "plain");
@@ -189,7 +197,7 @@ describe("AgentForm", () => {
 
         it("saves an empty system prompt once the switch is on", async () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
-            render(<AgentForm runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
             const user = userEvent.setup();
             const inputs = screen.getAllByRole("textbox");
             await user.type(inputs[0] as HTMLElement, "plain");
@@ -203,7 +211,9 @@ describe("AgentForm", () => {
         });
 
         it("disables the textarea without discarding a draft", async () => {
-            render(<AgentForm runtime="standard" onSave={() => {}} onCancel={() => {}} />);
+            render(
+                <AgentForm {...base} runtime="standard" onSave={() => {}} onCancel={() => {}} />,
+            );
             const user = userEvent.setup();
             const inputs = screen.getAllByRole("textbox");
             await user.type(inputs[0] as HTMLElement, "plain");
@@ -223,8 +233,10 @@ describe("AgentForm", () => {
         it("edit starts with the switch on for a definition that has no body", () => {
             render(
                 <AgentForm
+                    {...base}
                     runtime="standard"
                     existing={{
+                        scope: "global",
                         agentType: "roamer",
                         description: "d",
                         runtime: "standard",
@@ -236,6 +248,150 @@ describe("AgentForm", () => {
                 />,
             );
             assert.equal(screen.getByRole("switch").getAttribute("aria-checked"), "true");
+        });
+    });
+
+    describe("scope", () => {
+        const scopeTrigger = () => screen.getByRole("combobox", { name: "agents.form.scope" });
+
+        it("defaults to global and saves the scope it was given", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            const user = await fillRequired("plain");
+            await user.click(screen.getByText("agents.form.save"));
+            assert.equal(onSave.mock.calls[0]?.[0].scope, "global");
+        });
+
+        it("saves a workspace scope picked in the dropdown", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            const user = await fillRequired("plain");
+            await user.click(scopeTrigger());
+            await user.click(await screen.findByRole("option", { name: "agents.scope.workspace" }));
+            await user.click(screen.getByText("agents.form.save"));
+            assert.equal(onSave.mock.calls[0]?.[0].scope, "workspace");
+        });
+
+        it("disables the picker when there is no project directory", () => {
+            render(
+                <AgentForm
+                    {...base}
+                    hasProjectDir={false}
+                    runtime="standard"
+                    onSave={() => {}}
+                    onCancel={() => {}}
+                />,
+            );
+            assert.equal(scopeTrigger().hasAttribute("disabled"), true);
+        });
+
+        it("warns when a workspace agent would shadow a global one", async () => {
+            render(
+                <AgentForm
+                    {...base}
+                    shadowedTypes={["reviewer"]}
+                    runtime="standard"
+                    onSave={() => {}}
+                    onCancel={() => {}}
+                />,
+            );
+            const user = userEvent.setup();
+            await user.type(screen.getAllByRole("textbox")[0] as HTMLElement, "reviewer");
+            assert.equal(screen.queryByText("agents.form.shadowsGlobal"), null);
+
+            await user.click(scopeTrigger());
+            await user.click(await screen.findByRole("option", { name: "agents.scope.workspace" }));
+            assert.ok(screen.getByText("agents.form.shadowsGlobal"));
+        });
+    });
+
+    describe("Claude Code run directory", () => {
+        const cwdTrigger = () => screen.getByRole("combobox", { name: "agents.form.ccCwd" });
+        const ccExisting = (cwd?: string): AgentFormValue => ({
+            scope: "global",
+            agentType: "coder",
+            description: "d",
+            runtime: "claude-code",
+            maxTurns: 30,
+            systemPrompt: "p",
+            ...(cwd !== undefined ? { cwd } : {}),
+        });
+
+        it("a new agent starts on the workspace directory and saves it", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(
+                <AgentForm {...base} runtime="claude-code" onSave={onSave} onCancel={() => {}} />,
+            );
+            assert.match(cwdTrigger().textContent ?? "", /\/work\/repo/);
+            const user = await fillRequired("coder");
+            await user.click(screen.getByText("agents.form.save"));
+            assert.equal(onSave.mock.calls[0]?.[0].cwd, "/work/repo");
+        });
+
+        it("shows the directory a saved agent is fixed to", () => {
+            render(
+                <AgentForm
+                    {...base}
+                    runtime="claude-code"
+                    existing={ccExisting("/work/assoc")}
+                    onSave={() => {}}
+                    onCancel={() => {}}
+                />,
+            );
+            assert.match(cwdTrigger().textContent ?? "", /\/work\/assoc/);
+        });
+
+        it("an agent saved without a directory shows the workspace and stores it on save", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(
+                <AgentForm
+                    {...base}
+                    runtime="claude-code"
+                    existing={ccExisting()}
+                    onSave={onSave}
+                    onCancel={() => {}}
+                />,
+            );
+            assert.match(cwdTrigger().textContent ?? "", /\/work\/repo/);
+            await userEvent.setup().click(screen.getByText("agents.form.save"));
+            assert.equal(onSave.mock.calls[0]?.[0].cwd, "/work/repo");
+        });
+
+        it("saves an associated directory picked from the list", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(
+                <AgentForm {...base} runtime="claude-code" onSave={onSave} onCancel={() => {}} />,
+            );
+            const user = await fillRequired("coder");
+            await user.click(cwdTrigger());
+            await user.click(await screen.findByRole("option", { name: "/work/assoc" }));
+            await user.click(screen.getByText("agents.form.save"));
+            assert.equal(onSave.mock.calls[0]?.[0].cwd, "/work/assoc");
+        });
+
+        it("keeps a directory from another workspace instead of moving the agent", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(
+                <AgentForm
+                    {...base}
+                    runtime="claude-code"
+                    existing={ccExisting("/elsewhere/repo")}
+                    onSave={onSave}
+                    onCancel={() => {}}
+                />,
+            );
+            assert.match(cwdTrigger().textContent ?? "", /\/elsewhere\/repo/);
+            await userEvent.setup().click(screen.getByText("agents.form.save"));
+            assert.equal(onSave.mock.calls[0]?.[0].cwd, "/elsewhere/repo");
+        });
+
+        it("the taco dialog has no run directory and saves none", async () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
+            assert.equal(screen.queryByRole("combobox", { name: "agents.form.ccCwd" }), null);
+            const user = await fillRequired("plain");
+            await user.click(screen.getByText("agents.form.save"));
+            assert.equal("cwd" in (onSave.mock.calls[0]?.[0] ?? {}), false);
         });
     });
 });

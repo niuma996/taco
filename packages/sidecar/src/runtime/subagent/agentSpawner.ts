@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from "node:events";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../../agents/filterTools.ts";
@@ -168,6 +168,8 @@ export interface SubagentSessionArgs {
      */
     claudeCodeTools?: readonly string[];
     permissionMode?: ClaudeCodePermissionMode;
+    /** `claude-code` only: the definition's fixed directory. Absent = the execution cwd. */
+    claudeCodeCwd?: string;
     /**
      * Optional in-context examples to inject ahead of `rolePrompt`. The
      * examples establish the contract the profile expects (e.g. citation
@@ -712,6 +714,24 @@ export class AgentSpawner extends EventEmitter {
                 isError: true,
             };
         }
+        // A fixed directory that has since been moved or deleted fails the
+        // spawn: running the CLI somewhere else instead would point a
+        // write-capable agent at a tree its author never chose. Checked before
+        // the slot is reserved so the failure leaves nothing behind.
+        if (def.runtime === "claude-code" && def.cwd !== undefined) {
+            const isDir = await stat(def.cwd)
+                .then((s) => s.isDirectory())
+                .catch(() => false);
+            if (!isDir) {
+                return {
+                    resultText:
+                        `agent type "${def.agentType}" is set to run in ${def.cwd}, which is not an ` +
+                        "existing directory. Ask the user to fix the subagent's directory in its settings.",
+                    isError: true,
+                    ...(args.background ? { background: true as const } : {}),
+                };
+            }
+        }
         // Reserve the background slot before any `await` so two concurrent
         // launches cannot both pass a stale `size` check. Released in
         // `spawnBackgroundSubagent`'s `.finally`, or here if we bail before
@@ -787,7 +807,7 @@ export class AgentSpawner extends EventEmitter {
                 maxTurns: args.maxTurns,
                 tools: args.claudeCodeTools,
                 permissionMode: args.permissionMode,
-                cwd: this.env.cwd,
+                cwd: args.claudeCodeCwd ?? this.env.cwd,
                 abortController: controller,
                 onUpdate: args.onUpdate,
                 loadSdk: this.loadClaudeCodeSdk,
@@ -948,7 +968,11 @@ export class AgentSpawner extends EventEmitter {
             maxTurns: def.maxTurns,
             forkedContext,
             ...(def.runtime === "claude-code"
-                ? { claudeCodeTools: def.tools, permissionMode: def.permissionMode }
+                ? {
+                      claudeCodeTools: def.tools,
+                      permissionMode: def.permissionMode,
+                      ...(def.cwd !== undefined ? { claudeCodeCwd: def.cwd } : {}),
+                  }
                 : {}),
         };
         if (!args.background) {

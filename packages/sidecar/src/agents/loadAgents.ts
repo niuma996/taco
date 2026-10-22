@@ -6,7 +6,7 @@
  */
 
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import matter from "gray-matter";
 import type {
     AgentDefinition,
@@ -27,6 +27,7 @@ interface AgentFrontmatter {
     context?: unknown;
     runtime?: unknown;
     permissionMode?: unknown;
+    cwd?: unknown;
     [key: string]: unknown;
 }
 
@@ -76,6 +77,7 @@ export function parseAgentMarkdown(
         context: parseContext(frontmatter.context),
         runtime: parseRuntime(frontmatter.runtime),
         permissionMode: parsePermissionMode(frontmatter.permissionMode),
+        cwd: parseCwd(frontmatter.cwd),
         source,
         filePath,
     };
@@ -138,6 +140,15 @@ function parsePermissionMode(raw: unknown): ClaudeCodePermissionMode | undefined
     return typeof raw === "string" && PERMISSION_MODES.has(raw)
         ? (raw as ClaudeCodePermissionMode)
         : undefined;
+}
+
+/**
+ * Validate the optional `cwd:` entry. Only an absolute path counts: a relative
+ * one would resolve against whichever process happens to read it, and the
+ * spawner falls back to the workspace directory for anything else.
+ */
+function parseCwd(raw: unknown): string | undefined {
+    return typeof raw === "string" && isAbsolute(raw.trim()) ? raw.trim() : undefined;
 }
 
 async function loadDir(dir: string, source: "builtin" | "user"): Promise<AgentDefinition[]> {
