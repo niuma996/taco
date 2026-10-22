@@ -23,6 +23,7 @@ import type {
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { SystemPromptContributor } from "../../prompts/buildSystemPrompt.ts";
+import type { EnvironmentContext } from "../../prompts/index.ts";
 import { interpolateArgs } from "../../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
 import { tagWrap } from "../../tags/builder.ts";
@@ -112,6 +113,13 @@ export interface AgentSpawnerOptions {
      * stays consistent across parent and children.
      */
     readonly projectContext?: string;
+    /**
+     * Workspace-level `<environment>` snapshot (cwd/platform/shell/git), passed
+     * through to rebuilt subagent prompts. Without it a child in a workspace
+     * with no `.gitignore` would get no `<project_context>` cwd line and no
+     * environment block at all — no cwd, platform, or shell.
+     */
+    readonly environmentContext?: EnvironmentContext;
     /**
      * Mirrors the parent's IM/third-party channel flag. Children inherit it so
      * their rebuilt prompt carries the same `<channel_safety>` block and the
@@ -249,6 +257,7 @@ export class AgentSpawner extends EventEmitter {
             ? `${options.defaultModel.provider}/${options.defaultModel.id}`
             : undefined;
         this.projectContext = options.projectContext ?? "";
+        this.environmentContext = options.environmentContext;
         this.hideWorkspacePath = options.hideWorkspacePath;
         this.getParentInstructionsBlock = options.getParentInstructionsBlock ?? (() => "");
         // In-flight resume promises keyed by subSessionId. Concurrent calls
@@ -278,6 +287,8 @@ export class AgentSpawner extends EventEmitter {
 
     /** Workspace-level `<project_context>` block, passed through to rebuilt subagent prompts. */
     private readonly projectContext: string;
+    /** Workspace-level `<environment>` snapshot, passed through to rebuilt subagent prompts. */
+    private readonly environmentContext: EnvironmentContext | undefined;
     /** Parent's IM/third-party channel flag, inherited by every rebuilt subagent prompt. */
     private readonly hideWorkspacePath: boolean | undefined;
     /**
@@ -483,6 +494,7 @@ export class AgentSpawner extends EventEmitter {
                 this.sessionRegistry.toolsForChildSession(sessionId),
             systemPromptContributors: this.systemPromptContributors,
             projectContext: this.projectContext,
+            environmentContext: this.environmentContext,
             hideWorkspacePath: this.hideWorkspacePath,
             getParentInstructionsBlock: this.getParentInstructionsBlock,
         };

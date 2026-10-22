@@ -749,6 +749,7 @@ export class WorkspaceRuntime extends EventEmitter {
                     : undefined,
             defaultModel: this.defaultModel,
             projectContext: this.projectContextSnapshot,
+            environmentContext: this.environmentContextSnapshot,
             hideWorkspacePath: isIm,
             // Thunk, not a value: `updateInstructionsConfig()` re-renders the
             // block on settings.write, and a captured string would pin every

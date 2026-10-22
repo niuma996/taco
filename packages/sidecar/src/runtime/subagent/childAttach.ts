@@ -16,6 +16,7 @@ import {
     filterContributorsForTools,
     type SystemPromptContributor,
 } from "../../prompts/buildSystemPrompt.ts";
+import type { EnvironmentContext } from "../../prompts/index.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { createShellTool } from "../../tools/shellTool.ts";
 import type { SessionTaskState } from "../session/sessionTaskState.ts";
@@ -43,6 +44,8 @@ export interface ChildAttachDeps {
     readonly systemPromptContributors: SystemPromptContributor[];
     /** Workspace-level `<project_context>` block; a rebuild never re-reads disk. */
     readonly projectContext: string;
+    /** Parent's `<environment>` snapshot; without it a child in a workspace with no `.gitignore` would see no cwd/platform/shell at all. */
+    readonly environmentContext?: EnvironmentContext;
     /** Parent's IM/channel flag — children inherit the path-semantics variant. */
     readonly hideWorkspacePath: boolean | undefined;
     /** Parent's rendered instruction blocks; a thunk so a settings.write reaches the child. */
@@ -131,6 +134,7 @@ export async function prepareChildAttach(
         tools,
         modelIdentity: args.modelIdentity,
         projectContext: deps.projectContext,
+        environmentContext: deps.environmentContext,
         hideWorkspacePath: deps.hideWorkspacePath,
         contributors:
             profileContributors.length > 0
