@@ -11,6 +11,12 @@
  * Pass `description` only when the dialog has a real summary line: Radix
  * auto-links it via aria-describedby, and omitting Description entirely is
  * the documented alternative for dialogs whose title suffices.
+ *
+ * Layout contract: the title, description and `actions` row are pinned —
+ * the modal is a flex column capped below the viewport, and `children` sit
+ * in a `.ui-modal-body` region that scrolls. A dialog that renders its own
+ * `.ui-modal-actions` inside children (e.g. to keep a submit button inside
+ * its <form>) opts out of the pinned footer.
  */
 import * as Dialog from "@radix-ui/react-dialog";
 import type { ReactNode } from "react";
@@ -76,7 +82,7 @@ export function Modal(props: ModalProps) {
                             {description}
                         </Dialog.Description>
                     )}
-                    {children}
+                    <div className="ui-modal-body">{children}</div>
                     {actions !== undefined && <div className="ui-modal-actions">{actions}</div>}
                 </Dialog.Content>
             </Dialog.Portal>

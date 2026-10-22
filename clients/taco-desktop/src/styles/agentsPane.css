@@ -180,12 +180,12 @@
 }
 
 /* Fixed width: the base .ui-modal is content-sized, so switching the runtime
-   hint or showing a field error would otherwise resize the dialog. */
+   hint or showing a field error would otherwise resize the dialog. Height cap
+   only — scrolling is the shared .ui-modal-body's job. */
 .agent-form-modal {
     width: 600px;
     max-width: calc(100vw - 4rem);
     max-height: 85vh;
-    overflow-y: auto;
 }
 
 .agent-form-modal .ui-textarea {

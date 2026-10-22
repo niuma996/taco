@@ -468,19 +468,39 @@
     min-width: 320px;
     max-width: 420px;
     box-shadow: 0 8px 24px var(--shadow-color-strong);
+    /* Flex column capped below the viewport: title and actions stay pinned
+       and only .ui-modal-body scrolls. Feature classes with their own vh cap
+       (e.g. .agent-form-modal) load later and win. */
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 4rem);
 }
 .ui-modal-title {
+    flex-shrink: 0;
     margin: 0 0 0.6rem 0;
     font-size: 1rem;
     font-weight: 600;
 }
 .ui-modal-message {
+    flex-shrink: 0;
     margin: 0 0 1.2rem 0;
     font-size: 0.9rem;
     color: var(--fg-dim);
     line-height: 1.4;
 }
+.ui-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* A scrollport clips ink overflow at its padding box. Focus rings paint up
+       to 4px outside an input (2px outline + 2px offset), so give the body 4px
+       of padding for them and cancel the layout shift with a negative margin —
+       the content box, and every spacing rhythm around it, stays put. */
+    padding: 4px;
+    margin: -4px;
+}
 .ui-modal-actions {
+    flex-shrink: 0;
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;

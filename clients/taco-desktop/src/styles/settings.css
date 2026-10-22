@@ -701,12 +701,12 @@
 }
 
 /* MCP server modal — wider than the default .ui-modal so the multi-line env /
-   headers / always-loaded textareas are comfortable. */
+   headers / always-loaded textareas are comfortable. Scrolling is the shared
+   .ui-modal-body's job. */
 .mcp-server-modal {
     width: 600px;
     max-width: calc(100vw - 4rem);
     max-height: 85vh;
-    overflow-y: auto;
 }
 
 /* Project Conventions Tab — file rows and fieldset styles. Reuses .compaction-toggle-* rows;
@@ -924,13 +924,12 @@
 /* ── Schedule form dialog ── */
 /* Wider than the default .ui-modal (420px) so the cron expression, JSON
    args textarea, and toggle row all sit on one comfortable column.
-   `max-height` + `overflow-y` keeps the dialog within the viewport on
-   small windows. */
+   `max-height` keeps the dialog within the viewport on small windows;
+   scrolling is the shared .ui-modal-body's job. */
 .schedules-modal {
     width: 620px;
     max-width: calc(100vw - 4rem);
     max-height: 85vh;
-    overflow-y: auto;
 }
 
 /* Two-checkbox row for the booleans; native inputs stay accessible and

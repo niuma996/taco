@@ -210,13 +210,20 @@
 
 /* ── Bind dialog ── */
 .channel-bind-modal {
-    display: flex;
-    flex-direction: column;
+    /* Base .ui-modal is already a flex column; the gap spaces title ↔ body. */
     gap: 14px;
     /* Fixed width: content swaps on every bind state (connecting, QR,
        verify-code form, result), and content-sizing made it jump. */
     width: 420px;
     max-width: calc(100vw - 4rem);
+}
+/* The per-state blocks used to be direct children of the modal's flex column;
+   now they live inside .ui-modal-body, which needs the gap to keep their
+   spacing. */
+.channel-bind-modal .ui-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }
 .channels-bind-qr,
 .channel-bind-qr {
@@ -260,9 +267,11 @@
     width: 900px;
     max-width: calc(100vw - 4rem);
     max-height: 86vh;
-    overflow-y: auto;
-    /* Reserves scrollbar space from the start — when loading renders first (no scrollbar),
-       the content height increase adds the scrollbar without causing layout reflow. */
+}
+/* Reserves scrollbar space from the start — when loading renders first (no
+   scrollbar), the content height increase adds the scrollbar without causing
+   layout reflow. Scrolling itself is the shared .ui-modal-body's job. */
+.im-policy-modal .ui-modal-body {
     scrollbar-gutter: stable;
 }
 

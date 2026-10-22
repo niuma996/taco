@@ -3,6 +3,14 @@
    ui.css. */
 
 .workspace-associations-modal {
+    /* Base .ui-modal is already a flex column; the gap spaces title ↔
+       description ↔ body ↔ actions. */
+    gap: var(--space-3);
+}
+/* The dialog's blocks used to be direct children of the modal's flex column;
+   now they live inside .ui-modal-body, which needs the gap to keep their
+   spacing. */
+.workspace-associations-modal .ui-modal-body {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
