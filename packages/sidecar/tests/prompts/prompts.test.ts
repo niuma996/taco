@@ -20,6 +20,10 @@ import {
 import { formatSkillsForSystemPrompt } from "../../src/prompts/formatSkillsForSystemPrompt.ts";
 import { projectContextForPrompt } from "../../src/prompts/projectContext.ts";
 import { formatSkillAuthoringGuidance } from "../../src/prompts/skillAuthoringGuidance.ts";
+import {
+    buildEnvironmentPrompt,
+    type EnvironmentContext,
+} from "../../src/prompts/templates/environment.ts";
 import { toolSummaryForPrompt } from "../../src/prompts/toolSummary.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 
@@ -455,6 +459,39 @@ describe("toolSummaryForPrompt", () => {
             !out.includes("run concurrently, in no guaranteed order"),
             "must not repeat the inaccurate global assertion",
         );
+    });
+
+    it("calls out askUser as the exception to read-only batching", () => {
+        const withAskUser = toolSummaryForPrompt([
+            { name: "read", taco: { mutates: false } },
+            { name: "askUser", taco: { mutates: false } },
+        ]);
+        assert.match(withAskUser, /`askUser` is the exception/);
+        const withoutAskUser = toolSummaryForPrompt([{ name: "read", taco: { mutates: false } }]);
+        assert.ok(!withoutAskUser.includes("askUser"), "no dangling mention without the tool");
+    });
+});
+
+describe("buildEnvironmentPrompt", () => {
+    const env: EnvironmentContext = {
+        cwd: "/tmp/proj",
+        platform: "darwin",
+        shell: "zsh",
+        isGitRepository: false,
+    };
+
+    it("points relative-path resolution at the rendered working directory", () => {
+        const out = buildEnvironmentPrompt({ env });
+        assert.match(out, /Working directory: \/tmp\/proj/);
+        assert.match(out, /resolve against the working directory above/);
+    });
+
+    // Regression: the sentence dangled on IM channels, where the
+    // hideWorkspacePath branch omits the `Working directory` line it points at.
+    it("omits the sentence when the working directory is hidden", () => {
+        const out = buildEnvironmentPrompt({ env, hideWorkspacePath: true });
+        assert.ok(!out.includes("Working directory"));
+        assert.ok(!out.includes("working directory above"));
     });
 });
 

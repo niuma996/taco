@@ -72,7 +72,14 @@ export function toolSummaryForPrompt(tools: ReadonlyArray<NamedTool>): string {
     }
     lines.push("");
     lines.push("Concurrency:");
-    lines.push("- Tools marked [read-only] are concurrency-safe — batch them freely in one turn.");
+    // `askUser` is read-only in the "does not mutate files" sense but blocks
+    // the turn waiting for a human answer — the opposite of batchable.
+    const askUserException = tools.some((tool) => tool.name === "askUser")
+        ? " `askUser` is the exception: it waits for the user's reply, so call it on its own."
+        : "";
+    lines.push(
+        `- Tools marked [read-only] are concurrency-safe — batch them freely in one turn.${askUserException}`,
+    );
     lines.push(
         "- Mutating calls to the SAME file are serialized, but their order is not guaranteed — " +
             "do not make one edit depend on another's effect within the same turn; put the dependent call in the next turn.",

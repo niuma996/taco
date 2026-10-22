@@ -48,7 +48,11 @@ export function buildEnvironmentPrompt(options: BuildEnvironmentPromptOptions): 
         lines.push("- Git repository: no");
     }
 
-    lines.push("Relative paths in tool arguments resolve against the working directory above.");
+    // The sentence points at the `Working directory` line, which the
+    // hideWorkspacePath branch omits — emitting it there would dangle.
+    if (!hideWorkspacePath) {
+        lines.push("Relative paths in tool arguments resolve against the working directory above.");
+    }
     lines.push("</environment>");
     return lines.join("\n");
 }
