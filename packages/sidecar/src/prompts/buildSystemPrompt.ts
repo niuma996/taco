@@ -34,8 +34,12 @@ export type { NamedTool } from "./types.ts";
  * construction) can decide whether the section still applies to a reduced
  * toolset. Add new tags here when a contributor's relevance depends on a
  * specific capability being present — keeps the decision logic in one place.
+ *
+ * Every tag must map to at least one tool name: a tag with no tool to satisfy
+ * it can never be satisfied, so a contributor requiring it would be dropped
+ * silently. IM-channel gating is not a tag — it rides on `hideWorkspacePath`.
  */
-export type SystemPromptContributorTag = "skills" | "agents" | "plan" | "tasks" | "memory" | "im";
+export type SystemPromptContributorTag = "skills" | "agents" | "plan" | "tasks" | "memory";
 
 /** Runtime role of the session this prompt is being assembled for. */
 export interface SessionKind {
@@ -59,14 +63,15 @@ export interface SystemPromptContributor {
 /**
  * Maps a capability tag to the tool name(s) that satisfy it. Centralised so
  * callers do not hand-write the mapping and drift when tool names change.
+ * A non-empty tuple: a tag with no tool could never be satisfied, so the
+ * type forbids that mistake at compile time.
  */
-const CAPABILITY_TOOL_NAMES: Record<SystemPromptContributorTag, readonly string[]> = {
+const CAPABILITY_TOOL_NAMES: Record<SystemPromptContributorTag, readonly [string, ...string[]]> = {
     skills: ["skill"],
     agents: ["agent"],
     plan: ["planEnter", "planExit"],
     tasks: ["taskCreate", "taskList", "taskUpdate", "todoWrite"],
     memory: ["memory"],
-    im: [],
 };
 
 function tagSatisfied(
@@ -74,12 +79,6 @@ function tagSatisfied(
     availableToolNames: ReadonlySet<string>,
 ): boolean {
     const names = CAPABILITY_TOOL_NAMES[tag];
-    if (names.length === 0) {
-        // The "im" capability is not derived from a tool name; the caller
-        // decides by passing `hideWorkspacePath`. Contributors that require
-        // "im" are handled separately and should not reach this path.
-        return false;
-    }
     return names.some((name) => availableToolNames.has(name));
 }
 
@@ -110,7 +109,7 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
 
     if (tools.has("skill")) {
         lines.push(
-            "- When a task matches a skill's `when_to_use`, invoke it via the `skill` tool. Only use skills listed in <available_skills> — do not guess names.",
+            "- When a task matches a skill's description in <available_skills>, invoke it via the `skill` tool. Do not guess names.",
         );
     }
     if (tools.has("agent")) {

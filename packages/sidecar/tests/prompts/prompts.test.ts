@@ -10,6 +10,7 @@ import { buildPlatformPrompt } from "../../src/prompts/buildPlatformPrompt.ts";
 import {
     buildSystemPrompt,
     filterContributorsForTools,
+    type SystemPromptContributorTag,
 } from "../../src/prompts/buildSystemPrompt.ts";
 import { fillPlaceholders } from "../../src/prompts/fillPlaceholders.ts";
 import {
@@ -382,6 +383,17 @@ describe("filterContributorsForTools", () => {
         );
         assert.equal(out.length, 1);
         assert.equal(out[0].append, "skills block");
+    });
+
+    // "im" used to be a tag with no tool behind it: unsatisfiable by
+    // construction, so a contributor requiring it was dropped without a
+    // word. IM gating rides on `hideWorkspacePath` instead, and the tag is
+    // gone. The @ts-expect-error is the guard: re-adding "im" to the tag
+    // union makes the directive unused and fails the typecheck.
+    it("rejects an im capability tag at compile time", () => {
+        // @ts-expect-error "im" is not a SystemPromptContributorTag
+        const requires: SystemPromptContributorTag[] = ["im"];
+        assert.equal(requires.length, 1);
     });
 });
 

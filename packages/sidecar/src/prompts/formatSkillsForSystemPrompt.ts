@@ -84,7 +84,7 @@ export function formatSkillsForSystemPrompt(
     return [
         ...lines.slice(0, 1),
         "Use the `skill` tool to invoke a skill when the task matches its description.",
-        "Descriptions were omitted to fit the prompt budget — call `skill` with the name to load the full listing.",
+        "Descriptions were omitted to fit the prompt budget — call `skill` with the name to load that skill's body.",
         "",
         "<available_skills>",
         ...degradedLines,
