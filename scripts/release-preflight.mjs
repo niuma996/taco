@@ -83,13 +83,16 @@ check("lockfile-sync", () => {
 
 check("lint", () => runPnpm(["lint"], { label: "lint" }));
 check("lint:comments", () => runPnpm(["lint:comments"], { label: "lint:comments" }));
-check("typecheck", () => runPnpm(["typecheck"], { label: "typecheck" }));
-check("deps:circular", () => runPnpm(["deps:circular"], { label: "deps:circular" }));
-check("unit-tests", () => runPnpm(["test"], { label: "test" }));
+// The libs must be built before typecheck and the tests: both resolve
+// @taco-ai/protocol through the workspace link, which points at dist/.
+// A stale dist makes the suite assert against the previous release.
 check("protocol+shared:build", () => {
     runPnpm(["protocol:build"], { label: "protocol:build" });
     runPnpm(["shared:build"], { label: "shared:build" });
 });
+check("typecheck", () => runPnpm(["typecheck"], { label: "typecheck" }));
+check("deps:circular", () => runPnpm(["deps:circular"], { label: "deps:circular" }));
+check("unit-tests", () => runPnpm(["test"], { label: "test" }));
 check("desktop:build", () =>
     runPnpm(["--filter", "@taco-ai/desktop", "build"], { label: "desktop:build" }),
 );
