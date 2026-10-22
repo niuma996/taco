@@ -98,61 +98,61 @@ export function CommandPermissionPrompt({
             {children}
             <div className="permission-prompt-actions">
                 <div className="permission-prompt-buttons">
-                <button
-                    type="button"
-                    className="permission-allow"
-                    disabled={submitting}
-                    onClick={() => void handle(true, "once")}
-                >
-                    {submitting
-                        ? t("settings.permissionsSubmitting")
-                        : t("settings.permissionsAllowOnce")}
-                </button>
-                {/* A config change is global, so "allow for the session" and
-                    "always allow" have no meaningful scope — the change is
-                    already written, and there is nothing to remember. */}
-                {!isConfig && (
-                    <>
-                        <button
-                            type="button"
-                            className="permission-allow"
-                            disabled={submitting || persistentDisabled}
-                            title={
-                                persistentDisabled
-                                    ? t("settings.permissionsPersistentDisabled")
-                                    : undefined
-                            }
-                            onClick={() => void handle(true, "session")}
-                        >
-                            {submitting
-                                ? t("settings.permissionsSubmitting")
-                                : t("settings.permissionsAllowSession")}
-                        </button>
-                        <button
-                            type="button"
-                            className="permission-allow"
-                            disabled={submitting || persistentDisabled}
-                            title={
-                                persistentDisabled
-                                    ? t("settings.permissionsPersistentDisabled")
-                                    : t("settings.permissionsAlwaysAllowHint")
-                            }
-                            onClick={() => void handle(true, "global")}
-                        >
-                            {submitting
-                                ? t("settings.permissionsSubmitting")
-                                : t("settings.permissionsAlwaysAllow")}
-                        </button>
-                    </>
-                )}
-                <button
-                    type="button"
-                    className="permission-deny"
-                    disabled={submitting}
-                    onClick={() => void handle(false, "once")}
-                >
-                    {t("settings.permissionsDeny")}
-                </button>
+                    <button
+                        type="button"
+                        className="permission-allow"
+                        disabled={submitting}
+                        onClick={() => void handle(true, "once")}
+                    >
+                        {submitting
+                            ? t("settings.permissionsSubmitting")
+                            : t("settings.permissionsAllowOnce")}
+                    </button>
+                    {/* A config change is global, so "allow for the session" and
+                        "always allow" have no meaningful scope — the change is
+                        already written, and there is nothing to remember. */}
+                    {!isConfig && (
+                        <>
+                            <button
+                                type="button"
+                                className="permission-allow"
+                                disabled={submitting || persistentDisabled}
+                                title={
+                                    persistentDisabled
+                                        ? t("settings.permissionsPersistentDisabled")
+                                        : undefined
+                                }
+                                onClick={() => void handle(true, "session")}
+                            >
+                                {submitting
+                                    ? t("settings.permissionsSubmitting")
+                                    : t("settings.permissionsAllowSession")}
+                            </button>
+                            <button
+                                type="button"
+                                className="permission-allow"
+                                disabled={submitting || persistentDisabled}
+                                title={
+                                    persistentDisabled
+                                        ? t("settings.permissionsPersistentDisabled")
+                                        : t("settings.permissionsAlwaysAllowHint")
+                                }
+                                onClick={() => void handle(true, "global")}
+                            >
+                                {submitting
+                                    ? t("settings.permissionsSubmitting")
+                                    : t("settings.permissionsAlwaysAllow")}
+                            </button>
+                        </>
+                    )}
+                    <button
+                        type="button"
+                        className="permission-deny"
+                        disabled={submitting}
+                        onClick={() => void handle(false, "once")}
+                    >
+                        {t("settings.permissionsDeny")}
+                    </button>
                 </div>
                 {error && <span className="permission-error">{error}</span>}
             </div>
