@@ -87,8 +87,12 @@ export type CompactionFailureReason =
  *  `provider.listModels`, and the `providerExtraModels` /
  *  `providerHiddenModels` config fields. A 2.1 daemon drops those fields on
  *  `settings.write` while still answering ok, so a 2.2 client must refuse it
- *  rather than lose the user's model-list edits silently. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 2 } as const;
+ *  rather than lose the user's model-list edits silently.
+ *  2.3 added the `workspace.associations.get` / `.set` / `.resolve` RPCs,
+ *  the `config.patch` RPC and the `workspace.associations_changed` push. A
+ *  2.2 daemon does not know them, so a 2.3 client must refuse it up front
+ *  rather than fail on one particular RPC later. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 3 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

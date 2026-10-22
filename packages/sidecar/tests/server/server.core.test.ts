@@ -97,7 +97,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 2 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 3 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -146,13 +146,13 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.2 client refuses a 2.1 daemon (it would drop model-list config fields)", () => {
-            // Client-side gate: a 2.1 daemon answers settings.write ok while
-            // discarding providerExtraModels / providerHiddenModels, so the
-            // handshake must fail before any write can be lost.
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 1 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 2 }), true);
+        it("a 2.3 client refuses a 2.2 daemon (it lacks the association and config-patch RPCs)", () => {
+            // Client-side gate: a 2.2 daemon does not know workspace.associations.*
+            // or config.patch, so the handshake must fail before a call to them
+            // surfaces as a bare "method not found" at runtime.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 2 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 3 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 4 }), true);
         });
 
         it("accepts an older compatible client minor", async () => {
