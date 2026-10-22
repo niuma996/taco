@@ -31,7 +31,6 @@ import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelRegistry.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
 import type { AgentMessage, Api, Model, MutableModels } from "../pi/types.ts";
-import type { JsonlSessionRepo } from "../pi/values.ts";
 import { uuidv7 } from "../pi/values.ts";
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import {
@@ -81,7 +80,6 @@ export interface AgentSpawnerOptions {
      * them under the process cwd instead of beside the sessions.
      */
     readonly sessionsRoot: string;
-    readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
     /**
@@ -94,7 +92,7 @@ export interface AgentSpawnerOptions {
     readonly getTools: () => TacoTool[];
     /** Subagent definition registry; `spawnSubagent` looks up by `agentType`. */
     readonly agents: AgentDefinition[];
-    /** SessionRegistry reference — used to call attachChild / openSession / invalidateListCache. */
+    /** SessionRegistry reference — used to call createSession / attachChild / openSession / invalidateListCache. */
     readonly sessionRegistry: SessionRegistry;
     /**
      * Contributors used to build the workspace system prompt. Re-applied when
@@ -222,7 +220,6 @@ export class AgentSpawner extends EventEmitter {
 
     /** Root for sidecar-owned session-adjacent state; see `AgentSpawnerOptions`. */
     private readonly sessionsRoot: string;
-    readonly repo: JsonlSessionRepo;
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
     /** Public so tests can assert on the live parent toolset a spawn would see. */
@@ -239,7 +236,6 @@ export class AgentSpawner extends EventEmitter {
         super();
         this.sessionCwd = options.cwd;
         this.sessionsRoot = options.sessionsRoot;
-        this.repo = options.repo;
         this.env = options.env;
         this.models = options.models;
         this.getTools = options.getTools;
@@ -571,29 +567,27 @@ export class AgentSpawner extends EventEmitter {
 
         // 1. Create child session. pi 0.85 fixed the metadata shape, so the
         //    sidecar's own attributes are written as session values straight
-        //    after creation rather than passed to create().
+        //    after creation rather than passed to create(). Created under the
+        //    registry's per-id slot so a reader holding the id from a
+        //    background launch receipt cannot race the create handle.
         const childSessionId = args.childSessionId ?? uuidv7();
-        const childSession = await this.repo.create(
-            {
-                id: childSessionId,
-                cwd: this.sessionCwd,
-                parentSessionId: args.parentSessionId,
+        await this.sessionRegistry.createSession(
+            asSessionId(childSessionId),
+            args.parentSessionId,
+            async (session) => {
+                await writeSessionFacts(session, {
+                    kind: "subagent",
+                    agentType: args.agentType,
+                    parentSessionId: args.parentSessionId,
+                    parentToolCallId: args.parentToolCallId,
+                    depth: childDepth,
+                    ...(args.runtime !== undefined ? { runtime: args.runtime } : {}),
+                    ...(args.forkedContext !== undefined
+                        ? { forkedContext: args.forkedContext }
+                        : {}),
+                });
             },
-            harnessContext,
         );
-        await writeSessionFacts(childSession, {
-            kind: "subagent",
-            agentType: args.agentType,
-            parentSessionId: args.parentSessionId,
-            parentToolCallId: args.parentToolCallId,
-            depth: childDepth,
-            ...(args.runtime !== undefined ? { runtime: args.runtime } : {}),
-            ...(args.forkedContext !== undefined ? { forkedContext: args.forkedContext } : {}),
-        });
-        // create() holds pi's open-session slot. attachChild() below opens the
-        // same id again, which throws unless this handle is released first.
-        await childSession.close(harnessContext);
-        this.sessionRegistry.invalidateListCache();
 
         // A claude-code child never attaches, so the push layer cannot read
         // its kind from the attached map. Register it here — before the first

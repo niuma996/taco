@@ -309,13 +309,47 @@ export class SessionRegistry extends EventEmitter {
     private readonly attached = new Map<SessionId, AttachedSession>();
 
     /**
-     * Tail of the serialized read queue for each *detached* session id.
+     * Tail of the serialized pi-handle queue for each session id.
+     *
+     * pi's repo allows one open handle per id, so every path that would open
+     * one — a detached read or an attach — queues here rather than only the
+     * reads. The attach path is the one that made this necessary: a spawn
+     * publishes `subagent.spawned` before it attaches, and the desktop asks for
+     * that child's history as soon as it has the id, which used to open the
+     * file under the attach and throw "Session is already open".
      *
      * Holds a rejection-swallowing promise, so it is a barrier only — never the
-     * value a caller awaits. Entries are removed as each queue drains; see
-     * `withSession` for why the detached path needs this at all.
+     * value a caller awaits. Entries are removed as each queue drains.
      */
-    private readonly detachedReads = new Map<SessionId, Promise<void>>();
+    private readonly sessionSlots = new Map<SessionId, Promise<void>>();
+
+    /**
+     * Run `task` with exclusive use of `sessionId`'s pi handle slot.
+     *
+     * Not reentrant: a task already holding the slot must not call back into
+     * `withSession`/`attachChild` for the same id and await the result, or it
+     * waits on itself. Fire-and-forget callbacks started by an attach (crash
+     * recovery, title summarization) are fine — they queue and run once the
+     * attach releases the slot.
+     */
+    private async withSlot<T>(sessionId: SessionId, task: () => Promise<T>): Promise<T> {
+        const previous = this.sessionSlots.get(sessionId);
+        const run = (previous ?? Promise.resolve()).then(task);
+        const settled = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        this.sessionSlots.set(sessionId, settled);
+        try {
+            return await run;
+        } finally {
+            // Only the last link clears the entry, or a queue that is still
+            // draining would lose its tail and let a new task run in parallel.
+            if (this.sessionSlots.get(sessionId) === settled) {
+                this.sessionSlots.delete(sessionId);
+            }
+        }
+    }
 
     private readonly spawnSubagent: SessionRegistryOptions["spawnSubagent"];
     private readonly resumeSubagent: SessionRegistryOptions["resumeSubagent"];
@@ -459,6 +493,36 @@ export class SessionRegistry extends EventEmitter {
     }
 
     /**
+     * Create a session file under the same per-id slot as reads and attaches.
+     *
+     * pi registers the id in its open-session map from `create()` until the
+     * returned handle closes, and a background spawn's launch receipt names its
+     * child before that window ends. A reader that resolves the id early queues
+     * here instead of racing the open — and instead of winning the slot first,
+     * which makes `create()` fail and delete the file it just wrote.
+     */
+    async createSession(
+        id: SessionId,
+        parentSessionId: SessionId | undefined,
+        writeFacts: (session: Session) => Promise<void>,
+    ): Promise<void> {
+        await this.withSlot(id, async () => {
+            const session = await this.repo.create(
+                { id, cwd: this.sessionCwd, parentSessionId },
+                harnessContext,
+            );
+            try {
+                await writeFacts(session);
+            } finally {
+                // The handle owns pi's slot; a failed facts write must not
+                // leave it open for the rest of the process.
+                await session.close(harnessContext);
+            }
+        });
+        this.invalidateListCache();
+    }
+
+    /**
      * Run a read against a session without leaking pi's open-session slot.
      *
      * `JsonlSessionRepo.open()` registers the session in an internal
@@ -468,39 +532,23 @@ export class SessionRegistry extends EventEmitter {
      * is one and close its own handle when there isn't — otherwise the first
      * read permanently locks the id and the next `attach()` fails.
      *
-     * Reads against a *detached* session are serialized per id, because that
-     * same "throws on second open" rule makes two concurrent readers a race
-     * rather than merely slow. Background subagents made this reachable: several
-     * children of one detached parent can settle at once, and each records its
-     * result here — without the queue one of them would throw and its
-     * bookkeeping would be lost, which is exactly what that record exists to
-     * prevent. The attached path is deliberately left unserialized: it opens
-     * nothing, and it is on the hot path of every spawn.
+     * A detached read queues behind any in-flight attach of the same id (and
+     * vice versa): an attach opens the handle before it becomes visible in
+     * `attached`, and a spawn announces its child before that, so the desktop's
+     * history pull routinely lands inside that window. The attached path is
+     * deliberately left unserialized: it opens nothing, and it is on the hot
+     * path of every spawn.
      */
     async withSession<T>(sessionId: SessionId, read: (session: Session) => Promise<T>): Promise<T> {
         const attached = this.attached.get(sessionId);
         if (attached) return read(attached.session);
-        // Chain onto any in-flight detached read for this id. `settled` swallows
-        // rejections so one failed read cannot poison the queue for the next
-        // caller; the real result is still awaited (and thrown) below.
-        const previous = this.detachedReads.get(sessionId);
-        const run = (previous ?? Promise.resolve()).then(() =>
-            this.readPersistedSession(sessionId, read),
-        );
-        const settled = run.then(
-            () => undefined,
-            () => undefined,
-        );
-        this.detachedReads.set(sessionId, settled);
-        try {
-            return await run;
-        } finally {
-            // Only the last link clears the entry, or a queue that is still
-            // draining would lose its tail and let a new caller open in parallel.
-            if (this.detachedReads.get(sessionId) === settled) {
-                this.detachedReads.delete(sessionId);
-            }
-        }
+        return this.withSlot(sessionId, async () => {
+            // The attach we queued behind may have finished; its handle is the
+            // one to read — opening our own would hit the same guard.
+            const nowAttached = this.attached.get(sessionId);
+            if (nowAttached) return read(nowAttached.session);
+            return this.readPersistedSession(sessionId, read);
+        });
     }
 
     /** `withSession`'s detached branch: open, read, always release the slot. */
@@ -534,16 +582,25 @@ export class SessionRegistry extends EventEmitter {
         const meta = await this.openSession(sessionId);
         const recovered = await readLegacyFactsFromPath(meta.path);
         const session = await this.repo.open(meta, harnessContext);
-        const facts =
-            recovered ??
-            (meta.parentSessionId !== undefined
-                ? { kind: "subagent" as const, parentSessionId: meta.parentSessionId }
-                : undefined);
-        if (facts !== undefined) {
-            const wrote = await writeSessionFactsIfAbsent(session, facts);
-            this._factsCache.set(sessionId, wrote ? facts : await readSessionFacts(session));
+        try {
+            const facts =
+                recovered ??
+                (meta.parentSessionId !== undefined
+                    ? { kind: "subagent" as const, parentSessionId: meta.parentSessionId }
+                    : undefined);
+            if (facts !== undefined) {
+                const wrote = await writeSessionFactsIfAbsent(session, facts);
+                this._factsCache.set(sessionId, wrote ? facts : await readSessionFacts(session));
+            }
+            return session;
+        } catch (error) {
+            // From here on the handle owns pi's slot. A facts write can fail on
+            // a read-only or full disk, and leaving the handle open would fail
+            // every later read and attach of this id for the rest of the
+            // process. Close failures must not mask the real error.
+            await session.close(harnessContext).catch(() => undefined);
+            throw error;
         }
-        return session;
     }
 
     /**
@@ -874,65 +931,91 @@ export class SessionRegistry extends EventEmitter {
 
         // attach() builds and passes taskState; AgentSpawner subagent path
         // doesn't, so re-build here (subagent sessions also have independent
-        // task/plan state).
+        // task/plan state). Kept outside the slot: it is directory I/O and
+        // never touches pi's handle.
         const resolvedTaskState =
             taskState ?? (await buildSessionTaskState(sessionId, this.sessionsRoot));
 
-        const session = await this.openPersistedSession(sessionId);
-        const facts = await readSessionFacts(session);
-        const sessionKind: "main" | "subagent" = facts.kind === "subagent" ? "subagent" : "main";
-        const attached = await AttachedSession.create({
-            session,
-            models: this.models,
-            env: this.env,
-            model: opts.model ?? this.defaultModel,
-            systemPrompt: systemPrompt ?? this.getSystemPrompt(),
-            tools,
-            resources: this.resources,
-            streamOptions: this.streamOptions,
-            thinkingLevel: opts.thinkingLevel ?? this.defaultThinkingLevel,
-            compaction: this.compaction,
-            extensionContextHooks: this.extensions?.contextHooks(),
-            extensionToolCallHooks: this.extensions?.toolCallHooks(),
-            extensionToolResultHooks: this.extensions?.toolResultHooks(),
-            defaultUiLocale: this.defaultUiLocale,
-            getSkills: () => this.skills,
-            memoryStore: this.memoryStore,
-            isIm: this.isIm,
-            setSummaryTitle: (id, name) => this.setSummaryTitle(id, name),
-            taskStore: resolvedTaskState.taskStore,
-            planState: resolvedTaskState.planState,
-            tasksDir: resolvedTaskState.tasksDir,
-            checkpointStore: this.checkpointStore,
-            toolRegistry: this.toolRegistry,
-            // Main sessions only: a subagent's toolset is deliberately narrowed
-            // by its caller (depth-filtered, `agent` removed), so re-imposing
-            // the workspace set on it would widen it back.
-            refreshToolset:
-                sessionKind === "main" && this.refreshToolset
-                    ? () => this.refreshToolset?.(sessionId, resolvedTaskState)
-                    : undefined,
-            getInstructionsConfig: this.getInstructionsConfig,
-            getImChannelContext: this.getImChannelContext,
-            getAssociatedRoots: this.getAssociatedRoots,
-            getToolContext: this.getToolContext,
-            sessionCwd: this.sessionCwd,
-            sessionKind,
+        // Serialized with detached reads: the spawn announces its child before
+        // this runs, so the desktop's `session.history` pull queues here and
+        // reuses the attached handle instead of racing the open.
+        return await this.withSlot(sessionId, async () => {
+            // A queued read may have attached it, or another attach may have
+            // won the slot while this one waited.
+            const nowExisting = this.attached.get(sessionId);
+            if (nowExisting) return nowExisting;
+
+            const session = await this.openPersistedSession(sessionId);
+            let attached: AttachedSession;
+            try {
+                const facts = await readSessionFacts(session);
+                const sessionKind: "main" | "subagent" =
+                    facts.kind === "subagent" ? "subagent" : "main";
+                attached = await AttachedSession.create({
+                    session,
+                    models: this.models,
+                    env: this.env,
+                    model: opts.model ?? this.defaultModel,
+                    systemPrompt: systemPrompt ?? this.getSystemPrompt(),
+                    tools,
+                    resources: this.resources,
+                    streamOptions: this.streamOptions,
+                    thinkingLevel: opts.thinkingLevel ?? this.defaultThinkingLevel,
+                    compaction: this.compaction,
+                    extensionContextHooks: this.extensions?.contextHooks(),
+                    extensionToolCallHooks: this.extensions?.toolCallHooks(),
+                    extensionToolResultHooks: this.extensions?.toolResultHooks(),
+                    defaultUiLocale: this.defaultUiLocale,
+                    getSkills: () => this.skills,
+                    memoryStore: this.memoryStore,
+                    isIm: this.isIm,
+                    setSummaryTitle: (id, name) => this.setSummaryTitle(id, name),
+                    taskStore: resolvedTaskState.taskStore,
+                    planState: resolvedTaskState.planState,
+                    tasksDir: resolvedTaskState.tasksDir,
+                    checkpointStore: this.checkpointStore,
+                    toolRegistry: this.toolRegistry,
+                    // Main sessions only: a subagent's toolset is deliberately narrowed
+                    // by its caller (depth-filtered, `agent` removed), so re-imposing
+                    // the workspace set on it would widen it back.
+                    refreshToolset:
+                        sessionKind === "main" && this.refreshToolset
+                            ? () => this.refreshToolset?.(sessionId, resolvedTaskState)
+                            : undefined,
+                    getInstructionsConfig: this.getInstructionsConfig,
+                    getImChannelContext: this.getImChannelContext,
+                    getAssociatedRoots: this.getAssociatedRoots,
+                    getToolContext: this.getToolContext,
+                    sessionCwd: this.sessionCwd,
+                    sessionKind,
+                });
+            } catch (error) {
+                // The handle owns pi's slot until it closes. A failed attach
+                // that left it open would make every later read and attach of
+                // this id fail with "Session is already open".
+                await session.close(harnessContext).catch(() => undefined);
+                throw error;
+            }
+
+            this.attached.set(sessionId, attached);
+
+            // Forward harness events to workspace-level events
+            attached.on("event", (e) => this.emit("session.event", { sessionId, event: e }));
+            attached.on("error", (e) => this.emit("session.error", { sessionId, error: e }));
+
+            // Emit a one-shot attached push event
+            this.emit("session.attached", { sessionId });
+
+            return attached;
         });
-
-        this.attached.set(sessionId, attached);
-
-        // Forward harness events to workspace-level events
-        attached.on("event", (e) => this.emit("session.event", { sessionId, event: e }));
-        attached.on("error", (e) => this.emit("session.error", { sessionId, error: e }));
-
-        // Emit a one-shot attached push event
-        this.emit("session.attached", { sessionId });
-
-        return attached;
     }
 
     async detach(sessionId: SessionId): Promise<void> {
+        await this.withSlot(sessionId, () => this.detachLocked(sessionId));
+    }
+
+    /** `detach` body; the caller must hold the id's slot. */
+    private async detachLocked(sessionId: SessionId): Promise<void> {
         const attached = this.attached.get(sessionId);
         if (!attached) return;
         await attached.dispose();
@@ -942,9 +1025,14 @@ export class SessionRegistry extends EventEmitter {
 
     /** Delete a session: detach first (if attached) to release the harness, then delete the underlying .jsonl. */
     async deleteSession(sessionId: SessionId): Promise<void> {
-        await this.detach(sessionId);
-        const meta = await this.openSession(sessionId);
-        await this.repo.delete(meta, harnessContext);
+        // Detach and removal share one slot: releasing it between them lets an
+        // attach queued behind the detach reopen the handle, and pi's `delete`
+        // then throws "Session is open".
+        await this.withSlot(sessionId, async () => {
+            await this.detachLocked(sessionId);
+            const meta = await this.openSession(sessionId);
+            await this.repo.delete(meta, harnessContext);
+        });
         this.invalidateListCache();
         this.emit("session.deleted", { sessionId });
     }

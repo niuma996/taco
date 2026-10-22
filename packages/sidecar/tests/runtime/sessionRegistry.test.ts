@@ -652,6 +652,322 @@ describe("SessionRegistry", () => {
         assert.ok(after, "queue must still serve reads after one rejects");
     });
 
+    // An attach opens pi's handle before the session becomes visible in
+    // `attached`, and a spawn announces its child before either. The desktop
+    // pulls that child's history as soon as it has the id, so the read lands
+    // inside that window and used to open a second handle — the
+    // "Session is already open" toast users saw on every new subagent.
+    it("history read during an attach queues behind it instead of racing the open", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const originalCreate = AttachedSession.create;
+        let releaseCreate = (): void => {};
+        const createGate = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let createStarted = (): void => {};
+        const started = new Promise<void>((resolve) => {
+            createStarted = resolve;
+        });
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) => {
+            createStarted();
+            await createGate;
+            return {
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+            } as unknown as AttachedSession;
+        }) as typeof AttachedSession.create;
+
+        try {
+            const attach = sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("fake-tool"),
+            ]);
+            // The handle is open and pi's slot is taken; `attached` is not
+            // populated yet — exactly the window the desktop raced into.
+            await started;
+            const history = sr.getHistory(asSessionId(id));
+            releaseCreate();
+
+            assert.equal((await history).entries.length, 0);
+            await attach;
+            assert.equal((await sr.getHistory(asSessionId(id))).entries.length, 0);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
+    it("attach waits for an in-flight detached read instead of failing on the open", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const originalCreate = AttachedSession.create;
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) =>
+            ({
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+            }) as unknown as AttachedSession) as typeof AttachedSession.create;
+
+        let releaseRead = (): void => {};
+        const readGate = new Promise<void>((resolve) => {
+            releaseRead = resolve;
+        });
+        let readStarted = (): void => {};
+        const started = new Promise<void>((resolve) => {
+            readStarted = resolve;
+        });
+
+        try {
+            const read = sr.withSession(asSessionId(id), async () => {
+                readStarted();
+                await readGate;
+                return "read";
+            });
+            await started;
+            const attach = sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("fake-tool"),
+            ]);
+            let settled: unknown;
+            void attach.then(
+                () => {
+                    settled = "attached";
+                },
+                (e: unknown) => {
+                    settled = e;
+                },
+            );
+            await new Promise((r) => setTimeout(r, 10));
+            assert.equal(settled, undefined, "attach must wait for the read to release pi's slot");
+
+            releaseRead();
+            assert.equal(await read, "read");
+            await attach;
+            assert.equal((await sr.getHistory(asSessionId(id))).entries.length, 0);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
+    it("a failed attach closes the handle instead of poisoning the id", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const originalCreate = AttachedSession.create;
+        let calls = 0;
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) => {
+            calls += 1;
+            if (calls === 1) throw new Error("stubbed create failure");
+            return {
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+            } as unknown as AttachedSession;
+        }) as typeof AttachedSession.create;
+
+        try {
+            await assert.rejects(
+                () =>
+                    sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                        fakeTool("fake-tool"),
+                    ]),
+                /stubbed create failure/,
+            );
+            // Before the fix this threw "Session is already open": the failed
+            // attach had left its handle registered in pi's open-session map.
+            assert.equal((await sr.getHistory(asSessionId(id))).entries.length, 0);
+            await sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("fake-tool"),
+            ]);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
+    // A background spawn's launch receipt names its child before its create
+    // handle closes, so the desktop can pull history while pi still owns the
+    // id. The read must queue — opening a second handle throws "Session is
+    // already open", and winning the slot first makes create() delete the file.
+    it("history read during create queues behind it instead of racing the open", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+
+        let releaseFacts = (): void => {};
+        const factsGate = new Promise<void>((resolve) => {
+            releaseFacts = resolve;
+        });
+        let factsStarted = (): void => {};
+        const started = new Promise<void>((resolve) => {
+            factsStarted = resolve;
+        });
+
+        const created = sr.createSession(asSessionId(id), undefined, async (session) => {
+            await writeSessionFacts(session, { kind: "subagent" });
+            // The file exists and the create handle still holds pi's slot.
+            factsStarted();
+            await factsGate;
+        });
+        await started;
+
+        const history = sr.getHistory(asSessionId(id));
+        let settled = false;
+        void history.then(
+            () => {
+                settled = true;
+            },
+            () => {
+                settled = true;
+            },
+        );
+        await new Promise((r) => setTimeout(r, 10));
+        assert.equal(settled, false, "history must queue behind create");
+
+        releaseFacts();
+        await created;
+        assert.equal((await history).entries.length, 0);
+    });
+
+    it("a failed facts write releases the create handle instead of poisoning the id", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+
+        await assert.rejects(
+            () =>
+                sr.createSession(asSessionId(id), undefined, async () => {
+                    throw new Error("stubbed facts failure");
+                }),
+            /stubbed facts failure/,
+        );
+        // Before the fix the handle stayed open and every later read threw
+        // "Session is already open".
+        assert.equal((await sr.getHistory(asSessionId(id))).entries.length, 0);
+    });
+
+    // An attach opens pi's handle before it becomes visible in `attached`.
+    // A detach landing in that window used to read the map, find nothing and
+    // return, leaving the session attached and pi's slot held.
+    it("detach waits for an in-flight attach instead of being dropped", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const originalCreate = AttachedSession.create;
+        let releaseCreate = (): void => {};
+        const createGate = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let createStarted = (): void => {};
+        const started = new Promise<void>((resolve) => {
+            createStarted = resolve;
+        });
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) => {
+            createStarted();
+            await createGate;
+            return {
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+            } as unknown as AttachedSession;
+        }) as typeof AttachedSession.create;
+
+        try {
+            const attach = sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("fake-tool"),
+            ]);
+            await started;
+
+            const detach = sr.detach(asSessionId(id));
+            let detached = false;
+            void detach.then(() => {
+                detached = true;
+            });
+            await new Promise((r) => setTimeout(r, 10));
+            assert.equal(detached, false, "detach must queue behind the attach, not no-op");
+
+            releaseCreate();
+            await attach;
+            await detach;
+            assert.equal(sr.getAttached(asSessionId(id)), undefined);
+            // The handle is released, so a later attach can reopen pi's slot.
+            await sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("fake-tool"),
+            ]);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
+    // deleteSession detaches, then removes the file. If the slot were released
+    // between the two, a queued attach could reopen the handle and pi's
+    // `delete` would throw "Session is open".
+    it("deleteSession waits for an in-flight attach and then removes the file", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const originalCreate = AttachedSession.create;
+        let releaseCreate = (): void => {};
+        const createGate = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let createStarted = (): void => {};
+        const started = new Promise<void>((resolve) => {
+            createStarted = resolve;
+        });
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) => {
+            createStarted();
+            await createGate;
+            return {
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+            } as unknown as AttachedSession;
+        }) as typeof AttachedSession.create;
+
+        try {
+            const attach = sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("fake-tool"),
+            ]);
+            await started;
+
+            const deletion = sr.deleteSession(asSessionId(id));
+            let settled = false;
+            void deletion.then(
+                () => {
+                    settled = true;
+                },
+                () => {
+                    settled = true;
+                },
+            );
+            await new Promise((r) => setTimeout(r, 10));
+            assert.equal(settled, false, "delete must wait for the attach to release the handle");
+
+            releaseCreate();
+            await attach;
+            await deletion;
+            assert.deepEqual(
+                (await sr.listSessions()).map((m) => m.id),
+                [],
+            );
+        } finally {
+            AttachedSession.create = originalCreate;
+        }
+    });
+
     it("opening a 0.85 child with header parentSessionId but no facts backfills kind", async () => {
         const sr = makeRegistry();
         const parentId = uuidv7();
