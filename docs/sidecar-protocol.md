@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.3.0
+> **版本**: 0.3.1
 > **传输**: NDJSON over stdio
 > **来源**: 源码为唯一权威来源——`packages/shared/rpcMethods.ts`（RPC method 名）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -94,6 +94,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.0 | `initialize` handshake replaces the `sidecar.hello` push |
 | 2.1 | `session.cancelQueued`; `session.steer` returns `{ mode, entryId }` |
 | 2.2 | `providers.revealKey`; `provider.listModels` `{ providerId }` shape and discovery for every protocol; `providers.list` `baseUrl` / `api` / `models[].origin`; `providerExtraModels` / `providerHiddenModels` config fields; `provider.testConnection` |
+| 2.3 | `workspace.associations.get` / `.set` / `.resolve`; `config.patch`; the `workspace.associations_changed` push; `PermissionRequestKind` `config`; `AgentsContentResult.cwdChoices`; `ProviderView.models[].contextWindow` / `.maxTokens` |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)

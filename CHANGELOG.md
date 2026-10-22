@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.1] — 2026-10-23
+
+A release about how far the agent may reach: a workspace can be granted
+extra directories, the agent can change your config once you approve, and
+a third-party conversation can no longer read your disk.
+
+### Added
+
+**Associated directories.** A workspace — or an IM channel — can be granted
+extra absolute paths, and the shell, the write tools and the agent editor
+may act inside them. MCP servers, extension tools and subagent tools stay
+anchored to the workspace's own root.
+
+**Config changes behind your approval.** Two deferred tools read and patch
+the global config, and every patch goes through the approval prompt before
+it is written. API keys are never handed to the model.
+
+**Project-scoped agents.** The agent editor can write
+`<workspace>/.taco/agents`, where a definition shadows a global one of the
+same name, and a `claude-code` agent can pin its own run directory.
+
+### Changed
+
+- The wire protocol advances 2.2 → 2.3 for the `workspace.associations.*`
+  and `config.patch` RPCs. A 2.3 client refuses a 2.2 daemon at handshake,
+  so keep the desktop and the sidecar on the same release line.
+- The system prompt carries an `<environment>` block, and every injected
+  tag names its origin, so a system event cannot pass for your approval.
+- A model's context window can be declared in the provider panel; it used
+  to be overwritten with the server default on every save.
+
+### Fixed
+
+- An IM conversation can no longer read files outside its own directory —
+  `read`, `grep` and `glob` used to be exempt from the path fence.
+- Stopping the first turn no longer deletes the new conversation.
+- Opening a subagent's history no longer fails with "Session is already
+  open": handle access is now serialized per session id.
+- A session whose model was dropped from the catalog switches to a live
+  model, preferring one on the same provider.
+
 ## [0.3.0] — 2026-10-20
 
 A release about knowing what the agent is about to do: shell approvals are
