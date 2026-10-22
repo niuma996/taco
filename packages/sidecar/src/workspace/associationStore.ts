@@ -31,13 +31,17 @@
 
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { WorkspaceAssociationKey, WorkspaceId } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
 import { tacoHome } from "../config/tacoHome.ts";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
+import {
+    checkGrantRootSafety,
+    isSameOrInside,
+    realpathBestEffort,
+} from "../permissions/grantRootSafety.ts";
 
 const log = createLogger("workspace:associations");
 
@@ -73,38 +77,6 @@ export class AssociationValidationError extends Error {
     ) {
         super(message);
         this.name = "AssociationValidationError";
-    }
-}
-
-/**
- * True when `candidate` is `ancestor` or lives beneath it.
- *
- * Both sides are realpath'd first: a symlinked parent must not turn a
- * lexically-inside path into an outside one, nor the reverse.
- */
-function isSameOrInside(candidate: string, ancestor: string): boolean {
-    const rel = path.relative(ancestor, candidate);
-    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
-/**
- * Resolve a path to its real form, tolerating a not-yet-existing tail.
- *
- * The target of an association must exist, but the store also validates
- * paths that later go away (a directory the user deleted after granting).
- * `realpathSync` on a missing path throws, so the ancestor walk keeps the
- * comparison meaningful for a path that has since disappeared.
- */
-function realpathBestEffort(target: string): string {
-    let current = path.resolve(target);
-    for (;;) {
-        try {
-            return fs.realpathSync(current);
-        } catch {
-            const parent = path.dirname(current);
-            if (parent === current) return path.resolve(target);
-            current = parent;
-        }
     }
 }
 
@@ -279,17 +251,13 @@ export class WorkspaceAssociationStore {
                     String(root),
                 );
             }
-            if (!path.isAbsolute(root)) {
-                throw new AssociationValidationError(
-                    `root must be an absolute path: ${root}`,
-                    root,
-                );
-            }
-            if (root.startsWith(IM_CWD_PREFIX)) {
-                throw new AssociationValidationError(
-                    `root must be a filesystem path, not an IM workspace: ${root}`,
-                    root,
-                );
+            // The roots that are never a valid grant — $TACO_HOME in either
+            // direction, the filesystem root, the home directory. Shared with
+            // the IM policy's custom execution directory, which grants the
+            // same thing by a different road.
+            const safety = checkGrantRootSafety(root);
+            if (!safety.ok) {
+                throw new AssociationValidationError(`root ${safety.reason}`, root);
             }
             const real = realpathBestEffort(root);
             if (seen.has(real)) continue;
@@ -306,31 +274,6 @@ export class WorkspaceAssociationStore {
      * Split out from `validate` so each rule reads as one line of intent.
      */
     private assertSafeRoot(key: WorkspaceAssociationKey, root: string, real: string): void {
-        // $TACO_HOME holds taco.json (API keys + the shell permission rules)
-        // and the session store. A grant that reaches it would let the model
-        // disable every later approval. Excluded in both directions: the
-        // directory itself, anything above it, and anything inside it.
-        const home = realpathBestEffort(tacoHome());
-        if (isSameOrInside(real, home) || isSameOrInside(home, real)) {
-            throw new AssociationValidationError(
-                `root must not be inside or contain the Taco home directory: ${root}`,
-                root,
-            );
-        }
-        // The filesystem root and the home directory are the two places where
-        // "a directory" means "everything" — granting them grants the disk.
-        if (real === path.parse(real).root) {
-            throw new AssociationValidationError(
-                `root must not be the filesystem root: ${root}`,
-                root,
-            );
-        }
-        if (real === realpathBestEffort(os.homedir())) {
-            throw new AssociationValidationError(
-                `root must not be the home directory: ${root}`,
-                root,
-            );
-        }
         // A workspace must not be granted an ancestor of its own root: that
         // would widen its reach beyond the directory the user picked, and the
         // extra room is not visible anywhere in the UI.

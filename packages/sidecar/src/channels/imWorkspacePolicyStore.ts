@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { tacoHome } from "../config/tacoHome.ts";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
+import { checkGrantRootSafety } from "../permissions/grantRootSafety.ts";
 import {
     chatPolicyKey,
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -44,6 +45,29 @@ export function imWorkspacePoliciesPath(channelId: string, home: string = tacoHo
 
 function notifiedPath(home: string): string {
     return path.join(imWorkspacePoliciesDir(home), "notified.json");
+}
+
+/**
+ * A custom execution directory is a grant of the same kind as an associated
+ * directory: it BECOMES the IM workspace's root, and that root is what the
+ * read/write fence measures against. So it is held to the same rules — no
+ * $TACO_HOME (it holds the API keys and the shell permission rules), no
+ * filesystem root, no home directory.
+ *
+ * Checked on the patch, not on the merged document: a directory that was
+ * granted before this rule existed (or hand-edited into the file) must not
+ * block every later policy write. The runtime refuses it instead — see
+ * `resolveImExecutionCwd`.
+ */
+function assertSafeExecutionDir(patch: ImWorkspacePolicyPatch, source: string): void {
+    const dir = patch.executionDir;
+    if (dir?.mode !== "custom" || !dir.path) return;
+    const verdict = checkGrantRootSafety(dir.path);
+    if (!verdict.ok) {
+        throw new Error(
+            `invalid im policy executionDir.path from ${source}: execution directory ${verdict.reason}`,
+        );
+    }
 }
 
 /**
@@ -97,10 +121,12 @@ export class ImWorkspacePolicyStore {
      * shell grant.
      */
     async setChannelDefault(channelId: string, patch: ImWorkspacePolicyPatch): Promise<void> {
-        validatePartial(patch, `channel-default:${channelId}`);
+        const source = `channel-default:${channelId}`;
+        validatePartial(patch, source);
+        assertSafeExecutionDir(patch, source);
         const doc = this.patchDocument(channelId, (d) => {
             const merged = mergeImWorkspacePolicyPatch(d.default ?? {}, patch);
-            validatePartial(merged, `channel-default:${channelId}`);
+            validatePartial(merged, source);
             return migrateDocument({ ...d, default: merged });
         });
         await this.persist(channelId, doc);
@@ -108,11 +134,13 @@ export class ImWorkspacePolicyStore {
 
     /** Merge `patch` into this chat's override; omitted fields are preserved. */
     async setChatOverride(route: ImRoute, patch: ImWorkspacePolicyPatch): Promise<void> {
-        validatePartial(patch, `chat-override:${route.channelId}`);
+        const source = `chat-override:${route.channelId}`;
+        validatePartial(patch, source);
+        assertSafeExecutionDir(patch, source);
         const key = chatPolicyKey(route);
         const doc = this.patchDocument(route.channelId, (d) => {
             const merged = mergeImWorkspacePolicyPatch(d.chats?.[key] ?? {}, patch);
-            validatePartial(merged, `chat-override:${route.channelId}`);
+            validatePartial(merged, source);
             return migrateDocument({ ...d, chats: { ...(d.chats ?? {}), [key]: merged } });
         });
         await this.persist(route.channelId, doc);

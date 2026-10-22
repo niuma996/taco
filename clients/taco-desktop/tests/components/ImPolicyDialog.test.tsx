@@ -26,6 +26,7 @@ afterEach(() => {
     // Radix locks body pointer events while a modal/select is open; clearing it
     // here keeps the next test's user-event clicks working.
     document.body.style.pointerEvents = "";
+    vi.restoreAllMocks();
 });
 
 const DEFAULT_SOURCES: ImPolicyGetResult["sources"] = {
@@ -242,6 +243,75 @@ describe("ImPolicyDialog — working directory", () => {
                 patch: { executionDir: { mode: "per-chat" } },
             });
         });
+    });
+
+    it("accepts a Windows absolute path for a custom working directory", async () => {
+        // The sidecar's `path.isAbsolute` accepts a drive-letter path on
+        // Windows, so the dialog must not reject it there.
+        vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        );
+        const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        await screen.findByText("imPolicy.sourceGlobal");
+        await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirCustom/);
+        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
+        await user.type(
+            within(card).getByRole("textbox", { name: "imPolicy.executionDirCustom" }),
+            "C:\\Users\\me\\work",
+        );
+        await saveAndConfirm(user);
+
+        await waitFor(() => {
+            expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
+                channelId: "wechat",
+                patch: { executionDir: { mode: "custom", path: "C:\\Users\\me\\work" } },
+            });
+        });
+    });
+
+    it("keeps the inline error for a Windows absolute path on a POSIX client", async () => {
+        // The sidecar's `path.isAbsolute` rejects a drive-letter path on POSIX.
+        // Accepting it here would fail the save with a raw server error instead
+        // of the localized inline one.
+        vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+        );
+        const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        await screen.findByText("imPolicy.sourceGlobal");
+        await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirCustom/);
+        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
+        await user.type(
+            within(card).getByRole("textbox", { name: "imPolicy.executionDirCustom" }),
+            "C:\\Users\\me\\work",
+        );
+        await saveAndConfirm(user);
+
+        expect(await screen.findByText("imPolicy.invalidCwd")).toBeTruthy();
+        expect(client.imPolicySetChannelDefault).not.toHaveBeenCalled();
+    });
+
+    it("refuses a relative path for a custom working directory", async () => {
+        const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0 });
+
+        await screen.findByText("imPolicy.sourceGlobal");
+        await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirCustom/);
+        const card = screen.getByRole("group", { name: "imPolicy.executionCwd" });
+        await user.type(
+            within(card).getByRole("textbox", { name: "imPolicy.executionDirCustom" }),
+            "relative/dir",
+        );
+        await saveAndConfirm(user);
+
+        expect(await screen.findByText("imPolicy.invalidCwd")).toBeTruthy();
+        expect(client.imPolicySetChannelDefault).not.toHaveBeenCalled();
     });
 
     it("sends null when the parent's working directory is picked", async () => {

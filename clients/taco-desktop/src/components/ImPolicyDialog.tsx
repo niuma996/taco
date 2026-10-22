@@ -27,6 +27,7 @@ import { Layers } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useImPolicy } from "../hooks/useImPolicy.ts";
 import { useT } from "../i18n/useI18n.ts";
+import { isAbsolutePath } from "../lib/clients/fsClient";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { validatePermissionRuleClient } from "../lib/commandPermissionRuleClient.ts";
 import { subscribeImPolicyChanged } from "../lib/imPolicyEvents.ts";
@@ -54,6 +55,24 @@ const SOURCE_KEYS: Record<ImPolicySource, string> = {
     channel: "imPolicy.sourceChannel",
     chat: "imPolicy.sourceChat",
 };
+
+/**
+ * A path the sidecar will accept as absolute on THIS platform.
+ *
+ * The sidecar's `path.isAbsolute` is platform-specific: a drive-letter or UNC
+ * path is absolute on Windows and not on POSIX. Accepting Windows-only forms
+ * everywhere would let a POSIX save reach the server just to fail there with a
+ * raw error; rejecting them everywhere would refuse a path Windows accepts.
+ */
+const WINDOWS_ONLY_PATH_RE = /^(?:[a-zA-Z]:[\\/]|\\\\)/;
+
+function isWindowsPlatform(): boolean {
+    return navigator.userAgent.includes("Windows");
+}
+
+function isPlatformAbsolutePath(p: string): boolean {
+    return isAbsolutePath(p) && (!WINDOWS_ONLY_PATH_RE.test(p) || isWindowsPlatform());
+}
 
 const RULE_SOURCE_KEYS: Record<"global" | "channel" | "chat", string> = {
     global: "imPolicy.sourceGlobal",
@@ -282,7 +301,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         } else {
             if (execDir.mode === "custom") {
                 const dirPath = (execDir.path ?? "").trim();
-                if (dirPath.length === 0 || !dirPath.startsWith("/")) {
+                if (!isPlatformAbsolutePath(dirPath)) {
                     return t("imPolicy.invalidCwd");
                 }
                 if (dirPath !== execDir.path) {

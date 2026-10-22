@@ -17,6 +17,7 @@ import { accessSync, constants, mkdirSync, realpathSync, statSync } from "node:f
 import { join } from "node:path";
 import type { ImRoute, ImWorkspacePolicy } from "../channels/imWorkspacePolicy.ts";
 import { chatPolicyKey } from "../channels/imWorkspacePolicy.ts";
+import { checkGrantRootSafety } from "../permissions/grantRootSafety.ts";
 
 export interface ImExecutionCwdResult {
     executionCwd: string;
@@ -48,6 +49,20 @@ export function resolveImExecutionCwd(input: {
 
     const dir = policy.executionDir;
     if (dir.mode === "custom" && dir.path) {
+        // The custom directory BECOMES the workspace root, so it is held to
+        // the same rules as an associated directory: no $TACO_HOME (it holds
+        // the API keys and the shell permission rules), no filesystem root,
+        // no home directory. The store refuses these on write; this is the
+        // runtime guard for a policy file that was hand-edited or written
+        // before that rule existed.
+        const safety = checkGrantRootSafety(dir.path);
+        if (!safety.ok) {
+            return {
+                executionCwd: defaultScratch,
+                shared: true,
+                warning: `executionDir ${dir.path} rejected — ${safety.reason}; falling back to ${defaultScratch}`,
+            };
+        }
         if (isValidWritableDir(dir.path)) {
             return { executionCwd: dir.path, shared: false };
         }
