@@ -19,7 +19,7 @@
     "typecheck:sidecar": "tsc -p packages/sidecar/tsconfig.json --noEmit",
     "typecheck:protocol": "tsc -p packages/protocol/tsconfig.json --noEmit",
     "typecheck:shared": "tsc -p packages/shared/tsconfig.build.json --noEmit",
-    "test": "tsx --test 'packages/**/tests/**/*.test.ts' 'clients/**/tests/**/*.test.ts'",
+    "test": "tsx --import ./packages/sidecar/tests/_helpers/testSetup.ts --test 'packages/**/tests/**/*.test.ts' 'clients/**/tests/**/*.test.ts'",
     "test:e2e": "pnpm --filter @taco-ai/debug-console e2e",
     "deps:circular": "madge --circular --extensions ts packages/protocol/src packages/sidecar/src clients/debug-console/src packages/shared",
     "deps:orphans": "madge --orphans --extensions ts packages/protocol/src packages/sidecar/src clients/debug-console/src packages/shared",

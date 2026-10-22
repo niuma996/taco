@@ -1,28 +1,26 @@
-/**
- * Prompt module unit tests.
- *
- * Run with Node's built-in `node:test` runner through tsx:
- *
- *   pnpm --filter @taco-ai/sidecar test:prompts
- *
- * No new dependencies — Node 22 ships `node:test` and `tsx` is already in
- * sidecar's devDependencies.
- */
+// Prompt assembly tests: system/platform prompt, placeholders, project context, catalogs, skill authoring guidance.
 
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-
+import { defaultSkillDirs } from "../../src/config/config.ts";
 import { buildPlatformPrompt } from "../../src/prompts/buildPlatformPrompt.ts";
 import {
     buildSystemPrompt,
     filterContributorsForTools,
 } from "../../src/prompts/buildSystemPrompt.ts";
 import { fillPlaceholders } from "../../src/prompts/fillPlaceholders.ts";
+import {
+    formatAgentsForSystemPrompt,
+    formatDeferredToolsForSystemPrompt,
+} from "../../src/prompts/formatCatalogForSystemPrompt.ts";
+import { formatSkillsForSystemPrompt } from "../../src/prompts/formatSkillsForSystemPrompt.ts";
 import { projectContextForPrompt } from "../../src/prompts/projectContext.ts";
+import { formatSkillAuthoringGuidance } from "../../src/prompts/skillAuthoringGuidance.ts";
 import { toolSummaryForPrompt } from "../../src/prompts/toolSummary.ts";
+import type { Skill } from "../../src/runtime/pi/types.ts";
 
 const stubTool = (name: string) => ({ name });
 
@@ -512,5 +510,161 @@ describe("projectContextForPrompt", () => {
         assert.ok(!out.includes("Working directory"), "must not expose cwd line");
         assert.ok(!out.includes(dir), "must not contain the absolute cwd");
         assert.match(out, /```\nnode_modules\/\n```/);
+    });
+});
+
+describe("formatDeferredToolsForSystemPrompt", () => {
+    it("returns empty when there are no deferred tools", () => {
+        assert.equal(formatDeferredToolsForSystemPrompt([]), "");
+    });
+
+    it("lists name and summary", () => {
+        const out = formatDeferredToolsForSystemPrompt([
+            { name: "git-status", summary: "show git status" },
+        ]);
+        assert.match(out, /<deferred_tools>/);
+        assert.match(out, /<name>git-status<\/name>/);
+        assert.match(out, /<summary>show git status<\/summary>/);
+    });
+});
+
+describe("formatAgentsForSystemPrompt", () => {
+    it("returns empty when there are no types", () => {
+        assert.equal(formatAgentsForSystemPrompt([]), "");
+    });
+
+    it("prefers whenToUse over description and flags fork defaults", () => {
+        const out = formatAgentsForSystemPrompt([
+            {
+                agentType: "reviewer",
+                description: "short blurb",
+                whenToUse: "pick me when reviewing",
+                context: "fork",
+            },
+            { agentType: "explorer", description: "search", context: "independent" },
+        ]);
+        assert.match(out, /<name>reviewer<\/name>/);
+        assert.match(out, /pick me when reviewing/);
+        assert.ok(!out.includes("short blurb"));
+        assert.match(out, /forked context/);
+        const explorerBlock = out.slice(out.indexOf("<name>explorer</name>"));
+        assert.ok(!explorerBlock.includes("forked context"));
+    });
+
+    it("still lists a type with no description", () => {
+        const out = formatAgentsForSystemPrompt([{ agentType: "bare" }]);
+        assert.match(out, /<name>bare<\/name>/);
+    });
+
+    it("collapses multi-line frontmatter into a single when_to_use line", () => {
+        const out = formatAgentsForSystemPrompt([
+            { agentType: "wrapped", whenToUse: "line one\n  line two\n\nline three" },
+        ]);
+        assert.match(out, /<when_to_use>line one line two line three<\/when_to_use>/);
+        assert.ok(!out.includes("line one\n"));
+    });
+});
+
+describe("formatSkillsForSystemPrompt", () => {
+    const skill = {
+        name: "deploy",
+        description: "Ship the app",
+        filePath: "/Users/someone/.taco/skills/deploy/SKILL.md",
+        disableModelInvocation: false,
+    } as unknown as Skill;
+
+    it("names the tool as `skill`, not `<skill>`", () => {
+        const out = formatSkillsForSystemPrompt([skill]);
+        assert.match(out, /Use the `skill` tool/);
+        assert.ok(!out.includes("<skill> tool"));
+    });
+
+    it("includes the location and path-resolution guidance by default", () => {
+        const out = formatSkillsForSystemPrompt([skill]);
+        assert.match(
+            out,
+            /<location>\/Users\/someone\/\.taco\/skills\/deploy\/SKILL\.md<\/location>/,
+        );
+        assert.match(out, /resolve it against the skill directory/);
+    });
+
+    // Regression: IM sessions rendered the absolute host path even though the
+    // default IM policy strips every file-reading tool, so the path was both
+    // useless to the model and visible to the third party on the channel.
+    it("omits every absolute path when includeLocation is false", () => {
+        const out = formatSkillsForSystemPrompt([skill], { includeLocation: false });
+        assert.ok(!out.includes("<location>"));
+        assert.ok(!out.includes("/Users/someone"));
+        assert.ok(!out.includes("resolve it against the skill directory"));
+        assert.match(out, /<name>deploy<\/name>/);
+        assert.match(out, /<description>Ship the app<\/description>/);
+    });
+});
+
+describe("formatSkillAuthoringGuidance", () => {
+    it("always includes the path-discovery preamble, regardless of dir count", () => {
+        // Structural assertion independent of how many dirs defaultSkillDirs
+        // happens to return — a future change that trims the writable list
+        // to zero must not make this silently pass on an empty guidance
+        // string.
+        const guidance = formatSkillAuthoringGuidance("/work/project");
+        assert.ok(guidance.includes("checked in order, first match by name wins"));
+    });
+
+    it("lists every user-writable dir from defaultSkillDirs, in order", () => {
+        const cwd = "/work/project";
+        const guidance = formatSkillAuthoringGuidance(cwd);
+        const dirs = defaultSkillDirs(cwd);
+        const writable = dirs.filter((d) => d.source === "user");
+
+        assert.ok(writable.length > 0, "expected at least one writable skill dir");
+        let lastIndex = -1;
+        for (const dir of writable) {
+            const idx = guidance.indexOf(dir.path);
+            assert.ok(idx !== -1, `expected guidance to mention ${dir.path}`);
+            assert.ok(idx > lastIndex, `expected ${dir.path} to appear after the previous dir`);
+            lastIndex = idx;
+        }
+    });
+
+    it("separates the dir list from the frontmatter section with a blank line", () => {
+        // Regression: an earlier version built the blank separator as a `""`
+        // array entry and dropped it via `.filter((l) => l !== "")` alongside
+        // the conditionally-omitted builtin-readonly line, so the two
+        // sections ran together with no paragraph break in every case.
+        const guidance = formatSkillAuthoringGuidance("/work/project");
+        assert.ok(
+            guidance.includes("overwrite it).\n\nSKILL.md needs YAML frontmatter"),
+            "expected a blank line between the dir list/read-only callout and the frontmatter section",
+        );
+    });
+
+    it("flags the builtin dir as read-only rather than listing it as writable", () => {
+        const cwd = "/work/project";
+        const guidance = formatSkillAuthoringGuidance(cwd);
+        const builtin = defaultSkillDirs(cwd).find((d) => d.source === "builtin");
+        assert.ok(builtin, "expected defaultSkillDirs to include a builtin entry");
+        assert.ok(guidance.includes(builtin.path));
+        assert.ok(guidance.toLowerCase().includes("read-only"));
+    });
+
+    it("documents the taco-private frontmatter keys", () => {
+        const guidance = formatSkillAuthoringGuidance("/work/project");
+        for (const key of ["runAs", "inlineOnly", "allowedTools", "model"]) {
+            assert.ok(guidance.includes(key), `expected guidance to mention ${key}`);
+        }
+    });
+
+    it("documents hot reload and the already-open session discovery limitation", () => {
+        const guidance = formatSkillAuthoringGuidance("/work/project");
+        assert.ok(guidance.toLowerCase().includes("automatically"));
+        assert.ok(guidance.includes("already-open session"));
+        assert.ok(guidance.includes("<available_skills>"));
+    });
+
+    it("resolves relative to the given cwd, not a hardcoded path", () => {
+        const a = formatSkillAuthoringGuidance("/work/project-a");
+        const b = formatSkillAuthoringGuidance("/work/project-b");
+        assert.notEqual(a, b);
     });
 });

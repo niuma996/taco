@@ -83,8 +83,7 @@
         "!packages/sidecar/src/runtime/harness/harnessErrors.ts",
         "!packages/sidecar/src/runtime/models/modelRegistry.ts",
         "!packages/sidecar/src/runtime/models/customProvider.ts",
-        "!packages/sidecar/tests/runtime/attachedSession.streaming.test.ts",
-        "!packages/sidecar/tests/runtime/imToolFilter.test.ts",
+        "!packages/sidecar/tests/runtime/runtimeHelpers.test.ts",
         "!packages/sidecar/tests/server/handlers/skills.diagnostics.test.ts",
         "!packages/sidecar/tests/server/handlers/skills.inlineOnly.test.ts"
       ],

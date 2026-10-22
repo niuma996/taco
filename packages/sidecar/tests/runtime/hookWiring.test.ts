@@ -1,22 +1,18 @@
 /**
- * Hook timeout guard — `wrapHook` / `withHookTimeout` semantics.
- *
- * Covers: fast hooks pass through untouched, throwing / rejecting hooks
- * degrade to `undefined`, and a hung hook (a promise that never settles)
- * times out instead of blocking the caller.
- *
- * Run:
- *   pnpm --filter @taco-ai/sidecar test
+ * hookWiring: the wrapHook / withHookTimeout guard and the skill reinjector's
+ * live getSkills() wiring.
  */
 
 import { strict as assert } from "node:assert";
 import { describe, it, mock } from "node:test";
-
+import { createModels } from "@earendil-works/pi-ai/compat";
 import {
     HOOK_TIMEOUT_MS,
+    wireHarnessHooks,
     withHookTimeout,
     wrapHook,
 } from "../../src/runtime/harness/hookWiring.ts";
+import type { AgentHarness, AgentLane, AgentMessage, Skill } from "../../src/runtime/pi/types.ts";
 
 describe("withHookTimeout", () => {
     it("resolves fast promises with the original value", async () => {
@@ -93,5 +89,110 @@ describe("wrapHook", () => {
         } finally {
             mock.timers.reset();
         }
+    });
+});
+
+type TransformHandler = (event: {
+    messages: AgentMessage[];
+}) => Promise<{ messages?: AgentMessage[] } | undefined>;
+
+/**
+ * Minimal harness: records every `transform_context` handler it receives,
+ * returns no-op disposers for everything else. Lets us drive the
+ * skill-reinjector hook chain end-to-end without pi or the rest of the
+ * AgentHarness surface.
+ */
+function makeHarness(): {
+    harness: AgentHarness<never>;
+    contextHandlers: TransformHandler[];
+} {
+    const contextHandlers: TransformHandler[] = [];
+    const harness = {
+        hooks: {
+            on(type: string, handler: (event: unknown) => unknown) {
+                if (type === "transform_context") {
+                    contextHandlers.push(handler as TransformHandler);
+                }
+                return () => {};
+            },
+        },
+    };
+    return {
+        harness: harness as unknown as AgentHarness<never>,
+        contextHandlers,
+    };
+}
+
+const minimalLane = {} as AgentLane;
+
+const skillV1: Skill = {
+    name: "echo",
+    description: "v1",
+    content: "echo v1 body",
+    filePath: "/x/echo-v1.md",
+};
+const skillV2: Skill = {
+    name: "echo",
+    description: "v2",
+    content: "echo v2 body — replaced after reload",
+    filePath: "/x/echo-v2.md",
+};
+
+function bodyTexts(result: { messages?: AgentMessage[] } | undefined): string {
+    const msgs = result?.messages ?? [];
+    let s = "";
+    for (const m of msgs) {
+        const c = (m as { content?: unknown }).content;
+        if (typeof c === "string") s += `${c}\n`;
+    }
+    return s;
+}
+
+async function fireAll(handlers: TransformHandler[]): Promise<string> {
+    let combined = "";
+    for (const handler of handlers) {
+        const result = await handler({ messages: [] });
+        combined += bodyTexts(result);
+    }
+    return combined;
+}
+
+describe("hookWiring — skill reinjector reads getSkills live", () => {
+    it("a hot-reload of skills replaces the body the reinjector restores", async () => {
+        let current: readonly Skill[] = [skillV1];
+        const { harness, contextHandlers } = makeHarness();
+
+        const { skillReinjector } = await wireHarnessHooks(harness, minimalLane, {
+            cwd: "/tmp/ws",
+            getSkills: () => current,
+            getThinkingLevel: () => "off",
+            models: createModels(),
+        });
+
+        assert.ok(
+            skillReinjector,
+            "wireHarnessHooks must return a skillReinjector handle when getSkills is supplied",
+        );
+        skillReinjector.markInvoked("echo");
+
+        const before = await fireAll(contextHandlers);
+        assert.ok(
+            before.includes("echo v1 body"),
+            `with v1 in the store, the reinjector must splice the v1 body, got: ${JSON.stringify(before)}`,
+        );
+
+        // Hot-reload — the workspace swaps its skills array. `getSkills` is
+        // a thunk, so the next hook invocation re-reads the live list.
+        current = [skillV2];
+
+        const after = await fireAll(contextHandlers);
+        assert.ok(
+            after.includes("echo v2 body"),
+            `after the swap, the reinjector must splice the v2 body, got: ${JSON.stringify(after)}`,
+        );
+        assert.ok(
+            !after.includes("echo v1 body"),
+            "stale v1 body must not appear after the store swapped lists",
+        );
     });
 });

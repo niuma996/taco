@@ -48,6 +48,9 @@ export interface TacoClientOptions {
     sidecar?: SidecarClient;
     /** Upper bound for an unanswered RPC. Long-running prompts may override this at construction. */
     rpcTimeoutMs?: number;
+    /** Backstop for an unanswered `initialize` handshake. Tests shrink it so a
+     *  missing ack rejects in milliseconds instead of the production 10s. */
+    handshakeTimeoutMs?: number;
 }
 
 interface Readiness {
@@ -107,6 +110,7 @@ export class TacoClient extends TacoClientBase {
     private readonly ensuredCwds = new Set<WorkspaceId>();
     private readonly sidecar: SidecarClient;
     private readonly rpcTimeoutMs: number;
+    private readonly handshakeTimeoutMs: number;
     /** True when the caller passed `rpcTimeoutMs` explicitly. Suppresses the
      *  FAST_RPC_METHODS tier so an explicit bound is honoured verbatim — tests
      *  set small values and expect them to apply to every method. */
@@ -148,6 +152,12 @@ export class TacoClient extends TacoClientBase {
      *  event during the same disconnect storm doesn't schedule a parallel
      *  reconnect (which would race on the shared handshake). */
     private reconnectInFlight = false;
+    /** Pending backoff sleep of the reconnect loop. dispose() clears it so a
+     *  deliberate shutdown neither keeps the process alive nor re-spawns. */
+    private reconnectSleep:
+        | { timer: ReturnType<typeof setTimeout>; resolve: () => void }
+        | undefined;
+    private disposed = false;
     private readonly epochs = new SidecarEpochs();
     private readonly epochChangeHandlers = new Set<(workspace: WorkspaceId) => void>();
     /** Most recent instanceId observed on the initialize response; the tag
@@ -163,6 +173,7 @@ export class TacoClient extends TacoClientBase {
         this.sidecar = opts.sidecar ?? defaultSidecarClient();
         this.rpcTimeoutMsExplicit = opts.rpcTimeoutMs !== undefined;
         this.rpcTimeoutMs = opts.rpcTimeoutMs ?? 1_000_000;
+        this.handshakeTimeoutMs = opts.handshakeTimeoutMs ?? 10_000;
     }
 
     protected makeDispatch() {
@@ -219,6 +230,15 @@ export class TacoClient extends TacoClientBase {
     }
 
     async dispose(): Promise<void> {
+        this.disposed = true;
+        // Wake the reconnect loop so its `disposed` check runs immediately
+        // instead of leaving a multi-second backoff timer behind.
+        const sleep = this.reconnectSleep;
+        if (sleep) {
+            clearTimeout(sleep.timer);
+            this.reconnectSleep = undefined;
+            sleep.resolve();
+        }
         if (this.unlisten) this.unlisten();
         this.unlisten = undefined;
         if (this.unlistenExit) this.unlistenExit();
@@ -489,7 +509,7 @@ export class TacoClient extends TacoClientBase {
     private async awaitHandshake(handshake: Handshake): Promise<void> {
         // The ALREADY_INITIALIZED sentinel resolves immediately, so post-init
         // starts exit in microseconds. Real handshakes wait on the response
-        // or on the 10s safety net (kept as a backstop in case the daemon
+        // or on the safety net (kept as a backstop in case the daemon
         // is alive but never answers — surface a clear error rather than
         // hanging the UI forever).
         let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -499,7 +519,7 @@ export class TacoClient extends TacoClientBase {
                 new Promise<never>((_, reject) => {
                     timeout = setTimeout(
                         () => reject(new Error("sidecar initialize timeout")),
-                        10_000,
+                        this.handshakeTimeoutMs,
                     );
                 }),
             ]);
@@ -799,7 +819,15 @@ export class TacoClient extends TacoClientBase {
         const backoffs = [500, 1000, 2000, 5000] as const;
         try {
             for (const backoffMs of backoffs) {
-                await new Promise((resolve) => setTimeout(resolve, backoffMs));
+                if (this.disposed) return;
+                await new Promise<void>((resolve) => {
+                    const timer = setTimeout(() => {
+                        this.reconnectSleep = undefined;
+                        resolve();
+                    }, backoffMs);
+                    this.reconnectSleep = { timer, resolve };
+                });
+                if (this.disposed) return;
                 try {
                     const pending = await this.sidecar.upgradeMarkerPresent();
                     if (pending) {

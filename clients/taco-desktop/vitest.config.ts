@@ -3,9 +3,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         environment: "happy-dom",
-        // Component tests mount real markdown/shiki pipelines and Radix portals,
-        // and vitest runs the 36 files in parallel — a loaded box needs more
-        // than the 5s default before a legitimate render is called a hang.
+        // Component tests mount real markdown/shiki pipelines and Radix portals.
+        // Capping workers keeps shiki grammar loading from starving the timers
+        // these tests rely on (default CPU-count parallelism made the same
+        // assertions pass or fail depending on machine load).
+        maxWorkers: 4,
+        // A loaded box needs more than the 5s default before a legitimate
+        // render is called a hang.
         testTimeout: 15000,
         // Only runs hooks/ and components/ .test.tsx — other .test.ts go through the
         // `pnpm test` tsx --test path. Pure function + reducer unit tests use node:test;
@@ -16,11 +20,7 @@ export default defineConfig({
             "tests/hooks/useFileTree.test.tsx",
             "tests/hooks/useFilePreview.test.tsx",
             "tests/hooks/useImPolicy.test.tsx",
-            "tests/hooks/useWorkspacesSteer.test.tsx",
-            "tests/hooks/useWorkspacesFirstTurn.test.tsx",
-            "tests/hooks/useWorkspacesAttach.test.tsx",
-            "tests/hooks/useWorkspacesNotifications.test.tsx",
-            "tests/hooks/useWorkspacesDefaultCwdSettled.test.tsx",
+            "tests/hooks/useWorkspaces.test.tsx",
             "tests/hooks/useSaveConfigPatch.test.tsx",
             "tests/hooks/useDragResize.test.tsx",
             "tests/hooks/useRightPanel.test.tsx",
@@ -45,11 +45,7 @@ export default defineConfig({
             "tests/components/LlmDumpPanel.test.tsx",
             "tests/components/toolViews/ReadToolCard.test.tsx",
             "tests/components/toolViews/ToolCardShell.test.tsx",
-            "tests/components/ui/Switch.test.tsx",
-            "tests/components/ui/TextInput.test.tsx",
-            "tests/components/ui/Select.test.tsx",
-            "tests/components/ui/Slider.test.tsx",
-            "tests/components/ui/Modal.test.tsx",
+            "tests/components/ui/uiPrimitives.test.tsx",
             "tests/components/settings/ProviderDetailModal.test.tsx",
             "tests/components/settings/ProviderSection.test.tsx",
             "tests/components/settings/McpSection.test.tsx",

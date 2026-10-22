@@ -121,11 +121,8 @@ class FakeSidecarClient implements SidecarClient {
     }
 }
 
-/** Real-timer sleep. The suite deliberately avoids `mock.timers`: it is
- *  global mutable state, and six existing tests depend on real 10s / 800ms
- *  timings that a leaked reset would silently break. The fast-tier tests
- *  below therefore wait for real time, matching the suite's existing style. */
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** Drain the microtask queue (setImmediate is not covered by mock timers). */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 test("desktop client waits for initialize and rejects pending RPC when its sidecar exits", async () => {
     const sidecar = new FakeSidecarClient();
@@ -220,7 +217,9 @@ test("a failed start rejects the shared promise so concurrent waiters don't hang
     // Disable initialize acks so start blocks at awaitInitialization —
     // simulates slow/missing sidecar.
     sidecar.ackInitialize = false;
-    const client = new TacoClient({ sidecar });
+    // Short backstop: the exit below also schedules a reconnect loop, and the
+    // production 10s handshake bound would keep it (and the process) alive.
+    const client = new TacoClient({ sidecar, handshakeTimeoutMs: 60 });
     // Two concurrent starts share the same initialization promise.
     const first = client.start(asWorkspaceId("/workspace/a"));
     const second = client.start(asWorkspaceId("/workspace/b"));
@@ -411,7 +410,7 @@ test("an initialize timeout rejects the start", async () => {
             await originalSend(cwd, frame);
         }
     };
-    const client = new TacoClient({ sidecar, rpcTimeoutMs: 80 });
+    const client = new TacoClient({ sidecar, rpcTimeoutMs: 80, handshakeTimeoutMs: 80 });
     await assert.rejects(client.start(asWorkspaceId("/workspace/a")), /initialize/);
     await client.dispose();
 });
@@ -431,7 +430,7 @@ test("sends exactly one initialize per sidecar process", async () => {
 test("process death mid-handshake rejects start immediately", async () => {
     const sidecar = new FakeSidecarClient();
     sidecar.ackInitialize = false; // handshake never answered
-    const client = new TacoClient({ sidecar, rpcTimeoutMs: 60 });
+    const client = new TacoClient({ sidecar, rpcTimeoutMs: 60, handshakeTimeoutMs: 60 });
     const starting = client.start(asWorkspaceId("/workspace/a"));
     await new Promise((resolve) => setTimeout(resolve, 10));
     sidecar.emitExit({ code: 1 });
@@ -450,7 +449,7 @@ test("process death mid-handshake rejects start immediately", async () => {
 test("a start after a failed handshake can still recover", async () => {
     const sidecar = new FakeSidecarClient();
     sidecar.ackInitialize = false;
-    const client = new TacoClient({ sidecar, rpcTimeoutMs: 60 });
+    const client = new TacoClient({ sidecar, rpcTimeoutMs: 60, handshakeTimeoutMs: 60 });
     await assert.rejects(client.start(asWorkspaceId("/workspace/a")));
 
     // The sidecar recovers; start() itself drives the retry handshake.
@@ -464,37 +463,40 @@ test("a start after a failed handshake can still recover", async () => {
     await client.dispose();
 });
 
-test("PR4: sidecar exit schedules an upgrade-aware reconnect that re-spawns", async () => {
+test("PR4: sidecar exit schedules an upgrade-aware reconnect that re-spawns", async (t) => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await client.start(asWorkspaceId("/workspace/a"));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
 
-    // First backoff is 500ms; wait long enough for the reconnect attempt
-    // to land, plus a margin for the second start's initialize handshake.
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // First backoff is 500ms; past it the reconnect attempt lands and the
+    // second start re-handshakes.
+    t.mock.timers.tick(500);
+    await flush();
+    assert.equal(sidecar.initializeCount(), 2, "reconnect must re-handshake");
 
-    // Reconnect succeeded → start() ran again. We can't directly assert
-    // "ensureWorkspace was called twice" (start() shares state), but the
-    // absence of upgradeMarker + no apply calls matches the default
-    // (no-marker) reconnect path.
+    // No marker → no apply calls.
     assert.strictEqual(sidecar.upgradeApplyCalls, 0);
     assert.strictEqual(sidecar.upgradeMarker, false);
 
     await client.dispose();
 });
 
-test("PR4: sidecar exit triggers upgrade --apply when the marker is present", async () => {
+test("PR4: sidecar exit triggers upgrade --apply when the marker is present", async (t) => {
     const sidecar = new FakeSidecarClient();
     sidecar.upgradeMarker = true;
     const client = new TacoClient({ sidecar });
     await client.start(asWorkspaceId("/workspace/a"));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
 
     // Wait for the first backoff + apply + new start to land.
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    t.mock.timers.tick(500);
+    await flush();
+    assert.equal(sidecar.initializeCount(), 2, "reconnect must re-handshake");
 
     // upgradeApply was called exactly once (the marker cleared it).
     assert.strictEqual(sidecar.upgradeApplyCalls, 1);
@@ -503,18 +505,21 @@ test("PR4: sidecar exit triggers upgrade --apply when the marker is present", as
     await client.dispose();
 });
 
-test("PR4: sidecar exit tolerates upgrade --apply failure (best-effort)", async () => {
+test("PR4: sidecar exit tolerates upgrade --apply failure (best-effort)", async (t) => {
     const sidecar = new FakeSidecarClient();
     sidecar.upgradeMarker = true;
     sidecar.failUpgradeApply = true;
     const client = new TacoClient({ sidecar });
     await client.start(asWorkspaceId("/workspace/a"));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     // Must not throw — the reconnect loop swallows the apply error and
     // proceeds to re-ensure against the existing binary.
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    t.mock.timers.tick(500);
+    await flush();
 
+    assert.equal(sidecar.initializeCount(), 2, "reconnect must continue after apply failure");
     assert.strictEqual(sidecar.upgradeApplyCalls, 1);
     // Marker stays set so the next exit can retry.
     assert.strictEqual(sidecar.upgradeMarker, true);
@@ -522,7 +527,7 @@ test("PR4: sidecar exit tolerates upgrade --apply failure (best-effort)", async 
     await client.dispose();
 });
 
-test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async () => {
+test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async (t) => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
 
@@ -538,22 +543,23 @@ test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async
     await client.start(asWorkspaceId("/workspace/a"));
     const callsAfterStart = ensureCalls;
     assert.ok(callsAfterStart >= 1, "start() should call ensureWorkspace");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     await client.dispose();
-    // Wait past the longest reconnect backoff (5s in the loop, but we
-    // observe a single attempt here — 800ms covers the first 500ms
-    // backoff + the attempt itself).
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // Cover the first reconnect backoff + attempt; neither may happen.
+    t.mock.timers.tick(800);
+    await flush();
 
     // dispose must NOT trigger another ensureWorkspace; if it did, a
     // reconnect would have run (and called ensureWorkspace at least once).
     assert.strictEqual(ensureCalls, callsAfterStart);
 });
 
-test("PR4: multiple sidecar exits during one reconnect only schedule one loop", async () => {
+test("PR4: multiple sidecar exits during one reconnect only schedule one loop", async (t) => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await client.start(asWorkspaceId("/workspace/a"));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     sidecar.upgradeMarker = true;
     sidecar.emitExit({ code: 1, reason: "upgrade-pending" });
@@ -561,7 +567,8 @@ test("PR4: multiple sidecar exits during one reconnect only schedule one loop", 
     // spawn a parallel loop (which would race on processReadiness).
     sidecar.emitExit({ code: 1, reason: "second-exit" });
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    t.mock.timers.tick(500);
+    await flush();
 
     // The marker was present, but only one apply should have happened.
     // (A second loop would call apply again before clearing the marker.)
@@ -622,7 +629,10 @@ test("call() does not retry not_initialized when the handshake itself fails", as
     // rpcTimeoutMs so the unreplied retry deterministically rejects instead of
     // sitting on the dispatcher's 1,000,000ms default.
     const sidecar = new FakeSidecarClient();
-    const client = new TacoClient({ sidecar, rpcTimeoutMs: 80 });
+    // Shrink the handshake backstop too: the failed reconnect this test
+    // triggers retries in the background, and a real 10s bound per attempt
+    // would keep the test process alive long after the assertions pass.
+    const client = new TacoClient({ sidecar, rpcTimeoutMs: 80, handshakeTimeoutMs: 80 });
     await client.start(asWorkspaceId("/workspace/a"));
 
     const first = client.call(asWorkspaceId("/workspace/a"), "session.list", {
@@ -645,14 +655,13 @@ test("call() does not retry not_initialized when the handshake itself fails", as
     await client.dispose();
 });
 
-test("fast-tier RPCs are bounded when the daemon handshakes then goes silent", async () => {
+test("fast-tier RPCs are bounded when the daemon handshakes then goes silent", async (t) => {
     // Regression guard for the empty-sidebar cold start. The daemon accepts the
     // connection and completes `initialize`, then never answers anything else
     // (measured in the field: an OOM-dying daemon behaves exactly like this).
     // Before the tiered ceiling, `session.list` inherited the 1,000,000ms
     // default, so initFromStorage's await never settled and the sidebar stayed
-    // empty with no error to catch. Uses fake timers so the test does not sit
-    // for the real 15s.
+    // empty with no error to catch. Mocked timers keep the 15s wait virtual.
     const sidecar = new FakeSidecarClient();
     // No rpcTimeoutMs: exercise the production default, which is what the
     // desktop constructs in App.tsx.
@@ -660,10 +669,12 @@ test("fast-tier RPCs are bounded when the daemon handshakes then goes silent", a
     await client.start(asWorkspaceId("/workspace/a"));
     // The fake never answers non-initialize RPCs, which is exactly the wedged
     // daemon we need: handshake fine, everything after it silent.
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     const pending = client.call(asWorkspaceId("/workspace/a"), "session.list", {
         workspace: "/workspace/a",
     });
+    await flush();
     let settled: "pending" | "rejected" = "pending";
     const watched = pending.then(
         () => {
@@ -675,24 +686,26 @@ test("fast-tier RPCs are bounded when the daemon handshakes then goes silent", a
     );
 
     // Just before the fast ceiling: still in flight.
-    await sleep(FAST_RPC_TIMEOUT_MS - 1000);
+    t.mock.timers.tick(FAST_RPC_TIMEOUT_MS - 1000);
+    await flush();
     assert.strictEqual(settled, "pending", "must not bail before the fast ceiling");
 
     // Crossing it must reject rather than hang until the long default.
-    await sleep(2000);
+    t.mock.timers.tick(1000);
     await watched;
     assert.strictEqual(settled, "rejected", "fast-tier RPC must be bounded");
     await assert.rejects(pending, /RPC timeout after 15000ms: session\.list/);
     await client.dispose();
 });
 
-test("model-bound RPCs keep the long ceiling and are not truncated", async () => {
+test("model-bound RPCs keep the long ceiling and are not truncated", async (t) => {
     // The other half of the contract: a `session.prompt` can legitimately
     // stream for minutes, so it must NOT inherit the fast ceiling. If this
     // regresses, long agent turns would abort at 15s.
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
     await client.start(asWorkspaceId("/workspace/a"));
+    t.mock.timers.enable({ apis: ["setTimeout"] });
 
     const pending = client.call(asWorkspaceId("/workspace/a"), "session.prompt", {
         workspace: "/workspace/a",
@@ -702,10 +715,12 @@ test("model-bound RPCs keep the long ceiling and are not truncated", async () =>
         rejected = true;
     });
 
-    // Past the fast ceiling — a prompt must still be in flight. We only need
-    // to clear 15s to prove it was not truncated there; waiting out the real
-    // ~16.7min default would be absurd, and membership is asserted below.
-    await sleep(FAST_RPC_TIMEOUT_MS + 2000);
+    // Past the fast ceiling — a prompt must still be in flight. Waiting out
+    // the real ~16.7min default would be absurd, and membership is asserted
+    // below.
+    await flush();
+    t.mock.timers.tick(FAST_RPC_TIMEOUT_MS + 2000);
+    await flush();
     assert.strictEqual(rejected, false, "prompt must not be cut off at the fast ceiling");
     // Belt and braces: the classification itself is the contract.
     assert.ok(!FAST_RPC_METHODS.has("session.prompt"), "prompt must not be fast-tier");

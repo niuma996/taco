@@ -272,9 +272,14 @@ describe("SubagentPanel — 详情", () => {
                 />
             </SubagentProvider>,
         );
-        await waitFor(() => {
-            assert.equal(loadHistory.mock.calls.length, 2);
-        });
+        // The settled re-pull runs after the rerender's effects flush; under
+        // parallel load the default 1s waitFor budget is too tight.
+        await waitFor(
+            () => {
+                assert.equal(loadHistory.mock.calls.length, 2);
+            },
+            { timeout: 5000 },
+        );
         await waitFor(() => {
             assert.ok(screen.getByText("完成了"));
         });
