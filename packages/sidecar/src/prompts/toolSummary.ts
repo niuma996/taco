@@ -31,6 +31,8 @@ interface ResolvedEntry {
     readonly name: string;
     /** Defaults to true (conservative — treat unknowns as mutating). */
     readonly mutates: boolean;
+    /** Defaults to false. */
+    readonly destructive: boolean;
     readonly summary: string;
 }
 
@@ -43,6 +45,7 @@ function resolve(tool: NamedTool): ResolvedEntry {
     return {
         name: tool.name,
         mutates: meta?.mutates ?? true,
+        destructive: meta?.destructive ?? false,
         summary: summary && summary.length > 0 ? summary : FALLBACK_SUMMARY,
     };
 }
@@ -62,18 +65,21 @@ export function toolSummaryForPrompt(tools: ReadonlyArray<NamedTool>): string {
     ];
     for (const tool of tools) {
         const entry = resolve(tool);
-        const tag = entry.mutates ? "[mutates]" : "[read-only]";
+        const tags = [entry.mutates ? "mutates" : "read-only"];
+        if (entry.destructive) tags.push("destructive");
+        const tag = `[${tags.join(", ")}]`;
         lines.push(`- ${entry.name} ${tag} — ${entry.summary}`);
     }
     lines.push("");
-    // The harness runs every tool call in one turn concurrently — it does not
-    // read a tool's `executionMode` (only pi's legacy agent loop does), and
-    // pi serialises nothing beyond edit/write on the same file. So the rule
-    // the model needs is about dependencies, not about tool kinds.
+    lines.push("Concurrency:");
+    lines.push("- Tools marked [read-only] are concurrency-safe — batch them freely in one turn.");
     lines.push(
-        "All tool calls you issue in one turn run concurrently, in no guaranteed order. " +
-            "Batch independent calls together; when a step depends on another's result or effect, " +
-            "put it in the next turn (or chain shell commands with `&&` in one call).",
+        "- Mutating calls to the SAME file are serialized, but their order is not guaranteed — " +
+            "do not make one edit depend on another's effect within the same turn; put the dependent call in the next turn.",
+    );
+    lines.push("- Mutating calls to DIFFERENT files are independent — batch them.");
+    lines.push(
+        "- When one step's output feeds the next, chain them with `&&` in a single `shell` call rather than splitting across turns.",
     );
     return lines.join("\n");
 }

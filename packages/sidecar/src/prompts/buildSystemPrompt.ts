@@ -22,6 +22,7 @@ import {
     SESSION_ROLE_SUBAGENT,
     SUBAGENT_DELEGATION_BLOCK,
 } from "./templates/core.ts";
+import { buildEnvironmentPrompt, type EnvironmentContext } from "./templates/environment.ts";
 import { toolSummaryForPrompt } from "./toolSummary.ts";
 import type { NamedTool } from "./types.ts";
 
@@ -32,9 +33,9 @@ export type { NamedTool } from "./types.ts";
  * Tags callers can attach to a contributor so the rebuild path (subagent
  * construction) can decide whether the section still applies to a reduced
  * toolset. Add new tags here when a contributor's relevance depends on a
- * specific tool being present — keeps the decision logic in one place.
+ * specific capability being present — keeps the decision logic in one place.
  */
-export type SystemPromptContributorTag = "skills";
+export type SystemPromptContributorTag = "skills" | "agents" | "plan" | "tasks" | "memory" | "im";
 
 /** Runtime role of the session this prompt is being assembled for. */
 export interface SessionKind {
@@ -56,6 +57,33 @@ export interface SystemPromptContributor {
 }
 
 /**
+ * Maps a capability tag to the tool name(s) that satisfy it. Centralised so
+ * callers do not hand-write the mapping and drift when tool names change.
+ */
+const CAPABILITY_TOOL_NAMES: Record<SystemPromptContributorTag, readonly string[]> = {
+    skills: ["skill"],
+    agents: ["agent"],
+    plan: ["planEnter", "planExit"],
+    tasks: ["taskCreate", "taskList", "taskUpdate", "todoWrite"],
+    memory: ["memory"],
+    im: [],
+};
+
+function tagSatisfied(
+    tag: SystemPromptContributorTag,
+    availableToolNames: ReadonlySet<string>,
+): boolean {
+    const names = CAPABILITY_TOOL_NAMES[tag];
+    if (names.length === 0) {
+        // The "im" capability is not derived from a tool name; the caller
+        // decides by passing `hideWorkspacePath`. Contributors that require
+        // "im" are handled separately and should not reach this path.
+        return false;
+    }
+    return names.some((name) => availableToolNames.has(name));
+}
+
+/**
  * Filter a contributor list down to the entries whose `requires` tags are
  * satisfied by the given available tool names. A contributor without
  * `requires` is always kept.
@@ -67,19 +95,52 @@ export function filterContributorsForTools(
     if (!contributors || contributors.length === 0) return [];
     return contributors.filter((c) => {
         if (!c.requires || c.requires.length === 0) return true;
-        return c.requires.every((tag) => {
-            switch (tag) {
-                case "skills":
-                    return availableToolNames.has("skill");
-            }
-            // Exhaustiveness check: adding a new tag without a `case` above
-            // fails the `never` assignment at compile time. Without this,
-            // an unknown tag would silently fall through to `false` and
-            // drop the contributor without warning.
-            const _exhaustive: never = tag;
-            return _exhaustive;
-        });
+        return c.requires.every((tag) => tagSatisfied(tag, availableToolNames));
     });
+}
+
+/**
+ * Build a short, conditional guidance block that only mentions capabilities
+ * actually available in this session. Empty guidance returns the empty string
+ * so we never emit a bare `<session_guidance>` heading.
+ */
+function buildSessionGuidanceSection(toolNames: readonly string[]): string {
+    const tools = new Set(toolNames);
+    const lines: string[] = [];
+
+    if (tools.has("skill")) {
+        lines.push(
+            "- When a task matches a skill's `when_to_use`, invoke it via the `skill` tool. Only use skills listed in <available_skills> — do not guess names.",
+        );
+    }
+    if (tools.has("agent")) {
+        lines.push(
+            "- When a task matches an agent type in <available_agents>, delegate it via the `agent` tool.",
+        );
+    }
+    if (tools.has("planEnter") || tools.has("planExit")) {
+        lines.push(
+            "- Use `planEnter` before non-trivial implementation work that needs user sign-off; exit with `planExit` when the plan is ready for approval.",
+        );
+    }
+    if (tools.has("taskCreate") || tools.has("todoWrite")) {
+        lines.push(
+            "- Use tasks / todos to track work the user asked for, especially when it spans multiple turns.",
+        );
+    }
+    if (tools.has("memory")) {
+        lines.push(
+            "- Use the `memory` tool to record durable facts about the user or project when the user explicitly asks you to remember something.",
+        );
+    }
+    if (tools.has("askUser")) {
+        lines.push(
+            "- When a decision is genuinely the user's, call `askUser` — do not end the turn on a prose question.",
+        );
+    }
+
+    if (lines.length === 0) return "";
+    return ["<session_guidance>", ...lines, "</session_guidance>"].join("\n");
 }
 
 export interface BuildSystemPromptOptions {
@@ -102,6 +163,11 @@ export interface BuildSystemPromptOptions {
      * responsible for reading once at construction.
      */
     projectContext?: string;
+    /**
+     * Session-identity environment facts (cwd, platform, shell, git identity).
+     * Undefined omits the `<environment>` section entirely.
+     */
+    environmentContext?: EnvironmentContext;
     /** Reserved extension point; empty today. */
     contributors?: SystemPromptContributor[];
     /**
@@ -144,10 +210,20 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     });
     const platform = buildPlatformPrompt(options.platform, toolNames);
     const toolSummary = toolSummaryForPrompt(options.tools);
+    const sessionGuidance = buildSessionGuidanceSection(toolNames);
     const projectContext = options.projectContext ?? "";
 
+    const environmentSection = options.environmentContext
+        ? buildEnvironmentPrompt({
+              env: options.environmentContext,
+              hideWorkspacePath: options.hideWorkspacePath,
+          })
+        : "";
+
     const parts: string[] = [core];
+    if (environmentSection) parts.push(environmentSection);
     if (toolSummary) parts.push(toolSummary);
+    if (sessionGuidance) parts.push(sessionGuidance);
     if (projectContext) parts.push(projectContext);
     parts.push(platform);
 

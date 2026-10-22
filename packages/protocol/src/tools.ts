@@ -92,10 +92,10 @@ export interface SkillEntry {
  *  - `duplicate_name`: pi's loader does not dedupe, so same-name collisions
  *    across the five search dirs are detected by `dedupeSkillsByName` and have
  *    no pi counterpart.
- *  - the `runAs` / `inlineOnly` / `allowedTools` codes: pi ignores these
- *    taco-private frontmatter keys entirely, so a bad value loads cleanly and
- *    only surfaces at call time. taco re-parses frontmatter at load (see
- *    checkSkillFrontmatter) and reports them here.
+ *  - the `runAs` / `inlineOnly` / `allowedTools` / `whenToUse` codes: pi
+ *    ignores these taco-private frontmatter keys entirely, so a bad value
+ *    loads cleanly and only surfaces at call time. taco re-parses frontmatter
+ *    at load (see checkSkillFrontmatter) and reports them here.
  */
 export type SkillDiagnosticCode =
     | "file_info_failed"
@@ -108,7 +108,8 @@ export type SkillDiagnosticCode =
     | "invalid_inline_only"
     | "inline_only_conflict"
     | "invalid_allowed_tools"
-    | "empty_allowed_tools";
+    | "empty_allowed_tools"
+    | "invalid_when_to_use";
 
 /** One skill load-time warning, surfaced through `skills.list`. */
 export interface SkillDiagnosticEntry {

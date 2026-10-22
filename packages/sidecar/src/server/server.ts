@@ -1035,17 +1035,23 @@ export class SidecarServer implements ServerRpcSurface {
         const deduped = dedupeSkillsByNameWithDuplicates(loaded.skills.map((entry) => entry.skill));
         const skills = deduped.kept;
         preloadSkillFrontmatter(skills);
-        // Stamp frontmatter-only fields (currently: inlineOnly) onto each
-        // TacoSkill so skills.list can surface them. preloadSkillFrontmatter
+        // Stamp frontmatter-only fields (currently: inlineOnly, whenToUse) onto
+        // each TacoSkill so skills.list can surface them. preloadSkillFrontmatter
         // must run first — readSkillFrontmatter returns from the cache. The
         // same pass lints the taco-private keys pi ignores, so a malformed
-        // runAs/inlineOnly/allowedTools surfaces as a diagnostic here rather
-        // than as a tool error at call time.
+        // runAs/inlineOnly/allowedTools/whenToUse surfaces as a diagnostic here
+        // rather than as a tool error at call time.
         const frontmatterDiagnostics: SkillDiagnosticEntry[] = [];
         for (const s of skills) {
             const fm = readSkillFrontmatter(s.filePath);
             if (fm.inlineOnly === true) {
                 (s as TacoSkill).inlineOnly = true;
+            }
+            // typeof guard, not `!== undefined`: raw YAML yields null for an
+            // empty `whenToUse:` and numbers/booleans for unquoted values —
+            // `.trim()` on any of them would throw and abort the whole loop.
+            if (typeof fm.whenToUse === "string" && fm.whenToUse.trim().length > 0) {
+                (s as TacoSkill).whenToUse = fm.whenToUse.trim();
             }
             frontmatterDiagnostics.push(...checkSkillFrontmatter(fm, s.filePath));
         }

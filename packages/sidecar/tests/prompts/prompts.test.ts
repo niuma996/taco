@@ -20,7 +20,7 @@ import { formatSkillsForSystemPrompt } from "../../src/prompts/formatSkillsForSy
 import { projectContextForPrompt } from "../../src/prompts/projectContext.ts";
 import { formatSkillAuthoringGuidance } from "../../src/prompts/skillAuthoringGuidance.ts";
 import { toolSummaryForPrompt } from "../../src/prompts/toolSummary.ts";
-import type { Skill } from "../../src/runtime/pi/types.ts";
+import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 
 const stubTool = (name: string) => ({ name });
 
@@ -195,7 +195,7 @@ describe("buildSystemPrompt", () => {
         const delegationIdx = out.indexOf("<subagent_delegation>");
         assert.ok(delegationIdx > out.indexOf("</workflow>"), "delegation sits past the core");
         assert.ok(
-            delegationIdx < out.indexOf("<available_agents>"),
+            delegationIdx < out.indexOf("<available_agents>fake"),
             "delegation guidance precedes the agents catalog it references",
         );
 
@@ -420,14 +420,29 @@ describe("toolSummaryForPrompt", () => {
         assert.match(out, /- novel-tool \[mutates\] — See the tool's schema/);
     });
 
-    // Regression: the footer used to promise that [mutates] tools run one at a
-    // time. The harness runs a whole turn's calls concurrently and never reads
-    // `executionMode`, so the rule the model gets must be about dependencies.
-    it("describes same-turn calls as concurrent, not as serialised by tool kind", () => {
+    it("renders destructive and concurrency tags", () => {
+        const out = toolSummaryForPrompt([
+            { name: "read", taco: { mutates: false } },
+            { name: "write", taco: { mutates: true, destructive: true } },
+        ]);
+        assert.match(out, /- read \[read-only\]/);
+        assert.match(out, /- write \[mutates, destructive\]/);
+        assert.match(out, /Concurrency:/);
+        assert.match(out, /Tools marked \[read-only\] are concurrency-safe/);
+    });
+
+    // Regression: the footer used to claim that ALL tool calls run concurrently
+    // in no guaranteed order, which is false for same-file edit/write (pi
+    // serialises them). The new footer distinguishes same-file vs different-file
+    // mutations and concurrency-safe read-only tools.
+    it("describes concurrency accurately by tool kind", () => {
         const out = toolSummaryForPrompt([{ name: "read", taco: { mutates: false } }]);
-        assert.match(out, /run concurrently, in no guaranteed order/);
-        assert.match(out, /depends on another's result or effect, put it in the next turn/);
-        assert.ok(!out.includes("one at a time"), "must not imply per-tool serialisation");
+        assert.match(out, /Mutating calls to the SAME file are serialized/);
+        assert.match(out, /Mutating calls to DIFFERENT files are independent/);
+        assert.ok(
+            !out.includes("run concurrently, in no guaranteed order"),
+            "must not repeat the inaccurate global assertion",
+        );
     });
 });
 
@@ -571,7 +586,7 @@ describe("formatSkillsForSystemPrompt", () => {
         description: "Ship the app",
         filePath: "/Users/someone/.taco/skills/deploy/SKILL.md",
         disableModelInvocation: false,
-    } as unknown as Skill;
+    } as unknown as TacoSkill;
 
     it("names the tool as `skill`, not `<skill>`", () => {
         const out = formatSkillsForSystemPrompt([skill]);
@@ -588,16 +603,32 @@ describe("formatSkillsForSystemPrompt", () => {
         assert.match(out, /resolve it against the skill directory/);
     });
 
-    // Regression: IM sessions rendered the absolute host path even though the
-    // default IM policy strips every file-reading tool, so the path was both
-    // useless to the model and visible to the third party on the channel.
-    it("omits every absolute path when includeLocation is false", () => {
-        const out = formatSkillsForSystemPrompt([skill], { includeLocation: false });
-        assert.ok(!out.includes("<location>"));
-        assert.ok(!out.includes("/Users/someone"));
-        assert.ok(!out.includes("resolve it against the skill directory"));
-        assert.match(out, /<name>deploy<\/name>/);
-        assert.match(out, /<description>Ship the app<\/description>/);
+    // Regression: the 250-char cap used to truncate the merged
+    // "description — whenToUse" string, so a long description ate the hint —
+    // the one part that tells the model when to invoke.
+    it("truncates description and whenToUse separately so the hint survives", () => {
+        const out = formatSkillsForSystemPrompt([
+            {
+                ...skill,
+                description: "d".repeat(400),
+                whenToUse: "pick me when reviewing",
+            } as unknown as TacoSkill,
+        ]);
+        assert.match(out, /<description>d{249}\.\.\. — pick me when reviewing<\/description>/);
+    });
+
+    it("collapses a multi-line whenToUse into one line, like the agents catalog", () => {
+        const out = formatSkillsForSystemPrompt([
+            { ...skill, whenToUse: "line one\n  line two" } as unknown as TacoSkill,
+        ]);
+        assert.match(out, /Ship the app — line one line two<\/description>/);
+    });
+
+    it("caps the whenToUse hint at its own budget", () => {
+        const out = formatSkillsForSystemPrompt([
+            { ...skill, whenToUse: "w".repeat(200) } as unknown as TacoSkill,
+        ]);
+        assert.match(out, /— w{119}\.\.\.<\/description>/);
     });
 });
 

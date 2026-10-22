@@ -52,9 +52,12 @@ export interface TacoToolMetadata {
     /** Whether this tool mutates workspace state. Drives the
      *  `[read-only]` / `[mutates]` tag in the system prompt. Defaults to
      *  `true` when omitted — failure mode is conservative (model treats
-     *  unknown tools as mutating). It does not affect scheduling: every call
-     *  in one turn runs concurrently regardless (see `toolSummaryForPrompt`). */
+     *  unknown tools as mutating). */
     readonly mutates?: boolean;
+    /** Whether this tool is destructive / hard to reverse (e.g. overwrite,
+     *  delete, raw shell). Shown as an additional `[destructive]` tag in the
+     *  routing guide and may feed the permission layer. Defaults to false. */
+    readonly destructive?: boolean;
 }
 
 declare module "@taco-ai/pi-harness" {
@@ -98,6 +101,7 @@ export function defaultTools(opts?: {
             promptSummary:
                 "Create or fully replace a file — use it only for brand-new files or wholesale rewrites. Prefer `edit` when only part of the file should change; `write` rewrites the whole file and is harder to review.",
             mutates: true,
+            destructive: true,
         },
     };
     const edit: TacoTool = {
@@ -117,7 +121,13 @@ export function defaultTools(opts?: {
         createGlobTool(),
         createAskUserTool(),
     ];
-    tools.push(createShellTool(opts));
+    const shell = createShellTool(opts);
+    // annotate destructive on the shell tool so the routing guide carries the tag
+    const annotatedShell: TacoTool = {
+        ...shell,
+        taco: { ...shell.taco, destructive: true },
+    };
+    tools.push(annotatedShell);
     tools.push(createMemoryTool());
     const disabled = new Set(opts?.disabledTools ?? []);
     const filtered = disabled.size > 0 ? tools.filter((t) => !disabled.has(t.name)) : tools;

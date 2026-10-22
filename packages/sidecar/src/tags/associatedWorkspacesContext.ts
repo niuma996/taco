@@ -37,7 +37,7 @@ export function buildAssociatedWorkspacesContextHook(
         const roots = opts.getRoots();
         if (roots.length === 0) return undefined;
         if (hasSameRoots(event.messages, roots)) return undefined;
-        appendUserTag(event.messages, renderTag(roots));
+        appendUserTag(event.messages, renderTag(roots), "external-data");
         return { messages: event.messages };
     };
 }

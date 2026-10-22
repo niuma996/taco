@@ -143,6 +143,22 @@ describe("checkSkillFrontmatter", () => {
         assert.equal(entry.code, "empty_allowed_tools");
     });
 
+    // Regression: raw YAML turns `whenToUse:` (empty value) into null and an
+    // unquoted number/boolean into a non-string. The stamping loop in
+    // server.ts used to call `.trim()` on it, throwing and aborting the whole
+    // load; both shapes must degrade to a diagnostic instead.
+    it("flags a non-string whenToUse (null from an empty YAML value)", () => {
+        assert.deepEqual(codes({ whenToUse: null }), ["invalid_when_to_use"]);
+    });
+
+    it("flags a non-string whenToUse (number)", () => {
+        assert.deepEqual(codes({ whenToUse: 123 }), ["invalid_when_to_use"]);
+    });
+
+    it("accepts a string whenToUse", () => {
+        assert.deepEqual(codes({ whenToUse: "pick me when reviewing" }), []);
+    });
+
     it("reports several problems at once rather than stopping at the first", () => {
         assert.deepEqual(codes({ runAs: "bogus", allowedTools: "nope" }), [
             "unknown_run_as",

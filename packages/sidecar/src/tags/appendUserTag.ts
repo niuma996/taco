@@ -11,10 +11,18 @@
 
 import type { AgentMessage } from "../runtime/pi/types.ts";
 
-import { createUserMessage } from "./builder.ts";
+import { createUserMessage, prefixTagSource, type TagSource } from "./builder.ts";
 
-/** Push `text` as a user message onto `messages` (in-place) and return them. */
-export function appendUserTag(messages: AgentMessage[], text: string): AgentMessage[] {
-    messages.push(createUserMessage(text));
+/**
+ * Push `text` as a user message onto `messages` (in-place) and return them.
+ * When `source` is provided, the body is prefixed with a source framing so the
+ * model knows this is not ordinary user input.
+ */
+export function appendUserTag(
+    messages: AgentMessage[],
+    text: string,
+    source?: TagSource,
+): AgentMessage[] {
+    messages.push(createUserMessage(source ? prefixTagSource(text, source) : text));
     return messages;
 }

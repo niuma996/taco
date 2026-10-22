@@ -74,6 +74,8 @@ export function formatSkillAuthoringGuidance(cwd: string): string {
             "more `agent` calls) — a subagent cannot route those back to the parent.",
         "  - allowedTools: string[] — restricts the toolset for subagent mode.",
         "  - model: string — overrides the model for subagent mode.",
+        "  - whenToUse: string — a one-line hint shown in the system prompt's skill listing so the model " +
+            "knows when to invoke this skill rather than guessing from `description` alone.",
         "Changes to SKILL.md in these user-writable directories take effect automatically shortly after " +
             "saving. An already-open session can invoke a new or changed skill by name, but start a new " +
             "session before expecting <available_skills> to list a newly-created skill.",

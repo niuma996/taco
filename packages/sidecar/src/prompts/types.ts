@@ -16,5 +16,6 @@ export interface NamedTool {
     readonly taco?: {
         readonly promptSummary?: string;
         readonly mutates?: boolean;
+        readonly destructive?: boolean;
     };
 }

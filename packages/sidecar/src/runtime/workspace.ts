@@ -8,6 +8,7 @@
  *  - ModelRegistry: model switching + provider key hot-update
  */
 
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolve as resolvePath } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/compat";
@@ -54,6 +55,7 @@ import {
 } from "../prompts/formatCatalogForSystemPrompt.ts";
 import {
     buildSystemPrompt,
+    type EnvironmentContext,
     formatSkillsForSystemPrompt,
     projectContextForPrompt,
     type SystemPromptContributor,
@@ -102,6 +104,57 @@ import { settledSubagentResultIds } from "./subagent/subagentResultsDir.ts";
 import { dedupOverride, filterToolsForImPolicy } from "./toolAssembly.ts";
 
 const log = createLogger("workspace");
+
+/**
+ * Synchronously probe basic git identity facts for the environment snapshot.
+ * Any failure (not a repo, git missing, corrupt repo) returns a non-repo
+ * result — the workspace must never fail to start because of git probing.
+ */
+function probeGitEnvironment(
+    cwd: string,
+): Pick<EnvironmentContext, "isGitRepository" | "currentBranch" | "defaultBranch"> {
+    try {
+        execFileSync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {
+            encoding: "utf8",
+            timeout: 2000,
+        });
+    } catch {
+        return { isGitRepository: false };
+    }
+
+    let currentBranch: string | undefined;
+    try {
+        currentBranch = execFileSync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], {
+            encoding: "utf8",
+            timeout: 2000,
+        }).trim();
+    } catch {
+        // ignore
+    }
+
+    let defaultBranch: string | undefined;
+    try {
+        defaultBranch = execFileSync(
+            "git",
+            ["-C", cwd, "rev-parse", "--abbrev-ref", "origin/HEAD"],
+            { encoding: "utf8", timeout: 2000 },
+        )
+            .trim()
+            .replace(/^origin\//, "");
+    } catch {
+        // origin/HEAD is the only source that names THIS repo's default branch.
+        // `init.defaultBranch` is the user's global init preference (unrelated
+        // to this repo) and a hardcoded "main" is a guess — either could print
+        // a wrong "Default branch" fact into the prompt, so leave it unset and
+        // let the template omit the line.
+    }
+
+    return {
+        isGitRepository: true,
+        currentBranch,
+        defaultBranch,
+    };
+}
 
 export type { AttachOptions };
 
@@ -293,6 +346,10 @@ export class WorkspaceRuntime extends EventEmitter {
      *  construction. Reused by `rebuildSystemPrompt` so hot reload doesn't
      *  re-read the filesystem for a section that never changes post-construction. */
     private readonly projectContextSnapshot: string;
+    /** Stable environment snapshot (cwd/platform/shell + git identity) used
+     *  by `rebuildSystemPrompt` so hot reload doesn't re-probe the filesystem
+     *  for a section that never changes post-construction. */
+    private readonly environmentContextSnapshot: EnvironmentContext;
     // Mutable: settings.write hot-reloads the default model when the user
     // picks a provider/model after the sidecar is already running. See
     // setDefaultModel — without live update, session.create would keep using
@@ -577,6 +634,7 @@ export class WorkspaceRuntime extends EventEmitter {
         this.baseSystemPromptContributors = promptSnapshots.baseContributors;
         this.modelIdentitySnapshot = promptSnapshots.modelIdentity;
         this.projectContextSnapshot = promptSnapshots.projectContext;
+        this.environmentContextSnapshot = promptSnapshots.environmentContext;
         this.parentInstructionsBlock = promptSnapshots.parentInstructionsBlock;
         this.instructionsConfig = options.instructionsConfig;
         this.agentCatalog = options.agents ?? [];
@@ -916,6 +974,7 @@ export class WorkspaceRuntime extends EventEmitter {
         modelIdentity: string | undefined;
         projectContext: string;
         parentInstructionsBlock: string;
+        environmentContext: EnvironmentContext;
     } {
         // The system prompt always uses the built-in template (assembled from
         // the current toolset + platform) and can no longer be overridden by
@@ -960,6 +1019,15 @@ export class WorkspaceRuntime extends EventEmitter {
                 this.executionCwd,
                 options.instructionsConfig,
             ),
+            environmentContext: {
+                cwd: this.executionCwd,
+                platform: process.platform,
+                // Windows has no $SHELL; the shell tool runs PowerShell there
+                // (see shellTool.ts), so name that rather than "unknown".
+                shell:
+                    process.platform === "win32" ? "powershell" : (process.env.SHELL ?? "unknown"),
+                ...probeGitEnvironment(this.executionCwd),
+            },
         };
     }
 
@@ -1006,6 +1074,7 @@ export class WorkspaceRuntime extends EventEmitter {
             tools: orderTools(this.tools),
             modelIdentity: this.modelIdentitySnapshot,
             projectContext: this.projectContextSnapshot,
+            environmentContext: this.environmentContextSnapshot,
             contributors: contributors.length > 0 ? contributors : undefined,
             sessionKind: { role: "main", depth: 0 },
             hideWorkspacePath: this.isIm,

@@ -31,7 +31,8 @@ describe("buildCompactionReminderHook", () => {
         const injected = hook(ev);
         assert.ok(injected?.messages, "fires after notify");
         assert.equal(injected.messages.length, 2);
-        assert.match(firstText(injected.messages[1] as AgentMessage), /^<compaction_reminder>/);
+        assert.match(firstText(injected.messages[1] as AgentMessage), /^\[system-event\]/);
+        assert.match(firstText(injected.messages[1] as AgentMessage), /<compaction_reminder>/);
         assert.match(firstText(injected.messages[1] as AgentMessage), /just compacted/);
         assert.match(firstText(injected.messages[1] as AgentMessage), /trust the PINNED text/);
 

@@ -14,6 +14,12 @@ export interface SkillFrontmatter {
     allowedTools?: string[];
     model?: string;
     /**
+     * One-line guidance for the model on when this skill should be invoked.
+     * Shown in the system prompt's `<available_skills>` listing; if omitted,
+     * only `description` is rendered.
+     */
+    whenToUse?: string;
+    /**
      * When true, the skill must only be activated inline — running it inside
      * a subagent makes no sense (the subagent cannot dispatch tools back into
      * the parent session). `SkillTool` enforces this: a request to invoke an

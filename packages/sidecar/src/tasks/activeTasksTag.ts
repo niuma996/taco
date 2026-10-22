@@ -32,7 +32,7 @@ export function buildActiveTasksContextHook(
         if (unfinished.length === 0) return undefined;
         const lines = unfinished.map((t) => `- id=${t.id} (${t.status}) ${t.content}`);
         const body = `Active task list "${list.name}" has ${unfinished.length} unfinished task(s):\n${lines.join("\n")}\n\nIf the user's message continues this work (e.g. '继续', 'go on'), resume the next unfinished task and taskUpdate each to completed as you finish it. If the user changed topic, first taskUpdate the remaining tasks to failed (终止), then proceed.`;
-        appendUserTag(event.messages, tagWrap("active_tasks", body));
+        appendUserTag(event.messages, tagWrap("active_tasks", body), "system-event");
         return { messages: event.messages };
     };
 }

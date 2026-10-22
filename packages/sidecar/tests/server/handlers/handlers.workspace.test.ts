@@ -23,20 +23,16 @@ describe("jobs", () => {
      * that ctx IS the wire body. For `jobs.create`, the desktop client sends
      * `call(client, JOBS_RPC.create, { job })` (see
      * `clients/taco-desktop/src/lib/jobsClient.ts`), so on the server
-     * `params = { job: { ... } }`. The same shape applies to
-     * `jobs.update` (also a `{ job }` wrapper). `jobs.delete` /
-     * `jobs.runNow` / `jobs.history` / `jobs.get` use a flat `{ id }`
-     * payload — their `params` is `{ id }` directly.
+     * `params = { job: { ... } }`. `jobs.update` is the same shape. The
+     * `jobs.delete` / `jobs.runNow` / `jobs.history` / `jobs.get` calls
+     * use a flat `{ id }` payload — their `params` is `{ id }` directly.
      *
-     * The previous test wrapped each input in a redundant
-     * `params: { workspace, params: { job: ... } }` shell that does not
-     * match real wire traffic. With that shell, `assertJob(params, "job")`
-     * reads `params["job"]` = the inner `{ job: ... }` wrapper, throws on
-     * the missing `obj.id`, and `assertSafeJobId` never runs — the test was
-     * passing for the wrong reason.
+     * `params: { workspace, params: { job: ... } }` is NOT the wire shape:
+     * `assertJob(params, "job")` would read the inner wrapper, throw on the
+     * missing `obj.id`, and never reach `assertSafeJobId` — a test that
+     * passes for the wrong reason.
      *
-     * These tests use the real wire shape so the asserted contract is the
-     * one callers actually depend on.
+     * These tests use the real wire shape callers actually depend on.
      */
 
     type AnyServer = MethodCtx<unknown>["server"];

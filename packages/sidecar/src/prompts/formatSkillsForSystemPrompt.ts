@@ -9,7 +9,7 @@
  * remains compatible with any tooling that expects that structure.
  */
 
-import type { Skill } from "../runtime/pi/types.ts";
+import type { TacoSkill } from "../skills/tacoSkill.ts";
 
 function escapeXml(value: string): string {
     return value
@@ -31,10 +31,21 @@ export interface FormatSkillsOptions {
      * on an IM channel reaches a third party.
      */
     readonly includeLocation?: boolean;
+    /**
+     * Soft cap on the rendered `<available_skills>` block. If the full listing
+     * exceeds this, it degrades to names + paths only. Defaults to 20,000 chars.
+     */
+    readonly metadataBudget?: number;
 }
 
+const DEFAULT_SKILL_METADATA_BUDGET = 20_000;
+// Truncated separately, never as a merged string: a long description must not
+// eat the whenToUse hint — the hint is what tells the model when to invoke.
+const MAX_DESCRIPTION_CHARS = 250;
+const MAX_WHEN_TO_USE_CHARS = 120;
+
 export function formatSkillsForSystemPrompt(
-    skills: Skill[],
+    skills: TacoSkill[],
     options: FormatSkillsOptions = {},
 ): string {
     const visibleSkills = skills.filter((skill) => !skill.disableModelInvocation);
@@ -54,14 +65,52 @@ export function formatSkillsForSystemPrompt(
         "<available_skills>",
     ];
 
-    for (const skill of visibleSkills) {
-        lines.push("  <skill>");
-        lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-        lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-        if (includeLocation) lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-        lines.push("  </skill>");
+    const skillLines = visibleSkills.map((skill) => formatSkillLine(skill, includeLocation));
+    const full = [...lines, ...skillLines, "</available_skills>"].join("\n");
+    if (full.length <= (options.metadataBudget ?? DEFAULT_SKILL_METADATA_BUDGET)) {
+        return full;
     }
 
-    lines.push("</available_skills>");
-    return lines.join("\n");
+    // Budget exceeded: degrade to names + paths so a large skill set does not
+    // blow the system prompt budget. This mirrors ZCode's skillMetadataBudget.
+    const degradedLines = visibleSkills.map((skill) =>
+        [
+            "  <skill>",
+            `    <name>${escapeXml(skill.name)}</name>`,
+            ...(includeLocation ? [`    <location>${escapeXml(skill.filePath)}</location>`] : []),
+            "  </skill>",
+        ].join("\n"),
+    );
+    return [
+        ...lines.slice(0, 1),
+        "Use the `skill` tool to invoke a skill when the task matches its description.",
+        "Descriptions were omitted to fit the prompt budget — call `skill` with the name to load the full listing.",
+        "",
+        "<available_skills>",
+        ...degradedLines,
+        "</available_skills>",
+    ].join("\n");
+}
+
+/** Truncate to `max` chars with a trailing ellipsis. */
+function truncateWithEllipsis(value: string, max: number): string {
+    return value.length > max ? `${value.slice(0, max - 1)}...` : value;
+}
+
+function formatSkillLine(skill: TacoSkill, includeLocation: boolean): string {
+    const description = truncateWithEllipsis(skill.description, MAX_DESCRIPTION_CHARS);
+    // One-line contract, same as the agents catalog: collapse whitespace so a
+    // multi-line frontmatter value cannot break the listing layout.
+    const hint = skill.whenToUse
+        ? truncateWithEllipsis(skill.whenToUse.replace(/\s+/g, " ").trim(), MAX_WHEN_TO_USE_CHARS)
+        : undefined;
+    const text = hint ? `${description} — ${hint}` : description;
+    const parts = [
+        "  <skill>",
+        `    <name>${escapeXml(skill.name)}</name>`,
+        `    <description>${escapeXml(text)}</description>`,
+        ...(includeLocation ? [`    <location>${escapeXml(skill.filePath)}</location>`] : []),
+        "  </skill>",
+    ];
+    return parts.join("\n");
 }

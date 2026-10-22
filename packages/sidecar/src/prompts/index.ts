@@ -22,3 +22,8 @@ export {
     projectContextForPrompt,
     truncateByLines,
 } from "./projectContext.ts";
+export {
+    type BuildEnvironmentPromptOptions,
+    buildEnvironmentPrompt,
+    type EnvironmentContext,
+} from "./templates/environment.ts";

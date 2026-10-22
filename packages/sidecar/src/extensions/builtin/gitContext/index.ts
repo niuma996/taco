@@ -306,8 +306,8 @@ export function buildGitContextHook(cwd: string): ContextHook {
         // (activation.ts builds one hook per workspace), so a per-hook
         // "last pushed" cache let whichever session built context first claim
         // the tag and silently starve the others.
-        if (commitsTag) appendUserTag(event.messages, commitsTag);
-        if (uncommittedTag) appendUserTag(event.messages, uncommittedTag);
+        if (commitsTag) appendUserTag(event.messages, commitsTag, "external-data");
+        if (uncommittedTag) appendUserTag(event.messages, uncommittedTag, "external-data");
         return { messages: event.messages };
     };
 }

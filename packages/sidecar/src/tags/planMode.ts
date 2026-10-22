@@ -47,7 +47,11 @@ export function buildPlanModeContextHook(
         const state = getPlanState();
         if (!state.active || !state.currentSlug) return undefined;
         const body = PLAN_MODE_BODY;
-        appendUserTag(event.messages, tagWrap("plan_mode", body, { slug: state.currentSlug }));
+        appendUserTag(
+            event.messages,
+            tagWrap("plan_mode", body, { slug: state.currentSlug }),
+            "system-event",
+        );
         return { messages: event.messages };
     };
 }

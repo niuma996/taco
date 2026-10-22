@@ -447,9 +447,9 @@ describe("gitContext", () => {
                     : ((secondContent as Array<{ text?: string }>)[0]?.text ?? "");
 
             // First tag is recent_git_commits
-            assert.match(firstText, /^<recent_git_commits source="workspace" n="/);
+            assert.match(firstText, /<recent_git_commits source="workspace" n="/);
             // Second tag is working_tree_changes
-            assert.match(secondText, /^<working_tree_changes source="workspace">/);
+            assert.match(secondText, /<working_tree_changes source="workspace">/);
             assert.match(secondText, /staged\.txt/);
             assert.match(secondText, /untracked\.txt/);
         });
@@ -477,11 +477,11 @@ describe("gitContext", () => {
                         : ((content as Array<{ text?: string }>)[0]?.text ?? "");
                 });
                 assert.ok(
-                    texts.some((t) => t.startsWith("<recent_git_commits")),
+                    texts.some((t) => t.includes("<recent_git_commits")),
                     `${label} call should carry <recent_git_commits>`,
                 );
                 assert.ok(
-                    texts.some((t) => t.startsWith("<working_tree_changes")),
+                    texts.some((t) => t.includes("<working_tree_changes")),
                     `${label} call should carry <working_tree_changes>`,
                 );
             }
@@ -515,7 +515,7 @@ describe("gitContext", () => {
                 .map((c) =>
                     typeof c === "string" ? c : ((c as Array<{ text?: string }>)[0]?.text ?? ""),
                 )
-                .find((t) => t.startsWith("<recent_git_commits"));
+                .find((t) => t.includes("<recent_git_commits"));
             assert.ok(text, "expected a <recent_git_commits> tag");
             assert.ok(text.includes(deepFile), "long path must not be elided");
             assert.ok(text.includes(cjkFile), "non-ASCII path must not be octal-escaped");

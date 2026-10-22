@@ -70,8 +70,8 @@ const VALID_RUN_AS = ["inline", "subagent"] as const;
 
 /**
  * Check the taco-private frontmatter keys pi ignores (`runAs`, `inlineOnly`,
- * `allowedTools`) for a skill that already loaded, and emit one diagnostic per
- * problem.
+ * `allowedTools`, `whenToUse`) for a skill that already loaded, and emit one
+ * diagnostic per problem.
  *
  * pi's loader drops these keys without looking at them, so a malformed value
  * loads cleanly and otherwise only fails when the skill is invoked — catching
@@ -131,6 +131,15 @@ export function checkSkillFrontmatter(
             code: "empty_allowed_tools",
             message:
                 "`allowedTools` is an empty list, which gives the subagent no tools at all. Omit the key to inherit the default toolset.",
+            path,
+        });
+    }
+
+    const whenToUse = fm.whenToUse;
+    if (whenToUse !== undefined && typeof whenToUse !== "string") {
+        out.push({
+            code: "invalid_when_to_use",
+            message: `\`whenToUse\` must be a one-line string; got ${JSON.stringify(whenToUse)}.`,
             path,
         });
     }

@@ -21,6 +21,11 @@ export interface TacoSkill extends Skill {
      * `agentSpawner.spawnSkillSubagent`.
      */
     inlineOnly?: boolean;
+    /**
+     * Mirrors `SkillFrontmatter.whenToUse` — a one-line "when to invoke this
+     * skill" hint rendered in the system prompt's `<available_skills>` listing.
+     */
+    whenToUse?: string;
 }
 
 /**

@@ -81,7 +81,7 @@ export function buildTodoWriteReminderContextHook(
         const streak = countConsecutiveTurnsWithoutTodoWrite(event.messages);
         if (streak < TURNS_BETWEEN_REMINDERS) return undefined;
 
-        appendUserTag(event.messages, wrapped);
+        appendUserTag(event.messages, wrapped, "system-event");
         return { messages: event.messages };
     };
 }

@@ -25,7 +25,7 @@ import fg from "fast-glob";
 import ignore from "ignore";
 import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
 import type { AgentMessage } from "../../../runtime/pi/types.ts";
-import { createUserMessage, tagWrap } from "../../../tags/builder.ts";
+import { createUserMessage, prefixTagSource, tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import { MANIFEST_SAFE_DEFAULT_IGNORES } from "../../../tools/safeDefaults.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
@@ -176,7 +176,10 @@ export function buildProjectManifestsHook(cwd: string): ContextHook {
         if (manifests.length === 0) return undefined;
 
         const tag: AgentMessage = createUserMessage(
-            tagWrap(TAG_NAME, formatManifests(manifests), { source: "workspace" }),
+            prefixTagSource(
+                tagWrap(TAG_NAME, formatManifests(manifests), { source: "workspace" }),
+                "external-data",
+            ),
         );
         return { messages: [tag, ...event.messages] };
     };

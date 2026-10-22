@@ -276,30 +276,23 @@ const STOP_CHILD_TIMEOUT_MS = 5_000;
 
 /**
  * Delete a session, everything spawned beneath it, and its sidecar-owned
- * auxiliary directory.
+ * auxiliary directory. Three stores have to go; no single call covers them:
  *
- * Three separate stores have to go, and no single call covers them:
- *
- *  - The transcript itself (`workspace.deleteSession` → `repo.delete`), which
- *    for a subagent is a `.jsonl` in pi's cwd directory.
- *  - The transcripts of its descendants. pi records `parentSessionId` in each
- *    session's storage header, so the tree is walkable from `listSessions()`
- *    without opening a single file. Nothing else removes them: the parent's
- *    deletion does not cascade, and `session.list` hides subagent sessions from
- *    the user, so an orphan would be invisible and unreachable.
+ *  - The transcript (`workspace.deleteSession` → `repo.delete`) — a `.jsonl`
+ *    in pi's cwd directory for a subagent.
+ *  - Its descendants' transcripts: pi records `parentSessionId` per session,
+ *    so the tree is walkable from `listSessions()`. Nothing else removes
+ *    them — the parent's delete does not cascade and `session.list` hides
+ *    subagent sessions, so an orphan would be invisible and unreachable.
  *  - `<sessionsRoot>/<sid>/` — the `tasks/` and `subagent-results/`
- *    directories. `repo.delete` removes one file by path and these are siblings
- *    of the cwd directory rather than children of the transcript, so they sit
- *    outside its reach entirely.
+ *    directories: `repo.delete` removes one file by path, and these are
+ *    siblings of the cwd directory, not children of the transcript.
  *
- * Children are removed before the parent so a failure mid-way never leaves a
- * transcript pointing at a parent that is already gone.
+ * Children go before the parent: a mid-way failure never orphans a transcript.
  *
  * A child that will not stop within `STOP_CHILD_TIMEOUT_MS` is skipped, not
- * fatal. pi refuses to delete a session that is still open, and a subagent
- * stuck on a long tool call would otherwise make the whole session undeletable
- * — a worse outcome than the one leftover transcript, which the user never
- * sees listed and which the next stop settles on its own.
+ * fatal: a subagent stuck on a long tool call would make the session
+ * undeletable — worse than the one leftover transcript the user never sees.
  */
 async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: SessionId): Promise<void> {
     // Validate the raw RPC id before anything is deleted, not after.

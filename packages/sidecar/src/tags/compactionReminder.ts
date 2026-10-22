@@ -41,7 +41,7 @@ export function buildCompactionReminderHook(): CompactionReminderHandle {
         hook: (event: ContextEvent): ContextResult | undefined => {
             if (!compactionJustHappened) return undefined;
             compactionJustHappened = false;
-            appendUserTag(event.messages, wrapped);
+            appendUserTag(event.messages, wrapped, "system-event");
             return { messages: event.messages };
         },
         notify: () => {
