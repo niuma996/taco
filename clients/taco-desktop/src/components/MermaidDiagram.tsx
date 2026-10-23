@@ -1,10 +1,9 @@
 /**
- * Renders a mermaid fenced block as an SVG diagram.
+ * Renders a mermaid fenced block as an SVG diagram with Pele.
  *
- * mermaid + d3 are far too heavy for the initial chat chunk, so the library is
- * pulled in with a dynamic import the first time a mermaid block actually
- * appears. The code-block surface is always dark (`--terminal-bg`, fixed
- * across light/dark themes), so mermaid is initialized with its `dark` theme.
+ * Pele is pulled in with a dynamic import the first time a mermaid block
+ * actually appears. The code-block surface is always dark (`--terminal-bg`,
+ * fixed across light/dark themes), so its CSS variables are set on the wrapper.
  *
  * Streaming: the source arrives token-by-token and is mid-edit most of the
  * time, so rendering is debounced and any failure (incomplete or invalid
@@ -14,41 +13,25 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-type MermaidModule = typeof import("mermaid");
+type PeleModule = typeof import("pele");
 
-let mermaidPromise: Promise<MermaidModule> | null = null;
+let pelePromise: Promise<PeleModule> | null = null;
 
-function loadMermaid(): Promise<MermaidModule> {
-    mermaidPromise ??= import("mermaid")
-        .then((m) => {
-            m.default.initialize({
-                startOnLoad: false,
-                theme: "dark",
-                securityLevel: "strict",
-            });
-            return m;
-        })
-        .catch((err) => {
-            // Reset so the next mermaid block retries instead of reusing a
-            // poisoned rejected promise forever; warn so a bundling/install
-            // problem is diagnosable rather than silently stuck on source view.
-            mermaidPromise = null;
-            console.warn("[taco] mermaid failed to load; diagram view unavailable", err);
-            throw err;
-        });
-    return mermaidPromise;
+function loadPele(): Promise<PeleModule> {
+    pelePromise ??= import("pele").catch((err) => {
+        // Reset so the next diagram retries instead of reusing a poisoned
+        // rejected promise forever; keep source fallback diagnosable.
+        pelePromise = null;
+        console.warn("[taco] pele failed to load; diagram view unavailable", err);
+        throw err;
+    });
+    return pelePromise;
 }
 
 /** Debounce so streaming tokens don't trigger a re-render per keystroke. */
 const RENDER_DEBOUNCE_MS = 250;
 
 let renderSeq = 0;
-
-/** Remove the temporary node mermaid may leave in the document on some failure paths. */
-function dropTempNode(id: string) {
-    document.getElementById(id)?.remove();
-    document.getElementById(`d${id}`)?.remove();
-}
 
 interface MermaidDiagramProps {
     /** Raw mermaid source. */
@@ -63,10 +46,16 @@ export function MermaidDiagram({ code, fallback }: MermaidDiagramProps) {
 
     useEffect(() => {
         let cancelled = false;
-        const id = `mmd-${++renderSeq}`;
+        const idPrefix = `taco-mmd-${++renderSeq}`;
         const timer = setTimeout(() => {
-            loadMermaid()
-                .then((m) => m.default.render(id, code))
+            loadPele()
+                .then(({ render }) =>
+                    render(code, {
+                        idPrefix,
+                        links: false,
+                        images: false,
+                    }),
+                )
                 .then(({ svg }) => {
                     if (!cancelled) setSvg(svg);
                 })
@@ -74,18 +63,17 @@ export function MermaidDiagram({ code, fallback }: MermaidDiagramProps) {
                     // Incomplete (streaming) or invalid source: keep the last
                     // good render, or stay on the code fallback if none yet.
                     if (!cancelled) setSvg(null);
-                })
-                .finally(() => dropTempNode(id));
+                });
         }, RENDER_DEBOUNCE_MS);
         return () => {
             cancelled = true;
             clearTimeout(timer);
-            dropTempNode(id);
         };
     }, [code]);
 
     // Inject via ref rather than dangerouslySetInnerHTML (lint-forbidden).
-    // mermaid `strict` securityLevel sanitizes the SVG before it reaches us.
+    // Pele escapes diagram text and the render options disable untrusted links
+    // and images before this SVG reaches the DOM.
     useEffect(() => {
         if (containerRef.current && svg !== null) {
             containerRef.current.innerHTML = svg;

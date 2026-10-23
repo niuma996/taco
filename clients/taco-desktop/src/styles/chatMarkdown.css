@@ -301,10 +301,17 @@
     gap: 0.4em;
 }
 
-/* Rendered mermaid diagram. Sits on the same always-dark surface as the code
-   pre; mermaid is initialized with its dark theme so nodes/edges stay legible.
-   Mirrors the pre's padding and horizontal-scroll behavior. */
+/* Rendered Mermaid diagram. Pele reads these variables from the wrapper and
+   keeps the diagram on the same always-dark surface as the code block. */
 .md-mermaid {
+    --pele-bg: var(--terminal-bg);
+    --pele-fg: var(--fg);
+    --pele-muted: var(--fg-dim);
+    --pele-line: var(--fg-dim);
+    --pele-surface: var(--surface-tint);
+    --pele-surface-alt: var(--terminal-bg);
+    --pele-border: var(--fg-dim);
+    --pele-accent: var(--accent);
     padding: 0.7em 0.9em;
     overflow-x: auto;
     display: flex;

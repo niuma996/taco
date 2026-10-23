@@ -89,4 +89,42 @@ describe("AssistantMarkdown code blocks", () => {
         },
         SHIKI_TEST_TIMEOUT_MS,
     );
+
+    it(
+        "renders Mermaid syntax through Pele as a themed SVG",
+        async () => {
+            const { container } = render(
+                <AssistantMarkdown text={"```mermaid\nflowchart LR\n  A --> B\n```\n"} />,
+            );
+
+            await waitFor(
+                () => {
+                    const svg = container.querySelector(".md-mermaid svg");
+                    expect(svg).toBeTruthy();
+                    expect(svg?.classList.contains("pele")).toBe(true);
+                },
+                { timeout: 15000 },
+            );
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
+
+    it(
+        "keeps generic labels like List<T> instead of dropping the parameter",
+        async () => {
+            const { container } = render(
+                <AssistantMarkdown text={"```mermaid\nflowchart LR\n  A[List<T>] --> B\n```\n"} />,
+            );
+
+            await waitFor(
+                () => {
+                    const svg = container.querySelector(".md-mermaid svg");
+                    expect(svg).toBeTruthy();
+                    expect(svg?.textContent).toContain("List<T>");
+                },
+                { timeout: 15000 },
+            );
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
 });
