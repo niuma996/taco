@@ -87,6 +87,7 @@
     "send": "Send",
     "sendSteer": "Send steer",
     "stop": "Stop",
+    "runningIndicator": "Agent is running",
     "attachImages": "Attach images",
     "removeAttachment": "Remove attachment",
     "attachLimitWarn_one": "{{count}} file rejected: not an image, larger than 5MB, or would exceed {{limit}}-image limit.",

@@ -86,6 +86,7 @@
     "send": "发送",
     "sendSteer": "插话发送",
     "stop": "停止",
+    "runningIndicator": "代理运行中",
     "attachImages": "附加图片",
     "removeAttachment": "移除附件",
     "attachLimitWarn_one": "已拒绝 {{count}} 个文件:不是图片、超过 5MB,或超过 {{limit}} 张图片的上限。",

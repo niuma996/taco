@@ -239,6 +239,21 @@ export function ChatPane(props: ChatPaneProps) {
                         ));
                     })()
                 )}
+                {/* Persistent run indicator: while a turn is in flight, three
+                    bouncing dots sit at the left of the message column, where
+                    the next assistant output will land — typing a steer then
+                    still reads as "agent busy", not "idle input". */}
+                {runInFlight && (
+                    <div
+                        className="run-indicator"
+                        role="status"
+                        aria-label={t("input.runningIndicator")}
+                    >
+                        <span className="run-indicator__dot" />
+                        <span className="run-indicator__dot" />
+                        <span className="run-indicator__dot" />
+                    </div>
+                )}
                 <footer className="input">
                     {/* Same column as .input-card so the banner inherits the footer's
                     padding (including the 10% reading gutter). Shown for both
