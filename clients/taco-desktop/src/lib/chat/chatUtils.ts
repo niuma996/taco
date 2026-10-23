@@ -400,7 +400,10 @@ export function isLastInTurn(messages: UiMessage[], index: number): boolean {
  *     is streaming without any tool)
  *
  * `sessionBusy` defaults to false so the helper stays usable without a
- * caller that knows the session lifecycle.
+ * caller that knows the session lifecycle. It only applies to the last turn
+ * (no user message after `index`): a running session can only be producing
+ * that one, and letting it reach settled turns flipped every historical
+ * message's props on each run start/end, defeating Message's memo.
  */
 export function isTurnInProgress(
     messages: UiMessage[],
@@ -416,7 +419,26 @@ export function isTurnInProgress(
             if (waiting === true) return true;
         }
     }
-    return sessionBusy;
+    if (!sessionBusy) return false;
+    for (let i = index + 1; i < messages.length; i++) {
+        if (messages[i]?.kind === "user") return false;
+    }
+    return true;
+}
+
+/**
+ * The last turn start (user message index) at or before `target`, or 0 when
+ * there is none.
+ *
+ * A render window that begins only at such an index never separates a turn's
+ * assistant and tool rows from the prompt that started them. 0 also covers
+ * rows that precede the first user message.
+ */
+export function turnStartAtOrBefore(messages: readonly UiMessage[], target: number): number {
+    for (let i = Math.min(target, messages.length - 1); i > 0; i--) {
+        if (messages[i]?.kind === "user") return i;
+    }
+    return 0;
 }
 
 /**

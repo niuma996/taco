@@ -86,6 +86,7 @@ describe("useStickToBottom", () => {
 
     it("stops following once the user scrolls up, and resumes at the bottom", async () => {
         const { el, g } = mount();
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
         g.top = 50;
         el.dispatchEvent(new Event("scroll"));
         grow(el, g, 100);
@@ -97,5 +98,72 @@ describe("useStickToBottom", () => {
         el.dispatchEvent(new Event("scroll"));
         grow(el, g, 40);
         await waitFor(() => assert.equal(g.top, 340));
+    });
+
+    it("keeps following when scrollTop moves up without user input", async () => {
+        const { el, g } = mount();
+        // Content collapsing above the viewport, or another hook restoring a
+        // position, moves scrollTop up with no wheel / touch / key involved.
+        g.top = 50;
+        el.dispatchEvent(new Event("scroll"));
+        grow(el, g, 100);
+        await waitFor(() => assert.equal(g.top, 300));
+    });
+
+    it("unpins on an upward key, and pin() re-sticks", async () => {
+        let pin: (() => void) | undefined;
+        let el: HTMLDivElement | undefined;
+        let g: ReturnType<typeof fakeGeometry> | undefined;
+        function PinHarness() {
+            const ref = useRef<HTMLDivElement | null>(null);
+            pin = useStickToBottom(ref);
+            return (
+                <div
+                    ref={(node) => {
+                        if (node && ref.current !== node) {
+                            el = node;
+                            g = fakeGeometry(node, 100, 300);
+                            ref.current = node;
+                        }
+                    }}
+                />
+            );
+        }
+        render(<PinHarness />);
+        assert.ok(el && g && pin);
+        el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp" }));
+        grow(el, g, 100);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 200);
+
+        pin();
+        assert.equal(g.top, 300);
+    });
+
+    it("re-snaps when resetKey changes", () => {
+        let el: HTMLDivElement | undefined;
+        let g: ReturnType<typeof fakeGeometry> | undefined;
+        function KeyedHarness({ k }: { k: string }) {
+            const ref = useRef<HTMLDivElement | null>(null);
+            useStickToBottom(ref, k);
+            return (
+                <div
+                    ref={(node) => {
+                        if (node && ref.current !== node) {
+                            el = node;
+                            g = fakeGeometry(node, 100, 300);
+                            ref.current = node;
+                        }
+                    }}
+                />
+            );
+        }
+        const view = render(<KeyedHarness k="a" />);
+        assert.ok(el && g);
+        g.top = 0;
+        g.scrollHeight = 500;
+        view.rerender(<KeyedHarness k="b" />);
+        assert.equal(g.top, 400);
     });
 });

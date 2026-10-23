@@ -9,7 +9,9 @@
  * of that plugin alone could not see the break. Only an end-to-end render
  * covers it.
  *
- * Shiki highlighting is async (`MarkdownHooks`), so assertions use waitFor.
+ * Markdown renders synchronously, but the shared highlighter loads in the
+ * background and blocks re-render once it is ready, so assertions on
+ * highlighted output use waitFor.
  * Loading real grammars takes seconds under parallel load, which is more than
  * vitest's 5s default — without the explicit test timeout below the per-assertion
  * waitFor budgets could never actually be spent, and these tests failed
@@ -25,6 +27,40 @@ import { AssistantMarkdown } from "../../src/components/AssistantMarkdown";
 const SHIKI_TEST_TIMEOUT_MS = 20_000;
 
 afterEach(cleanup);
+
+describe("AssistantMarkdown first paint", () => {
+    it("renders its content synchronously, before any highlighting", () => {
+        // A message that mounts empty and fills in later grows the
+        // conversation after the scroll-to-bottom ran — the open-session jump.
+        const { container } = render(
+            <AssistantMarkdown text={"Hello **world**\n\n```python\nprint(1)\n```\n"} />,
+        );
+        expect(container.querySelector("strong")?.textContent).toBe("world");
+        expect(container.querySelector(".md-code-block pre")?.textContent).toContain("print(1)");
+        expect(screen.getByText("python")).toBeTruthy();
+    });
+
+    it(
+        "keeps the code block mounted when highlighting lands",
+        async () => {
+            const user = userEvent.setup();
+            const { container } = render(
+                <AssistantMarkdown text={"```mermaid\ngraph TD\n  A-->B\n```\n"} />,
+            );
+            // Flip to source before the highlighter is ready; a remount on
+            // highlight would reset the toggle back to the diagram view.
+            await user.click(screen.getByRole("button", { name: "View code" }));
+            await waitFor(
+                () => {
+                    expect(container.querySelector(".md-code-block pre.shiki")).toBeTruthy();
+                },
+                { timeout: 15000 },
+            );
+            expect(screen.getByRole("button", { name: "View diagram" })).toBeTruthy();
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
+});
 
 describe("AssistantMarkdown code blocks", () => {
     it(

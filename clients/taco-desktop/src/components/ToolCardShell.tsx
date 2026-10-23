@@ -44,8 +44,11 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
 
     // Every card gets the raw-args toggle, whatever its summary and body chose
     // to show: the digests above are lossy by design, so the exact input the
-    // model sent has to stay reachable from the card that sent it.
-    const rawArgs = formatRawArgs(tool.args);
+    // model sent has to stay reachable from the card that sent it. Serialized
+    // only while open — a long session holds hundreds of collapsed cards, some
+    // with file-sized write/edit arguments.
+    const hasRawArgs = tool.args !== undefined && tool.args !== "";
+    const rawArgs = rawOpen ? formatRawArgs(tool.args) : "";
 
     const isRunning = tool.status === "running";
     const isError = tool.status === "error";
@@ -71,7 +74,7 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
                 />
                 <span className="tool-card-name">{tool.name}</span>
                 {summary && <span className="tool-card-summary">{summary}</span>}
-                {rawArgs !== "" && (
+                {hasRawArgs && (
                     <IconButton
                         size="sm"
                         className="tool-card-raw-toggle"
@@ -90,7 +93,7 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
                     </IconButton>
                 )}
             </div>
-            {rawOpen && rawArgs !== "" && (
+            {rawOpen && hasRawArgs && (
                 <HighlightedCode
                     code={rawArgs}
                     // Non-object args are shown verbatim and are not valid JSON,

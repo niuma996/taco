@@ -25,6 +25,7 @@ import {
     stringifyResult,
     summarizeKnownArgFields,
     toolResultLine,
+    turnStartAtOrBefore,
     type UiMessage,
     type UiThinkingBlock,
     type UiToolCall,
@@ -1134,6 +1135,27 @@ describe("isTurnInProgress", () => {
         assert.equal(isTurnInProgress(msgs, 0, true), true);
     });
 
+    it("sessionBusy 只作用于最后一个 turn，已结束的 turn 不受影响", () => {
+        const assistant = (id: string): UiMessage => ({
+            id,
+            kind: "assistant",
+            text: "done",
+            ts: 1,
+            tools: [],
+            thinking: [],
+        });
+        const msgs: UiMessage[] = [
+            { id: "u1", kind: "user", text: "first", ts: 1 },
+            assistant("a1"),
+            assistant("a1b"),
+            { id: "u2", kind: "user", text: "second", ts: 2 },
+            assistant("a2"),
+        ];
+        assert.equal(isTurnInProgress(msgs, 1, true), false);
+        assert.equal(isTurnInProgress(msgs, 2, true), false);
+        assert.equal(isTurnInProgress(msgs, 4, true), true);
+    });
+
     it("sessionBusy 对 user 消息没影响", () => {
         const msgs: UiMessage[] = [{ id: "u", kind: "user", text: "hi", ts: 1 }];
         assert.equal(isTurnInProgress(msgs, 0, true), false);
@@ -1232,6 +1254,46 @@ describe("isTurnInProgress", () => {
             ];
             assert.equal(isTurnInProgress(msgs, 0), false, `waiting=${String(waiting)}`);
         }
+    });
+});
+
+describe("turnStartAtOrBefore", () => {
+    const user = (id: string): UiMessage => ({ id, kind: "user", text: id, ts: 1 });
+    const assistant = (id: string): UiMessage => ({
+        id,
+        kind: "assistant",
+        text: id,
+        ts: 1,
+        tools: [],
+        thinking: [],
+    });
+    const msgs = [
+        user("u1"),
+        assistant("a1"),
+        user("u2"),
+        assistant("a2"),
+        assistant("a2b"),
+        user("u3"),
+        assistant("a3"),
+    ];
+
+    it("向前找到最近的 user 消息，不把一轮拆开", () => {
+        assert.equal(turnStartAtOrBefore(msgs, 6), 5);
+        assert.equal(turnStartAtOrBefore(msgs, 5), 5);
+        assert.equal(turnStartAtOrBefore(msgs, 4), 2);
+        assert.equal(turnStartAtOrBefore(msgs, 1), 0);
+    });
+
+    it("目标越界或为负时夹到合法范围", () => {
+        assert.equal(turnStartAtOrBefore(msgs, 100), 5);
+        assert.equal(turnStartAtOrBefore(msgs, -3), 0);
+        assert.equal(turnStartAtOrBefore([], 3), 0);
+    });
+
+    it("开头的非 user 消息随第一轮一起保留", () => {
+        const sys: UiMessage = { id: "s", kind: "system", text: "", ts: 0 };
+        assert.equal(turnStartAtOrBefore([sys, user("u1"), assistant("a1")], 0), 0);
+        assert.equal(turnStartAtOrBefore([sys, user("u1"), assistant("a1")], 2), 1);
     });
 });
 

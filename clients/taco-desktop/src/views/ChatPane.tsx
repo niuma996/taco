@@ -23,11 +23,13 @@ import { QueueBar } from "../components/QueueBar";
 import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
+import { Button } from "../components/ui/Button";
 import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
+import { useMessageWindow } from "../hooks/useMessageWindow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
-import type { QueuedUiItem } from "../lib/chat/chatUtils";
+import type { QueuedUiItem, UiMessage } from "../lib/chat/chatUtils";
 import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
@@ -114,6 +116,9 @@ export interface ChatPaneProps {
     llmDumpDock?: ReactNode;
 }
 
+/** Stable fallback so the message window's callbacks don't churn with no workspace. */
+const EMPTY_MESSAGES: UiMessage[] = [];
+
 export function ChatPane(props: ChatPaneProps) {
     const {
         ws,
@@ -167,29 +172,34 @@ export function ChatPane(props: ChatPaneProps) {
     // steer stays one click away. Compaction always shows Stop — the textarea
     // is locked then, so typed text can't be cleared to reveal it.
     const showStop = compacting || (busy && !canSend);
+    const messages = ws?.messages ?? EMPTY_MESSAGES;
     // Fresh chat (no messages yet) — covers both a brand-new session and one
     // that was just created via "New chat" but never prompted.
-    const isEmptyChat = (ws?.messages ?? []).length === 0;
+    const isEmptyChat = messages.length === 0;
 
     // Auto-follow lives on the <main> ChatPane renders itself, so the
     // observers go away with it on a tab switch (see useStickToBottom).
     const mainRef = useRef<HTMLDivElement | null>(null);
-    useStickToBottom(mainRef);
+    // Keyed on the session: ChatPane stays mounted across session switches,
+    // and a conversation opened after scrolling up in another must still
+    // start at its bottom.
+    const pinToBottom = useStickToBottom(mainRef, ws?.activeSession);
+    const { start: windowStart, showEarlier } = useMessageWindow(
+        messages,
+        ws?.activeSession,
+        mainRef,
+    );
 
     // After-send snap to bottom: an empty `input` signals a just-completed send.
-    // The MutationObserver will fire for the incoming assistant message, but
-    // `stick` may be false if the user had scrolled up before sending. This
-    // effect re-asserts stick=true on each input clear so the first assistant
-    // message lands with the viewport already at the bottom.
+    // The user may have scrolled up before sending; re-stick so the incoming
+    // assistant message lands with the viewport already at the bottom.
     const prevInputRef = useRef<string>("");
     useEffect(() => {
         const prev = prevInputRef.current;
         prevInputRef.current = input;
         if (!prev || input) return;
-        const el = mainRef.current;
-        if (!el) return;
-        el.scrollTo({ top: 1e9 });
-    }, [input]);
+        pinToBottom();
+    }, [input, pinToBottom]);
 
     // Show a scrollbar only when the textarea exceeds the maximum row height;
     // otherwise hide it (WebView's default overflow:auto always reserves scrollbar width).
@@ -225,19 +235,33 @@ export function ChatPane(props: ChatPaneProps) {
                 {isEmptyChat ? (
                     <EmptyChatState />
                 ) : (
-                    (() => {
-                        const messages = ws?.messages ?? [];
-                        return messages.map((m, i) => (
-                            <Message
-                                key={m.id}
-                                m={m}
-                                isLastInTurn={isLastInTurn(messages, i)}
-                                isTurnInProgress={isTurnInProgress(messages, i, busy)}
-                                onCommandPermission={onCommandPermission}
-                                pendingPermissionRequests={ws?.pendingCommandPermissions}
-                            />
-                        ));
-                    })()
+                    <>
+                        {windowStart > 0 && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="chat-show-earlier"
+                                onClick={showEarlier}
+                            >
+                                {t("message.showEarlier", { count: windowStart })}
+                            </Button>
+                        )}
+                        {messages.slice(windowStart).map((m, offset) => {
+                            // Turn helpers read neighbours, so they take the
+                            // absolute index into the full list.
+                            const i = windowStart + offset;
+                            return (
+                                <Message
+                                    key={m.id}
+                                    m={m}
+                                    isLastInTurn={isLastInTurn(messages, i)}
+                                    isTurnInProgress={isTurnInProgress(messages, i, busy)}
+                                    onCommandPermission={onCommandPermission}
+                                    pendingPermissionRequests={ws?.pendingCommandPermissions}
+                                />
+                            );
+                        })}
+                    </>
                 )}
                 {/* Persistent run indicator: while a turn is in flight, three
                     bouncing dots sit at the left of the message column, where

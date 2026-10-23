@@ -688,7 +688,9 @@
     "copy": "Copy message",
     "copied": "Copied",
     "copyFailed": "Copy failed",
-    "thinkingShowAll": "Show all"
+    "thinkingShowAll": "Show all",
+    "showEarlier_one": "Show {{count}} earlier message",
+    "showEarlier_other": "Show {{count}} earlier messages"
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."

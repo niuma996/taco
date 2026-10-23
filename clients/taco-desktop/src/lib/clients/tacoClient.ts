@@ -542,6 +542,16 @@ export class TacoClient extends TacoClientBase {
      */
     private observeSessionLifecycle(frame: SidecarFrame): void {
         if (this.currentInstanceId === undefined) return;
+        // Every frame, RPC responses included, passes through here before the
+        // dispatcher parses it again. A substring probe lets multi-MB history
+        // responses and streaming pushes skip the redundant JSON.parse.
+        if (
+            !frame.line.includes(PushMethods.Attached) &&
+            !frame.line.includes(PushMethods.Detached) &&
+            !frame.line.includes(PushMethods.SessionDeleted)
+        ) {
+            return;
+        }
         let parsed: { method?: unknown; workspace?: unknown; session?: unknown };
         try {
             parsed = JSON.parse(frame.line) as typeof parsed;

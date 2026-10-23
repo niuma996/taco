@@ -284,6 +284,12 @@
     }
 }
 
+/* "Show earlier messages" — heads the render window of a long conversation. */
+.chat-show-earlier {
+    align-self: center;
+    color: var(--fg-dim);
+}
+
 /* Run indicator — three bouncing dots at the left of the message column while
    a turn is in flight, where the next assistant output will land. */
 .run-indicator {

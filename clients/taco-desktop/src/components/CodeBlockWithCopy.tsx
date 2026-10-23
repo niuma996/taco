@@ -12,6 +12,8 @@
  * `AssistantMarkdown`, which tags shiki's own `<pre>` output — a rehype
  * plugin running before shiki would write onto the node shiki discards.
  * hast's `dataLanguage` property arrives here as the `data-language` prop.
+ * Before shiki has the grammar, the block is remark's plain `<pre><code>` and
+ * the language is read from the code element's `language-*` class instead.
  */
 
 import { Code, Workflow } from "lucide-react";
@@ -42,15 +44,33 @@ function collectText(children: ReactNode): string {
     return out;
 }
 
+/**
+ * Language from the un-highlighted `<pre><code class="language-x">` remark
+ * emits. Used until shiki has the grammar, so the header label and the mermaid
+ * toggle don't change when highlighting lands.
+ */
+function fenceLanguage(children: ReactNode): string | undefined {
+    let lang: string | undefined;
+    Children.forEach(children, (child) => {
+        if (lang !== undefined || !isValidElement(child)) return;
+        const cls = (child.props as { className?: unknown }).className;
+        if (typeof cls !== "string") return;
+        const match = /(?:^|\s)language-(\S+)/.exec(cls);
+        if (match) lang = match[1];
+    });
+    return lang;
+}
+
 export function CodeBlockWithCopy(props: PreProps) {
     const {
         className,
         children,
         ref: _ref,
         node: _node,
-        "data-language": language,
+        "data-language": shikiLanguage,
         ...rest
     } = props;
+    const language = shikiLanguage ?? fenceLanguage(children);
     const codeText = collectText(children);
     const label = language && language.length > 0 ? language : "code";
     const isMermaid = label.toLowerCase() === "mermaid";
