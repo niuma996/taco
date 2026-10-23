@@ -108,7 +108,10 @@ footer.input textarea:focus {
    textarea panel color); top has a divider line. Bottom corners carry the card's outer radius. */
 .input-controls {
     background: var(--input-bg);
-    padding: 0.4rem 0.75rem 0.4rem 0.5rem;
+    /* Right padding matches top/bottom: the send toggle is always the rightmost
+       item, and its negative margin then leaves an equal gap to the card edge
+       on all three sides. */
+    padding: 0.4rem 0.4rem 0.4rem 0.5rem;
     border-top: 1px solid var(--border);
     /* Bottom corners carry the card's outer radius (container no longer clips). */
     border-bottom-left-radius: var(--radius-lg);
@@ -119,7 +122,8 @@ footer.input textarea:focus {
     gap: var(--space-1);
 }
 
-/* send / stop button: icon + text, fixed min-width to prevent jitter during state transitions. */
+/* Shared base for the composer's prompt buttons (attach, model trigger, send-toggle):
+   centered inline-flex; min-width keeps the settings-page bare variant from collapsing. */
 .prompt-button {
     display: inline-flex;
     align-items: center;
@@ -206,22 +210,61 @@ footer.input textarea:focus {
     cursor: not-allowed;
 }
 
-.prompt-button.send:disabled {
+/* Send/stop toggle — one icon-only rounded square. A quarter rem taller than
+   the row's other controls; the symmetric negative margins keep its margin box
+   at --composer-control-height, so the row (and the card) height is unchanged,
+   the button stays vertically centered, and its face sits at an equal distance
+   from the card's top, right and bottom edges. */
+.input-controls .prompt-button.send-toggle {
+    min-width: 0;
+    width: calc(var(--composer-control-height) + 0.25rem);
+    height: calc(var(--composer-control-height) + 0.25rem);
+    margin: -0.125rem -0.125rem -0.125rem 0;
+    padding: 0;
+    border-radius: var(--radius-md);
+    transition:
+        background 0.15s ease,
+        color 0.15s ease,
+        transform 0.1s ease;
+}
+
+.input-controls .prompt-button.send-toggle:active:not(:disabled) {
+    transform: scale(0.9);
+}
+
+.input-controls .prompt-button.send-toggle:disabled {
     opacity: 0.45;
     cursor: not-allowed;
 }
 
-/* After clicking Send, Stop is the only action that needs immediate attention.
-   The error red shifts it away from the send button accent and away from brand
-   orange, which elsewhere means "act on the app", not "interrupt". */
-.prompt-button.stop {
+/* Stop face: error red — shifts it away from the send accent and away from
+   brand orange, which elsewhere means "act on the app", not "interrupt". */
+.input-controls .prompt-button.send-toggle.stop {
     background: var(--danger);
     color: var(--bg);
 }
 
-.prompt-button.stop:hover:not(:disabled) {
+.input-controls .prompt-button.send-toggle.stop:hover:not(:disabled) {
     background: var(--danger-hover);
     color: var(--bg);
+}
+
+/* Icon swap: the span is remounted via React key on every state change, so
+   this pop runs once per swap. */
+.send-toggle-icon {
+    display: inline-flex;
+    animation: send-toggle-pop 0.18s ease;
+}
+
+@keyframes send-toggle-pop {
+    from {
+        transform: scale(0.4) rotate(-45deg);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+    }
 }
 
 /* Attach button — a round chip that sits with the model pill: the same

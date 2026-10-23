@@ -88,14 +88,9 @@ export function ContextIndicator(props: ContextIndicatorProps) {
     const cls = (local: string) => [local, className].filter(Boolean).join(" ");
 
     if (!info) {
-        return (
-            <output
-                className={cls("topbar-context-indicator topbar-context-indicator--neutral")}
-                aria-label={t("context.indicatorLabel")}
-            >
-                <span className="topbar-context-indicator__pct">—</span>
-            </output>
-        );
+        // No usage data yet (fresh session or the first fetch hasn't landed):
+        // render nothing rather than a placeholder dash.
+        return null;
     }
 
     // `compacting` is a class-only signal here — it does not freeze `ratio`.

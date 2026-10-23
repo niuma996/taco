@@ -162,6 +162,11 @@ export function ChatPane(props: ChatPaneProps) {
     const { t } = useT();
 
     const canSend = input.trim().length > 0 || attachments.length > 0;
+    // Single send/stop toggle: Stop while a run (or compaction) is in flight
+    // and the composer is empty; typing switches back to Send so an in-run
+    // steer stays one click away. Compaction always shows Stop — the textarea
+    // is locked then, so typed text can't be cleared to reveal it.
+    const showStop = compacting || (busy && !canSend);
     // Fresh chat (no messages yet) — covers both a brand-new session and one
     // that was just created via "New chat" but never prompted.
     const isEmptyChat = (ws?.messages ?? []).length === 0;
@@ -366,59 +371,58 @@ export function ChatPane(props: ChatPaneProps) {
                                         className="input-context-indicator"
                                     />
                                 )}
-                                {(busy || compacting) && (
-                                    <button
-                                        type="button"
-                                        className="prompt-button stop"
-                                        onClick={onAbort}
+                                {/* One icon-only toggle instead of separate
+                                    send/steer/stop buttons; the i18n labels
+                                    move to aria-label/title. */}
+                                <button
+                                    type="button"
+                                    className={`prompt-button send-toggle ${showStop ? "stop" : "send"}`}
+                                    aria-label={
+                                        showStop
+                                            ? t("input.stop")
+                                            : runInFlight
+                                              ? t("input.sendSteer")
+                                              : t("input.send")
+                                    }
+                                    title={
+                                        showStop
+                                            ? t("input.stop")
+                                            : runInFlight
+                                              ? t("input.sendSteer")
+                                              : t("input.send")
+                                    }
+                                    onClick={
+                                        showStop
+                                            ? onAbort
+                                            : () => {
+                                                  // Same height reset as Enter — avoids a one-frame multi-line flicker.
+                                                  const el = textareaRef.current;
+                                                  if (el) {
+                                                      el.style.height = "auto";
+                                                  }
+                                                  onSend();
+                                              }
+                                    }
+                                    disabled={!showStop && !canSend}
+                                >
+                                    {/* Keyed remount replays the swap animation
+                                        on every state change. Filled square:
+                                        an outlined one reads as a tick box. */}
+                                    <span
+                                        key={showStop ? "stop" : "send"}
+                                        className="send-toggle-icon"
                                     >
-                                        {/* Solid glyph: matches the subagent row's
-                                       stop button, and an outlined square next
-                                       to a label reads as a tick box. */}
-                                        <Square size={16} fill="currentColor" aria-hidden="true" />
-                                        {t("input.stop")}
-                                    </button>
-                                )}
-                                {runInFlight && (
-                                    // Steer send: coexists with Stop so an in-run
-                                    // message and an abort are both one click away.
-                                    <button
-                                        type="button"
-                                        className="prompt-button send"
-                                        onClick={() => {
-                                            const el = textareaRef.current;
-                                            if (el) {
-                                                el.style.height = "auto";
-                                            }
-                                            onSend();
-                                        }}
-                                        disabled={!canSend || compacting}
-                                    >
-                                        <ArrowUp size={16} aria-hidden="true" />
-                                        {t("input.sendSteer")}
-                                    </button>
-                                )}
-                                {!runInFlight && !compacting && (
-                                    // Background agent-tool activity (`busy` without
-                                    // `runInFlight`) still allows a normal prompt: the
-                                    // active session is idle. Without this branch that
-                                    // state had Enter but no send button.
-                                    <button
-                                        type="button"
-                                        className="prompt-button send"
-                                        onClick={() => {
-                                            const el = textareaRef.current;
-                                            if (el) {
-                                                el.style.height = "auto";
-                                            }
-                                            onSend();
-                                        }}
-                                        disabled={!canSend}
-                                    >
-                                        <ArrowUp size={16} aria-hidden="true" />
-                                        {t("input.send")}
-                                    </button>
-                                )}
+                                        {showStop ? (
+                                            <Square
+                                                size={16}
+                                                fill="currentColor"
+                                                aria-hidden="true"
+                                            />
+                                        ) : (
+                                            <ArrowUp size={16} aria-hidden="true" />
+                                        )}
+                                    </span>
+                                </button>
                             </div>
                         </div>
                     </div>

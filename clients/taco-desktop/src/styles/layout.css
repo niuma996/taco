@@ -685,11 +685,6 @@ button.topbar-context-indicator {
     font-variant-numeric: tabular-nums;
 }
 
-/* Empty state placeholder (no session data). */
-.topbar-context-indicator__pct {
-    font-weight: 500;
-}
-
 .topbar-context-indicator--warn .topbar-context-indicator__ring-fill {
     stroke: var(--warning, #ebcb8b);
 }
