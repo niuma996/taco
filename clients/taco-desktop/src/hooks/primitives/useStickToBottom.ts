@@ -37,7 +37,10 @@ const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
  * Returns `pin`, which re-sticks and snaps immediately — for callers that know
  * the user wants the bottom regardless of where they were (just sent a message)
  * — and `unpin`, which stops the follow without any user input, for callers
- * that take over the scroll position themselves.
+ * that take over the scroll position themselves. An explicit unpin also
+ * outranks the near-bottom heuristic: the jump sets scrollTop and the browser
+ * dispatches a scroll for it, which must not re-arm the follow and pull the
+ * viewport back to the bottom. `pin` clears it again.
  */
 export function useStickToBottom(
     ref: RefObject<HTMLElement | null>,
@@ -52,6 +55,9 @@ export function useStickToBottom(
         if (!el) return;
         let rafId: number | null = null;
         let stick = true;
+        // An explicit unpin outranks the proximity heuristic: the caller took
+        // over the scroll position, so no scroll event may re-arm the follow.
+        let explicitlyUnpinned = false;
         let lastUserInputAt = Number.NEGATIVE_INFINITY;
         let draggingScrollbar = false;
 
@@ -70,10 +76,13 @@ export function useStickToBottom(
             const distance = el.scrollHeight - top - el.clientHeight;
             // At the very bottom first: content shrinking clamps scrollTop
             // down, which must not read as the user scrolling up.
-            if (distance <= 1) stick = true;
-            else if (top < lastTop) {
+            if (distance <= 1) {
+                if (!explicitlyUnpinned) stick = true;
+            } else if (top < lastTop) {
                 if (userActive()) stick = false;
-            } else if (distance <= NEAR_BOTTOM_PX) stick = true;
+            } else if (distance <= NEAR_BOTTOM_PX) {
+                if (!explicitlyUnpinned) stick = true;
+            }
             lastTop = top;
         };
         const markInput = (): void => {
@@ -137,6 +146,7 @@ export function useStickToBottom(
 
         pinRef.current = () => {
             stick = true;
+            explicitlyUnpinned = false;
             snap();
         };
         // Explicit unpin: no user input involved, so the follow has to stop
@@ -144,6 +154,7 @@ export function useStickToBottom(
         // once more before the caller could take over the scroll position.
         unpinRef.current = () => {
             stick = false;
+            explicitlyUnpinned = true;
             if (rafId !== null) {
                 cancelAnimationFrame(rafId);
                 rafId = null;

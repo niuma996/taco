@@ -162,6 +162,40 @@ describe("useStickToBottom", () => {
         assert.equal(g.top, 300);
     });
 
+    it("stays unpinned when the jump lands near the bottom", async () => {
+        const { el, g, unpin } = mountPinned();
+        // The user had scrolled up, so the jump moves the viewport back down.
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+        g.top = 100;
+        el.dispatchEvent(new Event("scroll"));
+        unpin();
+        // The jump sets scrollTop 40px above the bottom, and the browser
+        // dispatches a scroll for it.
+        g.top = g.scrollHeight - g.clientHeight - 40;
+        el.dispatchEvent(new Event("scroll"));
+        grow(el, g, 100);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 160);
+    });
+
+    it("pin() clears the explicit unpin, so a later scroll re-arms the follow", async () => {
+        const { el, g, pin, unpin } = mountPinned();
+        unpin();
+        pin();
+        // The user scrolls up: the follow stops.
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
+        g.top = 100;
+        el.dispatchEvent(new Event("scroll"));
+        // Scrolling back to the bottom re-arms it — the explicit unpin is over.
+        g.top = g.scrollHeight - g.clientHeight;
+        el.dispatchEvent(new Event("scroll"));
+        grow(el, g, 40);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 240);
+    });
+
     it("re-snaps when resetKey changes", () => {
         let el: HTMLDivElement | undefined;
         let g: ReturnType<typeof fakeGeometry> | undefined;
