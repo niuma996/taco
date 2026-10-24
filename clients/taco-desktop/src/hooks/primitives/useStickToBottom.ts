@@ -35,13 +35,16 @@ const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
  * no mutation reports (an image finishing loading, a font swap, a reflow).
  *
  * Returns `pin`, which re-sticks and snaps immediately — for callers that know
- * the user wants the bottom regardless of where they were (just sent a message).
+ * the user wants the bottom regardless of where they were (just sent a message)
+ * — and `unpin`, which stops the follow without any user input, for callers
+ * that take over the scroll position themselves.
  */
 export function useStickToBottom(
     ref: RefObject<HTMLElement | null>,
     resetKey?: unknown,
-): () => void {
+): { pin: () => void; unpin: () => void } {
     const pinRef = useRef<() => void>(() => {});
+    const unpinRef = useRef<() => void>(() => {});
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is the trigger only; it is not read inside the effect.
     useLayoutEffect(() => {
@@ -136,6 +139,16 @@ export function useStickToBottom(
             stick = true;
             snap();
         };
+        // Explicit unpin: no user input involved, so the follow has to stop
+        // on request. The queued follow is cancelled too, or it would snap
+        // once more before the caller could take over the scroll position.
+        unpinRef.current = () => {
+            stick = false;
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        };
 
         return () => {
             el.removeEventListener("scroll", onScroll);
@@ -149,8 +162,11 @@ export function useStickToBottom(
             ro.disconnect();
             if (rafId !== null) cancelAnimationFrame(rafId);
             pinRef.current = () => {};
+            unpinRef.current = () => {};
         };
     }, [ref, resetKey]);
 
-    return useCallback(() => pinRef.current(), []);
+    const pin = useCallback(() => pinRef.current(), []);
+    const unpin = useCallback(() => unpinRef.current(), []);
+    return { pin, unpin };
 }

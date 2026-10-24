@@ -26,7 +26,7 @@ export function useMessageWindow(
     messages: readonly UiMessage[],
     sessionId: string | undefined,
     scrollRef: RefObject<HTMLElement | null>,
-): { start: number; showEarlier: () => void } {
+): { start: number; showEarlier: () => void; revealTo: (index: number) => void } {
     const [state, setState] = useState(() => ({
         sessionId,
         start: initialStart(messages),
@@ -52,6 +52,21 @@ export function useMessageWindow(
         }));
     }, [messages, scrollRef]);
 
+    // Reveal an arbitrary row: the window start moves to the turn that holds
+    // it, never past the current start. Drops any pending show-earlier anchor,
+    // so expanding for a jump does not compensate the scroll position and pull
+    // the viewport off the revealed row.
+    const revealTo = useCallback(
+        (index: number) => {
+            pendingAnchor.current = null;
+            setState((s) => ({
+                ...s,
+                start: turnStartAtOrBefore(messages, Math.max(0, Math.min(index, s.start))),
+            }));
+        },
+        [messages],
+    );
+
     // biome-ignore lint/correctness/useExhaustiveDependencies: start is the trigger — the anchor applies once the expanded rows are in the DOM.
     useLayoutEffect(() => {
         const el = scrollRef.current;
@@ -76,7 +91,7 @@ export function useMessageWindow(
         return release;
     }, [start, scrollRef]);
 
-    return { start, showEarlier };
+    return { start, showEarlier, revealTo };
 }
 
 // Input events rather than `scroll`: the pin itself fires scroll events.

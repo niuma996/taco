@@ -65,6 +65,34 @@ function grow(el: HTMLElement, g: { scrollHeight: number }, px: number) {
     el.appendChild(document.createElement("p"));
 }
 
+/** Mounts a container and hands back the hook's explicit stick operations. */
+function mountPinned() {
+    let pin: (() => void) | undefined;
+    let unpin: (() => void) | undefined;
+    let el: HTMLDivElement | undefined;
+    let g: ReturnType<typeof fakeGeometry> | undefined;
+    function PinHarness() {
+        const ref = useRef<HTMLDivElement | null>(null);
+        const ops = useStickToBottom(ref);
+        pin = ops.pin;
+        unpin = ops.unpin;
+        return (
+            <div
+                ref={(node) => {
+                    if (node && ref.current !== node) {
+                        el = node;
+                        g = fakeGeometry(node, 100, 300);
+                        ref.current = node;
+                    }
+                }}
+            />
+        );
+    }
+    render(<PinHarness />);
+    assert.ok(el && g && pin && unpin);
+    return { el, g, pin, unpin };
+}
+
 describe("useStickToBottom", () => {
     it("snaps to the bottom on mount", () => {
         const { g } = mount();
@@ -111,27 +139,20 @@ describe("useStickToBottom", () => {
     });
 
     it("unpins on an upward key, and pin() re-sticks", async () => {
-        let pin: (() => void) | undefined;
-        let el: HTMLDivElement | undefined;
-        let g: ReturnType<typeof fakeGeometry> | undefined;
-        function PinHarness() {
-            const ref = useRef<HTMLDivElement | null>(null);
-            pin = useStickToBottom(ref);
-            return (
-                <div
-                    ref={(node) => {
-                        if (node && ref.current !== node) {
-                            el = node;
-                            g = fakeGeometry(node, 100, 300);
-                            ref.current = node;
-                        }
-                    }}
-                />
-            );
-        }
-        render(<PinHarness />);
-        assert.ok(el && g && pin);
+        const { el, g, pin } = mountPinned();
         el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp" }));
+        grow(el, g, 100);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 200);
+
+        pin();
+        assert.equal(g.top, 300);
+    });
+
+    it("unpins explicitly, with no user input, and pin() re-sticks", async () => {
+        const { el, g, pin, unpin } = mountPinned();
+        unpin();
         grow(el, g, 100);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         await new Promise((r) => requestAnimationFrame(() => r(null)));

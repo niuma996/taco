@@ -86,4 +86,19 @@ describe("useMessageWindow", () => {
         rerender();
         assert.ok(result.current.start > 0);
     });
+
+    it("reveals the turn containing an arbitrary older row", () => {
+        const msgs = conversation(50, 2);
+        const { result } = renderHook(() => useMessageWindow(msgs, "s1", scrollRef));
+        act(() => result.current.revealTo(32));
+        assert.equal(result.current.start, 30);
+    });
+
+    it("does not move the start when the target is already mounted", () => {
+        const msgs = conversation(50, 2);
+        const { result } = renderHook(() => useMessageWindow(msgs, "s1", scrollRef));
+        const before = result.current.start;
+        act(() => result.current.revealTo(before + 1));
+        assert.equal(result.current.start, before);
+    });
 });

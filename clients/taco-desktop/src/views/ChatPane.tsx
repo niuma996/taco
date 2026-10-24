@@ -259,7 +259,7 @@ export function ChatPane(props: ChatPaneProps) {
     // and a conversation opened after scrolling up in another must still
     // start at its bottom. The skeleton is a key of its own so the history
     // that replaces it snaps again, before that frame paints.
-    const pinToBottom = useStickToBottom(
+    const { pin } = useStickToBottom(
         mainRef,
         showSkeleton ? `loading:${ws?.loadingSessionId}` : ws?.activeSession,
     );
@@ -277,8 +277,8 @@ export function ChatPane(props: ChatPaneProps) {
         const prev = prevInputRef.current;
         prevInputRef.current = input;
         if (!prev || input) return;
-        pinToBottom();
-    }, [input, pinToBottom]);
+        pin();
+    }, [input, pin]);
 
     // Show a scrollbar only when the textarea exceeds the maximum row height;
     // otherwise hide it (WebView's default overflow:auto always reserves scrollbar width).
