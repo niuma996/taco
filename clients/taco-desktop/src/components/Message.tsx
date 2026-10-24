@@ -40,6 +40,7 @@ export const Message = memo(function Message({
     isLastInTurn = false,
     isTurnInProgress = false,
     clampLines,
+    highlighted,
     onCommandPermission,
     pendingPermissionRequests,
 }: {
@@ -62,6 +63,11 @@ export const Message = memo(function Message({
      * prompt in full, so it leaves this unset.
      */
     clampLines?: number;
+    /**
+     * Mark the row as the landing spot of a guide jump. Only the user rows
+     * carry the navigation target, so the pulse belongs to them alone.
+     */
+    highlighted?: boolean;
     onCommandPermission?: (
         requestId: string,
         approved: boolean,
@@ -74,7 +80,10 @@ export const Message = memo(function Message({
     const showMeta = isLastInTurn && !isTurnInProgress;
     if (m.kind === "user") {
         return (
-            <div className="message user">
+            <div
+                className={`message user${highlighted ? " message--navigation-target" : ""}`}
+                data-message-id={m.id}
+            >
                 {m.images && m.images.length > 0 && (
                     <div className="message-images">
                         {m.images.map((img, i) => (
