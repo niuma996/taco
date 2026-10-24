@@ -652,10 +652,10 @@ export class AttachedSession extends EventEmitter {
         );
         attached.skillReinjector = skillReinjector;
 
-        // Build memory extractor: needs the session id (used as workspaceId for
-        // project-scoped topic files).
+        // Main sessions only: subagents share the injected memory context, but
+        // their task-specific transcripts must not create workspace memories.
         attached.memoryExtractor =
-            args.memoryStore?.enabled && args.model && !args.isIm
+            args.memoryStore?.enabled && args.model && args.sessionKind === "main" && !args.isIm
                 ? new MemoryExtractorImpl(
                       args.models,
                       args.model,

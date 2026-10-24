@@ -34,7 +34,11 @@ export class NoOpMemoryStore implements MemoryStore {
         return undefined;
     }
 
-    async updateTopic(_id: string, _content: string): Promise<MemoryEntry> {
+    async updateTopic(
+        _id: string,
+        _content: string,
+        _options?: { expectedContent?: string },
+    ): Promise<MemoryEntry> {
         return {
             id: _id,
             name: "",

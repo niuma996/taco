@@ -15,7 +15,7 @@ import {
 } from "../../src/memory/index.ts";
 import { MemoryExtractorImpl, parseExtractionResult } from "../../src/memory/local/extractor.ts";
 import type { MemoryEntry } from "../../src/memory/types.ts";
-import type { Api, Model, Models, TextContent } from "../../src/runtime/pi/types.ts";
+import type { AgentMessage, Api, Model, Models, TextContent } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
 
 describe("store", () => {
@@ -121,6 +121,27 @@ describe("store", () => {
             }
         });
 
+        it("rejects a duplicate id without overwriting the existing topic", async () => {
+            const s = mkStore();
+            await s.appendEntry(entry({ content: "original" }));
+            await assert.rejects(
+                () => s.appendEntry(entry({ content: "replacement" })),
+                /memory topic already exists: user_role/,
+            );
+            assert.equal(s.getTopic("user_role")?.content, "original");
+        });
+
+        it("allows only one of two concurrent appends with the same id", async () => {
+            const s = mkStore();
+            const results = await Promise.allSettled([
+                s.appendEntry(entry({ content: "first" })),
+                s.appendEntry(entry({ content: "second" })),
+            ]);
+            assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+            assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+            assert.equal(s.getTopic("user_role")?.content, "first");
+        });
+
         it("rejects when not initialized", async () => {
             const s = new LocalMemoryStore();
             await assert.rejects(() => s.appendEntry(entry()), /LocalMemoryStore not initialized/);
@@ -146,21 +167,32 @@ describe("store", () => {
             assert.ok(s.buildMemoryBlock().includes("free text"));
         });
 
-        it("buildMemoryBlock aggregates topic summaries with file paths", async () => {
+        it("buildMemoryBlock prints the topic directory once and ids on each row", async () => {
             const s = mkStore();
             await s.appendEntry(entry());
             await s.appendEntry(entry({ id: "feedback", name: "Use real DB", type: "feedback" }));
             const block = s.buildMemoryBlock();
-            // Topic summary lines with type + name + path
+            const topicDir = join(tmpRoot, "memory", "projects", workspaceKey("ws-test"));
             assert.match(block, /Workspace memory notes/);
-            assert.match(block, /\[user\] User uses pnpm/);
-            assert.match(block, /\[feedback\] Use real DB/);
+            assert.ok(block.includes(`fetch <id>.md from ${topicDir}`));
             assert.ok(
-                block.includes(
-                    join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md"),
-                ),
-                "block must include the topic file path",
+                block.includes("- [user] User uses pnpm — Project uses pnpm not npm — user_role"),
             );
+            assert.ok(block.includes("[feedback] Use real DB"));
+            assert.ok(!block.includes(join(topicDir, "user_role.md")));
+        });
+
+        it("buildMemoryBlock sorts replaced topics by updatedAt", async () => {
+            const s = mkStore();
+            await s.appendEntry(
+                entry({ id: "older", name: "Older", createdAt: "2026-01-01T00:00:00.000Z" }),
+            );
+            await s.appendEntry(
+                entry({ id: "newer", name: "Newer", createdAt: "2026-06-01T00:00:00.000Z" }),
+            );
+            await s.updateTopic("older", "recently replaced");
+            const block = s.buildMemoryBlock();
+            assert.ok(block.indexOf("— older") < block.indexOf("— newer"));
         });
 
         it("buildMemoryBlock lists newest topics first, capped at 100", async () => {
@@ -181,6 +213,7 @@ describe("store", () => {
             assert.match(block, /\[user\] topic 5 —/);
             assert.match(block, /\[user\] topic 104 —/);
             assert.doesNotMatch(block, /\[user\] topic 105 —/);
+            assert.match(block, /5 additional topics not listed/);
         });
     });
 
@@ -243,6 +276,21 @@ describe("store", () => {
             // chain still usable: subsequent appendEntry must still succeed
             await store.appendEntry(entry());
             assert.ok(store.getTopic("user_role"));
+        });
+
+        it("updateTopic with expectedContent rejects when the content has moved on", async () => {
+            const store = mkStore();
+            await store.appendEntry(entry({ content: "v1" }));
+            await store.updateTopic("user_role", "v2");
+
+            await assert.rejects(
+                () => store.updateTopic("user_role", "stale rewrite", { expectedContent: "v1" }),
+                /memory topic changed since it was read: user_role/,
+            );
+            assert.equal(store.getTopic("user_role")?.content, "v2");
+
+            await store.updateTopic("user_role", "v3", { expectedContent: "v2" });
+            assert.equal(store.getTopic("user_role")?.content, "v3");
         });
 
         it("updateTopic overwrites content, sets updatedAt, preserves other fields", async () => {
@@ -445,32 +493,58 @@ content`;
 });
 
 describe("extractor", () => {
-    describe("parseExtractionResult", () => {
-        const createdAt = "2026-07-26T00:00:00.000Z";
-        const ws = "ws-1";
+    const createdAt = "2026-07-26T00:00:00.000Z";
+    const ws = "ws-1";
 
-        it("parses a clean JSON array", () => {
+    const addedEntries = (actions: ReturnType<typeof parseExtractionResult>): MemoryEntry[] =>
+        actions.flatMap((action) => (action.action === "add" ? [action.entry] : []));
+
+    const existingTopic = (overrides: Partial<MemoryEntry> = {}): MemoryEntry => ({
+        id: "user-language",
+        name: "User language",
+        description: "User prefers Chinese replies",
+        type: "user",
+        content: "Reply in Chinese.",
+        createdAt,
+        workspaceId: ws,
+        ...overrides,
+    });
+
+    describe("parseExtractionResult", () => {
+        it("parses add and update actions", () => {
             const raw = JSON.stringify([
-                { id: "u1", name: "User role", type: "user", content: "admin" },
-                { id: "p1", name: "Project", type: "project", content: "taco" },
+                {
+                    action: "add",
+                    id: "user-role",
+                    name: "User role",
+                    type: "user",
+                    content: "admin",
+                },
+                { action: "update", id: "project-init", content: "Updated project state" },
             ]);
             const out = parseExtractionResult(raw, createdAt, ws);
             assert.equal(out.length, 2);
-            assert.equal(out[0]?.id, "u1");
-            assert.equal(out[1]?.type, "project");
+            assert.equal(out[0]?.action, "add");
+            assert.deepEqual(out[1], {
+                action: "update",
+                id: "project-init",
+                content: "Updated project state",
+            });
         });
 
-        it("strips ```json fences", () => {
-            const raw = '```json\n[{"name":"x","type":"user"}]\n```';
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out.length, 1);
-            assert.equal(out[0]?.name, "x");
-        });
-
-        it("ignores surrounding prose", () => {
-            const raw = 'Here is the result:\n[{"name":"x","type":"user"}]\nDone.';
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out.length, 1);
+        it("strips fences and ignores surrounding prose", () => {
+            const fenced = parseExtractionResult(
+                '```json\n[{"action":"add","name":"x","type":"user"}]\n```',
+                createdAt,
+                ws,
+            );
+            const prose = parseExtractionResult(
+                'Result:\n[{"action":"add","name":"x","type":"user"}]\nDone.',
+                createdAt,
+                ws,
+            );
+            assert.equal(addedEntries(fenced)[0]?.name, "x");
+            assert.equal(addedEntries(prose)[0]?.name, "x");
         });
 
         it("returns [] on non-JSON", () => {
@@ -478,133 +552,398 @@ describe("extractor", () => {
             assert.deepEqual(parseExtractionResult("{not an array}", createdAt, ws), []);
         });
 
-        it("drops entries with missing name or type", () => {
+        it("drops actions with missing or invalid required fields", () => {
             const raw = JSON.stringify([
-                { name: "ok", type: "user" },
-                { name: "no-type" },
-                { type: "user" },
+                { action: "add", name: "ok", type: "user" },
+                { name: "missing-action", type: "user" },
+                { action: "add", name: "no-type" },
+                { action: "add", type: "user" },
+                { action: "add", name: "bad", type: "fact" },
+                { action: "update", id: "x" },
+                { action: "update", content: "missing id" },
+                { action: "remove", id: "x" },
                 {},
             ]);
             const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out.length, 1);
-            assert.equal(out[0]?.name, "ok");
+            assert.deepEqual(
+                addedEntries(out).map((entry) => entry.name),
+                ["ok"],
+            );
         });
 
-        it("drops entries with invalid type (no longer coerces to 'fact')", () => {
+        it("normalises new ids to the handler's kebab-case rule", () => {
             const raw = JSON.stringify([
-                { name: "valid", type: "user" },
-                { name: "bad", type: "fact" }, // not in MEMORY_ENTRY_TYPES
-                { name: "another", type: "memory" }, // also not valid
+                { action: "add", id: "User Role @#$", name: "n", type: "user" },
             ]);
             const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out.length, 1);
-            assert.equal(out[0]?.name, "valid");
+            assert.equal(addedEntries(out)[0]?.id, "user-role-");
         });
 
-        it("normalises id: lowercase, spaces to _, strips non-alphanumerics", () => {
-            // Pipeline: lowercase → spaces→_ → strip non-[a-z0-9_].
-            // Trailing space becomes trailing _ (kept because _ is alphanumeric).
-            const raw = JSON.stringify([{ id: "User Role @#$", name: "n", type: "user" }]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out[0]?.id, "user_role_");
-        });
-
-        it("synthesises id when missing", () => {
+        it("tolerates non-string fields without dropping the rest of the batch", () => {
             const raw = JSON.stringify([
-                { name: "first", type: "user" },
-                { name: "second", type: "user" },
+                { action: "add", id: 42, name: "Numeric id", type: "user", content: "a" },
+                { action: "add", id: { nested: true }, name: "Object id", type: "user" },
+                { action: "add", id: "ok-id", name: "Fine", type: "user", content: 7 },
+                { action: "add", id: "bad-name", name: 5, type: "user" },
+                { action: "update", id: 9, content: "numeric update id" },
+                { action: "update", id: "x", content: ["not", "a", "string"] },
+                null,
+                "not an object",
             ]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.ok(out[0]?.id.startsWith("mem-"));
-            assert.ok(out[1]?.id.startsWith("mem-"));
-            assert.notEqual(out[0]?.id, out[1]?.id);
+            let out: ReturnType<typeof parseExtractionResult> = [];
+            assert.doesNotThrow(() => {
+                out = parseExtractionResult(raw, createdAt, ws);
+            });
+            const ids = addedEntries(out).map((entry) => entry.id);
+            assert.ok(ids.includes("42"));
+            assert.ok(ids.includes("ok-id"));
+            assert.ok(!ids.includes("bad-name"));
+            assert.equal(addedEntries(out).find((e) => e.id === "ok-id")?.content, "7");
+            assert.equal(out.filter((action) => action.action === "update").length, 0);
+        });
+
+        it("synthesises distinct ids when add omits them", () => {
+            const raw = JSON.stringify([
+                { action: "add", name: "first", type: "user" },
+                { action: "add", name: "second", type: "user" },
+            ]);
+            const entries = addedEntries(parseExtractionResult(raw, createdAt, ws));
+            assert.ok(entries[0]?.id.startsWith("mem-"));
+            assert.ok(entries[1]?.id.startsWith("mem-"));
+            assert.notEqual(entries[0]?.id, entries[1]?.id);
         });
 
         it("truncates fields to declared limits", () => {
-            const longName = "x".repeat(200);
-            const longDesc = "y".repeat(300);
-            const longContent = "z".repeat(MEMORY_CONTENT_MAX_CHARS * 2);
             const raw = JSON.stringify([
-                { name: longName, description: longDesc, content: longContent, type: "user" },
+                {
+                    action: "add",
+                    name: "x".repeat(200),
+                    description: "y".repeat(300),
+                    content: "z".repeat(MEMORY_CONTENT_MAX_CHARS * 2),
+                    type: "user",
+                },
+                { action: "update", id: "x", content: "z".repeat(MEMORY_CONTENT_MAX_CHARS * 2) },
             ]);
             const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out[0]?.name.length, 60);
-            assert.equal(out[0]?.description.length, 120);
-            assert.equal(out[0]?.content.length, MEMORY_CONTENT_MAX_CHARS);
+            const entry = addedEntries(out)[0];
+            assert.equal(entry?.name.length, 60);
+            assert.equal(entry?.description.length, 120);
+            assert.equal(entry?.content.length, MEMORY_CONTENT_MAX_CHARS);
+            assert.equal(
+                out[1]?.action === "update" && out[1].content.length,
+                MEMORY_CONTENT_MAX_CHARS,
+            );
         });
 
-        it("defaults description and content to name when missing", () => {
-            const raw = JSON.stringify([{ id: "x", name: "fallback", type: "user" }]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out[0]?.description, "fallback");
-            assert.equal(out[0]?.content, "fallback");
-        });
-
-        it("propagates createdAt and workspaceId to every entry", () => {
+        it("defaults add description and content to name when missing", () => {
             const raw = JSON.stringify([
-                { id: "a", name: "A", type: "user" },
-                { id: "b", name: "B", type: "feedback" },
+                { action: "add", id: "x", name: "fallback", type: "user" },
             ]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            for (const e of out) {
-                assert.equal(e.createdAt, createdAt);
-                assert.equal(e.workspaceId, ws);
-            }
+            const entry = addedEntries(parseExtractionResult(raw, createdAt, ws))[0];
+            assert.equal(entry?.description, "fallback");
+            assert.equal(entry?.content, "fallback");
+            assert.equal(entry?.createdAt, createdAt);
+            assert.equal(entry?.workspaceId, ws);
         });
     });
 
-    /**
-     * `MemoryExtractorImpl.extract` — fire-and-forget LLM call at turn_end.
-     * This call sits OUTSIDE the harness streamOptions (which is where
-     * `withTacoUserAgent` attaches the taco tag for main conversation
-     * turns), so a regression here used to surface at the provider as
-     * `Nr/JS <ver>` — the bundled sidecar's mangled default. Pin it.
-     */
-    describe("MemoryExtractorImpl — taco headers on the extraction LLM call", () => {
-        it("forwards tacoRequestHeaders to models.completeSimple", async () => {
-            const version = sidecarVersion();
-            let capturedOptions: { headers?: Record<string, string> } | undefined;
+    describe("MemoryExtractorImpl", () => {
+        interface ExtractionContext {
+            systemPrompt: string;
+            messages: Array<{ content: string }>;
+        }
 
+        function makeExtractor(response: unknown, existing: MemoryEntry[] = []) {
+            const calls: {
+                context?: ExtractionContext;
+                options?: { headers?: Record<string, string> };
+            } = {};
+            const appended: MemoryEntry[] = [];
+            const updates: Array<{ id: string; content: string }> = [];
             const fakeModel = { provider: "test", id: "m" } as unknown as Model<Api>;
             const fakeModels = {
                 completeSimple: async (
                     _model: Model<Api>,
-                    _context: unknown,
+                    context: ExtractionContext,
                     options?: { headers?: Record<string, string> },
                 ) => {
-                    capturedOptions = options;
-                    // Return an assistant message with valid JSON so the extractor
-                    // proceeds past the early return.
+                    calls.context = context;
+                    calls.options = options;
+                    return {
+                        role: "assistant",
+                        content: [
+                            { type: "text", text: JSON.stringify(response) } satisfies TextContent,
+                        ],
+                    };
+                },
+            } as unknown as Models;
+            const store = {
+                listTopics: () => existing,
+                appendEntry: async (entry: MemoryEntry) => {
+                    appended.push(entry);
+                },
+                updateTopic: async (id: string, content: string) => {
+                    updates.push({ id, content });
+                    return { ...existingTopic({ id }), content };
+                },
+            };
+            return {
+                extractor: new MemoryExtractorImpl(fakeModels, fakeModel, store, ws),
+                calls,
+                appended,
+                updates,
+            };
+        }
+
+        const conversation = [
+            {
+                role: "user",
+                content: "this is a memory-worthy conversation ".repeat(20),
+            } as unknown as AgentMessage,
+        ];
+
+        it("sends the existing index and taco headers with the extraction call", async () => {
+            const { extractor, calls } = makeExtractor([], [existingTopic()]);
+            await extractor.onRunEnd(conversation);
+
+            const version = sidecarVersion();
+            assert.equal(calls.options?.headers?.["user-agent"], `taco/${version}`);
+            assert.equal(calls.options?.headers?.["x-taco-sidecar-version"], version);
+            assert.ok(calls.context?.messages[0]?.content.includes('"id":"user-language"'));
+            assert.ok(calls.context?.messages[0]?.content.includes("User prefers Chinese replies"));
+        });
+
+        it("routes updates to existing ids and adds only genuinely new ids", async () => {
+            const { extractor, appended, updates } = makeExtractor(
+                [
+                    { action: "update", id: "user-language", content: "Reply in concise Chinese." },
+                    { action: "add", id: "user-language", name: "Duplicate", type: "user" },
+                    {
+                        action: "add",
+                        id: "new-pref",
+                        name: "New",
+                        type: "feedback",
+                        content: "New fact",
+                    },
+                    { action: "update", id: "unknown", content: "Must not be created" },
+                ],
+                [existingTopic()],
+            );
+            await extractor.onRunEnd(conversation);
+
+            assert.deepEqual(updates, [
+                { id: "user-language", content: "Reply in concise Chinese." },
+            ]);
+            assert.deepEqual(
+                appended.map((entry) => entry.id),
+                ["new-pref"],
+            );
+        });
+
+        it("keeps only the first add for a new id within one result", async () => {
+            const { extractor, appended } = makeExtractor([
+                { action: "add", id: "same-id", name: "First", type: "user", content: "first" },
+                { action: "add", id: "same-id", name: "Second", type: "user", content: "second" },
+            ]);
+            await extractor.onRunEnd(conversation);
+            assert.deepEqual(
+                appended.map((entry) => entry.content),
+                ["first"],
+            );
+        });
+
+        it("does not fork a legacy underscore id into a kebab-case duplicate", async () => {
+            const { extractor, appended } = makeExtractor(
+                [{ action: "add", id: "user_language", name: "Duplicate", type: "user" }],
+                [existingTopic({ id: "user_language" })],
+            );
+            await extractor.onRunEnd(conversation);
+            assert.equal(appended.length, 0);
+        });
+
+        it("shows existing content to the model so updates can keep its details", async () => {
+            const { extractor, calls } = makeExtractor(
+                [],
+                [existingTopic({ content: "Reply in Chinese; keep code identifiers in English." })],
+            );
+            await extractor.onRunEnd(conversation);
+            assert.ok(
+                calls.context?.messages[0]?.content.includes(
+                    "Reply in Chinese; keep code identifiers in English.",
+                ),
+            );
+        });
+
+        it("passes the snapshot content as expectedContent on update", async () => {
+            const seen: Array<{ expectedContent?: string }> = [];
+            const fakeModels = {
+                completeSimple: async () => ({
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify([
+                                { action: "update", id: "user-language", content: "new" },
+                            ]),
+                        } satisfies TextContent,
+                    ],
+                }),
+            } as unknown as Models;
+            const extractor = new MemoryExtractorImpl(
+                fakeModels,
+                {} as Model<Api>,
+                {
+                    listTopics: () => [existingTopic({ content: "snapshot" })],
+                    appendEntry: async () => undefined,
+                    updateTopic: async (id, content, options) => {
+                        seen.push(options ?? {});
+                        return { ...existingTopic({ id }), content };
+                    },
+                },
+                ws,
+            );
+            await extractor.onRunEnd(conversation);
+            assert.deepEqual(seen, [{ expectedContent: "snapshot" }]);
+        });
+
+        it("serialises runs so a slow earlier extraction cannot overwrite a later one", async () => {
+            // Real store: the bug only shows when snapshots and writes hit disk.
+            const prevTacoHome = process.env.TACO_HOME;
+            const root = mkdtempSync(join(tmpdir(), "taco-mem-race-"));
+            process.env.TACO_HOME = root;
+            try {
+                const store = new LocalMemoryStore();
+                store.initialize(ws);
+                await store.appendEntry(existingTopic({ content: "v1" }));
+
+                // Run A's model call is held open until run B has fully finished.
+                let releaseA: (() => void) | undefined;
+                const aGate = new Promise<void>((resolve) => {
+                    releaseA = resolve;
+                });
+                let call = 0;
+                const snapshots: string[] = [];
+                const fakeModels = {
+                    completeSimple: async (_m: Model<Api>, context: ExtractionContext) => {
+                        call++;
+                        const mine = call;
+                        snapshots.push(context.messages[0]?.content ?? "");
+                        if (mine === 1) await aGate;
+                        const content = mine === 1 ? "A rewrite of v1" : "B rewrite";
+                        return {
+                            role: "assistant",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: JSON.stringify([
+                                        { action: "update", id: "user-language", content },
+                                    ]),
+                                } satisfies TextContent,
+                            ],
+                        };
+                    },
+                } as unknown as Models;
+                const extractor = new MemoryExtractorImpl(fakeModels, {} as Model<Api>, store, ws);
+
+                const runA = extractor.onRunEnd(conversation);
+                const runB = extractor.onRunEnd(conversation);
+                // Give B every chance to overtake A if runs were not serialised.
+                await new Promise((resolve) => setTimeout(resolve, 20));
+                assert.equal(call, 1, "run B must not start before run A finishes");
+                releaseA?.();
+                await Promise.all([runA, runB]);
+
+                assert.equal(call, 2);
+                // B snapshotted after A's write, so its update applies on top of A.
+                assert.ok(snapshots[1]?.includes("A rewrite of v1"));
+                assert.equal(store.getTopic("user-language")?.content, "B rewrite");
+            } finally {
+                if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
+                else process.env.TACO_HOME = prevTacoHome;
+                rmSync(root, { recursive: true, force: true });
+            }
+        });
+
+        it("keeps the newer write when an update's snapshot went stale", async () => {
+            const prevTacoHome = process.env.TACO_HOME;
+            const root = mkdtempSync(join(tmpdir(), "taco-mem-cas-"));
+            process.env.TACO_HOME = root;
+            try {
+                const store = new LocalMemoryStore();
+                store.initialize(ws);
+                await store.appendEntry(existingTopic({ content: "v1" }));
+                const fakeModels = {
+                    completeSimple: async () => {
+                        // A MemoryPane / memory-tool edit lands during the LLM call.
+                        await store.updateTopic("user-language", "edited by user");
+                        return {
+                            role: "assistant",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: JSON.stringify([
+                                        {
+                                            action: "update",
+                                            id: "user-language",
+                                            content: "rewrite of v1",
+                                        },
+                                    ]),
+                                } satisfies TextContent,
+                            ],
+                        };
+                    },
+                } as unknown as Models;
+                const extractor = new MemoryExtractorImpl(fakeModels, {} as Model<Api>, store, ws);
+                await extractor.onRunEnd(conversation);
+                assert.equal(store.getTopic("user-language")?.content, "edited by user");
+            } finally {
+                if (prevTacoHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
+                else process.env.TACO_HOME = prevTacoHome;
+                rmSync(root, { recursive: true, force: true });
+            }
+        });
+
+        it("a failed extraction does not block later runs", async () => {
+            let call = 0;
+            const appended: MemoryEntry[] = [];
+            const fakeModels = {
+                completeSimple: async () => {
+                    call++;
+                    if (call === 1) throw new Error("provider down");
                     return {
                         role: "assistant",
                         content: [
                             {
                                 type: "text",
-                                text: JSON.stringify([{ name: "n", type: "user", content: "c" }]),
+                                text: JSON.stringify([
+                                    { action: "add", id: "later", name: "Later", type: "user" },
+                                ]),
                             } satisfies TextContent,
                         ],
                     };
                 },
             } as unknown as Models;
-
-            const store = { appendEntry: async () => undefined };
-            const extractor = new MemoryExtractorImpl(fakeModels, fakeModel, store, "ws-1");
-
-            // Need enough text to clear the 50-token threshold.
-            const longConversation =
-                "user: " + "this is a memory-worthy conversation ".repeat(20) + "\nassistant: ok";
-            await extractor.onTurnEnd([
-                { role: "user", content: longConversation } as unknown as Parameters<
-                    MemoryExtractorImpl["onTurnEnd"]
-                >[0][number],
-            ]);
-
-            assert.ok(capturedOptions, "completeSimple should have been called");
-            assert.equal(capturedOptions.headers?.["user-agent"], `taco/${version}`);
-            assert.equal(capturedOptions.headers?.["x-taco-sidecar-version"], version);
+            const extractor = new MemoryExtractorImpl(
+                fakeModels,
+                {} as Model<Api>,
+                {
+                    listTopics: () => [],
+                    appendEntry: async (entry) => {
+                        appended.push(entry);
+                    },
+                    updateTopic: async () => existingTopic(),
+                },
+                ws,
+            );
+            await extractor.onRunEnd(conversation);
+            await extractor.onRunEnd(conversation);
+            assert.deepEqual(
+                appended.map((entry) => entry.id),
+                ["later"],
+            );
         });
 
-        it("does not invoke the LLM when the conversation is below the token gate", async () => {
+        it("does not invoke the LLM below the token gate", async () => {
             let called = false;
             const fakeModels = {
                 completeSimple: async () => {
@@ -612,20 +951,17 @@ describe("extractor", () => {
                     return undefined;
                 },
             } as unknown as Models;
-            const fakeModel = {} as Model<Api>;
             const extractor = new MemoryExtractorImpl(
                 fakeModels,
-                fakeModel,
-                { appendEntry: async () => undefined },
-                "ws-1",
+                {} as Model<Api>,
+                {
+                    listTopics: () => [],
+                    appendEntry: async () => undefined,
+                    updateTopic: async () => existingTopic(),
+                },
+                ws,
             );
-
-            await extractor.onTurnEnd([
-                { role: "user", content: "hi" } as unknown as Parameters<
-                    MemoryExtractorImpl["onTurnEnd"]
-                >[0][number],
-            ]);
-
+            await extractor.onRunEnd([{ role: "user", content: "hi" } as AgentMessage]);
             assert.equal(called, false);
         });
     });

@@ -1,6 +1,6 @@
 /**
  * AttachedSession — the persisted model identity versus the catalog, and the
- * memory-extraction turn coordinator.
+ * memory-extraction run coordinator.
  */
 
 import { strict as assert } from "node:assert";
@@ -11,9 +11,14 @@ import { after, before, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { sliceForExtraction } from "../../src/memory/index.ts";
+import {
+    type MemoryExtractor,
+    type MemoryStore,
+    sliceForExtraction,
+} from "../../src/memory/index.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
 import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
+import { createMemoryExtractionHandlers } from "../../src/runtime/harness/turnBookkeeping.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { AgentMessage } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
@@ -42,6 +47,7 @@ describe("attachedSession.modelIdentity", () => {
         models: ReturnType<typeof createModels>,
         model: unknown,
         session: unknown,
+        options: { memoryStore?: MemoryStore; sessionKind?: "main" | "subagent" } = {},
     ): Promise<AttachedSession> {
         const env = new NodeExecutionEnv({ cwd: tmp });
         return await AttachedSession.create({
@@ -58,6 +64,8 @@ describe("attachedSession.modelIdentity", () => {
             tasksDir: tmp,
             sessionCwd: tmp as never,
             getToolContext: () => ({ env, workspace: tmp as never }) as never,
+            memoryStore: options.memoryStore,
+            sessionKind: options.sessionKind ?? "main",
         } as never);
     }
 
@@ -163,6 +171,40 @@ describe("attachedSession.modelIdentity", () => {
                 await attached.dispose();
             }
         });
+
+        it("enables memory extraction for main sessions but not subagents", async () => {
+            const env = new NodeExecutionEnv({ cwd: tmp });
+            const repo = new JsonlSessionRepo({
+                fileSystem: env,
+                sessionsRoot: join(tmp, "sessions"),
+            });
+            const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+            faux.setResponses([fauxAssistantMessage([fauxText("hi")])] as never);
+            const models = createModels();
+            models.setProvider(faux.provider);
+            const memoryStore = { enabled: true } as MemoryStore;
+            const extractorOf = (attached: AttachedSession): unknown =>
+                (attached as unknown as { memoryExtractor?: unknown }).memoryExtractor;
+
+            const mainSession = await repo.create({ cwd: tmp }, harnessContext);
+            const main = await attach(models, faux.getModel(), mainSession, {
+                memoryStore,
+                sessionKind: "main",
+            });
+            assert.ok(extractorOf(main));
+
+            const childSession = await repo.create({ cwd: tmp }, harnessContext);
+            const child = await attach(models, faux.getModel(), childSession, {
+                memoryStore,
+                sessionKind: "subagent",
+            });
+            assert.equal(extractorOf(child), undefined);
+
+            await main.dispose();
+            await child.dispose();
+            await mainSession.close(harnessContext);
+            await childSession.close(harnessContext);
+        });
     });
 });
 
@@ -239,317 +281,185 @@ describe("attachedSession.rememberCoord", () => {
         });
     });
 
-    // ─── coordination pattern ─────────────────────────────────────────────────────
-    //
-    // Mirror of the AttachedSession event handler block. Uses the SAME Promise
-    // chain structure as production code so a regression in the algorithm surfaces
-    // here. Mocks stand in for `session.buildContext()` and `extractor.onTurnEnd`.
+    // ─── run coordinator ──────────────────────────────────────────────────────────
 
-    interface MiniSession {
-        buildContext: () => Promise<{ messages: AgentMessage[] }>;
+    class MiniExtractor implements MemoryExtractor {
+        readonly calls: AgentMessage[][] = [];
+
+        async onRunEnd(messages: readonly AgentMessage[]): Promise<void> {
+            this.calls.push(messages.slice());
+        }
     }
 
-    interface MiniExtractor {
-        onTurnEnd: (messages: readonly AgentMessage[]) => Promise<void>;
-        /** Capture every messages slice we ever call onTurnEnd with. */
-        calls: AgentMessage[][];
+    function makeCoordinator(
+        buildContext: () => Promise<AgentMessage[]>,
+        extractor: MemoryExtractor | undefined,
+    ) {
+        return createMemoryExtractionHandlers({ buildContext, getExtractor: () => extractor });
     }
 
-    function makeExtractor(): MiniExtractor {
-        const calls: AgentMessage[][] = [];
-        return {
-            calls,
-            onTurnEnd: async (m) => {
-                calls.push(m.slice());
-            },
-        };
-    }
+    const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-    /**
-     * Mini-coordinator: a faithful copy of the AttachedSession block. If you
-     * refactor one, refactor the other. Each `tool_end` event flips a
-     * shared state; each `turn_end` event consumes it. We intentionally avoid
-     * linking to AttachedSession so the test stays O(constant) and doesn't have
-     * to mock AgentHarness.
-     */
-    function makeCoordinator(deps: {
-        session: MiniSession;
-        extractor: MiniExtractor;
-        state: { lastRememberMessageCountPromises: Promise<number>[] };
-    }) {
-        const { session, extractor, state } = deps;
+    describe("memory extraction coordinator — one extraction per completed run", () => {
+        it("run_end with no prior memory call gets the full conversation", async () => {
+            const extractor = new MiniExtractor();
+            const handlers = makeCoordinator(async () => messages(4), extractor);
 
-        const handleToolEnd = (toolName: string, isError: boolean) => {
-            if (toolName !== "memory" || isError) return;
-            state.lastRememberMessageCountPromises.push(
-                session.buildContext().then((ctx) => ctx.messages.length),
-            );
-        };
-
-        const handleTurnEnd = () => {
-            const promises = state.lastRememberMessageCountPromises;
-            state.lastRememberMessageCountPromises = [];
-            void session.buildContext().then(async (ctx) => {
-                let sinceCount: number | undefined;
-                if (promises.length > 0) {
-                    try {
-                        const counts = await Promise.all(promises);
-                        sinceCount = Math.min(...counts);
-                    } catch {
-                        sinceCount = undefined;
-                    }
-                }
-                const messages = sliceForExtraction(ctx.messages, sinceCount);
-                if (messages.length > 0) {
-                    await extractor.onTurnEnd(messages);
-                }
-            });
-        };
-
-        return { handleToolEnd, handleTurnEnd };
-    }
-
-    // Drain the microtask queue: every `.then()` schedules a microtask, and
-    // `await` inside one schedules another. Two ticks is enough for any chain
-    // in these tests.
-    const flush = () => new Promise<void>((r) => setImmediate(r));
-
-    describe("memory extraction coordinator — Promise-chain serialization", () => {
-        const freshState = (): { lastRememberMessageCountPromises: Promise<number>[] } => ({
-            lastRememberMessageCountPromises: [],
-        });
-
-        it("turn_end with no prior remember gets the full conversation", async () => {
-            const extractor = makeExtractor();
-            const session: MiniSession = {
-                buildContext: () => Promise.resolve({ messages: messages(4) }),
-            };
-            const state = freshState();
-            const { handleTurnEnd } = makeCoordinator({ session, extractor, state });
-
-            handleTurnEnd();
+            handlers.onRunEnd("completed");
             await flush();
 
             assert.equal(extractor.calls.length, 1);
             assert.equal(extractor.calls[0]?.length, 4);
-            assert.ok(extractor.calls[0]?.[0]);
             assert.equal(identify(extractor.calls[0][0]), "user:m0");
         });
 
-        it("tool_end('memory') then turn_end slices to messages after the offset", async () => {
-            const extractor = makeExtractor();
-            // First buildContext (from remember tool) sees 3 messages; turn_end
-            // sees 5 — extractor should receive only [m3, m4].
+        it("memory tool then run_end slices to messages after the offset", async () => {
+            const extractor = new MiniExtractor();
             let buildIndex = 0;
-            const session: MiniSession = {
-                buildContext: () => {
-                    buildIndex++;
-                    return Promise.resolve({ messages: messages(buildIndex === 1 ? 3 : 5) });
-                },
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+            const handlers = makeCoordinator(async () => {
+                buildIndex++;
+                return messages(buildIndex === 1 ? 3 : 5);
+            }, extractor);
 
-            handleToolEnd("memory", false);
-            await flush(); // let the remember Promise resolve to 3
-            handleTurnEnd();
+            handlers.onToolEnd("memory", false);
+            await flush();
+            handlers.onRunEnd("completed");
             await flush();
 
             assert.equal(extractor.calls.length, 1);
-            assert.equal(extractor.calls[0]?.length, 2);
-            assert.ok(extractor.calls[0]?.[0]);
-            assert.ok(extractor.calls[0]?.[1]);
-            assert.equal(identify(extractor.calls[0][0]), "user:m3");
-            assert.equal(identify(extractor.calls[0][1]), "user:m4");
+            assert.deepEqual(extractor.calls[0].map(identify), ["user:m3", "user:m4"]);
         });
 
-        it("turn_end reset clears the slot synchronously even when the remember count is still pending", async () => {
-            const extractor = makeExtractor();
-            // Both buildContext calls return the same length → after slicing
-            // there's nothing new to extract. The interesting assertion is the
-            // synchronous reset, plus that the algorithm doesn't crash or emit
-            // a stale full extract.
-            const session: MiniSession = {
-                buildContext: () => Promise.resolve({ messages: messages(2) }),
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+        it("offsets reset at run_end even while their snapshots are pending", async () => {
+            const extractor = new MiniExtractor();
+            let buildIndex = 0;
+            const handlers = makeCoordinator(async () => {
+                buildIndex++;
+                return messages(buildIndex <= 2 ? 2 : 4);
+            }, extractor);
 
-            // Fire tool_end but DON'T flush — the count Promise is
-            // still pending when turn_end runs.
-            handleToolEnd("memory", false);
-            handleTurnEnd(); // synchronously consumes the pending Promise into `sinceCountPromise`
-
-            // Before flush: the slot is already empty (synchronous reset).
-            assert.equal(state.lastRememberMessageCountPromises.length, 0);
-
+            handlers.onToolEnd("memory", false);
+            handlers.onRunEnd("completed");
             await flush();
-            // 2 messages total, offset 2 → slice is empty → no extractor call.
-            // This is the correct outcome: turn_end saw the offset even though
-            // its own buildContext raced ahead of the remember count's resolve.
             assert.equal(extractor.calls.length, 0);
+
+            handlers.onRunEnd("completed");
+            await flush();
+            assert.deepEqual(extractor.calls[0].map(identify), [
+                "user:m0",
+                "user:m1",
+                "user:m2",
+                "user:m3",
+            ]);
         });
 
-        it("turn_end skips onTurnEnd when the sliced range is empty", async () => {
-            const extractor = makeExtractor();
-            // Remember tool sees 5 messages, turn_end sees 5 — no new messages.
-            let _buildIndex = 0;
-            const session: MiniSession = {
-                buildContext: () => {
-                    _buildIndex++;
-                    return Promise.resolve({ messages: messages(5) });
-                },
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+        it("run_end skips extraction when the sliced range is empty", async () => {
+            const extractor = new MiniExtractor();
+            const handlers = makeCoordinator(async () => messages(5), extractor);
 
-            handleToolEnd("memory", false);
+            handlers.onToolEnd("memory", false);
             await flush();
-            handleTurnEnd();
+            handlers.onRunEnd("completed");
             await flush();
 
             assert.equal(extractor.calls.length, 0);
         });
 
-        it("remember tool with isError=true does NOT capture an offset", async () => {
-            const extractor = makeExtractor();
-            const session: MiniSession = {
-                buildContext: () => Promise.resolve({ messages: messages(3) }),
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+        it("a failed memory tool does not capture an offset", async () => {
+            const extractor = new MiniExtractor();
+            const handlers = makeCoordinator(async () => messages(3), extractor);
 
-            handleToolEnd("memory", true); // ERROR → no capture
-            assert.equal(state.lastRememberMessageCountPromises.length, 0);
-            handleTurnEnd();
+            handlers.onToolEnd("memory", true);
+            handlers.onRunEnd("completed");
             await flush();
 
-            assert.equal(extractor.calls.length, 1);
             assert.equal(extractor.calls[0]?.length, 3);
         });
 
-        it("non-memory tool does NOT capture an offset", async () => {
-            const extractor = makeExtractor();
-            const session: MiniSession = {
-                buildContext: () => Promise.resolve({ messages: messages(3) }),
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+        it("non-memory tools do not capture an offset", async () => {
+            const extractor = new MiniExtractor();
+            const handlers = makeCoordinator(async () => messages(3), extractor);
 
-            handleToolEnd("read", false);
-            handleToolEnd("write", false);
-            assert.equal(state.lastRememberMessageCountPromises.length, 0);
-            handleTurnEnd();
+            handlers.onToolEnd("read", false);
+            handlers.onToolEnd("write", false);
+            handlers.onRunEnd("completed");
             await flush();
 
-            assert.equal(extractor.calls.length, 1);
             assert.equal(extractor.calls[0]?.length, 3);
         });
 
-        it("two memory calls in same turn: uses earliest offset so no messages are lost", async () => {
-            const extractor = makeExtractor();
-            // messages sequence: after first remember → 3 messages, after second → 5.
-            // earliest offset = 3, so messages[3..] are new (m3, m4).
-            let resolveFirst: ((v: { messages: AgentMessage[] }) => void) | undefined;
-            let resolveSecond: ((v: { messages: AgentMessage[] }) => void) | undefined;
-            const _firstDone = new Promise<void>(() => {
-                resolveFirst = (_v) => {};
+        it("two memory calls in one run use the earliest offset", async () => {
+            const extractor = new MiniExtractor();
+            let resolveFirst: ((messages: AgentMessage[]) => void) | undefined;
+            let resolveSecond: ((messages: AgentMessage[]) => void) | undefined;
+            const first = new Promise<AgentMessage[]>((resolve) => {
+                resolveFirst = resolve;
             });
-            const _secondDone = new Promise<void>(() => {
-                resolveSecond = (_v) => {};
-            });
-            // Replace with real promises.
-            const firstPromise = new Promise<{ messages: AgentMessage[] }>((r) => {
-                resolveFirst = r;
-            });
-            const secondPromise = new Promise<{ messages: AgentMessage[] }>((r) => {
-                resolveSecond = r;
+            const second = new Promise<AgentMessage[]>((resolve) => {
+                resolveSecond = resolve;
             });
             let buildIndex = 0;
-            const session: MiniSession = {
-                buildContext: () => {
-                    buildIndex++;
-                    if (buildIndex === 1) return firstPromise;
-                    if (buildIndex === 2) return secondPromise;
-                    // turn_end's own buildContext — sees 10 messages total.
-                    return Promise.resolve({ messages: messages(10) });
-                },
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+            const handlers = makeCoordinator(() => {
+                buildIndex++;
+                if (buildIndex === 1) return first;
+                if (buildIndex === 2) return second;
+                return Promise.resolve(messages(10));
+            }, extractor);
 
-            // Fire both memory calls — both Promises are pending.
-            handleToolEnd("memory", false);
-            handleToolEnd("memory", false);
-            // Verify both went into the array before either resolves.
-            assert.equal(state.lastRememberMessageCountPromises.length, 2);
-
-            // Fire turn_end synchronously — it takes ownership of the array.
-            handleTurnEnd();
-            // Synchronous reset: the fresh array is empty.
-            assert.equal(state.lastRememberMessageCountPromises.length, 0);
-
-            // Now resolve the remember Promises — second has earlier count (3) than first (5).
-            if (resolveSecond) resolveSecond({ messages: messages(3) });
-            if (resolveFirst) resolveFirst({ messages: messages(5) });
+            handlers.onToolEnd("memory", false);
+            handlers.onToolEnd("memory", false);
+            handlers.onRunEnd("completed");
+            resolveSecond?.(messages(3));
+            resolveFirst?.(messages(5));
             await flush();
 
-            // Earliest offset = 3, so messages[3..10] = 7 messages extracted.
             assert.equal(extractor.calls.length, 1);
-            assert.equal(extractor.calls[0]?.length, 7);
+            assert.equal(extractor.calls[0].length, 7);
             assert.equal(identify(extractor.calls[0][0]), "user:m3");
         });
 
-        it("rejected countPromise falls back to full messages (no duplicate / no crash)", async () => {
-            const extractor = makeExtractor();
+        it("a rejected offset snapshot skips extraction without rejecting the run", async () => {
+            const extractor = new MiniExtractor();
             let buildIndex = 0;
-            const session: MiniSession = {
-                buildContext: () => {
-                    buildIndex++;
-                    // First call (the remember capture) rejects.
-                    if (buildIndex === 1) return Promise.reject(new Error("session boom"));
-                    return Promise.resolve({ messages: messages(4) });
-                },
-            };
-            const state = freshState();
-            const { handleToolEnd, handleTurnEnd } = makeCoordinator({
-                session,
-                extractor,
-                state,
-            });
+            const handlers = makeCoordinator(async () => {
+                buildIndex++;
+                if (buildIndex === 1) throw new Error("session boom");
+                return messages(4);
+            }, extractor);
 
-            handleToolEnd("memory", false);
-            handleTurnEnd();
+            handlers.onToolEnd("memory", false);
+            handlers.onRunEnd("completed");
             await flush();
 
-            // Should not throw; should emit full conversation since offset is
-            // swallowed by the catch.
+            assert.equal(extractor.calls.length, 0);
+        });
+
+        it("aborted and failed runs do not extract or leak offsets", async () => {
+            const extractor = new MiniExtractor();
+            const handlers = makeCoordinator(async () => messages(3), extractor);
+
+            handlers.onToolEnd("memory", false);
+            handlers.onRunEnd("aborted");
+            handlers.onRunEnd("failed");
+            await flush();
+            assert.equal(extractor.calls.length, 0);
+
+            handlers.onRunEnd("completed");
+            await flush();
             assert.equal(extractor.calls.length, 1);
-            assert.equal(extractor.calls[0]?.length, 4);
+            assert.equal(extractor.calls[0].length, 3);
+        });
+
+        it("a disabled extractor does not build the run context", async () => {
+            let builds = 0;
+            const handlers = makeCoordinator(async () => {
+                builds++;
+                return messages(3);
+            }, undefined);
+
+            handlers.onRunEnd("completed");
+            await flush();
+            assert.equal(builds, 0);
         });
     });
 });

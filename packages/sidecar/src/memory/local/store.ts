@@ -145,6 +145,9 @@ export class LocalMemoryStore implements MemoryStore {
         // Chain to serialize the read-modify-write. Each call extends the
         // chain; work runs in submission order even if callers don't await.
         const next = this.writeChain.then(() => {
+            if (this.getTopic(entry.id)) {
+                throw new Error(`memory topic already exists: ${entry.id}`);
+            }
             this.writeTopicFile(entry);
             // Invalidate the topics cache after every write — same pattern as
             // updateTopic / deleteTopic. readTopicsCached's mtime check is
@@ -172,13 +175,13 @@ export class LocalMemoryStore implements MemoryStore {
         const note = this.readMemory();
         const noteBody = note.trim() === MEMORY_INDEX_HEADER.trim() ? "" : note;
 
-        // Aggregate per-workspace topic summaries so the model can see what
-        // is remembered and read any full file via the read tool.
+        // Aggregate per-workspace topic summaries. The directory is printed once
+        // and each row carries only its id to keep the resident prompt small.
         const MAX_TOPIC_NOTES = 100;
-        const topics = this.listTopics()
+        const sortedTopics = this.listTopics()
             .slice()
-            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-            .slice(0, MAX_TOPIC_NOTES);
+            .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
+        const topics = sortedTopics.slice(0, MAX_TOPIC_NOTES);
 
         if (!noteBody && topics.length === 0) return "";
 
@@ -187,7 +190,7 @@ export class LocalMemoryStore implements MemoryStore {
         if (topics.length > 0) {
             if (parts.length > 0) parts.push("\n---\n");
             parts.push(
-                "Workspace memory notes (newest first; use the read tool to fetch full content):",
+                `Workspace memory notes (newest first; use the read tool to fetch <id>.md from ${this.workspaceDir}):`,
             );
             for (const t of topics) {
                 // Collapse any embedded newlines so a multiline name/description
@@ -197,8 +200,12 @@ export class LocalMemoryStore implements MemoryStore {
                     .replace(/[\r\n]+/g, " ")
                     .trim()
                     .slice(0, 80);
+                parts.push(`- [${t.type}] ${name} — ${desc} — ${t.id}`);
+            }
+            const omitted = sortedTopics.length - topics.length;
+            if (omitted > 0) {
                 parts.push(
-                    `- [${t.type}] ${name} — ${desc} — ${join(this.workspaceDir, `${t.id}.md`)}`,
+                    `${omitted} additional topics not listed; their files remain in the topic directory.`,
                 );
             }
         }
@@ -268,9 +275,14 @@ export class LocalMemoryStore implements MemoryStore {
      * replace semantics: verify id exists → overwrite topic file body,
      * preserving createdAt and writing a new updatedAt. Read-validate and
      * write are inside the same writeChain tick with no await between them,
-     * closing the TOCTOU window.
+     * closing the TOCTOU window. `expectedContent` turns the write into a
+     * compare-and-swap for callers that derived `content` from a snapshot.
      */
-    async updateTopic(id: string, content: string): Promise<MemoryEntry> {
+    async updateTopic(
+        id: string,
+        content: string,
+        options?: { expectedContent?: string },
+    ): Promise<MemoryEntry> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
@@ -279,6 +291,12 @@ export class LocalMemoryStore implements MemoryStore {
             const existing = topics.find((e) => e.id === id);
             if (!existing) {
                 throw new Error(`unknown memory topic: ${id}`);
+            }
+            if (
+                options?.expectedContent !== undefined &&
+                existing.content !== options.expectedContent
+            ) {
+                throw new Error(`memory topic changed since it was read: ${id}`);
             }
             const updatedAt = new Date().toISOString();
             const newEntry: MemoryEntry = { ...existing, content, updatedAt };

@@ -32,7 +32,7 @@ import { RPC } from "@taco-ai/shared";
 
 import { hashOf } from "../../memory/local/store.ts";
 import type { MemoryStore } from "../../memory/types.ts";
-import { MemoryConflictError } from "../../memory/types.ts";
+import { MemoryConflictError, normalizeMemoryTopicId } from "../../memory/types.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 /** Convert LocalMemoryStore's MemoryEntry to wire format. */
@@ -135,7 +135,7 @@ export function registerMemoryHandlers(): void {
                     "memory.upsert: id must be a string",
                 );
             }
-            const validatedId = params.id.toLowerCase().replace(/[^a-z0-9-]/g, "");
+            const validatedId = normalizeMemoryTopicId(params.id);
             if (validatedId !== params.id || params.id.length > 64 || params.id.length === 0) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,

@@ -11,9 +11,9 @@
 
 import type { CheckpointManager } from "../../checkpoints/manager.ts";
 import { createLogger } from "../../lib/logger.ts";
-import { type MemoryExtractorImpl, sliceForExtraction } from "../../memory/index.ts";
+import { type MemoryExtractor, sliceForExtraction } from "../../memory/index.ts";
 import type { TacoToolContext } from "../../tools/context.ts";
-import type { AgentHarness, HarnessEvent, Session } from "../pi/types.ts";
+import type { AgentHarness, AgentMessage, HarnessEvent, Session } from "../pi/types.ts";
 import { buildBranchContext } from "../session/sessionBranch.ts";
 import type { TitleSummarizer } from "../session/titleSummarizer.ts";
 
@@ -62,8 +62,68 @@ export interface TurnBookkeepingArgs {
     /** Forward a harness event onto the session's "event" stream. */
     readonly emitEvent: (event: HarnessEvent) => void;
     readonly getCheckpoints: () => CheckpointManager | undefined;
-    readonly getExtractor: () => MemoryExtractorImpl | undefined;
+    readonly getExtractor: () => MemoryExtractor | undefined;
     readonly getTitleSummarizer: () => TitleSummarizer | undefined;
+}
+
+interface MemoryExtractionHandlerArgs {
+    readonly buildContext: () => Promise<AgentMessage[]>;
+    readonly getExtractor: () => MemoryExtractor | undefined;
+}
+
+/** Coordinate memory-tool offsets with one extraction per completed run. */
+export function createMemoryExtractionHandlers(args: MemoryExtractionHandlerArgs): {
+    onToolEnd(toolName: string, isError: boolean): void;
+    onRunEnd(status: "completed" | "aborted" | "failed"): void;
+} {
+    const { buildContext, getExtractor } = args;
+    let pendingRememberCounts: Promise<number>[] = [];
+
+    const onToolEnd = (toolName: string, isError: boolean): void => {
+        if (toolName !== "memory" || isError) return;
+        // Capture synchronously so run_end sees the offset regardless of microtask
+        // timing. A failed snapshot resolves to Infinity and extracts nothing.
+        pendingRememberCounts.push(
+            buildContext()
+                .then((messages) => messages.length)
+                .catch((error) => {
+                    log.warn(
+                        "context build failed during memory offset snapshot, skipping:",
+                        error instanceof Error ? error.message : String(error),
+                    );
+                    return Number.POSITIVE_INFINITY;
+                }),
+        );
+    };
+
+    const onRunEnd = (status: "completed" | "aborted" | "failed"): void => {
+        // Offsets never leak into the next run, including failed and disabled ones.
+        const promises = pendingRememberCounts;
+        pendingRememberCounts = [];
+        if (status !== "completed") return;
+        const extractor = getExtractor();
+        if (extractor === undefined) return;
+
+        buildContext()
+            .then(async (contextMessages) => {
+                let sinceCount: number | undefined;
+                if (promises.length > 0) {
+                    const counts = await Promise.all(promises);
+                    sinceCount = Math.min(...counts);
+                }
+                const messages = sliceForExtraction(contextMessages, sinceCount);
+                if (messages.length > 0) await extractor.onRunEnd(messages);
+            })
+            .catch((error) => {
+                // Extraction is fire-and-forget and must not fail the run.
+                log.warn(
+                    "memory extraction after run_end failed:",
+                    error instanceof Error ? error.message : String(error),
+                );
+            });
+    };
+
+    return { onToolEnd, onRunEnd };
 }
 
 /** Subscribe the republish + turn-boundary handlers; returns their disposers. */
@@ -90,78 +150,24 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
         disposers.push(harness.events.on(type, republish));
     }
 
-    // Memory extraction — coordinator across two events:
-    //   tool_end ("memory") → pushes a Promise<number> resolving to the
-    //     context message count right after the commit.
-    //   turn_end → takes ownership of all pending Promises (resets the
-    //     array synchronously), then awaits their min offset. This handles
-    //     multiple memory calls in the same turn — instead of overwriting,
-    //     we take the earliest offset so only messages BEFORE all memory
-    //     calls are sent to the extractor.
-    //
-    // Closure-local rather than a field on AttachedSession: turn_end's take-and-reset
-    // is the only writer, so keeping the array here makes that structural.
-    let pendingRememberCounts: Promise<number>[] = [];
-
     disposers.push(
-        harness.events.on("tool_end", (event) => {
-            if (event.toolName !== "memory" || event.isError) return;
-            // Push synchronously so turn_end's Promise.all sees it regardless of
-            // microtask timing; the rejection is absorbed here (Infinity never wins
-            // Math.min), so a context-build failure can't become an unhandled
-            // rejection nor poison the offset computation.
-            pendingRememberCounts.push(
-                buildBranchContext(session)
-                    .then((messages) => messages.length)
-                    .catch((error) => {
-                        log.warn(
-                            "context build failed during memory offset snapshot, skipping:",
-                            error instanceof Error ? error.message : String(error),
-                        );
-                        return Number.POSITIVE_INFINITY;
-                    }),
-            );
+        harness.events.on("turn_end", () => {
+            // Memory extraction runs at run_end; checkpoint windows still close
+            // after every model turn so the next write opens a fresh restore point.
+            getCheckpoints()?.endTurn();
         }),
     );
 
+    const memoryHandlers = createMemoryExtractionHandlers({
+        buildContext: () => buildBranchContext(session),
+        getExtractor,
+    });
     disposers.push(
-        harness.events.on("turn_end", () => {
-            // Close the checkpoint window so the next turn's first write opens
-            // a fresh restore point instead of folding into this turn's.
-            getCheckpoints()?.endTurn();
-
-            const extractor = getExtractor();
-            if (extractor === undefined) return;
-            // Synchronous take + reset — after this line, no other code
-            // path writes to pendingRememberCounts.
-            const promises = pendingRememberCounts;
-            pendingRememberCounts = [];
-            buildBranchContext(session)
-                .then(async (contextMessages) => {
-                    let sinceCount: number | undefined;
-                    if (promises.length > 0) {
-                        try {
-                            const counts = await Promise.all(promises);
-                            sinceCount = Math.min(...counts);
-                        } catch {
-                            // extractor failure must never bleed into the
-                            // turn — fall back to "no offset" semantics
-                            sinceCount = undefined;
-                        }
-                    }
-                    const messages = sliceForExtraction(contextMessages, sinceCount);
-                    if (messages.length > 0) {
-                        await extractor.onTurnEnd(messages);
-                    }
-                })
-                .catch((error) => {
-                    // The context build or the extractor rejecting must never
-                    // surface as an unhandled rejection on this fire-and-forget chain.
-                    log.warn(
-                        "memory extraction after turn_end failed:",
-                        error instanceof Error ? error.message : String(error),
-                    );
-                });
+        harness.events.on("tool_end", (event) => {
+            memoryHandlers.onToolEnd(event.toolName, event.isError);
+        }),
+        harness.events.on("run_end", (event) => {
+            memoryHandlers.onRunEnd(event.status);
         }),
     );
 

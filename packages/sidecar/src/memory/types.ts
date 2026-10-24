@@ -13,6 +13,16 @@ import type { AgentMessage } from "../runtime/pi/types.ts";
 export const MEMORY_ENTRY_TYPES = ["user", "feedback", "project", "reference"] as const;
 export type MemoryEntryType = (typeof MEMORY_ENTRY_TYPES)[number];
 
+/** Canonical id for new topics. Existing legacy ids remain valid update targets. */
+export function normalizeMemoryTopicId(id: string): string {
+    return id
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "")
+        .slice(0, 64);
+}
+
 // ─── entry ────────────────────────────────────────────────────────────────────
 
 export interface MemoryEntry {
@@ -43,11 +53,7 @@ export interface MemoryStore {
      */
     initialize(workspaceId: string): void;
 
-    /**
-     * Persist a memory entry. Returns a Promise so implementations may
-     * serialise concurrent writers (the read-modify-write in MEMORY.md is
-     * not safe under parallel calls).
-     */
+    /** Persist a new entry. Rejects an existing id instead of overwriting it. */
     appendEntry(entry: MemoryEntry): Promise<void>;
 
     /** Read the full user-level MEMORY.md content (already formatted with H2 sections). */
@@ -85,19 +91,24 @@ export interface MemoryStore {
      * preserving createdAt and writing a new updatedAt. Throws if id is not
      * in listTopics(). Read-validate and write must be inside the same
      * writeChain tick — otherwise an extractor appendEntry / client
-     * deleteTopic can interleave and overwrite.
+     * deleteTopic can interleave and overwrite. When `expectedContent` is
+     * set, rejects instead of writing if the on-disk content differs.
      */
-    updateTopic(id: string, content: string): Promise<MemoryEntry>;
+    updateTopic(
+        id: string,
+        content: string,
+        options?: { expectedContent?: string },
+    ): Promise<MemoryEntry>;
 }
 
 // ─── extractor interface ───────────────────────────────────────────────────────
 
 export interface MemoryExtractor {
     /**
-     * Fire-and-forget extraction after each turn.
+     * Fire-and-forget extraction after each completed run.
      * Gates on token threshold; truncates to ~8000 chars; calls LLM.
      */
-    onTurnEnd(messages: readonly AgentMessage[]): Promise<void>;
+    onRunEnd(messages: readonly AgentMessage[]): Promise<void>;
 }
 
 // ─── errors ────────────────────────────────────────────────────────────────────

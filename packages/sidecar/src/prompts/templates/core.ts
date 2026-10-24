@@ -98,7 +98,7 @@ For complex tasks spanning multiple independent areas (different packages, layer
 - Act in parallel: implement changes in independent areas simultaneously.
 - Verify in parallel: check each result independently.
 
-Do not delegate work that is cheaper inline — single-file edits, trivial refactors, or anything that depends on context a sub-agent cannot see (the user's prior preferences, the current plan, unfinished parent work). Sub-agents have no memory and do not see this conversation, so such work only adds latency. A sub-agent started with \`context: "fork"\` does receive the transcript; see the \`context\` parameter of the \`agent\` tool.
+Do not delegate work that is cheaper inline — single-file edits, trivial refactors, or anything that depends on this conversation's context (the current plan, newly stated preferences, unfinished parent work). Sub-agents receive the workspace memory available to this session, but not this conversation, so such work only adds latency. A sub-agent started with \`context: "fork"\` does receive the transcript; see the \`context\` parameter of the \`agent\` tool.
 
 Typical calls, both ways:
 - Delegate, in parallel: map every caller of \`foo()\` across packages while you keep editing; run two independent test suites as background sub-agents; review a finished diff while you start the next task.
