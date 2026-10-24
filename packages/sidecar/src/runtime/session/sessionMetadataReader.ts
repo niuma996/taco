@@ -329,7 +329,10 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
  * the file without a new conversation turn, which is what leaked into the
  * sidebar when we used mtime.
  */
-function messageTimestamp(record: { type?: unknown; timestamp?: unknown }): number | undefined {
+export function messageTimestamp(record: {
+    type?: unknown;
+    timestamp?: unknown;
+}): number | undefined {
     if (record.type !== "message") return undefined;
     const raw = record.timestamp;
     if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return raw;

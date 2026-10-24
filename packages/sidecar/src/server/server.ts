@@ -109,6 +109,7 @@ import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { configToolCandidates } from "../tools/configCandidates.ts";
+import { sessionHistoryToolCandidates } from "../tools/sessionSearch.ts";
 import {
     associationAffectsWorkspace,
     WorkspaceAssociationStore,
@@ -1146,7 +1147,13 @@ export class SidecarServer implements ServerRpcSurface {
             log,
         });
         const toolRegistry = new DefaultDeferredToolRegistry({
-            candidates: [...mcpProvider.candidates(), ...configToolCandidates()],
+            candidates: [
+                ...mcpProvider.candidates(),
+                ...configToolCandidates(),
+                // Not offered to IM workspaces: a third party drives those, and
+                // the transcripts are the user's private history.
+                ...(paths.imRoute ? [] : sessionHistoryToolCandidates()),
+            ],
             dispose: () => mcpProvider.dispose(),
         });
 
