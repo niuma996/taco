@@ -158,12 +158,15 @@ export function useMessageNavigation({
         if (!el) return;
         const pending = pendingRef.current;
         if (pending) {
-            // A pending target whose window never moved cannot be covered
-            // any more: the session no longer has it. Left alone it would
-            // freeze the current item for good.
+            // A pending target is stale once it cannot be covered any more:
+            // the window never moved (the session no longer has it), or it
+            // moved and still stops short of it. Left alone it would freeze
+            // the current item for good.
+            const windowStart = windowStartRef.current;
             const stale =
-                windowStartRef.current === pendingWindowStartRef.current &&
-                !findTarget(el, pending.id);
+                !findTarget(el, pending.id) &&
+                (windowStart === pendingWindowStartRef.current ||
+                    windowStart > pending.messageIndex);
             if (!stale) return;
             pendingRef.current = null;
             pendingSessionRef.current = undefined;
@@ -347,8 +350,13 @@ export function useMessageNavigation({
         const el = scrollRef.current;
         if (!el || !enabled || !pending) return;
         if (pendingSessionRef.current !== sessionId) return;
-        if (windowStart > pending.messageIndex) return;
-        const node = findTarget(el, pending.id);
+        // Still waiting for the reveal. A window that moved but stops short
+        // of the target will not reach it (the conversation was replaced or
+        // shortened), so that case falls through and cancels.
+        if (windowStart > pending.messageIndex && windowStart === pendingWindowStartRef.current) {
+            return;
+        }
+        const node = windowStart > pending.messageIndex ? null : findTarget(el, pending.id);
         pendingRef.current = null;
         pendingSessionRef.current = undefined;
         pendingWindowStartRef.current = null;
@@ -359,6 +367,26 @@ export function useMessageNavigation({
         const jump = startJump(token, "correction");
         startCorrection(jump, pending.id);
     }, [enabled, pending, scrollRef, sessionId, startCorrection, startJump, windowStart]);
+
+    // The current item's row can be replaced without a scroll: a snapshot
+    // restore swaps live ids for history ids. Its node leaves the DOM then,
+    // so the current item is read again from the rows now mounted. The node
+    // is cached, so a streaming render costs one `isConnected` check.
+    const activeNodeRef = useRef<{ id: string; node: HTMLElement | null } | null>(null);
+    useLayoutEffect(() => {
+        const el = scrollRef.current;
+        if (!el || !enabled || activeId === undefined) return;
+        // A jump owns the current item until it ends and recomputes it.
+        if (holdRef.current || pendingRef.current) return;
+        let cached = activeNodeRef.current;
+        if (cached?.id !== activeId) {
+            cached = { id: activeId, node: findTarget(el, activeId) };
+            activeNodeRef.current = cached;
+        }
+        if (cached.node?.isConnected) return;
+        activeNodeRef.current = null;
+        scheduleUpdate();
+    });
 
     // A session switch or a disabled hook drops everything: the pending jump,
     // its timers, its observers and the reported positions.

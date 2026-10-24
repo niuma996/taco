@@ -551,6 +551,33 @@ describe("useMessageNavigation", () => {
         await waitFor(() => assert.equal(result().activeId, "x"));
     });
 
+    it("cancels a reveal whose window moved but stops short of the target", async () => {
+        const { result, rerender, scroller } = mount({
+            windowStart: 4,
+            ids: ["a", "b", "c", "d", "e", "f"],
+        });
+        act(() => result().navigate(entry("a", 0)));
+        assert.equal(result().activeId, "a");
+
+        // The conversation was replaced: the window moved, yet still starts
+        // after the target, so the reveal can never land.
+        rerender({ windowStart: 2, ids: ["x", "y", "z"], tops: [0, 0, 0] });
+        assert.equal(scrollIntoView.mock.calls.length, 0);
+
+        // The current item follows the scroll position again.
+        scroller().dispatchEvent(new Event("scroll"));
+        await waitFor(() => assert.equal(result().activeId, "z"));
+    });
+
+    it("re-reads the current item when its row is replaced without a scroll", async () => {
+        const { result, rerender } = mount({ ids: ["live-a", "b"], tops: [0, 200] });
+        await waitFor(() => assert.equal(result().activeId, "live-a"));
+
+        // A snapshot restore swaps the live id for the history id.
+        rerender({ ids: ["hist-a", "b"], tops: [0, 200] });
+        await waitFor(() => assert.equal(result().activeId, "hist-a"));
+    });
+
     it("cancels a pending target that disappeared, so the current item updates again", async () => {
         const { result, rerender, scroller } = mount({ windowStart: 2, ids: ["a", "b", "c"] });
         // The target is above the mounted window: the jump waits for a reveal.
