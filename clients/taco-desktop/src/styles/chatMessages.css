@@ -454,8 +454,10 @@
 }
 
 .user-message-guide__marker:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
+    /* --focus-ring is a full box-shadow value, not a colour — an `outline`
+       declaration built from it is invalid and would drop the UA focus ring
+       with it. */
+    box-shadow: var(--focus-ring);
 }
 
 .user-message-guide__dot {
