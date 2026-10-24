@@ -104,6 +104,10 @@ export class TacoClient extends TacoClientBase {
     private rpcSeq = 0;
     private unlisten?: () => void;
     private unlistenExit?: () => void;
+    /** In-flight or settled subscription, shared by concurrent start() calls. */
+    private listenersReady?: Promise<void>;
+    /** Bumped by dispose(); a subscription begun under an older value is stale. */
+    private listenerGeneration = 0;
     /** cwds ensured via `start()` — reused for process-level RPC + exit fan-out.
      * Single process means all cwds share one channel; this just tracks which
      * workspaces have been started. */
@@ -239,10 +243,13 @@ export class TacoClient extends TacoClientBase {
             this.reconnectSleep = undefined;
             sleep.resolve();
         }
+        // Bump first: a subscribe() still awaiting listen() must drop its result.
+        this.listenerGeneration++;
         if (this.unlisten) this.unlisten();
         this.unlisten = undefined;
         if (this.unlistenExit) this.unlistenExit();
         this.unlistenExit = undefined;
+        this.listenersReady = undefined;
         this.rejectAllPending(new Error("client disposed"));
         // Symmetric with handleExit: an in-flight handshake gets no response
         // after dispose, so settle it rather than leaving awaiters on their
@@ -459,15 +466,52 @@ export class TacoClient extends TacoClientBase {
         return this.call<TParams, TResult>(fallback, method, params);
     }
 
-    private async ensureListeners(): Promise<void> {
+    /**
+     * Subscribe to sidecar pushes and exits once. Concurrent start() calls
+     * share one in-flight subscription: checking `unlisten` alone let every
+     * caller that arrived before the first `onPush` resolved subscribe again,
+     * and each extra listener re-parsed and re-dispatched every frame —
+     * multi-MB history responses included.
+     */
+    private ensureListeners(): Promise<void> {
+        if (!this.listenersReady) {
+            const ready: Promise<void> = this.subscribe().catch((err: unknown) => {
+                // Let the next start() retry instead of reusing a rejected
+                // promise — unless a dispose() already replaced it.
+                if (this.listenersReady === ready) this.listenersReady = undefined;
+                throw err;
+            });
+            this.listenersReady = ready;
+        }
+        return this.listenersReady;
+    }
+
+    /**
+     * A dispose() that lands while a listen() is still in flight bumps the
+     * generation; the late result is then unregistered on arrival instead of
+     * being stored, where nothing would ever release it. A generation rather
+     * than `disposed`: restartSidecar() reuses this client after dispose().
+     */
+    private async subscribe(): Promise<void> {
+        const generation = this.listenerGeneration;
         if (!this.unlisten) {
-            this.unlisten = await this.sidecar.onPush((frame) => {
+            const unlisten = await this.sidecar.onPush((frame) => {
                 this.observeSessionLifecycle(frame);
                 this.buffer.push(`${frame.line}\n`);
             });
+            if (generation !== this.listenerGeneration) {
+                unlisten();
+                return;
+            }
+            this.unlisten = unlisten;
         }
         if (!this.unlistenExit) {
-            this.unlistenExit = await this.sidecar.onExit((exit) => this.handleExit(exit));
+            const unlistenExit = await this.sidecar.onExit((exit) => this.handleExit(exit));
+            if (generation !== this.listenerGeneration) {
+                unlistenExit();
+                return;
+            }
+            this.unlistenExit = unlistenExit;
         }
     }
 

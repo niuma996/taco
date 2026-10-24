@@ -159,6 +159,62 @@ test("concurrent starts share one initialize handshake — the storm fix", async
     await client.dispose();
 });
 
+test("concurrent starts subscribe to sidecar pushes once", async () => {
+    // Each extra push listener re-parses and re-dispatches every frame, so a
+    // duplicate doubled the cost of multi-MB history responses.
+    class CountingSidecar extends FakeSidecarClient {
+        pushSubscriptions = 0;
+        override async onPush(handler: (frame: SidecarFrame) => void): Promise<() => void> {
+            this.pushSubscriptions++;
+            // Resolve on a later tick, as Tauri's listen() does, so a second
+            // start() arrives while the first subscription is in flight.
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return super.onPush(handler);
+        }
+    }
+    const sidecar = new CountingSidecar();
+    const client = new TacoClient({ sidecar });
+    await Promise.all([
+        client.start(asWorkspaceId("/a")),
+        client.start(asWorkspaceId("/b")),
+        client.start(asWorkspaceId("/c")),
+    ]);
+    assert.equal(sidecar.pushSubscriptions, 1);
+    await client.dispose();
+});
+
+test("dispose during an in-flight listen() releases the late listener", async () => {
+    // A listener registered after dispose() would never be released and would
+    // keep feeding a dead client every push.
+    class SlowListenSidecar extends FakeSidecarClient {
+        releasePush?: () => void;
+        pushUnlistenCalls = 0;
+        pushListenStarted?: () => void;
+        readonly pushListenStartedP = new Promise<void>((resolve) => {
+            this.pushListenStarted = resolve;
+        });
+        override async onPush(handler: (frame: SidecarFrame) => void): Promise<() => void> {
+            this.pushListenStarted?.();
+            await new Promise<void>((resolve) => {
+                this.releasePush = resolve;
+            });
+            await super.onPush(handler);
+            return () => {
+                this.pushUnlistenCalls++;
+            };
+        }
+    }
+    const sidecar = new SlowListenSidecar();
+    const client = new TacoClient({ sidecar });
+    const started = client.start(asWorkspaceId("/a")).catch(() => {});
+    await sidecar.pushListenStartedP;
+    await client.dispose();
+    sidecar.releasePush?.();
+    await started;
+    await flush();
+    assert.equal(sidecar.pushUnlistenCalls, 1);
+});
+
 test("a start issued after initialize resolves immediately", async () => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
