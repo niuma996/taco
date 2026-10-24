@@ -40,6 +40,7 @@ export default defineConfig({
             "tests/components/ImPolicyDialog.test.tsx",
             "tests/components/ContextIndicator.test.tsx",
             "tests/components/TopbarQuickActions.test.tsx",
+            "tests/components/UserMessageGuide.test.tsx",
             "tests/components/WorkspaceModeTabs.test.tsx",
             "tests/components/WorkspacePicker.test.tsx",
             "tests/components/NotificationBell.test.tsx",

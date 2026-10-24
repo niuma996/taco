@@ -389,3 +389,185 @@
         opacity: 1;
     }
 }
+
+/* ── User message guide ──────────────────────────────────────────────────
+   The rail of user-message markers that sits in the left reading gutter.
+   It is an overlay of .main-col: the rail scrolls on its own and never
+   touches the chat's scroll position. */
+.user-message-guide {
+    position: absolute;
+    /* Centered on the midline of the left 10% gutter — the reading column
+       starts right after it, so the rail reads as attached to the messages.
+       The 20%-gutter layout moves it in layout.css. */
+    left: calc(5% - var(--guide-width) / 2);
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    width: var(--guide-width);
+    z-index: var(--guide-z-index);
+    /* Chrome over the gutter: only the markers take pointer events, the rest
+       of the rail lets clicks through. */
+    pointer-events: none;
+}
+
+.user-message-guide__count {
+    font-size: var(--text-2xs);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--fg-dim);
+}
+
+.user-message-guide__rail {
+    /* offsetParent for the markers: their offsetTop is measured against the
+       rail, which is what the scroll correction compares with scrollTop. */
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    max-height: var(--guide-max-height);
+    overflow-y: auto;
+    /* Scrolling the rail must not start scrolling the chat behind it. */
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+
+.user-message-guide__rail::-webkit-scrollbar {
+    display: none;
+}
+
+.user-message-guide__marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--guide-marker-size);
+    height: var(--guide-marker-size);
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-circle);
+    background: transparent;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.user-message-guide__marker:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.user-message-guide__dot {
+    width: var(--guide-dot-size);
+    height: var(--guide-dot-size);
+    border-radius: var(--radius-circle);
+    background: var(--fg-dim);
+    opacity: 0.45;
+    transition:
+        background-color var(--guide-motion-duration) ease,
+        opacity var(--guide-motion-duration) ease,
+        transform var(--guide-motion-duration) ease;
+}
+
+.user-message-guide__marker:hover .user-message-guide__dot {
+    background: var(--accent);
+    opacity: 1;
+    transform: scale(1.3);
+}
+
+.user-message-guide__marker[aria-current="location"] .user-message-guide__dot {
+    background: var(--accent);
+    opacity: 1;
+    transform: scale(1.5);
+}
+
+/* Hover preview — portaled to the body by Radix, so it escapes the chat
+   pane's overflow. */
+.user-message-guide__preview {
+    width: var(--guide-preview-width);
+    max-width: 80vw;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    color: var(--fg);
+    box-shadow: 0 4px 16px var(--shadow-color);
+    z-index: var(--guide-z-index);
+}
+
+.user-message-guide__preview-position {
+    font-size: var(--text-2xs);
+    color: var(--fg-dim);
+    margin-bottom: var(--space-1);
+}
+
+.user-message-guide__preview-text {
+    white-space: pre-wrap;
+    /* Long unbroken tokens must not widen the preview. */
+    overflow-wrap: anywhere;
+    /* Bounded block: the preview never grows past a screenful of text. */
+    max-height: 12rem;
+    overflow: hidden;
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+}
+
+.user-message-guide__preview-fallback {
+    font-size: var(--text-sm);
+    font-style: italic;
+    color: var(--fg-dim);
+}
+
+.user-message-guide__preview-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+}
+
+.user-message-guide__preview-image {
+    width: var(--guide-preview-image-size);
+    height: var(--guide-preview-image-size);
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.user-message-guide__preview-image-count {
+    margin-top: var(--space-1);
+    font-size: var(--text-2xs);
+    color: var(--fg-dim);
+}
+
+.user-message-guide__preview-notice {
+    margin-top: var(--space-2);
+    font-size: var(--text-2xs);
+    color: var(--fg-dim);
+}
+
+/* Navigation target — the user row the guide jumped to. The pulse marks the
+   landing spot once; it does not repeat. */
+.message--navigation-target {
+    animation: message-navigation-pulse 1.2s ease-out;
+}
+
+@keyframes message-navigation-pulse {
+    0% {
+        box-shadow: 0 0 0 0 var(--accent-border);
+    }
+    100% {
+        box-shadow: 0 0 0 0.5rem transparent;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .user-message-guide__dot {
+        transition: none;
+    }
+
+    .message--navigation-target {
+        animation: none;
+    }
+}

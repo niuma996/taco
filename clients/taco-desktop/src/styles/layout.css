@@ -607,6 +607,11 @@ header.topbar .topbar-picker-group {
     flex: 1;
     min-width: 0;
     overflow: hidden;
+    /* Anchor for the overlays that sit inside the reading gutter (the user
+       message guide). Absolute children resolve their percentages against
+       this box, which is the same box `main`'s gutter percentages resolve
+       against. */
+    position: relative;
 }
 
 /* ── Both side panels collapsed: wider 20% reading gutter ────────────────
@@ -627,6 +632,11 @@ header.topbar .topbar-picker-group {
    the narrower reading column instead. */
 .layout[data-sidebar-collapsed="true"][data-right-open="false"] .llm-dump-panel {
     width: min(640px, calc(80% - 1rem));
+}
+/* The user message guide sits in the left gutter, so the widened gutter
+   pushes it right as well. */
+.layout[data-sidebar-collapsed="true"][data-right-open="false"] .user-message-guide {
+    left: calc(10% - var(--guide-width) / 2);
 }
 
 /* ContextIndicator — topbar context usage bar. Single-row component: bar + percentage + optional loading marker.

@@ -691,7 +691,15 @@
     "thinkingShowAll": "Show all",
     "showEarlier_one": "Show {{count}} earlier message",
     "showEarlier_other": "Show {{count}} earlier messages",
-    "loadingSession": "Loading session"
+    "loadingSession": "Loading session",
+    "guideLabel": "User message navigation",
+    "guideCount": "Total user messages",
+    "guideItem": "Jump to user message {{index}}",
+    "guidePosition": "{{index}} of {{total}}",
+    "guideImageOnly": "Image message",
+    "guideEmpty": "Empty message",
+    "guideImageCount": "{{count}} images",
+    "guideTruncated": "Content truncated — open the message to read it all"
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."

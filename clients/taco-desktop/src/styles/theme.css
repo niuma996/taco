@@ -121,6 +121,20 @@
     --rail-width: 56px;
     --rail-item-size: 36px;
 
+    /* User message guide — the rail of user-message markers in the left
+       reading gutter. The rail is narrow: it must not eat the margin the
+       gutter provides. */
+    --guide-width: 1.5rem;
+    /* Marker hit area — bigger than the dot so the rail stays clickable. */
+    --guide-marker-size: 1.25rem;
+    --guide-dot-size: 0.375rem;
+    /* Rail height before it starts scrolling on its own. */
+    --guide-max-height: 60vh;
+    --guide-preview-width: 20rem;
+    --guide-preview-image-size: 3rem;
+    --guide-z-index: 4;
+    --guide-motion-duration: 150ms;
+
     /* Spacing scale (4px base). Hairline borders stay literal 1px. */
     --space-px: 1px;
     --space-0-5: 0.125rem;
