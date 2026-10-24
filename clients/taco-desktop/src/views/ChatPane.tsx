@@ -14,7 +14,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ArrowUp, Image, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { EmptyChatState } from "../components/EmptyChatState";
@@ -23,15 +23,18 @@ import { QueueBar } from "../components/QueueBar";
 import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
+import { UserMessageGuide } from "../components/UserMessageGuide";
 import { Button } from "../components/ui/Button";
 import { useDelayedFlag } from "../hooks/primitives/useDelayedFlag";
 import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
+import { useMessageNavigation } from "../hooks/useMessageNavigation";
 import { useMessageWindow } from "../hooks/useMessageWindow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import type { QueuedUiItem, UiMessage } from "../lib/chat/chatUtils";
 import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
+import { buildUserMessageGuide } from "../lib/chat/userMessageGuide";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import { MAX_ATTACHMENTS } from "../lib/imageAttachment";
@@ -259,15 +262,32 @@ export function ChatPane(props: ChatPaneProps) {
     // and a conversation opened after scrolling up in another must still
     // start at its bottom. The skeleton is a key of its own so the history
     // that replaces it snaps again, before that frame paints.
-    const { pin } = useStickToBottom(
+    const { pin, unpin } = useStickToBottom(
         mainRef,
         showSkeleton ? `loading:${ws?.loadingSessionId}` : ws?.activeSession,
     );
-    const { start: windowStart, showEarlier } = useMessageWindow(
-        messages,
-        ws?.activeSession,
-        mainRef,
-    );
+    const {
+        start: windowStart,
+        showEarlier,
+        revealTo,
+    } = useMessageWindow(messages, ws?.activeSession, mainRef);
+
+    // The guide indexes every user message of the session, including the rows
+    // the render window has not mounted yet.
+    const guideEntries = useMemo(() => buildUserMessageGuide(messages), [messages]);
+    // The rail belongs to a real conversation: the skeleton and the empty chat
+    // have no user messages to index.
+    const guideEnabled = !showSkeleton && !isEmptyChat;
+    // The navigation hook lives here, not above: it observes the chat's scroll
+    // container, which only exists once this pane has mounted.
+    const { activeId, highlightedId, navigate } = useMessageNavigation({
+        scrollRef: mainRef,
+        sessionId: ws?.activeSession,
+        windowStart,
+        enabled: guideEnabled,
+        revealTo,
+        unpin,
+    });
 
     // After-send snap to bottom: an empty `input` signals a just-completed send.
     // The user may have scrolled up before sending; re-stick so the incoming
@@ -340,6 +360,7 @@ export function ChatPane(props: ChatPaneProps) {
                                     m={m}
                                     isLastInTurn={isLastInTurn(messages, i)}
                                     isTurnInProgress={isTurnInProgress(messages, i, busy)}
+                                    highlighted={highlightedId === m.id}
                                     onCommandPermission={onCommandPermission}
                                     pendingPermissionRequests={ws?.pendingCommandPermissions}
                                 />
@@ -555,6 +576,15 @@ export function ChatPane(props: ChatPaneProps) {
                     {llmDumpDock}
                 </footer>
             </main>
+            {/* The rail is an overlay of .main-col: it indexes the session's
+                user messages without taking part in the chat's scroll. */}
+            {guideEnabled && guideEntries.length > 0 && (
+                <UserMessageGuide
+                    entries={guideEntries}
+                    activeId={activeId}
+                    onNavigate={navigate}
+                />
+            )}
         </div>
     );
 }
