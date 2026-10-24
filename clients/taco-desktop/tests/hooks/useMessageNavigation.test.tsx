@@ -87,15 +87,8 @@ function Harness({
     onResult,
 }: HarnessProps) {
     const ref = useRef<HTMLDivElement | null>(null);
-    const result = useMessageNavigation({
-        scrollRef: ref,
-        sessionId,
-        windowStart,
-        enabled,
-        revealTo,
-        unpin,
-    });
-    onResult(result);
+    // The faked layout is applied before the hook's own layout effect runs,
+    // so the hook reads the same geometry a browser would show it.
     useLayoutEffect(() => {
         const el = ref.current;
         if (!el) return;
@@ -106,6 +99,15 @@ function Harness({
             index++;
         }
     });
+    const result = useMessageNavigation({
+        scrollRef: ref,
+        sessionId,
+        windowStart,
+        enabled,
+        revealTo,
+        unpin,
+    });
+    onResult(result);
     return (
         <div ref={ref} data-testid="scroller">
             {ids.slice(windowStart).map((id) => (
@@ -171,9 +173,26 @@ async function nextFrame(): Promise<void> {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
 }
 
-/** Waits past the window a jump uses to settle. */
-async function sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+/** Lets the mutation observers deliver their records. */
+async function flushMutations(): Promise<void> {
+    await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+}
+
+/** The row carrying this message id. */
+function row(container: HTMLElement, id: string): HTMLElement {
+    const node = container.querySelector<HTMLElement>(`[data-message-id="${id}"]`);
+    assert.ok(node);
+    return node;
+}
+
+/** Moves a row and changes its text: the target's own box really changed. */
+function moveAndEdit(node: HTMLElement, top: number): void {
+    setRect(node, top, ROW_HEIGHT);
+    const text = node.firstChild;
+    if (text) text.textContent = `${text.textContent}!`;
 }
 
 let scrollIntoView: ReturnType<typeof vi.fn>;
@@ -217,22 +236,31 @@ describe("useMessageNavigation", () => {
     });
 
     it("keeps a revealed target centered while its content grows", async () => {
-        const { result, rerender, scroller } = mount({ windowStart: 2 });
-        act(() => result().navigate(entry("a", 0)));
-        rerender({ windowStart: 0 });
-        assert.equal(scrollIntoView.mock.calls.length, 1);
-        // The browser reports the landing scroll.
-        scroller().dispatchEvent(new Event("scroll"));
-        // The revealed rows finish rendering late: the correction outlives the
-        // jump's own settle window.
-        await act(async () => {
-            await sleep(250);
-        });
-        scroller().appendChild(document.createElement("p"));
-        await waitFor(() => assert.equal(scrollIntoView.mock.calls.length, 2));
-        // A box that grew without a mutation is corrected too.
-        FakeResizeObserver.instances.at(-1)?.trigger();
-        await waitFor(() => assert.equal(scrollIntoView.mock.calls.length, 3));
+        vi.useFakeTimers();
+        try {
+            const { result, rerender, scroller } = mount({ windowStart: 2 });
+            act(() => result().navigate(entry("a", 0)));
+            rerender({ windowStart: 0 });
+            assert.equal(scrollIntoView.mock.calls.length, 1);
+            // The browser reports the landing scroll.
+            scroller().dispatchEvent(new Event("scroll"));
+            // The revealed rows finish rendering late: the correction outlives
+            // the jump's own settle window.
+            await act(async () => {
+                vi.advanceTimersByTime(250);
+            });
+            const target = row(scroller(), "a");
+            // The rows above grew: the target moved down.
+            moveAndEdit(target, 400);
+            await flushMutations();
+            assert.equal(scrollIntoView.mock.calls.length, 2);
+            // A box that moved without a mutation is corrected too.
+            setRect(target, 500, ROW_HEIGHT);
+            FakeResizeObserver.instances.at(-1)?.trigger();
+            assert.equal(scrollIntoView.mock.calls.length, 3);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("lets the user's own input end the correction", async () => {
@@ -269,20 +297,112 @@ describe("useMessageNavigation", () => {
         assert.equal(result().activeId, "b");
     });
 
+    it("keeps the target while a long jump is still reporting its scroll", async () => {
+        vi.useFakeTimers();
+        try {
+            const { result, scroller } = mount({ windowStart: 0 });
+            act(() => result().navigate(entry("b", 1)));
+            // A jump across a long conversation animates for more than a
+            // second and keeps reporting its progress. The target stays the
+            // current item for as long as the animation runs.
+            for (let tick = 0; tick < 30; tick++) {
+                await act(async () => {
+                    vi.advanceTimersByTime(50);
+                });
+                scroller().dispatchEvent(new Event("scroll"));
+                assert.equal(result().activeId, "b");
+            }
+            // The animation stops: the scroll position decides again.
+            await act(async () => {
+                vi.advanceTimersByTime(300);
+            });
+            assert.equal(result().activeId, "c");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("ignores a streaming change that does not move the target", async () => {
+        const { result, rerender, scroller } = mount({ windowStart: 2 });
+        act(() => result().navigate(entry("a", 0)));
+        rerender({ windowStart: 0 });
+        assert.equal(scrollIntoView.mock.calls.length, 1);
+        // Let the pending renders settle before watching the queries.
+        await act(async () => {
+            await nextFrame();
+        });
+
+        const container = scroller();
+        const query = vi.spyOn(container, "querySelectorAll");
+        // Another row streams: the target does not move, so nothing repositions.
+        const other = row(container, "c");
+        if (other.firstChild) other.firstChild.textContent = "c is streaming";
+        await flushMutations();
+        assert.equal(scrollIntoView.mock.calls.length, 1);
+        assert.equal(query.mock.calls.length, 0);
+        query.mockRestore();
+    });
+
+    it("lets a downward key end the correction", async () => {
+        const { result, rerender, scroller } = mount({ windowStart: 2 });
+        act(() => result().navigate(entry("a", 0)));
+        rerender({ windowStart: 0 });
+        assert.equal(scrollIntoView.mock.calls.length, 1);
+
+        const container = scroller();
+        const target = row(container, "a");
+        scroller().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+        // The target moves after the user scrolled: the correction must not
+        // pull the viewport back.
+        moveAndEdit(target, 400);
+        await flushMutations();
+        assert.equal(scrollIntoView.mock.calls.length, 1);
+    });
+
+    it("reads a press on the container as a scrollbar, not a click on a message", async () => {
+        const { result, rerender, scroller } = mount({ windowStart: 2 });
+        act(() => result().navigate(entry("a", 0)));
+        rerender({ windowStart: 0 });
+        assert.equal(scrollIntoView.mock.calls.length, 1);
+
+        const container = scroller();
+        const target = row(container, "a");
+        // The target's own box changed: the correction is still alive.
+        moveAndEdit(target, 400);
+        await flushMutations();
+        assert.equal(scrollIntoView.mock.calls.length, 2);
+
+        // A click on the message content is not a scrollbar grab.
+        target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        moveAndEdit(target, 600);
+        await flushMutations();
+        assert.equal(scrollIntoView.mock.calls.length, 3);
+
+        // A press on the container itself is the scrollbar.
+        container.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        moveAndEdit(target, 800);
+        await flushMutations();
+        assert.equal(scrollIntoView.mock.calls.length, 3);
+    });
+
     it("hands the current item back to the scroll position once the jump settles", async () => {
-        const { result, scroller } = mount({ windowStart: 0 });
-        act(() => result().navigate(entry("b", 1)));
-        scroller().dispatchEvent(new Event("scroll"));
-        await act(async () => {
-            await nextFrame();
-        });
-        assert.equal(result().activeId, "b");
-        // The animation ends: the scroll position decides again.
-        await act(async () => {
-            await sleep(250);
-            await nextFrame();
-        });
-        assert.equal(result().activeId, "c");
+        vi.useFakeTimers();
+        try {
+            const { result, scroller } = mount({ windowStart: 0 });
+            act(() => result().navigate(entry("b", 1)));
+            scroller().dispatchEvent(new Event("scroll"));
+            await act(async () => {
+                vi.advanceTimersByTime(50);
+            });
+            assert.equal(result().activeId, "b");
+            // The animation ends: the scroll position decides again.
+            await act(async () => {
+                vi.advanceTimersByTime(300);
+            });
+            assert.equal(result().activeId, "c");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("drops the pending jump when the session changes", () => {

@@ -25,14 +25,23 @@ import type { UserMessageGuideEntry } from "../lib/chat/userMessageGuide";
 /** How long a revealed target keeps re-centering while its content grows. */
 const CORRECTION_HOLD_MS = 2000;
 
-/** Quiet period after the last scroll event that ends a jump's hold. */
+/** Quiet period after the last scroll report that ends a jump's hold. */
 const SETTLE_MS = 150;
 
-/** Backstop so a jump whose scroll never reports cannot hold the guide. */
+/** Idle backstop: a jump whose scroll is never reported ends after this. */
 const HOLD_MAX_MS = 1000;
 
-/** Keys that scroll a focused container upward. */
-const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+/** Keys that scroll the container. */
+const SCROLL_KEYS = new Set([
+    "ArrowUp",
+    "ArrowDown",
+    "PageUp",
+    "PageDown",
+    "Home",
+    "End",
+    " ",
+    "Spacebar",
+]);
 
 export interface MessageNavigationOptions {
     /** The chat's scroll container — the element the message rows live in. */
@@ -165,12 +174,14 @@ export function useMessageNavigation({
             const observers = new Set<{ disconnect: () => void }>();
             const timers = new Set<number>();
             let settleTimer: number | null = null;
+            let deadlineTimer: number | null = null;
             let ended = false;
 
             const finish = (recompute: boolean): void => {
                 if (ended) return;
                 ended = true;
                 if (settleTimer !== null) window.clearTimeout(settleTimer);
+                if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
                 for (const timer of timers) window.clearTimeout(timer);
                 for (const observer of observers) observer.disconnect();
                 holdRef.current = false;
@@ -182,22 +193,31 @@ export function useMessageNavigation({
                 // target holds for its own window, however long the content
                 // around it takes to settle.
                 if (mode !== "smooth") return;
+                // Both deadlines are measured from the last report, so a jump
+                // across a long conversation keeps its target for as long as
+                // the animation runs.
                 if (settleTimer !== null) window.clearTimeout(settleTimer);
                 settleTimer = window.setTimeout(() => {
                     settleTimer = null;
                     finish(true);
                 }, SETTLE_MS);
+                if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+                deadlineTimer = window.setTimeout(() => {
+                    deadlineTimer = null;
+                    finish(true);
+                }, HOLD_MAX_MS);
             };
 
             const jump: Jump = { token, end: finish, keepAlive, observers };
             jumpRef.current = jump;
             holdRef.current = true;
             if (mode === "smooth") {
-                // The animation reports itself as scroll events; the jump ends
-                // once they stop. The deadline is the backstop for a browser
-                // that reports none.
-                keepAlive();
-                timers.add(window.setTimeout(() => finish(true), HOLD_MAX_MS));
+                // The idle backstop covers a browser that reports no scroll
+                // at all: without a report the settle timer never arms.
+                deadlineTimer = window.setTimeout(() => {
+                    deadlineTimer = null;
+                    finish(true);
+                }, HOLD_MAX_MS);
             } else {
                 // A revealed target holds its place while its markdown and
                 // images resolve.
@@ -212,37 +232,47 @@ export function useMessageNavigation({
      * Keep a revealed target in the middle of the viewport: its rows grow
      * while markdown and images resolve, and a box that grew without a
      * mutation still moves the target.
+     *
+     * Only the target's own box decides. A row elsewhere that streams must
+     * not cost a query or a scroll, so the target is cached and its rect is
+     * compared with the last one seen.
      */
     const startCorrection = useCallback(
         (jump: Jump, id: string) => {
             const container = scrollRef.current;
             if (!container) return;
-            let observed: HTMLElement | null = null;
-            const centerTarget = (): void => {
-                if (jump.token !== tokenRef.current) return;
-                const node = findTarget(container, id);
-                if (!node) return;
-                scrollToTarget(node, "instant");
+            let node = findTarget(container, id);
+            let lastTop = node ? node.getBoundingClientRect().top : 0;
+            let lastHeight = node ? node.getBoundingClientRect().height : 0;
+
+            const remember = (current: HTMLElement): void => {
+                const rect = current.getBoundingClientRect();
+                lastTop = rect.top;
+                lastHeight = rect.height;
             };
-            const ro = new ResizeObserver(centerTarget);
-            const mo = new MutationObserver(() => {
-                // A replaced row is a new box: observe that one instead.
-                const node = findTarget(container, id);
-                if (node && observed !== node) {
+
+            const recenter = (): void => {
+                if (jump.token !== tokenRef.current) return;
+                if (!node?.isConnected) {
+                    // The row was replaced: take the new one.
+                    node = findTarget(container, id);
+                    if (!node) return;
                     ro.disconnect();
                     ro.observe(node);
-                    observed = node;
+                    remember(node);
                 }
-                centerTarget();
-            });
+                const rect = node.getBoundingClientRect();
+                if (rect.top === lastTop && rect.height === lastHeight) return;
+                scrollToTarget(node, "instant");
+                remember(node);
+            };
+
+            const ro = new ResizeObserver(recenter);
+            const mo = new MutationObserver(recenter);
             mo.observe(container, { childList: true, subtree: true, characterData: true });
             jump.observers.add(mo);
             jump.observers.add(ro);
-            const node = findTarget(container, id);
-            if (node) {
-                ro.observe(node);
-                observed = node;
-            }
+            if (node) ro.observe(node);
         },
         [scrollRef],
     );
@@ -333,20 +363,27 @@ export function useMessageNavigation({
             endJump(true);
         };
         const onKeyDown = (event: KeyboardEvent): void => {
-            if (!UPWARD_KEYS.has(event.key)) return;
+            if (!SCROLL_KEYS.has(event.key)) return;
+            onUserInput();
+        };
+        const onPointerDown = (event: PointerEvent): void => {
+            // Only a press on the container itself is the scrollbar. A click
+            // on a message is not a scroll intent and must not end the
+            // correction.
+            if (event.target !== el) return;
             onUserInput();
         };
         el.addEventListener("wheel", onUserInput, { passive: true });
         el.addEventListener("touchstart", onUserInput, { passive: true });
         el.addEventListener("touchmove", onUserInput, { passive: true });
         el.addEventListener("keydown", onKeyDown);
-        el.addEventListener("pointerdown", onUserInput, { passive: true });
+        el.addEventListener("pointerdown", onPointerDown, { passive: true });
         return () => {
             el.removeEventListener("wheel", onUserInput);
             el.removeEventListener("touchstart", onUserInput);
             el.removeEventListener("touchmove", onUserInput);
             el.removeEventListener("keydown", onKeyDown);
-            el.removeEventListener("pointerdown", onUserInput);
+            el.removeEventListener("pointerdown", onPointerDown);
         };
     }, [enabled, endJump, scrollRef]);
 
