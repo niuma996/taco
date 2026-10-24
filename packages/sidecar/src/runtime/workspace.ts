@@ -1221,6 +1221,10 @@ export class WorkspaceRuntime extends EventEmitter {
         return await this.sessionRegistry.getSessionActivityAt(sessionId);
     }
 
+    async getSessionMessageCount(sessionId: SessionId): Promise<number | undefined> {
+        return await this.sessionRegistry.getSessionMessageCount(sessionId);
+    }
+
     // ─────────── attach / detach (delegates to SessionRegistry) ───────────
 
     async attach(sessionId: SessionId, opts: AttachOptions = {}): Promise<AttachedSession> {

@@ -305,6 +305,9 @@ export class SessionRegistry extends EventEmitter {
      */
     private readonly _activityCache = new Map<SessionId, number | undefined>();
 
+    /** sessionId → message records in the file. Same scan; see getSessionMessageCount. */
+    private readonly _messageCountCache = new Map<SessionId, number>();
+
     /** Currently attached session map. */
     private readonly attached = new Map<SessionId, AttachedSession>();
 
@@ -466,6 +469,7 @@ export class SessionRegistry extends EventEmitter {
         this._factsCache.clear();
         this._activityCache.clear();
         this._titleSourceCache.clear();
+        this._messageCountCache.clear();
     }
 
     /** Get an existing session instance by id. */
@@ -787,15 +791,27 @@ export class SessionRegistry extends EventEmitter {
         return this._activityCache.get(sessionId);
     }
 
-    /** One JSONL scan fills name, facts, activity, and title-source caches together. */
+    /**
+     * Message records in the session file, from the same scan. An estimate
+     * for client loading placeholders: it counts abandoned branches too.
+     */
+    async getSessionMessageCount(sessionId: SessionId): Promise<number | undefined> {
+        if (this._messageCountCache.has(sessionId)) {
+            return this._messageCountCache.get(sessionId);
+        }
+        await this.hydrateSessionMetadata(sessionId);
+        return this._messageCountCache.get(sessionId);
+    }
+
+    /** One JSONL scan fills name, facts, activity, title-source and count caches together. */
     private async hydrateSessionMetadata(sessionId: SessionId): Promise<void> {
         const meta = await this.openSession(sessionId);
-        const { name, facts, activityAt, titleSource } = await readSessionMetadataFromDisk(
-            meta.path,
-        );
+        const { name, facts, activityAt, titleSource, messageCount } =
+            await readSessionMetadataFromDisk(meta.path);
         this._nameCache.set(sessionId, name);
         this._factsCache.set(sessionId, facts);
         this._activityCache.set(sessionId, activityAt);
+        this._messageCountCache.set(sessionId, messageCount);
         this._titleSourceCache.set(sessionId, titleSource);
     }
 

@@ -100,6 +100,12 @@ export interface SessionListEntry {
     depth?: number;
     /** User-defined title from the most recent session_info event. */
     name?: string;
+    /**
+     * Message records in the session file — an estimate (abandoned branches
+     * count too) for sizing a loading placeholder before the history arrives.
+     * Absent from older sidecars.
+     */
+    messageCount?: number;
 }
 
 export interface SessionHistoryEntry {

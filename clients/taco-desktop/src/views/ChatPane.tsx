@@ -24,6 +24,7 @@ import { SessionInfo } from "../components/SessionInfo";
 import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
 import { Button } from "../components/ui/Button";
+import { useDelayedFlag } from "../hooks/primitives/useDelayedFlag";
 import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
 import { useMessageWindow } from "../hooks/useMessageWindow";
@@ -119,6 +120,67 @@ export interface ChatPaneProps {
 /** Stable fallback so the message window's callbacks don't churn with no workspace. */
 const EMPTY_MESSAGES: UiMessage[] = [];
 
+/**
+ * How long a session may take to open before the skeleton appears. Most opens
+ * land inside this, and swapping straight to the conversation reads better
+ * than a placeholder that flashes for a few frames.
+ */
+const SKELETON_DELAY_MS = 150;
+
+/** Skeleton turns per estimated message (a turn is roughly a prompt plus a few rows), clamped. */
+const SKELETON_MESSAGES_PER_TURN = 4;
+const SKELETON_MIN_TURNS = 1;
+const SKELETON_MAX_TURNS = 6;
+
+/** Bar widths for successive assistant blocks, so stacked turns don't look stamped. */
+const ASSISTANT_LINE_SETS = [
+    ["100%", "92%", "64%"],
+    ["100%", "78%"],
+    ["96%", "100%", "88%", "52%"],
+] as const;
+const USER_WIDTHS = ["42%", "28%", "56%"] as const;
+
+/** Turns to sketch for a session of `messageCount` messages; unknown sizes get a mid-size sketch. */
+function skeletonTurns(messageCount: number | undefined): number {
+    if (messageCount === undefined) return 3;
+    const turns = Math.ceil(messageCount / SKELETON_MESSAGES_PER_TURN);
+    return Math.min(SKELETON_MAX_TURNS, Math.max(SKELETON_MIN_TURNS, turns));
+}
+
+/**
+ * Loading placeholder for the message column, shaped like the real stream:
+ * the user rows reuse `.message.user`, the assistant rows `.message.assistant`
+ * with markdown-sized text lines, so the skeleton matches the conversation's
+ * insets, radii and fills in both themes.
+ *
+ * Its height need not match the real conversation: the history replaces it
+ * wholesale and stick-to-bottom snaps before that frame paints.
+ */
+function ChatSkeleton({ turns, label }: { turns: number; label: string }) {
+    return (
+        <div className="chat-skeleton" role="status" aria-label={label}>
+            {Array.from({ length: turns }, (_, i) => {
+                const lines = ASSISTANT_LINE_SETS[i % ASSISTANT_LINE_SETS.length] ?? [];
+                return (
+                    <div key={i} className="chat-skeleton__turn" aria-hidden="true">
+                        <div
+                            className="message user chat-skeleton__user"
+                            style={{ width: USER_WIDTHS[i % USER_WIDTHS.length] }}
+                        >
+                            <span className="chat-skeleton__line" />
+                        </div>
+                        <div className="message assistant chat-skeleton__assistant">
+                            {lines.map((width, j) => (
+                                <span key={j} className="chat-skeleton__line" style={{ width }} />
+                            ))}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 export function ChatPane(props: ChatPaneProps) {
     const {
         ws,
@@ -166,12 +228,25 @@ export function ChatPane(props: ChatPaneProps) {
     );
     const { t } = useT();
 
-    const canSend = input.trim().length > 0 || attachments.length > 0;
+    // Another session is opening: `ws` still holds the previous one, so sends,
+    // stop and the run indicator would all target the wrong session.
+    const loadingSession = ws?.loadingSessionId !== undefined;
+    // Text and image input are locked while compacting, and while another
+    // session opens: the draft is one shared field, so anything typed now
+    // would land in the session being opened, not the one still on screen.
+    const composerLocked = compacting || loadingSession;
+    // Until the delay passes, the previous conversation stays up (with the
+    // composer locked above); the skeleton only replaces it for slow opens.
+    const showSkeleton = useDelayedFlag(loadingSession, SKELETON_DELAY_MS);
+    const loadingMeta = loadingSession
+        ? ws?.sessions.find((s) => s.id === ws.loadingSessionId)
+        : undefined;
+    const canSend = !loadingSession && (input.trim().length > 0 || attachments.length > 0);
     // Single send/stop toggle: Stop while a run (or compaction) is in flight
     // and the composer is empty; typing switches back to Send so an in-run
     // steer stays one click away. Compaction always shows Stop — the textarea
     // is locked then, so typed text can't be cleared to reveal it.
-    const showStop = compacting || (busy && !canSend);
+    const showStop = !loadingSession && (compacting || (busy && !canSend));
     const messages = ws?.messages ?? EMPTY_MESSAGES;
     // Fresh chat (no messages yet) — covers both a brand-new session and one
     // that was just created via "New chat" but never prompted.
@@ -180,10 +255,14 @@ export function ChatPane(props: ChatPaneProps) {
     // Auto-follow lives on the <main> ChatPane renders itself, so the
     // observers go away with it on a tab switch (see useStickToBottom).
     const mainRef = useRef<HTMLDivElement | null>(null);
-    // Keyed on the session: ChatPane stays mounted across session switches,
+    // Keyed on what is shown: ChatPane stays mounted across session switches,
     // and a conversation opened after scrolling up in another must still
-    // start at its bottom.
-    const pinToBottom = useStickToBottom(mainRef, ws?.activeSession);
+    // start at its bottom. The skeleton is a key of its own so the history
+    // that replaces it snaps again, before that frame paints.
+    const pinToBottom = useStickToBottom(
+        mainRef,
+        showSkeleton ? `loading:${ws?.loadingSessionId}` : ws?.activeSession,
+    );
     const { start: windowStart, showEarlier } = useMessageWindow(
         messages,
         ws?.activeSession,
@@ -231,8 +310,13 @@ export function ChatPane(props: ChatPaneProps) {
                 newSessionDisabled={newSessionDisabled}
                 isIm={isIm}
             />
-            <main ref={mainRef}>
-                {isEmptyChat ? (
+            <main ref={mainRef} aria-busy={loadingSession || undefined}>
+                {showSkeleton ? (
+                    <ChatSkeleton
+                        turns={skeletonTurns(loadingMeta?.messageCount)}
+                        label={t("message.loadingSession")}
+                    />
+                ) : isEmptyChat ? (
                     <EmptyChatState />
                 ) : (
                     <>
@@ -267,7 +351,7 @@ export function ChatPane(props: ChatPaneProps) {
                     bouncing dots sit at the left of the message column, where
                     the next assistant output will land — typing a steer then
                     still reads as "agent busy", not "idle input". */}
-                {runInFlight && (
+                {runInFlight && !loadingSession && (
                     <div
                         className="run-indicator"
                         role="status"
@@ -310,6 +394,7 @@ export function ChatPane(props: ChatPaneProps) {
                                             type="button"
                                             className="attachment-remove"
                                             aria-label={t("input.removeAttachment")}
+                                            disabled={composerLocked}
                                             onClick={() => removeAttachment(i)}
                                         >
                                             ×
@@ -324,7 +409,7 @@ export function ChatPane(props: ChatPaneProps) {
                             value={input}
                             onChange={(e) => onInputChange(e.target.value)}
                             onPaste={handlePaste}
-                            disabled={compacting}
+                            disabled={composerLocked}
                             onKeyDown={(e) => {
                                 // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
                                 // keyCode === 229 is a WebKit legacy fallback for older versions.
@@ -377,7 +462,7 @@ export function ChatPane(props: ChatPaneProps) {
                                 // Unlocked during a run: steer passthrough carries images
                                 // (session.steer accepts `images`). Compaction still locks —
                                 // its handler refuses new input until the compaction settles.
-                                disabled={compacting || attachments.length >= MAX_ATTACHMENTS}
+                                disabled={composerLocked || attachments.length >= MAX_ATTACHMENTS}
                             >
                                 <Image size={16} aria-hidden="true" />
                             </button>
@@ -391,7 +476,9 @@ export function ChatPane(props: ChatPaneProps) {
                                         defaultThinkingLevelForNewSession(getGlobalConfig().global)
                                     }
                                     onThinkingChange={onLevelChange}
-                                    disabled={busy}
+                                    // Model and thinking level are per-session settings:
+                                    // while another session opens, `ws` is still the old one.
+                                    disabled={busy || loadingSession}
                                     pendingNote={busy}
                                     onOpen={onRefreshModels}
                                     compact

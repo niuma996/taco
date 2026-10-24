@@ -51,6 +51,7 @@ function toSessionMeta(s: NonNullable<SessionListResult["sessions"]>[number]): S
         updatedAt: s.updatedAt,
         filePath: s.filePath,
         name: s.name,
+        messageCount: s.messageCount,
     };
 }
 
@@ -175,6 +176,10 @@ export function useWorkspaceLifecycle({
         async (cwd: string, sessionId: string): Promise<void> => {
             let inFlightAgentToolCallIds: string[] | undefined;
             let settledBackgroundSubSessionIds: string[] | undefined;
+            // Show the loading skeleton now; the history RPC can take a while
+            // for a long session, and the old conversation must not linger as
+            // if the click did nothing.
+            dispatchWs({ type: "ATTACH_START", cwd, sid: sessionId });
             try {
                 const attachResult = await client.sessionAttach(
                     asWorkspaceId(cwd),
@@ -199,6 +204,8 @@ export function useWorkspaceLifecycle({
                 // clears with the row.
                 if ((err as { code?: string }).code === ErrorCodes.NotFound) {
                     dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
+                } else {
+                    dispatchWs({ type: "ATTACH_FAILED", cwd, sid: sessionId });
                 }
                 return;
             }

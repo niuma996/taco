@@ -35,6 +35,8 @@ export interface SessionMeta {
     filePath?: string;
     /** User-defined title; falls back to first 8 chars of id when unset. */
     name?: string;
+    /** Estimated message count (server-supplied), for sizing the loading skeleton. */
+    messageCount?: number;
 }
 
 export interface SubagentSpawnedEntry {
@@ -158,6 +160,14 @@ export interface WorkspaceState {
      *  the full list (params.full === true). Lets the sidebar show "N sessions"
      *  even after a paged load hides the rest. */
     listTotal?: number;
+    /**
+     * Session the user just opened whose history is still loading. Set by
+     * ATTACH_START, cleared when its ATTACH lands or the open fails / is
+     * superseded. While set, `activeSession` and `messages` still hold the
+     * previous session (the chat shows a loading skeleton over them), so a
+     * failed open falls back to it intact.
+     */
+    loadingSessionId?: string;
 }
 
 /**
@@ -226,7 +236,15 @@ export type WorkspaceAction =
           append?: boolean;
       }
     | { type: "ADD_SESSION"; cwd: string; session: SessionMeta; makeActive?: boolean }
+    /** The user opened `sid`; its attach + history load is in flight. */
+    | { type: "ATTACH_START"; cwd: string; sid: string }
+    /** Opening `sid` failed before any history arrived; fall back to what was shown. */
+    | { type: "ATTACH_FAILED"; cwd: string; sid: string }
     | {
+          /**
+           * Applied only for the session being loaded (or a same-session
+           * re-attach): an ATTACH that lost a race to a later open is dropped.
+           */
           type: "ATTACH";
           cwd: string;
           sid: string;
@@ -537,6 +555,25 @@ export function workspacesReducer(
                 activeSession:
                     action.makeActive === false ? existing.activeSession : action.session.id,
             }));
+        case "ATTACH_START":
+            return updateWs(state, action.cwd, (existing) => {
+                // Re-opening the shown session keeps its messages on screen;
+                // the ATTACH that follows takes the same-session branch.
+                if (existing.activeSession === action.sid) {
+                    return existing.loadingSessionId === undefined
+                        ? undefined
+                        : { loadingSessionId: undefined };
+                }
+                return existing.loadingSessionId === action.sid
+                    ? undefined
+                    : { loadingSessionId: action.sid };
+            });
+        case "ATTACH_FAILED":
+            return updateWs(state, action.cwd, (existing) =>
+                existing.loadingSessionId === action.sid
+                    ? { loadingSessionId: undefined }
+                    : undefined,
+            );
         case "ATTACH":
             return updateWs(state, action.cwd, (existing) => {
                 // Same-session re-attach: keep the in-flight subagent live stream
@@ -568,6 +605,9 @@ export function workspacesReducer(
                         ? undefined
                         : { backgroundSubagents: merged };
                 }
+                // Superseded: the user opened another session (or started a new
+                // chat, or deleted this one) while this history was loading.
+                if (existing.loadingSessionId !== action.sid) return undefined;
                 // Restore pending for askUser toolCallIds still waiting in history so card
                 // selection can resume the turn. The injection trigger is the pending
                 // "true → false" transition; without restore, historical askUser clicks are dead.
@@ -575,6 +615,7 @@ export function workspacesReducer(
                 for (const id of action.pendingAskUserIds ?? []) restoredPending[id] = true;
                 return {
                     activeSession: action.sid,
+                    loadingSessionId: undefined,
                     messages: action.messages,
                     subagentSpawned: {},
                     childMessagesBySubSessionId: {},
@@ -643,6 +684,9 @@ export function workspacesReducer(
                         ? { listTotal: Math.max(0, existing.listTotal - 1) }
                         : {}),
                     ...(wasActive ? { activeSession: undefined, messages: [] } : {}),
+                    ...(existing.loadingSessionId === action.sid
+                        ? { loadingSessionId: undefined }
+                        : {}),
                     pendingBySessionId: omitKey(existing.pendingBySessionId, action.sid),
                     queuedBySessionId: omitKey(existing.queuedBySessionId, action.sid),
                     // The broker aborts these server-side, but the resolved push is
@@ -982,8 +1026,10 @@ export function workspacesReducer(
             // nothing put it back: run lifecycle events update these maps before the
             // activeSession guard, but `run_start` has already fired, so the sidebar
             // dot and the stop button read "idle" until the run ended.
+            // A session still loading is abandoned too; its late ATTACH is dropped.
             return updateWs(state, action.cwd, () => ({
                 activeSession: undefined,
+                loadingSessionId: undefined,
                 messages: [],
                 subagentSpawned: {},
                 childMessagesBySubSessionId: {},

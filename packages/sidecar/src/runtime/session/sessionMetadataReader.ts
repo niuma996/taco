@@ -154,6 +154,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
     facts: SessionFacts;
     activityAt: number | undefined;
     titleSource: TitleSource | undefined;
+    messageCount: number;
 }> {
     // createReadStream + readline.createInterface is the standard streaming
     // pattern, but readline does NOT close the input stream on rl.close().
@@ -172,6 +173,10 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
     let facts: SessionFacts = {};
     let activityAt: number | undefined;
     let titleSource: TitleSource | undefined;
+    // Every message record in the file, abandoned branches included — an
+    // estimate for sizing the client's loading placeholder, not a count of
+    // what the conversation shows.
+    let messageCount = 0;
     let lineCount = 0;
     let headerFacts: SessionFacts | undefined;
     let sawFactsValue = false;
@@ -228,6 +233,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
                     };
                     if (maybeName || maybeFacts || maybeTitleSource) applyValueRecord(rec);
                     if (maybeMessage) {
+                        if (rec.type === "message") messageCount++;
                         const ts = messageTimestamp(rec);
                         if (ts !== undefined) {
                             activityAt = activityAt === undefined ? ts : Math.max(activityAt, ts);
@@ -311,7 +317,7 @@ export async function readSessionMetadataFromDisk(path: string): Promise<{
     if (!sawFactsValue && headerFacts !== undefined) {
         facts = headerFacts;
     }
-    return { name, facts, activityAt, titleSource };
+    return { name, facts, activityAt, titleSource, messageCount };
 }
 
 /**

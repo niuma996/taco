@@ -284,6 +284,68 @@
     }
 }
 
+/* Loading skeleton — stands in for the message column while a session's
+   history loads. Rows reuse `.message.user` / `.message.assistant`, so fills,
+   radii, insets and the turn spacing come from the real bubbles; only the text
+   lines are placeholders. Starts at the top of the column, where reading
+   begins; the loaded history then snaps to its bottom before it paints. */
+.chat-skeleton {
+    display: flex;
+    flex-direction: column;
+    /* Same rhythm as main's message gap. */
+    gap: 0.5rem;
+    animation: chat-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+/* A turn is a user row and its answer; spaced like main's children. */
+.chat-skeleton__turn {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* The width is set inline per row; the bubble shell stays fit-to-width. */
+.chat-skeleton__user {
+    max-width: 90%;
+}
+
+.chat-skeleton__assistant {
+    display: flex;
+    flex-direction: column;
+    /* Markdown text: 0.85em at line-height 1.55 — one line box per bar. */
+    gap: calc(0.85rem * 0.55);
+}
+
+/* One text line: height of a markdown line's glyphs, inside its line box. */
+.chat-skeleton__line {
+    display: block;
+    height: 0.85rem;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--fg-dim) 18%, transparent);
+}
+
+.chat-skeleton__user .chat-skeleton__line {
+    /* Fills the bubble; the bubble's own width carries the variation. */
+    width: 100%;
+    background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+@keyframes chat-skeleton-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.55;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-skeleton {
+        animation: none;
+    }
+}
+
 /* "Show earlier messages" — heads the render window of a long conversation. */
 .chat-show-earlier {
     align-self: center;

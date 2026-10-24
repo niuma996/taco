@@ -378,7 +378,14 @@ async function buildSessionEntry(
     const updatedAtSource =
         typeof activityAt === "number" && Number.isFinite(activityAt) ? activityAt : m.createdAt;
     const updatedAt = new Date(updatedAtSource).toISOString();
+    // Served from the scan getSessionActivityAt just ran, so no extra I/O.
+    // A size hint must never fail the list — hence the catch, and `?.` for
+    // partial workspace stand-ins.
+    const messageCount = await workspace
+        .getSessionMessageCount?.(asSessionId(m.id))
+        .catch(() => undefined);
     return {
+        ...(messageCount !== undefined ? { messageCount } : {}),
         id: asSessionId(m.id),
         cwd: asWorkspaceId(m.cwd),
         filePath: m.path,

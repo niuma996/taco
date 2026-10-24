@@ -127,6 +127,24 @@ describe("writeSessionFacts / scanner contract", () => {
         assert.equal(facts.depth, 1);
         assert.equal(facts.parentSessionId, "parent-1");
     });
+
+    it("counts the message records a session file holds", async () => {
+        const cwd = mkdtempSync(join(tmpdir(), "taco-facts-cwd-"));
+        const sessionsRoot = mkdtempSync(join(tmpdir(), "taco-facts-sessions-"));
+        dirs.push(cwd, sessionsRoot);
+        const env = new NodeExecutionEnv({ cwd });
+        const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot });
+        const session = await repo.create({ id: uuidv7(), cwd }, harnessContext);
+        const path = session.metadata.path;
+        const branch = await session.createBranch("main", null, harnessContext);
+        for (const content of ["one", "two", "three"]) {
+            await branch.appendMessage({ role: "user", content, timestamp: 1 }, harnessContext);
+        }
+        await session.close(harnessContext);
+
+        const { messageCount } = await readSessionMetadataFromDisk(path);
+        assert.equal(messageCount, 3);
+    });
 });
 
 describe("parseLegacyV3TacoMetadata", () => {

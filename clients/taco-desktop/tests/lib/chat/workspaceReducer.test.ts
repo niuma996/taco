@@ -513,6 +513,128 @@ describe("workspacesReducer — sessions", () => {
     });
 });
 
+describe("workspacesReducer — session loading", () => {
+    const oldMsgs = [{ id: "o1", kind: "user", text: "old", ts: 1 } as UiMessage];
+    const newMsgs = [{ id: "n1", kind: "user", text: "new", ts: 2 } as UiMessage];
+
+    it("ATTACH_START marks the session loading and keeps the shown one intact", () => {
+        const state = { "/ws": baseWs({ activeSession: "a", messages: oldMsgs }) };
+        const next = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "b" });
+        assert.equal(next["/ws"]?.loadingSessionId, "b");
+        assert.equal(next["/ws"]?.activeSession, "a");
+        assert.equal(next["/ws"]?.messages, oldMsgs);
+    });
+
+    it("ATTACH_START for the shown session does not show a skeleton", () => {
+        const state = { "/ws": baseWs({ activeSession: "a", messages: oldMsgs }) };
+        const next = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "a" });
+        assert.equal(next, state);
+    });
+
+    it("ATTACH for the loading session swaps it in and clears the flag", () => {
+        const state = {
+            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b", messages: oldMsgs }),
+        };
+        const next = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "b",
+            messages: newMsgs,
+        });
+        assert.equal(next["/ws"]?.activeSession, "b");
+        assert.equal(next["/ws"]?.loadingSessionId, undefined);
+        assert.equal(next["/ws"]?.messages, newMsgs);
+    });
+
+    it("drops an ATTACH that lost the race to a later open", () => {
+        // Click b, then c; b's history returns last and must not overwrite c.
+        let state: Record<string, WorkspaceState> = { "/ws": baseWs({ activeSession: "a" }) };
+        state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "b" });
+        state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "c" });
+        state = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "c",
+            messages: newMsgs,
+        });
+        const settled = state;
+        state = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "b",
+            messages: oldMsgs,
+        });
+        assert.equal(state, settled);
+        assert.equal(state["/ws"]?.activeSession, "c");
+        assert.equal(state["/ws"]?.messages, newMsgs);
+    });
+
+    it("re-clicking the shown session while another loads cancels the load", () => {
+        let state: Record<string, WorkspaceState> = {
+            "/ws": baseWs({ activeSession: "a", messages: oldMsgs }),
+        };
+        state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "b" });
+        state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "a" });
+        assert.equal(state["/ws"]?.loadingSessionId, undefined);
+        state = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "b",
+            messages: newMsgs,
+        });
+        assert.equal(state["/ws"]?.activeSession, "a");
+        assert.equal(state["/ws"]?.messages, oldMsgs);
+    });
+
+    it("ATTACH_FAILED falls back to the shown session", () => {
+        const state = {
+            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b", messages: oldMsgs }),
+        };
+        const next = workspacesReducer(state, { type: "ATTACH_FAILED", cwd: "/ws", sid: "b" });
+        assert.equal(next["/ws"]?.loadingSessionId, undefined);
+        assert.equal(next["/ws"]?.activeSession, "a");
+        assert.equal(next["/ws"]?.messages, oldMsgs);
+    });
+
+    it("ATTACH_FAILED for a superseded open leaves the newer load alone", () => {
+        const state = { "/ws": baseWs({ activeSession: "a", loadingSessionId: "c" }) };
+        const next = workspacesReducer(state, { type: "ATTACH_FAILED", cwd: "/ws", sid: "b" });
+        assert.equal(next, state);
+    });
+
+    it("removing the loading session clears the flag", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "a",
+                loadingSessionId: "b",
+                sessions: [
+                    { id: "a", createdAt: "2026-01-01T00:00:00Z" },
+                    { id: "b", createdAt: "2026-01-02T00:00:00Z" },
+                ],
+            }),
+        };
+        const next = workspacesReducer(state, { type: "REMOVE_SESSION", cwd: "/ws", sid: "b" });
+        assert.equal(next["/ws"]?.loadingSessionId, undefined);
+        assert.equal(next["/ws"]?.activeSession, "a");
+    });
+
+    it("starting a new chat abandons a pending load", () => {
+        let state: Record<string, WorkspaceState> = {
+            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b" }),
+        };
+        state = workspacesReducer(state, { type: "BEGIN_PENDING_NEW_SESSION", cwd: "/ws" });
+        assert.equal(state["/ws"]?.loadingSessionId, undefined);
+        const settled = state;
+        state = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "b",
+            messages: newMsgs,
+        });
+        assert.equal(state, settled);
+    });
+});
+
 describe("workspacesReducer — guards", () => {
     it("returns state unchanged for unknown cwd", () => {
         const state = { "/ws": baseWs() };
@@ -781,7 +903,7 @@ describe("subagent actions", () => {
             },
         ];
         const next = workspacesReducer(
-            { "/ws": baseWs({ activeSession: "other" }) },
+            { "/ws": baseWs({ activeSession: "other", loadingSessionId: "main-1" }) },
             {
                 type: "ATTACH",
                 cwd: "/ws",
@@ -1191,6 +1313,7 @@ describe("subagent actions", () => {
                     "sub-1": [{ id: "m1", kind: "user", text: "x", ts: 1 } as UiMessage],
                 },
                 childHistoryLoaded: { "sub-1": [] },
+                loadingSessionId: "main-2",
             }),
         };
         const next = workspacesReducer(state, {
@@ -1600,7 +1723,11 @@ describe("workspacesReducer — per-session pending", () => {
 
     it("ATTACH to another session preserves the running session's slot", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "s1", pendingBySessionId: { s1: true } }),
+            "/ws": baseWs({
+                activeSession: "s1",
+                loadingSessionId: "s2",
+                pendingBySessionId: { s1: true },
+            }),
         };
         const next = workspacesReducer(state, {
             type: "ATTACH",

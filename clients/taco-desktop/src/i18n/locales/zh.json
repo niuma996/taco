@@ -686,7 +686,8 @@
     "copied": "已复制",
     "copyFailed": "复制失败",
     "thinkingShowAll": "展开全部",
-    "showEarlier_other": "显示更早的 {{count}} 条消息"
+    "showEarlier_other": "显示更早的 {{count}} 条消息",
+    "loadingSession": "正在加载会话"
   },
   "plan": {
     "modeTooltip": "Plan 模式:仅 plan 文档与只读 shell 命令可写;扩展贡献的工具不在约束范围内,使用前请人工核查其输出。"
