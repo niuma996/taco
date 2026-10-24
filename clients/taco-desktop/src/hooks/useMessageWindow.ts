@@ -42,33 +42,45 @@ export function useMessageWindow(
     }
     const start = Math.min(current.start, messages.length);
 
+    // The callbacks read the messages when they are called, so their identity
+    // never has to change: a stable navigation callback is what keeps the
+    // memoized guide from re-rendering on every streaming token.
+    const messagesRef = useRef(messages);
+    useLayoutEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
+
+    // The installed anchor's release, so a reveal can cancel it: clearing
+    // the pending anchor is not enough once its observer is watching.
+    const releaseAnchorRef = useRef<(() => void) | null>(null);
+
     const pendingAnchor = useRef<number | null>(null);
     const showEarlier = useCallback(() => {
         const el = scrollRef.current;
         if (el) pendingAnchor.current = el.scrollHeight - el.scrollTop;
         setState((s) => ({
             ...s,
-            start: turnStartAtOrBefore(messages, s.start - WINDOW_STEP),
+            start: turnStartAtOrBefore(messagesRef.current, s.start - WINDOW_STEP),
         }));
-    }, [messages, scrollRef]);
+    }, [scrollRef]);
 
     // Reveal an arbitrary row: the window start moves to the turn that holds
     // it, never past the current start. Drops any pending show-earlier anchor,
     // so expanding for a jump does not compensate the scroll position and pull
     // the viewport off the revealed row.
-    const revealTo = useCallback(
-        (index: number) => {
-            pendingAnchor.current = null;
-            setState((s) => ({
-                ...s,
-                start: turnStartAtOrBefore(messages, Math.max(0, Math.min(index, s.start))),
-            }));
-        },
-        [messages],
-    );
+    const revealTo = useCallback((index: number) => {
+        releaseAnchorRef.current?.();
+        releaseAnchorRef.current = null;
+        pendingAnchor.current = null;
+        setState((s) => ({
+            ...s,
+            start: turnStartAtOrBefore(messagesRef.current, Math.max(0, Math.min(index, s.start))),
+        }));
+    }, []);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: start is the trigger — the anchor applies once the expanded rows are in the DOM.
     useLayoutEffect(() => {
+        releaseAnchorRef.current = null;
         const el = scrollRef.current;
         const fromBottom = pendingAnchor.current;
         pendingAnchor.current = null;
@@ -88,7 +100,11 @@ export function useMessageWindow(
         for (const type of USER_SCROLL_EVENTS) {
             el.addEventListener(type, release, { passive: true });
         }
-        return release;
+        releaseAnchorRef.current = release;
+        return () => {
+            release();
+            if (releaseAnchorRef.current === release) releaseAnchorRef.current = null;
+        };
     }, [start, scrollRef]);
 
     return { start, showEarlier, revealTo };

@@ -132,6 +132,9 @@
     --guide-max-height: 60vh;
     --guide-preview-width: 20rem;
     --guide-preview-image-size: 3rem;
+    /* The preview body is bounded so it never grows past a screenful. */
+    --guide-preview-text-max-height: 12rem;
+    --guide-preview-shadow: 0 4px 16px var(--shadow-color);
     --guide-z-index: 4;
     --guide-motion-duration: 150ms;
 

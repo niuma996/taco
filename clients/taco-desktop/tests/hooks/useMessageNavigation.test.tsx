@@ -235,6 +235,29 @@ describe("useMessageNavigation", () => {
         assert.equal(result().highlightedId, "b");
     });
 
+    it("jumps instantly when the user prefers reduced motion", () => {
+        vi.stubGlobal(
+            "matchMedia",
+            vi.fn(() => ({ matches: true })),
+        );
+        const { result } = mount({ windowStart: 0 });
+        act(() => result().navigate(entry("b", 1)));
+        assert.deepEqual(scrollIntoView.mock.calls[0], [{ block: "center", behavior: "instant" }]);
+    });
+
+    it("reads the reduced-motion preference at jump time", () => {
+        let reduce = false;
+        vi.stubGlobal(
+            "matchMedia",
+            vi.fn(() => ({ matches: reduce })),
+        );
+        const { result } = mount({ windowStart: 0 });
+        // The preference changes while the app runs.
+        reduce = true;
+        act(() => result().navigate(entry("b", 1)));
+        assert.deepEqual(scrollIntoView.mock.calls[0], [{ block: "center", behavior: "instant" }]);
+    });
+
     it("keeps a revealed target centered while its content grows", async () => {
         vi.useFakeTimers();
         try {
@@ -513,5 +536,35 @@ describe("useMessageNavigation", () => {
         });
         scroller().dispatchEvent(new Event("scroll"));
         await waitFor(() => assert.equal(result().activeId, "a"));
+    });
+
+    it("recomputes the active item after a session switch", async () => {
+        const { result, rerender } = mount({
+            sessionId: "s1",
+            ids: ["a", "b", "c"],
+            tops: [0, 200, 400],
+        });
+        await waitFor(() => assert.equal(result().activeId, "a"));
+
+        // Another session opens: its own rows replace the old ones.
+        rerender({ sessionId: "s2", ids: ["x"], tops: [0] });
+        await waitFor(() => assert.equal(result().activeId, "x"));
+    });
+
+    it("cancels a pending target that disappeared, so the current item updates again", async () => {
+        const { result, rerender, scroller } = mount({ windowStart: 2, ids: ["a", "b", "c"] });
+        // The target is above the mounted window: the jump waits for a reveal.
+        act(() => result().navigate(entry("a", 0)));
+        assert.equal(result().activeId, "a");
+
+        // The message is gone from the session and the window does not move.
+        rerender({ ids: ["x", "b", "c"] });
+        // A scroll arrives: the current item must be calculated again instead
+        // of the stale pending freezing it.
+        scroller().dispatchEvent(new Event("scroll"));
+        await act(async () => {
+            await nextFrame();
+        });
+        assert.equal(result().activeId, "c");
     });
 });

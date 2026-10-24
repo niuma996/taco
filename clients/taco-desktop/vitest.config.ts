@@ -27,6 +27,7 @@ export default defineConfig({
             "tests/hooks/useStickToBottom.test.tsx",
             "tests/hooks/useMessageWindow.test.tsx",
             "tests/hooks/useMessageNavigation.test.tsx",
+            "tests/hooks/useStableUserMessageGuide.test.tsx",
             "tests/hooks/useDelayedFlag.test.tsx",
             "tests/components/ChatPaneLoading.test.tsx",
             "tests/hooks/useRightPanelAutoOpen.test.tsx",

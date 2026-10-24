@@ -53,6 +53,14 @@ describe("UserMessageGuide — 计数与当前项", () => {
         expect(screen.getByTestId("user-message-count").textContent).toBe("3");
     });
 
+    it("向读屏软件说明计数含义", () => {
+        render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
+        // The visible count stays the plain number.
+        expect(screen.getByTestId("user-message-count").textContent).toBe("3");
+        // The meaning of the number is available to assistive technology.
+        expect(screen.getByText("message.guideCountValue 3")).toBeTruthy();
+    });
+
     it("只给当前项打上 aria-current", () => {
         render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
         expect(marker(2).getAttribute("aria-current")).toBe("location");
@@ -106,6 +114,26 @@ describe("UserMessageGuide — 键盘交互", () => {
 
         fireEvent.click(marker(3));
         expect(onNavigate.mock.calls[0]?.[0].id).toBe("u3");
+    });
+
+    it("条目变少后仍然保留一个 Tab 停靠点", () => {
+        const many: UserMessageGuideEntry[] = Array.from({ length: 10 }, (_, i) => ({
+            id: `u${i}`,
+            messageIndex: i,
+            text: "",
+            images: [],
+        }));
+        const { rerender } = render(<UserMessageGuide entries={many} onNavigate={vi.fn()} />);
+        // The focus walked to the last marker of the long list.
+        fireEvent.keyDown(marker(1), { key: "End" });
+        expect(marker(10).getAttribute("tabindex")).toBe("0");
+
+        // A shorter session replaces the list, and no message is active.
+        rerender(<UserMessageGuide entries={ENTRIES} onNavigate={vi.fn()} />);
+        const tabbable = screen
+            .getAllByRole("button")
+            .filter((button) => button.getAttribute("tabindex") === "0");
+        expect(tabbable).toHaveLength(1);
     });
 });
 

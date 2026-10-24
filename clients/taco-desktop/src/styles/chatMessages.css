@@ -454,9 +454,10 @@
 }
 
 .user-message-guide__marker:focus-visible {
-    /* --focus-ring is a full box-shadow value, not a colour — an `outline`
-       declaration built from it is invalid and would drop the UA focus ring
-       with it. */
+    /* The ring is a box-shadow: --focus-ring is a full shadow value, not a
+       colour, so it cannot be built into an outline. The UA's own outline is
+       reset so the marker shows one ring, not two. */
+    outline: none;
     box-shadow: var(--focus-ring);
 }
 
@@ -494,7 +495,7 @@
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
     color: var(--fg);
-    box-shadow: 0 4px 16px var(--shadow-color);
+    box-shadow: var(--guide-preview-shadow);
     z-index: var(--guide-z-index);
 }
 
@@ -509,7 +510,7 @@
     /* Long unbroken tokens must not widen the preview. */
     overflow-wrap: anywhere;
     /* Bounded block: the preview never grows past a screenful of text. */
-    max-height: 12rem;
+    max-height: var(--guide-preview-text-max-height);
     overflow: hidden;
     font-size: var(--text-sm);
     line-height: var(--leading-normal);

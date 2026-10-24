@@ -14,7 +14,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ArrowUp, Image, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { EmptyChatState } from "../components/EmptyChatState";
@@ -30,11 +30,11 @@ import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
 import { useMessageNavigation } from "../hooks/useMessageNavigation";
 import { useMessageWindow } from "../hooks/useMessageWindow";
+import { useStableUserMessageGuide } from "../hooks/useStableUserMessageGuide";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import type { QueuedUiItem, UiMessage } from "../lib/chat/chatUtils";
 import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
-import { buildUserMessageGuide } from "../lib/chat/userMessageGuide";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import { MAX_ATTACHMENTS } from "../lib/imageAttachment";
@@ -274,7 +274,7 @@ export function ChatPane(props: ChatPaneProps) {
 
     // The guide indexes every user message of the session, including the rows
     // the render window has not mounted yet.
-    const guideEntries = useMemo(() => buildUserMessageGuide(messages), [messages]);
+    const guideEntries = useStableUserMessageGuide(messages);
     // The rail belongs to a real conversation: the skeleton and the empty chat
     // have no user messages to index.
     const guideEnabled = !showSkeleton && !isEmptyChat;

@@ -196,6 +196,41 @@ describe("useStickToBottom", () => {
         assert.equal(g.top, 240);
     });
 
+    it("re-arms the follow when the user returns to the bottom", async () => {
+        const { el, g, unpin } = mountPinned();
+        // A guide jump took over the scroll position.
+        unpin();
+        // The user wheels back down to the bottom.
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: 120 }));
+        g.top = g.scrollHeight - g.clientHeight;
+        el.dispatchEvent(new Event("scroll"));
+        // Content grows: the follow is armed again.
+        grow(el, g, 40);
+        await waitFor(() => assert.equal(g.top, 240));
+    });
+
+    it("re-arms the follow when a downward key returns the view to the bottom", async () => {
+        const { el, g, unpin } = mountPinned();
+        unpin();
+        el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+        g.top = g.scrollHeight - g.clientHeight;
+        el.dispatchEvent(new Event("scroll"));
+        grow(el, g, 40);
+        await waitFor(() => assert.equal(g.top, 240));
+    });
+
+    it("does not re-arm the follow when a programmatic scroll reaches the bottom", async () => {
+        const { el, g, unpin } = mountPinned();
+        unpin();
+        // The jump sets the scroll position itself: no user input involved.
+        g.top = g.scrollHeight - g.clientHeight;
+        el.dispatchEvent(new Event("scroll"));
+        grow(el, g, 40);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 200);
+    });
+
     it("re-snaps when resetKey changes", () => {
         let el: HTMLDivElement | undefined;
         let g: ReturnType<typeof fakeGeometry> | undefined;

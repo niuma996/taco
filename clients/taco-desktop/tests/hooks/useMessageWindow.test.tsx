@@ -101,4 +101,43 @@ describe("useMessageWindow", () => {
         act(() => result.current.revealTo(before + 1));
         assert.equal(result.current.start, before);
     });
+
+    it("releases a show-earlier anchor when a reveal takes over the scroll", async () => {
+        const el = document.createElement("div");
+        Object.defineProperty(el, "scrollHeight", {
+            configurable: true,
+            get: () => 1000,
+        });
+        el.scrollTop = 400;
+        const ref = { current: el };
+        const msgs = conversation(50, 2);
+        const { result } = renderHook(() => useMessageWindow(msgs, "s1", ref));
+
+        act(() => result.current.showEarlier());
+        // The anchor keeps the distance from the bottom: rows that finish
+        // rendering above the viewport are compensated.
+        el.scrollTop = 0;
+        el.appendChild(document.createElement("p"));
+        await flushMutations();
+        assert.equal(el.scrollTop, 400);
+
+        // A reveal inside the expanded window leaves the start where it is, so
+        // the anchor would keep fighting the navigation.
+        const start = result.current.start;
+        act(() => result.current.revealTo(start + 1));
+        assert.equal(result.current.start, start);
+
+        el.scrollTop = 0;
+        el.appendChild(document.createElement("p"));
+        await flushMutations();
+        assert.equal(el.scrollTop, 0);
+    });
 });
+
+/** Lets the mutation observers deliver their records. */
+async function flushMutations(): Promise<void> {
+    await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+}

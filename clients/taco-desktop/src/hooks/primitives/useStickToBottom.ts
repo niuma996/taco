@@ -9,6 +9,9 @@ const USER_INPUT_WINDOW_MS = 250;
 /** Keys that scroll a focused container upward. */
 const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
 
+/** Keys that scroll a focused container downward. */
+const DOWNWARD_KEYS = new Set(["ArrowDown", "PageDown", "End", " ", "Spacebar"]);
+
 /**
  * Keep a scroll container pinned to its bottom while content grows, unless the
  * user has scrolled up away from it. Snaps to the bottom on mount and whenever
@@ -40,7 +43,8 @@ const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
  * that take over the scroll position themselves. An explicit unpin also
  * outranks the near-bottom heuristic: the jump sets scrollTop and the browser
  * dispatches a scroll for it, which must not re-arm the follow and pull the
- * viewport back to the bottom. `pin` clears it again.
+ * viewport back to the bottom. `pin` clears it again — and so does the user
+ * scrolling back to the bottom on their own, which must re-arm the follow.
  */
 export function useStickToBottom(
     ref: RefObject<HTMLElement | null>,
@@ -77,7 +81,17 @@ export function useStickToBottom(
             // At the very bottom first: content shrinking clamps scrollTop
             // down, which must not read as the user scrolling up.
             if (distance <= 1) {
-                if (!explicitlyUnpinned) stick = true;
+                if (explicitlyUnpinned) {
+                    // The user came back to the bottom on their own: the
+                    // follow is armed again. A programmatic scroll must not
+                    // re-arm it, so the user input decides.
+                    if (userActive()) {
+                        explicitlyUnpinned = false;
+                        stick = true;
+                    }
+                } else {
+                    stick = true;
+                }
             } else if (top < lastTop) {
                 if (userActive()) stick = false;
             } else if (distance <= NEAR_BOTTOM_PX) {
@@ -99,7 +113,11 @@ export function useStickToBottom(
             if (UPWARD_KEYS.has(e.key)) {
                 markInput();
                 stick = false;
+                return;
             }
+            // A downward key is user activity too: it must be able to bring
+            // the follow back.
+            if (DOWNWARD_KEYS.has(e.key)) markInput();
         };
         // Content covers the container, so a pointerdown whose target is the
         // container itself is on its scrollbar.

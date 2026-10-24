@@ -693,7 +693,7 @@
     "showEarlier_other": "Show {{count}} earlier messages",
     "loadingSession": "Loading session",
     "guideLabel": "User message navigation",
-    "guideCount": "Total user messages",
+    "guideCountValue": "{{count}} user messages",
     "guideItem": "Jump to user message {{index}}",
     "guidePosition": "{{index}} of {{total}}",
     "guideImageOnly": "Image message",

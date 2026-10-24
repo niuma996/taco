@@ -109,6 +109,16 @@ function scrollToTarget(node: HTMLElement, behavior: ScrollBehavior): void {
     node.scrollIntoView({ block: "center", behavior });
 }
 
+/**
+ * Scroll behavior of a jump. The reduced-motion preference is read at jump
+ * time, not when the hook was built: it can change while the app runs, and a
+ * captured value would keep animating after the user asked for stillness.
+ */
+function jumpBehavior(): ScrollBehavior {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return reduce ? "instant" : "smooth";
+}
+
 export function useMessageNavigation({
     scrollRef,
     sessionId,
@@ -132,12 +142,34 @@ export function useMessageNavigation({
     const rafRef = useRef<number | null>(null);
     /** Whether a jump holds the current item against the scroll position. */
     const holdRef = useRef(false);
+    /** Index of the first mounted row — a pending target's window. */
+    const windowStartRef = useRef(windowStart);
+    /** Window the pending jump started in: a window that never moved cannot
+     * cover the target any more. */
+    const pendingWindowStartRef = useRef<number | null>(null);
+
+    useLayoutEffect(() => {
+        windowStartRef.current = windowStart;
+    }, [windowStart]);
 
     const updateCurrent = useCallback(() => {
         if (holdRef.current) return;
-        if (pendingRef.current) return;
         const el = scrollRef.current;
         if (!el) return;
+        const pending = pendingRef.current;
+        if (pending) {
+            // A pending target whose window never moved cannot be covered
+            // any more: the session no longer has it. Left alone it would
+            // freeze the current item for good.
+            const stale =
+                windowStartRef.current === pendingWindowStartRef.current &&
+                !findTarget(el, pending.id);
+            if (!stale) return;
+            pendingRef.current = null;
+            pendingSessionRef.current = undefined;
+            pendingWindowStartRef.current = null;
+            setPending(null);
+        }
         const id = currentMessageId(el);
         if (id !== undefined) setActiveId(id);
     }, [scrollRef]);
@@ -295,14 +327,16 @@ export function useMessageNavigation({
                 // the rows to appear.
                 pendingRef.current = entry;
                 pendingSessionRef.current = sessionId;
+                pendingWindowStartRef.current = windowStartRef.current;
                 setPending(entry);
                 revealTo(entry.messageIndex);
                 return;
             }
             pendingRef.current = null;
             pendingSessionRef.current = undefined;
+            pendingWindowStartRef.current = null;
             setPending(null);
-            scrollToTarget(node, "smooth");
+            scrollToTarget(node, jumpBehavior());
             startJump(token, "smooth");
         },
         [revealTo, scrollRef, sessionId, startJump, unpin],
@@ -317,6 +351,7 @@ export function useMessageNavigation({
         const node = findTarget(el, pending.id);
         pendingRef.current = null;
         pendingSessionRef.current = undefined;
+        pendingWindowStartRef.current = null;
         setPending(null);
         if (!node) return;
         const token = tokenRef.current;
@@ -333,6 +368,7 @@ export function useMessageNavigation({
         endJump(false);
         pendingRef.current = null;
         pendingSessionRef.current = undefined;
+        pendingWindowStartRef.current = null;
         setPending(null);
         setActiveId(undefined);
         setHighlightedId(undefined);
@@ -340,6 +376,9 @@ export function useMessageNavigation({
 
     // The scroll position decides the current item. One frame per burst of
     // scroll events keeps the guide in step without a layout read per event.
+    // The session is part of the lifecycle: a switch brings another
+    // conversation's rows, and the current item has to be read from them.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: the session is the trigger — it is not read inside the effect.
     useEffect(() => {
         const el = scrollRef.current;
         if (!el || !enabled) return;
@@ -357,7 +396,7 @@ export function useMessageNavigation({
         return () => {
             el.removeEventListener("scroll", onScroll);
         };
-    }, [enabled, scheduleUpdate, scrollRef]);
+    }, [enabled, scheduleUpdate, scrollRef, sessionId]);
 
     // The user always wins: any of these ends the jump, its correction and
     // the hold on the current item.

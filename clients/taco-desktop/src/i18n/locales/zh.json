@@ -689,7 +689,7 @@
     "showEarlier_other": "显示更早的 {{count}} 条消息",
     "loadingSession": "正在加载会话",
     "guideLabel": "用户消息导航",
-    "guideCount": "用户消息总数",
+    "guideCountValue": "共 {{count}} 条用户消息",
     "guideItem": "跳转到第 {{index}} 条用户消息",
     "guidePosition": "第 {{index}} / 共 {{total}} 条",
     "guideImageOnly": "图片消息",

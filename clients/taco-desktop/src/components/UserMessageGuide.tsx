@@ -11,11 +11,15 @@
  * Radix HoverCard owns the preview's portal, collision avoidance and focus
  * handling. What lives here is the roving tabindex over the markers and the
  * small correction that keeps the active marker inside the rail's band.
+ *
+ * Memoized: the chat re-renders on every streaming token, and the rail must
+ * not follow it. Its props have to be stable for that to hold — the entries
+ * come from `useStableUserMessageGuide`, the navigation callback is stable.
  */
 
 import * as HoverCard from "@radix-ui/react-hover-card";
 import type { KeyboardEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useT } from "../i18n/useI18n";
 import type { UserMessageGuideEntry } from "../lib/chat/userMessageGuide";
@@ -105,7 +109,11 @@ function GuidePreview({ entry, index, total }: GuidePreviewProps) {
     );
 }
 
-export function UserMessageGuide({ entries, activeId, onNavigate }: UserMessageGuideProps) {
+export const UserMessageGuide = memo(function UserMessageGuide({
+    entries,
+    activeId,
+    onNavigate,
+}: UserMessageGuideProps) {
     const { t } = useT();
     const railRef = useRef<HTMLDivElement | null>(null);
     const markersRef = useRef(new Map<string, HTMLButtonElement>());
@@ -117,10 +125,16 @@ export function UserMessageGuide({ entries, activeId, onNavigate }: UserMessageG
     );
 
     // The tab stop follows the active message, so Tab enters the rail on the
-    // row the chat is showing rather than on a stale position.
+    // row the chat is showing rather than on a stale position. Without an
+    // active message the index has to be clamped: a shorter list would
+    // otherwise leave every marker outside the tab order.
     useEffect(() => {
-        if (activeIndex >= 0) setFocusIndex(activeIndex);
-    }, [activeIndex]);
+        if (activeIndex >= 0) {
+            setFocusIndex(activeIndex);
+            return;
+        }
+        setFocusIndex((index) => Math.min(index, Math.max(0, entries.length - 1)));
+    }, [activeIndex, entries.length]);
 
     // Keep the active marker inside the rail's visible band. The rail scrolls
     // on its own, so the chat's scroll position stays untouched.
@@ -178,10 +192,13 @@ export function UserMessageGuide({ entries, activeId, onNavigate }: UserMessageG
 
     return (
         <nav className="user-message-guide" aria-label={t("message.guideLabel")}>
+            <span className="sr-only">
+                {t("message.guideCountValue", { count: entries.length })}
+            </span>
             <div
                 className="user-message-guide__count"
                 data-testid="user-message-count"
-                aria-label={t("message.guideCount")}
+                aria-hidden="true"
             >
                 {entries.length}
             </div>
@@ -226,4 +243,4 @@ export function UserMessageGuide({ entries, activeId, onNavigate }: UserMessageG
             </div>
         </nav>
     );
-}
+});
