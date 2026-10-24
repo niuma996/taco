@@ -322,6 +322,59 @@ describe("useMessageNavigation", () => {
         }
     });
 
+    it("follows the scroll position again after a jump has settled", async () => {
+        vi.useFakeTimers();
+        try {
+            // Every row sits below the middle, so the viewport shows the
+            // first one until the user scrolls further down.
+            const { result, rerender, scroller } = mount({
+                windowStart: 0,
+                tops: [0, 200, 400],
+            });
+            act(() => result().navigate(entry("b", 1)));
+            // The browser animates the jump and reports it.
+            scroller().dispatchEvent(new Event("scroll"));
+            // The animation ends on its own.
+            await act(async () => {
+                vi.advanceTimersByTime(300);
+            });
+            assert.equal(result().activeId, "a");
+
+            // The user scrolls: the current item follows the viewport.
+            rerender({ tops: [0, 200, 10] });
+            scroller().dispatchEvent(new Event("scroll"));
+            await act(async () => {
+                vi.advanceTimersByTime(50);
+            });
+            assert.equal(result().activeId, "c");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not revive a jump that has already ended", async () => {
+        vi.useFakeTimers();
+        try {
+            const { result, scroller } = mount({ windowStart: 0 });
+            act(() => result().navigate(entry("b", 1)));
+            scroller().dispatchEvent(new Event("scroll"));
+            await act(async () => {
+                vi.advanceTimersByTime(300);
+            });
+            // The jump is over: a scroll must not arm its timers again. The
+            // only timer a scroll may leave behind is the frame that updates
+            // the current item.
+            const before = vi.getTimerCount();
+            scroller().dispatchEvent(new Event("scroll"));
+            await act(async () => {
+                vi.advanceTimersByTime(50);
+            });
+            assert.equal(vi.getTimerCount(), before);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("ignores a streaming change that does not move the target", async () => {
         const { result, rerender, scroller } = mount({ windowStart: 2 });
         act(() => result().navigate(entry("a", 0)));

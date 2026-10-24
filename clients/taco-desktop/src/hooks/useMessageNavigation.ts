@@ -180,6 +180,11 @@ export function useMessageNavigation({
             const finish = (recompute: boolean): void => {
                 if (ended) return;
                 ended = true;
+                // The jump is over, so it must leave the registry. A stale
+                // entry would keep the scroll handler calling into it, which
+                // both re-arms its timers and stops the current item from
+                // following the scroll position.
+                if (jumpRef.current?.token === token) jumpRef.current = null;
                 if (settleTimer !== null) window.clearTimeout(settleTimer);
                 if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
                 for (const timer of timers) window.clearTimeout(timer);
