@@ -7,6 +7,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { bootstrapI18n, default as i18n } from "./i18n/index.ts";
 import { bootMark } from "./lib/bootTrace";
 import { getGlobalConfig, loadClientConfig } from "./lib/globalConfig.ts";
+import { preloadPeleWhenIdle } from "./lib/peleLoader";
 import { resolveTheme } from "./lib/theme";
 import "./components/toolViews"; // side-effect: register tool views before App renders
 import "./styles.css";
@@ -15,6 +16,10 @@ import "./styles.css";
 // `setup.done` and React mounting — in dev that span also covers Vite's module
 // graph transform, which is invisible from both the Rust and React sides.
 bootMark("ui.main.module_eval");
+
+// Mermaid diagrams render synchronously once Pele is in; fetch its chunk while
+// idle so the first diagram does not paint as source and then grow.
+preloadPeleWhenIdle();
 
 // Initialize i18next synchronously BEFORE render so the first paint uses the
 // persisted UI language (no English flash on a Chinese user).

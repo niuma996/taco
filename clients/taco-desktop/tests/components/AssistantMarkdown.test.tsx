@@ -146,6 +146,34 @@ describe("AssistantMarkdown code blocks", () => {
     );
 
     it(
+        "renders a diagram in its first paint once Pele is loaded",
+        async () => {
+            // Load Pele through a first diagram, then mount a second one: it
+            // must paint as an SVG straight away, not as source that later
+            // grows into a diagram and shoves the text below it.
+            const first = render(
+                <AssistantMarkdown text={"```mermaid\nflowchart LR\n  A --> B\n```\n"} />,
+            );
+            await waitFor(
+                () => {
+                    expect(first.container.querySelector(".md-mermaid svg")).toBeTruthy();
+                },
+                { timeout: 15000 },
+            );
+            first.unmount();
+
+            const { container } = render(
+                <AssistantMarkdown
+                    text={"Before\n\n```mermaid\nflowchart LR\n  C --> D\n```\n\nAfter\n"}
+                />,
+            );
+            expect(container.querySelector(".md-mermaid svg")).toBeTruthy();
+            expect(container.querySelector(".md-mermaid")?.textContent).toContain("C");
+        },
+        SHIKI_TEST_TIMEOUT_MS,
+    );
+
+    it(
         "keeps generic labels like List<T> instead of dropping the parameter",
         async () => {
             const { container } = render(
