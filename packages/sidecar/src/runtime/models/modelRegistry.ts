@@ -132,11 +132,20 @@ export function applyBuiltinProviders(
  * `api`/`baseUrl` inherit from the provider's first static model so the new
  * model streams through the same protocol implementation.
  *
- * `reasoning`, `maxTokens`, `compat` and `thinkingLevelMap` inherit from that
- * template too. The provider already knows whether its models think;
- * overriding `reasoning: false` for a thinking model leaves pi unable to send
+ * `reasoning`, `maxTokens` and `compat` inherit from that template too. The
+ * provider already knows whether its models think; overriding `reasoning:
+ * false` for a thinking model leaves pi unable to send
  * `thinking: {type:"disabled"}`, and the provider then reasons by default —
  * spending the output budget on reasoning and returning no text.
+ *
+ * The thinking levels do NOT inherit, and that is deliberate. pi sends
+ * `thinking: {type:"disabled"}` whenever a call omits a reasoning level and
+ * the model is marked as reasoning — unless the level map says the provider
+ * has no "off" (`thinkingLevelMap.off === null`, the shape Anthropic's own
+ * catalog uses). A user-added model is a variant the provider's catalog does
+ * not describe, so it may well reject that flag: MiniMax M3.1 answers
+ * `requires adaptive thinking` with HTTP 400. Declaring "off" as null keeps
+ * the provider on its own default instead of asking it to stop thinking.
  */
 function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | undefined {
     const template = base.getModels()[0];
@@ -148,12 +157,13 @@ function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | und
         provider: base.id,
         baseUrl: template.baseUrl,
         reasoning: entry.reasoning ?? template.reasoning,
-        // Protocol quirks and supported thinking levels belong to the api
-        // implementation the added model shares: without the template's
-        // compat, pi would send budget-based thinking to a model that only
-        // accepts effort levels.
+        // Protocol quirks belong to the api implementation the added model
+        // shares: without the template's compat, pi would send budget-based
+        // thinking to a model that only accepts effort levels.
         ...(template.compat ? { compat: template.compat } : {}),
-        ...(template.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {}),
+        // "off" maps to null: this model cannot be asked to stop thinking.
+        // The template's own mapping wins when it names an "off" level.
+        thinkingLevelMap: { off: null, ...(template.thinkingLevelMap ?? {}) },
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: entry.contextWindow ?? DEFAULT_CUSTOM_CONTEXT_WINDOW,

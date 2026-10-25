@@ -561,6 +561,58 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.equal(extra?.maxTokens, 65_536);
         });
 
+        it("an added model declares the off thinking level unsupported, so pi never disables thinking", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            const thinking = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [{ ...template, reasoning: true }],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => thinking }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            const extra = models.getModel("stub-a", "extra-1");
+            // pi's own rule (anthropic-messages adapter): a call that omits a
+            // reasoning level sends `thinking: {type:"disabled"}` unless the
+            // level map says the model has no "off". A provider that rejects
+            // that flag answers HTTP 400, and the request comes back empty.
+            assert.equal(extra?.thinkingLevelMap?.off, null);
+            const sendsDisabled =
+                extra?.reasoning === true && extra?.thinkingLevelMap?.off !== null;
+            assert.equal(sendsDisabled, false, "pi must not disable thinking for this model");
+        });
+
+        it("the template's own thinking level map wins over the default off", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            const thinking = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [
+                    {
+                        ...template,
+                        reasoning: true,
+                        thinkingLevelMap: { off: null, xhigh: "xhigh" },
+                    },
+                ],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => thinking }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            const extra = models.getModel("stub-a", "extra-1");
+            assert.equal(extra?.thinkingLevelMap?.off, null);
+            assert.equal(extra?.thinkingLevelMap?.xhigh, "xhigh", "the provider's levels survive");
+        });
+
         it("the user can declare a model as non-reasoning over its provider's default", () => {
             const store = new ProviderKeyStore({});
             const template = stubProvider("stub-a", "model-a").getModels()[0];

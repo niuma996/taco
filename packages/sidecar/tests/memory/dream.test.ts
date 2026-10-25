@@ -616,6 +616,17 @@ describe("runDream", () => {
         assert.equal(readPendingDream(store)?.actions.length, 1);
     });
 
+    it("a reply that never names the actions array is not salvaged", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        // Prose with brackets and a stray object: nothing points at a plan, so
+        // there is nothing to recover and the run fails rather than guessing.
+        const prose = 'I could not decide [maybe merge the two] {"action":"rewrite","id":"c"}';
+        const outcome = await runDream(fakeDeps(store, prose), { now: fixedNow });
+        assert.equal(outcome.status, "failed");
+        assert.equal(readPendingDream(store), undefined);
+    });
+
     it("a pending preview blocks further scheduled runs; discard clears it", async () => {
         const store = mkStore();
         await seed(store, ten());

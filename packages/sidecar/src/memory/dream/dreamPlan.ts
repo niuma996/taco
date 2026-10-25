@@ -204,8 +204,12 @@ export function parseDreamActions(raw: string): ParsedDreamPlan | null {
  * action is one the model actually committed to.
  */
 function salvageActionObjects(raw: string): unknown[] {
+    // Only a reply that names the actions array is salvageable. Starting from
+    // an arbitrary "[" would pick up brackets from prose and scan objects
+    // that were never part of a plan.
     const keyAt = raw.indexOf('"actions"');
-    const arrayAt = raw.indexOf("[", keyAt >= 0 ? keyAt : 0);
+    if (keyAt < 0) return [];
+    const arrayAt = raw.indexOf("[", keyAt);
     if (arrayAt < 0) return [];
 
     const out: unknown[] = [];
