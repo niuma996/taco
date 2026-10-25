@@ -160,6 +160,9 @@ export interface MemoryListResult {
      *  when the daemon has no scheduler (stdio / tests). Toggled via
      *  `jobs.update` on the `memory-dream` job. */
     dreamScheduled?: boolean;
+    /** Why the scheduler turned the job off by itself (repeated failures);
+     *  absent when it is on, or when the user turned it off. */
+    dreamPausedReason?: string;
 }
 
 /** `memory.write` params — overwrites MEMORY.md wholesale. `baseHash` provides optimistic concurrency. */
@@ -177,6 +180,9 @@ export interface MemoryWriteResult {
 export interface MemoryDeleteTopicParams {
     workspace: WorkspaceId;
     id: string;
+    /** The content the client last showed; when it no longer matches disk the
+     *  delete is refused with `memory.conflict`. Optional for older clients. */
+    expectedContent?: string;
 }
 export interface MemoryDeleteTopicResult {
     ok: true;

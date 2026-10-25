@@ -57,6 +57,7 @@ import {
     runDream,
     undoDreamReport,
 } from "../../memory/dream/consolidator.ts";
+import { resolveDreamModel } from "../../memory/dream/dreamModel.ts";
 import type { DreamOptions } from "../../memory/dream/dreamPlan.ts";
 import {
     listDreamReportIds,
@@ -67,6 +68,7 @@ import {
 import { hashOf, LocalMemoryStore } from "../../memory/local/store.ts";
 import type { MemoryStore } from "../../memory/types.ts";
 import { MemoryConflictError, normalizeMemoryTopicId } from "../../memory/types.ts";
+import type { Api, Model, Models } from "../../runtime/pi/types.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import {
     MEMORY_DREAM_JOB_ID,
@@ -102,8 +104,12 @@ function toWireTopic(entry: {
  * same store call; routing them through one helper keeps a future change
  * (audit log, cache invalidation) from landing on only one of them.
  */
-async function deleteTopic(store: MemoryStore, id: string): Promise<void> {
-    await store.deleteTopic(id);
+async function deleteTopic(
+    store: MemoryStore,
+    id: string,
+    expectedContent?: string,
+): Promise<void> {
+    await store.deleteTopic(id, expectedContent === undefined ? undefined : { expectedContent });
 }
 
 /** Applied runs listed on `memory.list`; older reports stay on disk. */
@@ -185,6 +191,9 @@ export function registerMemoryHandlers(): void {
                 enabled: store.enabled,
                 ...(store instanceof LocalMemoryStore ? { dream: readDreamState(store) } : {}),
                 ...(dreamJob ? { dreamScheduled: dreamJob.enabled } : {}),
+                ...(dreamJob && !dreamJob.enabled && dreamJob.disabled_reason
+                    ? { dreamPausedReason: dreamJob.disabled_reason }
+                    : {}),
             };
         },
         { schema: memoryListSchema },
@@ -318,7 +327,13 @@ export function registerMemoryHandlers(): void {
             workspace,
             params,
         }: MethodCtx<MemoryDeleteTopicParams>): Promise<MemoryDeleteTopicResult> => {
-            await deleteTopic(workspace.memoryStore, params.id);
+            const expected =
+                typeof params.expectedContent === "string" ? params.expectedContent : undefined;
+            try {
+                await deleteTopic(workspace.memoryStore, params.id, expected);
+            } catch (error) {
+                throw asConflict(error);
+            }
             return { ok: true };
         },
         { schema: memoryDeleteTopicSchema },
@@ -383,10 +398,16 @@ export function registerMemoryHandlers(): void {
                     return { ok: true, outcome: "created" };
                 }
                 case "replace": {
-                    if (params.content === undefined) {
+                    // Same content rule as add: an empty replace blanks the
+                    // topic, and an oversized one would be injected unbounded.
+                    if (
+                        typeof params.content !== "string" ||
+                        params.content.trim() === "" ||
+                        params.content.length > MEMORY_CONTENT_MAX_CHARS
+                    ) {
                         throw new RpcHandlerError(
                             ErrorCodes.InvalidParams,
-                            "memory.upsert replace: content required",
+                            `memory.upsert replace: content required, ≤${MEMORY_CONTENT_MAX_CHARS}`,
                         );
                     }
                     await store.updateTopic(validatedId, params.content);
@@ -409,40 +430,40 @@ export function registerMemoryHandlers(): void {
 }
 
 /**
- * Model for a manual run: the scheduled job's `args.model` when set (so the
- * preview matches what the nightly run would do), else this workspace's
- * default model. Knobs come from the job's args too.
+ * Model and options for a manual run, resolved as the scheduled job resolves
+ * them — the job's `args.model`, else the global default model — so the
+ * preview shows the plan the nightly run would make.
+ *
+ * With no global default configured, the workspace's own default stands in:
+ * the scheduled job has nothing to run with then (it skips), but the user who
+ * pressed the button can still preview with the model their chats use.
  */
 async function resolveManualDreamModel(
     workspace: WorkspaceRuntime,
     server: MethodCtx<unknown>["server"],
 ): Promise<{
-    models: WorkspaceRuntime["models"];
-    model: NonNullable<WorkspaceRuntime["defaultModel"]>;
+    models: Models;
+    model: Model<Api>;
     options: Partial<DreamOptions>;
 }> {
     const job = server.jobs ? await server.jobs.get(MEMORY_DREAM_JOB_ID) : null;
     const parsed = job ? parseMemoryDreamArgs(job.args) : undefined;
     const { model: override, ...options }: MemoryDreamArgs = parsed?.ok ? parsed.args : {};
-    let model = workspace.defaultModel;
+    const resolved = server.providerKeyStore
+        ? resolveDreamModel(server.providerKeyStore, override)
+        : undefined;
+    if (resolved) return { ...resolved, options };
     if (override) {
-        const slash = override.indexOf("/");
-        const found =
-            slash > 0
-                ? workspace.models.getModel(override.slice(0, slash), override.slice(slash + 1))
-                : workspace.models.getModels().find((m) => m.id === override);
-        if (!found) {
-            throw new RpcHandlerError(
-                ErrorCodes.InvalidParams,
-                `memory consolidation model not found: ${override}`,
-            );
-        }
-        model = found as typeof model;
+        throw new RpcHandlerError(
+            ErrorCodes.InvalidParams,
+            `memory consolidation model not found: ${override}`,
+        );
     }
-    if (!model)
+    if (!workspace.defaultModel) {
         throw new RpcHandlerError(
             ErrorCodes.InvalidParams,
             "no model available for memory consolidation",
         );
-    return { models: workspace.models, model, options };
+    }
+    return { models: workspace.models, model: workspace.defaultModel, options };
 }

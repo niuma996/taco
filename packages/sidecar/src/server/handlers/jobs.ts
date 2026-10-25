@@ -268,6 +268,14 @@ function assertJob(params: unknown, field: string, requireId = false): Job {
     // actionable (a clear invalid_params) instead of a recurring err entry
     // in the job's history. When a real second command shows up, add it to
     // the set AND wire the dispatcher to handle it.
+    // A client from before built-in jobs edits one without echoing
+    // `builtin: true`; say so instead of the agent.invoke message below.
+    if (typeof obj.command === "string" && BUILTIN_JOB_COMMANDS.has(obj.command)) {
+        throw new RpcHandlerError(
+            "invalid_params",
+            `${field}.command ${JSON.stringify(obj.command)} belongs to a built-in job; update the client to edit it`,
+        );
+    }
     if (obj.command !== "agent.invoke") {
         throw new RpcHandlerError(
             "invalid_params",

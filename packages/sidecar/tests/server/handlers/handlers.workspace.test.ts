@@ -659,6 +659,64 @@ describe("memory", () => {
             assert.equal(store.getTopic("user-role")?.content, "new body");
         });
 
+        it("replace refuses empty or oversized content", async () => {
+            const store = new LocalMemoryStore();
+            store.initialize("ws-test");
+            await store.appendEntry(sampleTopic);
+            const handler = getRegisteredMethod("memory.upsert");
+            assert.ok(handler);
+            for (const content of ["", "   ", "x".repeat(1001), 42]) {
+                await assert.rejects(
+                    Promise.resolve().then(() =>
+                        handler.handler(
+                            makeCtx(
+                                { memoryStore: store },
+                                {
+                                    workspace: "/tmp/ws",
+                                    action: "replace",
+                                    id: "user-role",
+                                    content,
+                                },
+                            ),
+                        ),
+                    ),
+                    /content required/,
+                );
+            }
+            assert.equal(store.getTopic("user-role")?.content, sampleTopic.content);
+        });
+
+        it("deleteTopic refuses when the topic changed since the client showed it", async () => {
+            const store = new LocalMemoryStore();
+            store.initialize("ws-test");
+            await store.appendEntry(sampleTopic);
+            const handler = getRegisteredMethod("memory.deleteTopic");
+            assert.ok(handler);
+            await assert.rejects(
+                Promise.resolve().then(() =>
+                    handler.handler(
+                        makeCtx(
+                            { memoryStore: store },
+                            { workspace: "/tmp/ws", id: "user-role", expectedContent: "stale" },
+                        ),
+                    ),
+                ),
+                /changed since it was read/,
+            );
+            assert.ok(store.getTopic("user-role"), "a stale delete leaves the topic in place");
+            await handler.handler(
+                makeCtx(
+                    { memoryStore: store },
+                    {
+                        workspace: "/tmp/ws",
+                        id: "user-role",
+                        expectedContent: store.getTopic("user-role")?.content,
+                    },
+                ),
+            );
+            assert.equal(store.getTopic("user-role"), undefined);
+        });
+
         it("replace writes updatedAt so listTopics wire response includes it", async () => {
             const store = new LocalMemoryStore();
             store.initialize("ws-test");

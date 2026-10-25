@@ -34,12 +34,27 @@ const MEMORY_INDEX_HEADER = "# Memory\n";
 /** Archived topics live here, below the topic dir, so injection never sees them. */
 export const ARCHIVE_DIR = "archive";
 
+/** Older archived copies of a re-archived id, under `archive/`. */
+const ARCHIVE_HISTORY_DIR = "history";
+
 /** Build a topic file body: YAML frontmatter + content. updatedAt omitted when undefined. */
+/** One frontmatter value: a newline would end the field and start another. */
+function frontmatterValue(value: string): string {
+    return value.replace(/[\r\n]+/g, " ").trim();
+}
+
 function buildTopicFile(entry: MemoryEntry): string {
-    const fm = [`name: ${entry.name}`, `description: ${entry.description}`, `type: ${entry.type}`];
+    const fm = [
+        `name: ${frontmatterValue(entry.name)}`,
+        `description: ${frontmatterValue(entry.description)}`,
+        `type: ${entry.type}`,
+    ];
     fm.push(`createdAt: ${entry.createdAt}`);
     if (entry.updatedAt) fm.push(`updatedAt: ${entry.updatedAt}`);
-    return `---\n${fm.join("\n")}\n---\n\n${entry.content}`;
+    // Trimmed because readTopicDir trims the body: what a write returns must
+    // equal what the next read sees, or a compare-and-swap against the
+    // returned content fails on whitespace alone.
+    return `---\n${fm.join("\n")}\n---\n\n${entry.content.trim()}`;
 }
 
 // ─── helper: hash ───────────────────────────────────────────────────────────────
@@ -124,10 +139,11 @@ export class LocalMemoryStore implements MemoryStore {
     private _dirKey?: string;
     /** Serialises read-modify-write on topic files (concurrent appends would lose entries). */
     private writeChain: Promise<unknown> = Promise.resolve();
-    /** Cached topic list, invalidated by the workspace dir's mtime and any
-     *  mutating write. buildMemoryBlock is called on every LLM context build,
-     *  so reading + parsing every topic file each time is O(n) sync I/O. */
-    private topicsCache: { mtimeMs: number; topics: MemoryEntry[] } | undefined;
+    /** Cached topic list, keyed by every topic file's mtime and size and
+     *  cleared by any mutating write. buildMemoryBlock is called on every LLM
+     *  context build, so reading + parsing every topic file each time is O(n)
+     *  sync I/O; a stat per file is far cheaper than a read + parse. */
+    private topicsCache: { signature: string; topics: MemoryEntry[] } | undefined;
     readonly enabled = true;
 
     private get workspaceDir(): string {
@@ -194,16 +210,15 @@ export class LocalMemoryStore implements MemoryStore {
         // Chain to serialize the read-modify-write. Each call extends the
         // chain; work runs in submission order even if callers don't await.
         const next = this.writeChain.then(() => {
-            if (this.getTopic(entry.id)) {
+            // Fresh read: a topic the model's write tool just created must
+            // block this add rather than be overwritten by it.
+            if (this.readTopicsFresh().some((e) => e.id === entry.id)) {
                 throw new Error(`memory topic already exists: ${entry.id}`);
             }
             this.writeTopicFile(entry);
-            // Invalidate the topics cache after every write — same pattern as
-            // updateTopic / deleteTopic. readTopicsCached's mtime check is
-            // unreliable on Windows (NTFS mtime granularity can keep two
-            // rapid same-tick writes at the same value), so the cache can
-            // otherwise return a stale list that pre-dates this append and
-            // miss the newly-written topic.
+            // Invalidate after every write, same as updateTopic / deleteTopic:
+            // two rapid writes can land on the same mtime (NTFS granularity),
+            // so the signature alone may not notice this append.
             this.topicsCache = undefined;
         });
         // Swallow rejections so one failure doesn't poison subsequent writers.
@@ -303,7 +318,7 @@ export class LocalMemoryStore implements MemoryStore {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
         const next = this.writeChain.then(() => {
-            const existing = this.readTopicsCached().find((e) => e.id === id);
+            const existing = this.readTopicsFresh().find((e) => e.id === id);
             if (!existing) throw new Error(`unknown memory topic: ${id}`);
             assertExpectedContent(existing, options);
             unlinkSync(join(this.workspaceDir, `${id}.md`));
@@ -320,22 +335,27 @@ export class LocalMemoryStore implements MemoryStore {
 
     /**
      * Move a topic into `archive/`, out of injection and `listTopics`. An
-     * existing archived copy with the same id is replaced: the newer archive
-     * is the one a restore should bring back.
+     * older archived copy with the same id is kept under `archive/history/`
+     * rather than overwritten: an undo may still need to bring it back, and
+     * the newest copy is the one a restore takes.
      */
     async archiveTopic(id: string, options?: { expectedContent?: string }): Promise<void> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
         const next = this.writeChain.then(() => {
-            const existing = this.readTopicsCached().find((e) => e.id === id);
+            const existing = this.readTopicsFresh().find((e) => e.id === id);
             if (!existing) throw new Error(`unknown memory topic: ${id}`);
             assertExpectedContent(existing, options);
             ensureDir(join(this.workspaceDir, ARCHIVE_DIR));
             const archivedPath = join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`);
-            // Windows rename does not replace an existing destination.
-            if (process.platform === "win32" && existsSync(archivedPath)) {
-                unlinkSync(archivedPath);
+            if (existsSync(archivedPath)) {
+                // readTopicDir ignores subdirectories, so history never shows
+                // up as an archived topic or a live one.
+                const historyDir = join(this.workspaceDir, ARCHIVE_DIR, ARCHIVE_HISTORY_DIR);
+                ensureDir(historyDir);
+                const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                renameSync(archivedPath, join(historyDir, `${id}.${stamp}.md`));
             }
             renameSync(join(this.workspaceDir, `${id}.md`), archivedPath);
             this.topicsCache = undefined;
@@ -363,7 +383,7 @@ export class LocalMemoryStore implements MemoryStore {
             }
             const from = join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`);
             if (!existsSync(from)) throw new Error(`unknown archived memory topic: ${id}`);
-            if (this.readTopicsCached().some((e) => e.id === id)) {
+            if (this.readTopicsFresh().some((e) => e.id === id)) {
                 throw new Error(`memory topic already exists: ${id}`);
             }
             renameSync(from, join(this.workspaceDir, `${id}.md`));
@@ -403,14 +423,14 @@ export class LocalMemoryStore implements MemoryStore {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
         const next = this.writeChain.then((): MemoryEntry => {
-            const topics = this.readTopicsCached();
+            const topics = this.readTopicsFresh();
             const existing = topics.find((e) => e.id === id);
             if (!existing) {
                 throw new Error(`unknown memory topic: ${id}`);
             }
             assertExpectedContent(existing, options);
             const updatedAt = new Date().toISOString();
-            const newEntry: MemoryEntry = { ...existing, content, updatedAt };
+            const newEntry: MemoryEntry = { ...existing, content: content.trim(), updatedAt };
             const path = join(this.workspaceDir, `${id}.md`);
             atomicWrite(path, buildTopicFile(newEntry));
             this.topicsCache = undefined;
@@ -423,27 +443,36 @@ export class LocalMemoryStore implements MemoryStore {
     // ── private helpers ────────────────────────────────────────────────────────
 
     /**
-     * Return the workspace's topics, cached against the workspace directory's
-     * mtime. buildMemoryBlock runs on every LLM context build; without a cache
-     * it would readdir + readFileSync + parse every topic file each call.
-     * Mutating writes (appendEntry / deleteTopic / updateTopic) clear the cache
-     * explicitly, so the mtime check only guards against external edits.
+     * Return the workspace's topics for reading (injection, listing), cached
+     * against a signature of every topic file's mtime and size.
+     *
+     * The directory mtime alone is not enough: the model's write / edit tools
+     * rewrite a topic file in place, which changes the file but not the
+     * directory, so a dir-mtime cache would keep serving the old content.
      */
     private readTopicsCached(): MemoryEntry[] {
         const dir = this.workspaceDir;
-        let mtimeMs: number;
-        try {
-            mtimeMs = statSync(dir).mtimeMs;
-        } catch {
+        const signature = topicDirSignature(dir);
+        if (signature === undefined) {
             this.topicsCache = undefined;
             return [];
         }
-        if (this.topicsCache && this.topicsCache.mtimeMs === mtimeMs) {
+        if (this.topicsCache && this.topicsCache.signature === signature) {
             return this.topicsCache.topics;
         }
         const topics = readTopicDir(dir, this._workspaceId);
-        this.topicsCache = { mtimeMs, topics };
+        this.topicsCache = { signature, topics };
         return topics;
+    }
+
+    /**
+     * Read the topics straight from disk, for the compare step of a
+     * compare-and-swap write. A cache hit there could compare against content
+     * an external edit already replaced and let a stale write through.
+     */
+    private readTopicsFresh(): MemoryEntry[] {
+        this.topicsCache = undefined;
+        return this.readTopicsCached();
     }
 
     /** Write a topic file at projects/{workspaceId}/{id}.md with frontmatter. */
@@ -491,6 +520,30 @@ export function readProjectTopics(workspaceId: string): MemoryEntry[] {
     return readTopicDir(root, workspaceId);
 }
 
+/**
+ * Change signature of a topic dir: name, mtime and size of every top-level
+ * `*.md`. Undefined when the directory cannot be read.
+ */
+function topicDirSignature(root: string): string | undefined {
+    let files: string[];
+    try {
+        files = readdirSync(root);
+    } catch {
+        return undefined;
+    }
+    const parts: string[] = [];
+    for (const file of files.sort()) {
+        if (!file.endsWith(".md")) continue;
+        try {
+            const stat = statSync(join(root, file));
+            parts.push(`${file}:${stat.mtimeMs}:${stat.size}`);
+        } catch {
+            // Vanished between readdir and stat: leave it out, as readTopicDir does.
+        }
+    }
+    return parts.join("|");
+}
+
 /** Parse every top-level `*.md` topic in `root`; subdirectories are ignored. */
 function readTopicDir(root: string, workspaceId?: string): MemoryEntry[] {
     if (!existsSync(root)) return [];
@@ -517,7 +570,10 @@ function readTopicDir(root: string, workspaceId?: string): MemoryEntry[] {
             // (Kept: an old_style fixture exercises it.)
             const fileCreatedAt =
                 frontmatter.createdAt ?? statSync(join(root, file)).mtime.toISOString();
-            const body = raw.replace(/^---[\s\S]+?---\r?\n/, "");
+            // The closing fence is the first "---" on a line of its own, the
+            // same rule parseTopicFrontmatter uses; an unanchored match would
+            // stop at a "---" inside a frontmatter value.
+            const body = raw.replace(/^---\r?\n[\s\S]+?\r?\n---\r?\n/, "");
             entries.push({
                 id,
                 name: frontmatter.name,

@@ -205,10 +205,15 @@ export class MemoryExtractorImpl implements MemoryExtractor {
 
     constructor(
         private readonly models: Models,
-        private readonly model: Model<Api>,
+        private model: Model<Api>,
         private readonly store: Pick<MemoryStore, "appendEntry" | "listTopics" | "updateTopic">,
         private readonly workspaceId: string,
     ) {}
+
+    /** Follow the session's model switch; the next extraction uses it. */
+    setModel(model: Model<Api>): void {
+        this.model = model;
+    }
 
     onRunEnd(messages: readonly AgentMessage[]): Promise<void> {
         const next = this.chain.then(async () => {

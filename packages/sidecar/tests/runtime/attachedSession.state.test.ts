@@ -330,6 +330,25 @@ describe("attachedSession.rememberCoord", () => {
             assert.deepEqual(extractor.calls[0].map(identify), ["user:m3", "user:m4"]);
         });
 
+        it("a compaction mid-run drops the offsets, so the run is not skipped", async () => {
+            const extractor = new MiniExtractor();
+            let buildIndex = 0;
+            const handlers = makeCoordinator(async () => {
+                buildIndex++;
+                // 8 messages at the memory call, then compaction shrinks it to 3.
+                return messages(buildIndex === 1 ? 8 : 3);
+            }, extractor);
+
+            handlers.onToolEnd("memory", false);
+            await flush();
+            handlers.onCompaction();
+            handlers.onRunEnd("completed");
+            await flush();
+
+            assert.equal(extractor.calls.length, 1, "the run still extracts");
+            assert.equal(extractor.calls[0]?.length, 3);
+        });
+
         it("offsets reset at run_end even while their snapshots are pending", async () => {
             const extractor = new MiniExtractor();
             let buildIndex = 0;

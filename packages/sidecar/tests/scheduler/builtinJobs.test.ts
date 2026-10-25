@@ -97,6 +97,16 @@ describe("built-in job seed", () => {
         });
     });
 
+    test("a freshly seeded built-in does not replay on the first boot", async () => {
+        await withTmp(async (dir) => {
+            const { ctrl } = await setup(dir);
+            const before = Date.now();
+            const seeded = await ctrl.seedBuiltin(defaultMemoryDreamJob());
+            ok(seeded.last_run_at, "seeded with a last run");
+            ok(Date.parse(seeded.last_run_at) >= before - 1000);
+        });
+    });
+
     test("seedBuiltin refuses a non-built-in job", async () => {
         await withTmp(async (dir) => {
             const { ctrl } = await setup(dir);

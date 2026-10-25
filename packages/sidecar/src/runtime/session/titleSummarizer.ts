@@ -101,10 +101,15 @@ function estimateTokens(text: string): number {
 export class TitleSummarizer {
     constructor(
         private readonly models: Models,
-        private readonly model: Model<Api>,
+        private model: Model<Api>,
         private readonly sessionId: SessionId,
         private readonly setSummaryTitle: (sessionId: SessionId, name: string) => Promise<boolean>,
     ) {}
+
+    /** Follow the session's model switch; a title not yet made uses it. */
+    setModel(model: Model<Api>): void {
+        this.model = model;
+    }
 
     /**
      * Fire-and-forget: called from every "completed" `run_end`. Never throws —

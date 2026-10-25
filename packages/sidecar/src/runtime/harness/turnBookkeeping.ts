@@ -77,10 +77,21 @@ interface MemoryExtractionHandlerArgs {
 /** Coordinate memory-tool offsets with one extraction per completed run. */
 export function createMemoryExtractionHandlers(args: MemoryExtractionHandlerArgs): {
     onToolEnd(toolName: string, isError: boolean): void;
+    onCompaction(): void;
     onRunEnd(status: "completed" | "aborted" | "failed"): void;
 } {
     const { buildContext, getExtractor } = args;
     let pendingRememberCounts: Promise<number>[] = [];
+
+    // An offset is a message count in the context at the time of the memory
+    // call. Compaction rewrites the context, so a count from before it can be
+    // past the new end and skip the whole run: drop the offsets and extract
+    // over the compacted context instead. The extractor sees the existing
+    // topics, so facts the model already saved come back as updates, not
+    // duplicates.
+    const onCompaction = (): void => {
+        pendingRememberCounts = [];
+    };
 
     const onToolEnd = (toolName: string, isError: boolean): void => {
         if (toolName !== "memory" || isError) return;
@@ -126,7 +137,7 @@ export function createMemoryExtractionHandlers(args: MemoryExtractionHandlerArgs
             });
     };
 
-    return { onToolEnd, onRunEnd };
+    return { onToolEnd, onCompaction, onRunEnd };
 }
 
 /** Subscribe the republish + turn-boundary handlers; returns their disposers. */
@@ -181,6 +192,9 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
                 pendingReads.delete(event.toolCallId);
                 if (!event.isError) usageTracker?.noteRead(path);
             }
+        }),
+        harness.events.on("compaction_end", () => {
+            memoryHandlers.onCompaction();
         }),
         harness.events.on("run_end", (event) => {
             memoryHandlers.onRunEnd(event.status);

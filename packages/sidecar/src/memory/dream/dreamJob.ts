@@ -20,7 +20,7 @@ import { LocalMemoryStore } from "../local/store.ts";
 import { type DreamOutcome, runDream } from "./consolidator.ts";
 import { resolveDreamModel } from "./dreamModel.ts";
 import type { DreamOptions } from "./dreamPlan.ts";
-import { readLastDreamAt } from "./dreamState.ts";
+import { dreamRetryAt, readLastDreamAt } from "./dreamState.ts";
 
 const log = createLogger("memory:dream-job");
 
@@ -30,6 +30,17 @@ const log = createLogger("memory:dream-job");
  * fire (or the boot catch-up), oldest-consolidated first.
  */
 export const MAX_WORKSPACES_PER_RUN = 5;
+
+/**
+ * Time one fire may spend on model calls, below the scheduler's five-minute
+ * fire timeout. A workspace is not started once the budget is spent, and the
+ * one in flight is cancelled at the deadline, so a fire never keeps applying
+ * plans after the history recorded it as timed out.
+ */
+export const DREAM_FIRE_BUDGET_MS = 4.5 * 60 * 1000;
+
+/** Summary of a fire that had no model to run with; not a failure. */
+export const NO_MODEL_SUMMARY = "skipped: no model is configured for memory consolidation";
 
 export interface DreamJobDeps {
     /** `false` when `memoryEnabled` is off: every fire is then a no-op. */
@@ -41,6 +52,8 @@ export interface DreamJobDeps {
 }
 
 export interface DreamJobRun {
+    /** Cancels the fire; defaults to a DREAM_FIRE_BUDGET_MS deadline. */
+    readonly signal?: AbortSignal;
     readonly force?: boolean;
     readonly options?: Partial<DreamOptions>;
     readonly model?: string;
@@ -58,20 +71,35 @@ export async function runDreamJob(
 ): Promise<DreamJobResult> {
     if (!deps.memoryEnabled()) return { summary: "skipped: memory is disabled", outcomes: [] };
     const resolved = deps.resolveModel(run.model);
-    if (!resolved) throw new Error("no model available for memory consolidation");
+    // No model is a setup gap, not a broken run: throwing would count toward
+    // the failure breaker and disable the job before the user adds a key.
+    if (!resolved) {
+        if (run.model) throw new Error(`memory consolidation model not found: ${run.model}`);
+        return { summary: NO_MODEL_SUMMARY, outcomes: [] };
+    }
+    const signal = run.signal ?? AbortSignal.timeout(DREAM_FIRE_BUDGET_MS);
 
-    // Least recently consolidated first, so a backlog drains fairly.
+    // Least recently consolidated first, so a backlog drains fairly; a
+    // workspace backing off after failures waits behind the rest.
     const keys = (deps.listDirKeys ?? LocalMemoryStore.listDirKeys)()
-        .map((dirKey) => ({ dirKey, store: LocalMemoryStore.openByKey(dirKey) }))
-        .sort((a, b) => readLastDreamAt(a.store.topicDir) - readLastDreamAt(b.store.topicDir));
+        .map((dirKey) => {
+            const store = LocalMemoryStore.openByKey(dirKey);
+            return {
+                dirKey,
+                store,
+                backoff: dreamRetryAt(store.topicDir) > Date.now() ? 1 : 0,
+                lastAt: readLastDreamAt(store.topicDir),
+            };
+        })
+        .sort((a, b) => a.backoff - b.backoff || a.lastAt - b.lastAt);
 
     const outcomes: Array<{ dirKey: string; outcome: DreamOutcome }> = [];
     let acted = 0;
     for (const { dirKey, store } of keys) {
-        if (acted >= MAX_WORKSPACES_PER_RUN) break;
+        if (acted >= MAX_WORKSPACES_PER_RUN || signal.aborted) break;
         const outcome = await runDream(
             { store, models: resolved.models, model: resolved.model },
-            { force: run.force, options: run.options },
+            { force: run.force, options: run.options, signal },
         );
         outcomes.push({ dirKey, outcome });
         // Gate skips are free; only runs that reached the model count toward the cap.

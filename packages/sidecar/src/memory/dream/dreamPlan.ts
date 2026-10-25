@@ -158,12 +158,19 @@ const KIND_BY_KEY: Record<string, ActionKind> = {
 /** Keys whose array value is a list of actions. */
 const ACTION_LIST_KEYS = ["actions", "plan", "items", "results", "changes"];
 
+/** Actions one run may apply; the prompt states the same number. */
+export const MAX_DREAM_ACTIONS = 40;
+
 export interface ParsedDreamPlan {
     readonly actions: readonly DreamAction[];
     /** True when the reply named no action at all — a valid "nothing to do". */
     readonly empty: boolean;
     /** True when the JSON was incomplete and the actions came from salvage. */
     readonly recovered: boolean;
+    /** Merges / rewrites dropped because their content is over the topic limit. */
+    readonly oversized: number;
+    /** Actions past MAX_DREAM_ACTIONS, dropped from the end. */
+    readonly overCap: number;
 }
 
 /**
@@ -190,11 +197,30 @@ export function parseDreamActions(raw: string): ParsedDreamPlan | null {
     if (truncated && candidates.length === 0) return null;
 
     const actions: DreamAction[] = [];
+    let oversized = 0;
     for (const { kindHint, item } of candidates) {
         const action = parseActionItem(item, kindHint);
         if (action) actions.push(action);
+        else if (isOversized(item)) oversized++;
     }
-    return { actions, empty: candidates.length === 0, recovered: truncated };
+    return {
+        // The prompt asks for the most valuable actions first, so the cap
+        // keeps the head of the list.
+        actions: actions.slice(0, MAX_DREAM_ACTIONS),
+        empty: candidates.length === 0,
+        recovered: truncated,
+        oversized,
+        overCap: Math.max(0, actions.length - MAX_DREAM_ACTIONS),
+    };
+}
+
+/** Whether an unparsed item failed only because its content is over the limit. */
+function isOversized(item: unknown): boolean {
+    if (!item || typeof item !== "object") return false;
+    const raw = item as Record<string, unknown>;
+    const target = (raw.target ?? raw.merged ?? raw.result ?? raw) as Record<string, unknown>;
+    const content = asText(target.content) ?? asText(raw.content);
+    return content !== undefined && content.length > MEMORY_CONTENT_MAX_CHARS;
 }
 
 /**
@@ -306,14 +332,17 @@ function parseMerge(raw: Record<string, unknown>): DreamAction | null {
     const type = asText(target.type);
     if (!id || !name || !content || !type) return null;
     if (!MEMORY_ENTRY_TYPES.includes(type as MemoryEntryType)) return null;
+    // Over the limit is dropped, never cut: a cut merge would archive its
+    // sources and keep only the start of what they said.
+    if (content.length > MEMORY_CONTENT_MAX_CHARS) return null;
     return {
         action: "merge",
-        sourceIds,
-        id: normalizeMemoryTopicId(id),
+        sourceIds: sourceIds.map(normalizePlanId),
+        id: normalizePlanId(id),
         name: name.slice(0, 60),
         description: (asText(target.description) ?? name).slice(0, 120),
         type: type as MemoryEntryType,
-        content: content.slice(0, MEMORY_CONTENT_MAX_CHARS),
+        content,
     };
 }
 
@@ -321,11 +350,9 @@ function parseRewrite(raw: Record<string, unknown>): DreamAction | null {
     const id = asText(raw.id);
     const content = asText(raw.content);
     if (!id || !content) return null;
-    return {
-        action: "rewrite",
-        id,
-        content: content.slice(0, MEMORY_CONTENT_MAX_CHARS),
-    };
+    // Same rule as a merge: a cut rewrite would replace the fact with a fragment.
+    if (content.length > MEMORY_CONTENT_MAX_CHARS) return null;
+    return { action: "rewrite", id: normalizePlanId(id), content };
 }
 
 function parseArchive(raw: Record<string, unknown>): DreamAction | null {
@@ -334,11 +361,21 @@ function parseArchive(raw: Record<string, unknown>): DreamAction | null {
     const supersededBy = asText(raw.supersededBy ?? raw.superseded_by ?? raw.replacedBy);
     return {
         action: "archive",
-        id,
+        id: normalizePlanId(id),
         // A missing reason is not worth dropping the action over.
         reason: (asText(raw.reason) ?? "retired by consolidation").slice(0, 200),
-        ...(supersededBy ? { supersededBy } : {}),
+        ...(supersededBy ? { supersededBy: normalizePlanId(supersededBy) } : {}),
     };
+}
+
+/**
+ * One normalisation for every id in a plan. Topic ids on disk are already
+ * kebab-case, so this is the identity for a model that copied them; a model
+ * that changed case or spacing still refers to the same topic, and a merge
+ * target is matched against its own sources and supersededBy by the same rule.
+ */
+function normalizePlanId(id: string): string {
+    return normalizeMemoryTopicId(id);
 }
 
 function firstArray(raw: Record<string, unknown>, keys: readonly string[]): string[] {

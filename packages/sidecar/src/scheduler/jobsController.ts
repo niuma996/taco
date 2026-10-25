@@ -177,13 +177,24 @@ export class JobsController implements JobsControl {
 
     /**
      * Seed a built-in job if its file is missing. Idempotent across boots: an
-     * existing file — including one the user disabled or rescheduled — wins.
+     * existing file — including one the user disabled or rescheduled — wins,
+     * so a later change to the defaults reaches new installs only. That is the
+     * intended trade-off: the user's edits are never overwritten on upgrade.
+     *
+     * `last_run_at` starts at seed time. A job with no last run replays at
+     * boot unconditionally, which would make the first start after an upgrade
+     * call a model before the user has seen the feature exists.
      */
     async seedBuiltin(job: Job): Promise<Job> {
         if (!isBuiltinJob(job)) throw new Error(`not a built-in job: ${job.id}`);
         const existing = await this.store.get(job.id);
         if (existing) return existing;
-        const seeded: Job = { ...job, generation: randomUUID(), history: [] };
+        const seeded: Job = {
+            ...job,
+            generation: randomUUID(),
+            history: [],
+            last_run_at: job.last_run_at ?? new Date().toISOString(),
+        };
         try {
             if (this.store.create) await this.store.create(seeded);
             else if (this.store.save) await this.store.save(seeded);

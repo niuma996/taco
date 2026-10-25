@@ -838,6 +838,11 @@ export class AttachedSession extends EventEmitter {
         // pi 0.85 takes a ModelIdentity (provider + id) rather than the full
         // model record, and resolves it against the harness's Models registry.
         await this.lane.setModel({ provider: model.provider, modelId: model.id }, harnessContext);
+        // The background calls run on the session's model too: left on the
+        // attach-time one, they would keep calling a model the user moved off,
+        // possibly one whose provider has no key any more.
+        this.memoryExtractor?.setModel(model);
+        this.titleSummarizer?.setModel(model);
         // The trigger and retention are both fractions of the model window, so
         // a model switch must re-derive them or the session keeps compacting
         // against the previous model's window.

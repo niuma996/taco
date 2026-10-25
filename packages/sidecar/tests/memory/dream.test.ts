@@ -7,7 +7,9 @@
 import { strict as assert } from "node:assert";
 import {
     existsSync,
+    mkdirSync,
     mkdtempSync,
+    readdirSync,
     readFileSync,
     rmSync,
     statSync,
@@ -21,12 +23,18 @@ import {
     applyPendingDream,
     type DreamDeps,
     discardPendingDream,
+    dreamGateReason,
     readPendingDream,
     runDream,
+    selectTopicsForPrompt,
     summarizeOutcome,
     undoDreamReport,
 } from "../../src/memory/dream/consolidator.ts";
-import { MAX_WORKSPACES_PER_RUN, runDreamJob } from "../../src/memory/dream/dreamJob.ts";
+import {
+    MAX_WORKSPACES_PER_RUN,
+    NO_MODEL_SUMMARY,
+    runDreamJob,
+} from "../../src/memory/dream/dreamJob.ts";
 import {
     buildTopicViews,
     capRetirement,
@@ -36,13 +44,20 @@ import {
     validateDreamPlan,
 } from "../../src/memory/dream/dreamPlan.ts";
 import {
+    dreamRetryAt,
     HOLDER_STALE_MS,
+    isDreamLocked,
+    KEPT_DREAM_REPORTS,
+    listDreamReportIds,
     markDreamConfirmed,
     readLastDreamAt,
     readTopicUsage,
+    recordDreamFailure,
+    recordTopicUsage,
     releaseDreamLock,
     rollbackDreamLock,
     tryAcquireDreamLock,
+    writeDreamReport,
 } from "../../src/memory/dream/dreamState.ts";
 import { createTopicUsageTracker } from "../../src/memory/dream/usageTracker.ts";
 import { LocalMemoryStore } from "../../src/memory/index.ts";
@@ -68,8 +83,12 @@ afterEach(() => {
 });
 
 function mkStore(): LocalMemoryStore {
+    return mkStoreAt("/ws/dream");
+}
+
+function mkStoreAt(workspace: string): LocalMemoryStore {
     const store = new LocalMemoryStore();
-    store.initialize("/ws/dream");
+    store.initialize(workspace);
     return store;
 }
 
@@ -201,54 +220,64 @@ describe("dream lock", () => {
         dir = mkdtempSync(join(tmpRoot, "lock-"));
     });
 
-    it("acquire stamps the run time; release keeps it; rollback rewinds it", () => {
+    it("only a successful release stamps the run time; rollback leaves it", () => {
         assert.equal(readLastDreamAt(dir), 0);
-        const prior = tryAcquireDreamLock(dir);
-        assert.equal(prior, 0);
-        assert.ok(readLastDreamAt(dir) > 0);
+        assert.equal(tryAcquireDreamLock(dir), true);
+        // Held, not yet stamped: the run's own writes must fall before the stamp.
+        assert.equal(readLastDreamAt(dir), 0);
+        assert.equal(isDreamLocked(dir), true);
 
         releaseDreamLock(dir);
         const afterRelease = readLastDreamAt(dir);
         assert.ok(afterRelease > 0);
+        assert.equal(isDreamLocked(dir), false);
+        assert.equal(existsSync(join(dir, ".dream", "lock")), false, "the holder file is gone");
 
-        // utimes round-trips through filesystem precision; ms drift is irrelevant
-        // for an hours-scale gate.
-        const prior2 = tryAcquireDreamLock(dir);
-        assert.ok(prior2 !== null && Math.abs(prior2 - afterRelease) < 5);
-        rollbackDreamLock(dir, afterRelease);
-        assert.ok(Math.abs(readLastDreamAt(dir) - afterRelease) < 5);
+        assert.equal(tryAcquireDreamLock(dir), true);
+        rollbackDreamLock(dir);
+        assert.equal(readLastDreamAt(dir), afterRelease, "a failed run keeps the last stamp");
     });
 
-    it("rollback of a first-ever run removes the lock entirely", () => {
-        const prior = tryAcquireDreamLock(dir);
-        assert.equal(prior, 0);
-        rollbackDreamLock(dir, 0);
+    it("a first-ever run that fails leaves no run time", () => {
+        assert.equal(tryAcquireDreamLock(dir), true);
+        rollbackDreamLock(dir);
         assert.equal(readLastDreamAt(dir), 0);
+        assert.equal(isDreamLocked(dir), false);
     });
 
     it("a live foreign holder blocks; a stale one is reclaimed", () => {
-        assert.notEqual(tryAcquireDreamLock(dir), null);
+        mkdirSync(join(dir, ".dream"), { recursive: true });
         const lock = join(dir, ".dream", "lock");
         // process.ppid is alive and is not this process.
         writeFileSync(lock, String(process.ppid));
-        assert.equal(tryAcquireDreamLock(dir), null);
+        assert.equal(tryAcquireDreamLock(dir), false);
 
         const old = new Date(Date.now() - HOLDER_STALE_MS - 1000);
         utimesSync(lock, old, old);
-        assert.notEqual(tryAcquireDreamLock(dir), null);
+        assert.equal(tryAcquireDreamLock(dir), true);
+        assert.equal(readFileSync(lock, "utf8"), String(process.pid));
     });
 
     it("a dead holder is reclaimed immediately", () => {
-        tryAcquireDreamLock(dir);
+        mkdirSync(join(dir, ".dream"), { recursive: true });
         writeFileSync(join(dir, ".dream", "lock"), "999999999");
-        assert.notEqual(tryAcquireDreamLock(dir), null);
+        assert.equal(tryAcquireDreamLock(dir), true);
     });
 
     it("a second acquire in the same process cannot steal the lock", () => {
-        assert.equal(tryAcquireDreamLock(dir), 0);
-        assert.equal(tryAcquireDreamLock(dir), null);
+        assert.equal(tryAcquireDreamLock(dir), true);
+        assert.equal(tryAcquireDreamLock(dir), false);
         releaseDreamLock(dir);
-        assert.notEqual(tryAcquireDreamLock(dir), null);
+        assert.equal(tryAcquireDreamLock(dir), true);
+    });
+
+    it("a release never removes a lock another holder reclaimed", () => {
+        assert.equal(tryAcquireDreamLock(dir), true);
+        const lock = join(dir, ".dream", "lock");
+        // Another process judged ours stale and took over.
+        writeFileSync(lock, String(process.ppid));
+        rollbackDreamLock(dir);
+        assert.equal(readFileSync(lock, "utf8"), String(process.ppid), "the new holder keeps it");
     });
 });
 
@@ -368,6 +397,8 @@ describe("dream plan", () => {
             actions: [],
             empty: true,
             recovered: false,
+            oversized: 0,
+            overCap: 0,
         });
         assert.equal(parseDreamActions("[]")?.empty, true);
         const malformed = parseDreamActions(
@@ -798,7 +829,7 @@ describe("runDream", () => {
         // Pretend the last run was 2h ago.
         tryAcquireDreamLock(store.topicDir);
         releaseDreamLock(store.topicDir);
-        const lock = join(store.topicDir, ".dream", "lock");
+        const lock = join(store.topicDir, ".dream", "last-run");
         const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
         utimesSync(lock, twoHoursAgo, twoHoursAgo);
 
@@ -996,10 +1027,46 @@ describe("runDreamJob", () => {
         assert.equal(resolved, false);
     });
 
-    it("fails visibly when no model resolves", async () => {
+    it("skips without failing when no default model is configured", async () => {
+        // A setup gap must not count toward the failure breaker and disable
+        // the job before the user has added a key.
+        const result = await runDreamJob({
+            memoryEnabled: () => true,
+            resolveModel: () => undefined,
+        });
+        assert.equal(result.summary, NO_MODEL_SUMMARY);
+        assert.deepEqual(result.outcomes, []);
+    });
+
+    it("fails visibly when the job names a model that does not resolve", async () => {
         await assert.rejects(
-            () => runDreamJob({ memoryEnabled: () => true, resolveModel: () => undefined }),
-            /no model available/,
+            () =>
+                runDreamJob(
+                    { memoryEnabled: () => true, resolveModel: () => undefined },
+                    { model: "gone/model" },
+                ),
+            /model not found: gone\/model/,
+        );
+    });
+
+    it("a workspace backing off waits behind the others", async () => {
+        const failing = storeFor("failing");
+        const healthy = storeFor("healthy");
+        await seed(failing, ten());
+        await seed(healthy, ten());
+        recordDreamFailure(failing.topicDir);
+        const model = modelReturning({ actions: [] });
+        const result = await runDreamJob(
+            {
+                memoryEnabled: () => true,
+                resolveModel: model.resolve,
+                listDirKeys: () => [failing.dirKey, healthy.dirKey],
+            },
+            { force: true },
+        );
+        assert.deepEqual(
+            result.outcomes.map((o) => o.dirKey),
+            [healthy.dirKey, failing.dirKey],
         );
     });
 
@@ -1076,5 +1143,288 @@ describe("runDreamJob", () => {
             listDirKeys: () => [],
         });
         assert.equal(result.summary, "no workspace needed consolidation");
+    });
+});
+
+// ─── review fixes ─────────────────────────────────────────────────────────────
+
+describe("dream review fixes", () => {
+    it("drops an over-limit merge or rewrite instead of cutting it", () => {
+        const long = "x".repeat(1001);
+        const parsed = parseDreamActions(
+            JSON.stringify({
+                actions: [
+                    {
+                        action: "merge",
+                        sourceIds: ["a", "b"],
+                        id: "ab",
+                        name: "AB",
+                        type: "project",
+                        content: long,
+                    },
+                    { action: "rewrite", id: "c", content: long },
+                    { action: "rewrite", id: "d", content: "short" },
+                ],
+            }),
+        );
+        assert.ok(parsed);
+        assert.deepEqual(
+            parsed.actions.map((a) => a.id),
+            ["d"],
+        );
+        assert.equal(parsed.oversized, 2);
+    });
+
+    it("normalizes every id in a plan by one rule and caps the action count", () => {
+        const parsed = parseDreamActions(
+            JSON.stringify({
+                actions: [
+                    {
+                        action: "merge",
+                        sourceIds: ["Topic A", "topic-b"],
+                        id: "Merged AB",
+                        name: "AB",
+                        type: "project",
+                        content: "ab",
+                    },
+                    { action: "archive", id: "Old One", supersededBy: "Merged AB" },
+                    ...Array.from({ length: 45 }, (_, i) => ({
+                        action: "rewrite",
+                        id: `r${i}`,
+                        content: "c",
+                    })),
+                ],
+            }),
+        );
+        assert.ok(parsed);
+        const merge = parsed.actions[0];
+        assert.equal(merge?.action, "merge");
+        if (merge?.action === "merge") {
+            assert.deepEqual(merge.sourceIds, ["topic-a", "topic-b"]);
+            assert.equal(merge.id, "merged-ab");
+        }
+        const archive = parsed.actions[1];
+        if (archive?.action === "archive") assert.equal(archive.supersededBy, "merged-ab");
+        assert.equal(parsed.actions.length, 40);
+        assert.equal(parsed.overCap, 7);
+    });
+
+    it("an archive waiting on a skipped merge is skipped too", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        markDreamConfirmed(store.topicDir);
+        const plan = {
+            actions: [
+                {
+                    action: "merge",
+                    sourceIds: ["a", "b"],
+                    id: "ab",
+                    name: "AB",
+                    type: "project",
+                    content: "a and b",
+                },
+                { action: "archive", id: "c", reason: "covered", supersededBy: "ab" },
+            ],
+        };
+        const base = fakeDeps(store, plan);
+        // Edit a merge source after planning starts, so the merge CAS fails.
+        const deps: DreamDeps = {
+            ...base,
+            models: {
+                completeSimple: async (...args: Parameters<Models["completeSimple"]>) => {
+                    const res = await base.models.completeSimple(...args);
+                    await store.updateTopic("a", "edited by the user");
+                    return res;
+                },
+            } as unknown as Models,
+        };
+        const outcome = await runDream(deps, { force: true, now: fixedNow });
+        assert.equal(outcome.status, "applied");
+        if (outcome.status !== "applied") return;
+        assert.deepEqual([...outcome.report.skipped].sort(), ["ab", "c"]);
+        assert.ok(store.getTopic("c"), "c keeps its fact: its replacement never landed");
+        assert.ok(store.getTopic("a") && store.getTopic("b"), "merge sources are back");
+    });
+
+    it("a run's own writes do not count as churn for the next gate", async () => {
+        const store = mkStore();
+        const monthAgo = new Date(Date.now() - 30 * DAY).toISOString();
+        await seed(
+            store,
+            ten().map((t) => ({ ...t, createdAt: monthAgo })),
+        );
+        markDreamConfirmed(store.topicDir);
+        const rewriteAll = {
+            actions: ["a", "b", "c", "d", "e"].map((id) => ({
+                action: "rewrite",
+                id,
+                content: `tight ${id}`,
+            })),
+        };
+        const first = await runDream(fakeDeps(store, rewriteAll), { force: true });
+        assert.equal(first.status, "applied");
+        // Move the stamp back past the time gate, keeping it after the rewrites.
+        const stamp = join(store.topicDir, ".dream", "last-run");
+        const after = statSync(stamp).mtime;
+        const shifted = new Date(after.getTime() + 1000);
+        utimesSync(stamp, shifted, shifted);
+        const gate = dreamGateReason(
+            store.topicDir,
+            store.listTopics(),
+            { ...DEFAULT_DREAM_OPTIONS, minHours: 0, minChanges: 1 },
+            Date.now() + 2000,
+        );
+        assert.match(gate ?? "", /0 topics changed/);
+    });
+
+    it("a scheduled failure backs off; a manual one does not", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        const broken = fakeDeps(store, "not json at all");
+        const failed = await runDream(broken, { now: fixedNow });
+        assert.equal(failed.status, "failed");
+        assert.ok(dreamRetryAt(store.topicDir) > Date.now(), "a backoff is recorded");
+        const gated = await runDream(broken, { now: fixedNow });
+        assert.equal(gated.status, "skipped");
+        if (gated.status === "skipped") assert.match(gated.reason, /backing off/);
+
+        const other = mkStoreAt("/ws/dream-manual");
+        await seed(other, ten());
+        await runDream(fakeDeps(other, "not json"), { force: true, now: fixedNow });
+        assert.equal(dreamRetryAt(other.topicDir), 0);
+    });
+
+    it("an aborted model call fails the run and releases the lock", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        const deps: DreamDeps = {
+            ...fakeDeps(store, mergePlan),
+            models: {
+                completeSimple: (_m: unknown, _c: unknown, opts: { signal?: AbortSignal }) =>
+                    new Promise((_resolve, reject) => {
+                        opts.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+                    }),
+            } as unknown as Models,
+        };
+        const controller = new AbortController();
+        const pending = runDream(deps, { force: true, signal: controller.signal, now: fixedNow });
+        controller.abort();
+        const outcome = await pending;
+        assert.equal(outcome.status, "failed");
+        if (outcome.status === "failed") assert.match(outcome.reason, /cancelled/);
+        assert.equal(isDreamLocked(store.topicDir), false);
+    });
+
+    it("keeps the prompt within budget by leaving out the least active topics", () => {
+        const views = buildTopicViews(
+            [
+                topic("fresh", { createdAt: new Date(NOW.getTime() - DAY).toISOString() }),
+                topic("old", { createdAt: new Date(NOW.getTime() - 90 * DAY).toISOString() }),
+            ],
+            {},
+            DEFAULT_DREAM_OPTIONS,
+            NOW.getTime(),
+        );
+        const one = JSON.stringify(views[0]).length + 1;
+        const picked = selectTopicsForPrompt(views, one + 5);
+        assert.deepEqual(
+            picked.views.map((v) => v.id),
+            ["fresh"],
+        );
+        assert.equal(picked.omitted, 1);
+        assert.equal(selectTopicsForPrompt(views).omitted, 0);
+    });
+
+    it("undo refuses a report from before undo support and runs under the lock", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        const dreamDir = join(store.topicDir, ".dream", "reports");
+        mkdirSync(dreamDir, { recursive: true });
+        writeFileSync(
+            join(dreamDir, "legacy.json"),
+            JSON.stringify({
+                id: "legacy",
+                appliedAt: NOW.toISOString(),
+                counts: { merged: 0, mergedInto: 0, rewritten: 1, archived: 0 },
+                created: [],
+                archived: [],
+                rewritten: [{ id: "a", before: "x" }],
+                skipped: [],
+            }),
+        );
+        await assert.rejects(undoDreamReport(store, "legacy"), /predates undo support/);
+        assert.equal(store.getTopic("a")?.content, "content of a");
+
+        assert.equal(tryAcquireDreamLock(store.topicDir), true);
+        await assert.rejects(undoDreamReport(store, "legacy"), /predates|running/);
+        rollbackDreamLock(store.topicDir);
+    });
+
+    it("re-archiving an id keeps the earlier archived copy", async () => {
+        const store = mkStore();
+        await seed(store, [topic("dup", { content: "first" })]);
+        await store.archiveTopic("dup");
+        await store.appendEntry(topic("dup", { content: "second" }));
+        await store.archiveTopic("dup");
+        assert.equal(store.listArchivedTopics().find((t) => t.id === "dup")?.content, "second");
+        const historyDir = join(store.topicDir, "archive", "history");
+        const kept = readdirSync(historyDir);
+        assert.equal(kept.length, 1);
+        assert.match(readFileSync(join(historyDir, kept[0] ?? ""), "utf8"), /first/);
+    });
+
+    it("prunes old reports and dead usage entries", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        for (let i = 0; i < KEPT_DREAM_REPORTS + 3; i++) {
+            writeDreamReport(store.topicDir, { id: `r-${String(i).padStart(3, "0")}` });
+        }
+        assert.equal(listDreamReportIds(store.topicDir).length, KEPT_DREAM_REPORTS);
+        assert.equal(
+            listDreamReportIds(store.topicDir)[0],
+            `r-${String(KEPT_DREAM_REPORTS + 2).padStart(3, "0")}`,
+        );
+
+        recordTopicUsage(store.topicDir, { a: NOW.toISOString(), gone: NOW.toISOString() });
+        await runDream(fakeDeps(store, { actions: [] }), { force: true, now: fixedNow });
+        assert.deepEqual(Object.keys(readTopicUsage(store.topicDir)), ["a"]);
+    });
+});
+
+describe("LocalMemoryStore review fixes", () => {
+    it("sees an in-place edit of a topic file, even with the dir mtime unchanged", async () => {
+        const store = mkStore();
+        await seed(store, [topic("live", { content: "before" })]);
+        assert.equal(store.getTopic("live")?.content, "before");
+        const file = join(store.topicDir, "live.md");
+        const dirStat = statSync(store.topicDir);
+        writeFileSync(file, readFileSync(file, "utf8").replace("before", "after, longer"));
+        utimesSync(store.topicDir, dirStat.atime, dirStat.mtime);
+        assert.equal(store.getTopic("live")?.content, "after, longer");
+        // A CAS against the stale content is now refused.
+        await assert.rejects(
+            store.updateTopic("live", "extractor", { expectedContent: "before" }),
+            /changed since it was read/,
+        );
+    });
+
+    it("a write returns exactly what the next read sees", async () => {
+        const store = mkStore();
+        await seed(store, [topic("ws")]);
+        const saved = await store.updateTopic("ws", "  padded content \n\n");
+        assert.equal(saved.content, store.getTopic("ws")?.content);
+        await store.updateTopic("ws", "next", { expectedContent: saved.content });
+    });
+
+    it("a newline or fence in a name cannot corrupt the topic file", async () => {
+        const store = mkStore();
+        await seed(store, [
+            topic("evil", { name: "line one\n---\ntype: user", description: "a\nb" }),
+        ]);
+        const read = store.getTopic("evil");
+        assert.ok(read);
+        assert.equal(read.type, "project");
+        assert.equal(read.content, "content of evil");
+        assert.equal(read.name, "line one --- type: user");
     });
 });

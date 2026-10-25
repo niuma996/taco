@@ -435,7 +435,11 @@ export interface TypedRpc {
         content: string,
         baseHash: string,
     ): Promise<MemoryWriteResult>;
-    memoryDeleteTopic(workspace: WorkspaceId, id: string): Promise<MemoryDeleteTopicResult>;
+    memoryDeleteTopic(
+        workspace: WorkspaceId,
+        id: string,
+        expectedContent?: string,
+    ): Promise<MemoryDeleteTopicResult>;
     /** Move an archived topic back into the live set. */
     memoryRestoreTopic(workspace: WorkspaceId, id: string): Promise<MemoryRestoreTopicResult>;
     /** Consolidate now; always returns a preview, never applies. Model-bound. */
@@ -858,11 +862,13 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 baseHash,
             }),
 
-        memoryDeleteTopic: (workspace, id) =>
+        memoryDeleteTopic: (workspace, id, expectedContent) =>
             call<MemoryDeleteTopicParams, MemoryDeleteTopicResult>(
                 RPC.memoryDeleteTopic,
                 workspace,
-                { workspace, id },
+                expectedContent === undefined
+                    ? { workspace, id }
+                    : { workspace, id, expectedContent },
             ),
 
         memoryRestoreTopic: (workspace, id) =>
