@@ -23,6 +23,14 @@ import { Select } from "../ui/Select.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
+export interface DreamArgsDraft {
+    minHours: string;
+    minChanges: string;
+    staleDays: string;
+    staleDaysDurable: string;
+    model: string;
+}
+
 export interface ScheduleDraft {
     name: string;
     schedule: JobScheduleSpec;
@@ -34,6 +42,8 @@ export interface ScheduleDraft {
     /** Raw text of the max-runs field. Held as a string because TextInput is
      *  controlled and "" has to mean "unlimited" (not 0). */
     maxRunsInput: string;
+    /** Structured args for the built-in memory.dream job; unused for agent jobs. */
+    dreamArgs: DreamArgsDraft;
 }
 
 export interface ScheduleSubmit {
@@ -74,6 +84,13 @@ const EMPTY_DRAFT: ScheduleDraft = {
     run_on_startup: false,
     sessionStrategy: "pin",
     maxRunsInput: "",
+    dreamArgs: {
+        minHours: "24",
+        minChanges: "5",
+        staleDays: "90",
+        staleDaysDurable: "180",
+        model: "",
+    },
 };
 
 const SCHEDULE_KIND_OPTIONS = [
@@ -89,6 +106,18 @@ const SESSION_STRATEGY_OPTIONS = [
 
 const ARGS_PLACEHOLDER = '{\n  "workspace": "/path/to/repo",\n  "prompt": "…"\n}';
 
+function dreamArgsFromJob(args: Record<string, unknown>): DreamArgsDraft {
+    const numberText = (key: string, fallback: string): string =>
+        typeof args[key] === "number" ? String(args[key]) : fallback;
+    return {
+        minHours: numberText("minHours", "24"),
+        minChanges: numberText("minChanges", "5"),
+        staleDays: numberText("staleDays", "90"),
+        staleDaysDurable: numberText("staleDaysDurable", "180"),
+        model: typeof args.model === "string" ? args.model : "",
+    };
+}
+
 function draftFromJob(job: Job): ScheduleDraft {
     return {
         name: job.name,
@@ -101,6 +130,7 @@ function draftFromJob(job: Job): ScheduleDraft {
         // Absent cap renders as an empty field, not a "0" that a later save
         // would persist as a bogus unlimited-but-written cap.
         maxRunsInput: job.max_runs != null ? String(job.max_runs) : "",
+        dreamArgs: dreamArgsFromJob(job.args),
     };
 }
 
@@ -122,9 +152,13 @@ type DraftError =
     | { field: "intervalMs"; message: string }
     | { field: "cronExpr"; message: string }
     | { field: "argsJson"; message: string }
+    | { field: "dreamArgs"; message: string }
     | { field: "maxRuns"; message: string };
 
-function validateDraft(draft: ScheduleDraft): {
+function validateDraft(
+    draft: ScheduleDraft,
+    builtinDream = false,
+): {
     ok: boolean;
     args?: Record<string, unknown>;
     errors: DraftError[];
@@ -154,6 +188,34 @@ function validateDraft(draft: ScheduleDraft): {
     ) {
         errors.push({ field: "maxRuns", message: "Max runs must be a positive integer or empty." });
     }
+    if (builtinDream) {
+        const args: Record<string, unknown> = {};
+        const fields: Array<[keyof Omit<DreamArgsDraft, "model">, number, number]> = [
+            ["minHours", 1, 720],
+            ["minChanges", 0, 1000],
+            ["staleDays", 7, 3650],
+            ["staleDaysDurable", 7, 3650],
+        ];
+        for (const [key, min, max] of fields) {
+            const raw = draft.dreamArgs[key].trim();
+            const value = Number(raw);
+            if (!/^\d+$/.test(raw) || value < min || value > max) {
+                errors.push({
+                    field: "dreamArgs",
+                    message: `${key} must be an integer in [${min}, ${max}].`,
+                });
+            } else {
+                args[key] = value;
+            }
+        }
+        if (draft.dreamArgs.model.length > 200) {
+            errors.push({ field: "dreamArgs", message: "model must be at most 200 characters." });
+        } else if (draft.dreamArgs.model.trim()) {
+            args.model = draft.dreamArgs.model.trim();
+        }
+        return { ok: nameOk && errors.length === 0, args, errors };
+    }
+
     let args: Record<string, unknown> | undefined;
     try {
         const parsed = JSON.parse(draft.argsJson) as unknown;
@@ -175,6 +237,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
     const { t } = useT();
     const { open, existing, saving, errorMessage, onSave, onCancel } = props;
     const isEdit = existing !== undefined;
+    const isBuiltinDream = existing?.builtin === true && existing.command === "memory.dream";
 
     const [draft, setDraft] = useState<ScheduleDraft>(EMPTY_DRAFT);
 
@@ -238,7 +301,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
         setDraft((prev) => ({ ...prev, sessionStrategy: next }));
     }, []);
 
-    const validation = useMemo(() => validateDraft(draft), [draft]);
+    const validation = useMemo(() => validateDraft(draft, isBuiltinDream), [draft, isBuiltinDream]);
     const canSubmit = validation.ok;
 
     const handleSubmit = useCallback(() => {
@@ -322,6 +385,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     id="schedules-form-name"
                     type="text"
                     value={draft.name}
+                    disabled={isBuiltinDream}
                     onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
             </FormField>
@@ -396,67 +460,120 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     id="schedules-form-command"
                     type="text"
                     value={draft.command}
+                    disabled={isBuiltinDream}
                     onChange={(e) => setDraft({ ...draft, command: e.target.value })}
                 />
             </FormField>
 
-            <FormField
-                label={t("schedules.fieldArgs", "Args (JSON object)")}
-                hint={t(
-                    "schedules.fieldArgsHint",
-                    "传递给命令的 JSON 对象，例如 { workspace, prompt }。",
-                )}
-                error={errorFor("argsJson")}
-            >
-                <Textarea
-                    id="schedules-form-args"
-                    rows={4}
-                    value={draft.argsJson}
-                    placeholder={ARGS_PLACEHOLDER}
-                    onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
-                />
-            </FormField>
+            {isBuiltinDream ? (
+                <div className="schedules-dream-args">
+                    {(
+                        [
+                            ["minHours", "schedules.dreamMinHours"],
+                            ["minChanges", "schedules.dreamMinChanges"],
+                            ["staleDays", "schedules.dreamStaleDays"],
+                            ["staleDaysDurable", "schedules.dreamStaleDaysDurable"],
+                        ] as const
+                    ).map(([key, label]) => (
+                        <FormField key={key} label={t(label)}>
+                            <TextInput
+                                id={`schedules-form-dream-${key}`}
+                                type="number"
+                                value={draft.dreamArgs[key]}
+                                onChange={(e) =>
+                                    setDraft({
+                                        ...draft,
+                                        dreamArgs: { ...draft.dreamArgs, [key]: e.target.value },
+                                    })
+                                }
+                            />
+                        </FormField>
+                    ))}
+                    <FormField
+                        label={t("schedules.dreamModel")}
+                        hint={t("schedules.dreamModelHint")}
+                    >
+                        <TextInput
+                            id="schedules-form-dream-model"
+                            type="text"
+                            value={draft.dreamArgs.model}
+                            onChange={(e) =>
+                                setDraft({
+                                    ...draft,
+                                    dreamArgs: { ...draft.dreamArgs, model: e.target.value },
+                                })
+                            }
+                        />
+                    </FormField>
+                    {errorFor("dreamArgs") ? (
+                        <p className="schedules-error" role="alert">
+                            {errorFor("dreamArgs")}
+                        </p>
+                    ) : null}
+                </div>
+            ) : (
+                <FormField
+                    label={t("schedules.fieldArgs", "Args (JSON object)")}
+                    hint={t(
+                        "schedules.fieldArgsHint",
+                        "传递给命令的 JSON 对象，例如 { workspace, prompt }。",
+                    )}
+                    error={errorFor("argsJson")}
+                >
+                    <Textarea
+                        id="schedules-form-args"
+                        rows={4}
+                        value={draft.argsJson}
+                        placeholder={ARGS_PLACEHOLDER}
+                        onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
+                    />
+                </FormField>
+            )}
 
-            <FormField
-                label={t("schedules.fieldSessionStrategy", "Session strategy")}
-                hint={
-                    isImWorkspace
-                        ? t(
-                              "schedules.sessionStrategyImHint",
-                              "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
-                          )
-                        : undefined
-                }
-            >
-                <Select
-                    value={effectiveStrategy}
-                    onValueChange={(v) => setStrategy(v as SessionStrategy)}
-                    options={SESSION_STRATEGY_OPTIONS}
-                    disabled={isImWorkspace}
+            {!isBuiltinDream ? (
+                <FormField
                     label={t("schedules.fieldSessionStrategy", "Session strategy")}
-                />
-            </FormField>
+                    hint={
+                        isImWorkspace
+                            ? t(
+                                  "schedules.sessionStrategyImHint",
+                                  "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
+                              )
+                            : undefined
+                    }
+                >
+                    <Select
+                        value={effectiveStrategy}
+                        onValueChange={(v) => setStrategy(v as SessionStrategy)}
+                        options={SESSION_STRATEGY_OPTIONS}
+                        disabled={isImWorkspace}
+                        label={t("schedules.fieldSessionStrategy", "Session strategy")}
+                    />
+                </FormField>
+            ) : null}
 
-            <FormField
-                label={t("schedules.fieldMaxRuns", "Max runs")}
-                hint={t(
-                    "schedules.fieldMaxRunsHint",
-                    "达到该成功运行次数后任务自动停用（记录保留）。留空表示不限次数。",
-                )}
-                error={
-                    errorFor("maxRuns")
-                        ? t("schedules.errorMaxRuns", "最大运行次数必须是正整数。")
-                        : undefined
-                }
-            >
-                <TextInput
-                    id="schedules-form-max-runs"
-                    type="number"
-                    min={1}
-                    value={draft.maxRunsInput}
-                    onChange={(e) => setDraft({ ...draft, maxRunsInput: e.target.value })}
-                />
-            </FormField>
+            {!isBuiltinDream ? (
+                <FormField
+                    label={t("schedules.fieldMaxRuns", "Max runs")}
+                    hint={t(
+                        "schedules.fieldMaxRunsHint",
+                        "达到该成功运行次数后任务自动停用（记录保留）。留空表示不限次数。",
+                    )}
+                    error={
+                        errorFor("maxRuns")
+                            ? t("schedules.errorMaxRuns", "最大运行次数必须是正整数。")
+                            : undefined
+                    }
+                >
+                    <TextInput
+                        id="schedules-form-max-runs"
+                        type="number"
+                        min={1}
+                        value={draft.maxRunsInput}
+                        onChange={(e) => setDraft({ ...draft, maxRunsInput: e.target.value })}
+                    />
+                </FormField>
+            ) : null}
 
             <div className="schedules-modal-toggles">
                 <label className="schedules-modal-toggle">
@@ -467,15 +584,23 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     />
                     <span>{t("schedules.fieldEnabled", "Enabled")}</span>
                 </label>
-                <label className="schedules-modal-toggle">
-                    <input
-                        type="checkbox"
-                        checked={draft.run_on_startup}
-                        onChange={(e) => setDraft({ ...draft, run_on_startup: e.target.checked })}
-                    />
-                    <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
-                </label>
+                {!isBuiltinDream ? (
+                    <label className="schedules-modal-toggle">
+                        <input
+                            type="checkbox"
+                            checked={draft.run_on_startup}
+                            onChange={(e) =>
+                                setDraft({ ...draft, run_on_startup: e.target.checked })
+                            }
+                        />
+                        <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
+                    </label>
+                ) : null}
             </div>
+
+            {isBuiltinDream ? (
+                <p className="schedules-builtin-note">{t("schedules.builtinNote")}</p>
+            ) : null}
 
             {errorMessage ? (
                 <p className="schedules-error" role="alert">

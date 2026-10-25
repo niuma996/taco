@@ -538,3 +538,101 @@ describe("SchedulesTab — modal add / edit flow", () => {
         });
     });
 });
+
+describe("SchedulesTab — built-in jobs", () => {
+    function builtinJob(overrides: Partial<Job> = {}): Job {
+        return {
+            id: "memory-dream",
+            name: "Memory consolidation",
+            schedule: { kind: "cron", expr: "17 4 * * *" },
+            command: "memory.dream",
+            args: { minHours: 24, minChanges: 5, staleDays: 90, staleDaysDurable: 180 },
+            enabled: true,
+            run_on_startup: true,
+            builtin: true,
+            history: [
+                {
+                    started_at: "2026-10-25T04:17:00.000Z",
+                    ended_at: "2026-10-25T04:17:10.000Z",
+                    status: "ok",
+                    summary: "1 consolidated (merged 4→2, archived 1, rewrote 0)",
+                },
+            ],
+            ...overrides,
+        };
+    }
+
+    it("shows the built-in badge and summary, but no delete action", async () => {
+        const client = makeClient({ list: () => Promise.resolve({ jobs: [builtinJob()] }) });
+        render(<SchedulesTab client={client} />);
+
+        await waitFor(() => expect(screen.getByText("schedules.builtin")).toBeTruthy());
+        expect(screen.getByText(/1 consolidated/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "schedules.actionDelete" })).toBeNull();
+    });
+
+    it("edits structured dream args and preserves the builtin marker on save", async () => {
+        const user = userEvent.setup();
+        const updates: Array<Record<string, unknown>> = [];
+        const client = makeClient({
+            list: () => Promise.resolve({ jobs: [builtinJob()] }),
+            update: (params) => {
+                updates.push(params);
+                return Promise.resolve(params);
+            },
+        });
+        render(<SchedulesTab client={client} />);
+
+        await waitFor(() => expect(screen.getByText("Memory consolidation")).toBeTruthy());
+        await user.click(screen.getByRole("button", { name: "schedules.actionEdit" }));
+        await waitFor(() => expect(screen.getByText("schedules.editTitle")).toBeTruthy());
+
+        expect(screen.queryByLabelText("schedules.fieldArgs")).toBeNull();
+        const minHours = screen.getByLabelText("schedules.dreamMinHours") as HTMLInputElement;
+        expect(minHours.value).toBe("24");
+        expect((screen.getByLabelText("schedules.fieldCommand") as HTMLInputElement).disabled).toBe(
+            true,
+        );
+        expect((screen.getByLabelText("schedules.fieldName") as HTMLInputElement).disabled).toBe(
+            true,
+        );
+
+        await user.clear(minHours);
+        await user.type(minHours, "48");
+        await user.click(screen.getByRole("button", { name: "schedules.actionSave" }));
+
+        await waitFor(() => expect(updates.length).toBe(1));
+        const sent = updates[0]?.job as Job;
+        expect(sent.args).toMatchObject({ minHours: 48, minChanges: 5 });
+        expect(sent.command).toBe("memory.dream");
+        expect(sent.builtin).toBe(true);
+        expect(sent.history).toBeUndefined();
+    });
+
+    it("rejects an out-of-range dream threshold before sending the update", async () => {
+        const user = userEvent.setup();
+        let updates = 0;
+        const client = makeClient({
+            list: () => Promise.resolve({ jobs: [builtinJob()] }),
+            update: () => {
+                updates++;
+                return Promise.resolve({});
+            },
+        });
+        render(<SchedulesTab client={client} />);
+
+        await waitFor(() => expect(screen.getByText("Memory consolidation")).toBeTruthy());
+        await user.click(screen.getByRole("button", { name: "schedules.actionEdit" }));
+        const staleDays = (await screen.findByLabelText(
+            "schedules.dreamStaleDays",
+        )) as HTMLInputElement;
+        await user.clear(staleDays);
+        await user.type(staleDays, "1");
+        expect(screen.getByRole("button", { name: "schedules.actionSave" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+        expect(screen.getByText(/staleDays must be an integer/)).toBeTruthy();
+        expect(updates).toBe(0);
+    });
+});

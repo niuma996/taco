@@ -965,3 +965,39 @@
 .updates-tab-action {
     min-width: 8.5rem;
 }
+
+/* Built-in jobs keep their identity visible without offering a destructive action. */
+.schedules-builtin-badge {
+    display: inline-block;
+    margin-left: var(--space-2);
+    padding: 0 var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+    vertical-align: middle;
+}
+
+.schedules-last-summary {
+    margin-top: var(--space-1);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+}
+
+.schedules-dream-args {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+}
+
+.schedules-dream-args .ui-form-field:last-child {
+    grid-column: 1 / -1;
+}
+
+.schedules-builtin-note {
+    margin: 0;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+}

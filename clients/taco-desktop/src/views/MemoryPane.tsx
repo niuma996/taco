@@ -10,7 +10,9 @@
 import { Pencil, RefreshCw, Save, Trash } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { type MemoryDreamActions, MemoryDreamPanel } from "../components/memory/MemoryDreamPanel";
 import { PaneHeader } from "../components/PaneHeader";
+import { Button } from "../components/ui/Button";
 import { IconButton } from "../components/ui/IconButton";
 import { useNow } from "../hooks/useNow";
 import { useT, useUiLanguage } from "../i18n/useI18n";
@@ -19,7 +21,7 @@ import type {
     MemoryListResult,
     MemoryTopicEntry,
 } from "../lib/memoryPaneTypes";
-import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes";
+import { MEMORY_ARCHIVE_PREFIX, MEMORY_ROOT_ID } from "../lib/memoryPaneTypes";
 import { formatRelativeTime } from "../lib/relativeTime";
 
 export interface MemoryPaneProps {
@@ -38,6 +40,8 @@ export interface MemoryPaneProps {
     onRefresh: () => void;
     /** Held by App.tsx to prevent duplicate submits. */
     saving: boolean;
+    /** Consolidation controls; absent in hosts that do not expose dream RPCs. */
+    dream?: MemoryDreamActions;
 }
 
 export function MemoryPane(props: MemoryPaneProps) {
@@ -51,6 +55,7 @@ export function MemoryPane(props: MemoryPaneProps) {
         onDeleteTopic,
         onRefresh,
         saving,
+        dream,
     } = props;
     const { t } = useT();
     const lng = useUiLanguage();
@@ -64,9 +69,13 @@ export function MemoryPane(props: MemoryPaneProps) {
     const [query, setQuery] = useState("");
 
     const isMemorySelected = selectedId === MEMORY_ROOT_ID;
+    const archivedTopics = data?.dream?.archived ?? [];
     const selectedTopic: MemoryTopicEntry | undefined = data?.topics.find(
         (topic) => topic.id === selectedId,
     );
+    const selectedArchivedTopic = selectedId.startsWith(MEMORY_ARCHIVE_PREFIX)
+        ? archivedTopics.find((topic) => `${MEMORY_ARCHIVE_PREFIX}${topic.id}` === selectedId)
+        : undefined;
 
     // Case-insensitive topic filter; the global MEMORY.md entry always stays
     // pinned at top and is never filtered out.
@@ -79,6 +88,15 @@ export function MemoryPane(props: MemoryPaneProps) {
             return terms.every((term) => haystack.includes(term));
         });
     }, [data?.topics, query]);
+
+    const filteredArchivedTopics = useMemo(() => {
+        const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (terms.length === 0) return archivedTopics;
+        return archivedTopics.filter((topic) => {
+            const haystack = `${topic.name} ${topic.type} ${topic.description ?? ""}`.toLowerCase();
+            return terms.every((term) => haystack.includes(term));
+        });
+    }, [archivedTopics, query]);
 
     // While editing, ignore external refreshes that would clobber the draft.
     useEffect(() => {
@@ -180,6 +198,12 @@ export function MemoryPane(props: MemoryPaneProps) {
         onSelect(MEMORY_ROOT_ID);
     };
 
+    const handleRestore = async (id: string) => {
+        if (!dream) return;
+        await dream.onRestoreTopic(id);
+        onSelect(MEMORY_ROOT_ID);
+    };
+
     return (
         <div className="memory-pane">
             <div className="memory-list">
@@ -234,11 +258,48 @@ export function MemoryPane(props: MemoryPaneProps) {
                             </button>
                         ))
                     )}
+
+                    {filteredArchivedTopics.length > 0 ? (
+                        <>
+                            <div className="memory-list-section-label">
+                                {t("memory.dream.archivedLabel")} ({filteredArchivedTopics.length})
+                            </div>
+                            {filteredArchivedTopics.map((topic) => {
+                                const archiveId = `${MEMORY_ARCHIVE_PREFIX}${topic.id}`;
+                                return (
+                                    <button
+                                        key={archiveId}
+                                        type="button"
+                                        className={`memory-list-item${selectedId === archiveId ? " active" : ""}`}
+                                        onClick={() => onSelect(archiveId)}
+                                    >
+                                        <span className="memory-list-item-name">{topic.name}</span>
+                                        <span className="memory-list-item-badge">
+                                            {t("memory.dream.archivedBadge")}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </>
+                    ) : null}
                 </div>
             </div>
 
             <div className="memory-detail">
-                {isMemoryEmpty && !isEditing ? (
+                {dream ? (
+                    <MemoryDreamPanel
+                        state={data.dream}
+                        scheduled={data.dreamScheduled}
+                        busy={dream.busy}
+                        onRun={dream.onRun}
+                        onApply={dream.onApply}
+                        onDiscard={dream.onDiscard}
+                        onUndo={dream.onUndo}
+                        onRestoreTopic={dream.onRestoreTopic}
+                        onScheduleToggle={dream.onScheduleToggle}
+                    />
+                ) : null}
+                {isMemoryEmpty && !isEditing && !selectedArchivedTopic ? (
                     <div className="memory-detail-placeholder">
                         <p>{t("memory.emptyState")}</p>
                     </div>
@@ -287,6 +348,55 @@ export function MemoryPane(props: MemoryPaneProps) {
                             <pre className="memory-view-content">{data.memoryContent}</pre>
                         </div>
                     )
+                ) : selectedArchivedTopic ? (
+                    <div className="memory-view">
+                        <div className="memory-view-header">
+                            <h2 className="memory-view-name">{selectedArchivedTopic.name}</h2>
+                            <Button
+                                size="sm"
+                                variant="default"
+                                disabled={!dream || dream.busy !== null}
+                                onClick={() => {
+                                    void handleRestore(selectedArchivedTopic.id);
+                                }}
+                            >
+                                {dream?.busy === "restore"
+                                    ? t("memory.dream.restoring")
+                                    : t("memory.dream.restore")}
+                            </Button>
+                        </div>
+                        <dl className="memory-view-meta">
+                            <dt>{t("memory.idLabel")}</dt>
+                            <dd>
+                                <code>{selectedArchivedTopic.id}</code>
+                            </dd>
+                            <dt>{t("memory.typeLabel")}</dt>
+                            <dd>{selectedArchivedTopic.type}</dd>
+                            <dt>{t("memory.createdLabel")}</dt>
+                            <dd>
+                                {formatRelativeTime(selectedArchivedTopic.createdAt, lng, nowMs)}
+                            </dd>
+                            {selectedArchivedTopic.updatedAt ? (
+                                <>
+                                    <dt>{t("memory.updatedLabel")}</dt>
+                                    <dd>
+                                        {formatRelativeTime(
+                                            selectedArchivedTopic.updatedAt,
+                                            lng,
+                                            nowMs,
+                                        )}
+                                    </dd>
+                                </>
+                            ) : null}
+                            {selectedArchivedTopic.description ? (
+                                <>
+                                    <dt>description</dt>
+                                    <dd>{selectedArchivedTopic.description}</dd>
+                                </>
+                            ) : null}
+                        </dl>
+                        <div className="memory-view-content">{selectedArchivedTopic.content}</div>
+                    </div>
                 ) : selectedTopic ? (
                     <div className="memory-view">
                         <div className="memory-view-header">

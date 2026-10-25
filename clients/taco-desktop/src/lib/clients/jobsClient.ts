@@ -38,6 +38,8 @@ export interface Job {
      *  client includes. Marked optional so the create/update input
      *  shape doesn't require callers to stub it. */
     history?: JobHistoryEntry[];
+    /** Daemon-seeded system job: native handler, not an agent prompt. */
+    builtin?: boolean;
     /** IM scope, server-derived. Desktop callers should not set these —
      *  the daemon derives them from `args.workspace` on create/update and
      *  ignores caller-supplied values (sandbox escape prevention). */
@@ -74,6 +76,8 @@ export interface JobHistoryEntry {
     ended_at?: string;
     status: "running" | "ok" | "err";
     error?: string;
+    /** One-line outcome reported by a native job handler. */
+    summary?: string;
 }
 
 /** Mirrors the sidecar's `JobRunResult` — the outcome of a force-fire.

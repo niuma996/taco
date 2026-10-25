@@ -682,7 +682,45 @@
     "idLabel": "id",
     "errorLoad": "Failed to load memory",
     "errorSave": "Save failed",
-    "errorDelete": "Delete failed"
+    "errorDelete": "Delete failed",
+    "dream": {
+      "title": "Memory consolidation",
+      "schedule": "Automatic consolidation",
+      "scheduleUnavailable": "The daemon does not provide scheduled jobs",
+      "run": "Consolidate now",
+      "running": "Consolidating…",
+      "pendingTitle": "Consolidation preview",
+      "pendingHint": "Nothing is written until you apply. Unlisted topics stay unchanged.",
+      "apply": "Apply consolidation",
+      "applying": "Applying…",
+      "discard": "Discard preview",
+      "history": "Consolidation history",
+      "merged": "Merged",
+      "archived": "Archived",
+      "rewritten": "Rewritten",
+      "actionMerge": "Merge",
+      "actionRewrite": "Rewrite",
+      "actionArchive": "Archive",
+      "supersededBy": "Superseded by:",
+      "skipped": "Skipped",
+      "undo": "Undo",
+      "undoing": "Undoing…",
+      "undone": "Undone",
+      "archivedLabel": "Archived",
+      "archivedBadge": "Archived",
+      "restore": "Restore",
+      "restoring": "Restoring…",
+      "nothingToDo": "Nothing needs consolidation",
+      "undoConflicts": "These topics changed after the run and were not reverted",
+      "error": {
+        "run": "Consolidation failed",
+        "apply": "Could not apply consolidation",
+        "discard": "Could not discard the preview",
+        "undo": "Could not undo consolidation",
+        "restore": "Could not restore memory",
+        "schedule": "Could not update automatic consolidation"
+      }
+    }
   },
   "message": {
     "copy": "Copy message",
@@ -749,7 +787,15 @@
     "sessionStrategyImHint": "im:// workspaces can only reuse the current session; the server rejects other strategies.",
     "errorMaxRuns": "Max runs must be a positive integer, or empty for unlimited.",
     "errorIntervalMs": "Interval (ms) must be a positive integer.",
-    "errorCronExpr": "Cron expression must not be empty."
+    "errorCronExpr": "Cron expression must not be empty.",
+    "builtin": "Built-in",
+    "builtinNote": "The system owns this job's name and command. Edit its schedule, enabled state, and consolidation settings only.",
+    "dreamMinHours": "Minimum hours since last run",
+    "dreamMinChanges": "Minimum new or updated topics",
+    "dreamStaleDays": "Candidate age for project/reference topics (days)",
+    "dreamStaleDaysDurable": "Candidate age for user/feedback topics (days)",
+    "dreamModel": "Consolidation model (optional)",
+    "dreamModelHint": "Leave empty for the default model. Use provider/modelId or modelId."
   },
   "tasks": {
     "empty": "No tasks yet"

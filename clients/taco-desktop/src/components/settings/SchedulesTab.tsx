@@ -148,7 +148,13 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
             // skip sending it to keep create/update symmetric.
             const rpc =
                 mode.kind === "edit"
-                    ? jobs.update({ id: mode.job.id, ...submit })
+                    ? jobs.update({
+                          id: mode.job.id,
+                          ...submit,
+                          // `builtin` is not a form field; preserve it so the
+                          // server keeps this on the built-in update path.
+                          ...(mode.job.builtin ? { builtin: true } : {}),
+                      })
                     : jobs.create(submit);
             void rpc
                 .then(() => {
@@ -328,12 +334,22 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
             : `every ${job.schedule.ms}ms`;
     return (
         <tr>
-            <td className="schedules-cell-name">{job.name}</td>
+            <td className="schedules-cell-name">
+                <span>{job.name}</span>
+                {job.builtin ? (
+                    <span className="schedules-builtin-badge">
+                        {t("schedules.builtin", "内置")}
+                    </span>
+                ) : null}
+            </td>
             <td className="schedules-cell-schedule">
                 <code>{scheduleLabel}</code>
             </td>
             <td className="schedules-cell-command">
                 <code>{job.command}</code>
+                {job.history?.[0]?.summary ? (
+                    <div className="schedules-last-summary">{job.history[0].summary}</div>
+                ) : null}
             </td>
             <td>
                 <input
@@ -353,9 +369,11 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
                     <Button size="sm" variant="default" onClick={onEdit}>
                         {t("schedules.actionEdit", "Edit")}
                     </Button>
-                    <Button size="sm" variant="danger" onClick={onDelete}>
-                        {t("schedules.actionDelete", "Delete")}
-                    </Button>
+                    {job.builtin ? null : (
+                        <Button size="sm" variant="danger" onClick={onDelete}>
+                            {t("schedules.actionDelete", "Delete")}
+                        </Button>
+                    )}
                 </div>
             </td>
         </tr>

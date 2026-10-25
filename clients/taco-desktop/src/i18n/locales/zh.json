@@ -679,7 +679,45 @@
     "idLabel": "id",
     "errorLoad": "加载记忆失败",
     "errorSave": "保存失败",
-    "errorDelete": "删除失败"
+    "errorDelete": "删除失败",
+    "dream": {
+      "title": "记忆整理",
+      "schedule": "定时自动整理",
+      "scheduleUnavailable": "当前 daemon 未提供定时任务",
+      "run": "立即整理",
+      "running": "整理中…",
+      "pendingTitle": "整理预览",
+      "pendingHint": "确认后才会写入；未列出的条目保持不变。",
+      "apply": "应用整理",
+      "applying": "应用中…",
+      "discard": "放弃预览",
+      "history": "整理记录",
+      "merged": "合并",
+      "archived": "归档",
+      "rewritten": "改写",
+      "actionMerge": "合并",
+      "actionRewrite": "改写",
+      "actionArchive": "归档",
+      "supersededBy": "由以下条目取代：",
+      "skipped": "跳过",
+      "undo": "撤销",
+      "undoing": "撤销中…",
+      "undone": "已撤销",
+      "archivedLabel": "已归档",
+      "archivedBadge": "归档",
+      "restore": "恢复",
+      "restoring": "恢复中…",
+      "nothingToDo": "本次没有需要整理的内容",
+      "undoConflicts": "以下条目已被后续修改，未回退",
+      "error": {
+        "run": "整理失败",
+        "apply": "应用整理失败",
+        "discard": "放弃预览失败",
+        "undo": "撤销整理失败",
+        "restore": "恢复记忆失败",
+        "schedule": "更新定时整理失败"
+      }
+    }
   },
   "message": {
     "copy": "复制消息",
@@ -745,7 +783,15 @@
     "sessionStrategyImHint": "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
     "errorMaxRuns": "最大运行次数必须是正整数，留空表示不限次数。",
     "errorIntervalMs": "间隔（毫秒）必须是正整数。",
-    "errorCronExpr": "Cron 表达式不能为空。"
+    "errorCronExpr": "Cron 表达式不能为空。",
+    "builtin": "内置",
+    "builtinNote": "内置任务的名称和命令由系统管理，只能修改调度、启用状态和整理参数。",
+    "dreamMinHours": "距上次整理至少（小时）",
+    "dreamMinChanges": "至少新增/更新条目数",
+    "dreamStaleDays": "项目/引用条目候选淘汰天数",
+    "dreamStaleDaysDurable": "用户/反馈条目候选淘汰天数",
+    "dreamModel": "整理模型（可选）",
+    "dreamModelHint": "留空使用当前默认模型；格式为 provider/modelId 或 modelId。"
   },
   "tasks": {
     "empty": "暂无任务"

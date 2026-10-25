@@ -67,7 +67,17 @@ import type {
     McpUpdateConfigParams,
     MemoryDeleteTopicParams,
     MemoryDeleteTopicResult,
+    MemoryDreamApplyParams,
+    MemoryDreamApplyResult,
+    MemoryDreamDiscardParams,
+    MemoryDreamDiscardResult,
+    MemoryDreamRunParams,
+    MemoryDreamRunResult,
+    MemoryDreamUndoParams,
+    MemoryDreamUndoResult,
     MemoryListResult,
+    MemoryRestoreTopicParams,
+    MemoryRestoreTopicResult,
     MemoryUpsertParams,
     MemoryUpsertResult,
     MemoryWriteParams,
@@ -426,6 +436,15 @@ export interface TypedRpc {
         baseHash: string,
     ): Promise<MemoryWriteResult>;
     memoryDeleteTopic(workspace: WorkspaceId, id: string): Promise<MemoryDeleteTopicResult>;
+    /** Move an archived topic back into the live set. */
+    memoryRestoreTopic(workspace: WorkspaceId, id: string): Promise<MemoryRestoreTopicResult>;
+    /** Consolidate now; always returns a preview, never applies. Model-bound. */
+    memoryDreamRun(workspace: WorkspaceId): Promise<MemoryDreamRunResult>;
+    /** Apply the reviewed preview; rejected if a newer preview replaced it. */
+    memoryDreamApply(workspace: WorkspaceId, previewId: string): Promise<MemoryDreamApplyResult>;
+    memoryDreamDiscard(workspace: WorkspaceId): Promise<MemoryDreamDiscardResult>;
+    /** Revert one applied consolidation; returns topics left as edited since. */
+    memoryDreamUndo(workspace: WorkspaceId, reportId: string): Promise<MemoryDreamUndoResult>;
     memoryUpsert(
         workspace: WorkspaceId,
         action: "add" | "replace" | "remove",
@@ -845,6 +864,33 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 workspace,
                 { workspace, id },
             ),
+
+        memoryRestoreTopic: (workspace, id) =>
+            call<MemoryRestoreTopicParams, MemoryRestoreTopicResult>(
+                RPC.memoryRestoreTopic,
+                workspace,
+                { workspace, id },
+            ),
+        memoryDreamRun: (workspace) =>
+            call<MemoryDreamRunParams, MemoryDreamRunResult>(RPC.memoryDreamRun, workspace, {
+                workspace,
+            }),
+        memoryDreamApply: (workspace, previewId) =>
+            call<MemoryDreamApplyParams, MemoryDreamApplyResult>(RPC.memoryDreamApply, workspace, {
+                workspace,
+                previewId,
+            }),
+        memoryDreamDiscard: (workspace) =>
+            call<MemoryDreamDiscardParams, MemoryDreamDiscardResult>(
+                RPC.memoryDreamDiscard,
+                workspace,
+                { workspace },
+            ),
+        memoryDreamUndo: (workspace, reportId) =>
+            call<MemoryDreamUndoParams, MemoryDreamUndoResult>(RPC.memoryDreamUndo, workspace, {
+                workspace,
+                reportId,
+            }),
 
         memoryUpsert: (workspace, action, params) =>
             call<MemoryUpsertParams, MemoryUpsertResult>(RPC.memoryUpsert, workspace, {
