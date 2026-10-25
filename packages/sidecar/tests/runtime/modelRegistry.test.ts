@@ -561,13 +561,82 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.equal(extra?.maxTokens, 65_536);
         });
 
-        it("an added model declares the off thinking level unsupported, so pi never disables thinking", () => {
+        it("an added model inherits from the first reasoning model, not a legacy first entry", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            // OpenAI's catalog starts with gpt-4: no reasoning, an 8k output cap.
+            const catalog = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [
+                    { ...template, id: "legacy", reasoning: false, maxTokens: 8_192 },
+                    {
+                        ...template,
+                        id: "other-api",
+                        api: "openai-completions" as Api,
+                        reasoning: true,
+                        maxTokens: 1_000_000,
+                    },
+                    {
+                        ...template,
+                        id: "current",
+                        reasoning: true,
+                        maxTokens: 128_000,
+                        thinkingLevelMap: { minimal: "minimal" },
+                    },
+                    { ...template, id: "later", reasoning: true, maxTokens: 512_000 },
+                ],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => catalog }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            const extra = models.getModel("stub-a", "extra-1");
+            assert.equal(extra?.api, "openai-responses", "the first model's api, never another");
+            assert.equal(extra?.reasoning, true);
+            assert.equal(
+                extra?.maxTokens,
+                128_000,
+                "the first reasoning model, not the largest cap",
+            );
+            assert.equal(extra?.thinkingLevelMap?.minimal, "minimal");
+        });
+
+        it("an added model falls back to the first model when none reasons", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            const catalog = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [
+                    { ...template, id: "a", maxTokens: 4_096 },
+                    { ...template, id: "b", maxTokens: 16_384 },
+                ],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => catalog }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            const extra = models.getModel("stub-a", "extra-1");
+            assert.equal(extra?.reasoning, false);
+            assert.equal(extra?.maxTokens, 4_096);
+        });
+
+        it("an added anthropic-messages model declares off unsupported, so pi never disables thinking", () => {
             const store = new ProviderKeyStore({});
             const template = stubProvider("stub-a", "model-a").getModels()[0];
             assert.ok(template);
             const thinking = {
                 ...stubProvider("stub-a", "model-a"),
-                getModels: () => [{ ...template, reasoning: true }],
+                getModels: () => [
+                    { ...template, api: "anthropic-messages" as Api, reasoning: true },
+                ],
             };
             new ModelRegistry({
                 models,
@@ -596,8 +665,9 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
                 getModels: () => [
                     {
                         ...template,
+                        api: "anthropic-messages" as Api,
                         reasoning: true,
-                        thinkingLevelMap: { off: null, xhigh: "xhigh" },
+                        thinkingLevelMap: { off: "none", xhigh: "xhigh" },
                     },
                 ],
             };
@@ -609,8 +679,62 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
                 providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
             });
             const extra = models.getModel("stub-a", "extra-1");
-            assert.equal(extra?.thinkingLevelMap?.off, null);
+            assert.equal(extra?.thinkingLevelMap?.off, "none", "the template's own off wins");
             assert.equal(extra?.thinkingLevelMap?.xhigh, "xhigh", "the provider's levels survive");
+        });
+
+        it("an added model on another api keeps the template's map, so thinking can still be turned off", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            for (const api of ["openai-completions", "openai-responses", "google-generative-ai"]) {
+                const thinking = {
+                    ...stubProvider("stub-a", "model-a"),
+                    getModels: () => [
+                        {
+                            ...template,
+                            api: api as Api,
+                            reasoning: true,
+                            thinkingLevelMap: { xhigh: "xhigh" },
+                        },
+                    ],
+                };
+                new ModelRegistry({
+                    models,
+                    sessionRegistry: makeSessionRegistry(),
+                    providerKeyStore: store,
+                    builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => thinking }],
+                    providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+                });
+                const extra = models.getModel("stub-a", "extra-1");
+                // On these apis pi skips the disable parameter when off is null
+                // (deepseek thinking:disabled, openrouter/responses effort:none),
+                // so a default null here would leave "off" thinking anyway.
+                assert.notEqual(
+                    extra?.thinkingLevelMap?.off,
+                    null,
+                    `${api} must not force off:null`,
+                );
+                assert.equal(extra?.thinkingLevelMap?.xhigh, "xhigh");
+            }
+        });
+
+        it("an added model on another api with no template map carries none", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            const thinking = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [{ ...template, reasoning: true }],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => thinking }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            assert.equal(models.getModel("stub-a", "extra-1")?.thinkingLevelMap, undefined);
         });
 
         it("the user can declare a model as non-reasoning over its provider's default", () => {

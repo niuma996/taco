@@ -129,8 +129,8 @@ export function applyBuiltinProviders(
 
 /**
  * Convert a user-added entry into a chat Model for a built-in provider.
- * `api`/`baseUrl` inherit from the provider's first static model so the new
- * model streams through the same protocol implementation.
+ * `api`/`baseUrl` inherit from a template static model (extraModelTemplate)
+ * so the new model streams through the same protocol implementation.
  *
  * `reasoning`, `maxTokens` and `compat` inherit from that template too. The
  * provider already knows whether its models think; overriding `reasoning:
@@ -138,17 +138,47 @@ export function applyBuiltinProviders(
  * `thinking: {type:"disabled"}`, and the provider then reasons by default —
  * spending the output budget on reasoning and returning no text.
  *
- * The thinking levels do NOT inherit, and that is deliberate. pi sends
- * `thinking: {type:"disabled"}` whenever a call omits a reasoning level and
- * the model is marked as reasoning — unless the level map says the provider
- * has no "off" (`thinkingLevelMap.off === null`, the shape Anthropic's own
- * catalog uses). A user-added model is a variant the provider's catalog does
- * not describe, so it may well reject that flag: MiniMax M3.1 answers
- * `requires adaptive thinking` with HTTP 400. Declaring "off" as null keeps
- * the provider on its own default instead of asking it to stop thinking.
+ * The thinking level map inherits as well, with one exception on the
+ * anthropic-messages api. There pi sends `thinking: {type:"disabled"}` for a
+ * reasoning model whenever a call omits a level, unless the map says "off"
+ * is unsupported (`off: null`, the shape Anthropic's own catalog uses). The
+ * Anthropic-compatible providers serve variants their catalog does not
+ * describe, and MiniMax M3.1 answers that flag with HTTP 400 `requires
+ * adaptive thinking`, so an added model there defaults "off" to null.
+ * Other apis keep the template's map untouched: on openai-completions,
+ * openai-responses and google `off: null` suppresses the disable parameter,
+ * and a user who turns thinking off would get a model that still thinks.
  */
+function extraThinkingLevelMap(
+    template: Model<Api>,
+): Pick<Model<Api>, "thinkingLevelMap"> | Record<string, never> {
+    if (template.api === "anthropic-messages") {
+        // The template's own mapping wins when it names an "off" level.
+        return { thinkingLevelMap: { off: null, ...(template.thinkingLevelMap ?? {}) } };
+    }
+    return template.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {};
+}
+
+/**
+ * The static model an added one inherits from: the first reasoning model on
+ * the first model's api, else the first model. Catalog order is alphabetical,
+ * so OpenAI's first entry is gpt-4 (no reasoning, an 8k cap) while a newly
+ * added id is almost always a current, thinking model; `entry.reasoning`
+ * still overrides for one that is not.
+ *
+ * Deliberately not "the largest output cap": MiniMax would inherit M3's 512k
+ * and send a max_tokens a smaller added model may reject. Every other
+ * built-in already lists a reasoning model first, so only OpenAI changes.
+ */
+function extraModelTemplate(base: Provider): Model<Api> | undefined {
+    const statics = base.getModels();
+    const first = statics[0];
+    if (!first) return undefined;
+    return statics.find((m) => m.api === first.api && m.reasoning) ?? first;
+}
+
 function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | undefined {
-    const template = base.getModels()[0];
+    const template = extraModelTemplate(base);
     if (!template) return undefined;
     return {
         id: entry.id,
@@ -161,9 +191,7 @@ function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | und
         // shares: without the template's compat, pi would send budget-based
         // thinking to a model that only accepts effort levels.
         ...(template.compat ? { compat: template.compat } : {}),
-        // "off" maps to null: this model cannot be asked to stop thinking.
-        // The template's own mapping wins when it names an "off" level.
-        thinkingLevelMap: { off: null, ...(template.thinkingLevelMap ?? {}) },
+        ...extraThinkingLevelMap(template),
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: entry.contextWindow ?? DEFAULT_CUSTOM_CONTEXT_WINDOW,
