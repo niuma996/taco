@@ -235,9 +235,43 @@ describe("MemoryPane", () => {
         expect(screen.getByText("memory.group.recent")).toBeTruthy();
         expect(screen.getByText("memory.group.earlier")).toBeTruthy();
 
-        fireEvent.click(screen.getByRole("button", { name: "memory.type.project" }));
+        fireEvent.click(screen.getByRole("radio", { name: "memory.type.project" }));
         expect(screen.getByText("Recent project")).toBeTruthy();
         expect(screen.queryByText("Old user")).toBeNull();
+        expect(
+            screen.getByRole("radio", { name: "memory.type.project" }).getAttribute("aria-checked"),
+        ).toBe("true");
+
+        // Arrow keys move the filter like a radio group.
+        fireEvent.keyDown(screen.getByRole("radiogroup"), { key: "ArrowRight" });
+        expect(
+            screen
+                .getByRole("radio", { name: "memory.type.reference" })
+                .getAttribute("aria-checked"),
+        ).toBe("true");
+    });
+
+    it("arrow keys move the selection through the list", () => {
+        const onSelect = vi.fn();
+        render(
+            <MemoryPane
+                data={sampleData}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={onSelect}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => true}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+        const globalRow = screen.getByRole("button", { name: "memory.globalName" });
+        globalRow.focus();
+        fireEvent.keyDown(globalRow, { key: "ArrowDown" });
+        expect(onSelect).toHaveBeenLastCalledWith("user_role");
+        fireEvent.keyDown(document.activeElement as Element, { key: "Home" });
+        expect(onSelect).toHaveBeenLastCalledWith(MEMORY_ROOT_ID);
     });
 
     it("search matches the topic content, not only its title", () => {

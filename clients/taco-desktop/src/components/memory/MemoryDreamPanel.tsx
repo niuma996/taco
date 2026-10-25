@@ -23,19 +23,22 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { Switch } from "../ui/Switch";
 
+/** Dream actions; a `false` result means it failed and was already notified. */
 export interface MemoryDreamActions {
     busy: DreamBusy | null;
-    onRun: () => void | Promise<void>;
-    onApply: (previewId: string) => void | Promise<void>;
-    onDiscard: () => void | Promise<void>;
-    onUndo: (reportId: string) => void | Promise<void>;
-    onRestoreTopic: (id: string) => void | Promise<void>;
-    onScheduleToggle: (enabled: boolean) => void | Promise<void>;
+    onRun: () => unknown;
+    onApply: (previewId: string) => unknown;
+    onDiscard: () => unknown;
+    onUndo: (reportId: string) => unknown;
+    onRestoreTopic: (id: string) => boolean | Promise<boolean>;
+    onScheduleToggle: (enabled: boolean) => unknown;
 }
 
 interface MemoryDreamPanelProps extends Omit<MemoryDreamActions, "onRestoreTopic"> {
     state?: MemoryDreamState;
     scheduled?: boolean;
+    /** Why the scheduler switched the job off by itself; shown as a warning. */
+    pausedReason?: string;
     /** Live topics, so plan actions can name the entries they touch. */
     topics?: readonly MemoryTopicEntry[];
     onClose: () => void;
@@ -239,6 +242,7 @@ function ReportHistory({
 export function MemoryDreamPanel({
     state,
     scheduled,
+    pausedReason,
     topics = [],
     busy,
     onRun,
@@ -287,6 +291,13 @@ export function MemoryDreamPanel({
                     {busy === "run" ? t("memory.dream.running") : t("memory.dream.run")}
                 </Button>
             </div>
+            {pausedReason ? (
+                // Turned off by the failure breaker, not by the user: the
+                // switch alone would look like a choice they made.
+                <p className="memory-dream-note memory-dream-note-warning" role="status">
+                    {t("memory.dream.pausedReason")}: {pausedReason}
+                </p>
+            ) : null}
             <p className="memory-dream-note">
                 {scheduled === undefined
                     ? t("memory.dream.scheduleUnavailable")

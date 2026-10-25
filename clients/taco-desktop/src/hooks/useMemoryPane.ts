@@ -1,5 +1,5 @@
 import { asWorkspaceId, type MemoryListResult } from "@taco-ai/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createJobsClient } from "../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes.js";
@@ -20,15 +20,17 @@ export interface UseMemoryPaneResult {
     memorySaving: boolean;
     loadMemory: () => void;
     handleSaveMemory: (content: string, baseHash: string) => Promise<SaveMemoryResult>;
-    handleDeleteTopic: (id: string) => Promise<void>;
+    /** Resolves true when the topic was deleted; failures are already notified. */
+    handleDeleteTopic: (id: string) => Promise<boolean>;
     /** Which dream action is in flight, so the pane can disable its controls. */
     dreamBusy: DreamBusy | null;
-    handleDreamRun: () => Promise<void>;
-    handleDreamApply: (previewId: string) => Promise<void>;
-    handleDreamDiscard: () => Promise<void>;
-    handleDreamUndo: (reportId: string) => Promise<void>;
-    handleRestoreTopic: (id: string) => Promise<void>;
-    handleDreamScheduleToggle: (enabled: boolean) => Promise<void>;
+    handleDreamRun: () => Promise<boolean>;
+    handleDreamApply: (previewId: string) => Promise<boolean>;
+    handleDreamDiscard: () => Promise<boolean>;
+    handleDreamUndo: (reportId: string) => Promise<boolean>;
+    /** Resolves true when the topic was restored; failures are already notified. */
+    handleRestoreTopic: (id: string) => Promise<boolean>;
+    handleDreamScheduleToggle: (enabled: boolean) => Promise<boolean>;
 }
 
 export type DreamBusy = "run" | "apply" | "discard" | "undo" | "restore" | "schedule";
@@ -36,7 +38,14 @@ export type DreamBusy = "run" | "apply" | "discard" | "undo" | "restore" | "sche
 /** Id of the daemon's built-in consolidation job (sidecar builtinJobs.ts). */
 export const MEMORY_DREAM_JOB_ID = "memory-dream";
 
-/** Loads memory topics + handles save/delete for the memory pane. */
+/**
+ * Loads memory topics + handles save/delete/dream for the memory pane.
+ *
+ * Every result is checked against the workspace it was requested for. A
+ * consolidation run takes tens of seconds; if the user switches workspace
+ * meanwhile, its refetch must not show the old workspace's topics under the
+ * new one, or a later delete would send the old ids against the new cwd.
+ */
 export function useMemoryPane(
     client: TacoClient,
     active: boolean,
@@ -50,30 +59,48 @@ export function useMemoryPane(
     const [memoryError, setMemoryError] = useState<string | null>(null);
     const [memorySelectedId, setMemorySelectedId] = useState<string>(MEMORY_ROOT_ID);
     const [memorySaving, setMemorySaving] = useState(false);
-    const [dreamBusy, setDreamBusy] = useState<DreamBusy | null>(null);
+    // Busy is per workspace: a run still going in A must not lock B's buttons.
+    const [dreamBusyFor, setDreamBusyFor] = useState<{ cwd: string; busy: DreamBusy } | null>(null);
     const jobs = useMemo(() => createJobsClient(client), [client]);
 
-    // Imperative refresh — only called after save / delete handlers succeed.
-    // Not used by the active-gated useEffect below (that one calls the
-    // callback inline). Exposed on the result solely so MemoryPane.onRefresh
-    // can request a refetch (e.g. user clicks a refresh button), keeping the
-    // RPC boundary inside the hook.
+    // The workspace the pane shows now, read by async continuations.
+    const cwdRef = useRef(activeCwd);
+    cwdRef.current = activeCwd;
+    // Only the newest list request may write state; an older one that
+    // resolves later would overwrite fresher data.
+    const listSeq = useRef(0);
+
+    // Selection belongs to a workspace: reset it when the workspace changes,
+    // not on every refetch (a refresh, apply or undo keeps the user in place).
+    // Data from the previous workspace is dropped at the same time, so nothing
+    // can act on it while the new list loads.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: activeCwd is the trigger, not an input
+    useEffect(() => {
+        setMemorySelectedId(MEMORY_ROOT_ID);
+        setMemoryData(null);
+        setMemoryError(null);
+    }, [activeCwd]);
+
     const loadMemory = useCallback(() => {
         if (!activeCwd) return;
+        const cwd = activeCwd;
+        const seq = ++listSeq.current;
         setMemoryLoading(true);
         setMemoryError(null);
         void client
-            .memoryList(asWorkspaceId(activeCwd))
+            .memoryList(asWorkspaceId(cwd))
             .then((r) => {
+                if (seq !== listSeq.current || cwdRef.current !== cwd) return;
                 setMemoryData(r);
-                // Fall back to global after data loads (prevents stale topic selection from previous cwd).
-                setMemorySelectedId(MEMORY_ROOT_ID);
             })
             .catch((e: unknown) => {
+                if (seq !== listSeq.current || cwdRef.current !== cwd) return;
                 console.error("[useMemoryPane] memoryList failed:", e);
                 setMemoryError(e instanceof Error ? e.message : String(e));
             })
-            .finally(() => setMemoryLoading(false));
+            .finally(() => {
+                if (seq === listSeq.current) setMemoryLoading(false);
+            });
     }, [activeCwd, client]);
 
     useEffect(() => {
@@ -81,15 +108,35 @@ export function useMemoryPane(
         loadMemory();
     }, [active, activeCwd, loadMemory]);
 
+    // A selection whose topic is gone after a refetch (deleted elsewhere,
+    // merged by consolidation) falls back to the global entry.
+    useEffect(() => {
+        if (!memoryData || memorySelectedId === MEMORY_ROOT_ID) return;
+        const live = memoryData.topics.some((topic) => topic.id === memorySelectedId);
+        const archived = (memoryData.dream?.archived ?? []).some(
+            (topic) => `archive:${topic.id}` === memorySelectedId,
+        );
+        if (!live && !archived) setMemorySelectedId(MEMORY_ROOT_ID);
+    }, [memoryData, memorySelectedId]);
+
+    /** Refetch only while the user is still on the workspace the action ran in. */
+    const reloadIfCurrent = useCallback(
+        (cwd: string) => {
+            if (cwdRef.current === cwd) loadMemory();
+        },
+        [loadMemory],
+    );
+
     const handleSaveMemory = useCallback(
         async (content: string, baseHash: string): Promise<SaveMemoryResult> => {
             if (!activeCwd) return { ok: false, conflict: { currentContent: "", currentHash: "" } };
+            const cwd = activeCwd;
             setMemorySaving(true);
             try {
-                await client.memoryWrite(asWorkspaceId(activeCwd), content, baseHash);
+                await client.memoryWrite(asWorkspaceId(cwd), content, baseHash);
                 // No success toast: the editor closes on `ok` and the refreshed
                 // content renders in its place.
-                loadMemory();
+                reloadIfCurrent(cwd);
                 return { ok: true };
             } catch (e: unknown) {
                 const err = e as { code?: string; data?: unknown };
@@ -104,22 +151,31 @@ export function useMemoryPane(
                 setMemorySaving(false);
             }
         },
-        [activeCwd, client, loadMemory, notify, t],
+        [activeCwd, client, notify, reloadIfCurrent, t],
     );
 
     const handleDeleteTopic = useCallback(
-        async (id: string): Promise<void> => {
-            if (!activeCwd) return;
+        async (id: string): Promise<boolean> => {
+            if (!activeCwd) return false;
+            const cwd = activeCwd;
+            // Compare-and-delete against what the pane showed: a topic the
+            // extractor rewrote since is refused rather than deleted unseen.
+            const shown = memoryData?.topics.find((topic) => topic.id === id)?.content;
             try {
-                await client.memoryDeleteTopic(asWorkspaceId(activeCwd), id);
+                await client.memoryDeleteTopic(asWorkspaceId(cwd), id, shown);
                 // No success toast: the topic drops out of the refreshed list.
-                loadMemory();
+                reloadIfCurrent(cwd);
+                return true;
             } catch (e: unknown) {
                 console.error("[useMemoryPane] memoryDeleteTopic failed:", e);
-                notify(t("memory.errorDelete"));
+                notify(
+                    `${t("memory.errorDelete")}${e instanceof Error && e.message ? `: ${e.message}` : ""}`,
+                );
+                reloadIfCurrent(cwd);
+                return false;
             }
         },
-        [activeCwd, client, loadMemory, notify, t],
+        [activeCwd, client, memoryData, notify, reloadIfCurrent, t],
     );
 
     /** Run one dream RPC: mark busy, refetch on success, notify on failure. */
@@ -127,22 +183,25 @@ export function useMemoryPane(
         async (
             busy: DreamBusy,
             action: (ws: ReturnType<typeof asWorkspaceId>) => Promise<unknown>,
-        ) => {
-            if (!activeCwd) return;
-            setDreamBusy(busy);
+        ): Promise<boolean> => {
+            if (!activeCwd) return false;
+            const cwd = activeCwd;
+            setDreamBusyFor({ cwd, busy });
             try {
-                await action(asWorkspaceId(activeCwd));
-                loadMemory();
+                await action(asWorkspaceId(cwd));
+                reloadIfCurrent(cwd);
+                return true;
             } catch (e: unknown) {
                 console.error(`[useMemoryPane] dream ${busy} failed:`, e);
                 notify(
                     `${t(`memory.dream.error.${busy}`)}${e instanceof Error && e.message ? `: ${e.message}` : ""}`,
                 );
+                return false;
             } finally {
-                setDreamBusy(null);
+                setDreamBusyFor((current) => (current?.cwd === cwd ? null : current));
             }
         },
-        [activeCwd, loadMemory, notify, t],
+        [activeCwd, notify, reloadIfCurrent, t],
     );
 
     const handleDreamRun = useCallback(
@@ -194,6 +253,8 @@ export function useMemoryPane(
             }),
         [jobs, runDreamAction],
     );
+
+    const dreamBusy = dreamBusyFor && dreamBusyFor.cwd === activeCwd ? dreamBusyFor.busy : null;
 
     return {
         memoryData,

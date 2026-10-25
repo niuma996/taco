@@ -705,6 +705,7 @@
       "neverRun": "Not consolidated yet",
       "lastRun": "Last consolidated",
       "schedule": "Automatic consolidation",
+      "pausedReason": "Automatic consolidation was paused after repeated failures; turn it back on to resume",
       "scheduleNote": "Timing and thresholds live in the memory-dream scheduled job.",
       "scheduleUnavailable": "The daemon does not provide scheduled jobs",
       "run": "Consolidate now",

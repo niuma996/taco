@@ -71,7 +71,7 @@ function actions() {
         onApply: vi.fn(),
         onDiscard: vi.fn(),
         onUndo: vi.fn(),
-        onRestoreTopic: vi.fn(),
+        onRestoreTopic: vi.fn(async () => true),
         onScheduleToggle: vi.fn(),
     };
 }
@@ -143,7 +143,17 @@ describe("MemoryPane dream controls", () => {
         expect(screen.getAllByText("Old archived fact").length).toBeGreaterThan(0);
         await user.click(screen.getByRole("button", { name: "memory.dream.restore" }));
         expect(dream.onRestoreTopic).toHaveBeenCalledWith("old");
-        expect(onSelect).toHaveBeenCalledWith(MEMORY_ROOT_ID);
+        // Lands on the restored topic rather than the top of the list.
+        expect(onSelect).toHaveBeenCalledWith("old");
+    });
+
+    it("stays on the archived topic when the restore fails", async () => {
+        const user = userEvent.setup();
+        const failing = { ...actions(), onRestoreTopic: vi.fn(async () => false) };
+        const { onSelect } = renderPane(failing, `${MEMORY_ARCHIVE_PREFIX}old`);
+        await user.click(screen.getByRole("button", { name: "memory.dream.restore" }));
+        expect(failing.onRestoreTopic).toHaveBeenCalledWith("old");
+        expect(onSelect).not.toHaveBeenCalled();
     });
 
     it("opens consolidation from the header when nothing is pending", async () => {

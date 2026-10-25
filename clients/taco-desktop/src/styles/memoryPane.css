@@ -35,7 +35,7 @@
 
 .memory-filter-chip {
     flex: 0 0 auto;
-    height: 22px;
+    height: var(--control-height-sm);
     padding: 0 var(--space-2);
     border: 1px solid transparent;
     border-radius: var(--radius-pill);
@@ -54,7 +54,7 @@
     color: var(--fg);
 }
 
-.memory-filter-chip[aria-pressed="true"] {
+.memory-filter-chip[aria-checked="true"] {
     background: var(--accent-bg-active);
     color: var(--accent);
     font-weight: 600;
@@ -74,10 +74,10 @@
 }
 
 .memory-list-empty {
-    padding: 0.75rem;
+    padding: var(--space-3);
     color: var(--fg-dim);
-    font-size: 0.8rem;
-    line-height: 1.6;
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
 }
 
 /* Sticky so a long list still says which section it is in at row 80. */
@@ -98,9 +98,9 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 1px;
-    width: calc(100% - 8px);
-    margin: 1px 4px;
+    gap: var(--space-px);
+    width: calc(100% - 2 * var(--space-1));
+    margin: var(--space-px) var(--space-1);
     padding: var(--space-1-5) var(--space-2-5);
     border: none;
     border-radius: var(--radius-sm);
@@ -144,14 +144,20 @@
     text-align: left;
 }
 
-/* Archived rows stay readable but lose weight against live topics. */
-.memory-list-item.archived {
-    opacity: 0.6;
+/* Archived rows drop to the dim foreground instead of fading the whole row:
+   opacity on dim text in the light theme falls below a readable contrast. */
+.memory-list-item.archived .memory-list-item-name {
+    color: var(--fg-dim);
+    font-weight: 500;
 }
 
-.memory-list-item.archived:hover,
-.memory-list-item.archived.active {
-    opacity: 1;
+.memory-list-item.archived:hover .memory-list-item-name,
+.memory-list-item.archived.active .memory-list-item-name {
+    color: var(--fg);
+}
+
+.memory-list-item.archived.active .memory-list-item-name {
+    color: var(--accent);
 }
 
 .memory-archive-section {
@@ -164,8 +170,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
-    width: calc(100% - 8px);
-    margin: 0 4px;
+    width: calc(100% - 2 * var(--space-1));
+    margin: 0 var(--space-1);
     padding: var(--space-1-5) var(--space-2-5);
     border: none;
     border-radius: var(--radius-sm);
@@ -214,12 +220,12 @@
     justify-content: center;
     color: var(--fg-dim);
     text-align: center;
-    padding: 2rem;
+    padding: calc(2 * var(--space-4));
 }
 
 .memory-detail-placeholder p {
     margin: 0;
-    max-width: 26rem;
+    max-width: calc(var(--reading-width) * 0.62);
     line-height: var(--leading-normal);
 }
 
@@ -228,7 +234,7 @@
 }
 
 .memory-detail-disabled h2 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-2) 0;
     font-size: var(--text-lg);
 }
 
@@ -241,7 +247,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    max-width: 42rem;
+    max-width: var(--reading-width);
 }
 
 .memory-view-header {
@@ -255,7 +261,7 @@
     margin: 0;
     font-size: var(--text-lg);
     font-weight: 600;
-    line-height: 1.3;
+    line-height: var(--leading-tight);
     word-break: break-word;
 }
 
@@ -264,8 +270,8 @@
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-    height: 20px;
-    margin-top: 3px;
+    height: var(--control-height-xs);
+    margin-top: var(--space-0-5);
     padding: 0 var(--space-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-pill);
@@ -288,7 +294,7 @@
 /* Prose, not a code card: topics are one or two sentences, not documents. */
 .memory-view-content {
     font-size: var(--text-base);
-    line-height: 1.7;
+    line-height: var(--leading-relaxed);
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -296,7 +302,7 @@
 /* Markdown typography comes from .md-assistant (chatMarkdown.css); this only
    supplies the reading measure. */
 .memory-view-markdown {
-    max-width: 42rem;
+    max-width: var(--reading-width);
 }
 
 /* Quiet footer line: identity, age, and the one action that applies. */
@@ -325,23 +331,6 @@
     flex: 1;
 }
 
-/* Inline `<code>` outside markdown panes: match the borderless orange chip used by
-   .md-assistant :not(pre) > code, otherwise dark-mode default fg renders
-   gray-on-darker-orange and is hard to read.
-
-   Caveat: this rule hits `<pre><code>` too. Each pre-style container
-   (e.g. `.md-code-block pre code`) must reset background/border/padding
-   itself — see chatMarkdown.css for the markdown case. New pre/code
-   containers added in the future need the same reset. */
-code {
-    background: var(--code-bg);
-    color: var(--code-fg);
-    border-radius: var(--radius-xs);
-    padding: 0.1em 0.4em;
-    font-size: 0.92em;
-    font-family: var(--mono);
-}
-
 .memory-edit {
     display: flex;
     flex-direction: column;
@@ -351,7 +340,7 @@ code {
 
 .memory-edit-textarea {
     flex: 1;
-    min-height: 300px;
+    min-height: calc(var(--reading-width) * 0.45);
     background: var(--bg-secondary);
     color: var(--fg);
     border: 1px solid var(--border);
@@ -377,7 +366,7 @@ code {
 
 .memory-conflict-extra {
     position: fixed;
-    bottom: 1.5rem;
+    bottom: calc(1.5 * var(--space-4));
     left: 50%;
     transform: translateX(-50%);
     z-index: 60;
@@ -387,7 +376,7 @@ code {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 0.5rem 0.9rem;
+    padding: var(--space-2) var(--space-3);
     color: var(--fg);
     font-size: var(--text-base);
     cursor: pointer;
@@ -406,8 +395,8 @@ code {
 /* Unapplied preview marker: the only consolidation state the reading view
    has to advertise, so it does not need a whole banner. */
 .memory-dream-dot {
-    width: 6px;
-    height: 6px;
+    width: var(--dot-size);
+    height: var(--dot-size);
     border-radius: var(--radius-circle);
     background: var(--warning);
     flex: 0 0 auto;
@@ -417,7 +406,7 @@ code {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    max-width: 52rem;
+    max-width: var(--reading-width-wide);
     min-height: 100%;
 }
 
@@ -465,6 +454,11 @@ code {
     color: var(--fg-dim);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
+}
+
+.memory-dream-note-warning {
+    margin-top: 0;
+    color: var(--warning);
 }
 
 .memory-dream-idle {

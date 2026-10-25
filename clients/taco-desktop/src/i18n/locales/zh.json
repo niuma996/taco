@@ -702,6 +702,7 @@
       "neverRun": "尚未整理",
       "lastRun": "上次整理",
       "schedule": "定时自动整理",
+      "pausedReason": "定时整理已因连续失败自动暂停，重新打开开关即可恢复",
       "scheduleNote": "时间与阈值在「定时任务」的 memory-dream 任务中调整。",
       "scheduleUnavailable": "当前 daemon 未提供定时任务",
       "run": "立即整理",

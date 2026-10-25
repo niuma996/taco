@@ -13,7 +13,7 @@
  */
 
 import { ChevronRight, Pencil, RefreshCw, Save, Sparkles, Trash } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { type MemoryDreamActions, MemoryDreamPanel } from "../components/memory/MemoryDreamPanel";
@@ -33,6 +33,7 @@ import { formatRelativeTime } from "../lib/relativeTime";
 const TOPIC_TYPES = ["user", "feedback", "project", "reference"] as const;
 type TopicType = (typeof TOPIC_TYPES)[number];
 type TypeFilter = "all" | TopicType;
+const FILTERS: readonly TypeFilter[] = ["all", ...TOPIC_TYPES];
 
 /** Topics touched inside this window are "recent"; the rest group under "earlier". */
 const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -51,7 +52,8 @@ export interface MemoryPaneProps {
         content: string,
         baseHash: string,
     ) => Promise<{ ok: true } | { ok: false; conflict: MemoryConflictPayload }>;
-    onDeleteTopic: (id: string) => Promise<void>;
+    /** Resolves false when the delete failed (already notified by the host). */
+    onDeleteTopic: (id: string) => Promise<boolean | undefined>;
     onRefresh: () => void;
     /** Held by App.tsx to prevent duplicate submits. */
     saving: boolean;
@@ -96,6 +98,7 @@ export function MemoryPane(props: MemoryPaneProps) {
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
     const [archivedExpanded, setArchivedExpanded] = useState(false);
+    const listRef = useRef<HTMLDivElement>(null);
     const pendingId = data?.dream?.pending?.id;
     // A topic already selected when the pane mounts (e.g. restored from app
     // state) wins over an unapplied preview; otherwise surface the preview so
@@ -261,19 +264,73 @@ export function MemoryPane(props: MemoryPaneProps) {
 
     const handleDelete = async () => {
         if (!confirmDeleteId) return;
-        await onDeleteTopic(confirmDeleteId);
+        const deleted = await onDeleteTopic(confirmDeleteId);
         setConfirmDeleteId(null);
-        onSelect(MEMORY_ROOT_ID);
+        // A failed delete keeps the user on the topic they were reading.
+        if (deleted !== false) onSelect(MEMORY_ROOT_ID);
     };
 
     const handleRestore = async (id: string) => {
         if (!dream) return;
-        await dream.onRestoreTopic(id);
-        onSelect(MEMORY_ROOT_ID);
+        const restored = await dream.onRestoreTopic(id);
+        // Land on the topic just brought back, not the top of a long list.
+        if (restored) onSelect(id);
         setView("detail");
     };
 
     const typeLabel = (type: TopicType) => t(`memory.type.${type}`);
+
+    // Arrow keys move the filter, as a radio group does; focus follows.
+    const handleFilterKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        const step =
+            event.key === "ArrowRight" || event.key === "ArrowDown"
+                ? 1
+                : event.key === "ArrowLeft" || event.key === "ArrowUp"
+                  ? -1
+                  : 0;
+        if (step === 0) return;
+        event.preventDefault();
+        const index = FILTERS.indexOf(typeFilter);
+        const next = FILTERS[(index + step + FILTERS.length) % FILTERS.length] ?? "all";
+        setTypeFilter(next);
+        const chips = event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=radio]");
+        chips[FILTERS.indexOf(next)]?.focus();
+    };
+
+    // Up / Down / Home / End move between rows and open the row reached, so
+    // a long list can be read without the mouse. Escape leaves the
+    // consolidation view.
+    const handleListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === "Escape" && view === "dream") {
+            event.preventDefault();
+            setView("detail");
+            return;
+        }
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const rows = Array.from(
+            listRef.current?.querySelectorAll<HTMLButtonElement>("[data-memory-row]") ?? [],
+        );
+        if (rows.length === 0) return;
+        event.preventDefault();
+        const current = rows.indexOf(document.activeElement as HTMLButtonElement);
+        const index =
+            event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? rows.length - 1
+                  : Math.min(
+                        rows.length - 1,
+                        Math.max(
+                            0,
+                            (current < 0 ? -1 : current) + (event.key === "ArrowDown" ? 1 : -1),
+                        ),
+                    );
+        const row = rows[index];
+        if (!row) return;
+        row.focus();
+        const id = row.dataset.memoryRow;
+        if (id) handleSelect(id);
+    };
 
     const renderTopicRow = (topic: MemoryTopicEntry, archived: boolean) => {
         const rowId = archived ? `${MEMORY_ARCHIVE_PREFIX}${topic.id}` : topic.id;
@@ -281,6 +338,8 @@ export function MemoryPane(props: MemoryPaneProps) {
             <button
                 key={rowId}
                 type="button"
+                data-memory-row={rowId}
+                aria-current={selectedId === rowId && view === "detail" ? "true" : undefined}
                 className={`memory-list-item${selectedId === rowId ? " active" : ""}${
                     archived ? " archived" : ""
                 }`}
@@ -337,34 +396,35 @@ export function MemoryPane(props: MemoryPaneProps) {
 
                 <div
                     className="memory-filter-bar"
-                    role="toolbar"
+                    role="radiogroup"
                     aria-label={t("memory.typeLabel")}
+                    onKeyDown={handleFilterKeyDown}
                 >
-                    <button
-                        type="button"
-                        className="memory-filter-chip"
-                        aria-pressed={typeFilter === "all"}
-                        onClick={() => setTypeFilter("all")}
-                    >
-                        {t("memory.filter.all")}
-                    </button>
-                    {TOPIC_TYPES.map((type) => (
-                        <button
-                            key={type}
-                            type="button"
-                            className="memory-filter-chip"
-                            aria-pressed={typeFilter === type}
-                            onClick={() => setTypeFilter(type)}
-                        >
-                            {typeLabel(type)}
-                        </button>
-                    ))}
+                    {FILTERS.map((filter) => {
+                        const checked = typeFilter === filter;
+                        return (
+                            // biome-ignore lint/a11y/useSemanticElements: chips styled as pills; native radio inputs cannot carry the chip styling
+                            <button
+                                key={filter}
+                                type="button"
+                                role="radio"
+                                aria-checked={checked}
+                                tabIndex={checked ? 0 : -1}
+                                className="memory-filter-chip"
+                                onClick={() => setTypeFilter(filter)}
+                            >
+                                {filter === "all" ? t("memory.filter.all") : typeLabel(filter)}
+                            </button>
+                        );
+                    })}
                 </div>
 
-                <div className="memory-list-body">
+                <div className="memory-list-body" ref={listRef} onKeyDown={handleListKeyDown}>
                     <div className="memory-list-section-label">{t("memory.globalLabel")}</div>
                     <button
                         type="button"
+                        data-memory-row={MEMORY_ROOT_ID}
+                        aria-current={isMemorySelected && view === "detail" ? "true" : undefined}
                         className={`memory-list-item${
                             isMemorySelected && view === "detail" ? " active" : ""
                         }`}
@@ -435,6 +495,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                     <MemoryDreamPanel
                         state={data.dream}
                         scheduled={data.dreamScheduled}
+                        pausedReason={data.dreamPausedReason}
                         topics={data.topics}
                         busy={dream.busy}
                         onRun={dream.onRun}
