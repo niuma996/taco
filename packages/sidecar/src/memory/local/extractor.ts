@@ -3,7 +3,7 @@
  *
  * Gate: token estimate < MIN_TOKENS → skip
  * Truncate: last ~8000 chars
- * LLM call: completeSimple (lite model, temp 0.1, maxTokens 800)
+ * LLM call: completeSimple (lite model, temp 0.1, maxTokens 2000)
  * Output: JSON add/update actions applied against the existing topic index.
  */
 
@@ -11,7 +11,7 @@ import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { extractJsonSpan } from "../../lib/jsonExtract.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { AgentMessage, Api, Model, Models, TextContent } from "../../runtime/pi/types.ts";
-import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
+import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
 import {
     MEMORY_ENTRY_TYPES,
@@ -28,8 +28,6 @@ const log = createLogger("memory:extractor");
 
 const MIN_TOKEN_THRESHOLD = 50;
 const MAX_CHARS = 8000;
-// Updates carry full replacement content, so leave room for several per run.
-const MAX_TOKENS = 800;
 const LLM_TEMPERATURE = 0.1;
 
 const EXTRACTION_SYSTEM_PROMPT = `You are a memory extraction assistant. Given a conversation transcript and an index of existing memories, extract facts worth remembering for future sessions.
@@ -242,7 +240,14 @@ export class MemoryExtractorImpl implements MemoryExtractor {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            { maxTokens: MAX_TOKENS, temperature: LLM_TEMPERATURE, headers: tacoRequestHeaders() },
+            {
+                // No output cap: thinking shares the response ceiling, and a
+                // provider that ignores the thinking budget would spend a
+                // small cap on reasoning and return no facts at all.
+                temperature: LLM_TEMPERATURE,
+                reasoning: backgroundThinkingLevel(this.model),
+                headers: tacoRequestHeaders(),
+            },
         );
 
         if (!res) return;
@@ -250,7 +255,18 @@ export class MemoryExtractorImpl implements MemoryExtractor {
             .filter((b): b is TextContent => b.type === "text" && typeof b.text === "string")
             .map((b) => b.text)
             .join("");
-        if (!rawText) return;
+        if (!rawText) {
+            // A thinking model that spends the whole budget on reasoning returns
+            // no text; without this line the extraction looks like it worked
+            // while quietly storing nothing.
+            const blocks = res.content.map((b) => b.type);
+            log.warn(
+                `extraction returned no text: stopReason=${String(res.stopReason)} blocks=[${blocks.join(",")}]${
+                    res.errorMessage ? ` error=${res.errorMessage}` : ""
+                }`,
+            );
+            return;
+        }
 
         const actions = parseExtractionResult(rawText, new Date().toISOString(), this.workspaceId);
         const snapshotContent = new Map(existingTopics.map((topic) => [topic.id, topic.content]));

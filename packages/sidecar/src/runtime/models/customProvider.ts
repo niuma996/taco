@@ -45,7 +45,11 @@ function toApiStreams(api: CustomProviderApi) {
     }
 }
 
-/** Maps `CustomModelEntry` to a pi-ai `Model`. `reasoning` / `input` cannot be probed — conservative values. */
+/**
+ * Maps `CustomModelEntry` to a pi-ai `Model`. `input` cannot be probed;
+ * `reasoning` is the user's own claim, since a custom endpoint exposes no
+ * catalog to read it from.
+ */
 export function toModel(entry: CustomModelEntry, cfg: CustomProviderConfig): Model<Api> {
     return {
         id: entry.id,
@@ -53,7 +57,7 @@ export function toModel(entry: CustomModelEntry, cfg: CustomProviderConfig): Mod
         api: toPiApi(cfg.api),
         provider: cfg.id,
         baseUrl: cfg.baseUrl,
-        reasoning: false,
+        reasoning: entry.reasoning ?? false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: entry.contextWindow ?? DEFAULT_CUSTOM_CONTEXT_WINDOW,

@@ -17,8 +17,8 @@
  *   custom provider is built from the form values; it is never registered.
  *
  * Each probe runs in its own `createModels()` collection so it can neither
- * read nor mutate the workspace catalog. Cost: a few input tokens and at most
- * MAX_TOKENS output tokens per click.
+ * read nor mutate the workspace catalog. Cost: a few input tokens; the reply
+ * is deliberately one word long.
  */
 
 import type { Api, AssistantMessage, Model, Provider } from "@earendil-works/pi-ai";
@@ -31,13 +31,11 @@ import type {
 import { ErrorCodes, providerTestConnectionSchema } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 import { buildCustomProvider } from "../../runtime/models/customProvider.ts";
-import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
+import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 /** Overall probe budget. Long enough for a cold relay, short enough to feel like a test. */
 const TIMEOUT_MS = 20_000;
-/** Small reply cap — enough for "pong" or a short sentence on reasoning models. */
-const MAX_TOKENS = 16;
 /** Characters of the reply echoed back to the UI. */
 const REPLY_PREVIEW_CHARS = 80;
 /** The probe prompt. Deliberately trivial; any non-error reply counts as a pass. */
@@ -172,7 +170,9 @@ export async function performProbe(
         {
             apiKey,
             signal,
-            maxTokens: MAX_TOKENS,
+            // No output cap: a tiny one would be consumed by thinking on
+            // adaptive models, and the probe would report a false failure.
+            reasoning: backgroundThinkingLevel(model),
             // A test should report the first failure, not hide it behind retries.
             maxRetries: 0,
             timeoutMs: TIMEOUT_MS,

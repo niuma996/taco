@@ -121,6 +121,9 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                 ...(m.name !== undefined && m.name !== m.id ? { name: m.name } : {}),
                 ...(m.contextWindow === undefined ? {} : { contextWindow: m.contextWindow }),
                 ...(m.maxTokens === undefined ? {} : { maxTokens: m.maxTokens }),
+                // A declared thinking flag must survive a save: dropping it
+                // would let the model fall back to the provider's default.
+                ...(m.reasoning === undefined ? {} : { reasoning: m.reasoning }),
             }));
     });
     const [hidden, setHidden] = useState<string[]>(() =>

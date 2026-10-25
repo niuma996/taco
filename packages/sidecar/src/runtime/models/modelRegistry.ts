@@ -48,6 +48,8 @@ export interface ModelInfo {
     contextWindow?: number;
     /** Per-output cap in tokens. */
     maxTokens?: number;
+    /** Whether the model reasons before answering, as the user declared it. */
+    reasoning?: boolean;
 }
 
 /** Per-provider availability view (used by the UI to render provider rows and filter models). */
@@ -127,9 +129,14 @@ export function applyBuiltinProviders(
 
 /**
  * Convert a user-added entry into a chat Model for a built-in provider.
- * Conservative defaults mirror customProvider.toModel (reasoning/input cannot
- * be probed); `api`/`baseUrl` inherit from the provider's first static model
- * so the new model streams through the same protocol implementation.
+ * `api`/`baseUrl` inherit from the provider's first static model so the new
+ * model streams through the same protocol implementation.
+ *
+ * `reasoning`, `maxTokens`, `compat` and `thinkingLevelMap` inherit from that
+ * template too. The provider already knows whether its models think;
+ * overriding `reasoning: false` for a thinking model leaves pi unable to send
+ * `thinking: {type:"disabled"}`, and the provider then reasons by default —
+ * spending the output budget on reasoning and returning no text.
  */
 function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | undefined {
     const template = base.getModels()[0];
@@ -140,11 +147,17 @@ function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | und
         api: template.api,
         provider: base.id,
         baseUrl: template.baseUrl,
-        reasoning: false,
+        reasoning: entry.reasoning ?? template.reasoning,
+        // Protocol quirks and supported thinking levels belong to the api
+        // implementation the added model shares: without the template's
+        // compat, pi would send budget-based thinking to a model that only
+        // accepts effort levels.
+        ...(template.compat ? { compat: template.compat } : {}),
+        ...(template.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {}),
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: entry.contextWindow ?? DEFAULT_CUSTOM_CONTEXT_WINDOW,
-        maxTokens: entry.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,
+        maxTokens: entry.maxTokens ?? template.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,
     };
 }
 
@@ -397,7 +410,7 @@ export class ModelRegistry {
                 if (!extraIds.has(m.id)) {
                     return { ...m, origin: "builtin" as const };
                 }
-                const { contextWindow: _w, maxTokens: _t, ...rest } = m;
+                const { contextWindow: _w, maxTokens: _t, reasoning: _r, ...rest } = m;
                 const declared = declaredExtras.get(m.id);
                 return {
                     ...rest,
@@ -406,6 +419,10 @@ export class ModelRegistry {
                         ? {}
                         : { contextWindow: declared.contextWindow }),
                     ...(declared?.maxTokens === undefined ? {} : { maxTokens: declared.maxTokens }),
+                    // Only the declared value: an inherited default is the
+                    // provider's business, and writing it back would pin the
+                    // model to today's catalog.
+                    ...(declared?.reasoning === undefined ? {} : { reasoning: declared.reasoning }),
                 };
             });
             // One factory instance serves both reads below: the endpoint the

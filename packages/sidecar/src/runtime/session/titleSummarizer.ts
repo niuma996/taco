@@ -25,7 +25,7 @@ import type { SessionId } from "@taco-ai/protocol";
 import { createLogger } from "../../lib/logger.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
 import type { AgentMessage, Api, Model, Models, TextContent } from "../pi/types.ts";
-import { tacoRequestHeaders } from "../runtimeResources.ts";
+import { backgroundThinkingLevel, tacoRequestHeaders } from "../runtimeResources.ts";
 
 const log = createLogger("session:titleSummarizer");
 
@@ -38,7 +38,6 @@ const MIN_TOKEN_THRESHOLD = 30;
  *  context than fact extraction, but the same tail-of-conversation heuristic
  *  (most recent content is most representative) applies. */
 const MAX_CHARS = 4000;
-const MAX_TOKENS = 30;
 const LLM_TEMPERATURE = 0.2;
 /** Hard cap enforced server-side — the model is asked to stay under this, but
  *  the prompt is a request, not a contract. */
@@ -139,7 +138,14 @@ export class TitleSummarizer {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            { maxTokens: MAX_TOKENS, temperature: LLM_TEMPERATURE, headers: tacoRequestHeaders() },
+            {
+                // No output cap: a title is short, but thinking shares the
+                // response ceiling and a provider that ignores the thinking
+                // budget would never reach the title.
+                temperature: LLM_TEMPERATURE,
+                reasoning: backgroundThinkingLevel(this.model),
+                headers: tacoRequestHeaders(),
+            },
         );
 
         if (!res) return;
@@ -147,7 +153,16 @@ export class TitleSummarizer {
             .filter((b): b is TextContent => b.type === "text" && typeof b.text === "string")
             .map((b) => b.text)
             .join("");
-        if (!rawText.trim()) return;
+        if (!rawText.trim()) {
+            // Same diagnostic as the extractor's: without it a provider error
+            // looks like a title that was simply never derived.
+            log.warn(
+                `title summary returned no text: stopReason=${String(res.stopReason)} blocks=[${res.content
+                    .map((b) => b.type)
+                    .join(",")}]${res.errorMessage ? ` error=${res.errorMessage}` : ""}`,
+            );
+            return;
+        }
 
         const title = cleanTitle(rawText);
         if (!title) return;

@@ -79,6 +79,24 @@ function isPidAlive(pid: number): boolean {
     }
 }
 
+/**
+ * Topic dirs this process holds. The pid file cannot see a same-process
+ * holder — its liveness check skips `holder === process.pid` — yet the
+ * scheduled job and a manual UI run share one daemon process, so without
+ * this set a manual run would interleave with a running consolidation.
+ */
+const heldHere = new Set<string>();
+
+/** The pid the lock file names, or undefined when unreadable / cleared. */
+function readHolder(path: string): number | undefined {
+    try {
+        const holder = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
+        return Number.isFinite(holder) && holder > 0 ? holder : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 // ─── lock / last-run time ─────────────────────────────────────────────────────
 
 /** Last consolidation time in ms (lock mtime), or 0 when never consolidated. */
@@ -97,6 +115,13 @@ export function readLastDreamAt(topicDir: string): number {
  */
 export function tryAcquireDreamLock(topicDir: string, now = Date.now()): number | null {
     const path = join(dreamDir(topicDir), LOCK_FILE);
+    if (heldHere.has(path)) {
+        // Only block while the file still names this process: an externally
+        // rewritten holder (foreign or dead pid) means our hold was revoked,
+        // and the file rules below take over.
+        if (readHolder(path) === process.pid) return null;
+        heldHere.delete(path);
+    }
     let priorMtime = 0;
     if (existsSync(path)) {
         try {
@@ -118,12 +143,14 @@ export function tryAcquireDreamLock(topicDir: string, now = Date.now()): number 
     } catch {
         return null;
     }
+    heldHere.add(path);
     return priorMtime;
 }
 
 /** Release after success: clear the holder; the mtime stays as the run time. */
 export function releaseDreamLock(topicDir: string): void {
     const path = join(dreamDir(topicDir), LOCK_FILE);
+    heldHere.delete(path);
     try {
         const mtime = statSync(path).mtime;
         writeFileSync(path, "", "utf8");
@@ -136,6 +163,7 @@ export function releaseDreamLock(topicDir: string): void {
 /** Release after failure: rewind the mtime so the time gate passes again. */
 export function rollbackDreamLock(topicDir: string, priorMtime: number): void {
     const path = join(dreamDir(topicDir), LOCK_FILE);
+    heldHere.delete(path);
     try {
         if (priorMtime === 0) {
             unlinkSync(path);

@@ -539,6 +539,46 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.equal(extra?.provider, "stub-a");
         });
 
+        it("an added model inherits the provider's thinking capability and output cap", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            const thinking = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [{ ...template, reasoning: true, maxTokens: 65_536 }],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => thinking }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1" }] },
+            });
+            const extra = models.getModel("stub-a", "extra-1");
+            // A thinking model left marked as non-reasoning keeps reasoning by
+            // default and spends the output budget on it.
+            assert.equal(extra?.reasoning, true);
+            assert.equal(extra?.maxTokens, 65_536);
+        });
+
+        it("the user can declare a model as non-reasoning over its provider's default", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            const thinking = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [{ ...template, reasoning: true }],
+            };
+            new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => thinking }],
+                providerExtraModels: { "stub-a": [{ id: "extra-1", reasoning: false }] },
+            });
+            assert.equal(models.getModel("stub-a", "extra-1")?.reasoning, false);
+        });
+
         it("an added model carries the context window the user declared", () => {
             const store = new ProviderKeyStore({});
             const mr = new ModelRegistry({

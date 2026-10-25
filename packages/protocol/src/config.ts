@@ -198,6 +198,19 @@ export interface CustomModelEntry {
     contextWindow?: number;
     /** Per-output cap in tokens, default 8192. */
     maxTokens?: number;
+    /**
+     * Whether the model reasons before answering. Left unset, the model
+     * inherits the capability of the provider it is added to — a model the
+     * provider lists as a thinking model is one, even when the user adds it
+     * by hand.
+     *
+     * This is not cosmetic: pi only sends `thinking: {type:"disabled"}` to a
+     * model it believes thinks. A thinking model left marked as
+     * non-reasoning keeps thinking by default, and the reasoning tokens eat
+     * the output budget — a request for a short JSON answer can come back
+     * with no text at all.
+     */
+    reasoning?: boolean;
 }
 
 /** Custom provider config (persisted as `customProviders` in `taco.json`). */

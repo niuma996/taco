@@ -80,6 +80,23 @@ export function tacoRequestHeaders(): Record<string, string> {
 }
 
 /**
+ * Thinking level for the sidecar's background one-shot calls (dream,
+ * extraction, session titles, provider probes).
+ *
+ * pi's simple-stream adapters send `thinking: {type:"disabled"}` when a call
+ * omits `reasoning` while the model is marked as reasoning; some providers
+ * reject that flag outright (MiniMax M3.1: "requires adaptive thinking" →
+ * HTTP 400, which surfaces as `stopReason:"error"` and no text). Asking for
+ * the cheapest level instead makes such providers answer and keeps the
+ * thinking budget bounded — pi adds the budget on top of `maxTokens`, so the
+ * answer room survives. Non-reasoning models get undefined: pi omits the
+ * thinking parameter for them either way.
+ */
+export function backgroundThinkingLevel(model: { reasoning?: boolean }): "minimal" | undefined {
+    return model.reasoning ? "minimal" : undefined;
+}
+
+/**
  * require resolution root for npm extensions. Bundled release ships no
  * node_modules, so the default points to `$TACO_HOME/extensions`;
  * TACO_EXTENSION_ROOT can override for tests/deploy.

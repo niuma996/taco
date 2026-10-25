@@ -401,6 +401,11 @@ export interface ProviderView {
         contextWindow?: number;
         /** Per-output cap in tokens. Absent when the model declares none. */
         maxTokens?: number;
+        /**
+         * Whether the model reasons before answering, as the user declared it
+         * for an added model. Absent means the provider's default applies.
+         */
+        reasoning?: boolean;
     }>;
 }
 

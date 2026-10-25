@@ -73,6 +73,11 @@ export const DEFAULT_DREAM_OPTIONS: DreamOptions = {
 /** Upper bound on the share of topics one plan may archive (merge sources included). */
 export const MAX_ARCHIVE_RATIO = 0.3;
 
+/** How many topics one plan may retire. The floor keeps one binary merge possible. */
+export function retirementCap(topicCount: number): number {
+    return Math.max(2, Math.floor(topicCount * MAX_ARCHIVE_RATIO));
+}
+
 /** A topic as the model sees it, with the signals the prompt reasons over. */
 export interface DreamTopicView {
     readonly id: string;
@@ -138,74 +143,208 @@ export function buildTopicViews(
 const asText = (value: unknown): string | undefined =>
     typeof value === "string" && value.trim() ? value.trim() : undefined;
 
-/**
- * Parse the model's JSON into actions. Malformed items are dropped here;
- * semantic checks (ids exist, no overlaps) happen in `validateDreamPlan`.
- */
-export function parseDreamActions(raw: string): DreamAction[] | null {
-    // The prompt asks for `{"actions": [...]}`; a bare array is accepted too.
-    const parsed = extractJsonSpan(raw, "{}");
-    if (Array.isArray(parsed)) return parseActionList(parsed);
-    const actions = (parsed as { actions?: unknown } | null)?.actions;
-    if (Array.isArray(actions)) return parseActionList(actions);
-    const bare = extractJsonSpan(raw, "[]");
-    return Array.isArray(bare) ? parseActionList(bare) : null;
+/** Action kinds the model may name in any of several fields. */
+type ActionKind = "merge" | "rewrite" | "archive";
+
+const KIND_BY_KEY: Record<string, ActionKind> = {
+    merge: "merge",
+    merges: "merge",
+    rewrite: "rewrite",
+    rewrites: "rewrite",
+    archive: "archive",
+    archives: "archive",
+};
+
+/** Keys whose array value is a list of actions. */
+const ACTION_LIST_KEYS = ["actions", "plan", "items", "results", "changes"];
+
+export interface ParsedDreamPlan {
+    readonly actions: readonly DreamAction[];
+    /** True when the reply named no action at all — a valid "nothing to do". */
+    readonly empty: boolean;
+    /** True when the JSON was incomplete and the actions came from salvage. */
+    readonly recovered: boolean;
 }
 
-function parseActionList(list: readonly unknown[]): DreamAction[] {
+/**
+ * Parse the model's reply into actions. Malformed items are dropped; the
+ * semantic checks (ids exist, no overlaps) live in `validateDreamPlan`.
+ *
+ * The shape is not fixed: models answer with `{"actions": [...]}`, a bare
+ * array, or a per-kind object (`{"merges": [...], "archives": [...]}`), and
+ * put the kind in `action`, `kind`, `op`, or `type`. All of those are
+ * accepted, because rejecting a plan over its envelope loses a good
+ * consolidation run.
+ *
+ * A reply that stops mid-JSON still yields its complete actions: the tail is
+ * unfinished, but every closed object before it is a decision the model
+ * finished making. `null` means neither a full parse nor a salvage produced
+ * anything.
+ */
+export function parseDreamActions(raw: string): ParsedDreamPlan | null {
+    const value = extractJsonSpan(raw, "{}") ?? extractJsonSpan(raw, "[]");
+    const truncated = value === null || value === undefined;
+    const candidates: ActionCandidate[] = truncated
+        ? salvageActionObjects(raw).map((item) => ({ item }))
+        : collectActionItems(value);
+    if (truncated && candidates.length === 0) return null;
+
     const actions: DreamAction[] = [];
-    for (const item of list) {
-        if (!item || typeof item !== "object") continue;
-        const raw = item as Record<string, unknown>;
-        const id = asText(raw.id);
-        switch (raw.action) {
-            case "merge": {
-                const sourceIds = Array.isArray(raw.sourceIds)
-                    ? raw.sourceIds.map(asText).filter((v): v is string => v !== undefined)
-                    : [];
-                const name = asText(raw.name);
-                const content = asText(raw.content);
-                const type = asText(raw.type);
-                if (!id || !name || !content || !type) continue;
-                if (!(MEMORY_ENTRY_TYPES as readonly string[]).includes(type)) continue;
-                actions.push({
-                    action: "merge",
-                    sourceIds,
-                    id: normalizeMemoryTopicId(id),
-                    name: name.slice(0, 60),
-                    description: (asText(raw.description) ?? name).slice(0, 120),
-                    type: type as MemoryEntryType,
-                    content: content.slice(0, MEMORY_CONTENT_MAX_CHARS),
-                });
-                break;
+    for (const { kindHint, item } of candidates) {
+        const action = parseActionItem(item, kindHint);
+        if (action) actions.push(action);
+    }
+    return { actions, empty: candidates.length === 0, recovered: truncated };
+}
+
+/**
+ * Recover the whole action objects from a reply that stopped mid-JSON — a
+ * truncated stream, or a model that quit while writing its last action. The
+ * unfinished tail is ignored rather than guessed at, so every recovered
+ * action is one the model actually committed to.
+ */
+function salvageActionObjects(raw: string): unknown[] {
+    const keyAt = raw.indexOf('"actions"');
+    const arrayAt = raw.indexOf("[", keyAt >= 0 ? keyAt : 0);
+    if (arrayAt < 0) return [];
+
+    const out: unknown[] = [];
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let escaped = false;
+    for (let i = arrayAt + 1; i < raw.length; i++) {
+        const char = raw[i];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (char === "\\") escaped = true;
+            else if (char === '"') inString = false;
+            continue;
+        }
+        if (char === '"') {
+            inString = true;
+        } else if (char === "{") {
+            if (depth === 0) start = i;
+            depth++;
+        } else if (char === "}" && depth > 0) {
+            depth--;
+            if (depth === 0 && start >= 0) {
+                try {
+                    out.push(JSON.parse(raw.slice(start, i + 1)));
+                } catch {
+                    // A broken object inside an otherwise usable plan.
+                }
+                start = -1;
             }
-            case "rewrite": {
-                const content = asText(raw.content);
-                if (!id || !content) continue;
-                actions.push({
-                    action: "rewrite",
-                    id,
-                    content: content.slice(0, MEMORY_CONTENT_MAX_CHARS),
-                });
-                break;
-            }
-            case "archive": {
-                const reason = asText(raw.reason);
-                if (!id || !reason) continue;
-                const supersededBy = asText(raw.supersededBy);
-                actions.push({
-                    action: "archive",
-                    id,
-                    reason: reason.slice(0, 200),
-                    ...(supersededBy ? { supersededBy } : {}),
-                });
-                break;
-            }
-            default:
-                break;
         }
     }
-    return actions;
+    return out;
+}
+
+interface ActionCandidate {
+    /** Known from the enclosing key, when the item itself does not say. */
+    readonly kindHint?: ActionKind;
+    readonly item: unknown;
+}
+
+function collectActionItems(value: unknown): ActionCandidate[] {
+    if (Array.isArray(value)) return value.map((item) => ({ item }));
+    if (!value || typeof value !== "object") return [];
+    const obj = value as Record<string, unknown>;
+    const out: ActionCandidate[] = [];
+
+    for (const key of ACTION_LIST_KEYS) {
+        const list = obj[key];
+        if (Array.isArray(list)) out.push(...list.map((item) => ({ item })));
+    }
+    for (const [key, kind] of Object.entries(KIND_BY_KEY)) {
+        const list = obj[key];
+        if (Array.isArray(list)) out.push(...list.map((item) => ({ kindHint: kind, item })));
+    }
+    // A single action object, e.g. {"action":"rewrite", ...}.
+    if (out.length === 0 && (obj.action !== undefined || obj.kind !== undefined)) {
+        out.push({ item: obj });
+    }
+    return out;
+}
+
+function parseActionItem(item: unknown, kindHint?: ActionKind): DreamAction | null {
+    if (!item || typeof item !== "object") return null;
+    const raw = item as Record<string, unknown>;
+    const kind = resolveKind(raw, kindHint);
+    if (!kind) return null;
+
+    if (kind === "merge") return parseMerge(raw);
+    if (kind === "rewrite") return parseRewrite(raw);
+    return parseArchive(raw);
+}
+
+/** The kind can sit in `action`, `kind`, `op`, or `type`. */
+function resolveKind(
+    raw: Record<string, unknown>,
+    kindHint: ActionKind | undefined,
+): ActionKind | undefined {
+    for (const field of ["action", "kind", "op", "type"]) {
+        const value = asText(raw[field])?.toLowerCase();
+        if (value === "merge" || value === "rewrite" || value === "archive") return value;
+    }
+    return kindHint;
+}
+
+function parseMerge(raw: Record<string, unknown>): DreamAction | null {
+    const sourceIds = firstArray(raw, ["sourceIds", "source_ids", "sources", "from"]);
+    if (sourceIds.length < 2) return null;
+    // The merged topic may be inline or nested under `target` / `merged`.
+    const target = (raw.target ?? raw.merged ?? raw.result ?? raw) as Record<string, unknown>;
+    const id = asText(target.id);
+    const name = asText(target.name);
+    const content = asText(target.content);
+    const type = asText(target.type);
+    if (!id || !name || !content || !type) return null;
+    if (!MEMORY_ENTRY_TYPES.includes(type as MemoryEntryType)) return null;
+    return {
+        action: "merge",
+        sourceIds,
+        id: normalizeMemoryTopicId(id),
+        name: name.slice(0, 60),
+        description: (asText(target.description) ?? name).slice(0, 120),
+        type: type as MemoryEntryType,
+        content: content.slice(0, MEMORY_CONTENT_MAX_CHARS),
+    };
+}
+
+function parseRewrite(raw: Record<string, unknown>): DreamAction | null {
+    const id = asText(raw.id);
+    const content = asText(raw.content);
+    if (!id || !content) return null;
+    return {
+        action: "rewrite",
+        id,
+        content: content.slice(0, MEMORY_CONTENT_MAX_CHARS),
+    };
+}
+
+function parseArchive(raw: Record<string, unknown>): DreamAction | null {
+    const id = asText(raw.id);
+    if (!id) return null;
+    const supersededBy = asText(raw.supersededBy ?? raw.superseded_by ?? raw.replacedBy);
+    return {
+        action: "archive",
+        id,
+        // A missing reason is not worth dropping the action over.
+        reason: (asText(raw.reason) ?? "retired by consolidation").slice(0, 200),
+        ...(supersededBy ? { supersededBy } : {}),
+    };
+}
+
+function firstArray(raw: Record<string, unknown>, keys: readonly string[]): string[] {
+    for (const key of keys) {
+        const list = raw[key];
+        if (!Array.isArray(list)) continue;
+        const ids = list.map(asText).filter((v): v is string => v !== undefined);
+        if (ids.length > 0) return ids;
+    }
+    return [];
 }
 
 // ─── validation ───────────────────────────────────────────────────────────────
@@ -293,7 +432,11 @@ export function validateDreamPlan(
         }
     }
 
-    const cap = Math.floor(views.length * MAX_ARCHIVE_RATIO);
+    // The floor keeps one binary merge possible on a small set: floor(n * 0.3)
+    // is 0 or 1 for n < 7, which would reject every merge — the one action
+    // that removes duplication. A merge also carries its facts forward, so
+    // the floor does not weaken what the ratio protects against.
+    const cap = retirementCap(views.length);
     if (archived > cap) {
         return {
             ok: false,
@@ -301,6 +444,49 @@ export function validateDreamPlan(
         };
     }
     return { ok: true };
+}
+
+/**
+ * Bring a plan under the retirement cap by dropping later actions.
+ *
+ * Rejecting the whole plan for this one overreach throws away every valid
+ * merge, rewrite and archive it also proposed — and a workspace large enough
+ * to hit the cap would fail that way on every scheduled run. Archives go
+ * first: a stale topic can wait for the next run, and merges carry their
+ * sources' facts forward. Only if archives alone cannot make room are merges
+ * dropped, from the end of the plan.
+ *
+ * Retirement counts are computed as `validateDreamPlan` counts them, so the
+ * trimmed plan is guaranteed to pass that check.
+ */
+export function capRetirement(
+    actions: readonly DreamAction[],
+    views: readonly DreamTopicView[],
+): { readonly actions: readonly DreamAction[]; readonly dropped: number } {
+    const cap = retirementCap(views.length);
+    const retired = actions.reduce((sum, action) => {
+        if (action.action === "merge") return sum + action.sourceIds.length;
+        return sum + (action.action === "archive" ? 1 : 0);
+    }, 0);
+    if (retired <= cap) return { actions, dropped: 0 };
+
+    let remaining = retired;
+    let dropped = 0;
+    const kept = [...actions];
+    for (let i = kept.length - 1; i >= 0 && remaining > cap; i--) {
+        if (kept[i]?.action !== "archive") continue;
+        remaining--;
+        dropped++;
+        kept.splice(i, 1);
+    }
+    for (let i = kept.length - 1; i >= 0 && remaining > cap; i--) {
+        const action = kept[i];
+        if (action?.action !== "merge") continue;
+        remaining -= action.sourceIds.length;
+        dropped++;
+        kept.splice(i, 1);
+    }
+    return { actions: kept, dropped };
 }
 
 /** Whether a plan archives `id` directly or as a merge source. */

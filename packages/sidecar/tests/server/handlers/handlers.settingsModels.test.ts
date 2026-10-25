@@ -935,14 +935,16 @@ describe("provider.testConnection", () => {
             return { p, model };
         }
 
-        it("sends a capped chat request with the key and returns the reply", async () => {
+        it("sends a chat request with the key and leaves the ceiling to the model", async () => {
             await withStub(200, async (baseUrl, seen) => {
                 const { p, model } = stubProvider(baseUrl);
                 const m = await performProbe(p, model, "sk-probe", AbortSignal.timeout(5000));
                 assert.equal(m.stopReason, "stop");
                 assert.equal(seen.path, "/v1/chat/completions");
                 assert.equal(seen.auth, "Bearer sk-probe");
-                assert.equal(seen.max, 16);
+                // No explicit cap: a small one would be spent on thinking by
+                // providers that ignore the thinking budget.
+                assert.equal(seen.max, model.maxTokens);
             });
         });
 
