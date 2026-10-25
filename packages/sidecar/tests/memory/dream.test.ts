@@ -238,6 +238,22 @@ describe("dream lock", () => {
         assert.equal(readLastDreamAt(dir), afterRelease, "a failed run keeps the last stamp");
     });
 
+    it("reads a released legacy lock's mtime as the last run, then moves to last-run", () => {
+        mkdirSync(join(dir, ".dream"), { recursive: true });
+        const lock = join(dir, ".dream", "lock");
+        // What the previous version left behind: an empty, released lock.
+        writeFileSync(lock, "");
+        const dayAgo = new Date(Date.now() - DAY);
+        utimesSync(lock, dayAgo, dayAgo);
+        assert.ok(Math.abs(readLastDreamAt(dir) - dayAgo.getTime()) < 5);
+
+        // The legacy file does not block a new run, and success writes last-run.
+        assert.equal(tryAcquireDreamLock(dir), true);
+        releaseDreamLock(dir);
+        assert.ok(readLastDreamAt(dir) > dayAgo.getTime() + 1000);
+        assert.equal(existsSync(lock), false);
+    });
+
     it("a first-ever run that fails leaves no run time", () => {
         assert.equal(tryAcquireDreamLock(dir), true);
         rollbackDreamLock(dir);

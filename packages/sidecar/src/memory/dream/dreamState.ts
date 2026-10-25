@@ -125,10 +125,24 @@ function isAbandoned(path: string, now: number): boolean {
 
 // ─── lock / last-run time ─────────────────────────────────────────────────────
 
-/** Last successful consolidation time in ms, or 0 when never consolidated. */
+/**
+ * Last successful consolidation time in ms, or 0 when never consolidated.
+ *
+ * Workspaces consolidated before `last-run` existed kept that time as the
+ * lock file's mtime, with an empty body once released. Read it as the run
+ * time until the next successful run writes `last-run`; otherwise every such
+ * workspace would look never-consolidated and skip the time gate.
+ */
 export function readLastDreamAt(topicDir: string): number {
     try {
         return statSync(join(dreamDir(topicDir), LAST_RUN_FILE)).mtimeMs;
+    } catch {
+        // fall through to the legacy stamp
+    }
+    const lock = lockPath(topicDir);
+    try {
+        if (readHolder(lock) !== undefined) return 0;
+        return statSync(lock).mtimeMs;
     } catch {
         return 0;
     }
