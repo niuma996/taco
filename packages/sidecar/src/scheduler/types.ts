@@ -54,6 +54,8 @@ export interface JobHistoryEntry {
     ended_at?: string;
     status: "running" | "ok" | "err";
     error?: string;
+    /** One-line outcome a built-in handler reports (e.g. "merged 12→4"). */
+    summary?: string;
 }
 
 /** Per-call caller identity, attached to jobs.* RPC params so the server
@@ -84,6 +86,10 @@ export interface Job {
     command: string;
     /** Free-form argument bag passed verbatim to the command. */
     args: Record<string, unknown>;
+    /** System job seeded by the daemon (see builtinJobs.ts): runs a native
+     *  handler, cannot be deleted, and its command is fixed. Absent on every
+     *  user-created job. */
+    builtin?: boolean;
     enabled: boolean;
     /** Whether to replay a missed fire when the daemon comes back up.
      *  Only applies when `enabled` is also true. */

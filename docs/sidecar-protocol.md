@@ -95,6 +95,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.1 | `session.cancelQueued`; `session.steer` returns `{ mode, entryId }` |
 | 2.2 | `providers.revealKey`; `provider.listModels` `{ providerId }` shape and discovery for every protocol; `providers.list` `baseUrl` / `api` / `models[].origin`; `providerExtraModels` / `providerHiddenModels` config fields; `provider.testConnection` |
 | 2.3 | `workspace.associations.get` / `.set` / `.resolve`; `config.patch`; the `workspace.associations_changed` push; `PermissionRequestKind` `config`; `AgentsContentResult.cwdChoices`; `ProviderView.models[].contextWindow` / `.maxTokens` |
+| 2.4 | `memory.dreamRun` / `.dreamApply` / `.dreamDiscard` / `.dreamUndo`; `memory.restoreTopic`; `MemoryListResult.dream` / `.dreamScheduled`; `Job.builtin` and `JobHistoryEntry.summary` on `jobs.*` |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
@@ -179,6 +180,11 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `memory.write` | memory.* |
 | `memory.deleteTopic` | memory.* |
 | `memory.upsert` | memory.* |
+| `memory.restoreTopic` | memory.* |
+| `memory.dreamRun` | memory.* |
+| `memory.dreamApply` | memory.* |
+| `memory.dreamDiscard` | memory.* |
+| `memory.dreamUndo` | memory.* |
 | `mcp.listServers` | mcp.* |
 | `mcp.getConfig` | mcp.* |
 | `mcp.createConfig` | mcp.* |

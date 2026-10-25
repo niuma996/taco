@@ -97,7 +97,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 3 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 4 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -146,13 +146,14 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.3 client refuses a 2.2 daemon (it lacks the association and config-patch RPCs)", () => {
-            // Client-side gate: a 2.2 daemon does not know workspace.associations.*
-            // or config.patch, so the handshake must fail before a call to them
-            // surfaces as a bare "method not found" at runtime.
+        it("a 2.4 client refuses a 2.3 daemon (it lacks the memory consolidation RPCs)", () => {
+            // Client-side gate: a 2.3 daemon does not know memory.dream* or
+            // memory.restoreTopic, so the handshake must fail before a call to
+            // them surfaces as a bare "method not found" at runtime.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 2 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 3 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 3 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 4 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), true);
         });
 
         it("accepts an older compatible client minor", async () => {

@@ -91,8 +91,12 @@ export type CompactionFailureReason =
  *  2.3 added the `workspace.associations.get` / `.set` / `.resolve` RPCs,
  *  the `config.patch` RPC and the `workspace.associations_changed` push. A
  *  2.2 daemon does not know them, so a 2.3 client must refuse it up front
- *  rather than fail on one particular RPC later. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 3 } as const;
+ *  rather than fail on one particular RPC later.
+ *  2.4 added the `memory.dreamRun` / `.dreamApply` / `.dreamDiscard` /
+ *  `.dreamUndo` and `memory.restoreTopic` RPCs, plus the optional `dream` /
+ *  `dreamScheduled` fields on `memory.list`. A 2.3 daemon does not know the
+ *  RPCs, so a 2.4 client must refuse it up front. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 4 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

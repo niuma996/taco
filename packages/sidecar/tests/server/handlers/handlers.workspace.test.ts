@@ -87,6 +87,62 @@ describe("jobs", () => {
         return "?";
     }
 
+    describe("jobs RPC handlers — built-in jobs (wire-shape)", () => {
+        const builtinJob = (args: Record<string, unknown>, command = "memory.dream") => ({
+            id: "memory-dream",
+            name: "Memory consolidation",
+            schedule: { kind: "cron", expr: "17 4 * * *" },
+            command,
+            args,
+            enabled: true,
+            run_on_startup: true,
+            builtin: true,
+            history: [],
+        });
+
+        it("jobs.update passes a built-in through with cleaned args, no workspace/prompt needed", async () => {
+            registerBuiltinMethods();
+            const controllerCalls: string[] = [];
+            const server = makeStubServer(controllerCalls);
+            const result = (await callMethod("jobs.update", {
+                server,
+                params: { job: builtinJob({ minHours: 48, prompt: "smuggled" }) },
+            })) as { job: { args: Record<string, unknown> } };
+            assert.deepEqual(controllerCalls, ["update:memory-dream:none"]);
+            assert.deepEqual(result.job.args, { minHours: 48 });
+        });
+
+        it("jobs.update rejects out-of-range built-in args before the controller", async () => {
+            registerBuiltinMethods();
+            const controllerCalls: string[] = [];
+            const server = makeStubServer(controllerCalls);
+            await assert.rejects(
+                () =>
+                    callMethod("jobs.update", {
+                        server,
+                        params: { job: builtinJob({ staleDays: 1 }) },
+                    }),
+                /args\.staleDays must be an integer/,
+            );
+            assert.deepEqual(controllerCalls, []);
+        });
+
+        it("jobs.update refuses builtin: true with a non-built-in command", async () => {
+            registerBuiltinMethods();
+            const controllerCalls: string[] = [];
+            const server = makeStubServer(controllerCalls);
+            await assert.rejects(
+                () =>
+                    callMethod("jobs.update", {
+                        server,
+                        params: { job: builtinJob({}, "shell.exec") },
+                    }),
+                /not a built-in command/,
+            );
+            assert.deepEqual(controllerCalls, []);
+        });
+    });
+
     describe("jobs RPC handlers — unsafe IDs (wire-shape)", () => {
         it("jobs.create ignores caller-supplied ids before persistence", async () => {
             registerBuiltinMethods();
@@ -809,6 +865,203 @@ describe("memory", () => {
             );
             await handler.handler(ctx2);
             assert.equal(store.getTopic("no-desc")?.description, "Name");
+        });
+    });
+
+    describe("memory.dream* (preview → apply → undo)", () => {
+        const topics = (n: number): MemoryEntry[] =>
+            Array.from({ length: n }, (_, i) => ({
+                ...sampleTopic,
+                id: `t${i}`,
+                name: `T${i}`,
+                content: `fact ${i}`,
+            }));
+
+        const plan = {
+            actions: [
+                {
+                    action: "merge",
+                    sourceIds: ["t0", "t1"],
+                    id: "t01",
+                    name: "T01",
+                    description: "merged",
+                    type: "user",
+                    content: "fact 0 and 1",
+                },
+                { action: "rewrite", id: "t2", content: "fact 2, tightened" },
+            ],
+        };
+
+        function workspaceWith(store: LocalMemoryStore, response: unknown = plan) {
+            let calls = 0;
+            const model = { provider: "faux", id: "m" };
+            const models = {
+                completeSimple: async () => {
+                    calls++;
+                    return {
+                        role: "assistant",
+                        content: [{ type: "text", text: JSON.stringify(response) }],
+                    };
+                },
+                getModel: () => undefined,
+                getModels: () => [model],
+            };
+            return {
+                workspace: {
+                    memoryStore: store,
+                    models,
+                    defaultModel: model,
+                } as unknown as Partial<WorkspaceRuntime>,
+                calls: () => calls,
+            };
+        }
+
+        async function call(
+            method: string,
+            workspace: Partial<WorkspaceRuntime>,
+            params: unknown = {},
+        ) {
+            const handler = getRegisteredMethod(method);
+            assert.ok(handler, `${method} is registered`);
+            return handler.handler(
+                makeCtx(workspace, { workspace: "/tmp/ws", ...(params as object) }),
+            );
+        }
+
+        async function seeded(n = 10): Promise<LocalMemoryStore> {
+            const store = new LocalMemoryStore();
+            store.initialize("ws-dream");
+            for (const topic of topics(n)) await store.appendEntry(topic);
+            return store;
+        }
+
+        it("dreamRun previews without touching memory; memory.list carries the preview", async () => {
+            const store = await seeded();
+            const { workspace } = workspaceWith(store);
+            const run = (await call("memory.dreamRun", workspace)) as {
+                status: string;
+                preview: { id: string; counts: { merged: number } };
+            };
+            assert.equal(run.status, "previewed");
+            assert.equal(run.preview.counts.merged, 2);
+            assert.equal(store.getTopic("t2")?.content, "fact 2");
+
+            const list = (await call("memory.list", workspace)) as {
+                dream?: { pending?: { id: string }; confirmed: boolean };
+            };
+            assert.equal(list.dream?.pending?.id, run.preview.id);
+            assert.equal(list.dream?.confirmed, false);
+        });
+
+        it("dreamApply requires the reviewed preview id, then applies and confirms", async () => {
+            const store = await seeded();
+            const { workspace } = workspaceWith(store);
+            const run = (await call("memory.dreamRun", workspace)) as { preview: { id: string } };
+
+            await assert.rejects(
+                () => call("memory.dreamApply", workspace, { previewId: "stale-id" }),
+                /preview changed/,
+            );
+            const applied = (await call("memory.dreamApply", workspace, {
+                previewId: run.preview.id,
+            })) as { report: { id: string; skipped: number } };
+            assert.equal(applied.report.skipped, 0);
+            assert.equal(store.getTopic("t01")?.content, "fact 0 and 1");
+            assert.equal(store.getTopic("t0"), undefined);
+
+            const list = (await call("memory.list", workspace)) as {
+                dream?: {
+                    pending?: unknown;
+                    confirmed: boolean;
+                    reports: Array<{ id: string }>;
+                    archived: Array<{ id: string }>;
+                };
+            };
+            assert.equal(list.dream?.pending, undefined);
+            assert.equal(list.dream?.confirmed, true);
+            assert.deepEqual(
+                list.dream?.reports.map((r) => r.id),
+                [applied.report.id],
+            );
+            assert.deepEqual(list.dream?.archived.map((t) => t.id).sort(), ["t0", "t1"]);
+        });
+
+        it("manual dreamRun previews even for a confirmed workspace", async () => {
+            const store = await seeded();
+            const { workspace } = workspaceWith(store);
+            const first = (await call("memory.dreamRun", workspace)) as { preview: { id: string } };
+            await call("memory.dreamApply", workspace, { previewId: first.preview.id });
+
+            const { workspace: again } = workspaceWith(store, {
+                actions: [{ action: "rewrite", id: "t3", content: "fact 3 v2" }],
+            });
+            const second = (await call("memory.dreamRun", again)) as { status: string };
+            assert.equal(second.status, "previewed");
+            assert.equal(store.getTopic("t3")?.content, "fact 3");
+        });
+
+        it("dreamDiscard drops the preview", async () => {
+            const store = await seeded();
+            const { workspace } = workspaceWith(store);
+            await call("memory.dreamRun", workspace);
+            await call("memory.dreamDiscard", workspace);
+            const list = (await call("memory.list", workspace)) as {
+                dream?: { pending?: unknown };
+            };
+            assert.equal(list.dream?.pending, undefined);
+        });
+
+        it("dreamUndo reverts an applied run and reports later conflicts", async () => {
+            const store = await seeded();
+            const { workspace } = workspaceWith(store);
+            const run = (await call("memory.dreamRun", workspace)) as { preview: { id: string } };
+            const applied = (await call("memory.dreamApply", workspace, {
+                previewId: run.preview.id,
+            })) as { report: { id: string } };
+            await store.updateTopic("t2", "edited after the run");
+
+            const undo = (await call("memory.dreamUndo", workspace, {
+                reportId: applied.report.id,
+            })) as { conflicts: string[] };
+            assert.deepEqual(undo.conflicts, ["t2"]);
+            assert.equal(store.getTopic("t0")?.content, "fact 0");
+            assert.equal(
+                store.getTopic("t2")?.content,
+                "edited after the run",
+                "a later edit wins",
+            );
+            await assert.rejects(
+                () => call("memory.dreamUndo", workspace, { reportId: applied.report.id }),
+                /already undone/,
+            );
+        });
+
+        it("restoreTopic brings an archived topic back", async () => {
+            const store = await seeded(3);
+            await store.archiveTopic("t1");
+            const { workspace } = workspaceWith(store);
+            await call("memory.restoreTopic", workspace, { id: "t1" });
+            assert.ok(store.getTopic("t1"));
+            await assert.rejects(
+                () => call("memory.restoreTopic", workspace, { id: "t1" }),
+                /unknown archived/,
+            );
+        });
+
+        it("dreamRun with too few topics skips without a model call", async () => {
+            const store = await seeded(2);
+            const { workspace, calls } = workspaceWith(store);
+            const run = (await call("memory.dreamRun", workspace)) as { status: string };
+            assert.equal(run.status, "skipped");
+            assert.equal(calls(), 0);
+        });
+
+        it("the dream surface refuses a disabled memory store", async () => {
+            const { workspace } = workspaceWith(new LocalMemoryStore());
+            const disabled = { ...workspace, memoryStore: new NoOpMemoryStore() };
+            await assert.rejects(() => call("memory.dreamRun", disabled), /memory is disabled/);
+            const list = (await call("memory.list", disabled)) as { dream?: unknown };
+            assert.equal(list.dream, undefined);
         });
     });
 });

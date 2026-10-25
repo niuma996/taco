@@ -97,6 +97,12 @@ export const RPC = {
     memoryWrite: "memory.write",
     memoryDeleteTopic: "memory.deleteTopic",
     memoryUpsert: "memory.upsert",
+    memoryRestoreTopic: "memory.restoreTopic",
+    // memory.dream* — consolidation preview / apply / discard / undo.
+    memoryDreamRun: "memory.dreamRun",
+    memoryDreamApply: "memory.dreamApply",
+    memoryDreamDiscard: "memory.dreamDiscard",
+    memoryDreamUndo: "memory.dreamUndo",
     // mcp.* — MCP server discovery and health status.
     mcpListServers: "mcp.listServers",
     mcpGetConfig: "mcp.getConfig",

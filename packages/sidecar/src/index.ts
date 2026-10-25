@@ -26,9 +26,11 @@ import type { ExtensionRegistry } from "./extensions/registry.ts";
 import { buildSidecarPidRecord, computeInstallId } from "./lib/installId.ts";
 import { createLogger } from "./lib/logger.ts";
 import { augmentProcessPath, resolveLoginShellPathCached } from "./lib/loginShellPath.ts";
+import { createMemoryDreamHandler } from "./memory/dream/dreamJob.ts";
 import { ProviderKeyStore } from "./runtime/models/providerKeyStore.ts";
 import type { ThinkingLevel } from "./runtime/pi/types.ts";
 import { sidecarVersion } from "./runtime/runtimeResources.ts";
+import { defaultMemoryDreamJob, MEMORY_DREAM_COMMAND } from "./scheduler/builtinJobs.ts";
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";
 import { JobsController } from "./scheduler/jobsController.ts";
 import { Scheduler } from "./scheduler/runner.ts";
@@ -436,6 +438,9 @@ async function runDaemon(
                             job ? { ...job, pinnedSessionId: sessionId } : null,
                         );
                     },
+                    builtinHandlers: new Map([
+                        [MEMORY_DREAM_COMMAND, createMemoryDreamHandler(deps.providerKeyStore)],
+                    ]),
                 },
             ),
         });
@@ -451,6 +456,10 @@ async function runDaemon(
         const jobsController = new JobsController(jobStore, scheduler, jobsDir);
         imHost.setJobsControl(jobsController);
         schedulerSidecar.setJobsControl(jobsController);
+        // Seed before start() so a missed nightly run replays at this boot.
+        await jobsController.seedBuiltin(defaultMemoryDreamJob()).catch((err: unknown) => {
+            log.error(`failed to seed the memory consolidation job: ${String(err)}`);
+        });
         await scheduler.start().catch((err: unknown) => {
             log.error(`scheduler failed to start: ${String(err)}`);
         });

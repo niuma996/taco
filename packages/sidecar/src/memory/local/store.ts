@@ -31,6 +31,9 @@ import {
 
 const MEMORY_INDEX_HEADER = "# Memory\n";
 
+/** Archived topics live here, below the topic dir, so injection never sees them. */
+export const ARCHIVE_DIR = "archive";
+
 /** Build a topic file body: YAML frontmatter + content. updatedAt omitted when undefined. */
 function buildTopicFile(entry: MemoryEntry): string {
     const fm = [`name: ${entry.name}`, `description: ${entry.description}`, `type: ${entry.type}`];
@@ -66,6 +69,18 @@ function atomicWrite(path: string, content: string): void {
             // ignore cleanup failure
         }
         throw e;
+    }
+}
+
+// ─── helper: compare-and-swap guard ───────────────────────────────────────────
+
+/** Reject a write derived from a snapshot that no longer matches disk. */
+function assertExpectedContent(
+    existing: MemoryEntry,
+    options: { expectedContent?: string } | undefined,
+): void {
+    if (options?.expectedContent !== undefined && existing.content !== options.expectedContent) {
+        throw new Error(`memory topic changed since it was read: ${existing.id}`);
     }
 }
 
@@ -105,6 +120,8 @@ export class LocalMemoryStore implements MemoryStore {
     private readonly projectsDir: string;
     private initialized = false;
     private _workspaceId?: string;
+    /** Project dir name; set by initialize (hash of the id) or openByKey. */
+    private _dirKey?: string;
     /** Serialises read-modify-write on topic files (concurrent appends would lose entries). */
     private writeChain: Promise<unknown> = Promise.resolve();
     /** Cached topic list, invalidated by the workspace dir's mtime and any
@@ -114,8 +131,8 @@ export class LocalMemoryStore implements MemoryStore {
     readonly enabled = true;
 
     private get workspaceDir(): string {
-        if (!this._workspaceId) throw new Error("LocalMemoryStore not initialized");
-        return join(this.projectsDir, workspaceKey(this._workspaceId));
+        if (!this._dirKey) throw new Error("LocalMemoryStore not initialized");
+        return join(this.projectsDir, this._dirKey);
     }
 
     constructor() {
@@ -130,12 +147,44 @@ export class LocalMemoryStore implements MemoryStore {
     initialize(workspaceId: string): void {
         if (this.initialized) return;
         this._workspaceId = workspaceId;
+        this._dirKey = workspaceKey(workspaceId);
         ensureDir(this.memoryDir);
         if (!existsSync(this.memoryIndex)) {
             atomicWrite(this.memoryIndex, `${MEMORY_INDEX_HEADER}\n`);
         }
         ensureDir(join(this.projectsDir, workspaceKey(workspaceId)));
         this.initialized = true;
+    }
+
+    /**
+     * Open an existing project dir by its key, for process-level work (dream)
+     * that walks `projects/` without knowing the original cwd — the dir name
+     * is a one-way hash. Entries read this way carry no `workspaceId`.
+     */
+    static openByKey(dirKey: string): LocalMemoryStore {
+        if (!/^[0-9a-f]{16}$/.test(dirKey)) throw new Error(`invalid memory dir key: ${dirKey}`);
+        const store = new LocalMemoryStore();
+        store._dirKey = dirKey;
+        store.initialized = true;
+        return store;
+    }
+
+    /** Every project dir key under `projects/`. */
+    static listDirKeys(): string[] {
+        const root = join(resolveTacoHome(tacoHome(), "memory"), "projects");
+        try {
+            return readdirSync(root, { withFileTypes: true })
+                .filter((d) => d.isDirectory() && /^[0-9a-f]{16}$/.test(d.name))
+                .map((d) => d.name);
+        } catch {
+            return [];
+        }
+    }
+
+    /** This store's project dir key (its directory name). */
+    get dirKey(): string {
+        if (!this._dirKey) throw new Error("LocalMemoryStore not initialized");
+        return this._dirKey;
     }
 
     appendEntry(entry: MemoryEntry): Promise<void> {
@@ -247,20 +296,74 @@ export class LocalMemoryStore implements MemoryStore {
     /**
      * Delete a topic. Throws when id is not in listTopics(). The check and
      * unlink are inside the chain so an appendEntry / writeMemory cannot
-     * interleave between them.
+     * interleave between them. `expectedContent` makes it a compare-and-delete.
      */
-    async deleteTopic(id: string): Promise<void> {
+    async deleteTopic(id: string, options?: { expectedContent?: string }): Promise<void> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
         const next = this.writeChain.then(() => {
-            const known = new Set(this.listTopics().map((e) => e.id));
-            if (!known.has(id)) throw new Error(`unknown memory topic: ${id}`);
+            const existing = this.readTopicsCached().find((e) => e.id === id);
+            if (!existing) throw new Error(`unknown memory topic: ${id}`);
+            assertExpectedContent(existing, options);
             unlinkSync(join(this.workspaceDir, `${id}.md`));
             this.topicsCache = undefined;
         });
         this.writeChain = next.catch(() => undefined);
         return next;
+    }
+
+    /** Topic directory for this workspace; dream state lives beside the topics. */
+    get topicDir(): string {
+        return this.workspaceDir;
+    }
+
+    /**
+     * Move a topic into `archive/`, out of injection and `listTopics`. An
+     * existing archived copy with the same id is replaced: the newer archive
+     * is the one a restore should bring back.
+     */
+    async archiveTopic(id: string, options?: { expectedContent?: string }): Promise<void> {
+        if (!this.initialized) {
+            return Promise.reject(new Error("LocalMemoryStore not initialized"));
+        }
+        const next = this.writeChain.then(() => {
+            const existing = this.readTopicsCached().find((e) => e.id === id);
+            if (!existing) throw new Error(`unknown memory topic: ${id}`);
+            assertExpectedContent(existing, options);
+            ensureDir(join(this.workspaceDir, ARCHIVE_DIR));
+            renameSync(
+                join(this.workspaceDir, `${id}.md`),
+                join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`),
+            );
+            this.topicsCache = undefined;
+        });
+        this.writeChain = next.catch(() => undefined);
+        return next;
+    }
+
+    /** Move an archived topic back. Refuses when a live topic took the id. */
+    async restoreTopic(id: string): Promise<void> {
+        if (!this.initialized) {
+            return Promise.reject(new Error("LocalMemoryStore not initialized"));
+        }
+        const next = this.writeChain.then(() => {
+            const from = join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`);
+            if (!existsSync(from)) throw new Error(`unknown archived memory topic: ${id}`);
+            if (this.readTopicsCached().some((e) => e.id === id)) {
+                throw new Error(`memory topic already exists: ${id}`);
+            }
+            renameSync(from, join(this.workspaceDir, `${id}.md`));
+            this.topicsCache = undefined;
+        });
+        this.writeChain = next.catch(() => undefined);
+        return next;
+    }
+
+    /** Archived topics. Not cached: only the MemoryPane and dream read them. */
+    listArchivedTopics(): MemoryEntry[] {
+        if (!this.initialized) throw new Error("LocalMemoryStore not initialized");
+        return readTopicDir(join(this.workspaceDir, ARCHIVE_DIR), this._workspaceId);
     }
 
     /** Synchronous lookup for a single topic. */
@@ -292,12 +395,7 @@ export class LocalMemoryStore implements MemoryStore {
             if (!existing) {
                 throw new Error(`unknown memory topic: ${id}`);
             }
-            if (
-                options?.expectedContent !== undefined &&
-                existing.content !== options.expectedContent
-            ) {
-                throw new Error(`memory topic changed since it was read: ${id}`);
-            }
+            assertExpectedContent(existing, options);
             const updatedAt = new Date().toISOString();
             const newEntry: MemoryEntry = { ...existing, content, updatedAt };
             const path = join(this.workspaceDir, `${id}.md`);
@@ -330,7 +428,7 @@ export class LocalMemoryStore implements MemoryStore {
         if (this.topicsCache && this.topicsCache.mtimeMs === mtimeMs) {
             return this.topicsCache.topics;
         }
-        const topics = readProjectTopics(this._workspaceId as string);
+        const topics = readTopicDir(dir, this._workspaceId);
         this.topicsCache = { mtimeMs, topics };
         return topics;
     }
@@ -377,6 +475,11 @@ export function parseTopicFrontmatter(raw: string): {
 /** Read all topic files from a project directory. */
 export function readProjectTopics(workspaceId: string): MemoryEntry[] {
     const root = join(resolveTacoHome(tacoHome()), "memory", "projects", workspaceKey(workspaceId));
+    return readTopicDir(root, workspaceId);
+}
+
+/** Parse every top-level `*.md` topic in `root`; subdirectories are ignored. */
+function readTopicDir(root: string, workspaceId?: string): MemoryEntry[] {
     if (!existsSync(root)) return [];
 
     let files: string[];

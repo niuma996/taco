@@ -25,8 +25,9 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { parseImCwd } from "@taco-ai/protocol";
-import { JobsScopeError } from "../lib/jobsErrors.ts";
+import { JobAlreadyExistsError, JobsScopeError } from "../lib/jobsErrors.ts";
 import type { JobsControl } from "../runtime/serverRpcSurface.ts";
+import { BUILTIN_JOB_COMMANDS, isBuiltinJob } from "./builtinJobs.ts";
 import { createJobId } from "./jobId.ts";
 import type { Scheduler } from "./runner.ts";
 import type { Actor, Job, JobHistoryEntry, JobRunResult } from "./types.ts";
@@ -73,6 +74,11 @@ export class JobsController implements JobsControl {
     }
 
     async create(job: Job, actor?: Actor): Promise<Job> {
+        // Built-ins are seeded by the daemon (`seedBuiltin`), never created
+        // through the API — and a user job may not borrow a built-in command.
+        if (job.builtin === true || BUILTIN_JOB_COMMANDS.has(job.command)) {
+            throw new JobsScopeError("forbidden", "built-in jobs cannot be created");
+        }
         const normalized = normalizeSessionStrategy(
             normalizeScopeFields({
                 ...job,
@@ -114,6 +120,10 @@ export class JobsController implements JobsControl {
             throw new JobsScopeError("not_found", `job not found: ${job.id}`);
         }
         assertActorMatchesJob(existing, actor);
+        if (isBuiltinJob(existing)) return this.updateBuiltin(existing, job);
+        if (job.builtin === true || BUILTIN_JOB_COMMANDS.has(job.command)) {
+            throw new JobsScopeError("forbidden", "a user job cannot become a built-in job");
+        }
         // mutate is the canonical write boundary: the per-id queue in
         // JobStore serialises against concurrent dispatcher callbacks
         // and the runner's history write, so the closure sees the
@@ -165,6 +175,50 @@ export class JobsController implements JobsControl {
         return saved;
     }
 
+    /**
+     * Seed a built-in job if its file is missing. Idempotent across boots: an
+     * existing file — including one the user disabled or rescheduled — wins.
+     */
+    async seedBuiltin(job: Job): Promise<Job> {
+        if (!isBuiltinJob(job)) throw new Error(`not a built-in job: ${job.id}`);
+        const existing = await this.store.get(job.id);
+        if (existing) return existing;
+        const seeded: Job = { ...job, generation: randomUUID(), history: [] };
+        try {
+            if (this.store.create) await this.store.create(seeded);
+            else if (this.store.save) await this.store.save(seeded);
+        } catch (err) {
+            // Lost a race with another seeder: the other copy is equivalent.
+            if (!(err instanceof JobAlreadyExistsError)) throw err;
+        }
+        await this.scheduler.reload(job.id);
+        return (await this.store.get(job.id)) ?? seeded;
+    }
+
+    /** Built-in update: only schedule, enabled and args are the caller's. */
+    private async updateBuiltin(existing: Job, job: Job): Promise<Job> {
+        if (job.command !== existing.command || job.builtin !== true) {
+            throw new JobsScopeError("forbidden", "a built-in job's command cannot change");
+        }
+        const saved = await this.store.mutate(job.id, (current) => {
+            if (!current || current.generation !== existing.generation) {
+                throw new JobsScopeError("not_found", `job not found: ${job.id}`);
+            }
+            const reEnabled = job.enabled && !current.enabled;
+            return {
+                ...current,
+                schedule: job.schedule,
+                enabled: job.enabled,
+                args: job.args,
+                consecutive_failures: reEnabled ? 0 : (current.consecutive_failures ?? 0),
+                disabled_reason: reEnabled ? undefined : current.disabled_reason,
+            };
+        });
+        if (!saved) throw new JobsScopeError("not_found", `job not found: ${job.id}`);
+        await this.scheduler.reload(saved.id);
+        return saved;
+    }
+
     async delete(id: string, actor?: Actor): Promise<void> {
         const existing = await this.store.get(id);
         if (!existing) return;
@@ -174,6 +228,12 @@ export class JobsController implements JobsControl {
         // "deleted"; the controller itself never throws on scope mismatch
         // here.
         if (actor && !isJobVisibleToActor(existing, actor)) return;
+        if (isBuiltinJob(existing)) {
+            throw new JobsScopeError(
+                "forbidden",
+                "built-in jobs cannot be deleted; disable instead",
+            );
+        }
         // Remove the in-flight lock too — a job deleted mid-run should
         // not leak its lock file. We can't kill the running callback,
         // but the callback itself releases the lock on its `finally`

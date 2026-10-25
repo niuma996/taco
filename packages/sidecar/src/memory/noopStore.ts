@@ -28,7 +28,7 @@ export class NoOpMemoryStore implements MemoryStore {
         return [];
     }
 
-    async deleteTopic(_id: string): Promise<void> {}
+    async deleteTopic(_id: string, _options?: { expectedContent?: string }): Promise<void> {}
 
     getTopic(_id: string): MemoryEntry | undefined {
         return undefined;

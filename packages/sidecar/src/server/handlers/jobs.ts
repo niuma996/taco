@@ -18,6 +18,7 @@
 
 import { Type } from "typebox";
 import { JobAlreadyExistsError, JobsScopeError } from "../../lib/jobsErrors.ts";
+import { BUILTIN_JOB_COMMANDS, parseMemoryDreamArgs } from "../../scheduler/builtinJobs.ts";
 import { safeJobId } from "../../scheduler/jobId.ts";
 import { JOBS_RPC } from "../../scheduler/jobsRpc.ts";
 import type {
@@ -240,6 +241,26 @@ function assertJob(params: unknown, field: string, requireId = false): Job {
     }
     if (typeof obj.command !== "string") {
         throw new RpcHandlerError("invalid_params", `${field}.command must be a string`);
+    }
+    // Built-in jobs (builtinJobs.ts) carry a native command and handler-
+    // specific args instead of a workspace + prompt. Whether the caller may
+    // write one at all is the controller's call; here only the shape is checked.
+    if (obj.builtin === true) {
+        if (!BUILTIN_JOB_COMMANDS.has(obj.command)) {
+            throw new RpcHandlerError(
+                "invalid_params",
+                `${field}.command ${JSON.stringify(obj.command)} is not a built-in command`,
+            );
+        }
+        if (typeof obj.args !== "object" || obj.args === null) {
+            throw new RpcHandlerError("invalid_params", `${field}.args must be an object`);
+        }
+        const parsed = parseMemoryDreamArgs(obj.args as Record<string, unknown>);
+        if (!parsed.ok) throw new RpcHandlerError("invalid_params", `${field}.${parsed.error}`);
+        if (typeof obj.enabled !== "boolean") {
+            throw new RpcHandlerError("invalid_params", `${field}.enabled must be a boolean`);
+        }
+        return { ...(obj as unknown as Job), args: { ...parsed.args } };
     }
     // The scheduler dispatcher only knows `agent.invoke` today — every other
     // command would land in `dispatcher.createJobDispatcher` and throw

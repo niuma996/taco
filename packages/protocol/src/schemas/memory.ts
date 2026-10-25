@@ -20,3 +20,22 @@ export const memoryWriteSchema = Type.Any();
 export const memoryDeleteTopicSchema = Type.Any();
 
 export const memoryUpsertSchema = Type.Any();
+
+export const memoryDreamRunSchema = Type.Object({ workspace: Type.String({ minLength: 1 }) });
+
+export const memoryDreamApplySchema = Type.Object({
+    workspace: Type.String({ minLength: 1 }),
+    previewId: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }),
+});
+
+export const memoryDreamDiscardSchema = Type.Object({ workspace: Type.String({ minLength: 1 }) });
+
+export const memoryDreamUndoSchema = Type.Object({
+    workspace: Type.String({ minLength: 1 }),
+    reportId: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }),
+});
+
+export const memoryRestoreTopicSchema = Type.Object({
+    workspace: Type.String({ minLength: 1 }),
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+});

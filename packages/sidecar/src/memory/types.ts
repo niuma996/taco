@@ -65,6 +65,9 @@ export interface MemoryStore {
     /** Whether memory is enabled. LocalMemoryStore = true, NoOpMemoryStore = false. */
     readonly enabled: boolean;
 
+    /** Directory holding this workspace's topic files; undefined when disabled. */
+    readonly topicDir?: string;
+
     /**
      * Overwrite MEMORY.md wholesale. Throws MemoryConflictError if `baseHash`
      * doesn't match the on-disk content. Implementations must place the
@@ -79,8 +82,9 @@ export interface MemoryStore {
     listTopics(): MemoryEntry[];
 
     /** Delete a topic. Throws when the id is not in listTopics().
-     *  Same writeChain constraint as writeMemory / appendEntry. */
-    deleteTopic(id: string): Promise<void>;
+     *  Same writeChain constraint as writeMemory / appendEntry; rejects when
+     *  `expectedContent` is set and the on-disk content differs. */
+    deleteTopic(id: string, options?: { expectedContent?: string }): Promise<void>;
 
     /** Synchronous lookup for one topic. Returns undefined when the id is
      *  missing (lets tools list-then-decide without errors). */

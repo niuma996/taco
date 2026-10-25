@@ -11,6 +11,7 @@
 
 import type { CheckpointManager } from "../../checkpoints/manager.ts";
 import { createLogger } from "../../lib/logger.ts";
+import type { TopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { type MemoryExtractor, sliceForExtraction } from "../../memory/index.ts";
 import type { TacoToolContext } from "../../tools/context.ts";
 import type { AgentHarness, AgentMessage, HarnessEvent, Session } from "../pi/types.ts";
@@ -64,6 +65,8 @@ export interface TurnBookkeepingArgs {
     readonly getCheckpoints: () => CheckpointManager | undefined;
     readonly getExtractor: () => MemoryExtractor | undefined;
     readonly getTitleSummarizer: () => TitleSummarizer | undefined;
+    /** Records successful `read`s of topic files; absent when memory is off. */
+    readonly usageTracker?: TopicUsageTracker;
 }
 
 interface MemoryExtractionHandlerArgs {
@@ -162,9 +165,22 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
         buildContext: () => buildBranchContext(session),
         getExtractor,
     });
+    // `read` args arrive on tool_start; only a successful tool_end counts as use.
+    const pendingReads = new Map<string, unknown>();
+    const { usageTracker } = args;
     disposers.push(
+        harness.events.on("tool_start", (event) => {
+            if (usageTracker && event.toolName === "read") {
+                pendingReads.set(event.toolCallId, (event.args as { path?: unknown } | null)?.path);
+            }
+        }),
         harness.events.on("tool_end", (event) => {
             memoryHandlers.onToolEnd(event.toolName, event.isError);
+            if (pendingReads.has(event.toolCallId)) {
+                const path = pendingReads.get(event.toolCallId);
+                pendingReads.delete(event.toolCallId);
+                if (!event.isError) usageTracker?.noteRead(path);
+            }
         }),
         harness.events.on("run_end", (event) => {
             memoryHandlers.onRunEnd(event.status);
@@ -204,6 +220,9 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
                 });
         }),
     );
+
+    // Flush batched usage on detach so a closed session's reads are not lost.
+    if (usageTracker) disposers.push(() => usageTracker.flush());
 
     return disposers;
 }

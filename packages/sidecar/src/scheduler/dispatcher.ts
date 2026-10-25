@@ -31,6 +31,8 @@ import { randomUUID } from "node:crypto";
 import { ErrorCodes, type RpcRequest, type RpcResponse } from "@taco-ai/protocol";
 
 import { createLogger } from "../lib/logger.ts";
+import { isBuiltinJob } from "./builtinJobs.ts";
+import type { InvokeResult } from "./runner.ts";
 import type { Job, SessionStrategy } from "./types.ts";
 
 const log = createLogger("sidecar.scheduler.dispatcher");
@@ -76,7 +78,10 @@ export class InvalidSessionStrategy extends Error {
     }
 }
 
-export type JobCommandInvoker = (job: Job) => Promise<void>;
+export type JobCommandInvoker = (job: Job) => Promise<InvokeResult | undefined>;
+
+/** Native handler for a built-in job command (see builtinJobs.ts). */
+export type BuiltinJobHandler = (job: Job) => Promise<InvokeResult>;
 
 /** Callback the dispatcher invokes after creating the pinned session on a
  *  `pin` strategy's first fire, so the scheduler can persist `pinnedSessionId`
@@ -86,6 +91,10 @@ export type OnPinnedSessionCreated = (jobId: string, sessionId: string) => Promi
 export interface DispatcherOptions {
     /** Persist `pinnedSessionId` after the first fire of a `pin` job. */
     onPinnedSessionCreated?: OnPinnedSessionCreated;
+    /** Handlers for built-in job commands, keyed by command. Only a job with
+     *  `builtin: true` may reach one — a user job naming the same command is
+     *  rejected, never routed. */
+    builtinHandlers?: ReadonlyMap<string, BuiltinJobHandler>;
 }
 
 export function createJobDispatcher(
@@ -93,12 +102,19 @@ export function createJobDispatcher(
     options: DispatcherOptions = {},
 ): JobCommandInvoker {
     return async (job) => {
+        // Built-ins run in-process and target no workspace; checked first so a
+        // built-in never reaches the agent path.
+        if (isBuiltinJob(job)) {
+            const handler = options.builtinHandlers?.get(job.command);
+            if (!handler) throw new UnsupportedScheduledCommand(job.command);
+            return handler(job);
+        }
         const workspace = typeof job.args.workspace === "string" ? job.args.workspace : "*";
         const server = resolveServer(workspace);
         switch (job.command) {
             case "agent.invoke":
                 await invokeAgent(server, job, workspace, options.onPinnedSessionCreated);
-                return;
+                return undefined;
             default:
                 throw new UnsupportedScheduledCommand(job.command);
         }

@@ -101,7 +101,12 @@ export function applyRunOutcome(latest: Job, ok: boolean): RunOutcomeUpdate {
  *  pipeline (e.g. agent.invoke → session.create + session.prompt). The
  *  dispatcher receives the whole job so it can read sessionStrategy /
  *  pinnedSessionId without the runner having to unpack them. */
-export type CommandInvoker = (job: Job) => Promise<void>;
+/** What a fire may report back. `summary` lands on the history entry. */
+export interface InvokeResult {
+    summary?: string;
+}
+
+export type CommandInvoker = (job: Job) => Promise<InvokeResult | undefined>;
 
 export interface SchedulerOptions {
     store: {
@@ -257,12 +262,13 @@ export class Scheduler {
         job.history = [entry, ...(job.history ?? [])].slice(0, HISTORY_LIMIT);
 
         let releaseLockAfterInvocation = true;
-        let completion: Promise<void> | undefined;
+        let completion: Promise<unknown> | undefined;
         try {
             const invocation = this.invokeWithTimeout(job);
             completion = invocation.completion;
-            await invocation.result;
+            const outcome = await invocation.result;
             entry.status = "ok";
+            if (outcome && typeof outcome.summary === "string") entry.summary = outcome.summary;
         } catch (err) {
             entry.status = "err";
             entry.error = err instanceof Error ? err.message : String(err);
@@ -390,11 +396,14 @@ export class Scheduler {
      *  background — we can't cancel it from this layer, but we don't need
      *  to: when it finally settles, its then/catch is detached and the
      *  process holds no more state for the job than its own promise. */
-    private invokeWithTimeout(job: Job): { result: Promise<void>; completion: Promise<void> } {
+    private invokeWithTimeout(job: Job): {
+        result: Promise<InvokeResult | undefined>;
+        completion: Promise<unknown>;
+    } {
         const timeoutMs = this.opts.fireTimeoutMs ?? DEFAULT_FIRE_TIMEOUT_MS;
         const fire = Promise.resolve().then(() => this.opts.invoke(job));
         let timer: NodeJS.Timeout | undefined;
-        const timeout = new Promise<void>((_, reject) => {
+        const timeout = new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new FireTimeoutError(timeoutMs)), timeoutMs);
             // Don't keep the event loop alive just for the watchdog.
             timer.unref();

@@ -33,6 +33,7 @@ import type {
 } from "../../extensions/index.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { createTopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { MemoryExtractorImpl, type MemoryStore } from "../../memory/index.ts";
 import type { PlanModeState } from "../../plan/planModeState.ts";
 import type { SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
@@ -680,6 +681,9 @@ export class AttachedSession extends EventEmitter {
         // Republish the harness events the desktop consumes, plus per-turn
         // bookkeeping (checkpoint window close, incremental memory extraction,
         // one-shot title summarization).
+        // Subagent reads count too: opening a topic is use, whoever does it.
+        const topicDir =
+            args.memoryStore?.enabled && !args.isIm ? args.memoryStore.topicDir : undefined;
         const disposers = wireTurnBookkeeping({
             harness,
             session: args.session,
@@ -687,6 +691,9 @@ export class AttachedSession extends EventEmitter {
             getCheckpoints: () => attached.checkpoints,
             getExtractor: () => attached.memoryExtractor,
             getTitleSummarizer: () => attached.titleSummarizer,
+            usageTracker: topicDir
+                ? createTopicUsageTracker({ topicDir, cwd: args.env.cwd })
+                : undefined,
         });
 
         // Push the derived settings onto pi before any run can start, so the

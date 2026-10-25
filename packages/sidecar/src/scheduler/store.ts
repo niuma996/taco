@@ -19,6 +19,7 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/pro
 import { join } from "node:path";
 import { JobAlreadyExistsError } from "../lib/jobsErrors.ts";
 import { createLogger } from "../lib/logger.ts";
+import { isBuiltinJob } from "./builtinJobs.ts";
 import { assertSafeJobId, isSafeJobId } from "./jobId.ts";
 import type { Job } from "./types.ts";
 
@@ -217,9 +218,12 @@ export class JobStore {
             // else triggers a `save` — and a job nobody edits never gets
             // that opportunity. A write failure is logged but doesn't
             // break the read; the next read will retry the migration.
+            // Built-in jobs carry a native command on purpose; rewriting one
+            // into an agent prompt would turn a system task into a model turn.
             if (
                 typeof withStrategy.command === "string" &&
-                withStrategy.command !== "agent.invoke"
+                withStrategy.command !== "agent.invoke" &&
+                !isBuiltinJob(withStrategy)
             ) {
                 const taskText = [withStrategy.command, ...positionalArgs(withStrategy.args)]
                     .join(" ")

@@ -576,13 +576,13 @@ test("invoke timeout records an error but retains the lock until the invocation 
             lockDir: dir,
             fireTimeoutMs: 50,
             invoke: () =>
-                new Promise<void>((resolve) => {
+                new Promise<undefined>((resolve) => {
                     // Must outlast the assertions below but stay short: this
                     // timer is never cancelled, so its length is dead time at
                     // the end of the process.
                     setTimeout(() => {
                         settled = true;
-                        resolve();
+                        resolve(undefined);
                     }, 200);
                 }),
         });
