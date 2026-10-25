@@ -118,7 +118,7 @@ describe("MemoryPane dream controls", () => {
         const { dream } = renderPane();
 
         expect(screen.getByText("memory.dream.pendingTitle")).toBeTruthy();
-        expect(screen.getByText(/a, b/)).toBeTruthy();
+        expect(screen.getByText(/a \+ b → AB/)).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "memory.dream.apply" }));
         expect(dream.onApply).toHaveBeenCalledWith("preview-1");
         await user.click(screen.getByRole("button", { name: "memory.dream.discard" }));
@@ -144,6 +144,27 @@ describe("MemoryPane dream controls", () => {
         await user.click(screen.getByRole("button", { name: "memory.dream.restore" }));
         expect(dream.onRestoreTopic).toHaveBeenCalledWith("old");
         expect(onSelect).toHaveBeenCalledWith(MEMORY_ROOT_ID);
+    });
+
+    it("opens consolidation from the header when nothing is pending", async () => {
+        const user = userEvent.setup();
+        const current = dreamData.dream;
+        if (!current) throw new Error("fixture is missing dream state");
+        const noPending: MemoryListResult = {
+            ...dreamData,
+            dream: {
+                confirmed: current.confirmed,
+                reports: current.reports,
+                archived: current.archived,
+            },
+        };
+        renderPane(actions(), MEMORY_ROOT_ID, noPending);
+
+        expect(screen.queryByRole("button", { name: "memory.dream.run" })).toBeNull();
+        await user.click(screen.getByRole("button", { name: "memory.dream.open" }));
+        expect(screen.getByRole("button", { name: "memory.dream.run" })).toBeTruthy();
+        await user.click(screen.getByRole("button", { name: "memory.dream.close" }));
+        expect(screen.queryByRole("button", { name: "memory.dream.run" })).toBeNull();
     });
 
     it("disables the schedule switch when the daemon has no scheduler", () => {

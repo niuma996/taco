@@ -656,8 +656,23 @@
     "title": "Memory",
     "globalLabel": "Global",
     "globalName": "MEMORY.md",
-    "projectTopicsLabel": "Project topics",
     "noTopics": "No topics for this project yet.",
+    "noDescription": "(no description)",
+    "noMatchFilter": "No memories match this filter.",
+    "selectHint": "Select a memory on the left.",
+    "filter": {
+      "all": "All"
+    },
+    "type": {
+      "user": "User",
+      "feedback": "Feedback",
+      "project": "Project",
+      "reference": "Reference"
+    },
+    "group": {
+      "recent": "Recent",
+      "earlier": "Earlier"
+    },
     "refresh": "Refresh",
     "edit": "Edit",
     "save": "Save",
@@ -679,13 +694,18 @@
     "typeLabel": "Type",
     "createdLabel": "Created",
     "updatedLabel": "Last updated",
-    "idLabel": "id",
     "errorLoad": "Failed to load memory",
     "errorSave": "Save failed",
     "errorDelete": "Delete failed",
     "dream": {
       "title": "Memory consolidation",
+      "open": "Consolidate",
+      "close": "Close consolidation",
+      "idle": "No consolidation is waiting for review.",
+      "neverRun": "Not consolidated yet",
+      "lastRun": "Last consolidated",
       "schedule": "Automatic consolidation",
+      "scheduleNote": "Timing and thresholds live in the memory-dream scheduled job.",
       "scheduleUnavailable": "The daemon does not provide scheduled jobs",
       "run": "Consolidate now",
       "running": "Consolidating…",

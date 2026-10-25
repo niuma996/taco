@@ -1,13 +1,26 @@
+/**
+ * MemoryDreamPanel — the consolidation view that owns the memory pane's right
+ * column while it is open.
+ *
+ * Workspace-level controls (schedule switch, manual run, preview, history) live
+ * here rather than above the reading view: they act on the whole memory set,
+ * not on whichever entry happened to be selected.
+ */
+
 import type {
     MemoryDreamAction,
     MemoryDreamCounts,
     MemoryDreamReportSummary,
     MemoryDreamState,
+    MemoryTopicEntry,
 } from "@taco-ai/protocol";
+import { X } from "lucide-react";
 import type { DreamBusy } from "../../hooks/useMemoryPane";
+import { useNow } from "../../hooks/useNow";
 import { useT, useUiLanguage } from "../../i18n/useI18n";
 import { formatRelativeTime } from "../../lib/relativeTime";
 import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
 import { Switch } from "../ui/Switch";
 
 export interface MemoryDreamActions {
@@ -20,9 +33,12 @@ export interface MemoryDreamActions {
     onScheduleToggle: (enabled: boolean) => void | Promise<void>;
 }
 
-interface MemoryDreamPanelProps extends MemoryDreamActions {
+interface MemoryDreamPanelProps extends Omit<MemoryDreamActions, "onRestoreTopic"> {
     state?: MemoryDreamState;
     scheduled?: boolean;
+    /** Live topics, so plan actions can name the entries they touch. */
+    topics?: readonly MemoryTopicEntry[];
+    onClose: () => void;
 }
 
 function Counts({ counts }: { counts: MemoryDreamCounts }) {
@@ -36,13 +52,28 @@ function Counts({ counts }: { counts: MemoryDreamCounts }) {
     );
 }
 
-function ActionDetails({ action }: { action: MemoryDreamAction }) {
+function buildTopicNames(topics: readonly MemoryTopicEntry[]) {
+    return new Map(topics.map((topic) => [topic.id, topic.name]));
+}
+
+function topicLabel(id: string, names: ReadonlyMap<string, string>): string {
+    return names.get(id) ?? id;
+}
+
+function ActionDetails({
+    action,
+    names,
+}: {
+    action: MemoryDreamAction;
+    names: ReadonlyMap<string, string>;
+}) {
     const { t } = useT();
     if (action.action === "merge") {
         return (
             <details className="memory-dream-action">
                 <summary>
-                    {t("memory.dream.actionMerge")} {action.sourceIds.join(", ")} → {action.id}
+                    {action.sourceIds.map((sourceId) => topicLabel(sourceId, names)).join(" + ")} →{" "}
+                    {action.name}
                 </summary>
                 <div className="memory-dream-action-body">
                     <strong>{action.name}</strong>
@@ -54,9 +85,7 @@ function ActionDetails({ action }: { action: MemoryDreamAction }) {
     if (action.action === "rewrite") {
         return (
             <details className="memory-dream-action">
-                <summary>
-                    {t("memory.dream.actionRewrite")} {action.id}
-                </summary>
+                <summary>{topicLabel(action.id, names)}</summary>
                 <pre className="memory-dream-action-body">{action.content}</pre>
             </details>
         );
@@ -64,29 +93,60 @@ function ActionDetails({ action }: { action: MemoryDreamAction }) {
     return (
         <div className="memory-dream-action memory-dream-action-archive">
             <span>
-                {t("memory.dream.actionArchive")} {action.id}: {action.reason}
+                {topicLabel(action.id, names)}: {action.reason}
             </span>
             {action.supersededBy ? (
                 <small>
-                    {t("memory.dream.supersededBy")} {action.supersededBy}
+                    {t("memory.dream.supersededBy")} {topicLabel(action.supersededBy, names)}
                 </small>
             ) : null}
         </div>
     );
 }
 
+function ActionGroup({
+    label,
+    actions,
+    names,
+}: {
+    label: string;
+    actions: readonly MemoryDreamAction[];
+    names: ReadonlyMap<string, string>;
+}) {
+    if (actions.length === 0) return null;
+    return (
+        <div className="memory-dream-group">
+            <div className="memory-dream-group-label">
+                {label} ({actions.length})
+            </div>
+            {actions.map((action, index) => (
+                <ActionDetails
+                    key={`${action.action}-${action.id}-${index}`}
+                    action={action}
+                    names={names}
+                />
+            ))}
+        </div>
+    );
+}
+
 function PendingPreview({
     preview,
+    names,
     busy,
     onApply,
     onDiscard,
 }: {
     preview: NonNullable<MemoryDreamState["pending"]>;
+    names: ReadonlyMap<string, string>;
     busy: DreamBusy | null;
     onApply: MemoryDreamActions["onApply"];
     onDiscard: MemoryDreamActions["onDiscard"];
 }) {
     const { t } = useT();
+    const merges = preview.actions.filter((action) => action.action === "merge");
+    const rewrites = preview.actions.filter((action) => action.action === "rewrite");
+    const archives = preview.actions.filter((action) => action.action === "archive");
     return (
         <section className="memory-dream-preview" aria-label={t("memory.dream.pendingTitle")}>
             <div className="memory-dream-section-heading">
@@ -95,9 +155,17 @@ function PendingPreview({
             </div>
             <Counts counts={preview.counts} />
             <div className="memory-dream-actions-list">
-                {preview.actions.map((action, index) => (
-                    <ActionDetails key={`${action.action}-${action.id}-${index}`} action={action} />
-                ))}
+                <ActionGroup label={t("memory.dream.actionMerge")} actions={merges} names={names} />
+                <ActionGroup
+                    label={t("memory.dream.actionRewrite")}
+                    actions={rewrites}
+                    names={names}
+                />
+                <ActionGroup
+                    label={t("memory.dream.actionArchive")}
+                    actions={archives}
+                    names={names}
+                />
             </div>
             <div className="memory-dream-preview-actions">
                 <Button
@@ -127,7 +195,7 @@ function ReportHistory({
 }) {
     const { t } = useT();
     const lng = useUiLanguage();
-    const nowMs = Date.now();
+    const nowMs = useNow();
     return (
         <details className="memory-dream-history">
             <summary>
@@ -171,16 +239,40 @@ function ReportHistory({
 export function MemoryDreamPanel({
     state,
     scheduled,
+    topics = [],
     busy,
     onRun,
     onApply,
     onDiscard,
     onUndo,
     onScheduleToggle,
+    onClose,
 }: MemoryDreamPanelProps) {
     const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
+    const names = buildTopicNames(topics);
+
     return (
-        <section className="memory-dream-panel" aria-label={t("memory.dream.title")}>
+        <section className="memory-dream-view" aria-label={t("memory.dream.title")}>
+            <div className="memory-dream-header">
+                <div>
+                    <h2>{t("memory.dream.title")}</h2>
+                    <p className="memory-dream-subtitle">
+                        {state?.lastRunAt
+                            ? `${t("memory.dream.lastRun")} ${formatRelativeTime(
+                                  state.lastRunAt,
+                                  lng,
+                                  nowMs,
+                              )}`
+                            : t("memory.dream.neverRun")}
+                    </p>
+                </div>
+                <IconButton aria-label={t("memory.dream.close")} onClick={onClose}>
+                    <X size={14} aria-hidden="true" />
+                </IconButton>
+            </div>
+
             <div className="memory-dream-toolbar">
                 <div className="memory-dream-schedule">
                     <Switch
@@ -190,22 +282,29 @@ export function MemoryDreamPanel({
                         onChange={onScheduleToggle}
                     />
                     <span>{t("memory.dream.schedule")}</span>
-                    {scheduled === undefined ? (
-                        <small>{t("memory.dream.scheduleUnavailable")}</small>
-                    ) : null}
                 </div>
                 <Button size="sm" variant="default" disabled={busy !== null} onClick={onRun}>
                     {busy === "run" ? t("memory.dream.running") : t("memory.dream.run")}
                 </Button>
             </div>
+            <p className="memory-dream-note">
+                {scheduled === undefined
+                    ? t("memory.dream.scheduleUnavailable")
+                    : t("memory.dream.scheduleNote")}
+            </p>
+
             {state?.pending ? (
                 <PendingPreview
                     preview={state.pending}
+                    names={names}
                     busy={busy}
                     onApply={onApply}
                     onDiscard={onDiscard}
                 />
-            ) : null}
+            ) : (
+                <p className="memory-dream-idle">{t("memory.dream.idle")}</p>
+            )}
+
             {state && state.reports.length > 0 ? (
                 <ReportHistory reports={state.reports} busy={busy} onUndo={onUndo} />
             ) : null}

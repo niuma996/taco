@@ -197,6 +197,69 @@ describe("MemoryPane", () => {
         assert.equal(textarea.value, "from-disk");
     });
 
+    it("filters the list by type and groups topics by recency", () => {
+        const now = new Date().toISOString();
+        render(
+            <MemoryPane
+                data={{
+                    ...sampleData,
+                    topics: [
+                        {
+                            id: "recent_project",
+                            name: "Recent project",
+                            description: "fresh",
+                            type: "project" as const,
+                            content: "fresh content",
+                            createdAt: now,
+                        },
+                        {
+                            id: "old_user",
+                            name: "Old user",
+                            description: "old",
+                            type: "user" as const,
+                            content: "old content",
+                            createdAt: "2026-01-01T00:00:00.000Z",
+                        },
+                    ],
+                }}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={() => {}}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => {}}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+        expect(screen.getByText("memory.group.recent")).toBeTruthy();
+        expect(screen.getByText("memory.group.earlier")).toBeTruthy();
+
+        fireEvent.click(screen.getByRole("button", { name: "memory.type.project" }));
+        expect(screen.getByText("Recent project")).toBeTruthy();
+        expect(screen.queryByText("Old user")).toBeNull();
+    });
+
+    it("search matches the topic content, not only its title", () => {
+        const { container } = render(
+            <MemoryPane
+                data={sampleData}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={() => {}}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => {}}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+        const ui = within(container);
+        fireEvent.click(ui.getByRole("button", { name: "pane.searchLabel" }));
+        fireEvent.change(ui.getByRole("textbox"), { target: { value: "said" } });
+        expect(ui.getByText("User uses pnpm")).toBeTruthy();
+    });
+
     it("opens delete confirm modal when topic delete clicked", async () => {
         const { container } = render(
             <MemoryPane

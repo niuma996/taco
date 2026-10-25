@@ -1,10 +1,11 @@
-/* memoryPane.css — memory pane (list + view/edit detail); split from panes.css */
+/* memoryPane.css — memory pane (filterable list + reading/detail + consolidation view) */
 
 /* ── Memory pane ──────────────────────────────────────────────── */
 
 .memory-pane {
     display: flex;
     flex: 1;
+    min-width: 0;
     overflow: hidden;
 }
 
@@ -18,12 +19,58 @@
     background: var(--pane-list-bg);
 }
 
-/* The list rows scroll; the PaneHeader above stays pinned. */
+/* Type filter: single-choice chips under the header, pinned above the list. */
+.memory-filter-bar {
+    display: flex;
+    flex: 0 0 auto;
+    gap: var(--space-1);
+    padding: 0 var(--space-3) var(--space-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.memory-filter-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.memory-filter-chip {
+    flex: 0 0 auto;
+    height: 22px;
+    padding: 0 var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
+}
+
+.memory-filter-chip:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+.memory-filter-chip[aria-pressed="true"] {
+    background: var(--accent-bg-active);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.memory-filter-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* The list rows scroll; the header and filter chips above stay pinned. */
 .memory-list-body {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0.25rem 0 0.5rem;
+    padding: 0 0 var(--space-2);
 }
 
 .memory-list-empty {
@@ -33,72 +80,135 @@
     line-height: 1.6;
 }
 
+/* Sticky so a long list still says which section it is in at row 80. */
 .memory-list-section-label {
-    padding: 0.6rem 0.9rem 0.2rem 0.9rem;
-    font-size: 0.7rem;
-    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: var(--space-2) var(--space-3) var(--space-1);
+    background: var(--pane-list-bg);
     color: var(--fg-dim);
+    font-size: var(--text-2xs);
+    font-weight: 600;
     letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .memory-list-item {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
     width: calc(100% - 8px);
-    padding: 0.4rem 0.75rem;
-    background: transparent;
-    border: none;
-    color: var(--fg);
-    font-size: 0.85rem;
-    cursor: pointer;
-    text-align: left;
-    border-radius: var(--radius-sm);
     margin: 1px 4px;
+    padding: var(--space-1-5) var(--space-2-5);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s ease;
 }
 
 .memory-list-item:hover {
-    background: var(--accent-bg-hover);
+    background: var(--hover-overlay);
 }
 
 .memory-list-item.active {
     background: var(--accent-bg-active);
+}
+
+.memory-list-item.active .memory-list-item-name {
     color: var(--accent);
 }
 
 .memory-list-item-name {
-    flex: 1;
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-align: left;
+    font-size: var(--text-base);
     font-weight: 600;
+    text-align: left;
 }
 
-.memory-list-item-badge {
-    flex: 0 0 auto;
-    font-size: 0.65rem;
-    padding: 0.05rem 0.4rem;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--border);
+/* The description is the "when is this relevant" line; it beats a type badge
+   that the filter chips already carry. */
+.memory-list-item-desc {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--fg-dim);
-    line-height: 1.3;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    text-align: left;
 }
+
+/* Archived rows stay readable but lose weight against live topics. */
+.memory-list-item.archived {
+    opacity: 0.6;
+}
+
+.memory-list-item.archived:hover,
+.memory-list-item.archived.active {
+    opacity: 1;
+}
+
+.memory-archive-section {
+    margin-top: var(--space-2);
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-1);
+}
+
+.memory-archive-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    width: calc(100% - 8px);
+    margin: 0 4px;
+    padding: var(--space-1-5) var(--space-2-5);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.memory-archive-toggle:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+.memory-archive-chevron {
+    transition: transform 0.15s ease;
+}
+
+.memory-archive-chevron.open {
+    transform: rotate(90deg);
+}
+
+.memory-archive-count {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Reading column ───────────────────────────────────────────── */
 
 .memory-detail {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
-    padding: 1.2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+    padding: var(--space-4);
 }
 
 .memory-detail-placeholder,
 .memory-detail-disabled,
 .memory-detail-error {
-    flex: 1;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -107,82 +217,112 @@
     padding: 2rem;
 }
 
+.memory-detail-placeholder p {
+    margin: 0;
+    max-width: 26rem;
+    line-height: var(--leading-normal);
+}
+
 .memory-detail-disabled {
     flex-direction: column;
 }
 
 .memory-detail-disabled h2 {
     margin: 0 0 0.5rem 0;
-    font-size: 1.05rem;
+    font-size: var(--text-lg);
 }
 
 .memory-detail-error {
     color: var(--error);
 }
 
-.memory-view,
-.memory-edit {
+/* One reading measure for every detail view; content height follows the text. */
+.memory-view {
     display: flex;
     flex-direction: column;
-    gap: 0.8rem;
-    flex: 1;
+    gap: var(--space-3);
+    max-width: 42rem;
 }
 
 .memory-view-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.6rem;
+    align-items: flex-start;
+    gap: var(--space-2);
 }
 
 .memory-view-name {
+    flex: 0 1 auto;
     margin: 0;
-    font-size: 1.15rem;
+    font-size: var(--text-lg);
     font-weight: 600;
+    line-height: 1.3;
     word-break: break-word;
 }
 
-.memory-edit-btn,
-.memory-delete-btn {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    width: auto;
-    padding: 0 0.6rem;
-    height: 28px;
+/* Neutral chip: the filter already carries the type distinction. */
+.memory-type-chip {
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    height: 20px;
+    margin-top: 3px;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
     color: var(--fg-dim);
-    cursor: pointer;
-    font-size: 0.8rem;
+    font-size: var(--text-2xs);
+    white-space: nowrap;
 }
 
-.memory-edit-btn:hover {
-    color: var(--fg);
-    background: var(--accent-bg-hover);
+.memory-type-chip-muted {
+    border-style: dashed;
 }
 
-.memory-delete-btn:hover {
-    color: var(--error);
-    border-color: var(--error);
-}
-
-.memory-view-meta {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.25rem 0.8rem;
+.memory-view-desc {
     margin: 0;
-    font-size: 0.8rem;
-}
-
-.memory-view-meta dt {
     color: var(--fg-dim);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
 }
 
-.memory-view-meta dd {
-    margin: 0;
+/* Prose, not a code card: topics are one or two sentences, not documents. */
+.memory-view-content {
+    font-size: var(--text-base);
+    line-height: 1.7;
+    white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* Markdown typography comes from .md-assistant (chatMarkdown.css); this only
+   supplies the reading measure. */
+.memory-view-markdown {
+    max-width: 42rem;
+}
+
+/* Quiet footer line: identity, age, and the one action that applies. */
+.memory-view-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+
+.memory-view-meta code {
+    font-size: var(--text-xs);
+}
+
+.memory-view-meta-time {
+    display: inline-flex;
+    gap: var(--space-1);
+}
+
+.memory-view-meta-spacer {
+    flex: 1;
 }
 
 /* Inline `<code>` outside markdown panes: match the borderless orange chip used by
@@ -202,16 +342,11 @@ code {
     font-family: var(--mono);
 }
 
-.memory-view-content {
-    background: var(--bg-secondary);
-    padding: 0.8rem;
-    border-radius: var(--radius-sm);
-    font-family: var(--mono);
-    font-size: 0.85rem;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-x: auto;
+.memory-edit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    height: 100%;
 }
 
 .memory-edit-textarea {
@@ -221,60 +356,23 @@ code {
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 0.8rem;
+    padding: var(--space-3);
     font-family: var(--mono);
-    font-size: 0.85rem;
-    line-height: 1.5;
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
     resize: vertical;
 }
 
-.memory-edit-textarea:focus {
+.memory-edit-textarea:focus-visible {
     outline: none;
     border-color: var(--accent);
+    box-shadow: var(--focus-ring);
 }
 
 .memory-edit-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
-}
-
-.memory-edit-cancel,
-.memory-edit-save {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0 0.8rem;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.85rem;
-    cursor: pointer;
-}
-
-.memory-edit-cancel {
-    color: var(--fg-dim);
-}
-
-.memory-edit-cancel:hover {
-    color: var(--fg);
-    background: var(--accent-bg-hover);
-}
-
-.memory-edit-save {
-    color: var(--accent);
-    border-color: var(--accent);
-}
-
-.memory-edit-save:hover:not(:disabled) {
-    background: var(--accent-bg-hover);
-}
-
-.memory-edit-cancel:disabled,
-.memory-edit-save:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    gap: var(--space-2);
 }
 
 .memory-conflict-extra {
@@ -291,7 +389,7 @@ code {
     border-radius: var(--radius-sm);
     padding: 0.5rem 0.9rem;
     color: var(--fg);
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     cursor: pointer;
 }
 
@@ -299,56 +397,97 @@ code {
     background: var(--accent-bg-hover);
 }
 
-/* ── Consolidation controls, preview and history ── */
-.memory-dream-panel {
+/* ── Consolidation view ───────────────────────────────────────── */
+
+.memory-dream-trigger {
+    position: relative;
+}
+
+/* Unapplied preview marker: the only consolidation state the reading view
+   has to advertise, so it does not need a whole banner. */
+.memory-dream-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-circle);
+    background: var(--warning);
+    flex: 0 0 auto;
+}
+
+.memory-dream-view {
     display: flex;
     flex-direction: column;
+    gap: var(--space-4);
+    max-width: 52rem;
+    min-height: 100%;
+}
+
+.memory-dream-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
     gap: var(--space-2);
-    padding: var(--space-3);
+}
+
+.memory-dream-header h2 {
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: 600;
+}
+
+.memory-dream-subtitle {
+    margin: var(--space-1) 0 0;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+
+.memory-dream-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2-5) var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
 }
 
-.memory-dream-toolbar,
-.memory-dream-schedule,
-.memory-dream-preview-actions {
+.memory-dream-schedule {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-}
-
-.memory-dream-toolbar {
-    justify-content: space-between;
-    flex-wrap: wrap;
-}
-
-.memory-dream-schedule {
     color: var(--fg-dim);
     font-size: var(--text-sm);
 }
 
-.memory-dream-schedule small,
-.memory-dream-section-heading span,
-.memory-dream-report-meta small {
+.memory-dream-note {
+    margin: calc(var(--space-2) * -1) 0 0;
     color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+}
+
+.memory-dream-idle {
+    margin: 0;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
 }
 
 .memory-dream-preview {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-    padding-top: var(--space-2);
-    border-top: 1px solid var(--border);
+    gap: var(--space-3);
 }
 
-.memory-dream-section-heading {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
+.memory-dream-section-heading strong {
+    font-size: var(--text-md);
 }
 
 .memory-dream-section-heading span {
+    display: block;
+    margin-top: var(--space-1);
+    color: var(--fg-dim);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
 }
@@ -361,19 +500,32 @@ code {
 .memory-dream-actions-list {
     display: flex;
     flex-direction: column;
+    gap: var(--space-3);
+}
+
+.memory-dream-group {
+    display: flex;
+    flex-direction: column;
     gap: var(--space-1);
-    max-height: 20rem;
-    overflow-y: auto;
+}
+
+.memory-dream-group-label {
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .memory-dream-action {
+    padding: var(--space-1) 0 var(--space-1) var(--space-2);
+    border-left: 2px solid var(--border);
     color: var(--fg);
     font-size: var(--text-sm);
 }
 
 .memory-dream-action summary {
     cursor: pointer;
-    padding: var(--space-1) 0;
 }
 
 .memory-dream-action-body {
@@ -402,9 +554,22 @@ code {
     color: var(--fg-dim);
 }
 
-.memory-dream-history {
+/* Stays reachable while the plan scrolls; the column background hides content
+   passing underneath. */
+.memory-dream-preview-actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) 0;
     border-top: 1px solid var(--border);
+    background: var(--chat-panel-bg);
+}
+
+.memory-dream-history {
     padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
     color: var(--fg-dim);
     font-size: var(--text-sm);
 }

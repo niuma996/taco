@@ -653,8 +653,23 @@
     "title": "记忆",
     "globalLabel": "全局",
     "globalName": "MEMORY.md",
-    "projectTopicsLabel": "本项目 topic",
     "noTopics": "本项目暂无 topic。",
+    "noDescription": "（无描述）",
+    "noMatchFilter": "当前筛选下暂无记忆。",
+    "selectHint": "从左侧选择一条记忆。",
+    "filter": {
+      "all": "全部"
+    },
+    "type": {
+      "user": "用户",
+      "feedback": "反馈",
+      "project": "项目",
+      "reference": "参考"
+    },
+    "group": {
+      "recent": "最近",
+      "earlier": "更早"
+    },
     "refresh": "刷新",
     "edit": "编辑",
     "save": "保存",
@@ -676,13 +691,18 @@
     "typeLabel": "类型",
     "createdLabel": "创建于",
     "updatedLabel": "上次更新",
-    "idLabel": "id",
     "errorLoad": "加载记忆失败",
     "errorSave": "保存失败",
     "errorDelete": "删除失败",
     "dream": {
       "title": "记忆整理",
+      "open": "整理",
+      "close": "关闭整理",
+      "idle": "暂无待确认的整理结果。",
+      "neverRun": "尚未整理",
+      "lastRun": "上次整理",
       "schedule": "定时自动整理",
+      "scheduleNote": "时间与阈值在「定时任务」的 memory-dream 任务中调整。",
       "scheduleUnavailable": "当前 daemon 未提供定时任务",
       "run": "立即整理",
       "running": "整理中…",
