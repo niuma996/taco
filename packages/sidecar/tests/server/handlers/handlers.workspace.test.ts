@@ -1048,6 +1048,18 @@ describe("memory", () => {
             );
         });
 
+        it("dreamRun rejects an unknown model override instead of falling back", async () => {
+            const store = await seeded();
+            const { workspace } = workspaceWith(store);
+            const handler = getRegisteredMethod("memory.dreamRun");
+            assert.ok(handler);
+            const ctx = makeCtx(workspace);
+            (ctx as { server?: unknown }).server = {
+                jobs: { get: async () => ({ args: { model: "missing/model" } }) },
+            };
+            await assert.rejects(() => handler.handler(ctx), /model not found: missing\/model/);
+        });
+
         it("dreamRun with too few topics skips without a model call", async () => {
             const store = await seeded(2);
             const { workspace, calls } = workspaceWith(store);

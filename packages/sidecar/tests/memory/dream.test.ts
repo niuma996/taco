@@ -5,7 +5,15 @@
  */
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    utimesSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -153,6 +161,25 @@ describe("LocalMemoryStore archive / restore", () => {
         assert.ok(store.getTopic("a"));
         await store.deleteTopic("a", { expectedContent: "v1" });
         assert.equal(store.getTopic("a"), undefined);
+    });
+
+    it("archiving the same id twice replaces the archived copy", async () => {
+        const store = mkStore();
+        await seed(store, [topic("a", { content: "v1" })]);
+        await store.archiveTopic("a");
+        await store.appendEntry(topic("a", { content: "v2" }));
+        await store.archiveTopic("a");
+        await store.restoreTopic("a");
+        assert.equal(store.getTopic("a")?.content, "v2");
+    });
+
+    it("restore rejects path-like ids instead of moving files outside archive", async () => {
+        const store = mkStore();
+        const outside = join(store.topicDir, "outside.md");
+        writeFileSync(outside, "do not move");
+        await assert.rejects(() => store.restoreTopic("../outside"), /invalid memory topic id/);
+        assert.equal(readFileSync(outside, "utf8"), "do not move");
+        await assert.rejects(() => store.restoreTopic("..\\outside"), /invalid memory topic id/);
     });
 
     it("restore refuses when a live topic took the id", async () => {

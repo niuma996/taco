@@ -431,7 +431,13 @@ async function resolveManualDreamModel(
             slash > 0
                 ? workspace.models.getModel(override.slice(0, slash), override.slice(slash + 1))
                 : workspace.models.getModels().find((m) => m.id === override);
-        if (found) model = found as typeof model;
+        if (!found) {
+            throw new RpcHandlerError(
+                ErrorCodes.InvalidParams,
+                `memory consolidation model not found: ${override}`,
+            );
+        }
+        model = found as typeof model;
     }
     if (!model)
         throw new RpcHandlerError(

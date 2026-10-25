@@ -332,10 +332,12 @@ export class LocalMemoryStore implements MemoryStore {
             if (!existing) throw new Error(`unknown memory topic: ${id}`);
             assertExpectedContent(existing, options);
             ensureDir(join(this.workspaceDir, ARCHIVE_DIR));
-            renameSync(
-                join(this.workspaceDir, `${id}.md`),
-                join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`),
-            );
+            const archivedPath = join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`);
+            // Windows rename does not replace an existing destination.
+            if (process.platform === "win32" && existsSync(archivedPath)) {
+                unlinkSync(archivedPath);
+            }
+            renameSync(join(this.workspaceDir, `${id}.md`), archivedPath);
             this.topicsCache = undefined;
         });
         this.writeChain = next.catch(() => undefined);
@@ -348,6 +350,17 @@ export class LocalMemoryStore implements MemoryStore {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
         const next = this.writeChain.then(() => {
+            // This id crosses the RPC boundary; never let it escape archive/.
+            if (
+                !id ||
+                id === "." ||
+                id === ".." ||
+                id.includes("/") ||
+                id.includes("\\") ||
+                id.includes("\0")
+            ) {
+                throw new Error(`invalid memory topic id: ${id}`);
+            }
             const from = join(this.workspaceDir, ARCHIVE_DIR, `${id}.md`);
             if (!existsSync(from)) throw new Error(`unknown archived memory topic: ${id}`);
             if (this.readTopicsCached().some((e) => e.id === id)) {
