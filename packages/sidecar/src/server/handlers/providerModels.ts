@@ -21,8 +21,7 @@ import type {
     ProviderListModelsParams,
     ProviderListModelsResult,
 } from "@taco-ai/protocol";
-import { ErrorCodes, providerListModelsSchema } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes } from "@taco-ai/protocol";
 import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -35,12 +34,9 @@ export function registerProviderModelsHandlers(
 ): void {
     const performRequest = deps.performModelsRequest ?? performModelsRequest;
     registerMethod(
-        RPC.providerListModels,
+        "providerListModels",
         false,
-        async ({
-            server,
-            params,
-        }: MethodCtx<ProviderListModelsParams>): Promise<ProviderListModelsResult> => {
+        async ({ server, params }): Promise<ProviderListModelsResult> => {
             const resolved = resolveEndpoint(server, params);
             if ("error" in resolved) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, resolved.error);
@@ -89,7 +85,6 @@ export function registerProviderModelsHandlers(
             }
             return { ok: true, models };
         },
-        { schema: providerListModelsSchema },
     );
 }
 

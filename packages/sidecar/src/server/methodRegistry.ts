@@ -1,32 +1,56 @@
 /**
- * Method registry — extensible skeleton for server dispatch. Each method
- * has one handler registered via `registerMethod` in `handlers/*.ts`.
- * `SidecarServer` calls `registerBuiltinMethods()` once at startup.
+ * Method registry — server-side dispatch table.
  *
- * commandId idempotency (`command: true`): fingerprint =
+ * Each method is registered once via `registerMethod`, which checks the
+ * handler against the shared contract table in `@taco-ai/protocol`: the
+ * `params` type the handler sees and the type it returns must be the ones
+ * the contract declares for that method. A drifted handler or a drifted
+ * contract therefore fails the build instead of surfacing as a runtime
+ * error.
+ *
+ * `commandId` idempotency (`command: true`): fingerprint =
  * `JSON.stringify(params)` (byte-exact); commandId is process-scoped —
  * adapters derive stable id, e.g. `sessionId + sha256(canonicalParams)`;
  * retry is best-effort (`commandRecordLimit` defaults to 1024 and clamps to 1,
  * settled-only FIFO prune,
  * TTL via `commandRecordTtlMs`).
  *
- * Schema validation (`schema: TSchema`): when a method registers a typebox
- * schema, `handleRpcRequest` runs `Value.Errors` before dispatch and rejects
- * bad input with `invalid_params`.
+ * Schema validation: the params schema comes from the contract table, so a
+ * method cannot be registered with a schema that belongs to another method.
+ * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects bad
+ * input with `invalid_params`.
  *
- * Two limits worth knowing before relying on this:
- *   1. `MethodCtx<P>`'s `P` is supplied by each handler's own annotation
- *      (e.g. `MethodCtx<PromptParams>`); it is NOT derived from `options.schema`.
- *      Nothing checks that the two agree — a schema/interface drift compiles
- *      cleanly and only surfaces at runtime.
- *   2. `ctx.params` is the raw `req.params` (no `Value.Cast`), so the handler's
- *      static type is an assertion about untrusted input, not a guarantee.
- * Handlers with concrete schemas must still keep defensive runtime checks for
- * values whose semantics are stricter than the wire shape.
+ * That guarantee is about *pairing*, not coverage: most schemas in the
+ * contract table are still `Type.Any()` / `Type.Unknown()` placeholders,
+ * which accept any value. Those methods get no wire-level validation —
+ * their handlers do their own runtime checks instead. Tightening a schema
+ * turns the gate on for that method; the contract table's compile-time
+ * assertion then requires the schema to stay consistent with the contract.
+ *
+ * Three limits worth knowing before relying on this:
+ *   1. `ctx.params` is the raw `req.params` (no `Value.Cast`), so a
+ *      handler's params type is an assertion about untrusted input, not a
+ *      guarantee. Handlers with concrete schemas must still keep defensive
+ *      runtime checks for values whose semantics are stricter than the wire
+ *      shape.
+ *   2. `ensureWorkspace` is the server's routing decision and is separate
+ *      from the contract's `scope`, which is the client's routing dimension.
+ *      They disagree for `workspace.ensure`, `workspace.dispose` and
+ *      `workspace.associations.resolve`, which are routed by workspace but
+ *      need no workspace runtime on the server.
+ *   3. The contract table's schema assertion is one-directional: it rejects
+ *      a schema that is *stricter* than the contract declares, but a schema
+ *      loosened beyond the contract still compiles. See `rpcContract.ts`.
  */
 
 import type { WorkspaceId } from "@taco-ai/protocol";
-import type { TSchema } from "typebox";
+import {
+    RPC,
+    type RpcContractKey,
+    type RpcParams,
+    type RpcResult,
+    rpcSchemas,
+} from "@taco-ai/protocol";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { WorkspaceRuntime } from "../runtime/workspace.ts";
 import type { ServerRegistry } from "./serverRegistry.ts";
@@ -48,14 +72,24 @@ export interface MethodCtx<P> {
     readonly params: P;
 }
 
-export type MethodHandler<P = unknown> = (ctx: MethodCtx<P>) => Promise<unknown>;
-type AnyMethodHandler = (ctx: MethodCtx<unknown>) => Promise<unknown>;
+/**
+ * A method handler.
+ *
+ * `R` is the result type the contract declares for the method. It is not
+ * `unknown`: the registry stores handlers generically, but a handler that
+ * returns the wrong shape is rejected where it is registered.
+ */
+export type MethodHandler<P, R> = (ctx: MethodCtx<P>) => Promise<R>;
 
 interface RegisteredMethod {
     ensureWorkspace: boolean;
     options: RegisterMethodOptions;
+    /** Params validator, taken from the contract table so it cannot be paired with the wrong method. */
+    schema: unknown;
     handler: AnyMethodHandler;
 }
+
+type AnyMethodHandler = (ctx: MethodCtx<unknown>) => Promise<unknown>;
 
 export interface RegisterMethodOptions {
     /** Workspace route param extracted from params; used by workspace.* lifecycle methods with `cwd`. */
@@ -64,26 +98,52 @@ export interface RegisterMethodOptions {
     command?: boolean;
     /** Starts an exclusive model turn for params.workspace + params.sessionId. */
     turnStart?: boolean;
-    /**
-     * Optional typebox schema for `params`. When set, `handleRpcRequest`
-     * validates incoming params before dispatch; failures return
-     * `invalid_params` with `data.issues: { path, message, schema }[]`.
-     * Does NOT influence the handler's `params` type — see the file header.
-     */
-    schema?: TSchema;
 }
 
 const registry = new Map<string, RegisteredMethod>();
 
-export function registerMethod<P>(
-    name: string,
+/**
+ * Registers one method.
+ *
+ * `key` names a row in the protocol contract table. The handler's params
+ * and result types are checked against that row: a handler that reads a
+ * field the contract does not declare, or returns a different shape, fails
+ * to compile here.
+ *
+ * The registry itself is keyed by the wire method name, because that is what
+ * the dispatcher looks up.
+ */
+export function registerMethod<K extends RpcContractKey>(
+    key: K,
     ensureWorkspace: boolean,
-    handler: MethodHandler<P>,
+    handler: MethodHandler<RpcParams<K>, RpcResult<K>>,
     options: RegisterMethodOptions = {},
 ): void {
-    registry.set(name, {
+    registry.set(RPC[key], {
         ensureWorkspace,
         options,
+        schema: rpcSchemas[key],
+        handler: handler as AnyMethodHandler,
+    });
+}
+
+/**
+ * Registers a method that is not part of the wire contract.
+ *
+ * Tests use this to stand up a probe method without adding it to the
+ * published contract. Production methods belong in the contract table and
+ * should use {@link registerMethod} so their types stay checked.
+ */
+export function registerAdhocMethod(
+    method: string,
+    ensureWorkspace: boolean,
+    handler: MethodHandler<unknown, unknown>,
+    options: RegisterMethodOptions = {},
+): void {
+    registry.set(method, {
+        ensureWorkspace,
+        options,
+        schema: undefined,
         handler: handler as AnyMethodHandler,
     });
 }

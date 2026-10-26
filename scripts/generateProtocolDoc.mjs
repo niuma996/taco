@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const DOC_PATH = resolve(REPO_ROOT, "docs", "sidecar-protocol.md");
-const RPC_PATH = resolve(REPO_ROOT, "packages", "shared", "rpcMethods.ts");
+const RPC_PATH = resolve(REPO_ROOT, "packages", "protocol", "src", "rpcContract.ts");
 const PUSH_PATH = resolve(REPO_ROOT, "packages", "protocol", "src", "push.ts");
 
 // ── Resolve the version to stamp into the doc ────────────────────────────────────
@@ -44,8 +44,8 @@ function resolveVersion() {
 // truth, so the table can never drift from a missing or misplaced `// foo.*` marker.
 function extractRpcMethods(path) {
     const src = readFileSync(path, "utf8");
-    // Only look inside the `export const RPC = { ... } as const` block.
-    const blockMatch = /export const RPC\s*=\s*\{([\s\S]*?)\}\s*as const/.exec(src);
+    // The contract table's `RPC` const holds the wire names.
+    const blockMatch = /export const RPC = \{([\s\S]*?)\} as const/.exec(src);
     if (!blockMatch) return [];
     const block = blockMatch[1];
     const methods = [];
@@ -89,11 +89,10 @@ function renderPushTable(pushMethods) {
 function discoverRuntimeMethods() {
     const handlersDir = resolve(REPO_ROOT, "packages", "sidecar", "src", "server", "handlers");
     const methodsFile = resolve(REPO_ROOT, "packages", "sidecar", "src", "server", "methods.ts");
-    // Handlers register via `registerMethod(RPC.<key>, …)` rather than a
-    // string literal, so the literal-string regex here would always miss
-    // every call. Capture the camelCase key instead, then resolve it
-    // through the same `RPC` const the source uses.
-    const re = /registerMethod\(\s*(?:RPC\.)?(?<key>[A-Za-z_][A-Za-z0-9_]*)/g;
+    // Handlers register via `registerMethod("<contractKey>", …)`, naming the
+    // row they implement rather than repeating the wire string. Resolve the
+    // key through the same contract table the source uses.
+    const re = /registerMethod\(\s*"(?<key>[A-Za-z_][A-Za-z0-9_]*)"/g;
     const keyToName = parseRpcConstKeys();
     const names = new Set();
     for (const file of [
@@ -116,7 +115,7 @@ function discoverRuntimeMethods() {
 // rather than mirrored in this script.
 function parseRpcConstKeys() {
     const src = readFileSync(RPC_PATH, "utf8");
-    const blockMatch = /export const RPC\s*=\s*\{([\s\S]*?)\}\s*as const/.exec(src);
+    const blockMatch = /export const RPC = \{([\s\S]*?)\} as const/.exec(src);
     if (!blockMatch) return new Map();
     const map = new Map();
     for (const m of blockMatch[1].matchAll(/^\s+(?<key>\w+):\s*"(?<name>[^"]+)"/gm)) {

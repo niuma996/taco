@@ -6,34 +6,17 @@
  */
 
 import type {
-    ChannelsBindParams,
     ChannelsBindResult,
-    ChannelsCreateParams,
     ChannelsCreateResult,
-    ChannelsListConversationsParams,
     ChannelsListConversationsResult,
-    ChannelsListParams,
     ChannelsListResult,
-    ChannelsRetryParams,
-    ChannelsSubmitVerifyCodeParams,
     ChannelsSubmitVerifyCodeResult,
-    ChannelsUnbindParams,
     ChannelsUnbindResult,
 } from "@taco-ai/protocol";
-import {
-    channelsBindSchema,
-    channelsCreateSchema,
-    channelsListConversationsSchema,
-    channelsListSchema,
-    channelsRetrySchema,
-    channelsSubmitVerifyCodeSchema,
-    channelsUnbindSchema,
-    ErrorCodes,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes } from "@taco-ai/protocol";
 import { WechatSdkMissingError, WecomSdkMissingError } from "../../channels/channelFactory.ts";
 import type { ChannelControl, ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
-import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 /** Channels are wired at startup; absent means this host does not support them. */
 function requireChannels(server: ServerRpcSurface): ChannelControl {
@@ -55,32 +38,25 @@ function requireChannelId(value: unknown): string {
 
 export function registerChannelsHandlers(): void {
     registerMethod(
-        RPC.channelsList,
+        "channelsList",
         false,
-        async ({ server }: MethodCtx<ChannelsListParams>) =>
-            requireChannels(server).list() satisfies ChannelsListResult,
-        { schema: channelsListSchema },
+        async ({ server }) => requireChannels(server).list() satisfies ChannelsListResult,
     );
 
-    registerMethod(
-        RPC.channelsListConversations,
-        false,
-        async ({ server, params }: MethodCtx<ChannelsListConversationsParams>) => {
-            const channelId =
-                typeof params?.channelId === "string" && params.channelId.length > 0
-                    ? params.channelId
-                    : undefined;
-            return requireChannels(server).listConversations(
-                channelId,
-            ) satisfies ChannelsListConversationsResult;
-        },
-        { schema: channelsListConversationsSchema },
-    );
+    registerMethod("channelsListConversations", false, async ({ server, params }) => {
+        const channelId =
+            typeof params?.channelId === "string" && params.channelId.length > 0
+                ? params.channelId
+                : undefined;
+        return requireChannels(server).listConversations(
+            channelId,
+        ) satisfies ChannelsListConversationsResult;
+    });
 
     registerMethod(
-        RPC.channelsCreate,
+        "channelsCreate",
         false,
-        async ({ server, params }: MethodCtx<ChannelsCreateParams>) => {
+        async ({ server, params }) => {
             const channels = requireChannels(server);
             if (typeof params?.name !== "string" || params.name.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "name is required");
@@ -98,13 +74,13 @@ export function registerChannelsHandlers(): void {
                 );
             }
         },
-        { command: true, schema: channelsCreateSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.channelsBind,
+        "channelsBind",
         false,
-        async ({ server, params }: MethodCtx<ChannelsBindParams>) => {
+        async ({ server, params }) => {
             const channels = requireChannels(server);
             const channelId = requireChannelId(params?.channelId);
             try {
@@ -128,13 +104,13 @@ export function registerChannelsHandlers(): void {
                 );
             }
         },
-        { command: true, schema: channelsBindSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.channelsSubmitVerifyCode,
+        "channelsSubmitVerifyCode",
         false,
-        async ({ server, params }: MethodCtx<ChannelsSubmitVerifyCodeParams>) => {
+        async ({ server, params }) => {
             const channels = requireChannels(server);
             if (typeof params?.requestId !== "string" || params.requestId.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "requestId is required");
@@ -146,13 +122,13 @@ export function registerChannelsHandlers(): void {
                 accepted: channels.submitVerifyCode(params.requestId, params.code),
             } satisfies ChannelsSubmitVerifyCodeResult;
         },
-        { command: true, schema: channelsSubmitVerifyCodeSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.channelsUnbind,
+        "channelsUnbind",
         false,
-        async ({ server, params }: MethodCtx<ChannelsUnbindParams>) => {
+        async ({ server, params }) => {
             const channels = requireChannels(server);
             const channelId = requireChannelId(params?.channelId);
             try {
@@ -165,13 +141,13 @@ export function registerChannelsHandlers(): void {
             }
             return { channelId } satisfies ChannelsUnbindResult;
         },
-        { command: true, schema: channelsUnbindSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.channelsRetry,
+        "channelsRetry",
         false,
-        async ({ server, params }: MethodCtx<ChannelsRetryParams>) => {
+        async ({ server, params }) => {
             const channels = requireChannels(server);
             const channelId = requireChannelId(params?.channelId);
             try {
@@ -183,6 +159,6 @@ export function registerChannelsHandlers(): void {
                 );
             }
         },
-        { command: true, schema: channelsRetrySchema },
+        { command: true },
     );
 }

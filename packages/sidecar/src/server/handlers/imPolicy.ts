@@ -7,24 +7,10 @@
  * swallow a legitimate re-apply. Aligns with `settings.write`.
  */
 
-import type {
-    ImPolicyClearChatOverrideParams,
-    ImPolicyGetParams,
-    ImPolicyGetResult,
-    ImPolicySetChannelDefaultParams,
-    ImPolicySetChatOverrideParams,
-    ImPolicyWriteResult,
-} from "@taco-ai/protocol";
-import {
-    ErrorCodes,
-    imPolicyClearChatOverrideSchema,
-    imPolicyGetSchema,
-    imPolicySetChannelDefaultSchema,
-    imPolicySetChatOverrideSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import type { ImPolicyGetResult, ImPolicyWriteResult } from "@taco-ai/protocol";
+import { ErrorCodes } from "@taco-ai/protocol";
 import type { ImPolicyControl, ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
-import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 /** IM policy control is wired at startup; absent means this host does not support it. */
 function requireImPolicy(server: ServerRpcSurface): ImPolicyControl {
@@ -62,24 +48,16 @@ function mapInvalidPatchError(e: unknown): never {
 }
 
 export function registerImPolicyHandlers(): void {
-    registerMethod(
-        RPC.imPolicyGet,
-        false,
-        async ({ server, params }: MethodCtx<ImPolicyGetParams>): Promise<ImPolicyGetResult> => {
-            const imPolicy = requireImPolicy(server);
-            const channelId = requireChannelId(params?.channelId);
-            return imPolicy.get({ ...(params ?? {}), channelId });
-        },
-        { schema: imPolicyGetSchema },
-    );
+    registerMethod("imPolicyGet", false, async ({ server, params }): Promise<ImPolicyGetResult> => {
+        const imPolicy = requireImPolicy(server);
+        const channelId = requireChannelId(params?.channelId);
+        return imPolicy.get({ ...(params ?? {}), channelId });
+    });
 
     registerMethod(
-        RPC.imPolicySetChannelDefault,
+        "imPolicySetChannelDefault",
         false,
-        async ({
-            server,
-            params,
-        }: MethodCtx<ImPolicySetChannelDefaultParams>): Promise<ImPolicyWriteResult> => {
+        async ({ server, params }): Promise<ImPolicyWriteResult> => {
             const imPolicy = requireImPolicy(server);
             const channelId = requireChannelId(params?.channelId);
             try {
@@ -89,16 +67,12 @@ export function registerImPolicyHandlers(): void {
             }
             return { channelId };
         },
-        { schema: imPolicySetChannelDefaultSchema },
     );
 
     registerMethod(
-        RPC.imPolicySetChatOverride,
+        "imPolicySetChatOverride",
         false,
-        async ({
-            server,
-            params,
-        }: MethodCtx<ImPolicySetChatOverrideParams>): Promise<ImPolicyWriteResult> => {
+        async ({ server, params }): Promise<ImPolicyWriteResult> => {
             const imPolicy = requireImPolicy(server);
             const channelId = requireChannelId(params?.channelId);
             const peerId = requireChatTriple(params?.peerId, "peerId");
@@ -110,16 +84,12 @@ export function registerImPolicyHandlers(): void {
             }
             return { channelId };
         },
-        { schema: imPolicySetChatOverrideSchema },
     );
 
     registerMethod(
-        RPC.imPolicyClearChatOverride,
+        "imPolicyClearChatOverride",
         false,
-        async ({
-            server,
-            params,
-        }: MethodCtx<ImPolicyClearChatOverrideParams>): Promise<ImPolicyWriteResult> => {
+        async ({ server, params }): Promise<ImPolicyWriteResult> => {
             const imPolicy = requireImPolicy(server);
             const channelId = requireChannelId(params?.channelId);
             const hasTriple = !!(params?.peerId && params?.chatId);
@@ -148,6 +118,5 @@ export function registerImPolicyHandlers(): void {
             }
             return { channelId };
         },
-        { schema: imPolicyClearChatOverrideSchema },
     );
 }

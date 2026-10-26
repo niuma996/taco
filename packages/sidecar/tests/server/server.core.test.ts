@@ -6,8 +6,12 @@ import type { RpcResponse } from "@taco-ai/protocol";
 import {
     asSessionId,
     asWorkspaceId,
+    channelsBindSchema,
     isCompatibleSidecarProtocol,
     SIDECAR_PROTOCOL_VERSION,
+    sessionCreateSchema,
+    sessionListSchema,
+    settingsWriteSchema,
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 import { Value } from "typebox/value";
@@ -16,7 +20,7 @@ import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import {
     getRegisteredMethod,
     listRegisteredMethods,
-    registerMethod,
+    registerAdhocMethod,
 } from "../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../src/server/methods.ts";
 import { normalizeError, redactUpstreamMessage } from "../../src/server/rpcResponse.ts";
@@ -28,7 +32,7 @@ import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 describe("initialize", () => {
     let probeCalls = 0;
-    registerMethod(
+    registerAdhocMethod(
         "test.probe",
         false,
         async () => {
@@ -323,19 +327,15 @@ describe("schemaValidation", () => {
         });
 
         it("every registered method has a schema attached", () => {
-            const missing = builtinMethods().filter(
-                (name) => !getRegisteredMethod(name)?.options.schema,
-            );
+            const missing = builtinMethods().filter((name) => !getRegisteredMethod(name)?.schema);
             assert.deepEqual(missing, [], `methods missing schema: ${missing.join(", ")}`);
         });
 
-        it("RPC + JOBS_RPC constants map 1:1 to registered methods", async () => {
-            // PR4: jobs.* lives in the scheduler module, not `@taco-ai/shared`.
-            // Import the local constants here so the closure test enforces the
-            // same invariant for jobs.* as for shared.* — adding a method name
-            // to either side without wiring the other surfaces immediately.
-            const { JOBS_RPC } = await import("../../src/scheduler/jobsRpc.ts");
-            const expected = [...Object.values(RPC), ...Object.values(JOBS_RPC)].sort();
+        it("RPC constants map 1:1 to registered methods", () => {
+            // The contract table lists every method the sidecar serves, so
+            // adding a name there without registering it — or registering one
+            // that is not in the table — fails here.
+            const expected = Object.values(RPC).sort();
             assert.deepEqual(builtinMethods(), expected);
         });
     });
@@ -404,6 +404,13 @@ describe("schemaValidation", () => {
         });
     });
 
+    it("high-risk RPC schemas reject malformed envelopes", () => {
+        assert.ok([...Value.Errors(sessionListSchema, {})].length > 0);
+        assert.ok([...Value.Errors(sessionCreateSchema, {})].length > 0);
+        assert.ok([...Value.Errors(settingsWriteSchema, { global: null })].length > 0);
+        assert.ok([...Value.Errors(channelsBindSchema, {})].length > 0);
+    });
+
     describe("placeholder schemas reject nothing (characterization)", () => {
         before(() => {
             registerBuiltinMethods();
@@ -422,9 +429,9 @@ describe("schemaValidation", () => {
             ["an empty object", {}],
         ];
 
-        for (const method of [RPC.initialize, RPC.sessionPrompt, RPC.sessionCreate]) {
+        for (const method of [RPC.initialize]) {
             it(`${method} still accepts nonsense inputs`, () => {
-                const schema = getRegisteredMethod(method)?.options.schema;
+                const schema = getRegisteredMethod(method)?.schema;
                 assert.ok(schema, `${method} must have a schema`);
                 for (const [label, input] of nonsenseInputs) {
                     const errors: unknown[] = [...Value.Errors(schema, input)];

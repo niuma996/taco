@@ -22,12 +22,23 @@
  * a row).
  */
 
+import type {
+    JobScheduleSpec,
+    Actor as ProtocolActor,
+    Job as ProtocolJob,
+    JobHistoryEntry as ProtocolJobHistoryEntry,
+    JobRunResult as ProtocolJobRunResult,
+    SessionStrategy as ProtocolSessionStrategy,
+} from "@taco-ai/protocol";
 import type { TSchema } from "typebox";
 import { Type } from "typebox";
 
-export type ScheduleSpec =
-    | { kind: "cron"; expr: string; tz?: string }
-    | { kind: "interval"; ms: number };
+/**
+ * The schedule shape. Defined in `@taco-ai/protocol` because it crosses the
+ * wire inside a `Job`; the scheduler re-exports it under its historical
+ * name so the scheduler internals read unchanged.
+ */
+export type ScheduleSpec = JobScheduleSpec;
 
 /**
  * Typebox schema mirror of ScheduleSpec, kept available for future JSON
@@ -49,22 +60,15 @@ export const scheduleSpecSchema: TSchema = Type.Union([
     }),
 ]);
 
-export interface JobHistoryEntry {
-    started_at: string;
-    ended_at?: string;
-    status: "running" | "ok" | "err";
-    error?: string;
-    /** One-line outcome a built-in handler reports (e.g. "merged 12→4"). */
-    summary?: string;
-}
+/** One past run of a job. The wire shape lives in `@taco-ai/protocol`. */
+export type JobHistoryEntry = ProtocolJobHistoryEntry;
 
 /** Per-call caller identity, attached to jobs.* RPC params so the server
  *  can enforce IM-scope (one channel/peer) vs IDE-scope (one fs workspace).
  *  Tool calls close over the actor at construction; legacy desktop paths
- *  pass undefined for backward-compatible admin access. */
-export type Actor =
-    | { kind: "im"; channelId: string; peerId: string; chatId: string }
-    | { kind: "ide"; workspace: string };
+ *  pass undefined for backward-compatible admin access. The wire shape
+ *  lives in `@taco-ai/protocol`. */
+export type Actor = ProtocolActor;
 
 /** How the scheduler picks a session when an `agent.invoke` job fires.
  *  - `new`  : non-IM only — every fire creates a fresh `sched-<uuid>` session.
@@ -74,94 +78,24 @@ export type Actor =
  *  - `pin`  : non-IM default — first fire creates `sched-pin-<jobId>` and stores the id on
  *             the job; subsequent fires attach that session. Lets a job
  *             maintain a single persistent context across many fires. */
-export type SessionStrategy = "new" | "reuse" | "pin";
+export type SessionStrategy = ProtocolSessionStrategy;
 
-export interface Job {
-    id: string;
-    name: string;
-    schedule: ScheduleSpec;
-    /** RPC-style method name the scheduler will invoke when the job fires,
-     *  e.g. `agent.invoke`. The daemon's command dispatcher resolves it
-     *  to a registered handler at run time. */
-    command: string;
-    /** Free-form argument bag passed verbatim to the command. */
-    args: Record<string, unknown>;
-    /** System job seeded by the daemon (see builtinJobs.ts): runs a native
-     *  handler, cannot be deleted, and its command is fixed. Absent on every
-     *  user-created job. */
-    builtin?: boolean;
-    enabled: boolean;
-    /** Whether to replay a missed fire when the daemon comes back up.
-     *  Only applies when `enabled` is also true. */
-    run_on_startup: boolean;
-    /** Cap on *successful* runs before the job retires itself (sets
-     *  `enabled: false` and stops its timer). Absent = unlimited.
-     *
-     *  Exists because `ScheduleSpec` has no one-shot kind: asking for "run
-     *  this once, now" previously meant faking a long interval and
-     *  remembering to delete the job afterwards. When the delete was
-     *  forgotten the job kept firing on that fake schedule forever.
-     *  `max_runs: 1` expresses the intent directly. */
-    max_runs?: number;
-    /** Successful runs so far — server-managed, incremented only on
-     *  `status: "ok"`. Client-supplied values are overwritten by
-     *  JobsController (same rule as `history`), otherwise a caller could
-     *  reset the counter and escape its own `max_runs`. */
-    run_count?: number;
-    /** Circuit breaker: consecutive failed fires tolerated before the job
-     *  retires itself. Absent = DEFAULT_MAX_CONSECUTIVE_FAILURES; an
-     *  explicit 0 disables the breaker.
-     *
-     *  Counts *consecutive* failures (any success resets it) so a job that
-     *  fails intermittently is never retired for transient trouble. Guards
-     *  the case `max_runs` cannot: a job whose command is permanently
-     *  broken (bad credentials, removed binary) never reaches a success, so
-     *  a success-only cap would let it retry on schedule forever. */
-    max_consecutive_failures?: number;
-    /** Consecutive failed fires — server-managed, reset to 0 by any
-     *  success. Same anti-tamper rule as `run_count`. */
-    consecutive_failures?: number;
-    /** Why the scheduler disabled this job on its own. Set alongside
-     *  `enabled: false` when a cap or the breaker trips, so an operator
-     *  can tell self-retirement from a manual toggle. Not folded into
-     *  `history` because that ring holds only HISTORY_LIMIT entries and
-     *  would eventually discard the reason. Cleared when a job is
-     *  re-enabled. */
-    disabled_reason?: string;
-    last_run_at?: string;
-    next_run_at?: string;
-    /** Newest-first; capped at HISTORY_LIMIT (20) entries. The store
-     *  normalizes older on-disk files (where this field was absent) to
-     *  an empty array on read, so in-memory Jobs always carry one. */
-    history: JobHistoryEntry[];
-    /** Server-generated identity for this incarnation of the job. */
-    generation?: string;
-    /** IM scope (server-derived from `args.workspace` when im://). Callers
-     *  MUST NOT set this directly — JobsController derives it from the
-     *  workspace at create/update time and ignores caller-supplied values
-     *  so a malicious IM tool can't escape its sandbox by editing the
-     *  fields. */
-    channelId?: string;
-    /** Peer scope — same derivation rule as channelId. */
-    peerId?: string;
-    /** IM defaults to `reuse` and only permits `reuse`. Filesystem workspaces
-     *  default to `pin` and may explicitly select `new`. */
-    sessionStrategy?: SessionStrategy;
-    /** Set after the first fire of a `pin` job. The dispatcher stores the
-     *  sessionId here so subsequent fires can attach the same session. */
-    pinnedSessionId?: string;
-}
-
+/**
+ * A scheduled job as the scheduler holds it.
+ *
+ * The wire shape lives in `@taco-ai/protocol`, where `history` is optional
+ * because the desktop never sends it. The scheduler always has it — the
+ * store seeds `[]` on read — so it narrows the field back to required here
+ * rather than scattering `?? []` through the scheduler.
+ */
+export type Job = Omit<ProtocolJob, "history"> & { history: JobHistoryEntry[] };
 /** Outcome of one job fire, surfaced to `jobs.runNow` callers so a force-fire
  *  reports what actually happened instead of only whether the lock was
  *  acquired. `skipped` = an overlapping fire held the lock (this fire was
  *  dropped, not queued); `failed` carries the invocation error. Without this,
  *  a run whose `session.prompt` was rejected still rendered as "fired" and the
  *  caller had to read history to learn otherwise. */
-export interface JobRunResult {
-    status: "ok" | "skipped" | "failed";
-    error?: string;
-}
+export type JobRunResult = ProtocolJobRunResult;
 
 export const HISTORY_LIMIT = 20;
 

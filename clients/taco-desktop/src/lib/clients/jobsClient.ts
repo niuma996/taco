@@ -15,129 +15,68 @@
  * key (an `im://` workspace → IM triple; a real fs cwd → IDE workspace)
  * and closes over it at the call site. Tests / admin tooling can pass
  * `undefined` for legacy un-scoped access.
+ *
+ * The wire shapes live in `@taco-ai/protocol` — the same definitions the
+ * sidecar serves — so the two halves cannot drift.
  */
 
-import { JOBS_RPC } from "../jobsRpc.ts";
+import type {
+    Actor,
+    Job,
+    JobCreate,
+    JobHistoryEntry,
+    JobRunResult,
+    JobsCreateParams,
+    JobsDeleteResult,
+    JobsGetResult,
+    JobsHistoryResult,
+    JobsIdParams,
+    JobsListParams,
+    JobsListResult,
+    JobsUpdateParams,
+    JobsWriteResult,
+} from "@taco-ai/protocol";
+import { RPC } from "@taco-ai/shared";
 import type { TacoClient } from "./tacoClient.ts";
-
-/** Job shape — mirrors the sidecar's `Job` type. Kept here rather than
- *  imported from `@taco-ai/protocol` so PR4 doesn't widen that package. */
-export interface Job {
-    id: string;
-    name: string;
-    schedule: JobScheduleSpec;
-    command: string;
-    args: Record<string, unknown>;
-    enabled: boolean;
-    run_on_startup: boolean;
-    last_run_at?: string;
-    next_run_at?: string;
-    /** Past run records — server-managed. The desktop never sends
-     *  `history` over the wire; the server seeds `[]` on create and
-     *  preserves the existing list on update regardless of what the
-     *  client includes. Marked optional so the create/update input
-     *  shape doesn't require callers to stub it. */
-    history?: JobHistoryEntry[];
-    /** Daemon-seeded system job: native handler, not an agent prompt. */
-    builtin?: boolean;
-    /** IM scope, server-derived. Desktop callers should not set these —
-     *  the daemon derives them from `args.workspace` on create/update and
-     *  ignores caller-supplied values (sandbox escape prevention). */
-    channelId?: string;
-    peerId?: string;
-    /** Default `new`. `reuse` is only valid when `args.workspace` is `im://`. */
-    sessionStrategy?: SessionStrategy;
-    /** Set after the first fire of a `pin` job. */
-    pinnedSessionId?: string;
-    /** Cap on successful runs; absent = unlimited. Set 1 for a one-shot job. */
-    max_runs?: number;
-    /** Successful runs so far. Server-managed — the daemon zeroes it on
-     *  create and preserves the stored value on update regardless of what
-     *  the client sends. Optional so create/update inputs need not stub it. */
-    run_count?: number;
-    /** Consecutive-failure budget before the job disables itself; absent =
-     *  the server default, 0 disables the breaker. */
-    max_consecutive_failures?: number;
-    /** Consecutive failed fires. Server-managed, same rule as `run_count`. */
-    consecutive_failures?: number;
-    /** Why the scheduler disabled this job on its own (cap reached or
-     *  breaker tripped). Cleared when the job is re-enabled. */
-    disabled_reason?: string;
-}
-
-export type SessionStrategy = "new" | "reuse" | "pin";
-
-export type JobScheduleSpec =
-    | { kind: "cron"; expr: string; tz?: string }
-    | { kind: "interval"; ms: number };
-
-export interface JobHistoryEntry {
-    started_at: string;
-    ended_at?: string;
-    status: "running" | "ok" | "err";
-    error?: string;
-    /** One-line outcome reported by a native job handler. */
-    summary?: string;
-}
-
-/** Mirrors the sidecar's `JobRunResult` — the outcome of a force-fire.
- *  `skipped` = an overlapping fire held the lock; `failed` carries the
- *  invocation error. Replaces the old boolean that reported only whether
- *  the lock was taken, which mislabelled a rejected run as "fired". */
-export interface JobRunResult {
-    status: "ok" | "skipped" | "failed";
-    error?: string;
-}
-
-/** Mirrors the sidecar's `Actor` — kept here so the desktop doesn't import
- *  the scheduler module directly (different module graph). */
-export type Actor =
-    | { kind: "im"; channelId: string; peerId: string; chatId: string }
-    | { kind: "ide"; workspace: string };
 
 export interface JobsClient {
     list(actor?: Actor): Promise<Job[]>;
     get(id: string, actor?: Actor): Promise<Job | null>;
-    create(job: Omit<Job, "id">, actor?: Actor): Promise<Job>;
+    create(job: JobCreate, actor?: Actor): Promise<Job>;
     update(job: Job, actor?: Actor): Promise<Job>;
     delete(id: string, actor?: Actor): Promise<boolean>;
     runNow(id: string, actor?: Actor): Promise<JobRunResult>;
     history(id: string, actor?: Actor): Promise<JobHistoryEntry[] | null>;
 }
 
-interface ListResult {
-    jobs: Job[];
-}
-interface GetResult {
-    job: Job | null;
-}
-interface CreateResult {
-    job: Job;
-}
-interface UpdateResult {
-    job: Job;
-}
-interface DeleteResult {
-    deleted: boolean;
-}
-interface HistoryResult {
-    history: JobHistoryEntry[] | null;
-}
-
 export function createJobsClient(client: TacoClient): JobsClient {
     return {
         list: (actor) =>
-            call<ListResult>(client, JOBS_RPC.list, {}, actor).then((r) => r.jobs ?? []),
-        get: (id, actor) => call<GetResult>(client, JOBS_RPC.get, { id }, actor).then((r) => r.job),
+            call<JobsListParams, JobsListResult>(client, RPC.jobsList, {}, actor).then(
+                (r) => r.jobs ?? [],
+            ),
+        get: (id, actor) =>
+            call<JobsIdParams, JobsGetResult>(client, RPC.jobsGet, { id }, actor).then(
+                (r) => r.job,
+            ),
         create: (job, actor) =>
-            call<CreateResult>(client, JOBS_RPC.create, { job }, actor).then((r) => r.job),
+            call<JobsCreateParams, JobsWriteResult>(client, RPC.jobsCreate, { job }, actor).then(
+                (r) => r.job,
+            ),
         update: (job, actor) =>
-            call<UpdateResult>(client, JOBS_RPC.update, { job }, actor).then((r) => r.job),
+            call<JobsUpdateParams, JobsWriteResult>(client, RPC.jobsUpdate, { job }, actor).then(
+                (r) => r.job,
+            ),
         delete: (id, actor) =>
-            call<DeleteResult>(client, JOBS_RPC.delete, { id }, actor).then((r) => r.deleted),
-        runNow: (id, actor) => call<JobRunResult>(client, JOBS_RPC.runNow, { id }, actor),
+            call<JobsIdParams, JobsDeleteResult>(client, RPC.jobsDelete, { id }, actor).then(
+                (r) => r.deleted,
+            ),
+        runNow: (id, actor) =>
+            call<JobsIdParams, JobRunResult>(client, RPC.jobsRunNow, { id }, actor),
         history: (id, actor) =>
-            call<HistoryResult>(client, JOBS_RPC.history, { id }, actor).then((r) => r.history),
+            call<JobsIdParams, JobsHistoryResult>(client, RPC.jobsHistory, { id }, actor).then(
+                (r) => r.history,
+            ),
     };
 }
 
@@ -146,10 +85,10 @@ export function createJobsClient(client: TacoClient): JobsClient {
  *  workspace is currently started (the daemon's stdin is shared, so any
  *  started cwd works); `call()` would require `params.workspace` to be set
  *  on the sidecar side, which the jobs UI never provides. */
-async function call<TResult>(
+async function call<TParams, TResult>(
     client: TacoClient,
     method: string,
-    params: Record<string, unknown>,
+    params: TParams,
     actor: Actor | undefined,
 ): Promise<TResult> {
     return client.callProcess(method, actor === undefined ? params : { ...params, actor });

@@ -12,17 +12,14 @@
 import type {
     ChannelInstanceConfigView,
     GlobalConfigPatch,
-    SettingsGetParams,
-    SettingsWriteParams,
     TacoGlobalConfigShape,
     TacoGlobalConfigView,
 } from "@taco-ai/protocol";
-import { ErrorCodes, settingsGetSchema, settingsWriteSchema } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../config/config.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
-import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import type { ServerRegistry } from "../serverRegistry.ts";
 import { mcpServerToView } from "./mcpView.ts";
 
@@ -256,48 +253,38 @@ export function applyGlobalConfigPatch(
 
 export function registerSettingsHandlers(): void {
     let writeQueue: Promise<void> = Promise.resolve();
-    registerMethod(
-        RPC.settingsGet,
-        false,
-        async ({ params }: MethodCtx<SettingsGetParams>) => {
-            // params is currently unused; structure is kept for future
-            // workspace-scoped layering.
-            void params;
-            return { global: toView(readGlobalConfig()) };
-        },
-        { schema: settingsGetSchema },
-    );
+    registerMethod("settingsGet", false, async ({ params }) => {
+        // params is currently unused; structure is kept for future
+        // workspace-scoped layering.
+        void params;
+        return { global: toView(readGlobalConfig()) };
+    });
 
-    registerMethod(
-        RPC.settingsWrite,
-        false,
-        async ({ params, server, serverRegistry }: MethodCtx<SettingsWriteParams>) => {
-            let release!: () => void;
-            const previous = writeQueue;
-            writeQueue = new Promise<void>((resolve) => {
-                release = resolve;
-            });
-            await previous;
-            try {
-                const { global: globalPatch } = params ?? {};
-                if (!globalPatch || typeof globalPatch !== "object") {
-                    throw new RpcHandlerError(
-                        ErrorCodes.InvalidParams,
-                        "settings.write: global must be an object",
-                    );
-                }
-                try {
-                    return { global: applyGlobalConfigPatch(server, serverRegistry, globalPatch) };
-                } catch (e) {
-                    throw new RpcHandlerError(
-                        ErrorCodes.InvalidValue,
-                        e instanceof Error ? e.message : "settings.write failed",
-                    );
-                }
-            } finally {
-                release();
+    registerMethod("settingsWrite", false, async ({ params, server, serverRegistry }) => {
+        let release!: () => void;
+        const previous = writeQueue;
+        writeQueue = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            const { global: globalPatch } = params ?? {};
+            if (!globalPatch || typeof globalPatch !== "object") {
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidParams,
+                    "settings.write: global must be an object",
+                );
             }
-        },
-        { schema: settingsWriteSchema },
-    );
+            try {
+                return { global: applyGlobalConfigPatch(server, serverRegistry, globalPatch) };
+            } catch (e) {
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidValue,
+                    e instanceof Error ? e.message : "settings.write failed",
+                );
+            }
+        } finally {
+            release();
+        }
+    });
 }

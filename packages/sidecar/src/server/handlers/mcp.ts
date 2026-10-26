@@ -18,25 +18,13 @@
  */
 
 import type {
-    McpCreateConfigParams,
-    McpDeleteConfigParams,
     McpDeleteConfigResult,
-    McpGetConfigParams,
     McpGetConfigResult,
     McpMutateConfigResult,
     McpServerConfig,
     McpServerView,
-    McpUpdateConfigParams,
 } from "@taco-ai/protocol";
-import {
-    ErrorCodes,
-    mcpCreateConfigSchema,
-    mcpDeleteConfigSchema,
-    mcpGetConfigSchema,
-    mcpListServersSchema,
-    mcpUpdateConfigSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes } from "@taco-ai/protocol";
 import {
     readGlobalConfig,
     readMcpServers,
@@ -118,7 +106,7 @@ export async function probeMcpServers(
 
 export function registerMcpHandlers(): void {
     registerMethod(
-        RPC.mcpListServers,
+        "mcpListServers",
         false,
         async ({
             params,
@@ -141,28 +129,19 @@ export function registerMcpHandlers(): void {
                 ),
             };
         },
-        { schema: mcpListServersSchema },
     );
 
-    registerMethod(
-        RPC.mcpGetConfig,
-        false,
-        async ({ params }: MethodCtx<McpGetConfigParams>): Promise<McpGetConfigResult> => {
-            if (typeof params?.id !== "string" || params.id.length === 0) {
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
-            }
-            return { config: requireServerConfig(readMcpServers(), params.id) };
-        },
-        { schema: mcpGetConfigSchema },
-    );
+    registerMethod("mcpGetConfig", false, async ({ params }): Promise<McpGetConfigResult> => {
+        if (typeof params?.id !== "string" || params.id.length === 0) {
+            throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
+        }
+        return { config: requireServerConfig(readMcpServers(), params.id) };
+    });
 
     registerMethod(
-        RPC.mcpCreateConfig,
+        "mcpCreateConfig",
         false,
-        async ({
-            params,
-            server,
-        }: MethodCtx<McpCreateConfigParams>): Promise<McpMutateConfigResult> => {
+        async ({ params, server }): Promise<McpMutateConfigResult> => {
             if (!params?.config)
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "config is required");
             // validateMcpServers throws a plain Error on malformed input
@@ -186,16 +165,12 @@ export function registerMcpHandlers(): void {
                 );
             }
         },
-        { schema: mcpCreateConfigSchema },
     );
 
     registerMethod(
-        RPC.mcpUpdateConfig,
+        "mcpUpdateConfig",
         false,
-        async ({
-            params,
-            server,
-        }: MethodCtx<McpUpdateConfigParams>): Promise<McpMutateConfigResult> => {
+        async ({ params, server }): Promise<McpMutateConfigResult> => {
             if (typeof params?.id !== "string" || params.id.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
             }
@@ -223,16 +198,12 @@ export function registerMcpHandlers(): void {
                 );
             }
         },
-        { schema: mcpUpdateConfigSchema },
     );
 
     registerMethod(
-        RPC.mcpDeleteConfig,
+        "mcpDeleteConfig",
         false,
-        async ({
-            params,
-            server,
-        }: MethodCtx<McpDeleteConfigParams>): Promise<McpDeleteConfigResult> => {
+        async ({ params, server }): Promise<McpDeleteConfigResult> => {
             if (typeof params?.id !== "string" || params.id.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
             }
@@ -242,7 +213,6 @@ export function registerMcpHandlers(): void {
             await server?.reloadMcpServers?.();
             return { deleted: params.id, requiresRestart: true };
         },
-        { schema: mcpDeleteConfigSchema },
     );
 }
 

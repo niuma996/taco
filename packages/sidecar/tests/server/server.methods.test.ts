@@ -14,7 +14,7 @@ import type { MethodCtx } from "../../src/server/methodRegistry.ts";
 import {
     getRegisteredMethod,
     RpcHandlerError,
-    registerMethod,
+    registerAdhocMethod,
 } from "../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../src/server/methods.ts";
 import type { CommandOutcome } from "../../src/server/rpcResponse.ts";
@@ -675,7 +675,7 @@ describe("commandIdempotency", () => {
     }
 
     let calls = 0;
-    registerMethod(
+    registerAdhocMethod(
         "test.command",
         false,
         async ({ params }) => {
@@ -687,7 +687,7 @@ describe("commandIdempotency", () => {
     );
 
     let boundedCalls = 0;
-    registerMethod(
+    registerAdhocMethod(
         "test.bounded-command",
         false,
         async ({ params }) => {
@@ -699,7 +699,7 @@ describe("commandIdempotency", () => {
 
     let inFlightBoundedCalls = 0;
     let inFlightGate: { release?: () => void; started?: () => void } | undefined;
-    registerMethod(
+    registerAdhocMethod(
         "test.in-flight-bounded-command",
         false,
         async () => {
@@ -975,7 +975,7 @@ describe("commandIdempotency", () => {
     });
 
     let turnCalls = 0;
-    registerMethod(
+    registerAdhocMethod(
         "test.turn",
         false,
         async () => {

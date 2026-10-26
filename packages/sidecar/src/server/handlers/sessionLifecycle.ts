@@ -9,14 +9,14 @@ import { rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type {
     AgentMessage,
-    AttachParams,
-    CreateSessionParams,
-    DeleteSessionParams,
-    RenameSessionParams,
+    CreateSessionResult,
+    SessionAttachResult,
+    SessionDeleteResult,
+    SessionDetachResult,
     SessionId,
     SessionListCursor,
     SessionListEntry,
-    SessionListParams,
+    SessionRenameResult,
 } from "@taco-ai/protocol";
 import {
     asSessionId,
@@ -24,92 +24,78 @@ import {
     ErrorCodes,
     SESSION_LIST_DEFAULT_LIMIT,
     SESSION_LIST_MAX_LIMIT,
-    sessionAttachSchema,
-    sessionCreateSchema,
-    sessionDeleteSchema,
-    sessionDetachSchema,
-    sessionListSchema,
-    sessionRenameSchema,
 } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { JsonlSessionMetadata } from "../../runtime/pi/types.ts";
 import { uuidv7 } from "../../runtime/pi/values.ts";
 import { isHiddenSubagentSession, type SessionFacts } from "../../runtime/session/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
-import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 const log = createLogger("session:lifecycle");
 
 export function registerSessionLifecycleHandlers(): void {
-    registerMethod(
-        RPC.sessionList,
-        true,
-        async ({ workspace, cwd, params }: MethodCtx<SessionListParams>) => {
-            const list = await workspace.listSessions();
-            // Subagent sessions are hidden from the main list. Kind lives in
-            // taco facts (pi 0.85 removed the free-form metadata bag), so it
-            // is read per session. Header parentSessionId is a second signal:
-            // repo.create stamps it atomically, covering the window before
-            // writeSessionFacts. A facts-read failure still yields {} so a
-            // pre-0.85 user session stays visible — but a header parent still
-            // hides the row.
-            const entries = await Promise.all(
-                list.map(async (m) => ({
-                    meta: m,
-                    facts: await workspace.getSessionFacts(m.id as SessionId).catch((err) => {
-                        log.error(
-                            "getSessionFacts failed in session.list; treating as unfacted",
-                            m.id,
-                            err,
-                        );
-                        return {} as Awaited<ReturnType<typeof workspace.getSessionFacts>>;
-                    }),
-                })),
-            );
-            const all = await Promise.all(
-                entries
-                    .filter(
-                        ({ facts, meta }) => !isHiddenSubagentSession(facts, meta.parentSessionId),
-                    )
-                    .map(({ facts, meta }) => buildSessionEntry(workspace, meta, facts)),
-            );
-            // Sort by updatedAt desc with createdAt fallback, id desc tiebreaker.
-            const sorted = sortSessionsDesc(all);
-            const limit = normalizeLimit(params.limit);
-            if (params.full) {
-                return {
-                    workspace: cwd,
-                    sessions: sorted,
-                    total: sorted.length,
-                };
-            }
-            const startIdx = findCursorIndex(sorted, params.cursor);
-            const pageEnd = startIdx + limit;
-            const page = sorted.slice(startIdx, pageEnd);
-            const last = page[page.length - 1];
-            const nextCursor: SessionListCursor | undefined =
-                pageEnd < sorted.length && last
-                    ? { updatedAt: last.updatedAt ?? last.createdAt, id: last.id }
-                    : undefined;
+    registerMethod("sessionList", true, async ({ workspace, cwd, params }) => {
+        const list = await workspace.listSessions();
+        // Subagent sessions are hidden from the main list. Kind lives in
+        // taco facts (pi 0.85 removed the free-form metadata bag), so it
+        // is read per session. Header parentSessionId is a second signal:
+        // repo.create stamps it atomically, covering the window before
+        // writeSessionFacts. A facts-read failure still yields {} so a
+        // pre-0.85 user session stays visible — but a header parent still
+        // hides the row.
+        const entries = await Promise.all(
+            list.map(async (m) => ({
+                meta: m,
+                facts: await workspace.getSessionFacts(m.id as SessionId).catch((err) => {
+                    log.error(
+                        "getSessionFacts failed in session.list; treating as unfacted",
+                        m.id,
+                        err,
+                    );
+                    return {} as Awaited<ReturnType<typeof workspace.getSessionFacts>>;
+                }),
+            })),
+        );
+        const all = await Promise.all(
+            entries
+                .filter(({ facts, meta }) => !isHiddenSubagentSession(facts, meta.parentSessionId))
+                .map(({ facts, meta }) => buildSessionEntry(workspace, meta, facts)),
+        );
+        // Sort by updatedAt desc with createdAt fallback, id desc tiebreaker.
+        const sorted = sortSessionsDesc(all);
+        const limit = normalizeLimit(params.limit);
+        if (params.full) {
             return {
                 workspace: cwd,
-                sessions: page,
-                nextCursor,
-                // Always the true workspace total (already computed in-memory
-                // above), not just this page's size — the sidebar header shows
-                // "N sessions" for the whole workspace, not the loaded count.
+                sessions: sorted,
                 total: sorted.length,
             };
-        },
-        { schema: sessionListSchema },
-    );
+        }
+        const startIdx = findCursorIndex(sorted, params.cursor);
+        const pageEnd = startIdx + limit;
+        const page = sorted.slice(startIdx, pageEnd);
+        const last = page[page.length - 1];
+        const nextCursor: SessionListCursor | undefined =
+            pageEnd < sorted.length && last
+                ? { updatedAt: last.updatedAt ?? last.createdAt, id: last.id }
+                : undefined;
+        return {
+            workspace: cwd,
+            sessions: page,
+            nextCursor,
+            // Always the true workspace total (already computed in-memory
+            // above), not just this page's size — the sidebar header shows
+            // "N sessions" for the whole workspace, not the loaded count.
+            total: sorted.length,
+        };
+    });
 
     registerMethod(
-        RPC.sessionCreate,
+        "sessionCreate",
         true,
-        async ({ workspace, params }: MethodCtx<CreateSessionParams>) => {
+        async ({ workspace, params }) => {
             if (!workspace.defaultModel) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidState,
@@ -164,19 +150,20 @@ export function registerSessionLifecycleHandlers(): void {
                     throw e;
                 }
             }
-            return {
-                sessionId: meta.id,
+            const result: CreateSessionResult = {
+                sessionId: asSessionId(meta.id),
                 filePath: meta.path,
                 assistantMessage,
             };
+            return result;
         },
-        { command: true, schema: sessionCreateSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionAttach,
+        "sessionAttach",
         true,
-        async ({ server, cwd, workspace, params }: MethodCtx<AttachParams>) => {
+        async ({ server, cwd, workspace, params }) => {
             // Before attach: the `attached` frame itself is the first
             // sequenced push a reconnecting client sees, so the ring must be
             // seeded from disk tail before this handler emits anything.
@@ -185,7 +172,7 @@ export function registerSessionLifecycleHandlers(): void {
             // Read after attach so the client can tell a live agent tool call from
             // one orphaned by a previous process exit. A history read alone cannot:
             // both look like a toolCall with no toolResult on disk.
-            return {
+            const result: SessionAttachResult = {
                 attached: true,
                 sessionId: params.sessionId,
                 inFlightAgentToolCallIds: workspace.inFlightAgentToolCallIds(params.sessionId),
@@ -197,39 +184,43 @@ export function registerSessionLifecycleHandlers(): void {
                     params.sessionId,
                 ),
             };
+            return result;
         },
-        { command: true, schema: sessionAttachSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionDetach,
+        "sessionDetach",
         true,
-        async ({ workspace, params }: MethodCtx<AttachParams>) => {
+        async ({ workspace, params }) => {
             const attached = workspace.getAttached(params.sessionId);
             if (attached) await workspace.detach(params.sessionId);
-            return { detached: true };
+            const result: SessionDetachResult = { detached: true };
+            return result;
         },
-        { command: true, schema: sessionDetachSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionDelete,
+        "sessionDelete",
         true,
-        async ({ workspace, params }: MethodCtx<DeleteSessionParams>) => {
+        async ({ workspace, params }) => {
             await deleteSessionTree(workspace, params.sessionId);
-            return { deleted: true };
+            const result: SessionDeleteResult = { deleted: true };
+            return result;
         },
-        { command: true, schema: sessionDeleteSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionRename,
+        "sessionRename",
         true,
-        async ({ workspace, params }: MethodCtx<RenameSessionParams>) => {
+        async ({ workspace, params }) => {
             await workspace.renameSession(params.sessionId, params.name);
-            return { renamed: true };
+            const result: SessionRenameResult = { renamed: true };
+            return result;
         },
-        { command: true, schema: sessionRenameSchema },
+        { command: true },
     );
 }
 

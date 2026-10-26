@@ -149,6 +149,26 @@ export interface SessionSnapshotGetParams {
     sessionId: SessionId;
 }
 
+/** `session.tasks.get` params — the current task list of an attached session. */
+export interface SessionTasksGetParams {
+    workspace: WorkspaceId;
+    sessionId: SessionId;
+}
+
+/** `session.taskHistory.get` params — one history list, expanded to its items. */
+export interface SessionTaskHistoryGetParams {
+    workspace: WorkspaceId;
+    sessionId: SessionId;
+    /** The history list id from the task-list snapshot. */
+    listId: string;
+}
+
+/** `session.planState.get` params — the current plan-mode state. */
+export interface SessionPlanStateGetParams {
+    workspace: WorkspaceId;
+    sessionId: SessionId;
+}
+
 /**
  * Authoritative state at `snapshotSeq`. Clients must replay only frames after
  * that cursor; task and plan state are absent for subagent sessions.
@@ -203,6 +223,21 @@ export interface AttachParams {
     sessionId: SessionId;
     /** Initial thinking level for this harness. Already-attached sessions are not overwritten. */
     thinkingLevel?: ThinkingLevel;
+}
+
+/** `session.attach` params — the attach envelope plus the initial thinking level. */
+export type SessionAttachParams = AttachParams;
+
+/** `session.detach` params — the session to detach; no thinking level applies. */
+export interface SessionDetachParams {
+    workspace: WorkspaceId;
+    sessionId: SessionId;
+}
+
+/** `session.history` params — the session whose transcript to replay. */
+export interface SessionHistoryParams {
+    workspace: WorkspaceId;
+    sessionId: SessionId;
 }
 
 export interface PromptParams {

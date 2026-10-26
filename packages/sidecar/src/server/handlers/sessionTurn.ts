@@ -6,30 +6,13 @@
  */
 
 import type {
-    AbortParams,
     AbortResult,
-    CancelQueuedParams,
     CancelQueuedResult,
-    FollowUpParams,
     FollowUpResult,
-    PromptParams,
     PromptResult,
-    SteerParams,
     SteerResult,
-    SubmitAnswersParams,
 } from "@taco-ai/protocol";
-import {
-    asSessionId,
-    asWorkspaceId,
-    ErrorCodes,
-    sessionAbortSchema,
-    sessionCancelQueuedSchema,
-    sessionFollowUpSchema,
-    sessionPromptSchema,
-    sessionSteerSchema,
-    sessionSubmitAnswersSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
 
 import { createLogger } from "../../lib/logger.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
@@ -107,9 +90,9 @@ function rethrowBusyAsSessionBusy(e: unknown): never {
 
 export function registerSessionTurnHandlers(): void {
     registerMethod(
-        RPC.sessionPrompt,
+        "sessionPrompt",
         true,
-        async ({ workspace, server, params }: MethodCtx<PromptParams>) => {
+        async ({ workspace, server, params }) => {
             // A `model` param applies to a not-yet-attached session (the first
             // turn of a brand-new session). An already-attached session ignores
             // it — switch those with session.setModel. Resolves through the
@@ -142,13 +125,13 @@ export function registerSessionTurnHandlers(): void {
             const result: PromptResult = { assistantMessage };
             return result;
         },
-        { command: true, turnStart: true, schema: sessionPromptSchema },
+        { command: true, turnStart: true },
     );
 
     registerMethod(
-        RPC.sessionSteer,
+        "sessionSteer",
         true,
-        async ({ workspace, server, params }: MethodCtx<SteerParams>) => {
+        async ({ workspace, server, params }) => {
             const attached = requireAttached(workspace, params.sessionId);
             // Same compaction contract as prompt: bounded wait, then a
             // retryable session_busy — never a silent enqueue that sits
@@ -162,13 +145,13 @@ export function registerSessionTurnHandlers(): void {
             );
             return result;
         },
-        { command: true, schema: sessionSteerSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionFollowUp,
+        "sessionFollowUp",
         true,
-        async ({ workspace, server, params }: MethodCtx<FollowUpParams>) => {
+        async ({ workspace, server, params }) => {
             const attached = requireAttached(workspace, params.sessionId);
             await requireCompactionSettled(server, params.workspace, params.sessionId);
             const result: FollowUpResult = await attached.enqueue(
@@ -179,27 +162,27 @@ export function registerSessionTurnHandlers(): void {
             );
             return result;
         },
-        { command: true, schema: sessionFollowUpSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionCancelQueued,
+        "sessionCancelQueued",
         true,
         // No compaction wait: cancelling is a pure inbox delete that a
         // compaction never contends for, unlike the enqueue paths above.
-        async ({ workspace, params }: MethodCtx<CancelQueuedParams>) => {
+        async ({ workspace, params }) => {
             const attached = requireAttached(workspace, params.sessionId);
             const kind = await attached.cancelQueued(params.entryId);
             const result: CancelQueuedResult = { kind };
             return result;
         },
-        { command: true, schema: sessionCancelQueuedSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionSubmitAnswers,
+        "sessionSubmitAnswers",
         true,
-        async ({ workspace, server, params }: MethodCtx<SubmitAnswersParams>) => {
+        async ({ workspace, server, params }) => {
             const attached = await ensureAttached(workspace, params.sessionId);
             await requireCompactionSettled(server, params.workspace, params.sessionId);
 
@@ -218,13 +201,13 @@ export function registerSessionTurnHandlers(): void {
             workspace.invalidateListCache();
             return null;
         },
-        { command: true, turnStart: true, schema: sessionSubmitAnswersSchema },
+        { command: true, turnStart: true },
     );
 
     registerMethod(
-        RPC.sessionAbort,
+        "sessionAbort",
         true,
-        async ({ workspace, params }: MethodCtx<AbortParams>) => {
+        async ({ workspace, params }) => {
             const attached = workspace.getAttached(params.sessionId);
             if (!attached) return { status: "not_running" } satisfies AbortResult;
             const cleared = await attached.abort();
@@ -237,6 +220,6 @@ export function registerSessionTurnHandlers(): void {
             };
             return result;
         },
-        { command: true, schema: sessionAbortSchema },
+        { command: true },
     );
 }

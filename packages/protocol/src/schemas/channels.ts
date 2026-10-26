@@ -6,23 +6,39 @@
  * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
  * with `invalid_params` carrying JSON-pointer paths.
  *
- * NOTE: the schemas below are `Type.Any()` placeholders — the validation gate
- * accepts anything and never rejects. Tightening to `Type.Object({...})` is
- * tracked as follow-up work; handlers keep their hand-written `XxxParams` types.
+ * These schemas reject malformed channel-management envelopes before they can
+ * trigger credential or connection operations.
  */
 
 import { Type } from "typebox";
 
-export const channelsListSchema = Type.Any();
+const channelId = Type.String({ minLength: 1 });
 
-export const channelsListConversationsSchema = Type.Any();
+export const channelsListSchema = Type.Object({});
 
-export const channelsCreateSchema = Type.Any();
+export const channelsListConversationsSchema = Type.Object({ channelId: Type.Optional(channelId) });
 
-export const channelsBindSchema = Type.Any();
+export const channelsCreateSchema = Type.Object({
+    name: Type.String({ minLength: 1 }),
+    channelId: Type.Optional(Type.String({ minLength: 1, pattern: "^[a-z0-9][a-z0-9-]*$" })),
+});
 
-export const channelsSubmitVerifyCodeSchema = Type.Any();
+export const channelsBindSchema = Type.Object({
+    channelId,
+    force: Type.Optional(Type.Boolean()),
+    creds: Type.Optional(
+        Type.Object({
+            botId: Type.Optional(Type.String()),
+            secret: Type.Optional(Type.String()),
+        }),
+    ),
+});
 
-export const channelsUnbindSchema = Type.Any();
+export const channelsSubmitVerifyCodeSchema = Type.Object({
+    requestId: Type.String({ minLength: 1 }),
+    code: Type.String({ minLength: 1 }),
+});
 
-export const channelsRetrySchema = Type.Any();
+export const channelsUnbindSchema = Type.Object({ channelId });
+
+export const channelsRetrySchema = Type.Object({ channelId });

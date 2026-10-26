@@ -20,9 +20,10 @@
  * edited as raw JSON; tightening that is a follow-up.
  */
 
+import type { Job } from "@taco-ai/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import { createJobsClient, type Job } from "../../lib/clients/jobsClient.ts";
+import { createJobsClient } from "../../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";

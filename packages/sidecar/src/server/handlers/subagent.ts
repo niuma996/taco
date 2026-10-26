@@ -3,16 +3,14 @@
  * parent's turn.
  */
 
-import type { SubagentAbortParams, SubagentAbortResult } from "@taco-ai/protocol";
-import { subagentAbortSchema } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
-import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
+import type { SubagentAbortResult } from "@taco-ai/protocol";
+import { registerMethod } from "../methodRegistry.ts";
 
 export function registerSubagentHandlers(): void {
     registerMethod(
-        RPC.subagentAbort,
+        "subagentAbort",
         true,
-        async ({ workspace, params }: MethodCtx<SubagentAbortParams>) => {
+        async ({ workspace, params }) => {
             // Firing the child's controller is the whole job: the runner's
             // signal listener aborts the child harness, and the outcome
             // travels back through the normal settle path — the sync caller's
@@ -23,6 +21,6 @@ export function registerSubagentHandlers(): void {
                 status: stopped ? "aborted" : "not_running",
             } satisfies SubagentAbortResult;
         },
-        { command: true, schema: subagentAbortSchema },
+        { command: true },
     );
 }

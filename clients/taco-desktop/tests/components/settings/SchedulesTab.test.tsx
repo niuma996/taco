@@ -22,12 +22,11 @@
  * assert which banner is shown in each state.
  */
 
+import type { Job } from "@taco-ai/protocol";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { SchedulesTab } from "../../../src/components/settings/SchedulesTab";
-import type { Job } from "../../../src/lib/clients/jobsClient";
 import type { TacoClient } from "../../../src/lib/clients/tacoClient";
 
 vi.mock("react-i18next", () => ({

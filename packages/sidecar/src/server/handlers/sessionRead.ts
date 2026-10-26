@@ -5,24 +5,8 @@
  * interact with the harness turn loop.
  */
 
-import type {
-    AttachParams,
-    SessionEventsGetParams,
-    SessionHistory,
-    SessionId,
-    SessionSnapshot,
-    SessionSnapshotGetParams,
-} from "@taco-ai/protocol";
-import {
-    ErrorCodes,
-    sessionEventsGetSchema,
-    sessionHistorySchema,
-    sessionPlanStateGetSchema,
-    sessionSnapshotGetSchema,
-    sessionTaskHistoryGetSchema,
-    sessionTasksGetSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import type { AttachParams, SessionHistory, SessionId, SessionSnapshot } from "@taco-ai/protocol";
+import { ErrorCodes } from "@taco-ai/protocol";
 import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
 
 import { resolveSessionByPrefix } from "../../runtime/session/sessionLookup.ts";
@@ -101,108 +85,82 @@ async function getPersistedSessionKind(
 }
 
 export function registerSessionReadHandlers(): void {
-    registerMethod(
-        RPC.sessionEventsGet,
-        true,
-        async ({ server, params }: MethodCtx<SessionEventsGetParams>) => {
-            if (!Number.isInteger(params.afterSeq) || params.afterSeq < 0) {
-                throw new RpcHandlerError(
-                    ErrorCodes.InvalidParams,
-                    "afterSeq must be a non-negative integer",
-                );
-            }
-            // A client replaying across a sidecar restart may reach this
-            // before any attach — hydrate so the ring reflects the disk tail.
-            await server.hydrateSessionEvents(params.workspace, params.sessionId);
-            return server.getSessionEvents(params.workspace, params.sessionId, params.afterSeq);
-        },
-        { schema: sessionEventsGetSchema },
-    );
-
-    registerMethod(
-        RPC.sessionHistory,
-        true,
-        async ({ workspace, params }: MethodCtx<AttachParams>) => {
-            return toSessionHistory(params.sessionId, await workspace.getHistory(params.sessionId));
-        },
-        { schema: sessionHistorySchema },
-    );
-
-    registerMethod(
-        RPC.sessionSnapshotGet,
-        true,
-        async ({ workspace, params, server }: MethodCtx<SessionSnapshotGetParams>) => {
-            const sessionKind = await getPersistedSessionKind(workspace, params.sessionId);
-            // Same restart-window reasoning as sessionEventsGet: lastSeq feeds
-            // snapshotSeq, so the ring must know about the disk tail first or
-            // the client would adopt snapshotSeq=0 and re-recover on every push.
-            await server.hydrateSessionEvents(params.workspace, params.sessionId);
-            for (let attempt = 0; attempt < 3; attempt++) {
-                const beforeSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
-                const history = toSessionHistory(
-                    params.sessionId,
-                    await workspace.getHistory(params.sessionId),
-                );
-                let tasks: SessionSnapshot["tasks"];
-                let planState: SessionSnapshot["planState"];
-                if (sessionKind === "main") {
-                    const attached = await ensureAttached(workspace, params.sessionId);
-                    tasks = buildTasksGetResult(attached.taskStore);
-                    planState = {
-                        active: attached.planState.active,
-                        currentSlug: attached.planState.currentSlug,
-                    };
-                }
-                const afterSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
-                if (beforeSeq === afterSeq) {
-                    return {
-                        sessionId: params.sessionId,
-                        sessionKind,
-                        snapshotSeq: afterSeq,
-                        history,
-                        ...(tasks ? { tasks } : {}),
-                        ...(planState ? { planState } : {}),
-                    } satisfies SessionSnapshot;
-                }
-            }
+    registerMethod("sessionEventsGet", true, async ({ server, params }) => {
+        if (!Number.isInteger(params.afterSeq) || params.afterSeq < 0) {
             throw new RpcHandlerError(
-                ErrorCodes.SnapshotUnstable,
-                "session changed while building snapshot; retry recovery",
+                ErrorCodes.InvalidParams,
+                "afterSeq must be a non-negative integer",
             );
-        },
-        { schema: sessionSnapshotGetSchema },
-    );
+        }
+        // A client replaying across a sidecar restart may reach this
+        // before any attach — hydrate so the ring reflects the disk tail.
+        await server.hydrateSessionEvents(params.workspace, params.sessionId);
+        return server.getSessionEvents(params.workspace, params.sessionId, params.afterSeq);
+    });
+
+    registerMethod("sessionHistory", true, async ({ workspace, params }) => {
+        return toSessionHistory(params.sessionId, await workspace.getHistory(params.sessionId));
+    });
+
+    registerMethod("sessionSnapshotGet", true, async ({ workspace, params, server }) => {
+        const sessionKind = await getPersistedSessionKind(workspace, params.sessionId);
+        // Same restart-window reasoning as sessionEventsGet: lastSeq feeds
+        // snapshotSeq, so the ring must know about the disk tail first or
+        // the client would adopt snapshotSeq=0 and re-recover on every push.
+        await server.hydrateSessionEvents(params.workspace, params.sessionId);
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const beforeSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
+            const history = toSessionHistory(
+                params.sessionId,
+                await workspace.getHistory(params.sessionId),
+            );
+            let tasks: SessionSnapshot["tasks"];
+            let planState: SessionSnapshot["planState"];
+            if (sessionKind === "main") {
+                const attached = await ensureAttached(workspace, params.sessionId);
+                tasks = buildTasksGetResult(attached.taskStore);
+                planState = {
+                    active: attached.planState.active,
+                    currentSlug: attached.planState.currentSlug,
+                };
+            }
+            const afterSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
+            if (beforeSeq === afterSeq) {
+                return {
+                    sessionId: params.sessionId,
+                    sessionKind,
+                    snapshotSeq: afterSeq,
+                    history,
+                    ...(tasks ? { tasks } : {}),
+                    ...(planState ? { planState } : {}),
+                } satisfies SessionSnapshot;
+            }
+        }
+        throw new RpcHandlerError(
+            ErrorCodes.SnapshotUnstable,
+            "session changed while building snapshot; retry recovery",
+        );
+    });
+
+    registerMethod("sessionTasksGet", true, async ({ workspace, params }) => {
+        const attached = await ensureAttached(workspace, params.sessionId);
+        return buildTasksGetResult(attached.taskStore);
+    });
+
+    registerMethod("sessionPlanStateGet", true, async ({ workspace, params }) => {
+        const attached = await ensureAttached(workspace, params.sessionId);
+        return {
+            active: attached.planState.active,
+            currentSlug: attached.planState.currentSlug,
+        };
+    });
 
     registerMethod(
-        RPC.sessionTasksGet,
-        true,
-        async ({ workspace, params }: MethodCtx<AttachParams>) => {
-            const attached = await ensureAttached(workspace, params.sessionId);
-            return buildTasksGetResult(attached.taskStore);
-        },
-        { schema: sessionTasksGetSchema },
-    );
-
-    registerMethod(
-        RPC.sessionPlanStateGet,
-        true,
-        async ({ workspace, params }: MethodCtx<AttachParams>) => {
-            const attached = await ensureAttached(workspace, params.sessionId);
-            return {
-                active: attached.planState.active,
-                currentSlug: attached.planState.currentSlug,
-            };
-        },
-        { schema: sessionPlanStateGetSchema },
-    );
-
-    registerMethod(
-        RPC.sessionTaskHistoryGet,
+        "sessionTaskHistoryGet",
         true,
         async ({ workspace, params }: MethodCtx<AttachParams & { listId: string }>) => {
             const attached = await ensureAttached(workspace, params.sessionId);
             return buildHistoryListDetail(attached.taskStore, params.listId);
         },
-        { schema: sessionTaskHistoryGetSchema },
     );
 }

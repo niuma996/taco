@@ -10,54 +10,37 @@
 
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
-import type {
-    SkillContentParams,
-    SkillContentResult,
-    SkillEntry,
-    SkillsListParams,
-    SkillsListResult,
-} from "@taco-ai/protocol";
-import { skillContentSchema, skillsListSchema } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import type { SkillContentResult, SkillEntry, SkillsListResult } from "@taco-ai/protocol";
 import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
 
 export function registerSkillsHandlers(): void {
-    registerMethod(
-        RPC.skillsList,
-        true,
-        async ({ workspace }: MethodCtx<SkillsListParams>): Promise<SkillsListResult> => {
-            const skills = workspace.resources.skills ?? [];
-            const entries: SkillEntry[] = skills.map((s) => ({
-                name: s.name,
-                description: s.description,
-                filePath: s.filePath,
-                source: s.source,
-                disableModelInvocation: s.disableModelInvocation,
-                inlineOnly: s.inlineOnly,
-            }));
-            // Omit the key entirely when there is nothing wrong, rather than
-            // sending `diagnostics: []`. Clients written before this field
-            // existed then see a byte-identical result in the common case.
-            const diagnostics = workspace.skillDiagnostics ?? [];
-            return diagnostics.length > 0
-                ? { skills: entries, diagnostics: [...diagnostics] }
-                : { skills: entries };
-        },
-        { schema: skillsListSchema },
-    );
+    registerMethod("skillsList", true, async ({ workspace }): Promise<SkillsListResult> => {
+        const skills = workspace.resources.skills ?? [];
+        const entries: SkillEntry[] = skills.map((s) => ({
+            name: s.name,
+            description: s.description,
+            filePath: s.filePath,
+            source: s.source,
+            disableModelInvocation: s.disableModelInvocation,
+            inlineOnly: s.inlineOnly,
+        }));
+        // Omit the key entirely when there is nothing wrong, rather than
+        // sending `diagnostics: []`. Clients written before this field
+        // existed then see a byte-identical result in the common case.
+        const diagnostics = workspace.skillDiagnostics ?? [];
+        return diagnostics.length > 0
+            ? { skills: entries, diagnostics: [...diagnostics] }
+            : { skills: entries };
+    });
 
     registerMethod(
-        RPC.skillContent,
+        "skillContent",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<SkillContentParams>): Promise<SkillContentResult> => {
+        async ({ workspace, params }): Promise<SkillContentResult> => {
             const absPath = resolveLoadedSkillPath(workspace, params.filePath, "skill content");
             const content = await nodeFs.readFile(absPath, "utf-8");
             return { content };
         },
-        { schema: skillContentSchema },
     );
 }
 

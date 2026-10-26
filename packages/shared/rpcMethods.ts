@@ -1,117 +1,16 @@
 /**
- * RPC method-name constants table.
+ * @taco-ai/shared — RPC method names and the fast-method set.
  *
- * Single source of truth: server-side handlers live in
- * packages/sidecar/src/server/methods.ts. Kept as `as const` (not an enum) to
- * stay type-compatible with the string `RpcRequest.method` field.
+ * The method names come from the contract table in `@taco-ai/protocol`,
+ * which is the single source of truth for every wire method: its name, its
+ * params type, its result type and its client routing scope. This module
+ * re-exports the names so existing importers keep working, and adds the
+ * timeout policy that is a client concern rather than a wire contract.
  */
 
-export const RPC = {
-    // Process-level bootstrap. First client → server request on a connection.
-    initialize: "initialize",
-    // workspace.*
-    workspaceList: "workspace.list",
-    workspaceEnsure: "workspace.ensure",
-    workspaceDispose: "workspace.dispose",
-    /** Read the associated-directory set stored at one key (workspace or channel scope). */
-    workspaceAssociationsGet: "workspace.associations.get",
-    /** Replace the associated-directory set stored at one key. */
-    workspaceAssociationsSet: "workspace.associations.set",
-    /** The effective associated-directory set for a workspace, after the scope fallback. */
-    workspaceAssociationsResolve: "workspace.associations.resolve",
-    // session.*
-    sessionList: "session.list",
-    sessionCreate: "session.create",
-    sessionAttach: "session.attach",
-    sessionDetach: "session.detach",
-    sessionDelete: "session.delete",
-    sessionRename: "session.rename",
-    sessionHistory: "session.history",
-    sessionEventsGet: "session.events.get",
-    sessionSnapshotGet: "session.snapshot.get",
-    sessionTasksGet: "session.tasks.get",
-    /** Fetch the full task list for a given history list (history pushes meta only; expand on demand). */
-    sessionTaskHistoryGet: "session.taskHistory.get",
-    sessionPlanStateGet: "session.planState.get",
-    sessionPrompt: "session.prompt",
-    sessionSteer: "session.steer",
-    /** Like steer, but consumed only at may-finish boundaries. */
-    sessionFollowUp: "session.followUp",
-    /** Remove one not-yet-consumed queue entry (steer/followUp/nextRun). */
-    sessionCancelQueued: "session.cancelQueued",
-    sessionAbort: "session.abort",
-    /** Stop one running subagent (by child session id) without aborting the parent's turn. */
-    subagentAbort: "subagent.abort",
-    commandPermissionResolve: "commandPermission.resolve",
-    sessionSetModel: "session.setModel",
-    sessionListModels: "session.listModels",
-    /** List the availability view of built-in providers (configured + models) for the Model settings UI. */
-    providersList: "providers.list",
-    /** Return one provider's plaintext API key (settings UI "reveal" toggle). */
-    providersRevealKey: "providers.revealKey",
-    sessionSetThinkingLevel: "session.setThinkingLevel",
-    sessionCompact: "session.compact",
-    sessionContextInfo: "session.contextInfo",
-    /** Submit askUser answers — sidecar injects <ask_user_context> into the user message; clients don't see the wire format. */
-    sessionSubmitAnswers: "session.submitAnswers",
-    /** Pull model ids from a provider's /models endpoint for the settings model list. */
-    providerListModels: "provider.listModels",
-    /** Send one minimal chat turn to verify key + endpoint + protocol + model id. */
-    providerTestConnection: "provider.testConnection",
-    // settings.*
-    settingsGet: "settings.get",
-    settingsWrite: "settings.write",
-    // config.* — the model's view of the global config. `config.patch` asks
-    // the user before writing; `settings.write` is the desktop's own path
-    // and needs no approval.
-    configPatch: "config.patch",
-    // extensions.*
-    extensionsStatus: "extensions.status",
-    // channels.* — IM channel listing / binding.
-    channelsList: "channels.list",
-    channelsListConversations: "channels.listConversations",
-    channelsCreate: "channels.create",
-    channelsBind: "channels.bind",
-    channelsSubmitVerifyCode: "channels.submitVerifyCode",
-    channelsUnbind: "channels.unbind",
-    channelsRetry: "channels.retry",
-    // imPolicy.* — IM workspace policy admin (process-level).
-    imPolicyGet: "imPolicy.get",
-    imPolicySetChannelDefault: "imPolicy.setChannelDefault",
-    imPolicySetChatOverride: "imPolicy.setChatOverride",
-    imPolicyClearChatOverride: "imPolicy.clearChatOverride",
-    // tools.*
-    toolsList: "tools.list",
-    // agents.*
-    agentsList: "agents.list",
-    agentsContent: "agents.content",
-    agentsWrite: "agents.write",
-    agentsDelete: "agents.delete",
-    skillsList: "skills.list",
-    skillContent: "skills.content",
-    // checkpoints.* — pre-write file snapshots; restore is client-driven only.
-    checkpointsList: "checkpoints.list",
-    checkpointsRestore: "checkpoints.restore",
-    // memory.*
-    memoryList: "memory.list",
-    memoryWrite: "memory.write",
-    memoryDeleteTopic: "memory.deleteTopic",
-    memoryUpsert: "memory.upsert",
-    memoryRestoreTopic: "memory.restoreTopic",
-    // memory.dream* — consolidation preview / apply / discard / undo.
-    memoryDreamRun: "memory.dreamRun",
-    memoryDreamApply: "memory.dreamApply",
-    memoryDreamDiscard: "memory.dreamDiscard",
-    memoryDreamUndo: "memory.dreamUndo",
-    // mcp.* — MCP server discovery and health status.
-    mcpListServers: "mcp.listServers",
-    mcpGetConfig: "mcp.getConfig",
-    mcpCreateConfig: "mcp.createConfig",
-    mcpUpdateConfig: "mcp.updateConfig",
-    mcpDeleteConfig: "mcp.deleteConfig",
-} as const;
+export { RPC, type RpcMethodName } from "@taco-ai/protocol";
 
-export type RpcMethodName = (typeof RPC)[keyof typeof RPC];
+import { RPC } from "@taco-ai/protocol";
 
 /**
  * Methods that must answer promptly or not at all.

@@ -286,6 +286,14 @@ export interface McpListServersResult {
     servers: McpServerView[];
 }
 
+/** `mcp.listServers` params — which servers to probe, and whether to force a probe. */
+export interface McpListServersParams {
+    /** Restrict the listing to these server ids. */
+    ids?: string[];
+    /** Probe even servers that are configured as disabled. */
+    forceProbe?: boolean;
+}
+
 /** `mcp.getConfig` params — fetch one raw MCP server config for editing. */
 export interface McpGetConfigParams {
     id: string;

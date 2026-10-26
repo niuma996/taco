@@ -6,16 +6,17 @@
  * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
  * with `invalid_params` carrying JSON-pointer paths.
  *
- * NOTE: the schemas below are `Type.Any()` placeholders — the validation gate
- * accepts anything and never rejects. Tightening to `Type.Object({...})` is
- * tracked as follow-up work; handlers keep their hand-written `XxxParams` types.
+ * The global patch remains open because its field set evolves with config,
+ * while the surrounding RPC envelope is validated here.
  */
 
 import { Type } from "typebox";
 
-export const settingsGetSchema = Type.Any();
+export const settingsGetSchema = Type.Object({});
 
-export const settingsWriteSchema = Type.Any();
+export const settingsWriteSchema = Type.Object({
+    global: Type.Optional(Type.Object({}, { additionalProperties: true })),
+});
 
 /**
  * `config.patch` params — the model's path to the global config.

@@ -8,27 +8,17 @@
  */
 
 import type {
-    AgentsContentParams,
     AgentsContentResult,
-    AgentsDeleteParams,
     AgentsDeleteResult,
-    AgentsListParams,
     AgentsListResult,
-    AgentsWriteParams,
     AgentsWriteResult,
 } from "@taco-ai/protocol";
-import {
-    agentsContentSchema,
-    agentsDeleteSchema,
-    agentsListSchema,
-    agentsWriteSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+
 import type { AgentDefinition } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
-import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
+import { registerMethod } from "../methodRegistry.ts";
 import type { ServerRegistry } from "../serverRegistry.ts";
 import {
     type AgentScopeContext,
@@ -68,36 +58,28 @@ function scopeContext(workspace: WorkspaceRuntime): AgentScopeContext {
 }
 
 export function registerAgentsHandlers(): void {
-    registerMethod(
-        RPC.agentsList,
-        true,
-        async ({ workspace }: MethodCtx<AgentsListParams>): Promise<AgentsListResult> => {
-            const ctx = scopeContext(workspace);
-            const agents = workspace.agents.map((a: AgentDefinition) => {
-                const scope = agentScopeOf(a, ctx);
-                return {
-                    agentType: a.agentType,
-                    description: a.description,
-                    whenToUse: a.whenToUse,
-                    context: a.context,
-                    runtime: a.runtime,
-                    source: a.source,
-                    ...(scope !== undefined ? { scope } : {}),
-                    editable: scope !== undefined,
-                };
-            });
-            return { agents, cwdChoices: [...(ctx.allowedCwds ?? [])] };
-        },
-        { schema: agentsListSchema },
-    );
+    registerMethod("agentsList", true, async ({ workspace }): Promise<AgentsListResult> => {
+        const ctx = scopeContext(workspace);
+        const agents = workspace.agents.map((a: AgentDefinition) => {
+            const scope = agentScopeOf(a, ctx);
+            return {
+                agentType: a.agentType,
+                description: a.description,
+                whenToUse: a.whenToUse,
+                context: a.context,
+                runtime: a.runtime,
+                source: a.source,
+                ...(scope !== undefined ? { scope } : {}),
+                editable: scope !== undefined,
+            };
+        });
+        return { agents, cwdChoices: [...(ctx.allowedCwds ?? [])] };
+    });
 
     registerMethod(
-        RPC.agentsContent,
+        "agentsContent",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<AgentsContentParams>): Promise<AgentsContentResult> => {
+        async ({ workspace, params }): Promise<AgentsContentResult> => {
             const def = workspace.findAgent(params.agentType);
             if (!def) {
                 throw new Error(`agent not found: ${params.agentType}`);
@@ -119,38 +101,25 @@ export function registerAgentsHandlers(): void {
                 editable: scope !== undefined,
             };
         },
-        { schema: agentsContentSchema },
     );
 
     registerMethod(
-        RPC.agentsWrite,
+        "agentsWrite",
         true,
-        async ({
-            server,
-            serverRegistry,
-            workspace,
-            params,
-        }: MethodCtx<AgentsWriteParams>): Promise<AgentsWriteResult> => {
+        async ({ server, serverRegistry, workspace, params }): Promise<AgentsWriteResult> => {
             await writeUserAgent(params, workspace.agents, scopeContext(workspace));
             await reloadAgentsEverywhere(server, serverRegistry);
             return { ok: true };
         },
-        { schema: agentsWriteSchema },
     );
 
     registerMethod(
-        RPC.agentsDelete,
+        "agentsDelete",
         true,
-        async ({
-            server,
-            serverRegistry,
-            workspace,
-            params,
-        }: MethodCtx<AgentsDeleteParams>): Promise<AgentsDeleteResult> => {
+        async ({ server, serverRegistry, workspace, params }): Promise<AgentsDeleteResult> => {
             await deleteUserAgent(params.agentType, workspace.agents, scopeContext(workspace));
             await reloadAgentsEverywhere(server, serverRegistry);
             return { ok: true };
         },
-        { schema: agentsDeleteSchema },
     );
 }

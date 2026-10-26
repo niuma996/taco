@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import { RPC } from "@taco-ai/shared";
 import { Value } from "typebox/value";
-import { JOBS_RPC } from "../../src/scheduler/jobsRpc.ts";
 import type { Job } from "../../src/scheduler/types.ts";
 import { createConfigTools, patchFields } from "../../src/tools/config.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
@@ -50,18 +50,18 @@ function makeImCtx(records: CallRecord[]): TacoToolContext {
 }
 
 function defaultStubResult(method: string): unknown {
-    if (method === JOBS_RPC.list) return { jobs: [] };
-    if (method === JOBS_RPC.get) return { job: null };
-    if (method === JOBS_RPC.create) return { job: { id: "" } };
-    if (method === JOBS_RPC.update) return { job: { id: "" } };
-    if (method === JOBS_RPC.delete) return { deleted: false };
-    if (method === JOBS_RPC.runNow) return { status: "skipped" };
-    if (method === JOBS_RPC.history) return { history: null };
+    if (method === RPC.jobsList) return { jobs: [] };
+    if (method === RPC.jobsGet) return { job: null };
+    if (method === RPC.jobsCreate) return { job: { id: "" } };
+    if (method === RPC.jobsUpdate) return { job: { id: "" } };
+    if (method === RPC.jobsDelete) return { deleted: false };
+    if (method === RPC.jobsRunNow) return { status: "skipped" };
+    if (method === RPC.jobsHistory) return { history: null };
     return null;
 }
 
 describe("jobs tools — execute dispatches + closes actor", () => {
-    it("jobsCreate dispatches to JOBS_RPC.create (IM, explicit reuse)", async () => {
+    it("jobsCreate dispatches to RPC.jobsCreate (IM, explicit reuse)", async () => {
         const records: CallRecord[] = [];
         const tool = createJobsCreateTool();
         const input = {
@@ -77,7 +77,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
             },
         } as unknown as JobsCreateInput;
         await invokeTool(tool, input, makeImCtx(records));
-        assert.equal(records[0].method, JOBS_RPC.create);
+        assert.equal(records[0].method, RPC.jobsCreate);
         const params = records[0].params as { job: Job; actor: unknown };
         assert.equal(params.job.id, "morning-brief");
         assert.equal(params.job.sessionStrategy, "reuse");

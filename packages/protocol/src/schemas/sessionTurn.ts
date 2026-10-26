@@ -6,31 +6,70 @@
  * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
  * with `invalid_params` carrying JSON-pointer paths.
  *
- * NOTE: the schemas below are `Type.Any()` placeholders — the validation gate
- * accepts anything and never rejects. Tightening to `Type.Object({...})` is
- * tracked as follow-up work; handlers keep their hand-written `XxxParams` types.
+ * These validate RPC envelopes before a request reaches a live session. The
+ * handler retains semantic checks such as attachment state and queue entries.
  */
 
 import { Type } from "typebox";
 
-export const sessionPromptSchema = Type.Any();
+const workspace = Type.String({ minLength: 1 });
+const sessionId = Type.String({ minLength: 1 });
+const locale = Type.Union([Type.Literal("zh"), Type.Literal("en")]);
+const thinkingLevel = Type.Union([
+    Type.Literal("off"),
+    Type.Literal("minimal"),
+    Type.Literal("low"),
+    Type.Literal("medium"),
+    Type.Literal("high"),
+    Type.Literal("xhigh"),
+    Type.Literal("max"),
+]);
+const sessionTarget = { workspace, sessionId };
 
-export const sessionSteerSchema = Type.Any();
+export const sessionPromptSchema = Type.Object({
+    ...sessionTarget,
+    text: Type.String(),
+    images: Type.Optional(Type.Array(Type.Unknown())),
+    uiLocale: Type.Optional(locale),
+    model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
+});
 
-export const sessionFollowUpSchema = Type.Any();
+export const sessionSteerSchema = Type.Object({
+    ...sessionTarget,
+    text: Type.String(),
+    images: Type.Optional(Type.Array(Type.Unknown())),
+    uiLocale: Type.Optional(locale),
+});
 
-export const sessionCancelQueuedSchema = Type.Any();
+export const sessionFollowUpSchema = sessionSteerSchema;
 
-export const sessionAbortSchema = Type.Any();
+export const sessionCancelQueuedSchema = Type.Object({ ...sessionTarget, entryId: Type.String() });
 
-export const subagentAbortSchema = Type.Any();
+export const sessionAbortSchema = Type.Object(sessionTarget);
 
-export const sessionSetModelSchema = Type.Any();
+export const subagentAbortSchema = Type.Object({ workspace, subSessionId: sessionId });
 
-export const sessionSetThinkingLevelSchema = Type.Any();
+export const sessionSetModelSchema = Type.Object({
+    ...sessionTarget,
+    provider: Type.String(),
+    modelId: Type.String(),
+});
 
-export const sessionCompactSchema = Type.Any();
+export const sessionSetThinkingLevelSchema = Type.Object({
+    ...sessionTarget,
+    level: thinkingLevel,
+});
 
-export const sessionContextInfoSchema = Type.Any();
+export const sessionCompactSchema = Type.Object({
+    ...sessionTarget,
+    customInstructions: Type.Optional(Type.String()),
+});
 
-export const sessionSubmitAnswersSchema = Type.Any();
+export const sessionContextInfoSchema = Type.Object(sessionTarget);
+
+export const sessionSubmitAnswersSchema = Type.Object({
+    ...sessionTarget,
+    toolCallId: Type.String({ minLength: 1 }),
+    answers: Type.Record(Type.String(), Type.Union([Type.String(), Type.Array(Type.String())])),
+    toolName: Type.Optional(Type.String()),
+});

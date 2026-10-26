@@ -190,6 +190,13 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 | `mcp.createConfig` | mcp.* |
 | `mcp.updateConfig` | mcp.* |
 | `mcp.deleteConfig` | mcp.* |
+| `jobs.list` | jobs.* |
+| `jobs.get` | jobs.* |
+| `jobs.create` | jobs.* |
+| `jobs.update` | jobs.* |
+| `jobs.delete` | jobs.* |
+| `jobs.runNow` | jobs.* |
+| `jobs.history` | jobs.* |
 <!-- RPC_TABLE_END -->
 
 ### Error Codes

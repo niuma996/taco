@@ -78,6 +78,7 @@ export type {
     McpDeleteConfigResult,
     McpGetConfigParams,
     McpGetConfigResult,
+    McpListServersParams,
     McpListServersResult,
     McpMutateConfigResult,
     McpServerConfig,
@@ -156,6 +157,25 @@ export type {
     ImWorkspacePolicyDocument,
     ImWorkspacePolicyPatch,
 } from "./imPolicy.js";
+// jobs.* RPC types — the scheduler's wire contract.
+export type {
+    Actor,
+    Job,
+    JobCreate,
+    JobHistoryEntry,
+    JobRunResult,
+    JobScheduleSpec,
+    JobsCreateParams,
+    JobsDeleteResult,
+    JobsGetResult,
+    JobsHistoryResult,
+    JobsIdParams,
+    JobsListParams,
+    JobsListResult,
+    JobsUpdateParams,
+    JobsWriteResult,
+    SessionStrategy,
+} from "./jobs.js";
 // Memory RPC types.
 export type {
     MemoryDeleteTopicParams,
@@ -230,6 +250,35 @@ export type {
     WorkspaceAssociationsChangedParams,
 } from "./push.js";
 export { PushMethods } from "./push.js";
+// RPC contract table — method name / params type / result type / scope.
+export {
+    contractKeysMatchRpcKeys,
+    type ProcessScopedKey,
+    RPC,
+    type RpcContractKey,
+    type RpcMethodName,
+    type RpcParams,
+    type RpcResult,
+    type RpcScope,
+    type RpcScopeOf,
+    rpcContract,
+    rpcSchemas,
+    type SessionAttachResult,
+    type SessionDeleteResult,
+    type SessionDetachResult,
+    type SessionListModelsResult,
+    type SessionPlanStateGetResult,
+    type SessionRenameResult,
+    type SessionSetModelResult,
+    type SessionSetThinkingLevelResult,
+    type SessionTaskHistoryGetResult,
+    type SessionTasksGetResult,
+    schemasAgreeWithParams,
+    type WorkspaceDisposeResult,
+    type WorkspaceEnsureResult,
+    type WorkspaceListResult,
+    type WorkspaceScopedKey,
+} from "./rpcContract.js";
 // RPC param schemas (typebox) — wire validators consumed by registerMethod.
 export * from "./schemas/index.js";
 // session.* RPC types (lifecycle / turn / runtime / snapshot / read).
@@ -259,14 +308,17 @@ export type {
     ProviderTestConnectionResult,
     ProviderView,
     RenameSessionParams,
+    SessionAttachParams,
     SessionCompactParams,
     SessionCompactResult,
     SessionContextInfoParams,
     SessionContextInfoResult,
+    SessionDetachParams,
     SessionEventsGetParams,
     SessionEventsGetResult,
     SessionHistory,
     SessionHistoryEntry,
+    SessionHistoryParams,
     SessionListCursor,
     SessionListEntry,
     SessionListParams,
@@ -275,6 +327,8 @@ export type {
     SessionSetThinkingLevelParams,
     SessionSnapshot,
     SessionSnapshotGetParams,
+    SessionTaskHistoryGetParams,
+    SessionTasksGetParams,
     SetModelParams,
     SteerParams,
     SteerResult,

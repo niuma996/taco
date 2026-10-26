@@ -94,19 +94,30 @@ import type {
     ProviderTestConnectionParams,
     ProviderTestConnectionResult,
     RenameSessionParams,
+    RpcContractKey,
+    SessionAttachResult,
     SessionCompactParams,
     SessionCompactResult,
     SessionContextInfoParams,
     SessionContextInfoResult,
+    SessionDeleteResult,
+    SessionDetachResult,
     SessionEventsGetParams,
     SessionEventsGetResult,
     SessionHistory,
     SessionId,
+    SessionListModelsResult,
     SessionListParams,
     SessionListResult,
+    SessionPlanStateGetResult,
+    SessionRenameResult,
+    SessionSetModelResult,
     SessionSetThinkingLevelParams,
+    SessionSetThinkingLevelResult,
     SessionSnapshot,
     SessionSnapshotGetParams,
+    SessionTaskHistoryGetResult,
+    SessionTasksGetResult,
     SetModelParams,
     SettingsGetResult,
     SettingsWriteParams,
@@ -130,6 +141,8 @@ import type {
     WorkspaceAssociationsResolveResult,
     WorkspaceAssociationsSetParams,
     WorkspaceAssociationsSetResult,
+    WorkspaceDisposeResult,
+    WorkspaceEnsureResult,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { asToolCallId } from "@taco-ai/protocol";
@@ -169,8 +182,8 @@ export interface TypedRpc {
 
     // ── workspace ──
     workspaceList(): Promise<WorkspaceId[]>;
-    workspaceEnsure(cwd: WorkspaceId): Promise<{ cwd: WorkspaceId }>;
-    workspaceDispose(cwd: WorkspaceId): Promise<null>;
+    workspaceEnsure(cwd: WorkspaceId): Promise<WorkspaceEnsureResult>;
+    workspaceDispose(cwd: WorkspaceId): Promise<WorkspaceDisposeResult>;
     /** Read the associated-directory set stored at one key. */
     workspaceAssociationsGet(key: WorkspaceAssociationKey): Promise<WorkspaceAssociationsGetResult>;
     /** Replace the associated-directory set stored at one key. */
@@ -193,28 +206,14 @@ export interface TypedRpc {
         workspace: WorkspaceId,
         sessionId: SessionId,
         opts?: { thinkingLevel?: ThinkingLevel },
-    ): Promise<{
-        attached: true;
-        sessionId: SessionId;
-        /**
-         * parentToolCallIds whose subagent is running in the sidecar right now.
-         * Absent on older sidecars. Process-memory state, so a fresh process
-         * reports none — which is what lets a client expire agent tool cards
-         * orphaned by a previous process exit without touching live ones.
-         */
-        inFlightAgentToolCallIds?: string[];
-        /**
-         * Child session ids under this parent that already produced a result
-         * file. Unlike the list above this is read from disk, so it survives the
-         * process that ran them — which is what separates a background child
-         * that finished from one a previous process was killed mid-run. Absent
-         * on older sidecars.
-         */
-        settledBackgroundSubSessionIds?: string[];
-    }>;
-    sessionDetach(workspace: WorkspaceId, sessionId: SessionId): Promise<{ detached: true }>;
-    sessionDelete(workspace: WorkspaceId, sessionId: SessionId): Promise<unknown>;
-    sessionRename(workspace: WorkspaceId, sessionId: SessionId, name: string): Promise<unknown>;
+    ): Promise<SessionAttachResult>;
+    sessionDetach(workspace: WorkspaceId, sessionId: SessionId): Promise<SessionDetachResult>;
+    sessionDelete(workspace: WorkspaceId, sessionId: SessionId): Promise<SessionDeleteResult>;
+    sessionRename(
+        workspace: WorkspaceId,
+        sessionId: SessionId,
+        name: string,
+    ): Promise<SessionRenameResult>;
     sessionHistory(workspace: WorkspaceId, sessionId: SessionId): Promise<SessionHistory>;
     /** Replay retained realtime frames after a session cursor. */
     sessionEventsGet(
@@ -227,10 +226,7 @@ export interface TypedRpc {
     /**
      * Fetch the task list snapshot for the attached session — push fallback.
      */
-    sessionTasksGet(
-        workspace: WorkspaceId,
-        sessionId: SessionId,
-    ): Promise<Pick<TasksUpdatedParams, "active" | "history">>;
+    sessionTasksGet(workspace: WorkspaceId, sessionId: SessionId): Promise<SessionTasksGetResult>;
     /**
      * Fetch the full task items for a given history list — push fallback, expanded on demand
      * (history pushes meta only).
@@ -239,14 +235,14 @@ export interface TypedRpc {
         workspace: WorkspaceId,
         sessionId: SessionId,
         listId: string,
-    ): Promise<TaskItem[]>;
+    ): Promise<SessionTaskHistoryGetResult>;
     /**
      * Fetch the plan-mode state snapshot for the attached session — push fallback.
      */
     sessionPlanStateGet(
         workspace: WorkspaceId,
         sessionId: SessionId,
-    ): Promise<Pick<PlanStateUpdatedParams, "active" | "currentSlug">>;
+    ): Promise<SessionPlanStateGetResult>;
     sessionPrompt(
         workspace: WorkspaceId,
         sessionId: SessionId,
@@ -308,11 +304,8 @@ export interface TypedRpc {
         sessionId: SessionId,
         provider: string,
         modelId: string,
-    ): Promise<{ switchedTo: { provider: string; modelId: string } }>;
-    sessionListModels(
-        workspace: WorkspaceId,
-        provider?: string,
-    ): Promise<{ models: Array<{ provider: string; id: string; name?: string }> }>;
+    ): Promise<SessionSetModelResult>;
+    sessionListModels(workspace: WorkspaceId, provider?: string): Promise<SessionListModelsResult>;
     /** List the availability view of built-in providers (configured + models) for the Model settings UI. */
     providersList(workspace: WorkspaceId): Promise<ProvidersListResult>;
     /** Reveal one provider's plaintext API key (settings UI "reveal" toggle). */
@@ -324,7 +317,7 @@ export interface TypedRpc {
         workspace: WorkspaceId,
         sessionId: SessionId,
         level: ThinkingLevel,
-    ): Promise<unknown>;
+    ): Promise<SessionSetThinkingLevelResult>;
     /**
      * Manually trigger compaction. Returns `ok` plus optional token stats.
      * Auto-trigger runs in the sidecar after `settled`; this RPC is the UI button / command palette entry point.
@@ -481,6 +474,22 @@ export interface TypedRpc {
     mcpDeleteConfig(id: string): Promise<McpDeleteConfigResult>;
 }
 
+/**
+ * The ergonomic method facade must cover every contract row. The implementation
+ * remains handwritten because it adapts friendly arguments into wire envelopes,
+ * but adding a protocol method without adding its client entry now fails here.
+ */
+// jobs.* belongs to the dedicated scheduler facade, while config.patch is
+// invoked internally by the config tool rather than exposed to app clients.
+type TypedRpcContractKey = Exclude<RpcContractKey, `jobs${string}` | "configPatch">;
+type TypedRpcKeysMatchContract = [keyof TypedRpc] extends [TypedRpcContractKey]
+    ? [TypedRpcContractKey] extends [keyof TypedRpc]
+        ? true
+        : false
+    : false;
+
+export const typedRpcKeysMatchContract: TypedRpcKeysMatchContract = true;
+
 // ─────────────────────────────────────────────────────────────────────
 // Generic helpers — four common param shapes, one helper per shape.
 // Helpers collapse each wrapper to one line; only methods with non-standard param shapes stay inline.
@@ -585,18 +594,18 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionAttach: workspace + sessionId + optional opts spread
         sessionAttach: (workspace, sessionId, opts) =>
-            call<AttachParams, { attached: true; sessionId: SessionId }>(
-                RPC.sessionAttach,
+            call<AttachParams, SessionAttachResult>(RPC.sessionAttach, workspace, {
                 workspace,
-                { workspace, sessionId, ...(opts ?? {}) },
-            ),
+                sessionId,
+                ...(opts ?? {}),
+            }),
 
-        sessionDetach: wsSession<{ detached: true }>(call, RPC.sessionDetach),
-        sessionDelete: wsSession<unknown>(call, RPC.sessionDelete),
+        sessionDetach: wsSession<SessionDetachResult>(call, RPC.sessionDetach),
+        sessionDelete: wsSession<SessionDeleteResult>(call, RPC.sessionDelete),
 
         // sessionRename: workspace + sessionId + name (one extra `name` beyond wsSession)
         sessionRename: (workspace, sessionId, name) =>
-            call<RenameSessionParams, unknown>(RPC.sessionRename, workspace, {
+            call<RenameSessionParams, SessionRenameResult>(RPC.sessionRename, workspace, {
                 workspace,
                 sessionId,
                 name,
@@ -682,20 +691,19 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionSetModel: workspace + sessionId + provider + modelId
         sessionSetModel: (workspace, sessionId, provider, modelId) =>
-            call<SetModelParams, { switchedTo: { provider: string; modelId: string } }>(
-                RPC.sessionSetModel,
+            call<SetModelParams, SessionSetModelResult>(RPC.sessionSetModel, workspace, {
                 workspace,
-                { workspace, sessionId, provider, modelId },
-            ),
+                sessionId,
+                provider,
+                modelId,
+            }),
 
         // sessionListModels: workspace + optional provider
         sessionListModels: (workspace, provider) =>
-            call<
-                ListModelsParams,
-                {
-                    models: Array<{ provider: string; id: string; name?: string }>;
-                }
-            >(RPC.sessionListModels, workspace, { workspace, provider }),
+            call<ListModelsParams, SessionListModelsResult>(RPC.sessionListModels, workspace, {
+                workspace,
+                provider,
+            }),
 
         // providersList: workspace → built-in provider availability view
         providersList: (workspace) =>
@@ -713,11 +721,15 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionSetThinkingLevel: workspace + sessionId + level
         sessionSetThinkingLevel: (workspace, sessionId, level) =>
-            call<SessionSetThinkingLevelParams, unknown>(RPC.sessionSetThinkingLevel, workspace, {
+            call<SessionSetThinkingLevelParams, SessionSetThinkingLevelResult>(
+                RPC.sessionSetThinkingLevel,
                 workspace,
-                sessionId,
-                level,
-            }),
+                {
+                    workspace,
+                    sessionId,
+                    level,
+                },
+            ),
 
         // sessionCompact: workspace + sessionId + optional customInstructions
         sessionCompact: (workspace, sessionId, customInstructions) =>

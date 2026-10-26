@@ -13,27 +13,20 @@
  * from.
  */
 
-import type { ConfigPatchParams, ConfigPatchResult, GlobalConfigPatch } from "@taco-ai/protocol";
-import { asSessionId, configPatchSchema, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import type { ConfigPatchResult, GlobalConfigPatch } from "@taco-ai/protocol";
+import { asSessionId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { createLogger } from "../../lib/logger.ts";
 import { patchFields } from "../../tools/config.ts";
-import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { applyGlobalConfigPatch } from "./settings.ts";
 
 const log = createLogger("config");
 
 export function registerConfigHandlers(): void {
     registerMethod(
-        RPC.configPatch,
+        "configPatch",
         true,
-        async ({
-            cwd,
-            workspace,
-            params,
-            server,
-            serverRegistry,
-        }: MethodCtx<ConfigPatchParams>): Promise<ConfigPatchResult> => {
+        async ({ cwd, workspace, params, server, serverRegistry }): Promise<ConfigPatchResult> => {
             // Defense-in-depth for the configPatch tool's own main-session
             // check: the RPC is also reachable from any client with a
             // dispatcher, so re-verify the claimed workspace is local and the
@@ -97,6 +90,5 @@ export function registerConfigHandlers(): void {
                 );
             }
         },
-        { schema: configPatchSchema },
     );
 }

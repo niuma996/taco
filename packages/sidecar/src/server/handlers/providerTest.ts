@@ -28,8 +28,7 @@ import type {
     ProviderTestConnectionParams,
     ProviderTestConnectionResult,
 } from "@taco-ai/protocol";
-import { ErrorCodes, providerTestConnectionSchema } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes } from "@taco-ai/protocol";
 import { buildCustomProvider } from "../../runtime/models/customProvider.ts";
 import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
@@ -55,12 +54,9 @@ export type ProbeFn = (
 export function registerProviderTestHandlers(deps: { probe?: ProbeFn } = {}): void {
     const probe = deps.probe ?? performProbe;
     registerMethod(
-        RPC.providerTestConnection,
+        "providerTestConnection",
         false,
-        async ({
-            server,
-            params,
-        }: MethodCtx<ProviderTestConnectionParams>): Promise<ProviderTestConnectionResult> => {
+        async ({ server, params }): Promise<ProviderTestConnectionResult> => {
             const target = resolveTarget(server, params);
             if ("error" in target) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, target.error);
@@ -90,7 +86,6 @@ export function registerProviderTestHandlers(deps: { probe?: ProbeFn } = {}): vo
                 reply: replyPreview(message),
             };
         },
-        { schema: providerTestConnectionSchema },
     );
 }
 

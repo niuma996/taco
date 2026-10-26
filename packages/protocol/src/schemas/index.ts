@@ -12,6 +12,7 @@ export * from "./commandPermission.js";
 export * from "./extensions.js";
 export * from "./imPolicy.js";
 export * from "./initialize.js";
+export * from "./jobs.js";
 export * from "./mcp.js";
 export * from "./memory.js";
 export * from "./sessionLifecycle.js";

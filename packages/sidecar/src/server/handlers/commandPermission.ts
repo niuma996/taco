@@ -4,18 +4,14 @@
  * Resolves permission requests with optional global rule persistence.
  */
 
-import type { CommandPermissionResolveParams } from "@taco-ai/protocol";
-import { commandPermissionResolveSchema } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
-
 import { saveGlobalConfig } from "../../config/config.ts";
-import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
+import { registerMethod } from "../methodRegistry.ts";
 
 export function registerCommandPermissionHandlers(): void {
     registerMethod(
-        RPC.commandPermissionResolve,
+        "commandPermissionResolve",
         true,
-        async ({ workspace, params }: MethodCtx<CommandPermissionResolveParams>) => {
+        async ({ workspace, params }) => {
             const request = workspace.permissionBroker.getRequest(params.requestId);
             if (
                 params.approved &&
@@ -43,6 +39,6 @@ export function registerCommandPermissionHandlers(): void {
                 ) !== undefined;
             return { resolved };
         },
-        { command: true, schema: commandPermissionResolveSchema },
+        { command: true },
     );
 }

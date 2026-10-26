@@ -9,15 +9,12 @@
 
 import type {
     CheckpointEntry,
-    CheckpointsListParams,
     CheckpointsListResult,
-    CheckpointsRestoreParams,
     CheckpointsRestoreResult,
 } from "@taco-ai/protocol";
-import { checkpointsListSchema, checkpointsRestoreSchema, ErrorCodes } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes } from "@taco-ai/protocol";
 import type { CheckpointMeta } from "../../checkpoints/store.ts";
-import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 function toWire(meta: CheckpointMeta): CheckpointEntry {
     return {
@@ -33,26 +30,19 @@ function toWire(meta: CheckpointMeta): CheckpointEntry {
 
 export function registerCheckpointsHandlers(): void {
     registerMethod(
-        RPC.checkpointsList,
+        "checkpointsList",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<CheckpointsListParams>): Promise<CheckpointsListResult> => {
+        async ({ workspace, params }): Promise<CheckpointsListResult> => {
             if (!workspace.checkpointStore) return { checkpoints: [], enabled: false };
             const list = await workspace.listCheckpoints(params.sessionId);
             return { checkpoints: list.map(toWire), enabled: true };
         },
-        { schema: checkpointsListSchema },
     );
 
     registerMethod(
-        RPC.checkpointsRestore,
+        "checkpointsRestore",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<CheckpointsRestoreParams>): Promise<CheckpointsRestoreResult> => {
+        async ({ workspace, params }): Promise<CheckpointsRestoreResult> => {
             if (!params.checkpointId) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "checkpointId is required");
             }
@@ -83,6 +73,6 @@ export function registerCheckpointsHandlers(): void {
                 );
             }
         },
-        { command: true, schema: checkpointsRestoreSchema },
+        { command: true },
     );
 }

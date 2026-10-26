@@ -14,10 +14,10 @@
  * See `memory.ts` for the same self-RPC pattern.
  */
 
+import { RPC } from "@taco-ai/shared";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
-import { JOBS_RPC } from "../scheduler/jobsRpc.ts";
 import type { Job, JobRunResult, SessionStrategy } from "../scheduler/types.ts";
 import type { TacoToolContext } from "./context.ts";
 
@@ -195,7 +195,7 @@ export function createJobsListTool(): AgentHarnessTool<TacoToolContext> {
             "List every scheduled job visible to the current session — IM jobs filtered to the current channel/peer, IDE jobs to the current workspace. Use before create/update to discover existing ids and avoid collisions.",
         mutates: false,
         schema: jobsListSchema,
-        rpcMethod: JOBS_RPC.list,
+        rpcMethod: RPC.jobsList,
         buildParams: () => ({}),
         render: (_input, result, ctx) => {
             if (result.jobs.length === 0) return "no jobs";
@@ -222,7 +222,7 @@ export function createJobsGetTool(): AgentHarnessTool<TacoToolContext> {
             "Read one scheduled job by id — returns the full record (schedule, args, and recent run history). Use when the list summary is too terse to decide the next action.",
         mutates: false,
         schema: jobsGetSchema,
-        rpcMethod: JOBS_RPC.get,
+        rpcMethod: RPC.jobsGet,
         buildParams: (input) => ({ id: input.id }),
         render: (_input, result, _ctx) =>
             result.job ? JSON.stringify(result.job, null, 2) : "not found",
@@ -237,7 +237,7 @@ export function createJobsCreateTool(): AgentHarnessTool<TacoToolContext> {
             "Create a new scheduled job in this session's scope. The daemon generates the globally unique id. Channel sessions default to reuse the current conversation; non-channel sessions default to pin a dedicated session and may explicitly choose new.",
         mutates: true,
         schema: jobsCreateSchema,
-        rpcMethod: JOBS_RPC.create,
+        rpcMethod: RPC.jobsCreate,
         buildParams: (input, ctx) => ({
             job: {
                 ...input.job,
@@ -266,7 +266,7 @@ export function createJobsUpdateTool(): AgentHarnessTool<TacoToolContext> {
             "Replace an existing scheduled job by id. The scope cannot be changed. Channel jobs only use reuse; non-channel jobs default to pin and may explicitly choose new.",
         mutates: true,
         schema: jobsUpdateSchema,
-        rpcMethod: JOBS_RPC.update,
+        rpcMethod: RPC.jobsUpdate,
         buildParams: (input, ctx) => ({
             job: {
                 ...input.job,
@@ -289,7 +289,7 @@ export function createJobsDeleteTool(): AgentHarnessTool<TacoToolContext> {
             "Remove a scheduled job by id. The daemon also drops its in-flight lock file, so any currently running fire finishes naturally without leaking state.",
         mutates: true,
         schema: jobsDeleteSchema,
-        rpcMethod: JOBS_RPC.delete,
+        rpcMethod: RPC.jobsDelete,
         buildParams: (input) => ({ id: input.id }),
         render: (input, result, _ctx) => `${result.deleted ? "deleted" : "not found"} ${input.id}`,
     });
@@ -303,7 +303,7 @@ export function createJobsRunNowTool(): AgentHarnessTool<TacoToolContext> {
             'Force-fire a job immediately, outside its schedule. Returns status="ok" once the fire was ACCEPTED (this is not the same as "completed": when the target session already has a turn in flight, the dispatcher degrades to a follow-up enqueue and reports "ok" the moment the enqueue lands, BEFORE the model turn actually runs — so a self-fired max_runs:1 job may retire itself before its own work finishes; the agent loop completes asynchronously at the next may_finish boundary). status="skipped" means an overlapping fire held the lock (this fire was dropped, not queued). status="failed" carries the invocation error.',
         mutates: true,
         schema: jobsRunNowSchema,
-        rpcMethod: JOBS_RPC.runNow,
+        rpcMethod: RPC.jobsRunNow,
         buildParams: (input) => ({ id: input.id }),
         render: (input, result, _ctx) => {
             if (result.status === "ok") return `fired ${input.id}`;

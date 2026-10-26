@@ -13,9 +13,10 @@
  * of SchedulesTab was getting squeezed by the 720px content cap and the
  * tables stacking underneath it; a dialog keeps the list scannable.
  */
+
+import type { Job, JobScheduleSpec, SessionStrategy } from "@taco-ai/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
-import type { Job, JobScheduleSpec, SessionStrategy } from "../../lib/clients/jobsClient.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Modal } from "../ui/Modal.tsx";

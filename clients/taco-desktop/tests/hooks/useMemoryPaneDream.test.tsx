@@ -1,8 +1,7 @@
-import type { MemoryListResult } from "@taco-ai/protocol";
+import type { Job, MemoryListResult } from "@taco-ai/protocol";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useMemoryPane } from "../../src/hooks/useMemoryPane";
-import type { Job } from "../../src/lib/clients/jobsClient";
 
 const listResult: MemoryListResult = {
     enabled: true,

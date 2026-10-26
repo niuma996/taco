@@ -10,43 +10,21 @@
  */
 
 import type {
-    MemoryDeleteTopicParams,
     MemoryDeleteTopicResult,
-    MemoryDreamApplyParams,
     MemoryDreamApplyResult,
-    MemoryDreamDiscardParams,
     MemoryDreamDiscardResult,
     MemoryDreamPreview,
     MemoryDreamReportSummary,
-    MemoryDreamRunParams,
     MemoryDreamRunResult,
     MemoryDreamState,
-    MemoryDreamUndoParams,
     MemoryDreamUndoResult,
-    MemoryListParams,
     MemoryListResult,
-    MemoryRestoreTopicParams,
     MemoryRestoreTopicResult,
     MemoryTopicEntry,
-    MemoryUpsertParams,
     MemoryUpsertResult,
-    MemoryWriteParams,
     MemoryWriteResult,
 } from "@taco-ai/protocol";
-import {
-    ErrorCodes,
-    MEMORY_CONTENT_MAX_CHARS,
-    memoryDeleteTopicSchema,
-    memoryDreamApplySchema,
-    memoryDreamDiscardSchema,
-    memoryDreamRunSchema,
-    memoryDreamUndoSchema,
-    memoryListSchema,
-    memoryRestoreTopicSchema,
-    memoryUpsertSchema,
-    memoryWriteSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
+import { ErrorCodes, MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 
 import {
     applyPendingDream,
@@ -177,37 +155,29 @@ function asConflict(error: unknown): RpcHandlerError {
 }
 
 export function registerMemoryHandlers(): void {
-    registerMethod(
-        RPC.memoryList,
-        true,
-        async ({ workspace, server }: MethodCtx<MemoryListParams>): Promise<MemoryListResult> => {
-            const store = workspace.memoryStore;
-            const content = store.readMemory();
-            const dreamJob = server.jobs ? await server.jobs.get(MEMORY_DREAM_JOB_ID) : null;
-            return {
-                memoryContent: content,
-                memoryHash: hashOf(content),
-                topics: store.listTopics().map(toWireTopic),
-                enabled: store.enabled,
-                ...(store instanceof LocalMemoryStore ? { dream: readDreamState(store) } : {}),
-                ...(dreamJob ? { dreamScheduled: dreamJob.enabled } : {}),
-                ...(dreamJob && !dreamJob.enabled && dreamJob.disabled_reason
-                    ? { dreamPausedReason: dreamJob.disabled_reason }
-                    : {}),
-            };
-        },
-        { schema: memoryListSchema },
-    );
+    registerMethod("memoryList", true, async ({ workspace, server }): Promise<MemoryListResult> => {
+        const store = workspace.memoryStore;
+        const content = store.readMemory();
+        const dreamJob = server.jobs ? await server.jobs.get(MEMORY_DREAM_JOB_ID) : null;
+        return {
+            memoryContent: content,
+            memoryHash: hashOf(content),
+            topics: store.listTopics().map(toWireTopic),
+            enabled: store.enabled,
+            ...(store instanceof LocalMemoryStore ? { dream: readDreamState(store) } : {}),
+            ...(dreamJob ? { dreamScheduled: dreamJob.enabled } : {}),
+            ...(dreamJob && !dreamJob.enabled && dreamJob.disabled_reason
+                ? { dreamPausedReason: dreamJob.disabled_reason }
+                : {}),
+        };
+    });
 
     // Manual consolidation always previews, even for a confirmed workspace:
     // the user asked to see what dream would do, not to have it done.
     registerMethod(
-        RPC.memoryDreamRun,
+        "memoryDreamRun",
         true,
-        async ({
-            workspace,
-            server,
-        }: MethodCtx<MemoryDreamRunParams>): Promise<MemoryDreamRunResult> => {
+        async ({ workspace, server }): Promise<MemoryDreamRunResult> => {
             const store = localStore(workspace);
             const model = await resolveManualDreamModel(workspace, server);
             const outcome = await runDream(
@@ -223,16 +193,12 @@ export function registerMemoryHandlers(): void {
             }
             return { status: outcome.status, reason: outcome.reason };
         },
-        { schema: memoryDreamRunSchema },
     );
 
     registerMethod(
-        RPC.memoryDreamApply,
+        "memoryDreamApply",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<MemoryDreamApplyParams>): Promise<MemoryDreamApplyResult> => {
+        async ({ workspace, params }): Promise<MemoryDreamApplyResult> => {
             const store = localStore(workspace);
             const pending = readPendingDream(store);
             // The user reviewed one specific plan; a newer one must be reviewed too.
@@ -248,44 +214,33 @@ export function registerMemoryHandlers(): void {
                 throw asConflict(error);
             }
         },
-        { schema: memoryDreamApplySchema },
     );
 
     registerMethod(
-        RPC.memoryDreamDiscard,
+        "memoryDreamDiscard",
         true,
-        async ({
-            workspace,
-        }: MethodCtx<MemoryDreamDiscardParams>): Promise<MemoryDreamDiscardResult> => {
+        async ({ workspace }): Promise<MemoryDreamDiscardResult> => {
             discardPendingDream(localStore(workspace));
             return { ok: true };
         },
-        { schema: memoryDreamDiscardSchema },
     );
 
     registerMethod(
-        RPC.memoryDreamUndo,
+        "memoryDreamUndo",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<MemoryDreamUndoParams>): Promise<MemoryDreamUndoResult> => {
+        async ({ workspace, params }): Promise<MemoryDreamUndoResult> => {
             try {
                 return { conflicts: await undoDreamReport(localStore(workspace), params.reportId) };
             } catch (error) {
                 throw asConflict(error);
             }
         },
-        { schema: memoryDreamUndoSchema },
     );
 
     registerMethod(
-        RPC.memoryRestoreTopic,
+        "memoryRestoreTopic",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<MemoryRestoreTopicParams>): Promise<MemoryRestoreTopicResult> => {
+        async ({ workspace, params }): Promise<MemoryRestoreTopicResult> => {
             try {
                 await localStore(workspace).restoreTopic(params.id);
             } catch (error) {
@@ -293,13 +248,12 @@ export function registerMemoryHandlers(): void {
             }
             return { ok: true };
         },
-        { schema: memoryRestoreTopicSchema },
     );
 
     registerMethod(
-        RPC.memoryWrite,
+        "memoryWrite",
         true,
-        async ({ workspace, params }: MethodCtx<MemoryWriteParams>): Promise<MemoryWriteResult> => {
+        async ({ workspace, params }): Promise<MemoryWriteResult> => {
             try {
                 await workspace.memoryStore.writeMemory(params.content, params.baseHash);
                 return { ok: true };
@@ -317,16 +271,12 @@ export function registerMemoryHandlers(): void {
                 throw e;
             }
         },
-        { schema: memoryWriteSchema },
     );
 
     registerMethod(
-        RPC.memoryDeleteTopic,
+        "memoryDeleteTopic",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<MemoryDeleteTopicParams>): Promise<MemoryDeleteTopicResult> => {
+        async ({ workspace, params }): Promise<MemoryDeleteTopicResult> => {
             const expected =
                 typeof params.expectedContent === "string" ? params.expectedContent : undefined;
             try {
@@ -336,16 +286,12 @@ export function registerMemoryHandlers(): void {
             }
             return { ok: true };
         },
-        { schema: memoryDeleteTopicSchema },
     );
 
     registerMethod(
-        RPC.memoryUpsert,
+        "memoryUpsert",
         true,
-        async ({
-            workspace,
-            params,
-        }: MethodCtx<MemoryUpsertParams>): Promise<MemoryUpsertResult> => {
+        async ({ workspace, params }): Promise<MemoryUpsertResult> => {
             // id whitelist: lowercase + kebab-case + length check. The
             // handler is the sole boundary.
             if (typeof params.id !== "string") {
@@ -425,7 +371,6 @@ export function registerMemoryHandlers(): void {
                 }
             }
         },
-        { schema: memoryUpsertSchema },
     );
 }
 

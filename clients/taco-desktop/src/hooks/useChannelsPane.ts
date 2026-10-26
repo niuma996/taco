@@ -5,9 +5,9 @@ import { useAutoClearError } from "./primitives/useAutoClearError";
 
 /** Manifest name for the WeCom channel. Mirror of the sidecar
  *  `CHANNEL_NAME_WECOM` constant — channels.* RPCs are addressed by
- *  manifest name in BUILTIN_CHANNEL_MANIFESTS, but there is no shared
- *  channels-name mirror (jobsRpc doesn't include channels.*). Kept local
- *  to the desktop until a second non-QR channel needs the same branch. */
+ *  manifest name in BUILTIN_CHANNEL_MANIFESTS, but the protocol package
+ *  carries no channels-name mirror. Kept local to the desktop until a
+ *  second non-QR channel needs the same branch. */
 export const CHANNEL_NAME_WECOM = "wecom";
 
 export interface UseChannelsPaneResult {

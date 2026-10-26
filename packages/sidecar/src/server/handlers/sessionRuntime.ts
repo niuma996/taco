@@ -5,62 +5,44 @@
  * mutate attached session state but do not initiate a model turn.
  */
 
-import type {
-    SessionCompactParams,
-    SessionContextInfoParams,
-    SessionSetThinkingLevelParams,
-    SetModelParams,
-} from "@taco-ai/protocol";
-import {
-    sessionCompactSchema,
-    sessionContextInfoSchema,
-    sessionSetModelSchema,
-    sessionSetThinkingLevelSchema,
-} from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
-import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
+import { registerMethod } from "../methodRegistry.ts";
 import { requireAttached } from "./attachGuard.ts";
 
 export function registerSessionRuntimeHandlers(): void {
     registerMethod(
-        RPC.sessionSetModel,
+        "sessionSetModel",
         true,
-        async ({ workspace, params }: MethodCtx<SetModelParams>) => {
+        async ({ workspace, params }) => {
             requireAttached(workspace, params.sessionId);
             await workspace.setSessionModel(params.sessionId, params.provider, params.modelId);
             return { switchedTo: { provider: params.provider, modelId: params.modelId } };
         },
-        { command: true, schema: sessionSetModelSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionSetThinkingLevel,
+        "sessionSetThinkingLevel",
         true,
-        async ({ workspace, params }: MethodCtx<SessionSetThinkingLevelParams>) => {
+        async ({ workspace, params }) => {
             requireAttached(workspace, params.sessionId);
             await workspace.setSessionThinkingLevel(params.sessionId, params.level);
             return { level: params.level };
         },
-        { command: true, schema: sessionSetThinkingLevelSchema },
+        { command: true },
     );
 
     registerMethod(
-        RPC.sessionCompact,
+        "sessionCompact",
         true,
-        async ({ workspace, params }: MethodCtx<SessionCompactParams>) => {
+        async ({ workspace, params }) => {
             const attached = requireAttached(workspace, params.sessionId);
             return await attached.compact(params.customInstructions);
         },
-        { command: true, schema: sessionCompactSchema },
+        { command: true },
     );
 
-    registerMethod(
-        RPC.sessionContextInfo,
-        true,
-        async ({ workspace, params }: MethodCtx<SessionContextInfoParams>) => {
-            const attached = requireAttached(workspace, params.sessionId);
-            return await attached.getContextInfo();
-        },
-        { schema: sessionContextInfoSchema },
-    );
+    registerMethod("sessionContextInfo", true, async ({ workspace, params }) => {
+        const attached = requireAttached(workspace, params.sessionId);
+        return await attached.getContextInfo();
+    });
 }

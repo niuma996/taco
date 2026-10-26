@@ -21,7 +21,7 @@ describe("jobs", () => {
      *
      * The handler signature is `MethodCtx<JobsXxxParams>` and `params` in
      * that ctx IS the wire body. For `jobs.create`, the desktop client sends
-     * `call(client, JOBS_RPC.create, { job })` (see
+     * `call(client, RPC.jobsCreate, { job })` (see
      * `clients/taco-desktop/src/lib/jobsClient.ts`), so on the server
      * `params = { job: { ... } }`. `jobs.update` is the same shape. The
      * `jobs.delete` / `jobs.runNow` / `jobs.history` / `jobs.get` calls
@@ -379,6 +379,87 @@ describe("jobs", () => {
             const controllerCalls: string[] = [];
             const resp = await dispatchThroughServer("jobs.runNow", { id: "abc" }, controllerCalls);
             assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+        });
+    });
+
+    /**
+     * Regression: `jobs.create` accepts a body with no `id`.
+     *
+     * The daemon mints the id, so no caller sends one — the desktop's
+     * "new schedule" form and the LLM's `jobsCreate` tool both omit it. The
+     * contract table's schema for this method once required `id`, and schema
+     * validation runs *before* the handler, so every real create failed with
+     * `invalid_params: must have required properties id`.
+     *
+     * These go through `handleRpcRequest` because the failure lived in the
+     * schema gate, which a direct handler call never reaches.
+     */
+    describe("jobs.create — id optional (regression)", () => {
+        it("accepts a body without an id and lets the daemon mint one", async () => {
+            registerBuiltinMethods();
+            const controllerCalls: string[] = [];
+            const resp = await dispatchThroughServer(
+                "jobs.create",
+                {
+                    job: {
+                        name: "nightly-cleanup",
+                        schedule: { kind: "interval", ms: 1000 },
+                        command: "agent.invoke",
+                        args: { workspace: "/tmp/test", prompt: "x" },
+                        enabled: true,
+                        run_on_startup: false,
+                    },
+                },
+                controllerCalls,
+            );
+            assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+            // The handler blanks the caller's id before the controller sees it;
+            // the daemon generates the real one.
+            assert.deepEqual(controllerCalls, ["create::none"]);
+        });
+
+        it("still accepts a caller-supplied id and ignores it", async () => {
+            registerBuiltinMethods();
+            const controllerCalls: string[] = [];
+            const resp = await dispatchThroughServer(
+                "jobs.create",
+                {
+                    job: {
+                        id: "nightly-cleanup",
+                        name: "x",
+                        schedule: { kind: "interval", ms: 1000 },
+                        command: "agent.invoke",
+                        args: { workspace: "/tmp/test", prompt: "x" },
+                        enabled: true,
+                        run_on_startup: false,
+                    },
+                },
+                controllerCalls,
+            );
+            assert.equal(resp.ok, true, `expected ok, got ${JSON.stringify(resp)}`);
+            assert.deepEqual(controllerCalls, ["create::none"]);
+        });
+
+        it("jobs.update still requires an id", async () => {
+            registerBuiltinMethods();
+            const controllerCalls: string[] = [];
+            const resp = await dispatchThroughServer(
+                "jobs.update",
+                {
+                    job: {
+                        name: "x",
+                        schedule: { kind: "interval", ms: 1000 },
+                        command: "agent.invoke",
+                        args: { workspace: "/tmp/test", prompt: "x" },
+                        enabled: true,
+                        run_on_startup: false,
+                    },
+                },
+                controllerCalls,
+            );
+            assert.equal(resp.ok, false, "update without an id must be rejected");
+            if (!resp.ok) assert.equal(resp.error.code, "invalid_params");
+            assert.deepEqual(controllerCalls, []);
         });
     });
 
