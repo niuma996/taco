@@ -21,6 +21,18 @@
     --border-strong: #7a8390;
     --input-bg: #1a1d23;
 
+    /* ── 分割线 ────────────────────────────────────────────────
+       与容器描边（--border）分开：这里的 token 只表达「分隔」，
+       不表达「描边」。三级层次 — 面板边界 > 区块分隔 > 内联细条。
+       面板边界横跨两种表面（--pane-list-bg ↔ --chat-panel-bg），
+       两边都得读得到，所以比区块分隔亮一档。 */
+    --divider-panel: #363d4b;
+    --divider-section: #2f3542;
+    --divider-inline: #292e39;
+    /* 强调竖线（引用块 / 缩进标记）—— 与分割线不同色相，一眼能分清
+       「装饰」而非「边界」。 */
+    --accent-rail: rgba(136, 192, 208, 0.24);
+
     /* Semantic tokens — consolidates scattered hardcoded colors, overridden per theme. */
     --error: #bf616a;
     --error-bg: rgba(191, 97, 106, 0.25);
@@ -198,6 +210,8 @@
     --fg-muted: var(--fg-dim);
     --muted: var(--fg-dim);
     --hover: var(--hover-overlay);
+    /* Container outlines only — separation between two regions is a
+       --divider-* token, never these. */
     --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
     --border-soft: color-mix(in srgb, var(--border) 40%, transparent);
     --info: var(--accent);
@@ -241,6 +255,12 @@
     --border: #dedbd5;
     --border-strong: #8a8177;
     --input-bg: var(--warm-gray-4);
+
+    /* 分割线 — 浅色主题上「更重」= 更深。三级层次与暗色一一对应。 */
+    --divider-panel: #cfcac1;
+    --divider-section: #dcd9d3;
+    --divider-inline: #e3e0db;
+    --accent-rail: rgba(94, 129, 172, 0.4);
 
     --error: #c0392b;
     --error-bg: rgba(192, 57, 43, 0.12);
@@ -318,6 +338,8 @@
     --fg-muted: var(--fg-dim);
     --muted: var(--fg-dim);
     --hover: var(--hover-overlay);
+    /* Container outlines only — separation between two regions is a
+       --divider-* token, never these. */
     --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
     --border-soft: color-mix(in srgb, var(--border) 40%, transparent);
     --info: var(--accent);

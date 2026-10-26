@@ -11,6 +11,7 @@ import type { ThinkingLevel } from "@taco-ai/protocol";
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
+import { Divider } from "../ui/Divider.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
 import { ThinkingSlider } from "./ThinkingSlider";
@@ -167,7 +168,7 @@ export function ModelMenu(props: ModelMenuProps) {
                     </div>
                     {props.thinkingValue !== undefined && props.onThinkingChange && (
                         <>
-                            <div className="model-menu-divider" />
+                            <Divider tone="section" className="model-menu-divider" />
                             <div className="model-menu-section">
                                 <div className="model-menu-header">
                                     {t("modelMenu.thinkingSection")}

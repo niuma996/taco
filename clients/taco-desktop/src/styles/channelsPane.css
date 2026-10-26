@@ -496,7 +496,7 @@
     gap: var(--space-1-5);
     margin-top: auto;
     padding-top: var(--space-2);
-    border-top: 1px solid var(--border-subtle);
+    border-top: 1px solid var(--divider-section);
 }
 .im-policy-rule-add input {
     flex: 1;

@@ -485,7 +485,7 @@ header.topbar .topbar-picker-group {
     align-items: center;
     justify-content: space-between;
     padding: 6px 10px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
 }
 
 .notification-popover__title {
@@ -778,7 +778,7 @@ button.topbar-context-indicator {
     justify-content: flex-end;
     margin-top: 0.5rem;
     padding-top: 0.4rem;
-    border-top: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+    border-top: 1px solid var(--divider-section);
 }
 
 .context-indicator-popover__compact {
@@ -854,7 +854,7 @@ button.topbar-context-indicator {
        panels don't start their headers at different heights. */
     padding: 8px 12px 12px;
     overflow-y: auto;
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--divider-panel);
     background: var(--bg-secondary, transparent);
     font-size: 13px;
     line-height: 1.4;
@@ -996,7 +996,7 @@ button.topbar-context-indicator {
 /* Visual separator when co-existing with active list; hidden when only history sessions exist. */
 .task-panel-history {
     margin-top: 12px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     padding-top: 8px;
 }
 

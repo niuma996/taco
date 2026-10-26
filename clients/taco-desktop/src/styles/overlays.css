@@ -188,7 +188,7 @@
     justify-content: space-between;
     padding: 0.55rem 0.8rem;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     cursor: grab;
     touch-action: none;
     user-select: none;
@@ -445,7 +445,7 @@ html *:hover {
     justify-content: space-between;
     gap: 1rem;
     padding-bottom: 1.25rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     min-width: 0;
 }
 
@@ -669,7 +669,7 @@ html *:hover {
     align-items: center;
     gap: 1rem;
     padding-top: 1.25rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     margin-top: auto;
 }
 
@@ -701,7 +701,7 @@ html *:hover {
 
 .onboarding-summary li {
     padding: 0.85rem 1.1rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -760,7 +760,7 @@ html *:hover {
     /* Top inset matches .subagent-panel's header padding — see .task-panel. */
     padding: 8px 12px 12px;
     background: var(--bg);
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--divider-panel);
     overflow: hidden;
 }
 .files-drawer-body {
@@ -828,7 +828,7 @@ html *:hover {
     justify-content: space-between;
     gap: 0.6rem;
     padding: 0.6rem 0.8rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
 }
 .files-preview-path {
     color: var(--fg-dim);
@@ -993,7 +993,7 @@ html *:hover {
     min-width: 0;
 }
 .files-tree-footer {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     padding: 0.4rem 0.8rem;
     font-size: 0.78rem;
     color: var(--fg-dim);

@@ -112,7 +112,7 @@ footer.input textarea:focus {
        item, and its negative margin then leaves an equal gap to the card edge
        on all three sides. */
     padding: 0.4rem 0.4rem 0.4rem 0.5rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-panel);
     /* Bottom corners carry the card's outer radius (container no longer clips). */
     border-bottom-left-radius: var(--radius-lg);
     border-bottom-right-radius: var(--radius-lg);

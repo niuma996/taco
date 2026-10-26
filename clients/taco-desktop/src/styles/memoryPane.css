@@ -15,7 +15,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--divider-panel);
     background: var(--pane-list-bg);
 }
 
@@ -162,7 +162,7 @@
 
 .memory-archive-section {
     margin-top: var(--space-2);
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     padding-top: var(--space-1);
 }
 
@@ -313,7 +313,7 @@
     gap: var(--space-2);
     margin-top: var(--space-1);
     padding-top: var(--space-2);
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     color: var(--fg-dim);
     font-size: var(--text-xs);
 }
@@ -513,7 +513,7 @@
 
 .memory-dream-action {
     padding: var(--space-1) 0 var(--space-1) var(--space-2);
-    border-left: 2px solid var(--border);
+    border-left: 2px solid var(--accent-rail);
     color: var(--fg);
     font-size: var(--text-sm);
 }
@@ -557,13 +557,13 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-3) 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     background: var(--chat-panel-bg);
 }
 
 .memory-dream-history {
     padding-top: var(--space-2);
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     color: var(--fg-dim);
     font-size: var(--text-sm);
 }

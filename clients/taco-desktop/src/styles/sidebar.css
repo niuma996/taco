@@ -3,7 +3,7 @@
 aside.sidebar {
     width: var(--pane-width);
     flex-shrink: 0;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--divider-panel);
     background: var(--pane-list-bg);
     /* flex column: header stays fixed at top, .sidebar-list fills remaining height and scrolls
        independently. */
@@ -217,16 +217,13 @@ button svg > * {
     padding: 0 0.25rem;
 }
 
-.activity-rail-divider {
+.ui-divider.activity-rail-divider {
     /* Divider below chat button: aligns with the hover/active square blocks. */
     width: 36px;
-    height: 1px;
-    background: var(--border);
     margin: 2px 0;
-    flex-shrink: 0;
 }
 
-/* Settings pinned to bottom via margin-top:auto. Separator line above via ::before. */
+/* Settings pinned to bottom via margin-top:auto. Separator line above. */
 .activity-rail-bottom {
     display: flex;
     flex-direction: column;
@@ -238,12 +235,9 @@ button svg > * {
     position: relative;
 }
 
-.activity-rail-bottom::before {
-    content: "";
+.ui-divider.activity-rail-separator {
     /* Divider above settings: same width as the top divider, centered. */
     width: 36px;
-    height: 1px;
-    background: var(--border);
     margin-bottom: 2px;
 }
 

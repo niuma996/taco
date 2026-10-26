@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { useT } from "../i18n/useI18n";
+import { Divider } from "./ui/Divider";
 
 type ActivityView =
     | "chat"
@@ -133,7 +134,7 @@ export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityR
             <div className="activity-rail-top">
                 <RailButton {...CHAT_ITEM} activeView={activeView} onSelect={onSelect} t={t} />
                 {/* Divider between chat and the rest of the top group; aligns with the settings border. */}
-                <div className="activity-rail-divider" aria-hidden="true" />
+                <Divider className="activity-rail-divider" />
                 {TOP_ITEMS.map((item) => (
                     <RailButton
                         key={item.type}
@@ -184,6 +185,7 @@ export function ActivityRail({ activeView, onSelect, hasUpdateBadge }: ActivityR
                 </DropdownMenu.Root>
             </div>
             <div className="activity-rail-bottom">
+                <Divider className="activity-rail-separator" />
                 <RailButton
                     {...SETTINGS_ITEM}
                     activeView={activeView}

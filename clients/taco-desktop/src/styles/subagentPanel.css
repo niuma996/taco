@@ -7,7 +7,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--divider-panel);
     background: var(--bg-secondary);
     /* --assistant-msg-bg is tuned against `main`'s --chat-panel-bg; this panel
        sits on --bg-secondary, one step lighter in light mode and one step
@@ -38,7 +38,7 @@
     padding: 4px 8px 8px;
     margin: 0;
     list-style: none;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
 }
 
 .subagent-panel-detail {

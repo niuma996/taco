@@ -558,3 +558,20 @@
 .ui-secret-input-toggle:hover:not(:disabled) {
     color: var(--fg);
 }
+
+/* ── Divider ── */
+
+.ui-divider {
+    flex: 0 0 auto;
+    width: 100%;
+    height: 1px;
+    background: var(--divider-inline);
+}
+.ui-divider--section {
+    background: var(--divider-section);
+}
+.ui-divider[data-orientation="vertical"] {
+    width: 1px;
+    height: 16px;
+    align-self: center;
+}

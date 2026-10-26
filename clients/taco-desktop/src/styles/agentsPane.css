@@ -14,7 +14,7 @@
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--divider-panel);
     background: var(--pane-list-bg);
     overflow: hidden;
 }
@@ -129,7 +129,7 @@
 .agents-detail-header {
     padding-bottom: 1rem;
     margin-bottom: 1rem;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--divider-section);
 }
 
 .agents-detail-content-label {

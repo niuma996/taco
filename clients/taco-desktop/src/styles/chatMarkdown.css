@@ -65,7 +65,7 @@
 .md-assistant blockquote {
     margin: 0.5em 0;
     padding: 0.2em 0.8em;
-    border-left: 3px solid var(--border);
+    border-left: 3px solid var(--accent-rail);
     color: var(--fg-dim);
     font-style: italic;
 }
@@ -137,7 +137,7 @@
 
 .md-assistant hr {
     border: 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
     margin: 1em 0;
 }
 
@@ -174,7 +174,7 @@
     justify-content: space-between;
     padding: 0.3em 0.6em;
     background: var(--input-bg);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     font-size: 0.8em;
 }
 

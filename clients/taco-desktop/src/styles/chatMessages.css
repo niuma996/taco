@@ -138,7 +138,7 @@
 .thinking-body {
     margin: 4px 0 4px 14px;
     padding: 4px 8px;
-    border-left: 2px solid var(--border);
+    border-left: 2px solid var(--accent-rail);
     color: var(--fg-dim);
     font-style: italic;
     font-size: 12px;

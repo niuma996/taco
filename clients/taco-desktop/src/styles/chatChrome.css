@@ -96,7 +96,7 @@ main {
     height: var(--rail-top-padding);
     box-sizing: border-box;
     padding: 0 1rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-panel);
     /* Frosted glass: the bar overlays the top of `main` (negative margin), so
        scrolling messages pass under it and pick up the blur. z-index keeps it
        above the message stream; popovers portal to body and are unaffected. */
@@ -325,13 +325,6 @@ main {
 }
 
 /* Vertical divider between metadata and action buttons: 1px x 16px. */
-.session-info-divider {
-    flex: 0 0 auto;
-    width: 1px;
-    height: 16px;
-    background: var(--border);
-    align-self: center;
-}
 /* Session status: dot + text instead of the old bordered pill — same language
    as the sidebar rows' .session-status-dot (dim when idle, accent + pulse when
    running). The dot carries the activity signal; text just labels it. */

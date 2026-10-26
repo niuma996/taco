@@ -46,7 +46,7 @@
     top: 0;
     padding: 0.4rem;
     background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     z-index: 1;
 }
 .model-menu-section {
@@ -73,8 +73,6 @@
     font-size: var(--text-sm);
     color: var(--fg-dim);
 }
-.model-menu-divider {
-    height: 1px;
-    background: var(--border);
+.ui-divider.model-menu-divider {
     margin: 0.3rem 0;
 }

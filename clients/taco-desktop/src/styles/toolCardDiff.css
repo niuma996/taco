@@ -14,7 +14,7 @@
     min-width: 0;
 }
 .tool-card-diff-item + .tool-card-diff-item {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--divider-section);
 }
 .tool-card-diff-old,
 .tool-card-diff-new,
@@ -76,7 +76,7 @@
     padding: 0.3rem 0.4rem;
     color: var(--fg-dim);
     font-size: 0.85em;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     background: rgba(0, 0, 0, 0.12);
 }
 .tool-card-diff-summary-stat-old {

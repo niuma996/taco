@@ -13,7 +13,7 @@
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--divider-panel);
     background: var(--pane-list-bg);
     overflow: hidden;
 }
@@ -24,7 +24,7 @@
     flex-direction: column;
     gap: 0.4rem;
     padding: 0.25rem 0.75rem 0.6rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--divider-section);
     margin-bottom: 0.35rem;
 }
 

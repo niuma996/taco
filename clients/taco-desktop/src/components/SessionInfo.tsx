@@ -35,6 +35,7 @@ import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
+import { Divider } from "./ui/Divider";
 import { IconButton } from "./ui/IconButton";
 
 export function SessionInfo({
@@ -173,7 +174,7 @@ export function SessionInfo({
                     <span>{t("session.new")}</span>
                 </button>
             )}
-            <span className="session-info-divider" aria-hidden="true" />
+            <Divider orientation="vertical" />
             {/* Status leads the metadata block: the dot reads as the session's
                 live signal before its name. Never shrinks — the title
                 truncates instead. */}
@@ -270,7 +271,7 @@ export function SessionInfo({
                 </Popover.Portal>
             </Popover.Root>
             {(onToggleSubagents || onToggleTasks || filesButton) && (
-                <span className="session-info-divider" aria-hidden="true" />
+                <Divider orientation="vertical" />
             )}
             {onToggleSubagents && (
                 <button
