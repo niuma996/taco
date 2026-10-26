@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.2] — 2026-10-26
+
+A release about memory that stops growing: a nightly job consolidates what the
+agent learned, the model can search the questions you asked before, and a
+session that used to take a minute to open now opens in a second.
+
+### Added
+
+**Memory consolidation.** A built-in nightly job proposes merges, rewrites and
+archives per workspace in one model call. The first plan for a workspace is
+always a preview — nothing is written until you apply it — and every run can be
+undone. The memory pane became its review surface: the plan, the run history
+and the archived entries, with archived topics restorable from there.
+
+**Cross-session search tools.** `sessionSearch` and `sessionList` are deferred
+tools that let the model answer "have I asked about this before?" from the
+questions you typed in past sessions of the same workspace.
+
+**A guide through your own messages.** The chat pane grew a rail of markers,
+one per message you sent: hover for a preview, click to jump, and the arrow
+keys, Home and End move between them.
+
+### Changed
+
+- The wire protocol advances 2.3 → 2.4 for the `memory.dream*` and
+  `memory.restoreTopic` RPCs, the `dream` / `dreamScheduled` fields on
+  `memory.list`, and `Job.builtin` on `jobs.*`. A 2.4 client refuses a 2.3
+  daemon at handshake, so keep the desktop and the sidecar on the same
+  release line.
+- Opening a long session no longer stalls the main thread: only the last ~40
+  messages render, the highlighters are preloaded, and a skeleton holds the
+  place while the history loads.
+- A user-added model inherits the provider's reasoning flag, output cap,
+  compat and thinking-level map. `CustomModelEntry.reasoning` overrides it.
+- The desktop renders Mermaid diagrams with `pele` instead of `mermaid`,
+  which drops mermaid and its 109 transitive packages and shrinks the lazily
+  loaded chart chunk from ~1.6 MB to ~250 kB gzip.
+
+### Fixed
+
+- Memory is extracted once per run. Extraction used to fire on every
+  `turn_end`, so a 30-tool-call run extracted 30 times over the same
+  transcript and injected ~18 KB of duplicated topics per call.
+- Sidecar pushes arrive once. Concurrent `start()` calls each subscribed,
+  so every push and every RPC response was parsed and dispatched twice.
+
 ## [0.3.1] — 2026-10-23
 
 A release about how far the agent may reach: a workspace can be granted

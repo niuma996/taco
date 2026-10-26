@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.3.1
+> **版本**: 0.3.2
 > **传输**: NDJSON over stdio
 > **来源**: 源码为唯一权威来源——`packages/shared/rpcMethods.ts`（RPC method 名）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
