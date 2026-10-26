@@ -49,19 +49,18 @@
     "test:memory": "tsx --import ./tests/_helpers/testSetup.ts --test tests/memory/memory.test.ts tests/server/handlers/handlers.workspace.test.ts tests/runtime/attachedSession.state.test.ts tests/tools/tools.builtin.test.ts"
   },
   "dependencies": {
-    "@taco-ai/pi-harness": "0.1.0",
     "@earendil-works/pi-ai": "1.3.0",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@taco-ai/pi-harness": "0.1.0",
     "@taco-ai/protocol": "workspace:*",
     "@taco-ai/shared": "workspace:*",
     "chokidar": "4.0.3",
     "croner": "^9.0.0",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
-    "ignore": "^7.0.6",
-    "typebox": "^1.3.30",
-    "web-tree-sitter": "0.25.10",
-    "yaml": "^2.9.0"
+    "ignore": "^7.0.14",
+    "typebox": "^1.4.3",
+    "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

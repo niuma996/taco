@@ -3,8 +3,7 @@
   "workspaces": {
     "packages/sidecar": {
       "entry": ["tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"],
-      "ignoreDependencies": ["yaml"]
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
     }
   },
   "tags": ["-internal"]
