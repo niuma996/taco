@@ -184,7 +184,13 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
     let tree: Tree | null = null;
     let visits = 0;
     try {
-        const deadline = performance.now() + 100;
+        // Wall-clock guard against a pathological parse. The structural
+        // limits (length, node count, depth) already bound the work; this
+        // budget only stops a parse that hangs. It has to leave room for the
+        // process being descheduled — a wall clock that trips under CPU
+        // contention turns an ordinary command into an "ask", so the decision
+        // would depend on machine load rather than on the command.
+        const deadline = performance.now() + 1000;
         tree = parser.parse(command, null, {
             progressCallback: () => performance.now() > deadline,
         });

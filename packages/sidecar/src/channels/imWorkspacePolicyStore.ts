@@ -167,6 +167,18 @@ export class ImWorkspacePolicyStore {
         await this.persist(channelId, doc);
     }
 
+    /**
+     * Wait for every queued write to finish.
+     *
+     * A read can start a background migration write-back that the caller
+     * never awaits, so the disk is not necessarily quiet when a write call
+     * resolves. Anything that tears the store's directory down — a test, a
+     * daemon shutdown — needs to know when the writes have landed.
+     */
+    async flush(): Promise<void> {
+        await this.chain;
+    }
+
     hasNotified(workspaceKey: string): boolean {
         return this.notified.has(workspaceKey);
     }

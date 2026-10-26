@@ -469,10 +469,12 @@ describe("imWorkspacePolicyStore", () => {
         store = new ImWorkspacePolicyStore(home);
     });
 
-    afterEach(() => {
-        // The store persists through a queued write; a write still landing
-        // while the directory is removed makes the removal fail with
-        // ENOTEMPTY. The retries give that write a moment to finish.
+    afterEach(async () => {
+        // Reading a legacy policy file starts a background migration
+        // write-back that the caller never awaits. Let those writes land
+        // before the directory goes away, otherwise the removal can fail
+        // with ENOTEMPTY.
+        await store.flush();
         fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     });
 
