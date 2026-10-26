@@ -128,23 +128,14 @@ export function applyBuiltinProviders(
 }
 
 /**
- * Convert a user-added entry into a chat Model for a built-in provider.
- * `api`/`baseUrl` inherit from a template static model (extraModelTemplate)
- * so the new model streams through the same protocol implementation.
- *
- * `reasoning`, `maxTokens` and `compat` inherit from that template too. The
- * provider already knows whether its models think; overriding `reasoning:
- * false` for a thinking model leaves pi unable to send
- * `thinking: {type:"disabled"}`, and the provider then reasons by default —
- * spending the output budget on reasoning and returning no text.
- *
- * The thinking level map inherits as well, with one exception on the
+ * The thinking level map an added model inherits, with one exception on the
  * anthropic-messages api. There pi sends `thinking: {type:"disabled"}` for a
  * reasoning model whenever a call omits a level, unless the map says "off"
  * is unsupported (`off: null`, the shape Anthropic's own catalog uses). The
  * Anthropic-compatible providers serve variants their catalog does not
  * describe, and MiniMax M3.1 answers that flag with HTTP 400 `requires
  * adaptive thinking`, so an added model there defaults "off" to null.
+ *
  * Other apis keep the template's map untouched: on openai-completions,
  * openai-responses and google `off: null` suppresses the disable parameter,
  * and a user who turns thinking off would get a model that still thinks.
@@ -177,6 +168,17 @@ function extraModelTemplate(base: Provider): Model<Api> | undefined {
     return statics.find((m) => m.api === first.api && m.reasoning) ?? first;
 }
 
+/**
+ * Convert a user-added entry into a chat Model for a built-in provider.
+ * `api`/`baseUrl` inherit from a template static model (extraModelTemplate)
+ * so the new model streams through the same protocol implementation.
+ *
+ * `reasoning`, `maxTokens` and `compat` inherit from that template too. The
+ * provider already knows whether its models think; overriding `reasoning:
+ * false` for a thinking model leaves pi unable to send
+ * `thinking: {type:"disabled"}`, and the provider then reasons by default —
+ * spending the output budget on reasoning and returning no text.
+ */
 function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | undefined {
     const template = extraModelTemplate(base);
     if (!template) return undefined;
