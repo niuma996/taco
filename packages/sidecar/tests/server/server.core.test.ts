@@ -7,7 +7,18 @@ import {
     asSessionId,
     asWorkspaceId,
     channelsBindSchema,
+    checkpointsRestoreSchema,
+    commandPermissionResolveSchema,
+    imPolicyClearChatOverrideSchema,
+    imPolicySetChannelDefaultSchema,
+    imPolicySetChatOverrideSchema,
     isCompatibleSidecarProtocol,
+    mcpCreateConfigSchema,
+    mcpDeleteConfigSchema,
+    mcpUpdateConfigSchema,
+    memoryDeleteTopicSchema,
+    memoryUpsertSchema,
+    memoryWriteSchema,
     SIDECAR_PROTOCOL_VERSION,
     sessionCreateSchema,
     sessionListSchema,
@@ -402,6 +413,99 @@ describe("schemaValidation", () => {
             });
             assert.equal([...errors].length, 0);
         });
+    });
+
+    /**
+     * Regression: the write-side RPCs validate their envelope before the
+     * handler runs. Each entry lists an envelope the schema must reject and
+     * one it must accept — a schema that accepts both is too loose to catch a
+     * malformed call, and one that rejects both is too strict for the real
+     * caller.
+     */
+    describe("write-method envelope validation", () => {
+        const cases = [
+            {
+                method: "commandPermission.resolve",
+                schema: commandPermissionResolveSchema,
+                invalid: { workspace: "/w", requestId: "r" },
+                valid: { workspace: "/w", requestId: "r", approved: true, scope: "once" },
+            },
+            {
+                method: "imPolicy.setChannelDefault",
+                schema: imPolicySetChannelDefaultSchema,
+                invalid: { channelId: "c" },
+                valid: { channelId: "c", patch: { tools: { fsTools: "deny" } } },
+            },
+            {
+                method: "imPolicy.setChatOverride",
+                schema: imPolicySetChatOverrideSchema,
+                invalid: { channelId: "c", peerId: "p", patch: {} },
+                valid: { channelId: "c", peerId: "p", chatId: "ch", patch: {} },
+            },
+            {
+                method: "imPolicy.clearChatOverride",
+                schema: imPolicyClearChatOverrideSchema,
+                // The "peerId+chatId or chatKey" rule is a semantic one the
+                // handler owns; the schema only checks the envelope shape,
+                // so a malformed chatKey is what it rejects.
+                invalid: { channelId: "c", chatKey: "not-a-sha256" },
+                valid: { channelId: "c", peerId: "p", chatId: "ch" },
+            },
+            {
+                method: "memory.write",
+                schema: memoryWriteSchema,
+                invalid: { workspace: "/w", content: "x" },
+                valid: { workspace: "/w", content: "x", baseHash: "h" },
+            },
+            {
+                method: "memory.deleteTopic",
+                schema: memoryDeleteTopicSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", id: "topic" },
+            },
+            {
+                method: "memory.upsert",
+                schema: memoryUpsertSchema,
+                invalid: { workspace: "/w", action: "add" },
+                valid: { workspace: "/w", action: "add", id: "topic" },
+            },
+            {
+                method: "mcp.createConfig",
+                schema: mcpCreateConfigSchema,
+                invalid: { config: { id: "srv" } },
+                valid: { config: { id: "srv", transport: "stdio", command: "run" } },
+            },
+            {
+                method: "mcp.updateConfig",
+                schema: mcpUpdateConfigSchema,
+                invalid: { id: "srv", patch: { transport: "carrier-pigeon" } },
+                valid: { id: "srv", patch: { enabled: false } },
+            },
+            {
+                method: "mcp.deleteConfig",
+                schema: mcpDeleteConfigSchema,
+                invalid: { id: "srv/../etc" },
+                valid: { id: "srv" },
+            },
+            {
+                method: "checkpoints.restore",
+                schema: checkpointsRestoreSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", checkpointId: "cp1" },
+            },
+        ];
+
+        for (const { method, schema, invalid, valid } of cases) {
+            it(`${method} rejects a malformed envelope`, () => {
+                const errors = [...Value.Errors(schema, invalid)];
+                assert.ok(errors.length > 0, `${method} accepted ${JSON.stringify(invalid)}`);
+            });
+
+            it(`${method} accepts a well-formed envelope`, () => {
+                const errors = [...Value.Errors(schema, valid)];
+                assert.equal(errors.length, 0, `${method} rejected ${JSON.stringify(valid)}`);
+            });
+        }
     });
 
     it("high-risk RPC schemas reject malformed envelopes", () => {

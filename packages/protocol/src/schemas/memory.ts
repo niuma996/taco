@@ -1,25 +1,46 @@
 /**
  * memory.* RPC param schemas — typebox validators consumed by
- * `registerMethod(..., { schema })` in `packages/sidecar/src/server/handlers/memory.ts`.
+ * `registerMethod` in `packages/sidecar/src/server/handlers/memory.ts`.
  *
- * Schemas here are the intended wire contract for each method's `params`:
- * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
- * with `invalid_params` carrying JSON-pointer paths.
- *
- * NOTE: the schemas below are `Type.Any()` placeholders — the validation gate
- * accepts anything and never rejects. Tightening to `Type.Object({...})` is
- * tracked as follow-up work; handlers keep their hand-written `XxxParams` types.
+ * The schema validates the envelope before dispatch; the handler still owns
+ * the semantic checks (topic id whitelist, content length, stale-hash
+ * conflicts).
  */
 
 import { Type } from "typebox";
 
-export const memoryListSchema = Type.Any();
+const workspace = Type.String({ minLength: 1 });
 
-export const memoryWriteSchema = Type.Any();
+export const memoryListSchema = Type.Object({ workspace });
 
-export const memoryDeleteTopicSchema = Type.Any();
+export const memoryWriteSchema = Type.Object({
+    workspace,
+    content: Type.String(),
+    baseHash: Type.String(),
+});
 
-export const memoryUpsertSchema = Type.Any();
+export const memoryDeleteTopicSchema = Type.Object({
+    workspace,
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    expectedContent: Type.Optional(Type.String()),
+});
+
+export const memoryUpsertSchema = Type.Object({
+    workspace,
+    action: Type.Union([Type.Literal("add"), Type.Literal("replace"), Type.Literal("remove")]),
+    id: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z0-9-]+$" }),
+    name: Type.Optional(Type.String({ maxLength: 60 })),
+    description: Type.Optional(Type.String({ maxLength: 120 })),
+    content: Type.Optional(Type.String()),
+    type: Type.Optional(
+        Type.Union([
+            Type.Literal("user"),
+            Type.Literal("feedback"),
+            Type.Literal("project"),
+            Type.Literal("reference"),
+        ]),
+    ),
+});
 
 export const memoryDreamRunSchema = Type.Object({ workspace: Type.String({ minLength: 1 }) });
 
