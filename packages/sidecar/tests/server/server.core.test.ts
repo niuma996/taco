@@ -4,11 +4,15 @@ import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 import type { RpcResponse } from "@taco-ai/protocol";
 import {
+    agentsContentSchema,
+    agentsListSchema,
     asSessionId,
     asWorkspaceId,
     channelsBindSchema,
+    channelsListSchema,
     checkpointsRestoreSchema,
     commandPermissionResolveSchema,
+    extensionsStatusSchema,
     imPolicyClearChatOverrideSchema,
     imPolicySetChannelDefaultSchema,
     imPolicySetChatOverrideSchema,
@@ -19,10 +23,28 @@ import {
     memoryDeleteTopicSchema,
     memoryUpsertSchema,
     memoryWriteSchema,
+    providerListModelsSchema,
+    providersListSchema,
+    providersRevealKeySchema,
+    providerTestConnectionSchema,
     SIDECAR_PROTOCOL_VERSION,
     sessionCreateSchema,
+    sessionEventsGetSchema,
+    sessionHistorySchema,
+    sessionListModelsSchema,
     sessionListSchema,
+    sessionPlanStateGetSchema,
+    sessionSnapshotGetSchema,
+    sessionTaskHistoryGetSchema,
+    sessionTasksGetSchema,
+    settingsGetSchema,
     settingsWriteSchema,
+    skillContentSchema,
+    skillsListSchema,
+    toolsListSchema,
+    workspaceDisposeSchema,
+    workspaceEnsureSchema,
+    workspaceListSchema,
 } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/shared";
 import { Value } from "typebox/value";
@@ -422,7 +444,17 @@ describe("schemaValidation", () => {
      * malformed call, and one that rejects both is too strict for the real
      * caller.
      */
-    describe("write-method envelope validation", () => {
+    /**
+     * Regression: every RPC validates its envelope before the handler runs.
+     *
+     * Each entry lists an envelope the schema must reject and one it must
+     * accept — a schema that accepts both is too loose to catch a malformed
+     * call, and one that rejects both is too strict for the real caller.
+     *
+     * The no-argument methods are called without a `params` field, so their
+     * schema has to accept `undefined` as well as `{}`.
+     */
+    describe("RPC envelope validation", () => {
         const cases = [
             {
                 method: "commandPermission.resolve",
@@ -493,6 +525,138 @@ describe("schemaValidation", () => {
                 invalid: { workspace: "/w" },
                 valid: { workspace: "/w", checkpointId: "cp1" },
             },
+            {
+                method: "session.list",
+                schema: sessionListSchema,
+                invalid: {},
+                valid: { workspace: "/w" },
+            },
+            {
+                method: "session.create",
+                schema: sessionCreateSchema,
+                invalid: {},
+                valid: { workspace: "/w" },
+            },
+            {
+                method: "settings.write",
+                schema: settingsWriteSchema,
+                invalid: { global: null },
+                valid: { global: { defaultModel: "x" } },
+            },
+            {
+                method: "channels.bind",
+                schema: channelsBindSchema,
+                invalid: {},
+                valid: { channelId: "c" },
+            },
+            {
+                method: "workspace.ensure",
+                schema: workspaceEnsureSchema,
+                invalid: {},
+                valid: { cwd: "/w" },
+            },
+            {
+                method: "workspace.dispose",
+                schema: workspaceDisposeSchema,
+                invalid: { cwd: "" },
+                valid: { cwd: "/w" },
+            },
+            {
+                method: "providers.list",
+                schema: providersListSchema,
+                invalid: {},
+                valid: { workspace: "/w" },
+            },
+            {
+                method: "providers.revealKey",
+                schema: providersRevealKeySchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", providerId: "anthropic" },
+            },
+            {
+                method: "session.listModels",
+                schema: sessionListModelsSchema,
+                invalid: { workspace: "/w", provider: 7 },
+                valid: { workspace: "/w", provider: "anthropic" },
+            },
+            {
+                method: "provider.listModels",
+                schema: providerListModelsSchema,
+                invalid: { providerId: "" },
+                valid: { providerId: "custom:x" },
+            },
+            {
+                method: "provider.testConnection",
+                schema: providerTestConnectionSchema,
+                invalid: { providerId: "custom:x" },
+                valid: { providerId: "custom:x", modelId: "m" },
+            },
+            {
+                method: "tools.list",
+                schema: toolsListSchema,
+                invalid: {},
+                valid: { workspace: "/w" },
+            },
+            {
+                method: "skills.list",
+                schema: skillsListSchema,
+                invalid: {},
+                valid: { workspace: "/w" },
+            },
+            {
+                method: "skills.content",
+                schema: skillContentSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", filePath: "a/SKILL.md" },
+            },
+            {
+                method: "agents.list",
+                schema: agentsListSchema,
+                invalid: {},
+                valid: { workspace: "/w" },
+            },
+            {
+                method: "agents.content",
+                schema: agentsContentSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", agentType: "reviewer" },
+            },
+            {
+                method: "session.history",
+                schema: sessionHistorySchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", sessionId: "s1" },
+            },
+            {
+                method: "session.events.get",
+                schema: sessionEventsGetSchema,
+                invalid: { workspace: "/w", sessionId: "s1" },
+                valid: { workspace: "/w", sessionId: "s1", afterSeq: 0 },
+            },
+            {
+                method: "session.snapshot.get",
+                schema: sessionSnapshotGetSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", sessionId: "s1" },
+            },
+            {
+                method: "session.tasks.get",
+                schema: sessionTasksGetSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", sessionId: "s1" },
+            },
+            {
+                method: "session.taskHistory.get",
+                schema: sessionTaskHistoryGetSchema,
+                invalid: { workspace: "/w", sessionId: "s1" },
+                valid: { workspace: "/w", sessionId: "s1", listId: "l1" },
+            },
+            {
+                method: "session.planState.get",
+                schema: sessionPlanStateGetSchema,
+                invalid: { workspace: "/w" },
+                valid: { workspace: "/w", sessionId: "s1" },
+            },
         ];
 
         for (const { method, schema, invalid, valid } of cases) {
@@ -506,13 +670,20 @@ describe("schemaValidation", () => {
                 assert.equal(errors.length, 0, `${method} rejected ${JSON.stringify(valid)}`);
             });
         }
-    });
 
-    it("high-risk RPC schemas reject malformed envelopes", () => {
-        assert.ok([...Value.Errors(sessionListSchema, {})].length > 0);
-        assert.ok([...Value.Errors(sessionCreateSchema, {})].length > 0);
-        assert.ok([...Value.Errors(settingsWriteSchema, { global: null })].length > 0);
-        assert.ok([...Value.Errors(channelsBindSchema, {})].length > 0);
+        // The no-argument methods travel without a `params` field.
+        for (const [method, schema] of [
+            ["workspace.list", workspaceListSchema],
+            ["settings.get", settingsGetSchema],
+            ["extensions.status", extensionsStatusSchema],
+            ["channels.list", channelsListSchema],
+        ] as const) {
+            it(`${method} accepts a call with no params`, () => {
+                const errors = [...Value.Errors(schema, undefined)];
+                assert.equal(errors.length, 0, `${method} rejected an absent params`);
+                assert.equal([...Value.Errors(schema, {})].length, 0, `${method} rejected {}`);
+            });
+        }
     });
 
     describe("placeholder schemas reject nothing (characterization)", () => {

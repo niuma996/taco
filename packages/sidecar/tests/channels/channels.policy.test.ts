@@ -470,7 +470,10 @@ describe("imWorkspacePolicyStore", () => {
     });
 
     afterEach(() => {
-        fs.rmSync(home, { recursive: true, force: true });
+        // The store persists through a queued write; a write still landing
+        // while the directory is removed makes the removal fail with
+        // ENOTEMPTY. The retries give that write a moment to finish.
+        fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     });
 
     function policyPath(channelId: string): string {

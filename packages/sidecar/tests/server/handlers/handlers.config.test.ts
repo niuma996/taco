@@ -57,11 +57,14 @@ describe("config", () => {
      * always answer.
      */
     function makeBroker(answer: (requestId: string) => void): PermissionBroker {
-        // Short timeout: a test that never gets its answer (e.g. a regressed
-        // guard that lets the request through to the broker) fails in 50ms
-        // instead of the 10-minute default.
+        // Bounded timeout: a test that never gets its answer (e.g. a regressed
+        // guard that lets the request through to the broker) fails in seconds
+        // instead of the 10-minute default. It cannot be much shorter — the
+        // answer below is delivered on the next tick, and under a loaded event
+        // loop that tick can be delayed by more than a few tens of
+        // milliseconds, which turned the denial into a timeout.
         const broker = new PermissionBroker(() => ({ mode: "ask" }) as const, {
-            requestTimeoutMs: 50,
+            requestTimeoutMs: 2_000,
         });
         broker.on("requested", (request) => {
             // The approval is a prompt the user sees; answer it on the next tick
