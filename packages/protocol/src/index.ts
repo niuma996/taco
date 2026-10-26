@@ -263,22 +263,27 @@ export {
     type RpcScopeOf,
     rpcContract,
     rpcSchemas,
-    type SessionAttachResult,
-    type SessionDeleteResult,
-    type SessionDetachResult,
-    type SessionListModelsResult,
-    type SessionPlanStateGetResult,
-    type SessionRenameResult,
-    type SessionSetModelResult,
-    type SessionSetThinkingLevelResult,
-    type SessionTaskHistoryGetResult,
-    type SessionTasksGetResult,
     schemasAgreeWithParams,
-    type WorkspaceDisposeResult,
-    type WorkspaceEnsureResult,
-    type WorkspaceListResult,
     type WorkspaceScopedKey,
-} from "./rpcContract.js";
+} from "./rpcContract/index.js";
+// RPC result shapes owned by their domain contract file.
+export type {
+    SessionAttachResult,
+    SessionDeleteResult,
+    SessionDetachResult,
+    SessionListModelsResult,
+    SessionPlanStateGetResult,
+    SessionRenameResult,
+    SessionSetModelResult,
+    SessionSetThinkingLevelResult,
+    SessionTaskHistoryGetResult,
+    SessionTasksGetResult,
+} from "./rpcContract/session.js";
+export type {
+    WorkspaceDisposeResult,
+    WorkspaceEnsureResult,
+    WorkspaceListResult,
+} from "./rpcContract/workspace.js";
 // RPC param schemas (typebox) — wire validators consumed by registerMethod.
 export * from "./schemas/index.js";
 // session.* RPC types (lifecycle / turn / runtime / snapshot / read).

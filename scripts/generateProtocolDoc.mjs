@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const DOC_PATH = resolve(REPO_ROOT, "docs", "sidecar-protocol.md");
-const RPC_PATH = resolve(REPO_ROOT, "packages", "protocol", "src", "rpcContract.ts");
+const RPC_DIR = resolve(REPO_ROOT, "packages", "protocol", "src", "rpcContract");
 const PUSH_PATH = resolve(REPO_ROOT, "packages", "protocol", "src", "push.ts");
 
 // ── Resolve the version to stamp into the doc ────────────────────────────────────
@@ -42,19 +42,18 @@ function resolveVersion() {
 // Namespace is derived from the method name itself (`session.list` → `session.*`),
 // not from source-code section comments — the wire name is the single source of
 // truth, so the table can never drift from a missing or misplaced `// foo.*` marker.
-function extractRpcMethods(path) {
-    const src = readFileSync(path, "utf8");
-    // The contract table's `RPC` const holds the wire names.
-    const blockMatch = /export const RPC = \{([\s\S]*?)\} as const/.exec(src);
-    if (!blockMatch) return [];
-    const block = blockMatch[1];
+function extractRpcMethods() {
+    // The contract table is split by domain; each domain file exports a
+    // `<domain>Methods` const with the wire names. The merged `RPC` const in
+    // `index.ts` is a spread of those, so the domain files are the source.
     const methods = [];
-    for (const m of block.matchAll(/^\s+\w+:\s*"([^"]+)"/gm)) {
-        const name = m[1];
+    for (const { key, name } of rpcConstEntries()) {
         const section = name.split(".")[0];
-        methods.push({ name, section });
+        methods.push({ key, name, section });
     }
-    return methods;
+    return methods.sort((a, b) =>
+        a.section === b.section ? a.name.localeCompare(b.name) : a.section.localeCompare(b.section),
+    );
 }
 
 // ── Extract push methods ───────────────────────────────────────────────────────
@@ -113,21 +112,28 @@ function discoverRuntimeMethods() {
 // Build a { camelCaseKey → dottedName } map from the `RPC` const. Keeps
 // the registry of "what's a real RPC method" in one place (the const)
 // rather than mirrored in this script.
-function parseRpcConstKeys() {
-    const src = readFileSync(RPC_PATH, "utf8");
-    const blockMatch = /export const RPC = \{([\s\S]*?)\} as const/.exec(src);
-    if (!blockMatch) return new Map();
-    const map = new Map();
-    for (const m of blockMatch[1].matchAll(/^\s+(?<key>\w+):\s*"(?<name>[^"]+)"/gm)) {
-        map.set(m.groups.key, m.groups.name);
+function rpcConstEntries() {
+    const entries = [];
+    for (const file of readdirSync(RPC_DIR)) {
+        if (!file.endsWith(".ts") || file === "index.ts" || file === "types.ts") continue;
+        const src = readFileSync(resolve(RPC_DIR, file), "utf8");
+        for (const block of src.matchAll(/export const \w+Methods = \{([\s\S]*?)\} as const;/g)) {
+            for (const m of block[1].matchAll(/^\s+(?<key>\w+):\s*"(?<name>[^"]+)"/gm)) {
+                entries.push({ key: m.groups.key, name: m.groups.name });
+            }
+        }
     }
-    return map;
+    return entries;
+}
+
+function parseRpcConstKeys() {
+    return new Map(rpcConstEntries().map(({ key, name }) => [key, name]));
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 const version = resolveVersion();
 const doc = readFileSync(DOC_PATH, "utf8");
-const rpcMethods = extractRpcMethods(RPC_PATH);
+const rpcMethods = extractRpcMethods();
 const pushMethods = extractPushMethods(PUSH_PATH);
 
 const rpcSection = renderRpcTable(rpcMethods);
