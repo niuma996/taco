@@ -1,24 +1,53 @@
 /**
  * catalog.* RPC param schemas — typebox validators consumed by
- * `registerMethod(..., { schema })` in `packages/sidecar/src/server/handlers/catalog.ts`.
+ * `registerMethod` in `packages/sidecar/src/server/handlers/catalog.ts`.
  *
- * Schemas here are the intended wire contract for each method's `params`:
- * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
- * with `invalid_params` carrying JSON-pointer paths.
- *
- * NOTE: the schemas below are `Type.Any()` placeholders — the validation gate
- * accepts anything and never rejects. Tightening to `Type.Object({...})` is
- * tracked as follow-up work; handlers keep their hand-written `XxxParams` types.
+ * The two provider probes take a discriminated shape: either the id of a
+ * saved provider or the fields of one the user is still typing. The schema
+ * mirrors that split so a half-filled form fails before the request leaves.
  */
 
 import { Type } from "typebox";
 
-export const sessionListModelsSchema = Type.Any();
+const workspace = Type.String({ minLength: 1 });
 
-export const providersListSchema = Type.Any();
+const providerApi = Type.Union([
+    Type.Literal("chatcomplete"),
+    Type.Literal("response"),
+    Type.Literal("anthropic"),
+]);
 
-export const providersRevealKeySchema = Type.Any();
+export const sessionListModelsSchema = Type.Object({
+    workspace,
+    provider: Type.Optional(Type.String({ minLength: 1 })),
+});
 
-export const providerListModelsSchema = Type.Any();
+export const providersListSchema = Type.Object({ workspace });
 
-export const providerTestConnectionSchema = Type.Any();
+export const providersRevealKeySchema = Type.Object({
+    workspace,
+    providerId: Type.String({ minLength: 1 }),
+});
+
+export const providerListModelsSchema = Type.Union([
+    Type.Object({ providerId: Type.String({ minLength: 1 }) }),
+    Type.Object({
+        baseUrl: Type.String({ minLength: 1 }),
+        api: providerApi,
+        apiKey: Type.String(),
+    }),
+]);
+
+export const providerTestConnectionSchema = Type.Union([
+    Type.Object({
+        providerId: Type.String({ minLength: 1 }),
+        modelId: Type.String({ minLength: 1 }),
+        apiKey: Type.Optional(Type.String()),
+    }),
+    Type.Object({
+        baseUrl: Type.String({ minLength: 1 }),
+        api: providerApi,
+        apiKey: Type.String(),
+        modelId: Type.String({ minLength: 1 }),
+    }),
+]);

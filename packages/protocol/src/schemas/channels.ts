@@ -11,10 +11,11 @@
  */
 
 import { Type } from "typebox";
+import { noParamsSchema } from "./workspace.js";
 
 const channelId = Type.String({ minLength: 1 });
 
-export const channelsListSchema = Type.Object({});
+export const channelsListSchema = noParamsSchema;
 
 export const channelsListConversationsSchema = Type.Object({ channelId: Type.Optional(channelId) });
 

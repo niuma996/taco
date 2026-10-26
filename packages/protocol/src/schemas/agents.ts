@@ -1,20 +1,21 @@
 /**
  * agents.* RPC param schemas — typebox validators consumed by
- * `registerMethod(..., { schema })` in `packages/sidecar/src/server/handlers/agents.ts`.
+ * `registerMethod` in `packages/sidecar/src/server/handlers/agents.ts`.
  *
- * Schemas here are the intended wire contract for each method's `params`:
- * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
- * with `invalid_params` carrying JSON-pointer paths.
- *
- * List/content remain permissive because their params are normalized by the
- * typed client. Write/delete use concrete wire validation before dispatch.
+ * The write/delete bodies carry the concrete wire validation; list/content
+ * only need the routing envelope.
  */
 
 import { Type } from "typebox";
 
-export const agentsListSchema = Type.Any();
+const workspace = Type.String({ minLength: 1 });
 
-export const agentsContentSchema = Type.Any();
+export const agentsListSchema = Type.Object({ workspace });
+
+export const agentsContentSchema = Type.Object({
+    workspace,
+    agentType: Type.String({ minLength: 1 }),
+});
 
 const agentType = Type.String({
     minLength: 1,

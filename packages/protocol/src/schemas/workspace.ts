@@ -1,25 +1,26 @@
 /**
  * workspace.* RPC param schemas — typebox validators consumed by
- * `registerMethod(..., { schema })` in `packages/sidecar/src/server/handlers/workspace.ts`.
+ * `registerMethod` in `packages/sidecar/src/server/handlers/workspace.ts`.
  *
- * Schemas here are the intended wire contract for each method's `params`:
- * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
- * with `invalid_params` carrying JSON-pointer paths.
- *
- * NOTE: the lifecycle schemas below are `Type.Any()` placeholders — the
- * validation gate accepts anything and never rejects. Tightening to
- * `Type.Object({...})` is tracked as follow-up work; handlers keep their
- * hand-written `XxxParams` types. The association schemas ARE strict: they
- * gate a permission grant, so a malformed key must not reach the store.
+ * `workspace.list` takes no arguments, and the client sends the call without
+ * a `params` field — its schema therefore accepts `undefined` as well as an
+ * empty object.
  */
 
 import { Type } from "typebox";
 
-export const workspaceListSchema = Type.Any();
+/** A call with no arguments may arrive with or without a `params` field. */
+export const noParamsSchema = Type.Union([Type.Object({}), Type.Undefined()]);
 
-export const workspaceEnsureSchema = Type.Any();
+export const workspaceListSchema = noParamsSchema;
 
-export const workspaceDisposeSchema = Type.Any();
+export const workspaceEnsureSchema = Type.Object({
+    cwd: Type.String({ minLength: 1 }),
+});
+
+export const workspaceDisposeSchema = Type.Object({
+    cwd: Type.String({ minLength: 1 }),
+});
 
 /**
  * Association key — the storage scope and the id within it.
