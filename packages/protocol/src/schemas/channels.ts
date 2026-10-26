@@ -1,6 +1,6 @@
 /**
  * channels.* RPC param schemas — typebox validators consumed by
- * `registerMethod(..., { schema })` in `packages/sidecar/src/server/handlers/channels.ts`.
+ * `registerMethod` in `packages/sidecar/src/server/handlers/channels.ts`.
  *
  * Schemas here are the intended wire contract for each method's `params`:
  * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures

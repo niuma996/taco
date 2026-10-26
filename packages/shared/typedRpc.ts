@@ -1,12 +1,12 @@
 /**
  * @taco-ai/shared — typed RPC surface factory.
  *
- * Defines the 20 typed RPC wrappers once, used by every client. Each
+ * Defines the typed RPC facade once, used by every client. Each
  * transport (Node child_process, Tauri sidecar) implements `RpcDispatch`
  * and passes it here. Params/Result come from `@taco-ai/protocol` directly.
  *
- * 12 of 20 methods use four helpers (ws0 / wsSession / process0 / process1);
- * the remaining 8 are inlined for non-standard param shapes.
+ * Common workspace/process shapes use small helpers; methods with non-standard
+ * envelopes remain explicit so their argument adapters stay readable.
  */
 
 import type {

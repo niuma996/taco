@@ -13,7 +13,12 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { AgentScope, AgentsWriteParams } from "@taco-ai/protocol";
+import {
+    AGENT_TOOL_NAME_PATTERN,
+    AGENT_TYPE_PATTERN,
+    type AgentScope,
+    type AgentsWriteParams,
+} from "@taco-ai/protocol";
 import { parseAgentMarkdown } from "../../agents/loadAgents.ts";
 import { type AgentDefinition, DEFAULT_SUBAGENT_RUNTIME } from "../../agents/types.ts";
 import { tacoHome } from "../../config/tacoHome.ts";
@@ -54,10 +59,8 @@ function agentsDirFor(scope: AgentScope, ctx: AgentScopeContext): string {
 }
 
 /** Lowercase-alphanumeric start; the name doubles as the markdown file name. */
-const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
-
 /** Claude Code tool names (`Read`, `WebFetch`, `mcp__x__y`). */
-const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+const TOOL_NAME_PATTERN = AGENT_TOOL_NAME_PATTERN;
 
 /** Tools the runner always blocks; persisting them would suggest they work. */
 const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);

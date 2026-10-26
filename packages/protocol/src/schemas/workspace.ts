@@ -10,7 +10,10 @@
 import { Type } from "typebox";
 
 /** A call with no arguments may arrive with or without a `params` field. */
-export const noParamsSchema = Type.Union([Type.Object({}), Type.Undefined()]);
+export const noParamsSchema = Type.Union([
+    Type.Object({}, { additionalProperties: false }),
+    Type.Undefined(),
+]);
 
 export const workspaceListSchema = noParamsSchema;
 

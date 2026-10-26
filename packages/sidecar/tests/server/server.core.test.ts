@@ -6,6 +6,7 @@ import type { RpcResponse } from "@taco-ai/protocol";
 import {
     agentsContentSchema,
     agentsListSchema,
+    agentsWriteSchema,
     asSessionId,
     asWorkspaceId,
     channelsBindSchema,
@@ -334,16 +335,8 @@ describe("schemaValidation", () => {
      * Schema validation tests — cover the typebox schema plumbing wired into
      * `registerMethod` + `handleRpcRequest`.
      *
-     * IMPORTANT: every registered schema is currently a `Type.Any()` /
-     * `Type.Unknown()` placeholder, and those accept ANY value — so the
-     * validation gate rejects nothing in production today. These tests
-     * therefore split into two groups:
-     *
-     *   - Plumbing that is genuinely load-bearing now: schema coverage across
-     *     all registered methods, and JSON-pointer decoding.
-     *   - A pinned characterization of the placeholder behaviour, so that
-     *     tightening a schema makes this file fail loudly instead of silently
-     *     passing. See `placeholder schemas reject nothing (characterization)`.
+     * These tests cover schema coverage, JSON-pointer diagnostics, and each
+     * domain's registered envelope shapes.
      */
 
     /**
@@ -438,14 +431,7 @@ describe("schemaValidation", () => {
     });
 
     /**
-     * Regression: the write-side RPCs validate their envelope before the
-     * handler runs. Each entry lists an envelope the schema must reject and
-     * one it must accept — a schema that accepts both is too loose to catch a
-     * malformed call, and one that rejects both is too strict for the real
-     * caller.
-     */
-    /**
-     * Regression: every RPC validates its envelope before the handler runs.
+     * Every RPC validates its envelope before the handler runs.
      *
      * Each entry lists an envelope the schema must reject and one it must
      * accept — a schema that accepts both is too loose to catch a malformed
@@ -548,6 +534,18 @@ describe("schemaValidation", () => {
                 schema: channelsBindSchema,
                 invalid: {},
                 valid: { channelId: "c" },
+            },
+            {
+                method: "agents.write",
+                schema: agentsWriteSchema,
+                invalid: { workspace: "", agentType: "Bad_Name" },
+                valid: {
+                    workspace: "/w",
+                    agentType: "reviewer",
+                    description: "Review code",
+                    maxTurns: 10,
+                    systemPrompt: "Be precise",
+                },
             },
             {
                 method: "workspace.ensure",
@@ -682,41 +680,19 @@ describe("schemaValidation", () => {
                 const errors = [...Value.Errors(schema, undefined)];
                 assert.equal(errors.length, 0, `${method} rejected an absent params`);
                 assert.equal([...Value.Errors(schema, {})].length, 0, `${method} rejected {}`);
+                assert.ok(
+                    [...Value.Errors(schema, { bogus: 1 })].length > 0,
+                    `${method} accepted an unknown field`,
+                );
             });
         }
     });
 
-    describe("placeholder schemas reject nothing (characterization)", () => {
-        before(() => {
-            registerBuiltinMethods();
-        });
-
-        // These assertions pin the CURRENT no-op behaviour on purpose. When a
-        // schema is tightened to Type.Object({...}), the matching case below will
-        // start failing — that failure is the signal to update this file and the
-        // schema's JSDoc together, not to loosen the schema again.
-        const nonsenseInputs: Array<[string, unknown]> = [
-            ["null", null],
-            ["undefined", undefined],
-            ["a number", 42],
-            ["a string", "not-params"],
-            ["an array", [1, 2, 3]],
-            ["an empty object", {}],
-        ];
-
-        for (const method of [RPC.initialize]) {
-            it(`${method} still accepts nonsense inputs`, () => {
-                const schema = getRegisteredMethod(method)?.schema;
-                assert.ok(schema, `${method} must have a schema`);
-                for (const [label, input] of nonsenseInputs) {
-                    const errors: unknown[] = [...Value.Errors(schema, input)];
-                    assert.equal(
-                        errors.length,
-                        0,
-                        `${method} unexpectedly rejected ${label} — if this schema was intentionally tightened, update this characterization test and the schema's JSDoc note`,
-                    );
-                }
-            });
+    it("initialize remains permissive so malformed clients reach negotiation", () => {
+        const schema = getRegisteredMethod(RPC.initialize)?.schema;
+        assert.ok(schema, "initialize must have a schema");
+        for (const input of [null, undefined, 42, "not-params", [1, 2, 3], {}]) {
+            assert.equal([...Value.Errors(schema, input)].length, 0);
         }
     });
 });

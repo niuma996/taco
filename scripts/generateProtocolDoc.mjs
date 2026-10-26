@@ -5,7 +5,7 @@
  *
  * Usage: node scripts/generateProtocolDoc.mjs [--version X.Y.Z]
  * Env var SIDECAR_VERSION takes precedence over package.json. Reads the marker
- * section, scans packages/shared/rpcMethods.ts and packages/protocol/src/push.ts,
+ * section, scans packages/protocol/src/rpcContract/ and packages/protocol/src/push.ts,
  * and leaves @manual sections untouched.
  */
 
@@ -80,7 +80,7 @@ function renderPushTable(pushMethods) {
 
 // ── Sanity check: every RPC / push method exposed by the runtime must
 // be reflected in the protocol doc. We compare the discoverable names
-// from rpcMethods.ts against the names actually registered in
+// from the protocol contract against the names actually registered in
 // packages/sidecar/src/server/handlers/*.ts. Mismatch means a handler
 // was added or removed but the doc generator did not catch it (a typo, a
 // missing registerMethod call, etc.). This is a build-time safety net,

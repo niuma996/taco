@@ -13,7 +13,13 @@
  *
  * The model never sees the runtime — it delegates by agent name only.
  */
-import type { AgentRuntime, AgentScope, ClaudeCodePermissionMode } from "@taco-ai/protocol";
+import {
+    AGENT_TOOL_NAME_PATTERN,
+    AGENT_TYPE_PATTERN,
+    type AgentRuntime,
+    type AgentScope,
+    type ClaudeCodePermissionMode,
+} from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
@@ -24,10 +30,8 @@ import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
-export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
-
 /** Claude Code tool names, as the sidecar validates them. */
-const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
+const TOOL_NAME_PATTERN = AGENT_TOOL_NAME_PATTERN;
 
 /** Never available to a subagent: it would open a prompt no one can answer. */
 const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);

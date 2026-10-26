@@ -825,7 +825,8 @@ export class SidecarServer implements ServerRpcSurface {
 
         // Schema validation — only when the registration declared a typebox
         // schema. Failures short-circuit with `invalid_params` carrying the
-        // JSON-pointer path so the desktop can render a precise error.
+        // JSON-pointer paths so clients and logs can diagnose the offending
+        // field without exposing the raw request payload.
         if (reg.schema) {
             const errors = Value.Errors(reg.schema, req.params);
             if (errors.length > 0) {

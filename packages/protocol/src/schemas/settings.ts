@@ -11,9 +11,10 @@ import { noParamsSchema } from "./workspace.js";
 
 export const settingsGetSchema = noParamsSchema;
 
-export const settingsWriteSchema = Type.Object({
-    global: Type.Optional(Type.Object({}, { additionalProperties: true })),
-});
+export const settingsWriteSchema = Type.Object(
+    { global: Type.Optional(Type.Object({}, { additionalProperties: true })) },
+    { additionalProperties: false },
+);
 
 /**
  * `config.patch` params — the model's path to the global config.
