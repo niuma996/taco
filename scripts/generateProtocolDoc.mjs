@@ -109,17 +109,23 @@ function discoverRuntimeMethods() {
     return names;
 }
 
-// Build a { camelCaseKey → dottedName } map from the `RPC` const. Keeps
-// the registry of "what's a real RPC method" in one place (the const)
-// rather than mirrored in this script.
+// Build a { camelCaseKey → dottedName } map from each domain's row table.
+// A row is `key: row<P, R>()("<wire name>", "<scope>", schema)`, so the first
+// string literal in the entry is the wire name. Rows may wrap across lines.
 function rpcConstEntries() {
     const entries = [];
     for (const file of readdirSync(RPC_DIR)) {
         if (!file.endsWith(".ts") || file === "index.ts" || file === "types.ts") continue;
         const src = readFileSync(resolve(RPC_DIR, file), "utf8");
-        for (const block of src.matchAll(/export const \w+Methods = \{([\s\S]*?)\} as const;/g)) {
-            for (const m of block[1].matchAll(/^\s+(?<key>\w+):\s*"(?<name>[^"]+)"/gm)) {
-                entries.push({ key: m.groups.key, name: m.groups.name });
+        for (const block of src.matchAll(/const \w+Rows = \{([\s\S]*?)\n\};/g)) {
+            const body = block[1];
+            const marks = [...body.matchAll(/^ {4}(?<key>\w+):/gm)];
+            for (let i = 0; i < marks.length; i++) {
+                const start = marks[i].index;
+                const end = marks[i + 1]?.index ?? body.length;
+                const entry = body.slice(start, end);
+                const name = /"([^"]+)"/.exec(entry)?.[1];
+                if (name) entries.push({ key: marks[i].groups.key, name });
             }
         }
     }

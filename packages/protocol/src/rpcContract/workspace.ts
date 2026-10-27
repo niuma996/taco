@@ -1,14 +1,9 @@
 /**
  * RPC contract rows — workspace.* — workspace lifecycle and associated directories.
  *
- * Three tables move together: the wire name, the params/result types, and the
- * params schema. `rpcContract/index.ts` merges them into the single
- * `RPC` / `rpcContract` / `rpcSchemas` exports that the client and the
- * sidecar both read.
- *
- * Adding a method to this domain means adding one entry to each of the three
- * tables below — the compile-time assertions in the index catch a row that
- * was added to one and forgotten in another.
+ * Each method is declared once as a row (wire name, scope, params/result
+ * types, schema); `rpcContract/index.ts` derives the `RPC` / `rpcContract` /
+ * `rpcSchemas` tables from those rows.
  */
 
 import type { WorkspaceId } from "../frames.js";
@@ -28,7 +23,7 @@ import type {
     WorkspaceAssociationsSetParams,
     WorkspaceAssociationsSetResult,
 } from "../workspace.js";
-import type { RpcContractRow } from "./types.js";
+import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 /** `workspace.list` result — the known workspace keys. */
 export type WorkspaceListResult = WorkspaceId[];
@@ -41,60 +36,38 @@ export interface WorkspaceEnsureResult {
 /** `workspace.dispose` result — nothing; the workspace is gone. */
 export type WorkspaceDisposeResult = null;
 
-/** Wire names for this domain. */
-export const workspaceMethods = {
-    workspaceList: "workspace.list",
-    workspaceEnsure: "workspace.ensure",
-    workspaceDispose: "workspace.dispose",
-    /** Read the associated-directory set stored at one key (workspace or channel scope). */
-    workspaceAssociationsGet: "workspace.associations.get",
-    /** Replace the associated-directory set stored at one key. */
-    workspaceAssociationsSet: "workspace.associations.set",
-    /** The effective associated-directory set for a workspace, after the scope fallback. */
-    workspaceAssociationsResolve: "workspace.associations.resolve",
-    // session.*
-} as const;
-
-/** Params/result types and routing scope for this domain. */
-export const workspaceContract = {
-    workspaceList: { scope: "process" } as RpcContractRow<
-        undefined,
-        WorkspaceListResult,
-        "process"
-    >,
-    workspaceEnsure: { scope: "workspace" } as RpcContractRow<
-        { cwd: WorkspaceId },
-        WorkspaceEnsureResult,
-        "workspace"
-    >,
-    workspaceDispose: { scope: "workspace" } as RpcContractRow<
-        { cwd: WorkspaceId },
-        WorkspaceDisposeResult,
-        "workspace"
-    >,
-    workspaceAssociationsGet: { scope: "process" } as RpcContractRow<
-        WorkspaceAssociationsGetParams,
-        WorkspaceAssociationsGetResult,
-        "process"
-    >,
-    workspaceAssociationsSet: { scope: "process" } as RpcContractRow<
-        WorkspaceAssociationsSetParams,
-        WorkspaceAssociationsSetResult,
-        "process"
-    >,
-    workspaceAssociationsResolve: { scope: "workspace" } as RpcContractRow<
+const workspaceRows = {
+    workspaceList: row<undefined, WorkspaceListResult>()(
+        "workspace.list",
+        "process",
+        workspaceListSchema,
+    ),
+    workspaceEnsure: row<{ cwd: WorkspaceId }, WorkspaceEnsureResult>()(
+        "workspace.ensure",
+        "workspace",
+        workspaceEnsureSchema,
+    ),
+    workspaceDispose: row<{ cwd: WorkspaceId }, WorkspaceDisposeResult>()(
+        "workspace.dispose",
+        "workspace",
+        workspaceDisposeSchema,
+    ),
+    workspaceAssociationsGet: row<WorkspaceAssociationsGetParams, WorkspaceAssociationsGetResult>()(
+        "workspace.associations.get",
+        "process",
+        workspaceAssociationsGetSchema,
+    ),
+    workspaceAssociationsSet: row<WorkspaceAssociationsSetParams, WorkspaceAssociationsSetResult>()(
+        "workspace.associations.set",
+        "process",
+        workspaceAssociationsSetSchema,
+    ),
+    workspaceAssociationsResolve: row<
         WorkspaceAssociationsResolveParams,
-        WorkspaceAssociationsResolveResult,
-        "workspace"
-    >,
+        WorkspaceAssociationsResolveResult
+    >()("workspace.associations.resolve", "workspace", workspaceAssociationsResolveSchema),
 };
 
-/** Params schemas for this domain. */
-export const workspaceSchemas = {
-    workspaceList: workspaceListSchema,
-    workspaceEnsure: workspaceEnsureSchema,
-    workspaceDispose: workspaceDisposeSchema,
-    workspaceAssociationsGet: workspaceAssociationsGetSchema,
-    workspaceAssociationsSet: workspaceAssociationsSetSchema,
-    workspaceAssociationsResolve: workspaceAssociationsResolveSchema,
-};
+export const workspaceMethods = domainMethods(workspaceRows);
+export const workspaceContract = domainContract(workspaceRows);
+export const workspaceSchemas = domainSchemas(workspaceRows);

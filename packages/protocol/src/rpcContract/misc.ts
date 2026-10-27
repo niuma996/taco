@@ -1,14 +1,9 @@
 /**
  * RPC contract rows — tools / agents / skills / mcp — the remaining read and configuration methods.
  *
- * Three tables move together: the wire name, the params/result types, and the
- * params schema. `rpcContract/index.ts` merges them into the single
- * `RPC` / `rpcContract` / `rpcSchemas` exports that the client and the
- * sidecar both read.
- *
- * Adding a method to this domain means adding one entry to each of the three
- * tables below — the compile-time assertions in the index catch a row that
- * was added to one and forgotten in another.
+ * Each method is declared once as a row (wire name, scope, params/result
+ * types, schema); `rpcContract/index.ts` derives the `RPC` / `rpcContract` /
+ * `rpcSchemas` tables from those rows.
  */
 
 import type {
@@ -52,104 +47,67 @@ import type {
     ToolsListParams,
     ToolsListResult,
 } from "../tools.js";
-import type { RpcContractRow } from "./types.js";
+import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
-/** Wire names for this domain. */
-export const miscMethods = {
-    toolsList: "tools.list",
-    // agents.*
-    agentsList: "agents.list",
-    agentsContent: "agents.content",
-    agentsWrite: "agents.write",
-    agentsDelete: "agents.delete",
-    skillsList: "skills.list",
-    skillContent: "skills.content",
-    // checkpoints.* — pre-write file snapshots; restore is client-driven only.
-    mcpListServers: "mcp.listServers",
-    mcpGetConfig: "mcp.getConfig",
-    mcpCreateConfig: "mcp.createConfig",
-    mcpUpdateConfig: "mcp.updateConfig",
-    mcpDeleteConfig: "mcp.deleteConfig",
-    // ── jobs.* ──
-} as const;
-
-/** Params/result types and routing scope for this domain. */
-export const miscContract = {
-    toolsList: { scope: "workspace" } as RpcContractRow<
-        ToolsListParams,
-        ToolsListResult,
-        "workspace"
-    >,
-    agentsList: { scope: "workspace" } as RpcContractRow<
-        AgentsListParams,
-        AgentsListResult,
-        "workspace"
-    >,
-    agentsContent: { scope: "workspace" } as RpcContractRow<
-        AgentsContentParams,
-        AgentsContentResult,
-        "workspace"
-    >,
-    agentsWrite: { scope: "workspace" } as RpcContractRow<
-        AgentsWriteParams,
-        AgentsWriteResult,
-        "workspace"
-    >,
-    agentsDelete: { scope: "workspace" } as RpcContractRow<
-        AgentsDeleteParams,
-        AgentsDeleteResult,
-        "workspace"
-    >,
-    skillsList: { scope: "workspace" } as RpcContractRow<
-        SkillsListParams,
-        SkillsListResult,
-        "workspace"
-    >,
-    skillContent: { scope: "workspace" } as RpcContractRow<
-        SkillContentParams,
-        SkillContentResult,
-        "workspace"
-    >,
-    mcpListServers: { scope: "process" } as RpcContractRow<
-        McpListServersParams,
-        McpListServersResult,
-        "process"
-    >,
-    mcpGetConfig: { scope: "process" } as RpcContractRow<
-        McpGetConfigParams,
-        McpGetConfigResult,
-        "process"
-    >,
-    mcpCreateConfig: { scope: "process" } as RpcContractRow<
-        McpCreateConfigParams,
-        McpMutateConfigResult,
-        "process"
-    >,
-    mcpUpdateConfig: { scope: "process" } as RpcContractRow<
-        McpUpdateConfigParams,
-        McpMutateConfigResult,
-        "process"
-    >,
-    mcpDeleteConfig: { scope: "process" } as RpcContractRow<
-        McpDeleteConfigParams,
-        McpDeleteConfigResult,
-        "process"
-    >,
-    // ── jobs.* ──
+const miscRows = {
+    toolsList: row<ToolsListParams, ToolsListResult>()("tools.list", "workspace", toolsListSchema),
+    agentsList: row<AgentsListParams, AgentsListResult>()(
+        "agents.list",
+        "workspace",
+        agentsListSchema,
+    ),
+    agentsContent: row<AgentsContentParams, AgentsContentResult>()(
+        "agents.content",
+        "workspace",
+        agentsContentSchema,
+    ),
+    agentsWrite: row<AgentsWriteParams, AgentsWriteResult>()(
+        "agents.write",
+        "workspace",
+        agentsWriteSchema,
+    ),
+    agentsDelete: row<AgentsDeleteParams, AgentsDeleteResult>()(
+        "agents.delete",
+        "workspace",
+        agentsDeleteSchema,
+    ),
+    skillsList: row<SkillsListParams, SkillsListResult>()(
+        "skills.list",
+        "workspace",
+        skillsListSchema,
+    ),
+    skillContent: row<SkillContentParams, SkillContentResult>()(
+        "skills.content",
+        "workspace",
+        skillContentSchema,
+    ),
+    mcpListServers: row<McpListServersParams, McpListServersResult>()(
+        "mcp.listServers",
+        "process",
+        mcpListServersSchema,
+    ),
+    mcpGetConfig: row<McpGetConfigParams, McpGetConfigResult>()(
+        "mcp.getConfig",
+        "process",
+        mcpGetConfigSchema,
+    ),
+    mcpCreateConfig: row<McpCreateConfigParams, McpMutateConfigResult>()(
+        "mcp.createConfig",
+        "process",
+        mcpCreateConfigSchema,
+    ),
+    mcpUpdateConfig: row<McpUpdateConfigParams, McpMutateConfigResult>()(
+        "mcp.updateConfig",
+        "process",
+        mcpUpdateConfigSchema,
+    ),
+    mcpDeleteConfig: row<McpDeleteConfigParams, McpDeleteConfigResult>()(
+        "mcp.deleteConfig",
+        "process",
+        mcpDeleteConfigSchema,
+    ),
 };
 
-/** Params schemas for this domain. */
-export const miscSchemas = {
-    toolsList: toolsListSchema,
-    agentsList: agentsListSchema,
-    agentsContent: agentsContentSchema,
-    agentsWrite: agentsWriteSchema,
-    agentsDelete: agentsDeleteSchema,
-    skillsList: skillsListSchema,
-    skillContent: skillContentSchema,
-    mcpListServers: mcpListServersSchema,
-    mcpGetConfig: mcpGetConfigSchema,
-    mcpCreateConfig: mcpCreateConfigSchema,
-    mcpUpdateConfig: mcpUpdateConfigSchema,
-    mcpDeleteConfig: mcpDeleteConfigSchema,
-};
+export const miscMethods = domainMethods(miscRows);
+export const miscContract = domainContract(miscRows);
+export const miscSchemas = domainSchemas(miscRows);

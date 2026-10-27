@@ -1,14 +1,9 @@
 /**
  * RPC contract rows — the bootstrap handshake plus session.* — lifecycle, reads, and turn control.
  *
- * Three tables move together: the wire name, the params/result types, and the
- * params schema. `rpcContract/index.ts` merges them into the single
- * `RPC` / `rpcContract` / `rpcSchemas` exports that the client and the
- * sidecar both read.
- *
- * Adding a method to this domain means adding one entry to each of the three
- * tables below — the compile-time assertions in the index catch a row that
- * was added to one and forgotten in another.
+ * Each method is declared once as a row (wire name, scope, params/result
+ * types, schema); `rpcContract/index.ts` derives the `RPC` / `rpcContract` /
+ * `rpcSchemas` tables from those rows.
  */
 
 import type { CommandPermissionResolveParams, CommandPermissionResolveResult } from "../config.js";
@@ -83,7 +78,7 @@ import type {
     SubagentAbortResult,
 } from "../session.js";
 import type { SubmitAnswersParams } from "../tools.js";
-import type { RpcContractRow } from "./types.js";
+import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 /** `session.attach` result — the attach acknowledgement plus live subagent state. */
 export interface SessionAttachResult {
@@ -145,196 +140,131 @@ export type SessionTasksGetResult = Pick<TasksUpdatedParams, "active" | "history
 /** `session.planState.get` result — the current plan-mode state. */
 export type SessionPlanStateGetResult = Pick<PlanStateUpdatedParams, "active" | "currentSlug">;
 
-/** Wire names for this domain. */
-export const sessionMethods = {
-    initialize: "initialize",
-    // workspace.*
-    sessionList: "session.list",
-    sessionCreate: "session.create",
-    sessionAttach: "session.attach",
-    sessionDetach: "session.detach",
-    sessionDelete: "session.delete",
-    sessionRename: "session.rename",
-    sessionHistory: "session.history",
-    sessionEventsGet: "session.events.get",
-    sessionSnapshotGet: "session.snapshot.get",
-    sessionTasksGet: "session.tasks.get",
-    /** Fetch the full task list for a given history list (history pushes meta only; expand on demand). */
-    sessionTaskHistoryGet: "session.taskHistory.get",
-    sessionPlanStateGet: "session.planState.get",
-    sessionPrompt: "session.prompt",
-    sessionSteer: "session.steer",
-    /** Like steer, but consumed only at may-finish boundaries. */
-    sessionFollowUp: "session.followUp",
-    /** Remove one not-yet-consumed queue entry (steer/followUp/nextRun). */
-    sessionCancelQueued: "session.cancelQueued",
-    sessionAbort: "session.abort",
-    /** Stop one running subagent (by child session id) without aborting the parent's turn. */
-    subagentAbort: "subagent.abort",
-    commandPermissionResolve: "commandPermission.resolve",
-    sessionSetModel: "session.setModel",
-    sessionListModels: "session.listModels",
-    /** List the availability view of built-in providers (configured + models) for the Model settings UI. */
-    sessionSetThinkingLevel: "session.setThinkingLevel",
-    sessionCompact: "session.compact",
-    sessionContextInfo: "session.contextInfo",
-    /** Submit askUser answers — sidecar injects <ask_user_context> into the user message; clients don't see the wire format. */
-    sessionSubmitAnswers: "session.submitAnswers",
-    /** Pull model ids from a provider's /models endpoint for the settings model list. */
-} as const;
-
-/** Params/result types and routing scope for this domain. */
-export const sessionContract = {
-    initialize: { scope: "process" } as RpcContractRow<
-        InitializeParams,
-        InitializeResult,
-        "process"
-    >,
-    sessionList: { scope: "workspace" } as RpcContractRow<
-        SessionListParams,
-        SessionListResult,
-        "workspace"
-    >,
-    sessionCreate: { scope: "workspace" } as RpcContractRow<
-        CreateSessionParams,
-        CreateSessionResult,
-        "workspace"
-    >,
-    sessionAttach: { scope: "workspace" } as RpcContractRow<
-        SessionAttachParams,
-        SessionAttachResult,
-        "workspace"
-    >,
-    sessionDetach: { scope: "workspace" } as RpcContractRow<
-        SessionDetachParams,
-        SessionDetachResult,
-        "workspace"
-    >,
-    sessionDelete: { scope: "workspace" } as RpcContractRow<
-        DeleteSessionParams,
-        SessionDeleteResult,
-        "workspace"
-    >,
-    sessionRename: { scope: "workspace" } as RpcContractRow<
-        RenameSessionParams,
-        SessionRenameResult,
-        "workspace"
-    >,
-    sessionHistory: { scope: "workspace" } as RpcContractRow<
-        SessionHistoryParams,
-        SessionHistory,
-        "workspace"
-    >,
-    sessionEventsGet: { scope: "workspace" } as RpcContractRow<
-        SessionEventsGetParams,
-        SessionEventsGetResult,
-        "workspace"
-    >,
-    sessionSnapshotGet: { scope: "workspace" } as RpcContractRow<
-        SessionSnapshotGetParams,
-        SessionSnapshot,
-        "workspace"
-    >,
-    sessionTasksGet: { scope: "workspace" } as RpcContractRow<
-        SessionTasksGetParams,
-        SessionTasksGetResult,
-        "workspace"
-    >,
-    sessionTaskHistoryGet: { scope: "workspace" } as RpcContractRow<
-        SessionTaskHistoryGetParams,
-        SessionTaskHistoryGetResult,
-        "workspace"
-    >,
-    sessionPlanStateGet: { scope: "workspace" } as RpcContractRow<
-        SessionPlanStateGetParams,
-        SessionPlanStateGetResult,
-        "workspace"
-    >,
-    sessionPrompt: { scope: "workspace" } as RpcContractRow<
-        PromptParams,
-        PromptResult,
-        "workspace"
-    >,
-    sessionSteer: { scope: "workspace" } as RpcContractRow<SteerParams, SteerResult, "workspace">,
-    sessionFollowUp: { scope: "workspace" } as RpcContractRow<
-        FollowUpParams,
-        FollowUpResult,
-        "workspace"
-    >,
-    sessionCancelQueued: { scope: "workspace" } as RpcContractRow<
-        CancelQueuedParams,
-        CancelQueuedResult,
-        "workspace"
-    >,
-    sessionSubmitAnswers: { scope: "workspace" } as RpcContractRow<
-        SubmitAnswersParams,
-        null,
-        "workspace"
-    >,
-    sessionAbort: { scope: "workspace" } as RpcContractRow<AbortParams, AbortResult, "workspace">,
-    subagentAbort: { scope: "workspace" } as RpcContractRow<
-        SubagentAbortParams,
-        SubagentAbortResult,
-        "workspace"
-    >,
-    sessionSetModel: { scope: "workspace" } as RpcContractRow<
-        SetModelParams,
-        SessionSetModelResult,
-        "workspace"
-    >,
-    sessionSetThinkingLevel: { scope: "workspace" } as RpcContractRow<
-        SessionSetThinkingLevelParams,
-        SessionSetThinkingLevelResult,
-        "workspace"
-    >,
-    sessionListModels: { scope: "workspace" } as RpcContractRow<
-        ListModelsParams,
-        SessionListModelsResult,
-        "workspace"
-    >,
-    sessionCompact: { scope: "workspace" } as RpcContractRow<
-        SessionCompactParams,
-        SessionCompactResult,
-        "workspace"
-    >,
-    sessionContextInfo: { scope: "workspace" } as RpcContractRow<
-        SessionContextInfoParams,
-        SessionContextInfoResult,
-        "workspace"
-    >,
-    commandPermissionResolve: { scope: "workspace" } as RpcContractRow<
-        CommandPermissionResolveParams,
-        CommandPermissionResolveResult,
-        "workspace"
-    >,
+const sessionRows = {
+    initialize: row<InitializeParams, InitializeResult>()(
+        "initialize",
+        "process",
+        initializeSchema,
+    ),
+    sessionList: row<SessionListParams, SessionListResult>()(
+        "session.list",
+        "workspace",
+        sessionListSchema,
+    ),
+    sessionCreate: row<CreateSessionParams, CreateSessionResult>()(
+        "session.create",
+        "workspace",
+        sessionCreateSchema,
+    ),
+    sessionAttach: row<SessionAttachParams, SessionAttachResult>()(
+        "session.attach",
+        "workspace",
+        sessionAttachSchema,
+    ),
+    sessionDetach: row<SessionDetachParams, SessionDetachResult>()(
+        "session.detach",
+        "workspace",
+        sessionDetachSchema,
+    ),
+    sessionDelete: row<DeleteSessionParams, SessionDeleteResult>()(
+        "session.delete",
+        "workspace",
+        sessionDeleteSchema,
+    ),
+    sessionRename: row<RenameSessionParams, SessionRenameResult>()(
+        "session.rename",
+        "workspace",
+        sessionRenameSchema,
+    ),
+    sessionHistory: row<SessionHistoryParams, SessionHistory>()(
+        "session.history",
+        "workspace",
+        sessionHistorySchema,
+    ),
+    sessionEventsGet: row<SessionEventsGetParams, SessionEventsGetResult>()(
+        "session.events.get",
+        "workspace",
+        sessionEventsGetSchema,
+    ),
+    sessionSnapshotGet: row<SessionSnapshotGetParams, SessionSnapshot>()(
+        "session.snapshot.get",
+        "workspace",
+        sessionSnapshotGetSchema,
+    ),
+    sessionTasksGet: row<SessionTasksGetParams, SessionTasksGetResult>()(
+        "session.tasks.get",
+        "workspace",
+        sessionTasksGetSchema,
+    ),
+    sessionTaskHistoryGet: row<SessionTaskHistoryGetParams, SessionTaskHistoryGetResult>()(
+        "session.taskHistory.get",
+        "workspace",
+        sessionTaskHistoryGetSchema,
+    ),
+    sessionPlanStateGet: row<SessionPlanStateGetParams, SessionPlanStateGetResult>()(
+        "session.planState.get",
+        "workspace",
+        sessionPlanStateGetSchema,
+    ),
+    sessionPrompt: row<PromptParams, PromptResult>()(
+        "session.prompt",
+        "workspace",
+        sessionPromptSchema,
+    ),
+    sessionSteer: row<SteerParams, SteerResult>()("session.steer", "workspace", sessionSteerSchema),
+    sessionFollowUp: row<FollowUpParams, FollowUpResult>()(
+        "session.followUp",
+        "workspace",
+        sessionFollowUpSchema,
+    ),
+    sessionCancelQueued: row<CancelQueuedParams, CancelQueuedResult>()(
+        "session.cancelQueued",
+        "workspace",
+        sessionCancelQueuedSchema,
+    ),
+    sessionAbort: row<AbortParams, AbortResult>()("session.abort", "workspace", sessionAbortSchema),
+    subagentAbort: row<SubagentAbortParams, SubagentAbortResult>()(
+        "subagent.abort",
+        "workspace",
+        subagentAbortSchema,
+    ),
+    commandPermissionResolve: row<CommandPermissionResolveParams, CommandPermissionResolveResult>()(
+        "commandPermission.resolve",
+        "workspace",
+        commandPermissionResolveSchema,
+    ),
+    sessionSetModel: row<SetModelParams, SessionSetModelResult>()(
+        "session.setModel",
+        "workspace",
+        sessionSetModelSchema,
+    ),
+    sessionListModels: row<ListModelsParams, SessionListModelsResult>()(
+        "session.listModels",
+        "workspace",
+        sessionListModelsSchema,
+    ),
+    sessionSetThinkingLevel: row<SessionSetThinkingLevelParams, SessionSetThinkingLevelResult>()(
+        "session.setThinkingLevel",
+        "workspace",
+        sessionSetThinkingLevelSchema,
+    ),
+    sessionCompact: row<SessionCompactParams, SessionCompactResult>()(
+        "session.compact",
+        "workspace",
+        sessionCompactSchema,
+    ),
+    sessionContextInfo: row<SessionContextInfoParams, SessionContextInfoResult>()(
+        "session.contextInfo",
+        "workspace",
+        sessionContextInfoSchema,
+    ),
+    sessionSubmitAnswers: row<SubmitAnswersParams, null>()(
+        "session.submitAnswers",
+        "workspace",
+        sessionSubmitAnswersSchema,
+    ),
 };
 
-/** Params schemas for this domain. */
-export const sessionSchemas = {
-    initialize: initializeSchema,
-    sessionList: sessionListSchema,
-    sessionCreate: sessionCreateSchema,
-    sessionAttach: sessionAttachSchema,
-    sessionDetach: sessionDetachSchema,
-    sessionDelete: sessionDeleteSchema,
-    sessionRename: sessionRenameSchema,
-    sessionHistory: sessionHistorySchema,
-    sessionEventsGet: sessionEventsGetSchema,
-    sessionSnapshotGet: sessionSnapshotGetSchema,
-    sessionTasksGet: sessionTasksGetSchema,
-    sessionTaskHistoryGet: sessionTaskHistoryGetSchema,
-    sessionPlanStateGet: sessionPlanStateGetSchema,
-    sessionPrompt: sessionPromptSchema,
-    sessionSteer: sessionSteerSchema,
-    sessionFollowUp: sessionFollowUpSchema,
-    sessionCancelQueued: sessionCancelQueuedSchema,
-    sessionSubmitAnswers: sessionSubmitAnswersSchema,
-    sessionAbort: sessionAbortSchema,
-    subagentAbort: subagentAbortSchema,
-    sessionSetModel: sessionSetModelSchema,
-    sessionSetThinkingLevel: sessionSetThinkingLevelSchema,
-    sessionListModels: sessionListModelsSchema,
-    sessionCompact: sessionCompactSchema,
-    sessionContextInfo: sessionContextInfoSchema,
-    commandPermissionResolve: commandPermissionResolveSchema,
-};
+export const sessionMethods = domainMethods(sessionRows);
+export const sessionContract = domainContract(sessionRows);
+export const sessionSchemas = domainSchemas(sessionRows);
