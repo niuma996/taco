@@ -42,7 +42,9 @@ import {
     sessionListModelsSchema,
     sessionListSchema,
     sessionPlanStateGetSchema,
+    sessionPromptSchema,
     sessionSnapshotGetSchema,
+    sessionSteerSchema,
     sessionTaskHistoryGetSchema,
     sessionTasksGetSchema,
     settingsGetSchema,
@@ -529,6 +531,47 @@ describe("schemaValidation", () => {
                 schema: sessionCreateSchema,
                 invalid: {},
                 valid: { workspace: "/w" },
+            },
+            {
+                method: "session.create (image-only prompt)",
+                schema: sessionCreateSchema,
+                invalid: { workspace: "/w", initialImages: [42] },
+                valid: {
+                    workspace: "/w",
+                    initialImages: [{ type: "image", data: "AAA", mimeType: "image/png" }],
+                },
+            },
+            {
+                method: "session.prompt",
+                schema: sessionPromptSchema,
+                invalid: {
+                    workspace: "/w",
+                    sessionId: "s1",
+                    text: "inspect this",
+                    images: [{ type: "image", data: "AAA" }],
+                },
+                valid: {
+                    workspace: "/w",
+                    sessionId: "s1",
+                    text: "inspect this",
+                    images: [{ type: "image", data: "AAA", mimeType: "image/png" }],
+                },
+            },
+            {
+                method: "session.steer",
+                schema: sessionSteerSchema,
+                invalid: {
+                    workspace: "/w",
+                    sessionId: "s1",
+                    text: "redirect",
+                    images: [{ type: "text", data: "not an image", mimeType: "text/plain" }],
+                },
+                valid: {
+                    workspace: "/w",
+                    sessionId: "s1",
+                    text: "redirect",
+                    images: [{ type: "image", data: "AAA", mimeType: "image/png" }],
+                },
             },
             {
                 method: "settings.write",
