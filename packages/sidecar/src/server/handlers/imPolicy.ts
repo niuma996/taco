@@ -23,20 +23,6 @@ function requireImPolicy(server: ServerRpcSurface): ImPolicyControl {
     return server.imPolicy;
 }
 
-function requireChannelId(value: unknown): string {
-    if (typeof value !== "string" || value.length === 0) {
-        throw new RpcHandlerError(ErrorCodes.InvalidParams, "channelId is required");
-    }
-    return value;
-}
-
-function requireChatTriple(value: unknown, field: "peerId" | "chatId"): string {
-    if (typeof value !== "string" || value.length === 0) {
-        throw new RpcHandlerError(ErrorCodes.InvalidParams, `${field} is required`);
-    }
-    return value;
-}
-
 /**
  * Translate a store validation error (thrown from `validatePartial` inside
  * `SidecarServer.setImChannelDefault / setImChatOverride`) into a coded
@@ -50,8 +36,7 @@ function mapInvalidPatchError(e: unknown): never {
 export function registerImPolicyHandlers(): void {
     registerMethod("imPolicyGet", false, async ({ server, params }): Promise<ImPolicyGetResult> => {
         const imPolicy = requireImPolicy(server);
-        const channelId = requireChannelId(params?.channelId);
-        return imPolicy.get({ ...(params ?? {}), channelId });
+        return imPolicy.get(params);
     });
 
     registerMethod(
@@ -59,9 +44,9 @@ export function registerImPolicyHandlers(): void {
         false,
         async ({ server, params }): Promise<ImPolicyWriteResult> => {
             const imPolicy = requireImPolicy(server);
-            const channelId = requireChannelId(params?.channelId);
+            const channelId = params.channelId;
             try {
-                await imPolicy.setChannelDefault(channelId, params?.patch ?? {});
+                await imPolicy.setChannelDefault(channelId, params.patch);
             } catch (e) {
                 mapInvalidPatchError(e);
             }
@@ -74,11 +59,11 @@ export function registerImPolicyHandlers(): void {
         false,
         async ({ server, params }): Promise<ImPolicyWriteResult> => {
             const imPolicy = requireImPolicy(server);
-            const channelId = requireChannelId(params?.channelId);
-            const peerId = requireChatTriple(params?.peerId, "peerId");
-            const chatId = requireChatTriple(params?.chatId, "chatId");
+            const channelId = params.channelId;
+            const peerId = params.peerId;
+            const chatId = params.chatId;
             try {
-                await imPolicy.setChatOverride({ channelId, peerId, chatId }, params?.patch ?? {});
+                await imPolicy.setChatOverride({ channelId, peerId, chatId }, params.patch);
             } catch (e) {
                 mapInvalidPatchError(e);
             }
@@ -91,9 +76,9 @@ export function registerImPolicyHandlers(): void {
         false,
         async ({ server, params }): Promise<ImPolicyWriteResult> => {
             const imPolicy = requireImPolicy(server);
-            const channelId = requireChannelId(params?.channelId);
-            const hasTriple = !!(params?.peerId && params?.chatId);
-            const hasKey = typeof params?.chatKey === "string" && params.chatKey.length > 0;
+            const channelId = params.channelId;
+            const hasTriple = !!(params.peerId && params.chatId);
+            const hasKey = !!params.chatKey;
             if (hasTriple === hasKey) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,
@@ -101,18 +86,16 @@ export function registerImPolicyHandlers(): void {
                 );
             }
             if (hasKey) {
-                const key = params?.chatKey;
-                if (!key)
-                    throw new RpcHandlerError(ErrorCodes.InvalidParams, "chatKey is required");
-                await imPolicy.clearChatOverride({ chatKey: key }, channelId);
+                await imPolicy.clearChatOverride({ chatKey: params.chatKey as string }, channelId);
             } else {
-                const peerId = params?.peerId;
-                const chatId = params?.chatId;
-                if (!peerId || !chatId) {
-                    throw new RpcHandlerError(ErrorCodes.InvalidParams, "peerId+chatId required");
-                }
                 await imPolicy.clearChatOverride(
-                    { route: { channelId, peerId, chatId } },
+                    {
+                        route: {
+                            channelId,
+                            peerId: params.peerId as string,
+                            chatId: params.chatId as string,
+                        },
+                    },
                     channelId,
                 );
             }

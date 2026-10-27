@@ -243,7 +243,10 @@ describe("channels", () => {
 
         it("rejects a missing name", async () => {
             const { control } = fakeChannels();
-            await assert.rejects(call("channels.create", hook(control), {}), /name is required/);
+            await assert.rejects(
+                call("channels.create", hook(control), {}),
+                /parameter validation failed/,
+            );
         });
 
         it("surfaces a duplicate channelId as a caller error", async () => {
@@ -273,7 +276,10 @@ describe("channels", () => {
 
         it("rejects a missing channelId", async () => {
             const { control } = fakeChannels();
-            await assert.rejects(call("channels.bind", hook(control), {}), /channelId is required/);
+            await assert.rejects(
+                call("channels.bind", hook(control), {}),
+                /parameter validation failed/,
+            );
         });
 
         it("surfaces an unknown channel as a caller error, not internal", async () => {
@@ -315,11 +321,11 @@ describe("channels", () => {
             const { control } = fakeChannels();
             await assert.rejects(
                 call("channels.submitVerifyCode", hook(control), { code: "1" }),
-                /requestId is required/,
+                /requestId/,
             );
             await assert.rejects(
                 call("channels.submitVerifyCode", hook(control), { requestId: "r1" }),
-                /code is required/,
+                /code/,
             );
         });
     });
@@ -335,10 +341,7 @@ describe("channels", () => {
 
         it("rejects a missing channelId", async () => {
             const { control } = fakeChannels();
-            await assert.rejects(
-                call("channels.unbind", hook(control), {}),
-                /channelId is required/,
-            );
+            await assert.rejects(call("channels.unbind", hook(control), {}), /channelId/);
         });
     });
 
@@ -352,10 +355,7 @@ describe("channels", () => {
 
         it("rejects a missing channelId", async () => {
             const { control } = fakeChannels();
-            await assert.rejects(
-                call("channels.retry", hook(control), {}),
-                /channelId is required/,
-            );
+            await assert.rejects(call("channels.retry", hook(control), {}), /channelId/);
         });
 
         it("surfaces a control-side error as invalid_params", async () => {
@@ -387,11 +387,14 @@ describe("channels", () => {
             assert.deepEqual(calls.listConversations, [undefined]);
         });
 
-        it("treats an empty-string channelId as undefined", async () => {
-            // Defensive against clients that send channelId="" when they mean "all".
-            const { control, calls } = fakeChannels();
-            await call("channels.listConversations", hook(control), { channelId: "" });
-            assert.deepEqual(calls.listConversations, [undefined]);
+        it("rejects an empty-string channelId", async () => {
+            // The schema requires a non-empty channel id, so a client that
+            // sends "" to mean "all" is rejected at the wire boundary.
+            const { control } = fakeChannels();
+            await assert.rejects(
+                call("channels.listConversations", hook(control), { channelId: "" }),
+                /channelId/,
+            );
         });
 
         it("fails with invalid_state when channels are unavailable", async () => {
@@ -538,7 +541,7 @@ describe("imPolicy", () => {
 
         it("rejects a missing channelId", async () => {
             const { control } = fakeImPolicy();
-            await assert.rejects(call("imPolicy.get", hook(control), {}), /channelId is required/);
+            await assert.rejects(call("imPolicy.get", hook(control), {}), /channelId/);
         });
 
         it("fails with invalid_state when imPolicy is unavailable", async () => {
@@ -562,17 +565,22 @@ describe("imPolicy", () => {
             assert.deepEqual(result, { channelId: "wechat" });
         });
 
-        it("defaults an absent patch to {}", async () => {
+        it("rejects an absent patch", async () => {
+            // The contract schema requires the patch body, so an absent one
+            // never reaches the handler.
             const { control, calls } = fakeImPolicy();
-            await call("imPolicy.setChannelDefault", hook(control), { channelId: "wechat" });
-            assert.deepEqual(calls.setChannelDefault, [{ channelId: "wechat", patch: {} }]);
+            await assert.rejects(
+                call("imPolicy.setChannelDefault", hook(control), { channelId: "wechat" }),
+                /patch/,
+            );
+            assert.deepEqual(calls.setChannelDefault, []);
         });
 
         it("rejects a missing channelId", async () => {
             const { control } = fakeImPolicy();
             await assert.rejects(
                 call("imPolicy.setChannelDefault", hook(control), {}),
-                /channelId is required/,
+                /channelId/,
             );
         });
 
@@ -618,7 +626,7 @@ describe("imPolicy", () => {
                     channelId: "wechat",
                     chatId: "c1",
                 }),
-                /peerId is required/,
+                /peerId/,
             );
         });
 
@@ -629,7 +637,7 @@ describe("imPolicy", () => {
                     channelId: "wechat",
                     peerId: "u1",
                 }),
-                /chatId is required/,
+                /chatId/,
             );
         });
 

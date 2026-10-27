@@ -498,17 +498,27 @@ describe("jobs", () => {
             assert.deepEqual(controllerCalls, ["list:none"]);
         });
 
-        it("treats malformed actor as undefined (admin path)", async () => {
+        it("rejects a malformed actor before it reaches the controller", async () => {
             registerBuiltinMethods();
             const controllerCalls: string[] = [];
             const server = makeStubServer(controllerCalls);
-            await callMethod("jobs.list", {
-                server,
-                params: {
-                    actor: { kind: "im", channelId: "ch1" }, // missing peerId/chatId
-                },
-            });
-            assert.deepEqual(controllerCalls, ["list:none"]);
+            // A malformed actor is a schema failure, not an unscoped call: the
+            // contract schema validates the actor before dispatch, so it never
+            // reaches the handler. Treating it as "no actor" would hand an
+            // unscoped (admin) caller the job list.
+            await assert.rejects(
+                () =>
+                    callMethod("jobs.list", {
+                        server,
+                        params: {
+                            actor: { kind: "im", channelId: "ch1" }, // missing peerId/chatId
+                        },
+                    }),
+                (e: unknown) =>
+                    e instanceof RpcHandlerError &&
+                    (e as { code: string }).code === "invalid_params",
+            );
+            assert.deepEqual(controllerCalls, []);
         });
     });
 });
@@ -869,8 +879,6 @@ describe("memory", () => {
         it("rejects id with uppercase, path traversal, underscores, or over-length", async () => {
             const store = new LocalMemoryStore();
             store.initialize("ws-test");
-            const handler = getRegisteredMethod("memory.upsert");
-            assert.ok(handler);
 
             for (const badId of [
                 "../etc/passwd",
@@ -880,19 +888,21 @@ describe("memory", () => {
                 "x".repeat(65),
                 "",
             ]) {
-                const ctx = makeCtx(
-                    { memoryStore: store },
-                    {
-                        workspace: "/tmp/ws",
-                        action: "add",
-                        id: badId,
-                        name: "x",
-                        content: "x",
-                        type: "user",
-                    },
-                );
+                // The id whitelist lives in the contract schema, which the
+                // server applies before the handler runs.
                 await assert.rejects(
-                    () => handler.handler(ctx),
+                    () =>
+                        callMethod("memory.upsert", {
+                            workspace: { memoryStore: store } as unknown as WorkspaceRuntime,
+                            params: {
+                                workspace: "/tmp/ws",
+                                action: "add",
+                                id: badId,
+                                name: "x",
+                                content: "x",
+                                type: "user",
+                            },
+                        }),
                     (err: unknown) => {
                         assert.ok(err instanceof Error);
                         assert.equal((err as { code?: string }).code, "invalid_params");
@@ -906,23 +916,21 @@ describe("memory", () => {
         it("rejects non-string id with invalid_params", async () => {
             const store = new LocalMemoryStore();
             store.initialize("ws-test");
-            const handler = getRegisteredMethod("memory.upsert");
-            assert.ok(handler);
 
             for (const badId of [null, undefined, 123, {}, []]) {
-                const ctx = makeCtx(
-                    { memoryStore: store },
-                    {
-                        workspace: "/tmp/ws",
-                        action: "add",
-                        id: badId,
-                        name: "x",
-                        content: "x",
-                        type: "user",
-                    },
-                );
                 await assert.rejects(
-                    () => handler.handler(ctx),
+                    () =>
+                        callMethod("memory.upsert", {
+                            workspace: { memoryStore: store } as unknown as WorkspaceRuntime,
+                            params: {
+                                workspace: "/tmp/ws",
+                                action: "add",
+                                id: badId,
+                                name: "x",
+                                content: "x",
+                                type: "user",
+                            },
+                        }),
                     (err: unknown) => {
                         assert.ok(err instanceof Error);
                         assert.equal((err as { code?: string }).code, "invalid_params");
@@ -940,24 +948,26 @@ describe("memory", () => {
             assert.ok(handler);
 
             const badCases: Array<{ name?: string; content?: string }> = [
+                // The name length is a schema rule; the content cap is the
+                // handler's, because the schema leaves the body free-form.
                 { name: "x".repeat(61), content: "ok" },
                 { name: "ok", content: "x".repeat(MEMORY_CONTENT_MAX_CHARS + 1) },
             ];
             for (const overrides of badCases) {
-                const ctx = makeCtx(
-                    { memoryStore: store },
-                    {
-                        workspace: "/tmp/ws",
-                        action: "add",
-                        id: "valid-id",
-                        name: "ok",
-                        content: "ok",
-                        type: "user",
-                        ...overrides,
-                    },
-                );
                 await assert.rejects(
-                    () => handler.handler(ctx),
+                    () =>
+                        callMethod("memory.upsert", {
+                            workspace: { memoryStore: store } as unknown as WorkspaceRuntime,
+                            params: {
+                                workspace: "/tmp/ws",
+                                action: "add",
+                                id: "valid-id",
+                                name: "ok",
+                                content: "ok",
+                                type: "user",
+                                ...overrides,
+                            },
+                        }),
                     (err: unknown) => {
                         assert.ok(err instanceof Error);
                         assert.equal((err as { code?: string }).code, "invalid_params");

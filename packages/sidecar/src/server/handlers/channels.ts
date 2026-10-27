@@ -29,13 +29,6 @@ function requireChannels(server: ServerRpcSurface): ChannelControl {
     return server.channels;
 }
 
-function requireChannelId(value: unknown): string {
-    if (typeof value !== "string" || value.length === 0) {
-        throw new RpcHandlerError(ErrorCodes.InvalidParams, "channelId is required");
-    }
-    return value;
-}
-
 export function registerChannelsHandlers(): void {
     registerMethod(
         "channelsList",
@@ -44,10 +37,7 @@ export function registerChannelsHandlers(): void {
     );
 
     registerMethod("channelsListConversations", false, async ({ server, params }) => {
-        const channelId =
-            typeof params?.channelId === "string" && params.channelId.length > 0
-                ? params.channelId
-                : undefined;
+        const channelId = params.channelId;
         return requireChannels(server).listConversations(
             channelId,
         ) satisfies ChannelsListConversationsResult;
@@ -58,9 +48,6 @@ export function registerChannelsHandlers(): void {
         false,
         async ({ server, params }) => {
             const channels = requireChannels(server);
-            if (typeof params?.name !== "string" || params.name.length === 0) {
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "name is required");
-            }
             try {
                 return channels.create(
                     params.name,
@@ -82,12 +69,12 @@ export function registerChannelsHandlers(): void {
         false,
         async ({ server, params }) => {
             const channels = requireChannels(server);
-            const channelId = requireChannelId(params?.channelId);
+            const channelId = params.channelId;
             try {
                 return (await channels.bind(
                     channelId,
-                    params?.force,
-                    params?.creds,
+                    params.force,
+                    params.creds,
                 )) satisfies ChannelsBindResult;
             } catch (e) {
                 if (e instanceof WechatSdkMissingError) {
@@ -112,12 +99,6 @@ export function registerChannelsHandlers(): void {
         false,
         async ({ server, params }) => {
             const channels = requireChannels(server);
-            if (typeof params?.requestId !== "string" || params.requestId.length === 0) {
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "requestId is required");
-            }
-            if (typeof params?.code !== "string" || params.code.length === 0) {
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "code is required");
-            }
             return {
                 accepted: channels.submitVerifyCode(params.requestId, params.code),
             } satisfies ChannelsSubmitVerifyCodeResult;
@@ -130,7 +111,7 @@ export function registerChannelsHandlers(): void {
         false,
         async ({ server, params }) => {
             const channels = requireChannels(server);
-            const channelId = requireChannelId(params?.channelId);
+            const channelId = params.channelId;
             try {
                 await channels.unbind(channelId);
             } catch (e) {
@@ -149,7 +130,7 @@ export function registerChannelsHandlers(): void {
         false,
         async ({ server, params }) => {
             const channels = requireChannels(server);
-            const channelId = requireChannelId(params?.channelId);
+            const channelId = params.channelId;
             try {
                 return await channels.retry(channelId);
             } catch (e) {

@@ -277,8 +277,7 @@ export function registerMemoryHandlers(): void {
         "memoryDeleteTopic",
         true,
         async ({ workspace, params }): Promise<MemoryDeleteTopicResult> => {
-            const expected =
-                typeof params.expectedContent === "string" ? params.expectedContent : undefined;
+            const expected = params.expectedContent;
             try {
                 await deleteTopic(workspace.memoryStore, params.id, expected);
             } catch (error) {
@@ -292,16 +291,11 @@ export function registerMemoryHandlers(): void {
         "memoryUpsert",
         true,
         async ({ workspace, params }): Promise<MemoryUpsertResult> => {
-            // id whitelist: lowercase + kebab-case + length check. The
-            // handler is the sole boundary.
-            if (typeof params.id !== "string") {
-                throw new RpcHandlerError(
-                    ErrorCodes.InvalidParams,
-                    "memory.upsert: id must be a string",
-                );
-            }
+            // The store owns the canonical id form (lowercase kebab-case).
+            // The contract schema already rejects anything else, so a
+            // mismatch here means the id would be rewritten on write.
             const validatedId = normalizeMemoryTopicId(params.id);
-            if (validatedId !== params.id || params.id.length > 64 || params.id.length === 0) {
+            if (validatedId !== params.id) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,
                     "memory.upsert: id must be kebab-case, ≤64 chars",
@@ -316,15 +310,10 @@ export function registerMemoryHandlers(): void {
                             "memory.upsert add: name/content/type required",
                         );
                     }
-                    if (
-                        typeof params.name !== "string" ||
-                        params.name.length > 60 ||
-                        typeof params.content !== "string" ||
-                        params.content.length > MEMORY_CONTENT_MAX_CHARS
-                    ) {
+                    if (params.content.length > MEMORY_CONTENT_MAX_CHARS) {
                         throw new RpcHandlerError(
                             ErrorCodes.InvalidParams,
-                            `memory.upsert add: name ≤60, content ≤${MEMORY_CONTENT_MAX_CHARS}`,
+                            `memory.upsert add: content ≤${MEMORY_CONTENT_MAX_CHARS}`,
                         );
                     }
                     if (store.getTopic(validatedId)) {

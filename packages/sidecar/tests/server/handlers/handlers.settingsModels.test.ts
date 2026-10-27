@@ -335,9 +335,11 @@ describe("provider.listModels", () => {
         });
 
         it("rejects unknown api value", async () => {
+            // The api literal is a schema rule, so the request is rejected at
+            // the wire boundary before the probe runs.
             await assert.rejects(
                 () => invoke({ baseUrl: "https://x", api: "wat", apiKey: "k" }),
-                /unsupported api/,
+                /api/,
             );
         });
 
@@ -771,14 +773,16 @@ describe("provider.testConnection", () => {
         });
 
         it("rejects an unsupported api and a blank key", async () => {
+            // Both are schema rules: the api literal is closed, and the key
+            // must be a non-empty string.
             await assert.rejects(
                 () => invoke({ baseUrl: "https://x", api: "bogus", apiKey: "k", modelId: "m" }),
-                /unsupported api/,
+                /api/,
             );
             await assert.rejects(
                 () =>
                     invoke({ baseUrl: "https://x", api: "chatcomplete", apiKey: "", modelId: "m" }),
-                /apiKey is required/,
+                /apiKey/,
             );
         });
     });

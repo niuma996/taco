@@ -132,9 +132,6 @@ export function registerMcpHandlers(): void {
     );
 
     registerMethod("mcpGetConfig", false, async ({ params }): Promise<McpGetConfigResult> => {
-        if (typeof params?.id !== "string" || params.id.length === 0) {
-            throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
-        }
         return { config: requireServerConfig(readMcpServers(), params.id) };
     });
 
@@ -142,8 +139,6 @@ export function registerMcpHandlers(): void {
         "mcpCreateConfig",
         false,
         async ({ params, server }): Promise<McpMutateConfigResult> => {
-            if (!params?.config)
-                throw new RpcHandlerError(ErrorCodes.InvalidParams, "config is required");
             // validateMcpServers throws a plain Error on malformed input
             // (duplicate id, bad transport, invalid url, ...) — map it to a
             // contract error here so clients see invalid_params, not internal.

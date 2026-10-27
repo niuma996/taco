@@ -665,7 +665,12 @@ describe("commandPermission.persistence", () => {
         });
         await callMethod("commandPermission.resolve", {
             workspace: { permissionBroker: broker },
-            params: { requestId: await requested, approved: true, scope: "global" },
+            params: {
+                workspace: "/tmp/ws",
+                requestId: await requested,
+                approved: true,
+                scope: "global",
+            },
         });
         assert.equal((await pending).scope, "once");
         assert.deepEqual(readGlobalConfig().commandPermissions?.allow, []);
@@ -686,7 +691,7 @@ describe("commandPermission.persistence", () => {
         });
         await callMethod("commandPermission.resolve", {
             workspace: { permissionBroker: broker },
-            params: { requestId, approved: true, scope: "global" },
+            params: { workspace: "/tmp/ws", requestId, approved: true, scope: "global" },
         });
         assert.equal((await pending).approved, true);
         assert.deepEqual(readGlobalConfig().commandPermissions?.allow, ["pnpm test", command]);
