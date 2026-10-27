@@ -1,8 +1,8 @@
 # `@taco-ai/shared`
 
 Typed Node-side RPC client for `@taco-ai/sidecar`. Wraps the raw
-NDJSON-over-stdio framing in a class with 53 typed methods
-(auto-generated from `rpcMethods.ts`).
+NDJSON-over-stdio framing in a class whose typed methods come from the
+protocol contract table in `@taco-ai/protocol`.
 
 ## Install
 
@@ -22,10 +22,17 @@ Requires `@taco-ai/protocol` (peer) and Node ≥ 22.
 - **`TacoClientBase`** — transport-agnostic dispatcher /
   pending-promise registry / typed RPC injection. Subclassed by
   the Tauri-flavored client inside `@taco-ai/desktop`.
-- **`createTypedRpc(dispatch)`** — generates 53 typed wrappers
-  (`workspaceEnsure`, `sessionPrompt`, `agentsList`, …) from a
-  two-method dispatch interface. Shared between the Node and
-  Tauri transports.
+- **`createTypedRpc(dispatch)`** — the typed method facade
+  (`workspaceEnsure`, `sessionPrompt`, `agentsList`, …). Each method's
+  payload and result type come from the protocol contract table, so the
+  wire shape cannot drift from the sidecar's. Shared between the Node
+  and Tauri transports.
+- **`createContractDispatch(dispatch)`** — the contract-bound send path
+  behind that facade: the method name determines the payload and result
+  types, and the routing (workspace vs process) is checked at compile time.
+- **`describeRpcError`** — folds a schema failure's field paths into the
+  error message, so every surface that shows `error.message` explains
+  which field was rejected.
 - **`FrameDispatcher` / `NdjsonLineBuffer`** — the frame parser,
   deduplicator, and pending-promise map. Exposed for tooling that
   wants to drive the sidecar over a custom transport.
@@ -77,7 +84,9 @@ src/
 ├── tacoClientBase.ts   # transport-agnostic base class
 ├── tacoClientNode.ts   # Node-side child_process transport
 ├── dispatcher.ts       # FrameDispatcher / NdjsonLineBuffer
-├── rpcMethods.ts       # wire-method name constants (single source of truth)
+├── contractDispatch.ts # contract-bound send path + RpcDispatch interface
+├── rpcError.ts         # validation-issue rendering for error messages
+├── rpcMethods.ts       # wire-method names (re-exported from the protocol contract)
 ├── typedRpc.ts         # createTypedRpc + TypedRpc surface
 └── spawn.ts            # createDefaultSidecarSpawn factory
 ```

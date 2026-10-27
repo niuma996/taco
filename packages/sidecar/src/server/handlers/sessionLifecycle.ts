@@ -333,12 +333,12 @@ async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: Session
 /**
  * `<sessionsRoot>/<sid>` — the one place a path is built from an RPC parameter.
  *
- * `sessionDeleteSchema` is `Type.Any()` and `asSessionId` only rejects the
- * empty string, so `sessionId` is whatever the caller sent. Every other delete
- * path goes through metadata resolved from the session list and never joins a
- * raw input onto a root; this one does, so the segment is checked to be a
- * single path component before it can reach a recursive delete. Without it a
- * `../..` id would escape `sessionsRoot`.
+ * `sessionDeleteSchema` only requires a non-empty id, and `asSessionId`
+ * rejects nothing beyond the empty string, so `sessionId` is whatever the
+ * caller sent. Every other delete path goes through metadata resolved from
+ * the session list and never joins a raw input onto a root; this one does, so
+ * the segment is checked to be a single path component before it can reach a
+ * recursive delete. Without it a `../..` id would escape `sessionsRoot`.
  */
 function sessionAuxDir(sessionsRoot: string, sessionId: SessionId): string {
     const root = resolve(sessionsRoot);

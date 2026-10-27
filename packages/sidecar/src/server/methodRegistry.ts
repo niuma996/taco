@@ -20,12 +20,12 @@
  * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects bad
  * input with `invalid_params`.
  *
- * That guarantee is about *pairing*, not coverage: most schemas in the
- * contract table are still `Type.Any()` / `Type.Unknown()` placeholders,
- * which accept any value. Those methods get no wire-level validation —
- * their handlers do their own runtime checks instead. Tightening a schema
- * turns the gate on for that method; the contract table's compile-time
- * assertion then requires the schema to stay consistent with the contract.
+ * That guarantee is about *pairing*, not depth: every registered method now
+ * carries a schema, and the compile-time assertion in the contract table
+ * keeps each schema at least as permissive as the params type it serves.
+ * The remaining gap is the other direction — a schema may be looser than the
+ * contract (a required field turned optional, an enum widened) and the
+ * assertion cannot see it, so handlers keep their own semantic checks.
  *
  * Three limits worth knowing before relying on this:
  *   1. `ctx.params` is the raw `req.params` (no `Value.Cast`), so a
