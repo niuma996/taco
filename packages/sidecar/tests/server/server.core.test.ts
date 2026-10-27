@@ -18,6 +18,13 @@ import {
     imPolicySetChannelDefaultSchema,
     imPolicySetChatOverrideSchema,
     isCompatibleSidecarProtocol,
+    jobsCreateSchema,
+    jobsDeleteSchema,
+    jobsGetSchema,
+    jobsHistorySchema,
+    jobsListSchema,
+    jobsRunNowSchema,
+    jobsUpdateSchema,
     mcpCreateConfigSchema,
     mcpDeleteConfigSchema,
     mcpUpdateConfigSchema,
@@ -654,6 +661,78 @@ describe("schemaValidation", () => {
                 schema: sessionPlanStateGetSchema,
                 invalid: { workspace: "/w" },
                 valid: { workspace: "/w", sessionId: "s1" },
+            },
+            {
+                method: "jobs.list",
+                schema: jobsListSchema,
+                invalid: { actor: { kind: "im" } },
+                valid: { actor: { kind: "im", channelId: "c", peerId: "p", chatId: "t" } },
+            },
+            {
+                method: "jobs.get",
+                schema: jobsGetSchema,
+                invalid: { id: "bad/id" },
+                valid: { id: "job-1" },
+            },
+            {
+                method: "jobs.delete",
+                schema: jobsDeleteSchema,
+                invalid: {},
+                valid: { id: "job-1" },
+            },
+            {
+                method: "jobs.runNow",
+                schema: jobsRunNowSchema,
+                invalid: { id: "" },
+                valid: { id: "job-1" },
+            },
+            {
+                method: "jobs.history",
+                schema: jobsHistorySchema,
+                invalid: { id: 7 },
+                valid: { id: "job-1" },
+            },
+            {
+                method: "jobs.create",
+                schema: jobsCreateSchema,
+                // The id is optional on create — the daemon mints it.
+                invalid: { job: { name: "n", command: "agent.invoke" } },
+                valid: {
+                    job: {
+                        name: "n",
+                        schedule: { kind: "interval", ms: 1000 },
+                        command: "agent.invoke",
+                        args: {},
+                        enabled: true,
+                        run_on_startup: false,
+                    },
+                },
+            },
+            {
+                method: "jobs.update",
+                schema: jobsUpdateSchema,
+                // The id is required on update — the body replaces a job.
+                invalid: {
+                    job: {
+                        name: "n",
+                        schedule: { kind: "interval", ms: 1000 },
+                        command: "agent.invoke",
+                        args: {},
+                        enabled: true,
+                        run_on_startup: false,
+                    },
+                },
+                valid: {
+                    job: {
+                        id: "job-1",
+                        name: "n",
+                        schedule: { kind: "interval", ms: 1000 },
+                        command: "agent.invoke",
+                        args: {},
+                        enabled: true,
+                        run_on_startup: false,
+                    },
+                },
             },
         ];
 
