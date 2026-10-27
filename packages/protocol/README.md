@@ -24,13 +24,30 @@ Runtime schema construction depends on TypeBox.
   servers negotiate on the `initialize` handshake.
 - **Namespace DTOs** — `session.*`, `channel.*`, `mcp.*`,
   `memory.*`, `imPolicy.*`, `checkpoints.*`, `tools.*`,
-  `agents.*`, `skills.*`, etc.
+  `agents.*`, `skills.*`, etc. A request's wire shape is declared
+  once, as a TypeBox schema in `schemas/`; the exported `*Params`
+  type is derived from it, so the validator and the type cannot
+  drift apart.
 - **`PushMethods`** — `const` map of push method names, used by
   `SidecarServer` (to emit) and `TacoClient` (to route) by method
   name rather than by string literal.
 - **`TacoGlobalConfigShape` / `TacoGlobalConfigView`** — the
   on-disk `taco.json` shape, plus its safe IPC view that strips
   secret-bearing fields.
+
+## Adding an RPC method
+
+1. Declare the request shape as a TypeBox schema in the matching
+   `schemas/<domain>.ts` file.
+2. Derive the exported params type from it:
+   `export type FooParams = ParamsOf<typeof fooSchema>;`.
+3. Add one row to the domain's `rpcContract/<domain>.ts` file:
+   `foo: row<FooResult>()("foo.bar", "workspace", fooSchema)`.
+
+The contract table reads the params type off the schema, so the
+row carries no second copy of the shape. A schema that must stay
+looser than its type — an open body, or a deliberately permissive
+gate — pins the type with `Type.Unsafe<T>(...)`.
 
 ## Stability
 
@@ -56,7 +73,7 @@ src/
 ├── imPolicy.ts       # imPolicy.* types
 ├── memory.ts         # memory.* types
 ├── rpcContract/      # domain contracts, typed request builder, scope assertions
-├── schemas/          # RPC parameter validators
+├── schemas/          # RPC parameter validators — the source of every request shape
 ├── push.ts           # PushMethods + push payload types
 └── tools.ts          # tools.* / agents.* / skills.* types
 ```
