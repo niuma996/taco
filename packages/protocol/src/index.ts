@@ -12,7 +12,6 @@
 
 // channels.* RPC types — IM channel listing / binding.
 export type {
-    ChannelInstanceConfig,
     ChannelState,
     ChannelStatusChangedParams,
     ChannelStatusEntry,
@@ -32,21 +31,35 @@ export type {
     ChannelsUnbindParams,
     ChannelsUnbindResult,
     ChannelTypeEntry,
+    ImCommandPolicy,
+    ImCommandPolicyPatch,
     ImConversationEntry,
+    ImExecutionDir,
+    ImExecutionDirMode,
+    ImPolicyChatOverrideEntry,
+    ImPolicyClearChatOverrideParams,
+    ImPolicyField,
+    ImPolicyGetParams,
+    ImPolicyGetResult,
+    ImPolicyRuleGroup,
+    ImPolicyRulesView,
+    ImPolicySetChannelDefaultParams,
+    ImPolicySetChatOverrideParams,
+    ImPolicySource,
+    ImPolicySources,
+    ImPolicyWriteResult,
+    ImRoute,
+    ImToolPolicy,
+    ImToolPolicyPatch,
+    ImWorkspacePolicy,
+    ImWorkspacePolicyDocument,
+    ImWorkspacePolicyPatch,
 } from "./channels.js";
 export { IM_CWD_PREFIX, makeImCwd, parseImCwd } from "./channels.js";
-// Checkpoint RPC types.
-export type {
-    CheckpointEntry,
-    CheckpointFileEntry,
-    CheckpointsListParams,
-    CheckpointsListResult,
-    CheckpointsRestoreParams,
-    CheckpointsRestoreResult,
-} from "./checkpoints.js";
 export { BUILTIN_READ_ONLY_COMMANDS } from "./commandPermissions.js";
 // taco.json + settings + custom providers + commands + extensions.
 export type {
+    ChannelInstanceConfig,
     ChannelInstanceConfigView,
     CommandEvaluation,
     CommandPermissionConfig,
@@ -119,31 +132,6 @@ export {
     SIDECAR_PROTOCOL_VERSION,
     WORKSPACE_ANY,
 } from "./frames.js";
-// imPolicy.* RPC types — IM workspace policy admin surface.
-export type {
-    ImCommandPolicy,
-    ImCommandPolicyPatch,
-    ImExecutionDir,
-    ImExecutionDirMode,
-    ImPolicyChatOverrideEntry,
-    ImPolicyClearChatOverrideParams,
-    ImPolicyField,
-    ImPolicyGetParams,
-    ImPolicyGetResult,
-    ImPolicyRuleGroup,
-    ImPolicyRulesView,
-    ImPolicySetChannelDefaultParams,
-    ImPolicySetChatOverrideParams,
-    ImPolicySource,
-    ImPolicySources,
-    ImPolicyWriteResult,
-    ImRoute,
-    ImToolPolicy,
-    ImToolPolicyPatch,
-    ImWorkspacePolicy,
-    ImWorkspacePolicyDocument,
-    ImWorkspacePolicyPatch,
-} from "./imPolicy.js";
 // jobs.* RPC types — the scheduler's wire contract.
 export type {
     Actor,
@@ -165,6 +153,12 @@ export type {
 } from "./jobs.js";
 // Memory RPC types.
 export type {
+    CheckpointEntry,
+    CheckpointFileEntry,
+    CheckpointsListParams,
+    CheckpointsListResult,
+    CheckpointsRestoreParams,
+    CheckpointsRestoreResult,
     MemoryDeleteTopicParams,
     MemoryDeleteTopicResult,
     MemoryDreamAction,
@@ -271,6 +265,7 @@ export type {
     SessionTaskHistoryGetResult,
     SessionTasksGetResult,
 } from "./rpcContract/session.js";
+// providers.* / mcp.* / settings.* / config.* RPC types — the configuration surface.
 export type {
     CommandPermissionResolveParams,
     CommandPermissionResolveResult,
@@ -288,6 +283,17 @@ export type {
     McpMutateConfigResult,
     McpServerView,
     McpUpdateConfigParams,
+    ProviderListModelsFailureReason,
+    ProviderListModelsParams,
+    ProviderListModelsResult,
+    ProvidersListParams,
+    ProvidersListResult,
+    ProvidersRevealKeyParams,
+    ProvidersRevealKeyResult,
+    ProviderTestConnectionFailureReason,
+    ProviderTestConnectionParams,
+    ProviderTestConnectionResult,
+    ProviderView,
     SettingsGetParams,
     SettingsGetResult,
     SettingsWriteResult,
@@ -299,7 +305,7 @@ export type {
 } from "./rpcContract/workspace.js";
 // RPC param schemas (typebox) — wire validators consumed by registerMethod.
 export * from "./schemas/index.js";
-export { AGENT_TOOL_NAME_PATTERN, AGENT_TYPE_PATTERN } from "./schemas/misc.js";
+export { AGENT_TOOL_NAME_PATTERN, AGENT_TYPE_PATTERN } from "./schemas/tools.js";
 // session.* RPC types (lifecycle / turn / runtime / snapshot / read).
 export type {
     AbortParams,
@@ -315,17 +321,6 @@ export type {
     ListModelsParams,
     PromptParams,
     PromptResult,
-    ProviderListModelsFailureReason,
-    ProviderListModelsParams,
-    ProviderListModelsResult,
-    ProvidersListParams,
-    ProvidersListResult,
-    ProvidersRevealKeyParams,
-    ProvidersRevealKeyResult,
-    ProviderTestConnectionFailureReason,
-    ProviderTestConnectionParams,
-    ProviderTestConnectionResult,
-    ProviderView,
     RenameSessionParams,
     SessionAttachParams,
     SessionCompactParams,

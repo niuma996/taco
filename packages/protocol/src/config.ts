@@ -8,7 +8,6 @@
  * `configPatch.ts`.
  */
 
-import type { ChannelInstanceConfig } from "./channels.js";
 import type { SessionId, ToolCallId } from "./frames.js";
 import type { ThinkingLevel } from "./messages.js";
 
@@ -21,6 +20,17 @@ import type { ThinkingLevel } from "./messages.js";
  * RPC return value — that would leak plaintext keys. Use `TacoGlobalConfigView`
  * for RPC returns.
  */
+/**
+ * One channel instance as persisted in taco.json. The embedded manifest is a
+ * snapshot for validation/routing; the live manifest comes from the channel
+ * implementation the factory resolves by `manifest.name`.
+ */
+export interface ChannelInstanceConfig {
+    channelId: string;
+    manifest: { name: string; version: string };
+    config: Record<string, unknown>;
+}
+
 export interface TacoGlobalConfigShape {
     commandPermissions?: CommandPermissionConfig;
     defaultModel?: string;

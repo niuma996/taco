@@ -16,7 +16,7 @@
  * method name or result shape cannot differ between the two halves.
  *
  * The table is split by domain (`session.ts`, `workspace.ts`, `settings.ts`,
- * `channels.ts`, `memory.ts`, `jobs.ts`, `misc.ts`). Each domain file owns the
+ * `channels.ts`, `memory.ts`, `jobs.ts`, `tools.ts`). Each domain file owns the
  * wire names, the params/result types, and the params schema for its
  * methods; this module merges them and holds the cross-table assertions.
  *
@@ -34,9 +34,9 @@ import type { RpcRequest } from "../frames.js";
 import { channelsContract, channelsMethods, channelsSchemas } from "./channels.js";
 import { jobsContract, jobsMethods, jobsSchemas } from "./jobs.js";
 import { memoryContract, memoryMethods, memorySchemas } from "./memory.js";
-import { miscContract, miscMethods, miscSchemas } from "./misc.js";
 import { sessionContract, sessionMethods, sessionSchemas } from "./session.js";
 import { settingsContract, settingsMethods, settingsSchemas } from "./settings.js";
+import { toolsContract, toolsMethods, toolsSchemas } from "./tools.js";
 import type { ParamsLacksShape, RpcContractRow } from "./types.js";
 import { workspaceContract, workspaceMethods, workspaceSchemas } from "./workspace.js";
 
@@ -50,7 +50,7 @@ export const RPC = {
     ...channelsMethods,
     ...memoryMethods,
     ...jobsMethods,
-    ...miscMethods,
+    ...toolsMethods,
 } as const;
 
 /** Params/result types and routing scope for every method. */
@@ -61,7 +61,7 @@ export const rpcContract = {
     ...channelsContract,
     ...memoryContract,
     ...jobsContract,
-    ...miscContract,
+    ...toolsContract,
 };
 
 /** Params schemas for every method. */
@@ -72,7 +72,7 @@ export const rpcSchemas = {
     ...channelsSchemas,
     ...memorySchemas,
     ...jobsSchemas,
-    ...miscSchemas,
+    ...toolsSchemas,
 };
 
 /** Every camelCase contract key. */

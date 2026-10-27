@@ -14,7 +14,7 @@ import {
     skillContentSchema,
     skillsListSchema,
     toolsListSchema,
-} from "../schemas/misc.js";
+} from "../schemas/tools.js";
 import type {
     AgentsContentResult,
     AgentsDeleteResult,
@@ -26,7 +26,7 @@ import type {
 } from "../tools.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
-const miscRows = {
+const toolsRows = {
     toolsList: row<ToolsListResult>()("tools.list", "workspace", toolsListSchema),
     agentsList: row<AgentsListResult>()("agents.list", "workspace", agentsListSchema),
     agentsContent: row<AgentsContentResult>()("agents.content", "workspace", agentsContentSchema),
@@ -36,6 +36,6 @@ const miscRows = {
     skillContent: row<SkillContentResult>()("skills.content", "workspace", skillContentSchema),
 };
 
-export const miscMethods = domainMethods(miscRows);
-export const miscContract = domainContract(miscRows);
-export const miscSchemas = domainSchemas(miscRows);
+export const toolsMethods = domainMethods(toolsRows);
+export const toolsContract = domainContract(toolsRows);
+export const toolsSchemas = domainSchemas(toolsRows);

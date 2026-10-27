@@ -14,9 +14,10 @@ import type {
     ChannelsRetryResult,
     ChannelsSubmitVerifyCodeResult,
     ChannelsUnbindResult,
+    ImPolicyGetResult,
+    ImPolicyWriteResult,
 } from "../channels.js";
 
-import type { ImPolicyGetResult, ImPolicyWriteResult } from "../imPolicy.js";
 import {
     channelsBindSchema,
     channelsCreateSchema,

@@ -6,9 +6,9 @@
  * `rpcSchemas` tables from those rows.
  */
 
-import type { CheckpointsListResult, CheckpointsRestoreResult } from "../checkpoints.js";
-
 import type {
+    CheckpointsListResult,
+    CheckpointsRestoreResult,
     MemoryDeleteTopicResult,
     MemoryDreamApplyResult,
     MemoryDreamDiscardResult,
