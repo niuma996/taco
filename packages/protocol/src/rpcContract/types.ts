@@ -6,7 +6,7 @@
  * direction one-way (`types` → domain files → `index`).
  */
 
-import type { TSchema } from "typebox";
+import type { Static, TSchema } from "typebox";
 
 /**
  * How the client routes a call.
@@ -59,17 +59,28 @@ export interface DomainRow<
 /**
  * Declare one method.
  *
- * `P`/`R` are explicit because the schema does not own them, and TypeScript
- * has no partial type-argument inference — so they are supplied by the first
+ * The params type comes from the schema — the schema is the single definition
+ * of the request shape — so only the result type is spelled out. TypeScript
+ * has no partial type-argument inference, so `R` is supplied by the first
  * call and the wire name, scope, and schema are inferred by the second.
  */
-export function row<P, R>() {
+export function row<R>() {
     return <const M extends string, S extends RpcScope, Sch extends TSchema>(
         method: M,
         scope: S,
         schema: Sch,
-    ): DomainRow<P, R, S, Sch, M> => ({ method, scope, schema });
+    ): DomainRow<ParamsOf<Sch>, R, S, Sch, M> => ({ method, scope, schema });
 }
+
+/**
+ * The request type of a schema.
+ *
+ * The schema is the single definition of a request's wire shape: the
+ * exported `*Params` types are read off it, so a field cannot drift between
+ * the validator and the type. A schema that has to keep a readonly shape
+ * (for example `roots: readonly string[]`) pins it with `Type.Unsafe`.
+ */
+export type ParamsOf<Sch extends TSchema> = Static<Sch>;
 
 type AnyDomainRow = DomainRow<unknown, unknown, RpcScope, TSchema, string>;
 

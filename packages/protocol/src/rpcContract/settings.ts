@@ -7,74 +7,49 @@
  */
 
 import type {
-    ConfigPatchParams,
     ConfigPatchResult,
-    ExtensionsStatusParams,
     ExtensionsStatusResult,
-    SettingsGetParams,
     SettingsGetResult,
-    SettingsWriteParams,
     SettingsWriteResult,
 } from "../config.js";
+import { configPatchSchema, settingsWriteSchema } from "../schemas/globalConfig.js";
 import {
-    configPatchSchema,
     extensionsStatusSchema,
     providerListModelsSchema,
     providersListSchema,
     providersRevealKeySchema,
     providerTestConnectionSchema,
     settingsGetSchema,
-    settingsWriteSchema,
 } from "../schemas/index.js";
 import type {
-    ProviderListModelsParams,
     ProviderListModelsResult,
-    ProvidersListParams,
     ProvidersListResult,
-    ProvidersRevealKeyParams,
     ProvidersRevealKeyResult,
-    ProviderTestConnectionParams,
     ProviderTestConnectionResult,
 } from "../session.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const settingsRows = {
-    providersList: row<ProvidersListParams, ProvidersListResult>()(
-        "providers.list",
-        "workspace",
-        providersListSchema,
-    ),
-    providersRevealKey: row<ProvidersRevealKeyParams, ProvidersRevealKeyResult>()(
+    providersList: row<ProvidersListResult>()("providers.list", "workspace", providersListSchema),
+    providersRevealKey: row<ProvidersRevealKeyResult>()(
         "providers.revealKey",
         "workspace",
         providersRevealKeySchema,
     ),
-    providerListModels: row<ProviderListModelsParams, ProviderListModelsResult>()(
+    providerListModels: row<ProviderListModelsResult>()(
         "provider.listModels",
         "process",
         providerListModelsSchema,
     ),
-    providerTestConnection: row<ProviderTestConnectionParams, ProviderTestConnectionResult>()(
+    providerTestConnection: row<ProviderTestConnectionResult>()(
         "provider.testConnection",
         "process",
         providerTestConnectionSchema,
     ),
-    settingsGet: row<SettingsGetParams, SettingsGetResult>()(
-        "settings.get",
-        "process",
-        settingsGetSchema,
-    ),
-    settingsWrite: row<SettingsWriteParams, SettingsWriteResult>()(
-        "settings.write",
-        "process",
-        settingsWriteSchema,
-    ),
-    configPatch: row<ConfigPatchParams, ConfigPatchResult>()(
-        "config.patch",
-        "workspace",
-        configPatchSchema,
-    ),
-    extensionsStatus: row<ExtensionsStatusParams, ExtensionsStatusResult>()(
+    settingsGet: row<SettingsGetResult>()("settings.get", "process", settingsGetSchema),
+    settingsWrite: row<SettingsWriteResult>()("settings.write", "process", settingsWriteSchema),
+    configPatch: row<ConfigPatchResult>()("config.patch", "workspace", configPatchSchema),
+    extensionsStatus: row<ExtensionsStatusResult>()(
         "extensions.status",
         "process",
         extensionsStatusSchema,

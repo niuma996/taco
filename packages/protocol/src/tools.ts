@@ -3,14 +3,23 @@
  * askUser payload, subagent.spawned push. All workspace-scoped.
  */
 
-import type { SessionId, ToolCallId, WorkspaceId } from "./frames.js";
+import type { SessionId } from "./frames.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type {
+    agentsContentSchema,
+    agentsDeleteSchema,
+    agentsListSchema,
+    agentsWriteSchema,
+    skillContentSchema,
+    skillsListSchema,
+    toolsListSchema,
+} from "./schemas/index.js";
+import type { sessionSubmitAnswersSchema } from "./schemas/sessionTurn.js";
 
 // tools.list
 
 /** `tools.list` RPC params. */
-export interface ToolsListParams {
-    workspace: WorkspaceId;
-}
+export type ToolsListParams = ParamsOf<typeof toolsListSchema>;
 
 /** One tool entry in the `tools.list` result. */
 export interface ToolEntry {
@@ -56,9 +65,7 @@ export interface ToolsListResult {
 // skills.list
 
 /** `skills.list` RPC params. */
-export interface SkillsListParams {
-    workspace: WorkspaceId;
-}
+export type SkillsListParams = ParamsOf<typeof skillsListSchema>;
 
 /** One skill entry in the `skills.list` result. */
 export interface SkillEntry {
@@ -139,10 +146,7 @@ export interface SkillsListResult {
 // skills.content
 
 /** `skills.content` RPC params — `filePath` comes from the `skills.list` result. */
-export interface SkillContentParams {
-    workspace: WorkspaceId;
-    filePath: string;
-}
+export type SkillContentParams = ParamsOf<typeof skillContentSchema>;
 
 /** `skills.content` RPC result. */
 export interface SkillContentResult {
@@ -152,9 +156,7 @@ export interface SkillContentResult {
 // agents.list / subagent.spawned
 
 /** `agents.list` RPC params. */
-export interface AgentsListParams {
-    workspace: WorkspaceId;
-}
+export type AgentsListParams = ParamsOf<typeof agentsListSchema>;
 
 /**
  * Engine that runs an agent. UI/config only — the model always delegates by
@@ -211,10 +213,7 @@ export interface AgentsListResult {
 }
 
 /** `agents.content` RPC params — only `agentType` is required. */
-export interface AgentsContentParams {
-    workspace: WorkspaceId;
-    agentType: string;
-}
+export type AgentsContentParams = ParamsOf<typeof agentsContentSchema>;
 
 /** `agents.content` RPC result — the agent's system prompt (md body, frontmatter stripped). */
 export interface AgentsContentResult {
@@ -241,52 +240,14 @@ export interface AgentsContentResult {
  * `agents.write` RPC params — create or overwrite one agent definition as
  * `<agentType>.md` in the directory `scope` names.
  */
-export interface AgentsWriteParams {
-    workspace: WorkspaceId;
-    /**
-     * Omitted = "global" on create, unchanged on edit. "workspace" is rejected
-     * for IM conversations, which have no project directory.
-     */
-    scope?: AgentScope;
-    agentType: string;
-    description: string;
-    whenToUse?: string;
-    /** Omitted = "standard"; the file then carries no `runtime:` line. */
-    runtime?: AgentRuntime;
-    maxTurns: number;
-    /**
-     * `claude-code` only — written for no other runtime. `tools` omitted or
-     * empty = Claude Code's full preset; `permissionMode` omitted = "auto".
-     */
-    tools?: string[];
-    permissionMode?: ClaudeCodePermissionMode;
-    /**
-     * `claude-code` only: absolute directory the CLI runs in, fixed in the
-     * definition. Must be the workspace directory or one of its associated
-     * directories when saved. Omitted = the calling workspace's directory.
-     */
-    cwd?: string;
-    systemPrompt: string;
-    /**
-     * Set when editing: the agentType being replaced. Renaming deletes the old
-     * file once the new one is written. Absent = create, which fails if the
-     * agentType already exists in the same scope or in a source that cannot be
-     * shadowed (builtin, hand-managed directories); a workspace definition may
-     * shadow a global one. A `scope` different from the replaced definition's
-     * moves it: the old file is removed once the new one is written.
-     */
-    previousAgentType?: string;
-}
+export type AgentsWriteParams = ParamsOf<typeof agentsWriteSchema>;
 
 export interface AgentsWriteResult {
     ok: true;
 }
 
 /** `agents.delete` RPC params — only editable (global or workspace scope) definitions. */
-export interface AgentsDeleteParams {
-    workspace: WorkspaceId;
-    agentType: string;
-}
+export type AgentsDeleteParams = ParamsOf<typeof agentsDeleteSchema>;
 
 export interface AgentsDeleteResult {
     ok: true;
@@ -414,11 +375,4 @@ export interface AskUserToolDetails {
  * no longer need to know the wire format of that tag. `toolCallId`
  * verifies the askUser call is still in the waiting state.
  */
-export interface SubmitAnswersParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    toolCallId: ToolCallId;
-    answers: Record<string, string | string[]>;
-    /** Aligned with `AskUserPayload.toolName`; defaults to "askUser". */
-    toolName?: string;
-}
+export type SubmitAnswersParams = ParamsOf<typeof sessionSubmitAnswersSchema>;

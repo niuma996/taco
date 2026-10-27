@@ -7,7 +7,8 @@
  * exposed to the model as a tool.
  */
 
-import type { SessionId, WorkspaceId } from "./frames.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type { checkpointsListSchema, checkpointsRestoreSchema } from "./schemas/checkpoints.js";
 
 /** One file captured in a checkpoint. */
 export interface CheckpointFileEntry {
@@ -29,10 +30,7 @@ export interface CheckpointEntry {
 }
 
 /** `checkpoints.list` — workspace-scoped; omit `sessionId` for all sessions. */
-export interface CheckpointsListParams {
-    workspace: WorkspaceId;
-    sessionId?: SessionId;
-}
+export type CheckpointsListParams = ParamsOf<typeof checkpointsListSchema>;
 
 export interface CheckpointsListResult {
     /** Newest first. */
@@ -42,12 +40,7 @@ export interface CheckpointsListResult {
 }
 
 /** `checkpoints.restore` — rolls files back to the given checkpoint. */
-export interface CheckpointsRestoreParams {
-    workspace: WorkspaceId;
-    checkpointId: string;
-    /** Attributes the automatic pre-restore snapshot to this session. */
-    sessionId?: SessionId;
-}
+export type CheckpointsRestoreParams = ParamsOf<typeof checkpointsRestoreSchema>;
 
 export interface CheckpointsRestoreResult {
     /** Paths written back to their captured content. */

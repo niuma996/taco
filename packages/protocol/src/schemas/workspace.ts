@@ -8,21 +8,27 @@
  */
 
 import { Type } from "typebox";
+import { workspaceIdSchema } from "./fields.js";
 
-/** A call with no arguments may arrive with or without a `params` field. */
-export const noParamsSchema = Type.Union([
-    Type.Object({}, { additionalProperties: false }),
-    Type.Undefined(),
-]);
+/**
+ * A call with no arguments may arrive with or without a `params` field.
+ *
+ * The static type is `undefined` — that is the only shape a caller sends —
+ * while the runtime accepts an empty object too, because older clients sent
+ * one.
+ */
+export const noParamsSchema = Type.Unsafe<undefined>(
+    Type.Union([Type.Object({}, { additionalProperties: false }), Type.Undefined()]),
+);
 
 export const workspaceListSchema = noParamsSchema;
 
 export const workspaceEnsureSchema = Type.Object({
-    cwd: Type.String({ minLength: 1 }),
+    cwd: workspaceIdSchema,
 });
 
 export const workspaceDisposeSchema = Type.Object({
-    cwd: Type.String({ minLength: 1 }),
+    cwd: workspaceIdSchema,
 });
 
 /**
@@ -42,9 +48,9 @@ export const workspaceAssociationsGetSchema = Type.Object({
 
 export const workspaceAssociationsSetSchema = Type.Object({
     key: workspaceAssociationKeySchema,
-    roots: Type.Array(Type.String({ minLength: 1 })),
+    roots: Type.Unsafe<readonly string[]>(Type.Array(Type.String({ minLength: 1 }))),
 });
 
 export const workspaceAssociationsResolveSchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
 });

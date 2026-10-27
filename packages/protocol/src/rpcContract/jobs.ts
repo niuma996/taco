@@ -8,14 +8,10 @@
 
 import type {
     JobRunResult,
-    JobsCreateParams,
     JobsDeleteResult,
     JobsGetResult,
     JobsHistoryResult,
-    JobsIdParams,
-    JobsListParams,
     JobsListResult,
-    JobsUpdateParams,
     JobsWriteResult,
 } from "../jobs.js";
 import {
@@ -30,25 +26,13 @@ import {
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const jobsRows = {
-    jobsList: row<JobsListParams, JobsListResult>()("jobs.list", "process", jobsListSchema),
-    jobsGet: row<JobsIdParams, JobsGetResult>()("jobs.get", "process", jobsGetSchema),
-    jobsCreate: row<JobsCreateParams, JobsWriteResult>()(
-        "jobs.create",
-        "process",
-        jobsCreateSchema,
-    ),
-    jobsUpdate: row<JobsUpdateParams, JobsWriteResult>()(
-        "jobs.update",
-        "process",
-        jobsUpdateSchema,
-    ),
-    jobsDelete: row<JobsIdParams, JobsDeleteResult>()("jobs.delete", "process", jobsDeleteSchema),
-    jobsRunNow: row<JobsIdParams, JobRunResult>()("jobs.runNow", "process", jobsRunNowSchema),
-    jobsHistory: row<JobsIdParams, JobsHistoryResult>()(
-        "jobs.history",
-        "process",
-        jobsHistorySchema,
-    ),
+    jobsList: row<JobsListResult>()("jobs.list", "process", jobsListSchema),
+    jobsGet: row<JobsGetResult>()("jobs.get", "process", jobsGetSchema),
+    jobsCreate: row<JobsWriteResult>()("jobs.create", "process", jobsCreateSchema),
+    jobsUpdate: row<JobsWriteResult>()("jobs.update", "process", jobsUpdateSchema),
+    jobsDelete: row<JobsDeleteResult>()("jobs.delete", "process", jobsDeleteSchema),
+    jobsRunNow: row<JobRunResult>()("jobs.runNow", "process", jobsRunNowSchema),
+    jobsHistory: row<JobsHistoryResult>()("jobs.history", "process", jobsHistorySchema),
 };
 
 export const jobsMethods = domainMethods(jobsRows);

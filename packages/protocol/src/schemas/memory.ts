@@ -8,8 +8,9 @@
  */
 
 import { Type } from "typebox";
+import { workspaceIdSchema } from "./fields.js";
 
-const workspace = Type.String({ minLength: 1 });
+const workspace = workspaceIdSchema;
 
 export const memoryListSchema = Type.Object({ workspace });
 
@@ -42,21 +43,21 @@ export const memoryUpsertSchema = Type.Object({
     ),
 });
 
-export const memoryDreamRunSchema = Type.Object({ workspace: Type.String({ minLength: 1 }) });
+export const memoryDreamRunSchema = Type.Object({ workspace: workspaceIdSchema });
 
 export const memoryDreamApplySchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
     previewId: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }),
 });
 
-export const memoryDreamDiscardSchema = Type.Object({ workspace: Type.String({ minLength: 1 }) });
+export const memoryDreamDiscardSchema = Type.Object({ workspace: workspaceIdSchema });
 
 export const memoryDreamUndoSchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
     reportId: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }),
 });
 
 export const memoryRestoreTopicSchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
     id: Type.String({ minLength: 1, maxLength: 128 }),
 });

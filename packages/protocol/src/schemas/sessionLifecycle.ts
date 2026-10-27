@@ -2,19 +2,14 @@
  * sessionLifecycle.* RPC param schemas — typebox validators consumed by
  * `registerMethod` in `packages/sidecar/src/server/handlers/sessionLifecycle.ts`.
  *
- * Schemas here are the intended wire contract for each method's `params`:
- * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects failures
- * with `invalid_params` carrying JSON-pointer paths.
- *
- * These schemas deliberately validate only the stable envelope. The handler
- * remains responsible for semantic checks (session existence, cursor bounds,
- * and IM routing), but malformed requests never reach it.
+ * These schemas are the single definition of the request shape: the exported
+ * `*Params` types are derived from them. The handler keeps the semantic
+ * checks (session existence, cursor bounds, IM routing) a shape cannot
+ * express.
  */
-
 import { Type } from "typebox";
+import { imageInputSchema, sessionIdSchema, workspaceIdSchema } from "./fields.js";
 
-const workspace = Type.String({ minLength: 1 });
-const sessionId = Type.String({ minLength: 1 });
 const thinkingLevel = Type.Union([
     Type.Literal("off"),
     Type.Literal("minimal"),
@@ -27,17 +22,17 @@ const thinkingLevel = Type.Union([
 const locale = Type.Union([Type.Literal("zh"), Type.Literal("en")]);
 
 export const sessionListSchema = Type.Object({
-    workspace,
+    workspace: workspaceIdSchema,
     limit: Type.Optional(Type.Number()),
-    cursor: Type.Optional(Type.Object({ updatedAt: Type.String(), id: Type.String() })),
+    cursor: Type.Optional(Type.Object({ updatedAt: Type.String(), id: sessionIdSchema })),
     full: Type.Optional(Type.Boolean()),
 });
 
 export const sessionCreateSchema = Type.Object({
-    workspace,
-    sessionId: Type.Optional(sessionId),
+    workspace: workspaceIdSchema,
+    sessionId: Type.Optional(sessionIdSchema),
     initialPrompt: Type.Optional(Type.String()),
-    initialImages: Type.Optional(Type.Array(Type.Unknown())),
+    initialImages: Type.Optional(Type.Array(imageInputSchema)),
     thinkingLevel: Type.Optional(thinkingLevel),
     uiLocale: Type.Optional(locale),
     imRouting: Type.Optional(
@@ -50,13 +45,23 @@ export const sessionCreateSchema = Type.Object({
 });
 
 export const sessionAttachSchema = Type.Object({
-    workspace,
-    sessionId,
+    workspace: workspaceIdSchema,
+    sessionId: sessionIdSchema,
     thinkingLevel: Type.Optional(thinkingLevel),
 });
 
-export const sessionDetachSchema = Type.Object({ workspace, sessionId });
+export const sessionDetachSchema = Type.Object({
+    workspace: workspaceIdSchema,
+    sessionId: sessionIdSchema,
+});
 
-export const sessionDeleteSchema = Type.Object({ workspace, sessionId });
+export const sessionDeleteSchema = Type.Object({
+    workspace: workspaceIdSchema,
+    sessionId: sessionIdSchema,
+});
 
-export const sessionRenameSchema = Type.Object({ workspace, sessionId, name: Type.String() });
+export const sessionRenameSchema = Type.Object({
+    workspace: workspaceIdSchema,
+    sessionId: sessionIdSchema,
+    name: Type.String(),
+});

@@ -8,9 +8,10 @@
  */
 
 import { Type } from "typebox";
+import { workspaceIdSchema } from "./fields.js";
 
 export const commandPermissionResolveSchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
     requestId: Type.String({ minLength: 1 }),
     approved: Type.Boolean(),
     scope: Type.Union([Type.Literal("once"), Type.Literal("session"), Type.Literal("global")]),

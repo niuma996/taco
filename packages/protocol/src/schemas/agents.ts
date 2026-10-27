@@ -7,12 +7,13 @@
  */
 
 import { Type } from "typebox";
+import { workspaceIdSchema } from "./fields.js";
 
 /** Shared with the desktop editor and sidecar's semantic validator. */
 export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 export const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
-const workspace = Type.String({ minLength: 1 });
+const workspace = workspaceIdSchema;
 
 export const agentsListSchema = Type.Object({ workspace });
 
@@ -30,7 +31,7 @@ const agentType = Type.String({
 const agentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")]);
 
 export const agentsWriteSchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
     scope: Type.Optional(agentScope),
     agentType,
     description: Type.String({ minLength: 1, maxLength: 1024 }),
@@ -64,6 +65,6 @@ export const agentsWriteSchema = Type.Object({
 });
 
 export const agentsDeleteSchema = Type.Object({
-    workspace: Type.String({ minLength: 1 }),
+    workspace: workspaceIdSchema,
     agentType,
 });

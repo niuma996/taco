@@ -8,8 +8,9 @@
  */
 
 import { Type } from "typebox";
+import { workspaceIdSchema } from "./fields.js";
 
-const workspace = Type.String({ minLength: 1 });
+const workspace = workspaceIdSchema;
 
 const providerApi = Type.Union([
     Type.Literal("chatcomplete"),

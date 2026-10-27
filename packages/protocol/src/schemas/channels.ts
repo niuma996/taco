@@ -24,15 +24,22 @@ export const channelsCreateSchema = Type.Object({
     channelId: Type.Optional(Type.String({ minLength: 1, pattern: "^[a-z0-9][a-z0-9-]*$" })),
 });
 
+/**
+ * Optional credential payload carried by `channels.bind`.
+ *
+ * Only the WeCom channel consumes it today (static botId + secret from the
+ * admin console — no QR flow). Exported so the wire type and the validator
+ * read off the same declaration.
+ */
+export const channelsBindCredsSchema = Type.Object({
+    botId: Type.Optional(Type.String()),
+    secret: Type.Optional(Type.String()),
+});
+
 export const channelsBindSchema = Type.Object({
     channelId,
     force: Type.Optional(Type.Boolean()),
-    creds: Type.Optional(
-        Type.Object({
-            botId: Type.Optional(Type.String()),
-            secret: Type.Optional(Type.String()),
-        }),
-    ),
+    creds: Type.Optional(channelsBindCredsSchema),
 });
 
 export const channelsSubmitVerifyCodeSchema = Type.Object({

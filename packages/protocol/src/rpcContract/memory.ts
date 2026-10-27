@@ -6,31 +6,17 @@
  * `rpcSchemas` tables from those rows.
  */
 
-import type {
-    CheckpointsListParams,
-    CheckpointsListResult,
-    CheckpointsRestoreParams,
-    CheckpointsRestoreResult,
-} from "../checkpoints.js";
+import type { CheckpointsListResult, CheckpointsRestoreResult } from "../checkpoints.js";
 
 import type {
-    MemoryDeleteTopicParams,
     MemoryDeleteTopicResult,
-    MemoryDreamApplyParams,
     MemoryDreamApplyResult,
-    MemoryDreamDiscardParams,
     MemoryDreamDiscardResult,
-    MemoryDreamRunParams,
     MemoryDreamRunResult,
-    MemoryDreamUndoParams,
     MemoryDreamUndoResult,
-    MemoryListParams,
     MemoryListResult,
-    MemoryRestoreTopicParams,
     MemoryRestoreTopicResult,
-    MemoryUpsertParams,
     MemoryUpsertResult,
-    MemoryWriteParams,
     MemoryWriteResult,
 } from "../memory.js";
 import {
@@ -49,57 +35,45 @@ import {
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const memoryRows = {
-    checkpointsList: row<CheckpointsListParams, CheckpointsListResult>()(
+    checkpointsList: row<CheckpointsListResult>()(
         "checkpoints.list",
         "workspace",
         checkpointsListSchema,
     ),
-    checkpointsRestore: row<CheckpointsRestoreParams, CheckpointsRestoreResult>()(
+    checkpointsRestore: row<CheckpointsRestoreResult>()(
         "checkpoints.restore",
         "workspace",
         checkpointsRestoreSchema,
     ),
-    memoryList: row<MemoryListParams, MemoryListResult>()(
-        "memory.list",
-        "workspace",
-        memoryListSchema,
-    ),
-    memoryWrite: row<MemoryWriteParams, MemoryWriteResult>()(
-        "memory.write",
-        "workspace",
-        memoryWriteSchema,
-    ),
-    memoryDeleteTopic: row<MemoryDeleteTopicParams, MemoryDeleteTopicResult>()(
+    memoryList: row<MemoryListResult>()("memory.list", "workspace", memoryListSchema),
+    memoryWrite: row<MemoryWriteResult>()("memory.write", "workspace", memoryWriteSchema),
+    memoryDeleteTopic: row<MemoryDeleteTopicResult>()(
         "memory.deleteTopic",
         "workspace",
         memoryDeleteTopicSchema,
     ),
-    memoryUpsert: row<MemoryUpsertParams, MemoryUpsertResult>()(
-        "memory.upsert",
-        "workspace",
-        memoryUpsertSchema,
-    ),
-    memoryRestoreTopic: row<MemoryRestoreTopicParams, MemoryRestoreTopicResult>()(
+    memoryUpsert: row<MemoryUpsertResult>()("memory.upsert", "workspace", memoryUpsertSchema),
+    memoryRestoreTopic: row<MemoryRestoreTopicResult>()(
         "memory.restoreTopic",
         "workspace",
         memoryRestoreTopicSchema,
     ),
-    memoryDreamRun: row<MemoryDreamRunParams, MemoryDreamRunResult>()(
+    memoryDreamRun: row<MemoryDreamRunResult>()(
         "memory.dreamRun",
         "workspace",
         memoryDreamRunSchema,
     ),
-    memoryDreamApply: row<MemoryDreamApplyParams, MemoryDreamApplyResult>()(
+    memoryDreamApply: row<MemoryDreamApplyResult>()(
         "memory.dreamApply",
         "workspace",
         memoryDreamApplySchema,
     ),
-    memoryDreamDiscard: row<MemoryDreamDiscardParams, MemoryDreamDiscardResult>()(
+    memoryDreamDiscard: row<MemoryDreamDiscardResult>()(
         "memory.dreamDiscard",
         "workspace",
         memoryDreamDiscardSchema,
     ),
-    memoryDreamUndo: row<MemoryDreamUndoParams, MemoryDreamUndoResult>()(
+    memoryDreamUndo: row<MemoryDreamUndoResult>()(
         "memory.dreamUndo",
         "workspace",
         memoryDreamUndoSchema,

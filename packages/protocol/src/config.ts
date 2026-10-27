@@ -7,6 +7,17 @@
 import type { ChannelInstanceConfig } from "./channels.js";
 import type { SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 import type { ThinkingLevel } from "./messages.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type { commandPermissionResolveSchema } from "./schemas/commandPermission.js";
+import type { extensionsStatusSchema } from "./schemas/extensions.js";
+import type {
+    mcpCreateConfigSchema,
+    mcpDeleteConfigSchema,
+    mcpGetConfigSchema,
+    mcpListServersSchema,
+    mcpUpdateConfigSchema,
+} from "./schemas/mcp.js";
+import type { settingsGetSchema } from "./schemas/settings.js";
 
 /**
  * Wire shape of `taco.json` on disk — the protocol-layer contract.
@@ -169,12 +180,7 @@ export interface CommandPermissionDecision {
     evaluation: CommandEvaluation;
     denialReason?: CommandPermissionDenialReason;
 }
-export interface CommandPermissionResolveParams {
-    workspace: WorkspaceId;
-    requestId: string;
-    approved: boolean;
-    scope: CommandPermissionScope;
-}
+export type CommandPermissionResolveParams = ParamsOf<typeof commandPermissionResolveSchema>;
 export interface CommandPermissionResolveResult {
     resolved: boolean;
 }
@@ -287,36 +293,21 @@ export interface McpListServersResult {
 }
 
 /** `mcp.listServers` params — which servers to probe, and whether to force a probe. */
-export interface McpListServersParams {
-    /** Restrict the listing to these server ids. */
-    ids?: string[];
-    /** Probe even servers that are configured as disabled. */
-    forceProbe?: boolean;
-}
+export type McpListServersParams = ParamsOf<typeof mcpListServersSchema>;
 
 /** `mcp.getConfig` params — fetch one raw MCP server config for editing. */
-export interface McpGetConfigParams {
-    id: string;
-}
+export type McpGetConfigParams = ParamsOf<typeof mcpGetConfigSchema>;
 export interface McpGetConfigResult {
     config: McpServerConfig;
 }
-export interface McpCreateConfigParams {
-    config: McpServerConfig;
-}
+export type McpCreateConfigParams = ParamsOf<typeof mcpCreateConfigSchema>;
 /** Shared result for create / update — safe summary + restart requirement. */
 export interface McpMutateConfigResult {
     server: McpServerConfigView;
     requiresRestart: true;
 }
-export interface McpUpdateConfigParams {
-    id: string;
-    /** Field-wise merge — absent fields keep their current value. */
-    patch: Partial<McpServerConfig>;
-}
-export interface McpDeleteConfigParams {
-    id: string;
-}
+export type McpUpdateConfigParams = ParamsOf<typeof mcpUpdateConfigSchema>;
+export type McpDeleteConfigParams = ParamsOf<typeof mcpDeleteConfigSchema>;
 export interface McpDeleteConfigResult {
     deleted: string;
     requiresRestart: true;
@@ -419,7 +410,7 @@ export interface TacoGlobalConfigView
 }
 
 /** `settings.get` RPC params (currently no required input; reserved for future). */
-export type SettingsGetParams = undefined;
+export type SettingsGetParams = ParamsOf<typeof settingsGetSchema>;
 
 /** `settings.get` RPC result — sidecar global config view (key fields masked, never plaintext). */
 export interface SettingsGetResult {
@@ -579,7 +570,7 @@ export type ExtensionPermission =
 export type ExtensionSource = "builtin" | "external";
 
 /** `extensions.status` RPC — returns the current extension registry's status. */
-export type ExtensionsStatusParams = undefined;
+export type ExtensionsStatusParams = ParamsOf<typeof extensionsStatusSchema>;
 
 export interface ExtensionStatusEntry {
     name: string;

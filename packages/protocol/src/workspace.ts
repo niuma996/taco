@@ -20,7 +20,12 @@
  * override the channel entry when present.
  */
 
-import type { WorkspaceId } from "./frames.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type {
+    workspaceAssociationsGetSchema,
+    workspaceAssociationsResolveSchema,
+    workspaceAssociationsSetSchema,
+} from "./schemas/workspace.js";
 
 /**
  * Which level an association set is stored at.
@@ -44,9 +49,7 @@ export interface WorkspaceAssociationKey {
 }
 
 /** `workspace.associations.get` params — read the set stored at one key. */
-export interface WorkspaceAssociationsGetParams {
-    readonly key: WorkspaceAssociationKey;
-}
+export type WorkspaceAssociationsGetParams = ParamsOf<typeof workspaceAssociationsGetSchema>;
 
 /** `workspace.associations.get` result — the set stored at one key. */
 export interface WorkspaceAssociationsGetResult {
@@ -61,10 +64,7 @@ export interface WorkspaceAssociationsGetResult {
  * wants. A partial update would need a read-modify-write round trip whose
  * result could be stale by the time it lands.
  */
-export interface WorkspaceAssociationsSetParams {
-    readonly key: WorkspaceAssociationKey;
-    readonly roots: readonly string[];
-}
+export type WorkspaceAssociationsSetParams = ParamsOf<typeof workspaceAssociationsSetSchema>;
 
 /** `workspace.associations.set` result — the set as stored. */
 export interface WorkspaceAssociationsSetResult {
@@ -78,9 +78,9 @@ export interface WorkspaceAssociationsSetResult {
  * (a conversation's own entry wins over its channel's) so the client does not
  * have to reimplement it.
  */
-export interface WorkspaceAssociationsResolveParams {
-    readonly workspace: WorkspaceId;
-}
+export type WorkspaceAssociationsResolveParams = ParamsOf<
+    typeof workspaceAssociationsResolveSchema
+>;
 
 /** `workspace.associations.resolve` result. */
 export interface WorkspaceAssociationsResolveResult {

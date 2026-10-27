@@ -10,6 +10,7 @@ export * from "./channels.js";
 export * from "./checkpoints.js";
 export * from "./commandPermission.js";
 export * from "./extensions.js";
+export * from "./globalConfig.js";
 export * from "./imPolicy.js";
 export * from "./initialize.js";
 export * from "./jobs.js";

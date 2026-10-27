@@ -4,5 +4,6 @@
  */
 
 import { Type } from "typebox";
+import { workspaceIdSchema } from "./fields.js";
 
-export const toolsListSchema = Type.Object({ workspace: Type.String({ minLength: 1 }) });
+export const toolsListSchema = Type.Object({ workspace: workspaceIdSchema });

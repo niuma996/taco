@@ -16,11 +16,8 @@ import {
     workspaceListSchema,
 } from "../schemas/index.js";
 import type {
-    WorkspaceAssociationsGetParams,
     WorkspaceAssociationsGetResult,
-    WorkspaceAssociationsResolveParams,
     WorkspaceAssociationsResolveResult,
-    WorkspaceAssociationsSetParams,
     WorkspaceAssociationsSetResult,
 } from "../workspace.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
@@ -37,35 +34,32 @@ export interface WorkspaceEnsureResult {
 export type WorkspaceDisposeResult = null;
 
 const workspaceRows = {
-    workspaceList: row<undefined, WorkspaceListResult>()(
-        "workspace.list",
-        "process",
-        workspaceListSchema,
-    ),
-    workspaceEnsure: row<{ cwd: WorkspaceId }, WorkspaceEnsureResult>()(
+    workspaceList: row<WorkspaceListResult>()("workspace.list", "process", workspaceListSchema),
+    workspaceEnsure: row<WorkspaceEnsureResult>()(
         "workspace.ensure",
         "workspace",
         workspaceEnsureSchema,
     ),
-    workspaceDispose: row<{ cwd: WorkspaceId }, WorkspaceDisposeResult>()(
+    workspaceDispose: row<WorkspaceDisposeResult>()(
         "workspace.dispose",
         "workspace",
         workspaceDisposeSchema,
     ),
-    workspaceAssociationsGet: row<WorkspaceAssociationsGetParams, WorkspaceAssociationsGetResult>()(
+    workspaceAssociationsGet: row<WorkspaceAssociationsGetResult>()(
         "workspace.associations.get",
         "process",
         workspaceAssociationsGetSchema,
     ),
-    workspaceAssociationsSet: row<WorkspaceAssociationsSetParams, WorkspaceAssociationsSetResult>()(
+    workspaceAssociationsSet: row<WorkspaceAssociationsSetResult>()(
         "workspace.associations.set",
         "process",
         workspaceAssociationsSetSchema,
     ),
-    workspaceAssociationsResolve: row<
-        WorkspaceAssociationsResolveParams,
-        WorkspaceAssociationsResolveResult
-    >()("workspace.associations.resolve", "workspace", workspaceAssociationsResolveSchema),
+    workspaceAssociationsResolve: row<WorkspaceAssociationsResolveResult>()(
+        "workspace.associations.resolve",
+        "workspace",
+        workspaceAssociationsResolveSchema,
+    ),
 };
 
 export const workspaceMethods = domainMethods(workspaceRows);

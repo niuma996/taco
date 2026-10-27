@@ -10,5 +10,13 @@
  * version-negotiation path instead of being rejected at the envelope.
  */
 import { Type } from "typebox";
+import type { InitializeParams } from "../frames.js";
 
-export const initializeSchema = Type.Unknown();
+/**
+ * The schema stays `Type.Unknown()` — the gate is deliberately open — but the
+ * static type is pinned to `InitializeParams` so the contract table still
+ * declares what a well-formed `initialize` carries. `Type.Unsafe` changes
+ * only the static side: at runtime the schema still accepts anything, which
+ * is the point of keeping the gate open.
+ */
+export const initializeSchema = Type.Unsafe<InitializeParams>(Type.Unknown());

@@ -7,15 +7,10 @@
  */
 
 import type {
-    McpCreateConfigParams,
-    McpDeleteConfigParams,
     McpDeleteConfigResult,
-    McpGetConfigParams,
     McpGetConfigResult,
-    McpListServersParams,
     McpListServersResult,
     McpMutateConfigResult,
-    McpUpdateConfigParams,
 } from "../config.js";
 import {
     agentsContentSchema,
@@ -32,76 +27,37 @@ import {
     toolsListSchema,
 } from "../schemas/index.js";
 import type {
-    AgentsContentParams,
     AgentsContentResult,
-    AgentsDeleteParams,
     AgentsDeleteResult,
-    AgentsListParams,
     AgentsListResult,
-    AgentsWriteParams,
     AgentsWriteResult,
-    SkillContentParams,
     SkillContentResult,
-    SkillsListParams,
     SkillsListResult,
-    ToolsListParams,
     ToolsListResult,
 } from "../tools.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const miscRows = {
-    toolsList: row<ToolsListParams, ToolsListResult>()("tools.list", "workspace", toolsListSchema),
-    agentsList: row<AgentsListParams, AgentsListResult>()(
-        "agents.list",
-        "workspace",
-        agentsListSchema,
-    ),
-    agentsContent: row<AgentsContentParams, AgentsContentResult>()(
-        "agents.content",
-        "workspace",
-        agentsContentSchema,
-    ),
-    agentsWrite: row<AgentsWriteParams, AgentsWriteResult>()(
-        "agents.write",
-        "workspace",
-        agentsWriteSchema,
-    ),
-    agentsDelete: row<AgentsDeleteParams, AgentsDeleteResult>()(
-        "agents.delete",
-        "workspace",
-        agentsDeleteSchema,
-    ),
-    skillsList: row<SkillsListParams, SkillsListResult>()(
-        "skills.list",
-        "workspace",
-        skillsListSchema,
-    ),
-    skillContent: row<SkillContentParams, SkillContentResult>()(
-        "skills.content",
-        "workspace",
-        skillContentSchema,
-    ),
-    mcpListServers: row<McpListServersParams, McpListServersResult>()(
-        "mcp.listServers",
-        "process",
-        mcpListServersSchema,
-    ),
-    mcpGetConfig: row<McpGetConfigParams, McpGetConfigResult>()(
-        "mcp.getConfig",
-        "process",
-        mcpGetConfigSchema,
-    ),
-    mcpCreateConfig: row<McpCreateConfigParams, McpMutateConfigResult>()(
+    toolsList: row<ToolsListResult>()("tools.list", "workspace", toolsListSchema),
+    agentsList: row<AgentsListResult>()("agents.list", "workspace", agentsListSchema),
+    agentsContent: row<AgentsContentResult>()("agents.content", "workspace", agentsContentSchema),
+    agentsWrite: row<AgentsWriteResult>()("agents.write", "workspace", agentsWriteSchema),
+    agentsDelete: row<AgentsDeleteResult>()("agents.delete", "workspace", agentsDeleteSchema),
+    skillsList: row<SkillsListResult>()("skills.list", "workspace", skillsListSchema),
+    skillContent: row<SkillContentResult>()("skills.content", "workspace", skillContentSchema),
+    mcpListServers: row<McpListServersResult>()("mcp.listServers", "process", mcpListServersSchema),
+    mcpGetConfig: row<McpGetConfigResult>()("mcp.getConfig", "process", mcpGetConfigSchema),
+    mcpCreateConfig: row<McpMutateConfigResult>()(
         "mcp.createConfig",
         "process",
         mcpCreateConfigSchema,
     ),
-    mcpUpdateConfig: row<McpUpdateConfigParams, McpMutateConfigResult>()(
+    mcpUpdateConfig: row<McpMutateConfigResult>()(
         "mcp.updateConfig",
         "process",
         mcpUpdateConfigSchema,
     ),
-    mcpDeleteConfig: row<McpDeleteConfigParams, McpDeleteConfigResult>()(
+    mcpDeleteConfig: row<McpDeleteConfigResult>()(
         "mcp.deleteConfig",
         "process",
         mcpDeleteConfigSchema,

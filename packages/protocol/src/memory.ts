@@ -2,7 +2,18 @@
  * Memory RPC types — list/write/deleteTopic + model-initiated upsert.
  */
 
-import type { WorkspaceId } from "./frames.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type {
+    memoryDeleteTopicSchema,
+    memoryDreamApplySchema,
+    memoryDreamDiscardSchema,
+    memoryDreamRunSchema,
+    memoryDreamUndoSchema,
+    memoryListSchema,
+    memoryRestoreTopicSchema,
+    memoryUpsertSchema,
+    memoryWriteSchema,
+} from "./schemas/memory.js";
 
 /**
  * Hard ceiling on a topic body. Not a target — one topic holds one fact, and
@@ -15,9 +26,7 @@ export const MEMORY_CONTENT_MAX_CHARS = 1000;
 // memory.list / memory.write / memory.deleteTopic
 
 /** `memory.list` / `memory.write` / `memory.deleteTopic` — workspace-scoped. */
-export interface MemoryListParams {
-    workspace: WorkspaceId;
-}
+export type MemoryListParams = ParamsOf<typeof memoryListSchema>;
 
 /** One topic entry in `memory.list` (corresponds to `projects/{cwd}/{id}.md`).
  *  Field names align with the sidecar `MemoryEntry`; `createdAt` is the file mtime. */
@@ -98,46 +107,32 @@ export interface MemoryDreamState {
 }
 
 /** `memory.dreamRun` — consolidate this workspace now and return a preview. */
-export interface MemoryDreamRunParams {
-    workspace: WorkspaceId;
-}
+export type MemoryDreamRunParams = ParamsOf<typeof memoryDreamRunSchema>;
 export type MemoryDreamRunResult =
     | { status: "previewed"; preview: MemoryDreamPreview }
     | { status: "skipped" | "failed"; reason: string };
 
 /** `memory.dreamApply` — apply the pending preview (confirms the workspace). */
-export interface MemoryDreamApplyParams {
-    workspace: WorkspaceId;
-    /** The preview id the user reviewed; rejected if a newer preview replaced it. */
-    previewId: string;
-}
+export type MemoryDreamApplyParams = ParamsOf<typeof memoryDreamApplySchema>;
 export interface MemoryDreamApplyResult {
     report: MemoryDreamReportSummary;
 }
 
 /** `memory.dreamDiscard` — drop the pending preview without applying it. */
-export interface MemoryDreamDiscardParams {
-    workspace: WorkspaceId;
-}
+export type MemoryDreamDiscardParams = ParamsOf<typeof memoryDreamDiscardSchema>;
 export interface MemoryDreamDiscardResult {
     ok: true;
 }
 
 /** `memory.dreamUndo` — revert one applied consolidation. */
-export interface MemoryDreamUndoParams {
-    workspace: WorkspaceId;
-    reportId: string;
-}
+export type MemoryDreamUndoParams = ParamsOf<typeof memoryDreamUndoSchema>;
 export interface MemoryDreamUndoResult {
     /** Topics left as they are because they changed after the run. */
     conflicts: string[];
 }
 
 /** `memory.restoreTopic` — move an archived topic back into the live set. */
-export interface MemoryRestoreTopicParams {
-    workspace: WorkspaceId;
-    id: string;
-}
+export type MemoryRestoreTopicParams = ParamsOf<typeof memoryRestoreTopicSchema>;
 export interface MemoryRestoreTopicResult {
     ok: true;
 }
@@ -166,45 +161,20 @@ export interface MemoryListResult {
 }
 
 /** `memory.write` params — overwrites MEMORY.md wholesale. `baseHash` provides optimistic concurrency. */
-export interface MemoryWriteParams {
-    workspace: WorkspaceId;
-    content: string;
-    /** `memoryHash` from the previous `memory.list`. Rejected if disk content has changed. */
-    baseHash: string;
-}
+export type MemoryWriteParams = ParamsOf<typeof memoryWriteSchema>;
 export interface MemoryWriteResult {
     ok: true;
 }
 
 /** `memory.deleteTopic` params — client supplies the id; the sidecar path-whitelists internally. */
-export interface MemoryDeleteTopicParams {
-    workspace: WorkspaceId;
-    id: string;
-    /** The content the client last showed; when it no longer matches disk the
-     *  delete is refused with `memory.conflict`. Optional for older clients. */
-    expectedContent?: string;
-}
+export type MemoryDeleteTopicParams = ParamsOf<typeof memoryDeleteTopicSchema>;
 export interface MemoryDeleteTopicResult {
     ok: true;
 }
 
 // memory.upsert — model-initiated add/replace/remove; the handler dispatches by `action`.
 
-export interface MemoryUpsertParams {
-    workspace: WorkspaceId;
-    /** add / replace / remove */
-    action: "add" | "replace" | "remove";
-    /** Matches `^[a-z0-9-]{1,64}$` — kebab-case id, lowercase letters/digits/hyphens, ≤64 chars. Whitelisted by the handler. */
-    id: string;
-    /** Required on add: human-readable name, ≤60 chars. */
-    name?: string;
-    /** Optional on add: one-line description used for relevance matching, ≤120 chars. Defaults to `name`. */
-    description?: string;
-    /** Required on add/replace: body text, ≤MEMORY_CONTENT_MAX_CHARS. */
-    content?: string;
-    /** Required on add. */
-    type?: "user" | "feedback" | "project" | "reference";
-}
+export type MemoryUpsertParams = ParamsOf<typeof memoryUpsertSchema>;
 export interface MemoryUpsertResult {
     ok: true;
     /** "created" | "updated" | "deleted" — the model decides next steps based on this. */

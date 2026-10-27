@@ -5,6 +5,18 @@
  * only `{ configured, mask }`, mirroring how provider API keys cross the wire.
  */
 
+import type { ParamsOf } from "./rpcContract/types.js";
+import type {
+    channelsBindCredsSchema,
+    channelsBindSchema,
+    channelsCreateSchema,
+    channelsListConversationsSchema,
+    channelsListSchema,
+    channelsRetrySchema,
+    channelsSubmitVerifyCodeSchema,
+    channelsUnbindSchema,
+} from "./schemas/channels.js";
+
 /**
  * Prefix marking a virtual IM workspace cwd (`im://<channelId>/<peerId>/<chatId>`).
  * Lives here (like CUSTOM_PROVIDER_PREFIX) because the desktop client needs to
@@ -108,7 +120,7 @@ export interface ChannelStatusEntry {
 }
 
 /** `channels.list` RPC params — a process-level call with no input. */
-export type ChannelsListParams = undefined;
+export type ChannelsListParams = ParamsOf<typeof channelsListSchema>;
 
 export interface ChannelsListResult {
     /** Channel types available to instantiate. */
@@ -119,12 +131,7 @@ export interface ChannelsListResult {
     failed: Array<{ channelId: string; error: string }>;
 }
 
-export interface ChannelsCreateParams {
-    /** Manifest name of the channel type to instantiate, e.g. "wechat". */
-    name: string;
-    /** Runtime id; defaults to `name` when omitted. Must match /^[a-z0-9][a-z0-9-]*$/. */
-    channelId?: string;
-}
+export type ChannelsCreateParams = ParamsOf<typeof channelsCreateSchema>;
 
 export interface ChannelsCreateResult {
     channelId: string;
@@ -141,38 +148,23 @@ export interface ChannelsCreateResult {
  * no QR flow). Defined at the wire boundary so any future channel needing a
  * non-QR bind can extend the shape.
  */
-export interface ChannelsBindCreds {
-    botId?: string;
-    secret?: string;
-}
+export type ChannelsBindCreds = ParamsOf<typeof channelsBindCredsSchema>;
 
-export interface ChannelsBindParams {
-    channelId: string;
-    /** Discard stored credentials and re-run the full QR flow. */
-    force?: boolean;
-    /** Static credentials to persist + connect; ignored by channels without a
-     *  non-QR bind flow. */
-    creds?: ChannelsBindCreds;
-}
+export type ChannelsBindParams = ParamsOf<typeof channelsBindSchema>;
 
 export interface ChannelsBindResult {
     channelId: string;
     state: ChannelState;
 }
 
-export interface ChannelsSubmitVerifyCodeParams {
-    requestId: string;
-    code: string;
-}
+export type ChannelsSubmitVerifyCodeParams = ParamsOf<typeof channelsSubmitVerifyCodeSchema>;
 
 export interface ChannelsSubmitVerifyCodeResult {
     /** False when the request is unknown or already expired. */
     accepted: boolean;
 }
 
-export interface ChannelsUnbindParams {
-    channelId: string;
-}
+export type ChannelsUnbindParams = ParamsOf<typeof channelsUnbindSchema>;
 
 export interface ChannelsUnbindResult {
     channelId: string;
@@ -185,9 +177,7 @@ export interface ChannelsUnbindResult {
  * reconnect budget is exhausted, this is the only way to get another attempt
  * without clearing the binding. Absent (or a no-op) on channels that don't
  * have this problem — the desktop shows a Retry button only where it's wired. */
-export interface ChannelsRetryParams {
-    channelId: string;
-}
+export type ChannelsRetryParams = ParamsOf<typeof channelsRetrySchema>;
 
 export interface ChannelsRetryResult {
     channelId: string;
@@ -214,10 +204,7 @@ export interface ImConversationEntry {
     lastUsedAt: number;
 }
 
-export interface ChannelsListConversationsParams {
-    /** Restrict to one channel instance; omit for all. */
-    channelId?: string;
-}
+export type ChannelsListConversationsParams = ParamsOf<typeof channelsListConversationsSchema>;
 
 export interface ChannelsListConversationsResult {
     /** Sorted by lastUsedAt descending. */

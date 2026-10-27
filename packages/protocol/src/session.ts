@@ -6,16 +6,44 @@
  */
 
 import type { CustomProviderApi } from "./config.js";
-import type {
-    CompactionFailureReason,
-    ImageInput,
-    ServerPush,
-    SessionId,
-    SupportedLocale,
-    WorkspaceId,
-} from "./frames.js";
-import type { AgentMessage, ThinkingLevel } from "./messages.js";
+import type { CompactionFailureReason, ServerPush, SessionId, WorkspaceId } from "./frames.js";
+import type { AgentMessage } from "./messages.js";
 import type { PlanStateUpdatedParams, TasksUpdatedParams } from "./push.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type {
+    providerListModelsSchema,
+    providersListSchema,
+    providersRevealKeySchema,
+    providerTestConnectionSchema,
+    sessionListModelsSchema,
+} from "./schemas/catalog.js";
+import type {
+    sessionAttachSchema,
+    sessionCreateSchema,
+    sessionDeleteSchema,
+    sessionDetachSchema,
+    sessionListSchema,
+    sessionRenameSchema,
+} from "./schemas/sessionLifecycle.js";
+import type {
+    sessionEventsGetSchema,
+    sessionHistorySchema,
+    sessionPlanStateGetSchema,
+    sessionSnapshotGetSchema,
+    sessionTaskHistoryGetSchema,
+    sessionTasksGetSchema,
+} from "./schemas/sessionRead.js";
+import type {
+    sessionAbortSchema,
+    sessionCancelQueuedSchema,
+    sessionCompactSchema,
+    sessionContextInfoSchema,
+    sessionPromptSchema,
+    sessionSetModelSchema,
+    sessionSetThinkingLevelSchema,
+    sessionSteerSchema,
+    subagentAbortSchema,
+} from "./schemas/sessionTurn.js";
 
 export interface SessionMeta {
     id: SessionId;
@@ -72,18 +100,7 @@ export interface SessionListCursor {
 }
 
 /** Params for `session.list`. */
-export interface SessionListParams {
-    workspace: WorkspaceId;
-    /** Page size. Omitted or <= 0 means SESSION_LIST_DEFAULT_LIMIT; the server
-     *  clamps to SESSION_LIST_MAX_LIMIT. */
-    limit?: number;
-    /** Cursor returned from a previous list result. Undefined = first page. */
-    cursor?: SessionListCursor;
-    /** When true, ignore pagination and return the full list (plus `total`).
-     *  Used by the client to refresh the sidebar — discards any in-progress
-     *  pagination state. */
-    full?: boolean;
-}
+export type SessionListParams = ParamsOf<typeof sessionListSchema>;
 
 export interface SessionListEntry {
     id: SessionId;
@@ -129,11 +146,7 @@ export interface SessionHistory {
 }
 
 /** Request the retained realtime frames after a contiguous session cursor. */
-export interface SessionEventsGetParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    afterSeq: number;
-}
+export type SessionEventsGetParams = ParamsOf<typeof sessionEventsGetSchema>;
 
 /** Bounded replay result. `resetRequired` means the client must pull authoritative snapshots. */
 export interface SessionEventsGetResult {
@@ -144,30 +157,16 @@ export interface SessionEventsGetResult {
 }
 
 /** Request one consistent session-state snapshot and its replay watermark. */
-export interface SessionSnapshotGetParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type SessionSnapshotGetParams = ParamsOf<typeof sessionSnapshotGetSchema>;
 
 /** `session.tasks.get` params — the current task list of an attached session. */
-export interface SessionTasksGetParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type SessionTasksGetParams = ParamsOf<typeof sessionTasksGetSchema>;
 
 /** `session.taskHistory.get` params — one history list, expanded to its items. */
-export interface SessionTaskHistoryGetParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    /** The history list id from the task-list snapshot. */
-    listId: string;
-}
+export type SessionTaskHistoryGetParams = ParamsOf<typeof sessionTaskHistoryGetSchema>;
 
 /** `session.planState.get` params — the current plan-mode state. */
-export interface SessionPlanStateGetParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type SessionPlanStateGetParams = ParamsOf<typeof sessionPlanStateGetSchema>;
 
 /**
  * Authoritative state at `snapshotSeq`. Clients must replay only frames after
@@ -182,32 +181,7 @@ export interface SessionSnapshot {
     planState?: Pick<PlanStateUpdatedParams, "active" | "currentSlug">;
 }
 
-export interface CreateSessionParams {
-    workspace: WorkspaceId;
-    /** Optional client-supplied id. */
-    sessionId?: SessionId;
-    /** First user message (recorded as the first entry + triggers agent prompt). */
-    initialPrompt?: string;
-    /**
-     * Images attached to the first user message. May be sent with or without
-     * `initialPrompt` (image-only prompts are allowed).
-     */
-    initialImages?: ImageInput[];
-    /** Session-level override; defaults to workspace default (then taco.json / CLI). */
-    thinkingLevel?: ThinkingLevel;
-    /**
-     * Desktop UI language at the moment this session is created. Server passes
-     * it through to `AttachedSession.uiLocaleRef` so the first `<reply_language>`
-     * tag (per-turn context hook) reflects the UI. Never persisted.
-     */
-    uiLocale?: SupportedLocale;
-    /** IM routing triple, written to jsonl metadata as the authoritative routing source. */
-    imRouting?: {
-        channelId: string;
-        peerId: string;
-        chatId: string;
-    };
-}
+export type CreateSessionParams = ParamsOf<typeof sessionCreateSchema>;
 
 export interface CreateSessionResult {
     sessionId: SessionId;
@@ -218,47 +192,18 @@ export interface CreateSessionResult {
     assistantMessage: AgentMessage | null;
 }
 
-export interface AttachParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    /** Initial thinking level for this harness. Already-attached sessions are not overwritten. */
-    thinkingLevel?: ThinkingLevel;
-}
+export type AttachParams = ParamsOf<typeof sessionAttachSchema>;
 
 /** `session.attach` params — the attach envelope plus the initial thinking level. */
 export type SessionAttachParams = AttachParams;
 
 /** `session.detach` params — the session to detach; no thinking level applies. */
-export interface SessionDetachParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type SessionDetachParams = ParamsOf<typeof sessionDetachSchema>;
 
 /** `session.history` params — the session whose transcript to replay. */
-export interface SessionHistoryParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type SessionHistoryParams = ParamsOf<typeof sessionHistorySchema>;
 
-export interface PromptParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    text: string;
-    images?: ImageInput[];
-    /**
-     * Desktop UI language for THIS turn only. Server injects a transient
-     * `<reply_language>` tag if set. Updates the live uiLocaleRef so subsequent
-     * turns of the same session keep matching the user's latest UI choice.
-     */
-    uiLocale?: SupportedLocale;
-    /**
-     * Model override applied when this prompt attaches the session (the first
-     * turn of a brand-new session). Ignored for already-attached sessions —
-     * callers must use `session.setModel` to switch those. Lets the desktop
-     * honour a model picked on a fresh session before its id exists.
-     */
-    model?: { provider: string; id: string };
-}
+export type PromptParams = ParamsOf<typeof sessionPromptSchema>;
 
 /**
  * `session.prompt` RPC result — a structured turn outcome.
@@ -274,17 +219,7 @@ export interface PromptResult {
     assistantMessage: AgentMessage;
 }
 
-export interface SteerParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    text: string;
-    /** Images attached to the steering message (pi 0.85 supports image parts on steer). */
-    images?: ImageInput[];
-    /**
-     * Desktop UI language for THIS steer. Same semantics as PromptParams.uiLocale.
-     */
-    uiLocale?: SupportedLocale;
-}
+export type SteerParams = ParamsOf<typeof sessionSteerSchema>;
 
 /**
  * `session.steer` / `session.followUp` result. Both are pure enqueues: with no
@@ -318,22 +253,14 @@ export type FollowUpParams = SteerParams;
 export type FollowUpResult = SteerResult;
 
 /** Params for `session.cancelQueued` — remove one not-yet-consumed queue entry. */
-export interface CancelQueuedParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    /** entryId from the queue_update push, or from a steer result's echo. */
-    entryId: string;
-}
+export type CancelQueuedParams = ParamsOf<typeof sessionCancelQueuedSchema>;
 
 /** `session.cancelQueued` result — mirrors pi's CancelQueuedResult kind. */
 export interface CancelQueuedResult {
     kind: "cancelled" | "already_consumed" | "not_found";
 }
 
-export interface AbortParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type AbortParams = ParamsOf<typeof sessionAbortSchema>;
 
 /** Explicit outcome for an idempotent cancellation request. */
 export interface AbortResult {
@@ -351,11 +278,7 @@ export interface AbortResult {
 }
 
 /** `subagent.abort` params — stop one running subagent without touching its parent's turn. */
-export interface SubagentAbortParams {
-    workspace: WorkspaceId;
-    /** The child session to stop (the panel entry / receipt's subSessionId). */
-    subSessionId: SessionId;
-}
+export type SubagentAbortParams = ParamsOf<typeof subagentAbortSchema>;
 
 /** Explicit outcome for an idempotent subagent-stop request. */
 export interface SubagentAbortResult {
@@ -368,37 +291,16 @@ export interface SubagentAbortResult {
     status: "aborted" | "not_running";
 }
 
-export interface DeleteSessionParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type DeleteSessionParams = ParamsOf<typeof sessionDeleteSchema>;
 
-export interface RenameSessionParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    /** New title; empty string is allowed (server trims to empty, last write wins). */
-    name: string;
-}
+export type RenameSessionParams = ParamsOf<typeof sessionRenameSchema>;
 
-export interface SetModelParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    /** Provider id, e.g. "anthropic" / "openai". */
-    provider: string;
-    /** Model id, e.g. "claude-sonnet-4-5". */
-    modelId: string;
-}
+export type SetModelParams = ParamsOf<typeof sessionSetModelSchema>;
 
-export interface ListModelsParams {
-    workspace: WorkspaceId;
-    /** Optional provider filter. */
-    provider?: string;
-}
+export type ListModelsParams = ParamsOf<typeof sessionListModelsSchema>;
 
 /** `providers.list` RPC params. */
-export interface ProvidersListParams {
-    workspace: WorkspaceId;
-}
+export type ProvidersListParams = ParamsOf<typeof providersListSchema>;
 
 /** Provider availability view (one entry in `providers.list` result). */
 export interface ProviderView {
@@ -450,10 +352,7 @@ export interface ProvidersListResult {
 }
 
 /** `providers.revealKey` RPC params — returns the plaintext key for one provider. */
-export interface ProvidersRevealKeyParams {
-    workspace: WorkspaceId;
-    providerId: string;
-}
+export type ProvidersRevealKeyParams = ParamsOf<typeof providersRevealKeySchema>;
 
 /** `providers.revealKey` RPC result — `null` when no key is configured. */
 export interface ProvidersRevealKeyResult {
@@ -470,15 +369,7 @@ export interface ProvidersRevealKeyResult {
  *   or customProviders) and the key from the sidecar's ProviderKeyStore, so
  *   plaintext keys never cross the wire for already-saved providers.
  */
-export type ProviderListModelsParams =
-    | {
-          providerId: string;
-      }
-    | {
-          baseUrl: string;
-          api: CustomProviderApi;
-          apiKey: string;
-      };
+export type ProviderListModelsParams = ParamsOf<typeof providerListModelsSchema>;
 
 /**
  * Discriminated result — either a model id list or why the probe failed.
@@ -504,18 +395,7 @@ export type ProviderListModelsResult =
  * - `{ baseUrl, api, apiKey, modelId }` — the create-custom form, before any
  *   provider is registered.
  */
-export type ProviderTestConnectionParams =
-    | {
-          providerId: string;
-          modelId: string;
-          apiKey?: string;
-      }
-    | {
-          baseUrl: string;
-          api: CustomProviderApi;
-          apiKey: string;
-          modelId: string;
-      };
+export type ProviderTestConnectionParams = ParamsOf<typeof providerTestConnectionSchema>;
 
 /**
  * `provider.testConnection` result. Probe failures are a normal outcome, not
@@ -569,19 +449,10 @@ export type ProviderListModelsFailureReason =
     | "protocol-not-supported";
 
 /** `session.setThinkingLevel` RPC params. */
-export interface SessionSetThinkingLevelParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    level: ThinkingLevel;
-}
+export type SessionSetThinkingLevelParams = ParamsOf<typeof sessionSetThinkingLevelSchema>;
 
 /** `session.compact` RPC params — manually trigger compaction. */
-export interface SessionCompactParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-    /** Optional custom instructions (forwarded to pi `harness.compact(customInstructions)`). */
-    customInstructions?: string;
-}
+export type SessionCompactParams = ParamsOf<typeof sessionCompactSchema>;
 
 /** `session.compact` RPC result — success/failure only, never the artefact. */
 export interface SessionCompactResult {
@@ -598,10 +469,7 @@ export interface SessionCompactResult {
 }
 
 /** `session.contextInfo` RPC params — pulls a snapshot of current context usage. */
-export interface SessionContextInfoParams {
-    workspace: WorkspaceId;
-    sessionId: SessionId;
-}
+export type SessionContextInfoParams = ParamsOf<typeof sessionContextInfoSchema>;
 
 /** `session.contextInfo` RPC result — authoritative source for the desktop top-bar indicator. */
 export interface SessionContextInfoResult {

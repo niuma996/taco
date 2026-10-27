@@ -15,6 +15,13 @@
  */
 
 import type { CommandPermissionRule } from "./config.js";
+import type { ParamsOf } from "./rpcContract/types.js";
+import type {
+    imPolicyClearChatOverrideSchema,
+    imPolicyGetSchema,
+    imPolicySetChannelDefaultSchema,
+    imPolicySetChatOverrideSchema,
+} from "./schemas/imPolicy.js";
 
 /** (channelId, peerId, chatId) — identity of one IM conversation. */
 export interface ImRoute {
@@ -156,11 +163,7 @@ export interface ImWorkspacePolicyDocument {
  * view (default + every chat override for the channel); pass `peerId` +
  * `chatId` to also resolve the effective policy for that specific chat.
  */
-export interface ImPolicyGetParams {
-    channelId: string;
-    peerId?: string;
-    chatId?: string;
-}
+export type ImPolicyGetParams = ParamsOf<typeof imPolicyGetSchema>;
 
 /**
  * One chat override entry. Live conversation overrides carry the `route`;
@@ -199,31 +202,11 @@ export interface ImPolicyGetResult {
     rules: ImPolicyRulesView;
 }
 
-export interface ImPolicySetChannelDefaultParams {
-    channelId: string;
-    patch: ImWorkspacePolicyPatch;
-}
+export type ImPolicySetChannelDefaultParams = ParamsOf<typeof imPolicySetChannelDefaultSchema>;
 
-export interface ImPolicySetChatOverrideParams {
-    channelId: string;
-    peerId: string;
-    chatId: string;
-    patch: ImWorkspacePolicyPatch;
-}
+export type ImPolicySetChatOverrideParams = ParamsOf<typeof imPolicySetChatOverrideSchema>;
 
-export interface ImPolicyClearChatOverrideParams {
-    channelId: string;
-    /**
-     * Either the full route triple (preferred; matches by `chatPolicyKey` on
-     * the server) OR a raw `chatKey` (64-char sha256 hex) when the
-     * conversation that owned the override is no longer routed and the
-     * route cannot be reconstructed. Provide one of `peerId+chatId` or
-     * `chatKey`; the server rejects ambiguous or empty input.
-     */
-    peerId?: string;
-    chatId?: string;
-    chatKey?: string;
-}
+export type ImPolicyClearChatOverrideParams = ParamsOf<typeof imPolicyClearChatOverrideSchema>;
 
 export interface ImPolicyWriteResult {
     channelId: string;

@@ -158,6 +158,30 @@ export const contractKeysMatchRpcKeys: [RpcContractKey, keyof typeof RPC] extend
         : false
     : false = true;
 
+/**
+ * The methods whose params type carries no field information.
+ *
+ * Every params type is derived from its schema, so a schema that widens to
+ * `Type.Any()` / `Type.Unknown()` without a `Type.Unsafe` pin would erase
+ * the request shape: callers would pass anything and the build would stay
+ * quiet. This names the methods that lost their shape, so the check below
+ * fails instead.
+ */
+type UntypedParams<K extends RpcContractKey> = K extends unknown
+    ? 0 extends 1 & RpcParams<K>
+        ? K
+        : never
+    : never;
+
+/**
+ * Compile-time proof that every method still has a typed request shape.
+ *
+ * Assigned rather than aliased, like the assertions above: the assignment
+ * is what makes the check fail the build instead of sitting unused.
+ */
+export const paramsTypesAreTyped: [UntypedParams<RpcContractKey>] extends [never] ? true : false =
+    true;
+
 /** Resolve a wire method to its contract row without duplicating the name table. */
 export type RpcKeyForMethod<M extends RpcMethodName> = {
     [K in RpcContractKey]: (typeof RPC)[K] extends M ? K : never;

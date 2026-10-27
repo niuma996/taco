@@ -6,9 +6,9 @@
  * `rpcSchemas` tables from those rows.
  */
 
-import type { CommandPermissionResolveParams, CommandPermissionResolveResult } from "../config.js";
+import type { CommandPermissionResolveResult } from "../config.js";
 
-import type { InitializeParams, InitializeResult, SessionId } from "../frames.js";
+import type { InitializeResult, SessionId } from "../frames.js";
 
 import type { PlanStateUpdatedParams, TaskItem, TasksUpdatedParams } from "../push.js";
 import {
@@ -40,44 +40,21 @@ import {
     subagentAbortSchema,
 } from "../schemas/index.js";
 import type {
-    AbortParams,
     AbortResult,
-    CancelQueuedParams,
     CancelQueuedResult,
-    CreateSessionParams,
     CreateSessionResult,
-    DeleteSessionParams,
-    FollowUpParams,
     FollowUpResult,
-    ListModelsParams,
-    PromptParams,
     PromptResult,
-    RenameSessionParams,
-    SessionAttachParams,
-    SessionCompactParams,
     SessionCompactResult,
-    SessionContextInfoParams,
     SessionContextInfoResult,
-    SessionDetachParams,
-    SessionEventsGetParams,
     SessionEventsGetResult,
     SessionHistory,
-    SessionHistoryParams,
-    SessionListParams,
     SessionListResult,
-    SessionPlanStateGetParams,
     SessionSetThinkingLevelParams,
     SessionSnapshot,
-    SessionSnapshotGetParams,
-    SessionTaskHistoryGetParams,
-    SessionTasksGetParams,
-    SetModelParams,
-    SteerParams,
     SteerResult,
-    SubagentAbortParams,
     SubagentAbortResult,
 } from "../session.js";
-import type { SubmitAnswersParams } from "../tools.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 /** `session.attach` result — the attach acknowledgement plus live subagent state. */
@@ -141,124 +118,80 @@ export type SessionTasksGetResult = Pick<TasksUpdatedParams, "active" | "history
 export type SessionPlanStateGetResult = Pick<PlanStateUpdatedParams, "active" | "currentSlug">;
 
 const sessionRows = {
-    initialize: row<InitializeParams, InitializeResult>()(
-        "initialize",
-        "process",
-        initializeSchema,
-    ),
-    sessionList: row<SessionListParams, SessionListResult>()(
-        "session.list",
-        "workspace",
-        sessionListSchema,
-    ),
-    sessionCreate: row<CreateSessionParams, CreateSessionResult>()(
-        "session.create",
-        "workspace",
-        sessionCreateSchema,
-    ),
-    sessionAttach: row<SessionAttachParams, SessionAttachResult>()(
-        "session.attach",
-        "workspace",
-        sessionAttachSchema,
-    ),
-    sessionDetach: row<SessionDetachParams, SessionDetachResult>()(
-        "session.detach",
-        "workspace",
-        sessionDetachSchema,
-    ),
-    sessionDelete: row<DeleteSessionParams, SessionDeleteResult>()(
-        "session.delete",
-        "workspace",
-        sessionDeleteSchema,
-    ),
-    sessionRename: row<RenameSessionParams, SessionRenameResult>()(
-        "session.rename",
-        "workspace",
-        sessionRenameSchema,
-    ),
-    sessionHistory: row<SessionHistoryParams, SessionHistory>()(
-        "session.history",
-        "workspace",
-        sessionHistorySchema,
-    ),
-    sessionEventsGet: row<SessionEventsGetParams, SessionEventsGetResult>()(
+    initialize: row<InitializeResult>()("initialize", "process", initializeSchema),
+    sessionList: row<SessionListResult>()("session.list", "workspace", sessionListSchema),
+    sessionCreate: row<CreateSessionResult>()("session.create", "workspace", sessionCreateSchema),
+    sessionAttach: row<SessionAttachResult>()("session.attach", "workspace", sessionAttachSchema),
+    sessionDetach: row<SessionDetachResult>()("session.detach", "workspace", sessionDetachSchema),
+    sessionDelete: row<SessionDeleteResult>()("session.delete", "workspace", sessionDeleteSchema),
+    sessionRename: row<SessionRenameResult>()("session.rename", "workspace", sessionRenameSchema),
+    sessionHistory: row<SessionHistory>()("session.history", "workspace", sessionHistorySchema),
+    sessionEventsGet: row<SessionEventsGetResult>()(
         "session.events.get",
         "workspace",
         sessionEventsGetSchema,
     ),
-    sessionSnapshotGet: row<SessionSnapshotGetParams, SessionSnapshot>()(
+    sessionSnapshotGet: row<SessionSnapshot>()(
         "session.snapshot.get",
         "workspace",
         sessionSnapshotGetSchema,
     ),
-    sessionTasksGet: row<SessionTasksGetParams, SessionTasksGetResult>()(
+    sessionTasksGet: row<SessionTasksGetResult>()(
         "session.tasks.get",
         "workspace",
         sessionTasksGetSchema,
     ),
-    sessionTaskHistoryGet: row<SessionTaskHistoryGetParams, SessionTaskHistoryGetResult>()(
+    sessionTaskHistoryGet: row<SessionTaskHistoryGetResult>()(
         "session.taskHistory.get",
         "workspace",
         sessionTaskHistoryGetSchema,
     ),
-    sessionPlanStateGet: row<SessionPlanStateGetParams, SessionPlanStateGetResult>()(
+    sessionPlanStateGet: row<SessionPlanStateGetResult>()(
         "session.planState.get",
         "workspace",
         sessionPlanStateGetSchema,
     ),
-    sessionPrompt: row<PromptParams, PromptResult>()(
-        "session.prompt",
-        "workspace",
-        sessionPromptSchema,
-    ),
-    sessionSteer: row<SteerParams, SteerResult>()("session.steer", "workspace", sessionSteerSchema),
-    sessionFollowUp: row<FollowUpParams, FollowUpResult>()(
-        "session.followUp",
-        "workspace",
-        sessionFollowUpSchema,
-    ),
-    sessionCancelQueued: row<CancelQueuedParams, CancelQueuedResult>()(
+    sessionPrompt: row<PromptResult>()("session.prompt", "workspace", sessionPromptSchema),
+    sessionSteer: row<SteerResult>()("session.steer", "workspace", sessionSteerSchema),
+    sessionFollowUp: row<FollowUpResult>()("session.followUp", "workspace", sessionFollowUpSchema),
+    sessionCancelQueued: row<CancelQueuedResult>()(
         "session.cancelQueued",
         "workspace",
         sessionCancelQueuedSchema,
     ),
-    sessionAbort: row<AbortParams, AbortResult>()("session.abort", "workspace", sessionAbortSchema),
-    subagentAbort: row<SubagentAbortParams, SubagentAbortResult>()(
-        "subagent.abort",
-        "workspace",
-        subagentAbortSchema,
-    ),
-    commandPermissionResolve: row<CommandPermissionResolveParams, CommandPermissionResolveResult>()(
+    sessionAbort: row<AbortResult>()("session.abort", "workspace", sessionAbortSchema),
+    subagentAbort: row<SubagentAbortResult>()("subagent.abort", "workspace", subagentAbortSchema),
+    commandPermissionResolve: row<CommandPermissionResolveResult>()(
         "commandPermission.resolve",
         "workspace",
         commandPermissionResolveSchema,
     ),
-    sessionSetModel: row<SetModelParams, SessionSetModelResult>()(
+    sessionSetModel: row<SessionSetModelResult>()(
         "session.setModel",
         "workspace",
         sessionSetModelSchema,
     ),
-    sessionListModels: row<ListModelsParams, SessionListModelsResult>()(
+    sessionListModels: row<SessionListModelsResult>()(
         "session.listModels",
         "workspace",
         sessionListModelsSchema,
     ),
-    sessionSetThinkingLevel: row<SessionSetThinkingLevelParams, SessionSetThinkingLevelResult>()(
+    sessionSetThinkingLevel: row<SessionSetThinkingLevelResult>()(
         "session.setThinkingLevel",
         "workspace",
         sessionSetThinkingLevelSchema,
     ),
-    sessionCompact: row<SessionCompactParams, SessionCompactResult>()(
+    sessionCompact: row<SessionCompactResult>()(
         "session.compact",
         "workspace",
         sessionCompactSchema,
     ),
-    sessionContextInfo: row<SessionContextInfoParams, SessionContextInfoResult>()(
+    sessionContextInfo: row<SessionContextInfoResult>()(
         "session.contextInfo",
         "workspace",
         sessionContextInfoSchema,
     ),
-    sessionSubmitAnswers: row<SubmitAnswersParams, null>()(
+    sessionSubmitAnswers: row<null>()(
         "session.submitAnswers",
         "workspace",
         sessionSubmitAnswersSchema,

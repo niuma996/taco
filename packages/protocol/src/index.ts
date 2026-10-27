@@ -259,6 +259,7 @@ export {
     contractKeysMatchRpcKeys,
     createRpcRequest,
     type ProcessScopedKey,
+    paramsTypesAreTyped,
     RPC,
     type RpcContractKey,
     type RpcKeyForMethod,

@@ -7,30 +7,16 @@
  */
 
 import type {
-    ChannelsBindParams,
     ChannelsBindResult,
-    ChannelsCreateParams,
     ChannelsCreateResult,
-    ChannelsListConversationsParams,
     ChannelsListConversationsResult,
-    ChannelsListParams,
     ChannelsListResult,
-    ChannelsRetryParams,
     ChannelsRetryResult,
-    ChannelsSubmitVerifyCodeParams,
     ChannelsSubmitVerifyCodeResult,
-    ChannelsUnbindParams,
     ChannelsUnbindResult,
 } from "../channels.js";
 
-import type {
-    ImPolicyClearChatOverrideParams,
-    ImPolicyGetParams,
-    ImPolicyGetResult,
-    ImPolicySetChannelDefaultParams,
-    ImPolicySetChatOverrideParams,
-    ImPolicyWriteResult,
-} from "../imPolicy.js";
+import type { ImPolicyGetResult, ImPolicyWriteResult } from "../imPolicy.js";
 import {
     channelsBindSchema,
     channelsCreateSchema,
@@ -47,56 +33,33 @@ import {
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const channelsRows = {
-    channelsList: row<ChannelsListParams, ChannelsListResult>()(
-        "channels.list",
+    channelsList: row<ChannelsListResult>()("channels.list", "process", channelsListSchema),
+    channelsListConversations: row<ChannelsListConversationsResult>()(
+        "channels.listConversations",
         "process",
-        channelsListSchema,
+        channelsListConversationsSchema,
     ),
-    channelsListConversations: row<
-        ChannelsListConversationsParams,
-        ChannelsListConversationsResult
-    >()("channels.listConversations", "process", channelsListConversationsSchema),
-    channelsCreate: row<ChannelsCreateParams, ChannelsCreateResult>()(
-        "channels.create",
-        "process",
-        channelsCreateSchema,
-    ),
-    channelsBind: row<ChannelsBindParams, ChannelsBindResult>()(
-        "channels.bind",
-        "process",
-        channelsBindSchema,
-    ),
-    channelsSubmitVerifyCode: row<ChannelsSubmitVerifyCodeParams, ChannelsSubmitVerifyCodeResult>()(
+    channelsCreate: row<ChannelsCreateResult>()("channels.create", "process", channelsCreateSchema),
+    channelsBind: row<ChannelsBindResult>()("channels.bind", "process", channelsBindSchema),
+    channelsSubmitVerifyCode: row<ChannelsSubmitVerifyCodeResult>()(
         "channels.submitVerifyCode",
         "process",
         channelsSubmitVerifyCodeSchema,
     ),
-    channelsUnbind: row<ChannelsUnbindParams, ChannelsUnbindResult>()(
-        "channels.unbind",
-        "process",
-        channelsUnbindSchema,
-    ),
-    channelsRetry: row<ChannelsRetryParams, ChannelsRetryResult>()(
-        "channels.retry",
-        "process",
-        channelsRetrySchema,
-    ),
-    imPolicyGet: row<ImPolicyGetParams, ImPolicyGetResult>()(
-        "imPolicy.get",
-        "process",
-        imPolicyGetSchema,
-    ),
-    imPolicySetChannelDefault: row<ImPolicySetChannelDefaultParams, ImPolicyWriteResult>()(
+    channelsUnbind: row<ChannelsUnbindResult>()("channels.unbind", "process", channelsUnbindSchema),
+    channelsRetry: row<ChannelsRetryResult>()("channels.retry", "process", channelsRetrySchema),
+    imPolicyGet: row<ImPolicyGetResult>()("imPolicy.get", "process", imPolicyGetSchema),
+    imPolicySetChannelDefault: row<ImPolicyWriteResult>()(
         "imPolicy.setChannelDefault",
         "process",
         imPolicySetChannelDefaultSchema,
     ),
-    imPolicySetChatOverride: row<ImPolicySetChatOverrideParams, ImPolicyWriteResult>()(
+    imPolicySetChatOverride: row<ImPolicyWriteResult>()(
         "imPolicy.setChatOverride",
         "process",
         imPolicySetChatOverrideSchema,
     ),
-    imPolicyClearChatOverride: row<ImPolicyClearChatOverrideParams, ImPolicyWriteResult>()(
+    imPolicyClearChatOverride: row<ImPolicyWriteResult>()(
         "imPolicy.clearChatOverride",
         "process",
         imPolicyClearChatOverrideSchema,
