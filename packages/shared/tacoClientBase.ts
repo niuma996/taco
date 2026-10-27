@@ -5,13 +5,14 @@
  * rejectAllPending on dispose). Subclasses implement `makeDispatch()` and
  * `start` / `dispose`; their `call` / `callProcess` are optional.
  *
- * The 20 typed methods are merged via namesake interface — removable if
+ * The typed methods are merged via namesake interface — removable if
  * methods are generated or inlined in the future.
  */
 
 import type { ServerPush } from "@taco-ai/protocol";
+import type { RpcDispatch } from "./contractDispatch.js";
 import { FrameDispatcher, NdjsonLineBuffer } from "./dispatcher.js";
-import { createTypedRpc, type RpcDispatch, type TypedRpc } from "./typedRpc.js";
+import { createTypedRpc, type TypedRpc } from "./typedRpc.js";
 
 export interface TacoClientBase extends TypedRpc {}
 
@@ -30,7 +31,7 @@ export abstract class TacoClientBase {
     });
 
     constructor() {
-        // Inject the 20 typed methods. The adapter that re-orders args (method, workspace, params) is supplied by the subclass.
+        // Inject the typed methods. The adapter that re-orders args (method, workspace, params) is supplied by the subclass.
         // Runs during super(): subclass fields are NOT yet assigned, so makeDispatch() must not touch them.
         Object.assign(this, createTypedRpc(this.makeDispatch()));
     }

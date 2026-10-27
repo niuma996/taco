@@ -419,7 +419,7 @@ export interface TacoGlobalConfigView
 }
 
 /** `settings.get` RPC params (currently no required input; reserved for future). */
-export type SettingsGetParams = object;
+export type SettingsGetParams = undefined;
 
 /** `settings.get` RPC result — sidecar global config view (key fields masked, never plaintext). */
 export interface SettingsGetResult {
@@ -579,7 +579,7 @@ export type ExtensionPermission =
 export type ExtensionSource = "builtin" | "external";
 
 /** `extensions.status` RPC — returns the current extension registry's status. */
-export type ExtensionsStatusParams = object;
+export type ExtensionsStatusParams = undefined;
 
 export interface ExtensionStatusEntry {
     name: string;

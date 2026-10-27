@@ -26,18 +26,12 @@ import type {
     JobCreate,
     JobHistoryEntry,
     JobRunResult,
-    JobsCreateParams,
-    JobsDeleteResult,
-    JobsGetResult,
-    JobsHistoryResult,
-    JobsIdParams,
-    JobsListParams,
-    JobsListResult,
-    JobsUpdateParams,
-    JobsWriteResult,
+    RpcMethodName,
+    RpcMethodParams,
+    RpcMethodResult,
 } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/shared";
-import type { TacoClient } from "./tacoClient.ts";
+import type { RpcDispatch } from "@taco-ai/shared";
+import { createProcessContractDispatch, RPC } from "@taco-ai/shared";
 
 export interface JobsClient {
     list(actor?: Actor): Promise<Job[]>;
@@ -49,47 +43,24 @@ export interface JobsClient {
     history(id: string, actor?: Actor): Promise<JobHistoryEntry[] | null>;
 }
 
-export function createJobsClient(client: TacoClient): JobsClient {
+export function createJobsClient(client: Pick<RpcDispatch, "callProcess">): JobsClient {
+    // Bind transport methods: TacoClient.callProcess reads instance state.
+    const contract = createProcessContractDispatch({
+        callProcess: (method, params) => client.callProcess(method, params),
+    });
+    const call = <M extends Extract<RpcMethodName, `jobs.${string}`>>(
+        method: M,
+        params: RpcMethodParams<M>,
+        actor?: Actor,
+    ): Promise<RpcMethodResult<M>> =>
+        contract.callProcess<M>(method, { ...params, ...(actor === undefined ? {} : { actor }) });
     return {
-        list: (actor) =>
-            call<JobsListParams, JobsListResult>(client, RPC.jobsList, {}, actor).then(
-                (r) => r.jobs ?? [],
-            ),
-        get: (id, actor) =>
-            call<JobsIdParams, JobsGetResult>(client, RPC.jobsGet, { id }, actor).then(
-                (r) => r.job,
-            ),
-        create: (job, actor) =>
-            call<JobsCreateParams, JobsWriteResult>(client, RPC.jobsCreate, { job }, actor).then(
-                (r) => r.job,
-            ),
-        update: (job, actor) =>
-            call<JobsUpdateParams, JobsWriteResult>(client, RPC.jobsUpdate, { job }, actor).then(
-                (r) => r.job,
-            ),
-        delete: (id, actor) =>
-            call<JobsIdParams, JobsDeleteResult>(client, RPC.jobsDelete, { id }, actor).then(
-                (r) => r.deleted,
-            ),
-        runNow: (id, actor) =>
-            call<JobsIdParams, JobRunResult>(client, RPC.jobsRunNow, { id }, actor),
-        history: (id, actor) =>
-            call<JobsIdParams, JobsHistoryResult>(client, RPC.jobsHistory, { id }, actor).then(
-                (r) => r.history,
-            ),
+        list: (actor) => call(RPC.jobsList, {}, actor).then((r) => r.jobs ?? []),
+        get: (id, actor) => call(RPC.jobsGet, { id }, actor).then((r) => r.job),
+        create: (job, actor) => call(RPC.jobsCreate, { job }, actor).then((r) => r.job),
+        update: (job, actor) => call(RPC.jobsUpdate, { job }, actor).then((r) => r.job),
+        delete: (id, actor) => call(RPC.jobsDelete, { id }, actor).then((r) => r.deleted),
+        runNow: (id, actor) => call(RPC.jobsRunNow, { id }, actor),
+        history: (id, actor) => call(RPC.jobsHistory, { id }, actor).then((r) => r.history),
     };
-}
-
-/** Process-level RPC for jobs.* — the scheduler lives in the daemon process,
- *  not in any workspace. `callProcess` routes the frame through whichever
- *  workspace is currently started (the daemon's stdin is shared, so any
- *  started cwd works); `call()` would require `params.workspace` to be set
- *  on the sidecar side, which the jobs UI never provides. */
-async function call<TParams, TResult>(
-    client: TacoClient,
-    method: string,
-    params: TParams,
-    actor: Actor | undefined,
-): Promise<TResult> {
-    return client.callProcess(method, actor === undefined ? params : { ...params, actor });
 }

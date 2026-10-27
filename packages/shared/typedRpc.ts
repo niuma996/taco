@@ -5,21 +5,17 @@
  * transport (Node child_process, Tauri sidecar) implements `RpcDispatch`
  * and passes it here. Params/Result come from `@taco-ai/protocol` directly.
  *
- * Common workspace/process shapes use small helpers; methods with non-standard
- * envelopes remain explicit so their argument adapters stay readable.
+ * All sends use the contract-bound dispatcher; explicit adapters preserve the
+ * public facade arguments while the method determines payload and result types.
  */
 
 import type {
     AbortResult,
-    AgentsContentParams,
     AgentsContentResult,
-    AgentsDeleteParams,
     AgentsDeleteResult,
     AgentsListResult,
     AgentsWriteParams,
     AgentsWriteResult,
-    AttachParams,
-    CancelQueuedParams,
     CancelQueuedResult,
     ChannelsBindParams,
     ChannelsBindResult,
@@ -34,9 +30,7 @@ import type {
     ChannelsSubmitVerifyCodeResult,
     ChannelsUnbindParams,
     ChannelsUnbindResult,
-    CheckpointsListParams,
     CheckpointsListResult,
-    CheckpointsRestoreParams,
     CheckpointsRestoreResult,
     ClientCapabilities,
     CommandPermissionResolveParams,
@@ -44,7 +38,6 @@ import type {
     CreateSessionParams,
     CreateSessionResult,
     ExtensionsStatusResult,
-    FollowUpParams,
     FollowUpResult,
     ImageInput,
     ImPolicyClearChatOverrideParams,
@@ -55,54 +48,34 @@ import type {
     ImPolicyWriteResult,
     InitializeParams,
     InitializeResult,
-    ListModelsParams,
-    McpCreateConfigParams,
-    McpDeleteConfigParams,
     McpDeleteConfigResult,
-    McpGetConfigParams,
     McpGetConfigResult,
+    McpListServersParams,
     McpListServersResult,
     McpMutateConfigResult,
     McpServerConfig,
-    McpUpdateConfigParams,
-    MemoryDeleteTopicParams,
     MemoryDeleteTopicResult,
-    MemoryDreamApplyParams,
     MemoryDreamApplyResult,
-    MemoryDreamDiscardParams,
     MemoryDreamDiscardResult,
-    MemoryDreamRunParams,
     MemoryDreamRunResult,
-    MemoryDreamUndoParams,
     MemoryDreamUndoResult,
     MemoryListResult,
-    MemoryRestoreTopicParams,
     MemoryRestoreTopicResult,
-    MemoryUpsertParams,
     MemoryUpsertResult,
-    MemoryWriteParams,
     MemoryWriteResult,
-    PlanStateUpdatedParams,
-    PromptParams,
     PromptResult,
     ProviderListModelsParams,
     ProviderListModelsResult,
-    ProvidersListParams,
     ProvidersListResult,
-    ProvidersRevealKeyParams,
     ProvidersRevealKeyResult,
     ProviderTestConnectionParams,
     ProviderTestConnectionResult,
-    RenameSessionParams,
     RpcContractKey,
     SessionAttachResult,
-    SessionCompactParams,
     SessionCompactResult,
-    SessionContextInfoParams,
     SessionContextInfoResult,
     SessionDeleteResult,
     SessionDetachResult,
-    SessionEventsGetParams,
     SessionEventsGetResult,
     SessionHistory,
     SessionId,
@@ -112,60 +85,31 @@ import type {
     SessionPlanStateGetResult,
     SessionRenameResult,
     SessionSetModelResult,
-    SessionSetThinkingLevelParams,
     SessionSetThinkingLevelResult,
     SessionSnapshot,
-    SessionSnapshotGetParams,
     SessionTaskHistoryGetResult,
     SessionTasksGetResult,
-    SetModelParams,
     SettingsGetResult,
     SettingsWriteParams,
     SettingsWriteResult,
     SkillContentResult,
     SkillsListResult,
-    SteerParams,
     SteerResult,
-    SubagentAbortParams,
     SubagentAbortResult,
-    SubmitAnswersParams,
     SupportedLocale,
-    TaskItem,
-    TasksUpdatedParams,
     ThinkingLevel,
     ToolsListResult,
     WorkspaceAssociationKey,
-    WorkspaceAssociationsGetParams,
     WorkspaceAssociationsGetResult,
-    WorkspaceAssociationsResolveParams,
     WorkspaceAssociationsResolveResult,
-    WorkspaceAssociationsSetParams,
     WorkspaceAssociationsSetResult,
     WorkspaceDisposeResult,
     WorkspaceEnsureResult,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { asToolCallId } from "@taco-ai/protocol";
+import { createContractDispatch, type RpcDispatch } from "./contractDispatch.js";
 import { RPC } from "./rpcMethods.js";
-
-/**
- * Abstract dispatch — one implementation per transport.
- *
- * `call`: workspace-scoped; the transport selects the channel per call (e.g. Tauri invoke).
- * `callProcess`: process-level (settings.* / workspace.list); the transport chooses routing
- *   (e.g. Tauri reuses any ensured cwd; Node uses the single instance process).
- */
-export interface RpcDispatch {
-    call<TParams = void, TResult = unknown>(
-        method: string,
-        workspace: WorkspaceId,
-        params: TParams,
-    ): Promise<TResult>;
-    callProcess<TParams = void, TResult = unknown>(
-        method: string,
-        params: TParams,
-    ): Promise<TResult>;
-}
 
 export interface TypedRpc {
     // ── initialize (process-level bootstrap, no workspace) ──
@@ -459,10 +403,7 @@ export interface TypedRpc {
      * servers short-circuit to `status: "skipped"` without spawning; pass
      * `forceProbe: true` to override.
      */
-    mcpListServers(params?: {
-        ids?: string[];
-        forceProbe?: boolean;
-    }): Promise<McpListServersResult>;
+    mcpListServers(params?: McpListServersParams): Promise<McpListServersResult>;
     /** Fetch one raw MCP server config for editing — the only path that returns
      *  command/args/env/headers/url for a single server. */
     mcpGetConfig(id: string): Promise<McpGetConfigResult>;
@@ -490,154 +431,88 @@ type TypedRpcKeysMatchContract = [keyof TypedRpc] extends [TypedRpcContractKey]
 
 export const typedRpcKeysMatchContract: TypedRpcKeysMatchContract = true;
 
-// ─────────────────────────────────────────────────────────────────────
-// Generic helpers — four common param shapes, one helper per shape.
-// Helpers collapse each wrapper to one line; only methods with non-standard param shapes stay inline.
-// ─────────────────────────────────────────────────────────────────────
-
-/** Workspace-scoped, params = `{ workspace }` (workspace field only). */
-function ws0<R>(call: RpcDispatch["call"], method: string): (workspace: WorkspaceId) => Promise<R> {
-    return (workspace) => call<{ workspace: WorkspaceId }, R>(method, workspace, { workspace });
-}
-
-/** Workspace-scoped, params = `{ workspace, sessionId }` (2 fields). */
-function wsSession<R>(
-    call: RpcDispatch["call"],
-    method: string,
-): (workspace: WorkspaceId, sessionId: SessionId) => Promise<R> {
-    return (workspace, sessionId) =>
-        call<{ workspace: WorkspaceId; sessionId: SessionId }, R>(method, workspace, {
-            workspace,
-            sessionId,
-        });
-}
-
-/** Workspace + session + listId (3 fields) — used to fetch history list details. */
-function wsSessionWithListId<R>(
-    call: RpcDispatch["call"],
-    method: string,
-): (workspace: WorkspaceId, sessionId: SessionId, listId: string) => Promise<R> {
-    return (workspace, sessionId, listId) =>
-        call<{ workspace: WorkspaceId; sessionId: SessionId; listId: string }, R>(
-            method,
-            workspace,
-            { workspace, sessionId, listId },
-        );
-}
-
-/** Process-level, no params (e.g. settings.get). */
-function process0<R>(callProcess: RpcDispatch["callProcess"], method: string): () => Promise<R> {
-    return () => callProcess<undefined, R>(method, undefined);
-}
-
-/** Process-level, one param passed as params (e.g. settings.write). */
-function process1<P, R>(
-    callProcess: RpcDispatch["callProcess"],
-    method: string,
-): (params: P) => Promise<R> {
-    return (params) => callProcess<P, R>(method, params);
-}
-
 export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
-    const call = dispatch.call;
-    const callProcess = dispatch.callProcess;
+    const contract = createContractDispatch(dispatch);
 
     return {
         // ── initialize (process-level bootstrap) ──
         initialize: (protocolVersion, clientCapabilities) =>
-            callProcess<InitializeParams, InitializeResult>(RPC.initialize, {
+            contract.callProcess(RPC.initialize, {
                 protocolVersion,
                 clientCapabilities: clientCapabilities ?? {},
             }),
 
         // ── workspace ──
-        workspaceList: process0<WorkspaceId[]>(callProcess, RPC.workspaceList),
+        workspaceList: () => contract.callProcess(RPC.workspaceList, undefined),
 
-        // workspaceEnsure / workspaceDispose use `cwd` (not `workspace`), so they don't match ws0.
-        workspaceEnsure: (cwd) =>
-            call<{ cwd: WorkspaceId }, { cwd: WorkspaceId }>(RPC.workspaceEnsure, cwd, { cwd }),
-        workspaceDispose: (cwd) =>
-            call<{ cwd: WorkspaceId }, null>(RPC.workspaceDispose, cwd, { cwd }),
+        // Workspace lifecycle methods route by cwd without requiring an existing runtime.
+        workspaceEnsure: (cwd) => contract.call(RPC.workspaceEnsure, cwd, { cwd }),
+        workspaceDispose: (cwd) => contract.call(RPC.workspaceDispose, cwd, { cwd }),
 
         // Association get/set are process-level: the key names a workspace OR a
         // channel, and a channel is not a routing key.
         workspaceAssociationsGet: (key) =>
-            callProcess<WorkspaceAssociationsGetParams, WorkspaceAssociationsGetResult>(
-                RPC.workspaceAssociationsGet,
-                { key },
-            ),
+            contract.callProcess(RPC.workspaceAssociationsGet, { key }),
         workspaceAssociationsSet: (key, roots) =>
-            callProcess<WorkspaceAssociationsSetParams, WorkspaceAssociationsSetResult>(
-                RPC.workspaceAssociationsSet,
-                { key, roots },
-            ),
+            contract.callProcess(RPC.workspaceAssociationsSet, { key, roots }),
         // Resolve is workspace-scoped: the client asks "what applies to this
         // workspace" and the sidecar applies the scope fallback.
         workspaceAssociationsResolve: (workspace) =>
-            call<WorkspaceAssociationsResolveParams, WorkspaceAssociationsResolveResult>(
-                RPC.workspaceAssociationsResolve,
-                workspace,
-                { workspace },
-            ),
+            contract.call(RPC.workspaceAssociationsResolve, workspace, { workspace }),
 
         // ── session ──
         sessionList: (workspace, opts) =>
-            call<{ workspace: WorkspaceId } & SessionListParams, SessionListResult>(
-                RPC.sessionList,
-                workspace,
-                { workspace, ...(opts ?? {}) },
-            ),
+            contract.call(RPC.sessionList, workspace, { workspace, ...(opts ?? {}) }),
 
         // sessionCreate: args go straight to params (workspace is inside args)
-        sessionCreate: (args) =>
-            call<CreateSessionParams, CreateSessionResult>(RPC.sessionCreate, args.workspace, args),
+        sessionCreate: (args) => contract.call(RPC.sessionCreate, args.workspace, args),
 
         // sessionAttach: workspace + sessionId + optional opts spread
         sessionAttach: (workspace, sessionId, opts) =>
-            call<AttachParams, SessionAttachResult>(RPC.sessionAttach, workspace, {
+            contract.call(RPC.sessionAttach, workspace, {
                 workspace,
                 sessionId,
                 ...(opts ?? {}),
             }),
 
-        sessionDetach: wsSession<SessionDetachResult>(call, RPC.sessionDetach),
-        sessionDelete: wsSession<SessionDeleteResult>(call, RPC.sessionDelete),
+        sessionDetach: (workspace, sessionId) =>
+            contract.call(RPC.sessionDetach, workspace, { workspace, sessionId }),
+        sessionDelete: (workspace, sessionId) =>
+            contract.call(RPC.sessionDelete, workspace, { workspace, sessionId }),
 
-        // sessionRename: workspace + sessionId + name (one extra `name` beyond wsSession)
+        // sessionRename: workspace + sessionId + name.
         sessionRename: (workspace, sessionId, name) =>
-            call<RenameSessionParams, SessionRenameResult>(RPC.sessionRename, workspace, {
+            contract.call(RPC.sessionRename, workspace, {
                 workspace,
                 sessionId,
                 name,
             }),
-        sessionHistory: wsSession<SessionHistory>(call, RPC.sessionHistory),
+        sessionHistory: (workspace, sessionId) =>
+            contract.call(RPC.sessionHistory, workspace, { workspace, sessionId }),
         sessionEventsGet: (workspace, sessionId, afterSeq) =>
-            call<SessionEventsGetParams, SessionEventsGetResult>(RPC.sessionEventsGet, workspace, {
+            contract.call(RPC.sessionEventsGet, workspace, {
                 workspace,
                 sessionId,
                 afterSeq,
             }),
         sessionSnapshotGet: (workspace, sessionId) =>
-            call<SessionSnapshotGetParams, SessionSnapshot>(RPC.sessionSnapshotGet, workspace, {
+            contract.call(RPC.sessionSnapshotGet, workspace, {
                 workspace,
                 sessionId,
             }),
         // sessionTasksGet: returns the current task list snapshot; push fallback
-        sessionTasksGet: wsSession<Pick<TasksUpdatedParams, "active" | "history">>(
-            call,
-            RPC.sessionTasksGet,
-        ),
+        sessionTasksGet: (workspace, sessionId) =>
+            contract.call(RPC.sessionTasksGet, workspace, { workspace, sessionId }),
         // sessionTaskHistoryGet: lazily fetches the full task items for a history list.
-        sessionTaskHistoryGet: wsSessionWithListId<TaskItem[]>(call, RPC.sessionTaskHistoryGet),
+        sessionTaskHistoryGet: (workspace, sessionId, listId) =>
+            contract.call(RPC.sessionTaskHistoryGet, workspace, { workspace, sessionId, listId }),
         // sessionPlanStateGet: returns the current plan-mode state snapshot; push fallback
-        sessionPlanStateGet: wsSession<Pick<PlanStateUpdatedParams, "active" | "currentSlug">>(
-            call,
-            RPC.sessionPlanStateGet,
-        ),
+        sessionPlanStateGet: (workspace, sessionId) =>
+            contract.call(RPC.sessionPlanStateGet, workspace, { workspace, sessionId }),
 
         // sessionPrompt: workspace + sessionId + text + optional images + optional uiLocale
         sessionPrompt: (workspace, sessionId, text, images, uiLocale, model) =>
-            call<PromptParams, PromptResult>(RPC.sessionPrompt, workspace, {
+            contract.call(RPC.sessionPrompt, workspace, {
                 workspace,
                 sessionId,
                 text,
@@ -648,7 +523,7 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionSteer / sessionFollowUp: workspace + sessionId + text + optional images + optional uiLocale
         sessionSteer: (workspace, sessionId, text, images, uiLocale) =>
-            call<SteerParams, SteerResult>(RPC.sessionSteer, workspace, {
+            contract.call(RPC.sessionSteer, workspace, {
                 workspace,
                 sessionId,
                 text,
@@ -656,7 +531,7 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 ...(uiLocale ? { uiLocale } : {}),
             }),
         sessionFollowUp: (workspace, sessionId, text, images, uiLocale) =>
-            call<FollowUpParams, FollowUpResult>(RPC.sessionFollowUp, workspace, {
+            contract.call(RPC.sessionFollowUp, workspace, {
                 workspace,
                 sessionId,
                 text,
@@ -664,7 +539,7 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 ...(uiLocale ? { uiLocale } : {}),
             }),
         sessionCancelQueued: (workspace, sessionId, entryId) =>
-            call<CancelQueuedParams, CancelQueuedResult>(RPC.sessionCancelQueued, workspace, {
+            contract.call(RPC.sessionCancelQueued, workspace, {
                 workspace,
                 sessionId,
                 entryId,
@@ -672,7 +547,7 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionSubmitAnswers: workspace + sessionId + toolCallId + answers + optional toolName
         sessionSubmitAnswers: (workspace, sessionId, toolCallId, answers, toolName) =>
-            call<SubmitAnswersParams, null>(RPC.sessionSubmitAnswers, workspace, {
+            contract.call(RPC.sessionSubmitAnswers, workspace, {
                 workspace,
                 sessionId,
                 toolCallId: asToolCallId(toolCallId),
@@ -680,18 +555,19 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 ...(toolName ? { toolName } : {}),
             }),
 
-        sessionAbort: wsSession<AbortResult>(call, RPC.sessionAbort),
+        sessionAbort: (workspace, sessionId) =>
+            contract.call(RPC.sessionAbort, workspace, { workspace, sessionId }),
 
         // subagentAbort: workspace + subSessionId (child session, not the parent's)
         subagentAbort: (workspace, subSessionId) =>
-            call<SubagentAbortParams, SubagentAbortResult>(RPC.subagentAbort, workspace, {
+            contract.call(RPC.subagentAbort, workspace, {
                 workspace,
                 subSessionId,
             }),
 
         // sessionSetModel: workspace + sessionId + provider + modelId
         sessionSetModel: (workspace, sessionId, provider, modelId) =>
-            call<SetModelParams, SessionSetModelResult>(RPC.sessionSetModel, workspace, {
+            contract.call(RPC.sessionSetModel, workspace, {
                 workspace,
                 sessionId,
                 provider,
@@ -700,40 +576,32 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionListModels: workspace + optional provider
         sessionListModels: (workspace, provider) =>
-            call<ListModelsParams, SessionListModelsResult>(RPC.sessionListModels, workspace, {
+            contract.call(RPC.sessionListModels, workspace, {
                 workspace,
                 provider,
             }),
 
         // providersList: workspace → built-in provider availability view
         providersList: (workspace) =>
-            call<ProvidersListParams, ProvidersListResult>(RPC.providersList, workspace, {
+            contract.call(RPC.providersList, workspace, {
                 workspace,
             }),
 
         // providersRevealKey: workspace + providerId → plaintext key (or null)
         providersRevealKey: (workspace, providerId) =>
-            call<ProvidersRevealKeyParams, ProvidersRevealKeyResult>(
-                RPC.providersRevealKey,
-                workspace,
-                { workspace, providerId },
-            ),
+            contract.call(RPC.providersRevealKey, workspace, { workspace, providerId }),
 
         // sessionSetThinkingLevel: workspace + sessionId + level
         sessionSetThinkingLevel: (workspace, sessionId, level) =>
-            call<SessionSetThinkingLevelParams, SessionSetThinkingLevelResult>(
-                RPC.sessionSetThinkingLevel,
+            contract.call(RPC.sessionSetThinkingLevel, workspace, {
                 workspace,
-                {
-                    workspace,
-                    sessionId,
-                    level,
-                },
-            ),
+                sessionId,
+                level,
+            }),
 
         // sessionCompact: workspace + sessionId + optional customInstructions
         sessionCompact: (workspace, sessionId, customInstructions) =>
-            call<SessionCompactParams, SessionCompactResult>(RPC.sessionCompact, workspace, {
+            contract.call(RPC.sessionCompact, workspace, {
                 workspace,
                 sessionId,
                 // Omit `customInstructions` from the RPC frame when absent, avoiding an undefined placeholder.
@@ -742,140 +610,98 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
 
         // sessionContextInfo: workspace + sessionId snapshot
         sessionContextInfo: (workspace, sessionId) =>
-            call<SessionContextInfoParams, SessionContextInfoResult>(
-                RPC.sessionContextInfo,
-                workspace,
-                { workspace, sessionId },
-            ),
+            contract.call(RPC.sessionContextInfo, workspace, { workspace, sessionId }),
         commandPermissionResolve: (workspace, params) =>
-            call<CommandPermissionResolveParams, CommandPermissionResolveResult>(
-                RPC.commandPermissionResolve,
-                workspace,
-                { workspace, ...params },
-            ),
+            contract.call(RPC.commandPermissionResolve, workspace, { workspace, ...params }),
 
         // ── settings(process-level)──
-        settingsGet: process0<SettingsGetResult>(callProcess, RPC.settingsGet),
-        settingsWrite: process1<SettingsWriteParams, SettingsWriteResult>(
-            callProcess,
-            RPC.settingsWrite,
-        ),
+        settingsGet: () => contract.callProcess(RPC.settingsGet, undefined),
+        settingsWrite: (params) => contract.callProcess(RPC.settingsWrite, params),
 
         // ── extensions(process-level)──
-        extensionsStatus: process0<ExtensionsStatusResult>(callProcess, RPC.extensionsStatus),
-        channelsList: process0<ChannelsListResult>(callProcess, RPC.channelsList),
-        channelsListConversations: process1<
-            ChannelsListConversationsParams,
-            ChannelsListConversationsResult
-        >(callProcess, RPC.channelsListConversations),
-        channelsCreate: process1<ChannelsCreateParams, ChannelsCreateResult>(
-            callProcess,
-            RPC.channelsCreate,
-        ),
-        channelsBind: process1<ChannelsBindParams, ChannelsBindResult>(
-            callProcess,
-            RPC.channelsBind,
-        ),
-        channelsSubmitVerifyCode: process1<
-            ChannelsSubmitVerifyCodeParams,
-            ChannelsSubmitVerifyCodeResult
-        >(callProcess, RPC.channelsSubmitVerifyCode),
-        channelsUnbind: process1<ChannelsUnbindParams, ChannelsUnbindResult>(
-            callProcess,
-            RPC.channelsUnbind,
-        ),
-        channelsRetry: process1<ChannelsRetryParams, ChannelsRetryResult>(
-            callProcess,
-            RPC.channelsRetry,
-        ),
+        extensionsStatus: () => contract.callProcess(RPC.extensionsStatus, undefined),
+        channelsList: () => contract.callProcess(RPC.channelsList, undefined),
+        channelsListConversations: (params) =>
+            contract.callProcess(RPC.channelsListConversations, params ?? {}),
+        channelsCreate: (params) => contract.callProcess(RPC.channelsCreate, params),
+        channelsBind: (params) => contract.callProcess(RPC.channelsBind, params),
+        channelsSubmitVerifyCode: (params) =>
+            contract.callProcess(RPC.channelsSubmitVerifyCode, params),
+        channelsUnbind: (params) => contract.callProcess(RPC.channelsUnbind, params),
+        channelsRetry: (params) => contract.callProcess(RPC.channelsRetry, params),
 
         // ── imPolicy (process-level) ──
-        imPolicyGet: process1<ImPolicyGetParams, ImPolicyGetResult>(callProcess, RPC.imPolicyGet),
-        imPolicySetChannelDefault: process1<ImPolicySetChannelDefaultParams, ImPolicyWriteResult>(
-            callProcess,
-            RPC.imPolicySetChannelDefault,
-        ),
-        imPolicySetChatOverride: process1<ImPolicySetChatOverrideParams, ImPolicyWriteResult>(
-            callProcess,
-            RPC.imPolicySetChatOverride,
-        ),
-        imPolicyClearChatOverride: process1<ImPolicyClearChatOverrideParams, ImPolicyWriteResult>(
-            callProcess,
-            RPC.imPolicyClearChatOverride,
-        ),
+        imPolicyGet: (params) => contract.callProcess(RPC.imPolicyGet, params),
+        imPolicySetChannelDefault: (params) =>
+            contract.callProcess(RPC.imPolicySetChannelDefault, params),
+        imPolicySetChatOverride: (params) =>
+            contract.callProcess(RPC.imPolicySetChatOverride, params),
+        imPolicyClearChatOverride: (params) =>
+            contract.callProcess(RPC.imPolicyClearChatOverride, params),
 
         // ── provider (process-level, config-only helpers) ──
-        providerListModels: process1<ProviderListModelsParams, ProviderListModelsResult>(
-            callProcess,
-            RPC.providerListModels,
-        ),
-        providerTestConnection: process1<
-            ProviderTestConnectionParams,
-            ProviderTestConnectionResult
-        >(callProcess, RPC.providerTestConnection),
+        providerListModels: (params) => contract.callProcess(RPC.providerListModels, params),
+        providerTestConnection: (params) =>
+            contract.callProcess(RPC.providerTestConnection, params),
 
         // ── tools ──
-        toolsList: ws0<ToolsListResult>(call, RPC.toolsList),
+        toolsList: (workspace) => contract.call(RPC.toolsList, workspace, { workspace }),
 
         // ── agents ──
-        agentsList: ws0<AgentsListResult>(call, RPC.agentsList),
+        agentsList: (workspace) => contract.call(RPC.agentsList, workspace, { workspace }),
 
         // agentsContent: workspace + agentType
         agentsContent: (workspace, agentType) =>
-            call<AgentsContentParams, AgentsContentResult>(RPC.agentsContent, workspace, {
+            contract.call(RPC.agentsContent, workspace, {
                 workspace,
                 agentType,
             }),
 
         agentsWrite: (workspace, params) =>
-            call<AgentsWriteParams, AgentsWriteResult>(RPC.agentsWrite, workspace, {
+            contract.call(RPC.agentsWrite, workspace, {
                 workspace,
                 ...params,
             }),
 
         agentsDelete: (workspace, agentType) =>
-            call<AgentsDeleteParams, AgentsDeleteResult>(RPC.agentsDelete, workspace, {
+            contract.call(RPC.agentsDelete, workspace, {
                 workspace,
                 agentType,
             }),
 
         // ── skills ──
-        skillsList: ws0<SkillsListResult>(call, RPC.skillsList),
+        skillsList: (workspace) => contract.call(RPC.skillsList, workspace, { workspace }),
 
         // skillContent: workspace + filePath
         skillContent: (workspace, filePath) =>
-            call<{ workspace: WorkspaceId; filePath: string }, SkillContentResult>(
-                RPC.skillContent,
-                workspace,
-                { workspace, filePath },
-            ),
+            contract.call(RPC.skillContent, workspace, { workspace, filePath }),
 
         // ── checkpoints ──
         checkpointsList: (workspace, sessionId) =>
-            call<CheckpointsListParams, CheckpointsListResult>(RPC.checkpointsList, workspace, {
+            contract.call(RPC.checkpointsList, workspace, {
                 workspace,
                 sessionId,
             }),
 
         checkpointsRestore: (workspace, checkpointId, sessionId) =>
-            call<CheckpointsRestoreParams, CheckpointsRestoreResult>(
-                RPC.checkpointsRestore,
+            contract.call(RPC.checkpointsRestore, workspace, {
                 workspace,
-                { workspace, checkpointId, sessionId },
-            ),
+                checkpointId,
+                sessionId,
+            }),
 
         // ── memory ──
-        memoryList: ws0<MemoryListResult>(call, RPC.memoryList),
+        memoryList: (workspace) => contract.call(RPC.memoryList, workspace, { workspace }),
 
         memoryWrite: (workspace, content, baseHash) =>
-            call<MemoryWriteParams, MemoryWriteResult>(RPC.memoryWrite, workspace, {
+            contract.call(RPC.memoryWrite, workspace, {
                 workspace,
                 content,
                 baseHash,
             }),
 
         memoryDeleteTopic: (workspace, id, expectedContent) =>
-            call<MemoryDeleteTopicParams, MemoryDeleteTopicResult>(
+            contract.call(
                 RPC.memoryDeleteTopic,
                 workspace,
                 expectedContent === undefined
@@ -884,34 +710,26 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             ),
 
         memoryRestoreTopic: (workspace, id) =>
-            call<MemoryRestoreTopicParams, MemoryRestoreTopicResult>(
-                RPC.memoryRestoreTopic,
-                workspace,
-                { workspace, id },
-            ),
+            contract.call(RPC.memoryRestoreTopic, workspace, { workspace, id }),
         memoryDreamRun: (workspace) =>
-            call<MemoryDreamRunParams, MemoryDreamRunResult>(RPC.memoryDreamRun, workspace, {
+            contract.call(RPC.memoryDreamRun, workspace, {
                 workspace,
             }),
         memoryDreamApply: (workspace, previewId) =>
-            call<MemoryDreamApplyParams, MemoryDreamApplyResult>(RPC.memoryDreamApply, workspace, {
+            contract.call(RPC.memoryDreamApply, workspace, {
                 workspace,
                 previewId,
             }),
         memoryDreamDiscard: (workspace) =>
-            call<MemoryDreamDiscardParams, MemoryDreamDiscardResult>(
-                RPC.memoryDreamDiscard,
-                workspace,
-                { workspace },
-            ),
+            contract.call(RPC.memoryDreamDiscard, workspace, { workspace }),
         memoryDreamUndo: (workspace, reportId) =>
-            call<MemoryDreamUndoParams, MemoryDreamUndoResult>(RPC.memoryDreamUndo, workspace, {
+            contract.call(RPC.memoryDreamUndo, workspace, {
                 workspace,
                 reportId,
             }),
 
         memoryUpsert: (workspace, action, params) =>
-            call<MemoryUpsertParams, MemoryUpsertResult>(RPC.memoryUpsert, workspace, {
+            contract.call(RPC.memoryUpsert, workspace, {
                 workspace,
                 action,
                 id: params.id,
@@ -921,23 +739,17 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             }),
 
         // ── mcp (process-level) ──
-        mcpListServers: (params) =>
-            callProcess<{ ids?: string[]; forceProbe?: boolean }, McpListServersResult>(
-                RPC.mcpListServers,
-                params ?? {},
-            ),
-        mcpGetConfig: (id) =>
-            callProcess<McpGetConfigParams, McpGetConfigResult>(RPC.mcpGetConfig, { id }),
+        mcpListServers: (params) => contract.callProcess(RPC.mcpListServers, params ?? {}),
+        mcpGetConfig: (id) => contract.callProcess(RPC.mcpGetConfig, { id }),
         mcpCreateConfig: (config) =>
-            callProcess<McpCreateConfigParams, McpMutateConfigResult>(RPC.mcpCreateConfig, {
+            contract.callProcess(RPC.mcpCreateConfig, {
                 config,
             }),
         mcpUpdateConfig: (id, patch) =>
-            callProcess<McpUpdateConfigParams, McpMutateConfigResult>(RPC.mcpUpdateConfig, {
+            contract.callProcess(RPC.mcpUpdateConfig, {
                 id,
                 patch,
             }),
-        mcpDeleteConfig: (id) =>
-            callProcess<McpDeleteConfigParams, McpDeleteConfigResult>(RPC.mcpDeleteConfig, { id }),
+        mcpDeleteConfig: (id) => contract.callProcess(RPC.mcpDeleteConfig, { id }),
     };
 }

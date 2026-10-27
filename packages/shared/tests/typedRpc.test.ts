@@ -8,8 +8,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import type { RpcDispatch } from "../contractDispatch.js";
 import { RPC } from "../rpcMethods.js";
-import { createTypedRpc, type RpcDispatch } from "../typedRpc.js";
+import { createTypedRpc } from "../typedRpc.js";
 
 interface Call {
     method: string;

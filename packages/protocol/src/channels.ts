@@ -108,7 +108,7 @@ export interface ChannelStatusEntry {
 }
 
 /** `channels.list` RPC params — a process-level call with no input. */
-export type ChannelsListParams = object;
+export type ChannelsListParams = undefined;
 
 export interface ChannelsListResult {
     /** Channel types available to instantiate. */

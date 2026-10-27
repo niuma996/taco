@@ -150,7 +150,7 @@ function createConfigGet(): TacoTool {
             if (!ctx.call) {
                 throw new Error("configGet: no self-RPC dispatcher in this workspace");
             }
-            const result = await ctx.call(RPC.settingsGet, ctx.workspace, {});
+            const result = await ctx.call(RPC.settingsGet, ctx.workspace, undefined);
             return {
                 content: [{ type: "text", text: summarizeConfig(result.global) }],
                 details: result.global,
