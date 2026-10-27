@@ -176,6 +176,7 @@ export function createRpcRequest<M extends RpcMethodName>(
     id: string,
     method: M,
     params: NoInfer<RpcMethodParams<M>>,
+    commandId?: string,
 ): RpcRequest {
-    return { id, method, params };
+    return commandId === undefined ? { id, method, params } : { id, commandId, method, params };
 }

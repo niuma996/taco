@@ -3,7 +3,14 @@ import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ImConversationEntry } from "@taco-ai/protocol";
-import { makeImCwd, parseImCwd } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    createRpcRequest,
+    makeImCwd,
+    parseImCwd,
+    RPC,
+} from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
@@ -192,11 +199,13 @@ export class ConversationRouter extends EventEmitter {
         // Use the caller-supplied id when given so the conversation uses a stable UUID
         // rather than leaking a platform message id into the session identity.
         const sid = sessionId ?? uuidv7();
-        await hook.dispatchRpc?.({
-            id: randomUUID(),
-            method: "session.create",
-            params: { workspace, sessionId: sid, imRouting: { channelId, peerId, chatId } },
-        });
+        await hook.dispatchRpc?.(
+            createRpcRequest(randomUUID(), RPC.sessionCreate, {
+                workspace: asWorkspaceId(workspace),
+                sessionId: asSessionId(sid),
+                imRouting: { channelId, peerId, chatId },
+            }),
+        );
 
         // One timestamp for both the route entry and the event: sampling
         // Date.now() twice let the pushed payload disagree with what listAll()
@@ -226,11 +235,12 @@ export class ConversationRouter extends EventEmitter {
         sessionId: string,
     ): Promise<boolean> {
         try {
-            const res = await hook.dispatchRpc?.({
-                id: randomUUID(),
-                method: "session.history",
-                params: { workspace, sessionId },
-            });
+            const res = await hook.dispatchRpc?.(
+                createRpcRequest(randomUUID(), RPC.sessionHistory, {
+                    workspace: asWorkspaceId(workspace),
+                    sessionId: asSessionId(sessionId),
+                }),
+            );
             return res?.ok === true;
         } catch (e) {
             // Falling back to "does not exist" creates a fresh session, so the

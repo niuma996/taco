@@ -1,5 +1,5 @@
 import type { ImageInput, PromptParams, SteerResult } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, createRpcRequest, ErrorCodes, RPC } from "@taco-ai/protocol";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -60,12 +60,9 @@ export class DefaultChannelContext implements ChannelContext {
                         .map(toImageInput)
                         .filter((i): i is ImageInput => i !== undefined),
                 };
-                const res = await this.hook.dispatchRpc?.({
-                    id,
-                    commandId: id,
-                    method: "session.prompt",
-                    params,
-                });
+                const res = await this.hook.dispatchRpc?.(
+                    createRpcRequest(id, RPC.sessionPrompt, params, id),
+                );
                 // Without this the failure is invisible: submit() still returns a
                 // sessionId and the peer simply never receives a reply.
                 if (res?.ok === false) {
@@ -105,23 +102,17 @@ export class DefaultChannelContext implements ChannelContext {
         sessionId: string,
     ): Promise<void> {
         const log = this.logger.child({ sid: sessionId });
-        const queued = await this.hook.dispatchRpc?.({
-            id: `${id}:followUp`,
-            commandId: `${id}:followUp`,
-            method: "session.followUp",
-            params,
-        });
+        const queued = await this.hook.dispatchRpc?.(
+            createRpcRequest(`${id}:followUp`, RPC.sessionFollowUp, params, `${id}:followUp`),
+        );
         if (queued?.ok === false) {
             log.warn(`followUp fallback rejected: ${queued.error.code} ${queued.error.message}`);
             return;
         }
         if ((queued?.result as SteerResult | undefined)?.mode !== "idle") return;
-        const retry = await this.hook.dispatchRpc?.({
-            id: `${id}:retry`,
-            commandId: `${id}:retry`,
-            method: "session.prompt",
-            params,
-        });
+        const retry = await this.hook.dispatchRpc?.(
+            createRpcRequest(`${id}:retry`, RPC.sessionPrompt, params, `${id}:retry`),
+        );
         if (retry?.ok === false) {
             log.warn(
                 `prompt retry after idle followUp rejected: ${retry.error.code} ${retry.error.message}`,
