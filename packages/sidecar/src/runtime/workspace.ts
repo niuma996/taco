@@ -16,6 +16,9 @@ import type {
     CustomModelEntry,
     CustomProviderConfig,
     InstructionsConfig,
+    RpcMethodName,
+    RpcMethodParams,
+    RpcMethodResult,
     RpcRequest,
     RpcResponse,
     SessionId,
@@ -875,14 +878,18 @@ export class WorkspaceRuntime extends EventEmitter {
         // echo back into `RpcResponse.id`.
         const dispatchRpc = options.dispatchRpc;
         const selfRpc: SelfRpcCall | undefined = dispatchRpc
-            ? async <P, R>(method: string, _ws: WorkspaceId, params: P): Promise<R> => {
+            ? async <M extends RpcMethodName>(
+                  method: M,
+                  _ws: WorkspaceId,
+                  params: NoInfer<RpcMethodParams<M>>,
+              ): Promise<RpcMethodResult<M>> => {
                   const req: RpcRequest = {
                       id: `self-${crypto.randomUUID().toLowerCase()}`,
                       method,
                       params,
                   };
                   const resp = await dispatchRpc(req);
-                  if (resp.ok) return resp.result as R;
+                  if (resp.ok) return resp.result as RpcMethodResult<M>;
                   throw new Error(`${resp.error.code}: ${resp.error.message}`);
               }
             : undefined;

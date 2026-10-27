@@ -185,85 +185,127 @@ export const sessionMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const sessionContract = {
-    initialize: { scope: "process" } as RpcContractRow<InitializeParams, InitializeResult>,
-    sessionList: { scope: "workspace" } as RpcContractRow<SessionListParams, SessionListResult>,
+    initialize: { scope: "process" } as RpcContractRow<
+        InitializeParams,
+        InitializeResult,
+        "process"
+    >,
+    sessionList: { scope: "workspace" } as RpcContractRow<
+        SessionListParams,
+        SessionListResult,
+        "workspace"
+    >,
     sessionCreate: { scope: "workspace" } as RpcContractRow<
         CreateSessionParams,
-        CreateSessionResult
+        CreateSessionResult,
+        "workspace"
     >,
     sessionAttach: { scope: "workspace" } as RpcContractRow<
         SessionAttachParams,
-        SessionAttachResult
+        SessionAttachResult,
+        "workspace"
     >,
     sessionDetach: { scope: "workspace" } as RpcContractRow<
         SessionDetachParams,
-        SessionDetachResult
+        SessionDetachResult,
+        "workspace"
     >,
     sessionDelete: { scope: "workspace" } as RpcContractRow<
         DeleteSessionParams,
-        SessionDeleteResult
+        SessionDeleteResult,
+        "workspace"
     >,
     sessionRename: { scope: "workspace" } as RpcContractRow<
         RenameSessionParams,
-        SessionRenameResult
+        SessionRenameResult,
+        "workspace"
     >,
-    sessionHistory: { scope: "workspace" } as RpcContractRow<SessionHistoryParams, SessionHistory>,
+    sessionHistory: { scope: "workspace" } as RpcContractRow<
+        SessionHistoryParams,
+        SessionHistory,
+        "workspace"
+    >,
     sessionEventsGet: { scope: "workspace" } as RpcContractRow<
         SessionEventsGetParams,
-        SessionEventsGetResult
+        SessionEventsGetResult,
+        "workspace"
     >,
     sessionSnapshotGet: { scope: "workspace" } as RpcContractRow<
         SessionSnapshotGetParams,
-        SessionSnapshot
+        SessionSnapshot,
+        "workspace"
     >,
     sessionTasksGet: { scope: "workspace" } as RpcContractRow<
         SessionTasksGetParams,
-        SessionTasksGetResult
+        SessionTasksGetResult,
+        "workspace"
     >,
     sessionTaskHistoryGet: { scope: "workspace" } as RpcContractRow<
         SessionTaskHistoryGetParams,
-        SessionTaskHistoryGetResult
+        SessionTaskHistoryGetResult,
+        "workspace"
     >,
     sessionPlanStateGet: { scope: "workspace" } as RpcContractRow<
         SessionPlanStateGetParams,
-        SessionPlanStateGetResult
+        SessionPlanStateGetResult,
+        "workspace"
     >,
-    sessionPrompt: { scope: "workspace" } as RpcContractRow<PromptParams, PromptResult>,
-    sessionSteer: { scope: "workspace" } as RpcContractRow<SteerParams, SteerResult>,
-    sessionFollowUp: { scope: "workspace" } as RpcContractRow<FollowUpParams, FollowUpResult>,
+    sessionPrompt: { scope: "workspace" } as RpcContractRow<
+        PromptParams,
+        PromptResult,
+        "workspace"
+    >,
+    sessionSteer: { scope: "workspace" } as RpcContractRow<SteerParams, SteerResult, "workspace">,
+    sessionFollowUp: { scope: "workspace" } as RpcContractRow<
+        FollowUpParams,
+        FollowUpResult,
+        "workspace"
+    >,
     sessionCancelQueued: { scope: "workspace" } as RpcContractRow<
         CancelQueuedParams,
-        CancelQueuedResult
+        CancelQueuedResult,
+        "workspace"
     >,
-    sessionSubmitAnswers: { scope: "workspace" } as RpcContractRow<SubmitAnswersParams, null>,
-    sessionAbort: { scope: "workspace" } as RpcContractRow<AbortParams, AbortResult>,
+    sessionSubmitAnswers: { scope: "workspace" } as RpcContractRow<
+        SubmitAnswersParams,
+        null,
+        "workspace"
+    >,
+    sessionAbort: { scope: "workspace" } as RpcContractRow<AbortParams, AbortResult, "workspace">,
     subagentAbort: { scope: "workspace" } as RpcContractRow<
         SubagentAbortParams,
-        SubagentAbortResult
+        SubagentAbortResult,
+        "workspace"
     >,
     sessionSetModel: { scope: "workspace" } as RpcContractRow<
         SetModelParams,
-        SessionSetModelResult
+        SessionSetModelResult,
+        "workspace"
     >,
     sessionSetThinkingLevel: { scope: "workspace" } as RpcContractRow<
         SessionSetThinkingLevelParams,
-        SessionSetThinkingLevelResult
+        SessionSetThinkingLevelResult,
+        "workspace"
     >,
     sessionListModels: { scope: "workspace" } as RpcContractRow<
         ListModelsParams,
-        SessionListModelsResult
+        SessionListModelsResult,
+        "workspace"
     >,
     sessionCompact: { scope: "workspace" } as RpcContractRow<
         SessionCompactParams,
-        SessionCompactResult
+        SessionCompactResult,
+        "workspace"
     >,
     sessionContextInfo: { scope: "workspace" } as RpcContractRow<
         SessionContextInfoParams,
-        SessionContextInfoResult
+        SessionContextInfoResult,
+        "workspace"
     >,
     commandPermissionResolve: { scope: "workspace" } as RpcContractRow<
         CommandPermissionResolveParams,
-        CommandPermissionResolveResult
+        CommandPermissionResolveResult,
+        "workspace"
     >,
 };
 

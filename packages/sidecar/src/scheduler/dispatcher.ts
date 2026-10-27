@@ -28,7 +28,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { ErrorCodes, type RpcRequest, type RpcResponse } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    createRpcRequest,
+    ErrorCodes,
+    RPC,
+    type RpcRequest,
+    type RpcResponse,
+} from "@taco-ai/protocol";
 
 import { createLogger } from "../lib/logger.ts";
 import { isBuiltinJob } from "./builtinJobs.ts";
@@ -136,11 +144,13 @@ async function invokeAgent(
     switch (strategy) {
         case "new": {
             const id = `sched-${randomUUID()}`;
-            const res = await server.dispatchRpc({
-                id,
-                method: "session.create",
-                params: { workspace, sessionId: id, initialPrompt: prompt },
-            });
+            const res = await server.dispatchRpc(
+                createRpcRequest(id, RPC.sessionCreate, {
+                    workspace: asWorkspaceId(workspace),
+                    sessionId: asSessionId(id),
+                    initialPrompt: prompt,
+                }),
+            );
             if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
             return;
         }
@@ -184,15 +194,13 @@ async function invokeAgent(
                     `pinned session ${pinned} for job ${job.id} no longer exists; re-creating`,
                 );
             }
-            const res = await server.dispatchRpc({
-                id,
-                method: "session.create",
-                params: {
-                    workspace,
-                    sessionId: id,
+            const res = await server.dispatchRpc(
+                createRpcRequest(id, RPC.sessionCreate, {
+                    workspace: asWorkspaceId(workspace),
+                    sessionId: asSessionId(id),
                     initialPrompt: prompt,
-                },
-            });
+                }),
+            );
             if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
             if (onPinnedSessionCreated) {
                 await onPinnedSessionCreated(job.id, id);
@@ -256,11 +264,12 @@ async function sessionExists(
     sessionId: string,
 ): Promise<boolean> {
     try {
-        const res = await server.dispatchRpc({
-            id: randomUUID(),
-            method: "session.history",
-            params: { workspace, sessionId },
-        });
+        const res = await server.dispatchRpc(
+            createRpcRequest(randomUUID(), RPC.sessionHistory, {
+                workspace: asWorkspaceId(workspace),
+                sessionId: asSessionId(sessionId),
+            }),
+        );
         return res.ok === true;
     } catch (err) {
         log.warn(
@@ -288,11 +297,12 @@ async function attachAndPrompt(
     sessionId: string,
     prompt: string,
 ): Promise<void> {
-    const attach = await server.dispatchRpc({
-        id: randomUUID(),
-        method: "session.attach",
-        params: { workspace, sessionId },
-    });
+    const attach = await server.dispatchRpc(
+        createRpcRequest(randomUUID(), RPC.sessionAttach, {
+            workspace: asWorkspaceId(workspace),
+            sessionId: asSessionId(sessionId),
+        }),
+    );
     if (!attach.ok) throw new ScheduledCommandFailed(attach.error.code, attach.error.message);
     await promptWithBusyFallback(server, workspace, sessionId, prompt);
 }
@@ -318,27 +328,23 @@ async function promptWithBusyFallback(
     sessionId: string,
     prompt: string,
 ): Promise<void> {
-    const params = { workspace, sessionId, text: prompt };
-    const res = await server.dispatchRpc({
-        id: randomUUID(),
-        method: "session.prompt",
-        params,
-    });
+    const params = {
+        workspace: asWorkspaceId(workspace),
+        sessionId: asSessionId(sessionId),
+        text: prompt,
+    };
+    const res = await server.dispatchRpc(createRpcRequest(randomUUID(), RPC.sessionPrompt, params));
     if (res.ok) return;
     if (res.error.code !== ErrorCodes.SessionBusy) {
         throw new ScheduledCommandFailed(res.error.code, res.error.message);
     }
-    const queued = await server.dispatchRpc({
-        id: randomUUID(),
-        method: "session.followUp",
-        params,
-    });
+    const queued = await server.dispatchRpc(
+        createRpcRequest(randomUUID(), RPC.sessionFollowUp, params),
+    );
     if (!queued.ok) throw new ScheduledCommandFailed(queued.error.code, queued.error.message);
     if ((queued.result as { mode?: string } | undefined)?.mode !== "idle") return;
-    const retry = await server.dispatchRpc({
-        id: randomUUID(),
-        method: "session.prompt",
-        params,
-    });
+    const retry = await server.dispatchRpc(
+        createRpcRequest(randomUUID(), RPC.sessionPrompt, params),
+    );
     if (!retry.ok) throw new ScheduledCommandFailed(retry.error.code, retry.error.message);
 }

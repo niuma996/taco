@@ -1,6 +1,6 @@
 # `@taco-ai/protocol`
 
-Zero-dependency wire contract for the Taco sidecar protocol. RPC
+Shared wire contract for the Taco sidecar protocol. RPC
 parameter / result types, push frame DTOs, and the push-method
 constants. Source of truth for every other package in the monorepo.
 
@@ -9,6 +9,12 @@ constants. Source of truth for every other package in the monorepo.
 ```bash
 pnpm add @taco-ai/protocol
 ```
+
+TypeScript consumers require **TypeScript 5.4 or newer**. The published
+declarations use the built-in `NoInfer` type to infer RPC payloads from the
+method alone, preventing a malformed payload from widening the inferred
+method. JavaScript consumers do not need TypeScript.
+Runtime schema construction depends on TypeBox.
 
 ## What's here
 
@@ -49,6 +55,8 @@ src/
 ├── config.ts         # TacoGlobalConfigShape / View + constants
 ├── imPolicy.ts       # imPolicy.* types
 ├── memory.ts         # memory.* types
+├── rpcContract/      # domain contracts, typed request builder, scope assertions
+├── schemas/          # RPC parameter validators
 ├── push.ts           # PushMethods + push payload types
 └── tools.ts          # tools.* / agents.* / skills.* types
 ```

@@ -253,10 +253,14 @@ export { PushMethods } from "./push.js";
 // RPC contract table — method name / params type / result type / scope.
 export {
     contractKeysMatchRpcKeys,
+    createRpcRequest,
     type ProcessScopedKey,
     RPC,
     type RpcContractKey,
+    type RpcKeyForMethod,
     type RpcMethodName,
+    type RpcMethodParams,
+    type RpcMethodResult,
     type RpcParams,
     type RpcResult,
     type RpcScope,
@@ -264,6 +268,7 @@ export {
     rpcContract,
     rpcSchemas,
     schemasAgreeWithParams,
+    scopeCoversAllKeys,
     type WorkspaceScopedKey,
 } from "./rpcContract/index.js";
 // RPC result shapes owned by their domain contract file.

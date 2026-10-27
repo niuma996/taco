@@ -26,11 +26,10 @@
 
 import type {
     CommandPermissionDenialReason,
-    ConfigPatchResult,
     GlobalConfigPatch,
-    SettingsGetResult,
     TacoGlobalConfigView,
 } from "@taco-ai/protocol";
+import { asToolCallId, RPC } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { denialGuidance } from "../permissions/denialGuidance.ts";
@@ -151,11 +150,7 @@ function createConfigGet(): TacoTool {
             if (!ctx.call) {
                 throw new Error("configGet: no self-RPC dispatcher in this workspace");
             }
-            const result = await ctx.call<unknown, SettingsGetResult>(
-                "settings.get",
-                ctx.workspace,
-                {},
-            );
+            const result = await ctx.call(RPC.settingsGet, ctx.workspace, {});
             return {
                 content: [{ type: "text", text: summarizeConfig(result.global) }],
                 details: result.global,
@@ -213,16 +208,12 @@ function createConfigPatch(): TacoTool {
                 throw new Error("configPatch: no self-RPC dispatcher in this workspace");
             }
             const patch = params.patch as GlobalConfigPatch;
-            const result = await ctx.call<unknown, ConfigPatchResult>(
-                "config.patch",
-                ctx.workspace,
-                {
-                    workspace: ctx.workspace,
-                    sessionId: ctx.sessionId,
-                    toolCallId,
-                    patch,
-                },
-            );
+            const result = await ctx.call(RPC.configPatch, ctx.workspace, {
+                workspace: ctx.workspace,
+                sessionId: ctx.sessionId,
+                toolCallId: asToolCallId(toolCallId),
+                patch,
+            });
             if (!result.approved) {
                 return {
                     content: [{ type: "text", text: denialText(result.denialReason) }],

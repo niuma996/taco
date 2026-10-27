@@ -75,32 +75,65 @@ export const miscMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const miscContract = {
-    toolsList: { scope: "workspace" } as RpcContractRow<ToolsListParams, ToolsListResult>,
-    agentsList: { scope: "workspace" } as RpcContractRow<AgentsListParams, AgentsListResult>,
+    toolsList: { scope: "workspace" } as RpcContractRow<
+        ToolsListParams,
+        ToolsListResult,
+        "workspace"
+    >,
+    agentsList: { scope: "workspace" } as RpcContractRow<
+        AgentsListParams,
+        AgentsListResult,
+        "workspace"
+    >,
     agentsContent: { scope: "workspace" } as RpcContractRow<
         AgentsContentParams,
-        AgentsContentResult
+        AgentsContentResult,
+        "workspace"
     >,
-    agentsWrite: { scope: "workspace" } as RpcContractRow<AgentsWriteParams, AgentsWriteResult>,
-    agentsDelete: { scope: "workspace" } as RpcContractRow<AgentsDeleteParams, AgentsDeleteResult>,
-    skillsList: { scope: "workspace" } as RpcContractRow<SkillsListParams, SkillsListResult>,
-    skillContent: { scope: "workspace" } as RpcContractRow<SkillContentParams, SkillContentResult>,
+    agentsWrite: { scope: "workspace" } as RpcContractRow<
+        AgentsWriteParams,
+        AgentsWriteResult,
+        "workspace"
+    >,
+    agentsDelete: { scope: "workspace" } as RpcContractRow<
+        AgentsDeleteParams,
+        AgentsDeleteResult,
+        "workspace"
+    >,
+    skillsList: { scope: "workspace" } as RpcContractRow<
+        SkillsListParams,
+        SkillsListResult,
+        "workspace"
+    >,
+    skillContent: { scope: "workspace" } as RpcContractRow<
+        SkillContentParams,
+        SkillContentResult,
+        "workspace"
+    >,
     mcpListServers: { scope: "process" } as RpcContractRow<
         McpListServersParams,
-        McpListServersResult
+        McpListServersResult,
+        "process"
     >,
-    mcpGetConfig: { scope: "process" } as RpcContractRow<McpGetConfigParams, McpGetConfigResult>,
+    mcpGetConfig: { scope: "process" } as RpcContractRow<
+        McpGetConfigParams,
+        McpGetConfigResult,
+        "process"
+    >,
     mcpCreateConfig: { scope: "process" } as RpcContractRow<
         McpCreateConfigParams,
-        McpMutateConfigResult
+        McpMutateConfigResult,
+        "process"
     >,
     mcpUpdateConfig: { scope: "process" } as RpcContractRow<
         McpUpdateConfigParams,
-        McpMutateConfigResult
+        McpMutateConfigResult,
+        "process"
     >,
     mcpDeleteConfig: { scope: "process" } as RpcContractRow<
         McpDeleteConfigParams,
-        McpDeleteConfigResult
+        McpDeleteConfigResult,
+        "process"
     >,
     // ── jobs.* ──
 };

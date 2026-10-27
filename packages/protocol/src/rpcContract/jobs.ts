@@ -47,13 +47,21 @@ export const jobsMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const jobsContract = {
-    jobsList: { scope: "process" } as RpcContractRow<JobsListParams, JobsListResult>,
-    jobsGet: { scope: "process" } as RpcContractRow<JobsIdParams, JobsGetResult>,
-    jobsCreate: { scope: "process" } as RpcContractRow<JobsCreateParams, JobsWriteResult>,
-    jobsUpdate: { scope: "process" } as RpcContractRow<JobsUpdateParams, JobsWriteResult>,
-    jobsDelete: { scope: "process" } as RpcContractRow<JobsIdParams, JobsDeleteResult>,
-    jobsRunNow: { scope: "process" } as RpcContractRow<JobsIdParams, JobRunResult>,
-    jobsHistory: { scope: "process" } as RpcContractRow<JobsIdParams, JobsHistoryResult>,
+    jobsList: { scope: "process" } as RpcContractRow<JobsListParams, JobsListResult, "process">,
+    jobsGet: { scope: "process" } as RpcContractRow<JobsIdParams, JobsGetResult, "process">,
+    jobsCreate: { scope: "process" } as RpcContractRow<
+        JobsCreateParams,
+        JobsWriteResult,
+        "process"
+    >,
+    jobsUpdate: { scope: "process" } as RpcContractRow<
+        JobsUpdateParams,
+        JobsWriteResult,
+        "process"
+    >,
+    jobsDelete: { scope: "process" } as RpcContractRow<JobsIdParams, JobsDeleteResult, "process">,
+    jobsRunNow: { scope: "process" } as RpcContractRow<JobsIdParams, JobRunResult, "process">,
+    jobsHistory: { scope: "process" } as RpcContractRow<JobsIdParams, JobsHistoryResult, "process">,
 };
 
 /** Params schemas for this domain. */

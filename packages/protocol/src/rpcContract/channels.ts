@@ -70,37 +70,60 @@ export const channelsMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const channelsContract = {
-    channelsList: { scope: "process" } as RpcContractRow<ChannelsListParams, ChannelsListResult>,
+    channelsList: { scope: "process" } as RpcContractRow<
+        ChannelsListParams,
+        ChannelsListResult,
+        "process"
+    >,
     channelsListConversations: { scope: "process" } as RpcContractRow<
         ChannelsListConversationsParams,
-        ChannelsListConversationsResult
+        ChannelsListConversationsResult,
+        "process"
     >,
     channelsCreate: { scope: "process" } as RpcContractRow<
         ChannelsCreateParams,
-        ChannelsCreateResult
+        ChannelsCreateResult,
+        "process"
     >,
-    channelsBind: { scope: "process" } as RpcContractRow<ChannelsBindParams, ChannelsBindResult>,
+    channelsBind: { scope: "process" } as RpcContractRow<
+        ChannelsBindParams,
+        ChannelsBindResult,
+        "process"
+    >,
     channelsSubmitVerifyCode: { scope: "process" } as RpcContractRow<
         ChannelsSubmitVerifyCodeParams,
-        ChannelsSubmitVerifyCodeResult
+        ChannelsSubmitVerifyCodeResult,
+        "process"
     >,
     channelsUnbind: { scope: "process" } as RpcContractRow<
         ChannelsUnbindParams,
-        ChannelsUnbindResult
+        ChannelsUnbindResult,
+        "process"
     >,
-    channelsRetry: { scope: "process" } as RpcContractRow<ChannelsRetryParams, ChannelsRetryResult>,
-    imPolicyGet: { scope: "process" } as RpcContractRow<ImPolicyGetParams, ImPolicyGetResult>,
+    channelsRetry: { scope: "process" } as RpcContractRow<
+        ChannelsRetryParams,
+        ChannelsRetryResult,
+        "process"
+    >,
+    imPolicyGet: { scope: "process" } as RpcContractRow<
+        ImPolicyGetParams,
+        ImPolicyGetResult,
+        "process"
+    >,
     imPolicySetChannelDefault: { scope: "process" } as RpcContractRow<
         ImPolicySetChannelDefaultParams,
-        ImPolicyWriteResult
+        ImPolicyWriteResult,
+        "process"
     >,
     imPolicySetChatOverride: { scope: "process" } as RpcContractRow<
         ImPolicySetChatOverrideParams,
-        ImPolicyWriteResult
+        ImPolicyWriteResult,
+        "process"
     >,
     imPolicyClearChatOverride: { scope: "process" } as RpcContractRow<
         ImPolicyClearChatOverrideParams,
-        ImPolicyWriteResult
+        ImPolicyWriteResult,
+        "process"
     >,
 };
 

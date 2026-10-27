@@ -9,8 +9,7 @@
  * `tools/context.ts`); the schema only carries business fields.
  */
 
-import type { MemoryUpsertParams, MemoryUpsertResult } from "@taco-ai/protocol";
-import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
+import { MEMORY_CONTENT_MAX_CHARS, RPC } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
@@ -121,19 +120,15 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             if (!call) {
                 throw new Error("memory.upsert: no self-RPC dispatcher in this workspace");
             }
-            const result = await call<MemoryUpsertParams, MemoryUpsertResult>(
-                "memory.upsert",
+            const result = await call(RPC.memoryUpsert, workspace, {
                 workspace,
-                {
-                    workspace,
-                    action: params.action,
-                    id: params.id,
-                    name: params.name,
-                    description: params.description,
-                    content: params.content,
-                    type: params.type,
-                },
-            );
+                action: params.action,
+                id: params.id,
+                name: params.name,
+                description: params.description,
+                content: params.content,
+                type: params.type,
+            });
             const text = `memory.upsert ${result.outcome}: ${params.id}`;
             return {
                 content: [{ type: "text", text }],

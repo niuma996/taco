@@ -57,26 +57,35 @@ export const workspaceMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const workspaceContract = {
-    workspaceList: { scope: "process" } as RpcContractRow<void, WorkspaceListResult>,
+    workspaceList: { scope: "process" } as RpcContractRow<
+        undefined,
+        WorkspaceListResult,
+        "process"
+    >,
     workspaceEnsure: { scope: "workspace" } as RpcContractRow<
         { cwd: WorkspaceId },
-        WorkspaceEnsureResult
+        WorkspaceEnsureResult,
+        "workspace"
     >,
     workspaceDispose: { scope: "workspace" } as RpcContractRow<
         { cwd: WorkspaceId },
-        WorkspaceDisposeResult
+        WorkspaceDisposeResult,
+        "workspace"
     >,
     workspaceAssociationsGet: { scope: "process" } as RpcContractRow<
         WorkspaceAssociationsGetParams,
-        WorkspaceAssociationsGetResult
+        WorkspaceAssociationsGetResult,
+        "process"
     >,
     workspaceAssociationsSet: { scope: "process" } as RpcContractRow<
         WorkspaceAssociationsSetParams,
-        WorkspaceAssociationsSetResult
+        WorkspaceAssociationsSetResult,
+        "process"
     >,
     workspaceAssociationsResolve: { scope: "workspace" } as RpcContractRow<
         WorkspaceAssociationsResolveParams,
-        WorkspaceAssociationsResolveResult
+        WorkspaceAssociationsResolveResult,
+        "workspace"
     >,
 };
 

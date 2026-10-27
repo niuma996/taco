@@ -73,40 +73,60 @@ export const memoryMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const memoryContract = {
-    memoryList: { scope: "workspace" } as RpcContractRow<MemoryListParams, MemoryListResult>,
-    memoryWrite: { scope: "workspace" } as RpcContractRow<MemoryWriteParams, MemoryWriteResult>,
+    memoryList: { scope: "workspace" } as RpcContractRow<
+        MemoryListParams,
+        MemoryListResult,
+        "workspace"
+    >,
+    memoryWrite: { scope: "workspace" } as RpcContractRow<
+        MemoryWriteParams,
+        MemoryWriteResult,
+        "workspace"
+    >,
     memoryDeleteTopic: { scope: "workspace" } as RpcContractRow<
         MemoryDeleteTopicParams,
-        MemoryDeleteTopicResult
+        MemoryDeleteTopicResult,
+        "workspace"
     >,
-    memoryUpsert: { scope: "workspace" } as RpcContractRow<MemoryUpsertParams, MemoryUpsertResult>,
+    memoryUpsert: { scope: "workspace" } as RpcContractRow<
+        MemoryUpsertParams,
+        MemoryUpsertResult,
+        "workspace"
+    >,
     memoryRestoreTopic: { scope: "workspace" } as RpcContractRow<
         MemoryRestoreTopicParams,
-        MemoryRestoreTopicResult
+        MemoryRestoreTopicResult,
+        "workspace"
     >,
     memoryDreamRun: { scope: "workspace" } as RpcContractRow<
         MemoryDreamRunParams,
-        MemoryDreamRunResult
+        MemoryDreamRunResult,
+        "workspace"
     >,
     memoryDreamApply: { scope: "workspace" } as RpcContractRow<
         MemoryDreamApplyParams,
-        MemoryDreamApplyResult
+        MemoryDreamApplyResult,
+        "workspace"
     >,
     memoryDreamDiscard: { scope: "workspace" } as RpcContractRow<
         MemoryDreamDiscardParams,
-        MemoryDreamDiscardResult
+        MemoryDreamDiscardResult,
+        "workspace"
     >,
     memoryDreamUndo: { scope: "workspace" } as RpcContractRow<
         MemoryDreamUndoParams,
-        MemoryDreamUndoResult
+        MemoryDreamUndoResult,
+        "workspace"
     >,
     checkpointsList: { scope: "workspace" } as RpcContractRow<
         CheckpointsListParams,
-        CheckpointsListResult
+        CheckpointsListResult,
+        "workspace"
     >,
     checkpointsRestore: { scope: "workspace" } as RpcContractRow<
         CheckpointsRestoreParams,
-        CheckpointsRestoreResult
+        CheckpointsRestoreResult,
+        "workspace"
     >,
 };
 

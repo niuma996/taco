@@ -14,7 +14,8 @@
  * question being asked, so it would always match.
  */
 
-import type { SessionListEntry, SessionListResult } from "@taco-ai/protocol";
+import type { SessionListEntry } from "@taco-ai/protocol";
+import { RPC } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { ToolCandidate } from "../runtime/harness/deferredToolRegistry.ts";
@@ -144,11 +145,10 @@ export function snippetAround(text: string, index: number): string {
 
 async function listOtherSessions(ctx: TacoToolContext): Promise<SessionListEntry[]> {
     if (!ctx.call) throw new Error("session.list: no self-RPC dispatcher in this workspace");
-    const result = await ctx.call<{ workspace: string; full: boolean }, SessionListResult>(
-        "session.list",
-        ctx.workspace,
-        { workspace: ctx.workspace, full: true },
-    );
+    const result = await ctx.call(RPC.sessionList, ctx.workspace, {
+        workspace: ctx.workspace,
+        full: true,
+    });
     return result.sessions.filter((s) => s.id !== ctx.sessionId);
 }
 

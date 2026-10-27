@@ -14,11 +14,17 @@
  * See `memory.ts` for the same self-RPC pattern.
  */
 
-import { RPC } from "@taco-ai/shared";
+import type {
+    Job,
+    RpcMethodName,
+    RpcMethodParams,
+    RpcMethodResult,
+    SessionStrategy,
+} from "@taco-ai/protocol";
+import { RPC } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
-import type { Job, JobRunResult, SessionStrategy } from "../scheduler/types.ts";
 import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
@@ -118,7 +124,10 @@ const jobsCreateSchema = Type.Object({
 });
 
 const jobsUpdateSchema = Type.Object({
-    job: jobSchema,
+    job: Type.Object({
+        ...jobSchema.properties,
+        id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    }),
 });
 
 const jobsDeleteSchema = Type.Object({
@@ -138,19 +147,19 @@ export type JobsRunNowInput = Static<typeof jobsRunNowSchema>;
 
 // ─── shared tool builder ─────────────────────────────────────────────────────
 
-interface JobsToolOptions<TInput, TResult> {
+interface JobsToolOptions<M extends Extract<RpcMethodName, `jobs.${string}`>, TInput> {
     name: string;
     label: string;
     summary: string;
     mutates: boolean;
     schema: import("typebox").TSchema;
-    rpcMethod: string;
-    buildParams: (input: TInput, ctx: TacoToolContext) => Record<string, unknown>;
-    render: (input: TInput, result: TResult, ctx: TacoToolContext) => string;
+    rpcMethod: M;
+    buildParams: (input: TInput, ctx: TacoToolContext) => RpcMethodParams<M>;
+    render: (input: TInput, result: RpcMethodResult<M>, ctx: TacoToolContext) => string;
 }
 
-function buildJobsTool<TInput, TResult>(
-    opts: JobsToolOptions<TInput, TResult>,
+function buildJobsTool<M extends Extract<RpcMethodName, `jobs.${string}`>, TInput>(
+    opts: JobsToolOptions<M, TInput>,
 ): AgentHarnessTool<TacoToolContext> {
     return {
         name: opts.name,
@@ -173,10 +182,7 @@ function buildJobsTool<TInput, TResult>(
                 throw new Error(`${opts.rpcMethod}: no self-RPC dispatcher in this workspace`);
             }
             const params = opts.buildParams(input, ctx);
-            const result = await call<Record<string, unknown>, TResult>(opts.rpcMethod, workspace, {
-                ...params,
-                actor,
-            });
+            const result = await call<M>(opts.rpcMethod, workspace, { ...params, actor });
             return {
                 content: [{ type: "text", text: opts.render(input, result, ctx) }],
                 details: result,
@@ -188,7 +194,7 @@ function buildJobsTool<TInput, TResult>(
 // ─── six tools ───────────────────────────────────────────────────────────────
 
 export function createJobsListTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsListInput, { jobs: Job[] }>({
+    return buildJobsTool<"jobs.list", JobsListInput>({
         name: "jobsList",
         label: "jobsList",
         summary:
@@ -215,7 +221,7 @@ export function createJobsListTool(): AgentHarnessTool<TacoToolContext> {
 }
 
 export function createJobsGetTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsGetInput, { job: Job | null }>({
+    return buildJobsTool<"jobs.get", JobsGetInput>({
         name: "jobsGet",
         label: "jobsGet",
         summary:
@@ -230,7 +236,7 @@ export function createJobsGetTool(): AgentHarnessTool<TacoToolContext> {
 }
 
 export function createJobsCreateTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsCreateInput, { job: Job }>({
+    return buildJobsTool<"jobs.create", JobsCreateInput>({
         name: "jobsCreate",
         label: "jobsCreate",
         summary:
@@ -259,7 +265,7 @@ export function createJobsCreateTool(): AgentHarnessTool<TacoToolContext> {
 }
 
 export function createJobsUpdateTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsUpdateInput, { job: Job }>({
+    return buildJobsTool<"jobs.update", JobsUpdateInput>({
         name: "jobsUpdate",
         label: "jobsUpdate",
         summary:
@@ -282,7 +288,7 @@ export function createJobsUpdateTool(): AgentHarnessTool<TacoToolContext> {
 }
 
 export function createJobsDeleteTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsDeleteInput, { deleted: boolean }>({
+    return buildJobsTool<"jobs.delete", JobsDeleteInput>({
         name: "jobsDelete",
         label: "jobsDelete",
         summary:
@@ -296,7 +302,7 @@ export function createJobsDeleteTool(): AgentHarnessTool<TacoToolContext> {
 }
 
 export function createJobsRunNowTool(): AgentHarnessTool<TacoToolContext> {
-    return buildJobsTool<JobsRunNowInput, JobRunResult>({
+    return buildJobsTool<"jobs.runNow", JobsRunNowInput>({
         name: "jobsRunNow",
         label: "jobsRunNow",
         summary:

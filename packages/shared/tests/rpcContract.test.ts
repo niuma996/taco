@@ -70,3 +70,17 @@ test("the constant key mirrors the wire name's casing", () => {
         assert.equal(key, camel, `${key} does not mirror ${wire}`);
     }
 });
+
+test("typed request builder preserves wire names and payloads", async () => {
+    const { createRpcRequest, asWorkspaceId } = await import("@taco-ai/protocol");
+    const params = { workspace: asWorkspaceId("/w"), initialPrompt: "hello" };
+    assert.deepEqual(createRpcRequest("1", RPC.sessionCreate, params), {
+        id: "1",
+        method: "session.create",
+        params,
+    });
+    assert.equal(
+        JSON.stringify(createRpcRequest("2", RPC.workspaceList, undefined)),
+        '{"id":"2","method":"workspace.list"}',
+    );
+});

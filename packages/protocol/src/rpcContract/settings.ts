@@ -65,28 +65,45 @@ export const settingsMethods = {
 
 /** Params/result types and routing scope for this domain. */
 export const settingsContract = {
-    settingsGet: { scope: "process" } as RpcContractRow<SettingsGetParams, SettingsGetResult>,
-    settingsWrite: { scope: "process" } as RpcContractRow<SettingsWriteParams, SettingsWriteResult>,
-    configPatch: { scope: "workspace" } as RpcContractRow<ConfigPatchParams, ConfigPatchResult>,
+    settingsGet: { scope: "process" } as RpcContractRow<
+        SettingsGetParams,
+        SettingsGetResult,
+        "process"
+    >,
+    settingsWrite: { scope: "process" } as RpcContractRow<
+        SettingsWriteParams,
+        SettingsWriteResult,
+        "process"
+    >,
+    configPatch: { scope: "workspace" } as RpcContractRow<
+        ConfigPatchParams,
+        ConfigPatchResult,
+        "workspace"
+    >,
     extensionsStatus: { scope: "process" } as RpcContractRow<
         ExtensionsStatusParams,
-        ExtensionsStatusResult
+        ExtensionsStatusResult,
+        "process"
     >,
     providersList: { scope: "workspace" } as RpcContractRow<
         ProvidersListParams,
-        ProvidersListResult
+        ProvidersListResult,
+        "workspace"
     >,
     providersRevealKey: { scope: "workspace" } as RpcContractRow<
         ProvidersRevealKeyParams,
-        ProvidersRevealKeyResult
+        ProvidersRevealKeyResult,
+        "workspace"
     >,
     providerListModels: { scope: "process" } as RpcContractRow<
         ProviderListModelsParams,
-        ProviderListModelsResult
+        ProviderListModelsResult,
+        "process"
     >,
     providerTestConnection: { scope: "process" } as RpcContractRow<
         ProviderTestConnectionParams,
-        ProviderTestConnectionResult
+        ProviderTestConnectionResult,
+        "process"
     >,
 };
 

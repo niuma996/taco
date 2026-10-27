@@ -31,6 +31,7 @@
  */
 
 import type { Static } from "typebox";
+import type { RpcRequest } from "../frames.js";
 import { channelsContract, channelsMethods, channelsSchemas } from "./channels.js";
 import { jobsContract, jobsMethods, jobsSchemas } from "./jobs.js";
 import { memoryContract, memoryMethods, memorySchemas } from "./memory.js";
@@ -81,16 +82,9 @@ export type RpcContractKey = keyof typeof rpcContract;
 /** Every wire method name the sidecar serves. */
 export type RpcMethodName = (typeof RPC)[RpcContractKey];
 
-/**
- * The wire params type of one contract key.
- *
- * `RpcContractRow` carries the types as optional phantom fields, so the
- * inferred type is `P | undefined`; `NonNullable` removes that. It must not
- * be applied to the *result* type — a method may legitimately return `null`.
- */
-export type RpcParams<K extends RpcContractKey> = NonNullable<
-    (typeof rpcContract)[K] extends RpcContractRow<infer P, unknown> ? P : never
->;
+/** The wire params type, preserving undefined for calls with no params. */
+export type RpcParams<K extends RpcContractKey> =
+    (typeof rpcContract)[K] extends RpcContractRow<infer P, unknown> ? P : never;
 
 /** The wire result type of one contract key. */
 export type RpcResult<K extends RpcContractKey> =
@@ -109,26 +103,19 @@ export type ProcessScopedKey = {
     [K in RpcContractKey]: RpcScopeOf<K> extends "process" ? K : never;
 }[RpcContractKey];
 
+/** Every method must belong to exactly one routing scope. */
+export const scopeCoversAllKeys: [WorkspaceScopedKey | ProcessScopedKey] extends [RpcContractKey]
+    ? [RpcContractKey] extends [WorkspaceScopedKey | ProcessScopedKey]
+        ? true
+        : false
+    : false = true;
+
 /**
- * The methods whose schema rejects values their contract declares legal.
- *
- * `Params<K> extends Static<schema>` is the check that matters: every value
- * the contract's params type permits must be a value the schema accepts. A
- * schema that requires a field the contract says is optional fails here —
- * the exact `jobs.create` shape where the schema demanded an `id` that no
- * caller sends.
- *
- * Comparing only the outer keys would not catch that: the contract and the
- * schema both have a `job` property, and the disagreement lives one level
- * down. Assignability walks the whole shape.
- *
- * The check is one-directional by construction: it rejects a schema that is
- * *stricter* than the contract, but a schema loosened beyond the contract —
- * a required field turned optional, a narrowed enum widened — still
- * compiles. Loosening a schema is a runtime behaviour change that this
- * assertion cannot see, so it has to be reviewed on its own. The methods
- * that carry real validation today (`jobs.*`) also validate inside their
- * handlers, which is what catches a loosened schema at runtime.
+ * Params<K> extends Static<schema> ensures every statically legal payload passes
+ * the schema's shape: jobs.create must not require an id that callers may omit.
+ * Assignability checks nested fields, unlike a comparison of outer keys.
+ * This is one-directional: a looser schema still compiles, and JSON Schema
+ * constraints such as minLength/pattern need runtime regression tests.
  */
 type SchemaRejects<K extends RpcContractKey> = K extends unknown
     ? SchemaHasShape<Static<(typeof rpcSchemas)[K]>> extends true
@@ -170,3 +157,25 @@ export const contractKeysMatchRpcKeys: [RpcContractKey, keyof typeof RPC] extend
             : false
         : false
     : false = true;
+
+/** Resolve a wire method to its contract row without duplicating the name table. */
+export type RpcKeyForMethod<M extends RpcMethodName> = {
+    [K in RpcContractKey]: (typeof RPC)[K] extends M ? K : never;
+}[RpcContractKey];
+type RpcMethods = {
+    [K in RpcContractKey as (typeof RPC)[K]]: {
+        params: RpcParams<K>;
+        result: RpcResult<K>;
+    };
+};
+export type RpcMethodParams<M extends RpcMethodName> = RpcMethods[M]["params"];
+export type RpcMethodResult<M extends RpcMethodName> = RpcMethods[M]["result"];
+
+/** Build an internal request with the same params contract as external clients. */
+export function createRpcRequest<M extends RpcMethodName>(
+    id: string,
+    method: M,
+    params: NoInfer<RpcMethodParams<M>>,
+): RpcRequest {
+    return { id, method, params };
+}

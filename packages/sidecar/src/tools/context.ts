@@ -15,7 +15,13 @@
  * declared `unknown` when they exist only to reach a later position.
  */
 
-import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
+import type {
+    RpcMethodName,
+    RpcMethodParams,
+    RpcMethodResult,
+    SessionId,
+    WorkspaceId,
+} from "@taco-ai/protocol";
 import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
 import type { Actor } from "../scheduler/types.ts";
 
@@ -25,7 +31,11 @@ import type { Actor } from "../scheduler/types.ts";
  * `workspace` is included for parity with the wire surface even though
  * today every tool passes the session's own cwd.
  */
-export type SelfRpcCall = <P, R>(method: string, workspace: WorkspaceId, params: P) => Promise<R>;
+export type SelfRpcCall = <M extends RpcMethodName>(
+    method: M,
+    workspace: WorkspaceId,
+    params: NoInfer<RpcMethodParams<M>>,
+) => Promise<RpcMethodResult<M>>;
 
 /**
  * The part of the tool context the WORKSPACE supplies: the execution

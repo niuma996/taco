@@ -25,8 +25,8 @@ export type RpcScope = "workspace" | "process";
  * routed by workspace but need no workspace runtime on the server, so the
  * two axes disagree for three methods.
  */
-export interface RpcContractRow<P, R> {
-    readonly scope: RpcScope;
+export interface RpcContractRow<P, R, S extends RpcScope = RpcScope> {
+    readonly scope: S;
     /** Phantom carrier for the wire params type — never present at runtime. */
     readonly __params?: P;
     /** Phantom carrier for the wire result type — never present at runtime. */

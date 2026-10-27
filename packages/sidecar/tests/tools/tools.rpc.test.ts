@@ -365,6 +365,26 @@ describe("jobs tools — list rendering", () => {
 });
 
 describe("jobs tools — schema validation", () => {
+    it("requires an id for update but not create", () => {
+        const input = {
+            job: {
+                name: "x",
+                schedule: { kind: "interval", ms: 60_000 },
+                command: "agent.invoke",
+                args: { prompt: "hello" },
+                enabled: true,
+                run_on_startup: false,
+            },
+        };
+        assert.equal(Value.Check(createJobsCreateTool().parameters, input), true);
+        assert.equal(Value.Check(createJobsUpdateTool().parameters, input), false);
+        assert.equal(
+            Value.Check(createJobsUpdateTool().parameters, {
+                job: { ...input.job, id: "job-1" },
+            }),
+            true,
+        );
+    });
     it("rejects job id with traversal characters", () => {
         const tool = createJobsCreateTool();
         const bad: JobsCreateInput = {
