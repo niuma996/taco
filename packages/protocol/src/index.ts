@@ -102,9 +102,13 @@ export {
     DEFAULT_COMPACTION_ENABLED,
     DEFAULT_COMPACTION_THRESHOLD,
 } from "./config.js";
-export type { ErrorCode } from "./errors.js";
+export type {
+    ErrorCode,
+    RpcValidationErrorData,
+    RpcValidationIssue,
+} from "./errors.js";
 // Error code constants — wire-stable strings for RpcResponse.error.code.
-export { ErrorCodes } from "./errors.js";
+export { ErrorCodes, readValidationIssues } from "./errors.js";
 // Wire frames — routing keys, request/response/push, hello + capabilities.
 export type {
     Brand,

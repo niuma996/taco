@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { asSessionId, asWorkspaceId, ErrorCodes, RPC, type RpcRequest } from "@taco-ai/protocol";
-import { createTypedRpc, type RpcDispatch } from "@taco-ai/shared";
+import {
+    asSessionId,
+    asWorkspaceId,
+    ErrorCodes,
+    RPC,
+    type RpcRequest,
+    readValidationIssues,
+} from "@taco-ai/protocol";
+import { createTypedRpc, describeRpcError, type RpcDispatch } from "@taco-ai/shared";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { SidecarServer } from "../../src/server/server.ts";
@@ -231,4 +238,27 @@ test("every facade method serializes a payload accepted by its registered schema
         .map((key) => RPC[key])
         .sort();
     assert.deepEqual([...checked].sort(), expected);
+});
+
+test("a schema rejection names the offending field on the wire", async () => {
+    const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+    const response = await server.dispatchRpc({
+        id: "bad-rename",
+        method: RPC.sessionRename,
+        params: { workspace: "/w", sessionId: "s", name: 42 },
+    });
+    assert.equal(response.ok, false);
+    if (response.ok) return;
+    assert.equal(response.error.code, ErrorCodes.InvalidParams);
+    const issues = readValidationIssues(response.error.data);
+    assert.ok(issues, "a schema failure must carry the field paths");
+    assert.ok(
+        issues.some((issue) => issue.path.includes("name")),
+        `expected the offending field in ${JSON.stringify(issues)}`,
+    );
+    // The client renders exactly these issues into the message it shows.
+    assert.match(
+        describeRpcError(response.error.code, response.error.message, response.error.data),
+        /\/name/,
+    );
 });

@@ -14,6 +14,11 @@ export {
 } from "./contractDispatch.js";
 export { FrameDispatcher, NdjsonLineBuffer, RpcRemoteError } from "./dispatcher.js";
 export {
+    describeRpcError,
+    formatValidationIssue,
+    formatValidationIssues,
+} from "./rpcError.js";
+export {
     FAST_RPC_METHODS,
     FAST_RPC_TIMEOUT_MS,
     RPC,

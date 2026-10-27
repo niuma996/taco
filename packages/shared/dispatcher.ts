@@ -9,6 +9,7 @@
  */
 
 import { asSessionId, asWorkspaceId, type ServerPush, WORKSPACE_ANY } from "@taco-ai/protocol";
+import { describeRpcError } from "./rpcError.js";
 
 type Listener<T> = (value: T) => void;
 
@@ -125,7 +126,13 @@ export class FrameDispatcher {
                 } else {
                     const code = f.error?.code ?? "unknown";
                     const msg = f.error?.message ?? "rpc failed";
-                    entry.reject(new RpcRemoteError(code, msg, f.error?.data));
+                    entry.reject(
+                        new RpcRemoteError(
+                            code,
+                            describeRpcError(code, msg, f.error?.data),
+                            f.error?.data,
+                        ),
+                    );
                 }
                 return;
             }

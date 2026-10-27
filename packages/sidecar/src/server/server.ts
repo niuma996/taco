@@ -30,6 +30,8 @@ import {
     parseImCwd,
     type RpcRequest,
     type RpcResponse,
+    type RpcValidationErrorData,
+    type RpcValidationIssue,
     type SessionEventsGetResult,
     type SessionId,
     type SidecarCapabilities,
@@ -830,13 +832,14 @@ export class SidecarServer implements ServerRpcSurface {
         if (reg.schema) {
             const errors = Value.Errors(reg.schema, req.params);
             if (errors.length > 0) {
+                const issues: RpcValidationIssue[] = errors.map((e) => ({
+                    path: parseJsonPointer(e.instancePath),
+                    message: e.message ?? "validation error",
+                    schema: e.schemaPath,
+                }));
                 return err(req.id, ErrorCodes.InvalidParams, "parameter validation failed", {
-                    issues: errors.map((e) => ({
-                        path: parseJsonPointer(e.instancePath),
-                        message: e.message ?? "validation error",
-                        schema: e.schemaPath,
-                    })),
-                });
+                    issues,
+                } satisfies RpcValidationErrorData);
             }
         }
 

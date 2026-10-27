@@ -49,3 +49,46 @@ export const ErrorCodes = {
 
 /** Union of all error code string literals. */
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
+/**
+ * One schema-validation failure, as reported in `error.data.issues`.
+ *
+ * `path` is the JSON-pointer token list of the offending field (empty for the
+ * root object), `message` the schema's own reason, and `schema` the pointer
+ * into the schema that rejected it.
+ */
+export interface RpcValidationIssue {
+    path: string[];
+    message: string;
+    schema: string;
+}
+
+/** The `error.data` payload carried by an `invalid_params` schema failure. */
+export interface RpcValidationErrorData {
+    issues: RpcValidationIssue[];
+}
+
+/**
+ * Read validation issues out of an `error.data` payload.
+ *
+ * Returns `undefined` when the payload is not the shape the sidecar sends —
+ * a caller must treat "no issues" and "unexpected data" the same way rather
+ * than trusting the field.
+ */
+export function readValidationIssues(data: unknown): RpcValidationIssue[] | undefined {
+    if (typeof data !== "object" || data === null) return undefined;
+    const issues = (data as { issues?: unknown }).issues;
+    if (!Array.isArray(issues)) return undefined;
+    const parsed: RpcValidationIssue[] = [];
+    for (const issue of issues) {
+        if (typeof issue !== "object" || issue === null) continue;
+        const { path, message, schema } = issue as Partial<RpcValidationIssue>;
+        if (!Array.isArray(path) || typeof message !== "string") continue;
+        parsed.push({
+            path: path.filter((token): token is string => typeof token === "string"),
+            message,
+            schema: typeof schema === "string" ? schema : "",
+        });
+    }
+    return parsed.length > 0 ? parsed : undefined;
+}
