@@ -1,6 +1,6 @@
 /**
  * Re-export every RPC param schema from one entry point. Consumers import
- * `import { SessionPromptSchema } from "@taco-ai/protocol"` instead of
+ * `import { sessionPromptSchema } from "@taco-ai/protocol"` instead of
  * reaching into `schemas/session.ts` directly.
  *
  * The files below are the per-domain schema modules; each one matches the

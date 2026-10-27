@@ -285,7 +285,7 @@ export interface TypedRpc {
     ): Promise<CommandPermissionResolveResult>;
 
     // ── settings(process-level)──
-    /** Fetch sidecar global config + client-local settings (sidecar RPC + local read merged). */
+    /** Fetch the sidecar global config view with secret fields masked. */
     settingsGet(): Promise<SettingsGetResult>;
     /** Write sidecar global config to ~/.taco/taco.json. */
     settingsWrite(params: SettingsWriteParams): Promise<SettingsWriteResult>;

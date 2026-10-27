@@ -32,7 +32,7 @@ export interface TacoClientOptions {
     spawn: TacoClientSpawnOptions;
 }
 
-// The 20 typed methods are injected by `createTypedRpc` on the base class and merged via namesake interface (see TacoClientBase).
+// The typed methods are injected by `createTypedRpc` on the base class and merged via namesake interface (see TacoClientBase).
 export interface TacoClient extends TacoClientBase {}
 
 // biome-ignore lint/suspicious/noUnsafeDeclarationMerging: see interface comment above

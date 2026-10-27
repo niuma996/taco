@@ -1,20 +1,23 @@
 # Taco Sidecar Protocol
 
 > **版本**: 0.3.2
-> **传输**: NDJSON over stdio
+> **传输**: NDJSON over stdio 或 daemon data socket
 > **来源**: 源码为唯一权威来源——`packages/protocol/src/rpcContract/`（RPC method 名、参数、返回值与 schema）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
 ---
 
 ## Overview
 
-`taco-sidecar` is a long-lived server process. Clients communicate with it by writing NDJSON frames to its stdin and reading responses from its stdout.  The server may push frames to the client at any time — these have no `id` field.
+`taco-sidecar` accepts NDJSON frames over stdio or its daemon data socket.
+It may push frames at any time. Responses carry boolean `ok` and pair with
+requests by `id`; pushes carry `method` and may have an optional deduplication
+`id`. A push id does not pair it with a pending RPC.
 
 ```
 Client → Server  { "id": "uuid", "method": "session.prompt", "params": { ... } }
 Client → Server  { "id": "uuid2", "method": "workspace.ensure", "params": { "cwd": "..." } }
 Server → Client  { "id": "uuid", "ok": true, "result": { ... } }     ← response
-Server → Client  { "method": "session.event", "workspace": "...", ... }  ← push (no id)
+Server → Client  { "method": "session.event", "workspace": "...", ... }  ← push (id optional)
 Server → Client  { "id": "uuid2", "ok": true, "result": { ... } }     ← response
 ```
 
@@ -28,7 +31,8 @@ All frames are newline-delimited JSON.  A line containing only whitespace is ign
 
 ```typescript
 interface RpcRequest<TParams = unknown> {
-    id: string;       // UUID; responses and pushes are matched by id
+    id: string;       // client-generated request/response correlation id
+    commandId?: string; // stable retry identity for deduplicated mutations
     method: string;
     params: TParams;
 }
@@ -50,6 +54,7 @@ interface ServerPush<TParams = unknown> {
     method: string;        // push method name
     workspace: string;     // cwd of the workspace this push belongs to
     session?: string;      // SessionId; absent for sessionless events
+    seq?: number;         // per-session replay cursor; absent for process-wide pushes
     sessionKind?: "main" | "subagent";
     params: TParams;
 }
@@ -111,7 +116,23 @@ recommended single-call readiness check for any client that is going to call RPC
 
 ## RPC Methods
 
-All method names are listed below, grouped by namespace.  The `workspace.*` methods are process-global; all others carry a `workspace` field in their params identifying the target workspace `cwd`.
+All method names are listed below, grouped by namespace. Client routing scope
+comes from each `rpcContract` row, not from its namespace: workspace-scoped
+calls carry a routing key, while process-scoped calls do not. The server's
+`ensureWorkspace` flag separately decides whether to resolve a runtime before
+calling the handler. `workspace.ensure` and `workspace.dispose` carry `cwd`;
+`workspace.associations.resolve` carries `workspace`, but none needs a runtime
+resolved up front.
+
+Request shapes live in `schemas/<domain>.ts`; params types derive from them.
+The server validates before workspace resolution and handler execution. Schema
+failures return `invalid_params` with `data.issues`; handlers retain semantic
+checks. `initialize` delegates to its negotiation handler, and config patch
+bodies remain open. Result and push payloads have no runtime schema validation.
+
+Tauri commands/events and the daemon control socket are separate contracts.
+Desktop-only settings are merged locally after the RPC response; they are not
+fields of `settings.get` or `settings.write`.
 
 <!-- RPC_TABLE_START -->
 | Method | Namespace |
@@ -205,7 +226,7 @@ All method names are listed below, grouped by namespace.  The `workspace.*` meth
 may be added in minor versions; renaming or removal is a major-version bump.
 Clients should map unknown codes to a generic "internal error" rather than
 assert equality against any of the constants below. The full table is exported
-as `ErrorCodes` from `@taco-ai/protocol/errors`.
+as `ErrorCodes` from `@taco-ai/protocol`.
 
 | Code | When |
 |------|------|

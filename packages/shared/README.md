@@ -10,7 +10,7 @@ protocol contract table in `@taco-ai/protocol`.
 pnpm add @taco-ai/shared
 ```
 
-Requires `@taco-ai/protocol` (peer) and Node ≥ 22.
+Depends on `@taco-ai/protocol` and requires Node ≥ 22.
 
 ## What's here
 
@@ -36,51 +36,57 @@ Requires `@taco-ai/protocol` (peer) and Node ≥ 22.
 - **`FrameDispatcher` / `NdjsonLineBuffer`** — the frame parser,
   deduplicator, and pending-promise map. Exposed for tooling that
   wants to drive the sidecar over a custom transport.
-- **`createDefaultSidecarSpawn()`** (in `./spawn.ts`) — picks
-  `taco-sidecar` on PATH with no extra args. Override via
-  `{ command, args, cwd, env }` for testing.
+- **`createDefaultSidecarSpawn()`** (in `./spawn.ts`) — defaults to
+  `tsx packages/sidecar/src/index.ts` from the repository root. Installed
+  consumers pass `{ command: "taco-sidecar", args: [] }` to use the bin on PATH.
+  Options include `command`, `args`, `repoRoot` and `env`.
 
 ## Quick start
 
 ```typescript
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { TacoClient } from "@taco-ai/shared/node";
 import { createDefaultSidecarSpawn } from "@taco-ai/shared/spawn";
 
-const client = new TacoClient(createDefaultSidecarSpawn());
+// Install @taco-ai/sidecar so its bin is available on PATH.
+const client = new TacoClient(
+    createDefaultSidecarSpawn({ command: "taco-sidecar", args: [] }),
+);
 await client.start();
-await client.handshake();   // protocol v2+: initialize RPC; returns InitializeResult
+try {
+    await client.handshake();
+    const workspace = asWorkspaceId("/tmp/myproject"); // use an existing project
+    await client.workspaceEnsure(workspace);
+    const { sessionId } = await client.sessionCreate({ workspace });
+    await client.sessionAttach(workspace, sessionId);
 
-const list = await client.sessionList("/tmp/myproject");
-const sid = await client.sessionCreate({
-    workspace: "/tmp/myproject",
-    initialPrompt: "hello",
-});
-const reply = await client.sessionPrompt("/tmp/myproject", sid, {
-    text: "continue",
-});
-
-// Subscribe to pushes.
-const unsub = client.onPush((p) => {
-    if (p.method === "session.event") {
-        // p.workspace, p.session, p.params.event are typed
+    const unsub = client.onPush((push) => {
+        if (push.method === "session.event") {
+            // Push params are unknown here; narrow or validate before reading.
+            console.log(push.workspace, push.session, push.params);
+        }
+    });
+    try {
+        await client.sessionPrompt(workspace, sessionId, "hello");
+    } finally {
+        unsub();
     }
-});
-
-await client.dispose();
+} finally {
+    await client.dispose();
+}
 ```
 
 ## Browser note
 
-The barrel `./index.ts` is **browser-safe** (no `node:` imports).
-The `tacoClientNode.ts` and `spawn.ts` entry points are Node-only.
-Vite / webpack will tree-shake Node-only imports if you only import
-the barrel.
+The package root (`tacoClient.ts`) is **browser-safe** and imports no
+`node:` modules. The `/node`, `/spawn` and `/controlNode` entry points are
+Node-only; browser consumers should not import them.
 
 ## Layout
 
 ```
-src/
-├── index.ts            # browser-safe barrel
+packages/shared/
+├── tacoClient.ts       # browser-safe package root
 ├── tacoClientBase.ts   # transport-agnostic base class
 ├── tacoClientNode.ts   # Node-side child_process transport
 ├── dispatcher.ts       # FrameDispatcher / NdjsonLineBuffer
@@ -88,7 +94,8 @@ src/
 ├── rpcError.ts         # validation-issue rendering for error messages
 ├── rpcMethods.ts       # wire-method names (re-exported from the protocol contract)
 ├── typedRpc.ts         # createTypedRpc + TypedRpc surface
-└── spawn.ts            # createDefaultSidecarSpawn factory
+├── spawn.ts            # createDefaultSidecarSpawn factory
+└── controlNode.ts      # separate daemon control-socket client
 ```
 
 ## License

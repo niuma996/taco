@@ -186,7 +186,7 @@ Two approvals are required for changes touching:
 - `packages/shared/**` (`TacoClientBase` and the typed RPC surface
   are consumed by every client)
 - `clients/taco-desktop/src-tauri/**` (Rust process management)
-- `clients/taco-desktop/src/lib/tacoClient.ts` (Tauri transport
+- `clients/taco-desktop/src/lib/clients/tacoClient.ts` (Tauri transport
   state machine)
 
 Other changes need one approval. Use the GitHub suggestion block for
@@ -194,22 +194,37 @@ small fixes; re-request review after addressing comments.
 
 ## Adding a new RPC
 
-1. Add the name to `packages/shared/rpcMethods.ts` under the matching
-   namespace.
-2. Define request / response types in the appropriate
-   `packages/protocol/src/<domain>.ts` file.
-3. Register the handler in
-   `packages/sidecar/src/server/handlers/<domain>.ts` via
-   `registerMethod(name, ensureWorkspace, async (ctx) => {...},
-   options)`. Pick `options.command = true` for mutating writes,
-   `options.turnStart = true` if it should serialize against an
-   active model turn.
-4. Add the typed wrapper in `packages/shared/typedRpc.ts`. The
-   `helpers` block at the top shows the four common shapes
-   (`ws0 / wsSession / process0 / process1`); non-standard param
-   shapes are inlined.
-5. Run `pnpm sidecar:docs` and commit the regenerated
-   `docs/sidecar-protocol.md`.
+1. Declare the request shape in `packages/protocol/src/schemas/<domain>.ts`.
+   Use the branded id schemas from `schemas/fields.ts` for workspace,
+   session and tool-call ids. Derive any exported params type with
+   `ParamsOf<typeof fooSchema>`; declare the result type in the domain's
+   DTO or contract module. Do not add a second request interface.
+2. Add one row in `packages/protocol/src/rpcContract/<domain>.ts`:
+   `foo: row<FooResult>()("foo.bar", "workspace", fooSchema)`.
+   The row generates the method constant, scope and schema tables.
+   `packages/shared/rpcMethods.ts` only re-exports names and owns timeout policy.
+3. Register the handler in `packages/sidecar/src/server/handlers/<domain>.ts`
+   with `registerMethod("foo", ensureWorkspace, handler, options)`.
+   The key is the contract key. Set `command: true` for retry-deduplicated
+   mutations and `turnStart: true` for exclusive model-turn entry points.
+   Client routing scope and server `ensureWorkspace` are separate decisions.
+   Keep authorization, state and cross-field checks in the handler.
+4. Add the client facade in `packages/shared/typedRpc.ts`, sending through
+   `createContractDispatch`. The dedicated jobs facade uses
+   `createProcessContractDispatch`; model/internal callers use the typed
+   self-RPC dispatcher or `createRpcRequest`. Update the relevant facade's
+   coverage expectation when a new method intentionally belongs elsewhere.
+5. Add an invalid-input regression case and a valid JSON-serialized payload
+   case through the registered schema. Contract assertions check method/scope
+   coverage and reject untyped params; runtime tests cover constraints such
+   as `minLength`, patterns and handler semantics.
+6. Run `pnpm protocol:build` and `pnpm shared:build` before consumer tests,
+   then lint, typecheck, dependency checks and the relevant tests. Run
+   `pnpm sidecar:docs` and commit the regenerated method inventory.
+
+The data RPC contract does not include Tauri commands/events or the daemon's
+control socket. Desktop-only fields belong in desktop state or desktop
+configuration; do not add them to a sidecar request just to reuse its envelope.
 
 ## Adding a new IM channel
 

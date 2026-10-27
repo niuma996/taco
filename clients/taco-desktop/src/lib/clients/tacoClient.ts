@@ -88,7 +88,7 @@ const ALREADY_INITIALIZED: Handshake = (() => {
     return { generation: 0, promise, resolve, reject: () => {} };
 })();
 
-// The 20 typed methods are injected at construction by the base class's
+// The typed methods are injected at construction by the base class's
 // createTypedRpc via Object.assign; the TS type is visible through interface
 // merging. See TacoClientBase for details.
 //

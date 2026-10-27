@@ -1,7 +1,7 @@
 /**
  * @taco-ai/protocol — Taco sidecar protocol contract.
  *
- * Types and constants only; no runtime dependencies (both server and client import it).
+ * Types, constants and TypeBox schemas shared by server and client.
  * Session message shapes (`AgentMessage` / `ThinkingLevel`) are protocol-native DTOs
  * with zero external dependencies.
  *

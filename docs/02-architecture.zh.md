@@ -32,7 +32,7 @@ harness 这层仍在建设：
 
 ```
 请求:  {"id":"r1","method":"workspace.ensure","params":{"cwd":"/tmp/x"}}
-响应:  {"id":"r1","ok":true,"result":{"cwd":"/tmp/x","sessionsRoot":"..."}}
+响应:  {"id":"r1","ok":true,"result":{"cwd":"/tmp/x"}}
 推送:  {"id":"<uuid>","method":"session.event","workspace":"/tmp/x","session":"<id>","params":{"event":<AgentHarnessEvent>}}
 ```
 
@@ -63,6 +63,7 @@ Taco 在同一 NDJSON `line` 抽象上支持两种传输模式：
 ```typescript
 interface RpcRequest<TParams> {
     id: string;        // 客户端生成,配对用
+    commandId?: string; // stable retry identity for deduplicated mutations
     method: string;    // 形如 "workspace.ensure" / "session.prompt"
     params: TParams;
 }
@@ -80,44 +81,44 @@ interface ServerPush<TParams> {
     method: string;                // "session.event" / "session.attached" …
     workspace: WorkspaceId;       // 一级路由
     session?: SessionId;          // 二级路由(可选)
+    seq?: number;                // per-session replay cursor
+    sessionKind?: "main" | "subagent";
     params: TParams;
 }
 ```
 
 push 帧**自己带 method**——客户端靠 `method` 字段识别事件类型，**不要**用 `id` 配对（`id` 留给 pull 配对）。
 
-### 1.3 Method 列表
+### 1.3 契约与校验
 
-完整定义见 [`packages/protocol/src/types.ts`](../packages/protocol/src/types.ts) 的 `Methods` 常量：
+RPC 与 push 清单位于 `docs/sidecar-protocol.md`，由 `pnpm sidecar:docs`
+生成。请求形状只在 `packages/protocol/src/schemas/<domain>.ts` 定义一次，
+params 类型从 schema 推导。`rpcContract/<domain>.ts` 的一行声明绑定方法名、
+客户端路由 scope、schema 与结果类型，派生 `RPC`、`rpcContract` 和
+`rpcSchemas`。Push 名称与 payload DTO 定义在 `push.ts`。
 
-```typescript
-export const Methods = {
-    WorkspaceList:        "workspace.list",
-    WorkspaceEnsure:      "workspace.ensure",
-    WorkspaceDispose:     "workspace.dispose",
-    SessionList:          "session.list",
-    SessionCreate:        "session.create",        // 含可选 initialPrompt
-    SessionAttach:        "session.attach",
-    SessionDetach:        "session.detach",
-    SessionHistory:       "session.history",       // 拉完整 chat tree
-    SessionPrompt:        "session.prompt",        // 同步等回复
-    SessionSteer:         "session.steer",
-    SessionAbort:         "session.abort",
-    SessionSetModel:      "session.setModel",      // 切模型
-    SessionListModels:    "session.listModels",    // 列可用的 model
-};
-```
+`registerMethod` 将 handler 类型绑定到契约行。服务端先校验 params，再解析
+workspace、调用 handler；schema 失败返回 `invalid_params` 与
+`data.issues` 字段路径，不转换输入、不删除字段。权限、状态、冲突和跨字段
+规则由 handler 检查。`initialize` 刻意交给握手 handler 校验，配置 patch
+内部保持开放。结果与 push payload 目前只有类型，没有运行时 schema。
 
-Push 帧 method：
+shared facade 与进程内 self-RPC 使用同一契约。编译期守卫检查方法覆盖、
+params 类型和路由 scope；JSON 往返测试检查 facade 实际发出的 payload。
 
-```typescript
-// 协议 v2: 不再发送 sidecar.hello 推送帧; 启动身份信息(serverVersion / pid /
-// instanceId)由 initialize RPC 的响应承载。
-"session.attached"  // attach 完成
-"session.detached"
-"session.event"     // AgentHarness emit 的事件直透(详见 §2.3)
-"session.error"
-```
+### 1.3.1 协议边界
+
+- 主数据通道使用上述契约，通过 stdio 或 daemon socket 传输。
+- daemon control socket 使用独立请求/响应格式处理 `control.ping` 与
+  `control.shutdown`，由 `controlChannel.ts` 和 `shared/controlNode.ts`
+  实现，不属于主数据通道契约。
+- 桌面 React ↔ Rust commands/events 属于 Tauri IPC。`workspace_send`
+  用 `{ cwd, line }` 包装序列化后的数据帧，Rust 原样转发 line。
+  `desktop_config_*`、文件授权与升级命令是桌面接口，不加入主 RPC 表。
+
+桌面收到 `settings.get` 的 `{ global }` 后，才组合 `{ global, client, loaded }`。
+客户端偏好与 `desktop.json` 由桌面层拥有。主 RPC 的额外字段由各自 schema
+决定；无参 envelope 和 `settings.write` envelope 会拒绝未知键。
 
 ### 1.4 路由 key
 
@@ -136,7 +137,7 @@ cwd 是文件系统层面的"项目目录"标识，pi 的现有 model（`pi-codi
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ SidecarServer  (单例,持 Map<cwd, WorkspaceRuntime>)             │
-│  ├─ 处理 RPC dispatch (Methods.X → handler)                     │
+│  ├─ 处理 RPC dispatch (RPC[key] → handler)                     │
 │  ├─ 维护 workspaceMap                                            │
 │  └─ 转发 session.event (push 帧 → stdout)                        │
 └─────────────┬──────────────────────────────────────────────────┘
@@ -365,46 +366,29 @@ sidecar 两种运行模式的隔离语义不同：
 
 ### 3.1 客户端分层
 
-```
-┌─────────────────────────────────────────────┐
-│  @taco-ai/shared (通用 NDJSON client)         │  → 任何 Node / tsx 进程能用
-│  TacoClient / TypedTacoClient              │
-└─────────────────┬───────────────────────────┘
-                  │ 被消费
-       ┌──────────┴────────────┐
-       ▼                       ▼
-┌─────────────────────┐  ┌─────────────────────────────────┐
-│ Node TUI 示例（社区）   │  │ @taco-ai/desktop (Tauri 2 骨架)    │
-│                       │  │ Rust spawn sidecar + React UI    │
-└─────────────────────┘  └─────────────────────────────────┘
-```
+`@taco-ai/protocol` 提供类型、常量与 TypeBox schema；`@taco-ai/shared`
+提供浏览器安全的 facade 和 dispatcher。Node transport 通过 `/node` 单独
+导出，桌面 transport 位于 `clients/taco-desktop/src/lib/clients/tacoClient.ts`。
 
 ### 3.2 `@taco-ai/shared` 设计要点
 
-`TacoClient`（基类）做原始 NDJSON：
+`TacoClientBase` 拥有帧缓冲、dispatcher、订阅和 typed facade 注入。
+Node `TacoClient` 提供子进程传输、`start()` / `dispose()` 和检查版本的
+`handshake()`；桌面 `TacoClient` 提供 Tauri transport 与重连处理。
 
-- `start()`：spawn 子进程（默认 `tsx packages/sidecar/src/index.ts`），搭 `readline` 解析每行 NDJSON
-- `call(method, params)`：写到 stdin，缓存 `Promise` 到 `pending: Map<id, {resolve, reject}>`，收到响应时 resolve
-- `onPush(handler)`：注册 push 监听器
-- `dispose()`：SIGTERM 子进程，等 1 秒，超时 SIGKILL
+`createTypedRpc(dispatch)` 将便捷参数组装为 wire envelope，
+`createContractDispatch` 根据契约检查方法、参数、结果与路由：
 
-`TypedTacoClient`（子类）做 typed convenience methods：
+- `call(method, workspace, params)`：workspace scope。
+- `callProcess(method, params)`：process scope。
 
-```typescript
-workspaceList(): Promise<WorkspaceId[]>
-workspaceEnsure(cwd): Promise<{cwd, sessionsRoot}>
-sessionList(workspace): Promise<{workspace, sessions: SessionMeta[]}>
-sessionCreate({workspace, initialPrompt?, sessionId?}): Promise<{sessionId, filePath?, assistantMessage?}>
-sessionAttach(workspace, sessionId): Promise<{attached: true}>
-sessionHistory(workspace, sessionId): Promise<{leafEntryId, entries}>
-sessionPrompt(workspace, sessionId, text): Promise<AssistantMessage>
-sessionSteer(workspace, sessionId, text): Promise<void>
-sessionAbort(workspace, sessionId): Promise<AbortResult>
-sessionSetModel(workspace, sessionId, provider, modelId): Promise<{switchedTo}>
-sessionListModels(workspace, provider?): Promise<{models: ModelInfo[]}>
-```
+客户端 scope 与服务端 `ensureWorkspace` 独立；生命周期与 association resolve
+调用不要求已有 runtime。jobs facade 使用 `createProcessContractDispatch`，
+`config.patch` 面向模型/内部调用。
 
-**dispatch 优先级**：先判断 `frame.method` 是不是存在（push 帧），再看 `frame.id` 是不是在 pending Map 配对 response——避免 push 帧被误识别成 response。
+`FrameDispatcher` 先用布尔 `ok` 识别 response，再按 `id` 配对 pending 请求。
+其余带字符串 `method` 的帧作为 push 分发，即使它有与请求相同的 id。
+无法识别的帧发出 warning。
 
 ### 3.3 `@taco-ai/desktop` Tauri 骨架
 
@@ -432,7 +416,7 @@ daemon 生命周期由 `cli` 包与操作系统服务注册（如适用）共同
     拒绝所有 pending RPC 并启动有界重连
 
 - **React 前端 (`src/`)**：
-  - `lib/tacoClient.ts` — 在 Tauri transport 上的 typed `TacoClient`，
+  - `lib/clients/tacoClient.ts` — 在 Tauri transport 上的 typed `TacoClient`，
     持有桌面端 README 描述的 reconnect 状态机
   - `App.tsx` — workspace sidebar + session list + chat pane + settings
     + plugins + skills + agents + channels + memory panes；共用一套状态机

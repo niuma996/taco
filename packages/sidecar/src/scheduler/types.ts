@@ -30,8 +30,6 @@ import type {
     JobRunResult as ProtocolJobRunResult,
     SessionStrategy as ProtocolSessionStrategy,
 } from "@taco-ai/protocol";
-import type { TSchema } from "typebox";
-import { Type } from "typebox";
 
 /**
  * The schedule shape. Defined in `@taco-ai/protocol` because it crosses the
@@ -39,26 +37,6 @@ import { Type } from "typebox";
  * name so the scheduler internals read unchanged.
  */
 export type ScheduleSpec = JobScheduleSpec;
-
-/**
- * Typebox schema mirror of ScheduleSpec, kept available for future JSON
- * validation of on-disk job files. Currently jobs are loaded by direct
- * TypeScript decode (see scheduler/store.ts) and never round-trip through
- * a schema validator.
- *
- * @internal
- */
-export const scheduleSpecSchema: TSchema = Type.Union([
-    Type.Object({
-        kind: Type.Literal("cron"),
-        expr: Type.String({ minLength: 1 }),
-        tz: Type.Optional(Type.String()),
-    }),
-    Type.Object({
-        kind: Type.Literal("interval"),
-        ms: Type.Integer({ minimum: 1 }),
-    }),
-]);
 
 /** One past run of a job. The wire shape lives in `@taco-ai/protocol`. */
 export type JobHistoryEntry = ProtocolJobHistoryEntry;

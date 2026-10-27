@@ -1,46 +1,12 @@
 /**
- * Method registry — server-side dispatch table.
- *
- * Each method is registered once via `registerMethod`, which checks the
- * handler against the shared contract table in `@taco-ai/protocol`: the
- * `params` type the handler sees and the type it returns must be the ones
- * the contract declares for that method. A drifted handler or a drifted
- * contract therefore fails the build instead of surfacing as a runtime
- * error.
- *
- * `commandId` idempotency (`command: true`): fingerprint =
- * `JSON.stringify(params)` (byte-exact); commandId is process-scoped —
- * adapters derive stable id, e.g. `sessionId + sha256(canonicalParams)`;
- * retry is best-effort (`commandRecordLimit` defaults to 1024 and clamps to 1,
- * settled-only FIFO prune,
- * TTL via `commandRecordTtlMs`).
- *
- * Schema validation: the params schema comes from the contract table, so a
- * method cannot be registered with a schema that belongs to another method.
- * `handleRpcRequest` runs `Value.Errors` before dispatch and rejects bad
- * input with `invalid_params`.
- *
- * That guarantee is about *pairing*, not depth: every registered method now
- * carries a schema, and the compile-time assertion in the contract table
- * keeps each schema at least as permissive as the params type it serves.
- * The remaining gap is the other direction — a schema may be looser than the
- * contract (a required field turned optional, an enum widened) and the
- * assertion cannot see it, so handlers keep their own semantic checks.
- *
- * Three limits worth knowing before relying on this:
- *   1. `ctx.params` is the raw `req.params` (no `Value.Cast`), so a
- *      handler's params type is an assertion about untrusted input, not a
- *      guarantee. Handlers with concrete schemas must still keep defensive
- *      runtime checks for values whose semantics are stricter than the wire
- *      shape.
- *   2. `ensureWorkspace` is the server's routing decision and is separate
- *      from the contract's `scope`, which is the client's routing dimension.
- *      They disagree for `workspace.ensure`, `workspace.dispose` and
- *      `workspace.associations.resolve`, which are routed by workspace but
- *      need no workspace runtime on the server.
- *   3. The contract table's schema assertion is one-directional: it rejects
- *      a schema that is *stricter* than the contract declares, but a schema
- *      loosened beyond the contract still compiles. See `rpcContract.ts`.
+ * Registers handlers against the protocol's params/result types and schema.
+ * Params are derived from that schema; explicit Type.Unsafe pins remain trust
+ * boundaries. Validation checks raw input without casting or stripping fields.
+ * Handlers retain semantic checks (permissions, state, conflicts, open bodies).
+ * Client scope and server ensureWorkspace are separate: workspace.ensure,
+ * workspace.dispose and workspace.associations.resolve need no runtime up front.
+ * Mutations marked command use process-scoped commandId deduplication with
+ * byte-exact JSON.stringify(params) fingerprints and bounded settled records.
  */
 
 import type { WorkspaceId } from "@taco-ai/protocol";

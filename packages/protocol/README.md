@@ -2,7 +2,7 @@
 
 Shared wire contract for the Taco sidecar protocol. RPC
 parameter / result types, push frame DTOs, and the push-method
-constants. Source of truth for every other package in the monorepo.
+constants. Source of truth for the main data RPC channel.
 
 ## Install
 
@@ -22,7 +22,7 @@ Runtime schema construction depends on TypeBox.
   NDJSON frame shapes.
 - **`SIDECAR_PROTOCOL_VERSION`** — the version tuple clients and
   servers negotiate on the `initialize` handshake.
-- **Namespace DTOs** — `session.*`, `channel.*`, `mcp.*`,
+- **Namespace DTOs** — `session.*`, `channels.*`, `mcp.*`,
   `memory.*`, `imPolicy.*`, `checkpoints.*`, `tools.*`,
   `agents.*`, `skills.*`, etc. A request's wire shape is declared
   once, as a TypeBox schema in `schemas/`; the exported `*Params`
@@ -51,6 +51,18 @@ from `schemas/fields.ts` instead of a bare `Type.String()`; otherwise
 the brand is silently lost. A schema that must stay looser than its
 type — an open body, or a deliberately permissive gate — pins the
 type with `Type.Unsafe<T>(...)`.
+
+## Boundaries
+
+The main data channel runs over stdio or the daemon data socket. Tauri
+commands/events and the daemon control socket have separate contracts.
+Desktop-only preferences and aggregate view fields stay in the desktop;
+`settings.get` returns the sidecar's `{ global }` view only.
+
+Request schemas validate shapes without casting or stripping input.
+Handlers retain authorization, state and cross-field checks. `initialize`
+is deliberately permissive, and config patch bodies stay open. Result
+and push payload DTOs currently have no runtime schema validation.
 
 ## Stability
 
