@@ -38,19 +38,19 @@ export const workspaceDisposeSchema = Type.Object({
  * silently unreachable entry.
  */
 const workspaceAssociationKeySchema = Type.Object({
-    scope: Type.Union([Type.Literal("workspace"), Type.Literal("channel")]),
-    id: Type.String({ minLength: 1 }),
+    scope: Type.Readonly(Type.Union([Type.Literal("workspace"), Type.Literal("channel")])),
+    id: Type.Readonly(Type.String({ minLength: 1 })),
 });
 
 export const workspaceAssociationsGetSchema = Type.Object({
-    key: workspaceAssociationKeySchema,
+    key: Type.Readonly(workspaceAssociationKeySchema),
 });
 
 export const workspaceAssociationsSetSchema = Type.Object({
-    key: workspaceAssociationKeySchema,
-    roots: Type.Unsafe<readonly string[]>(Type.Array(Type.String({ minLength: 1 }))),
+    key: Type.Readonly(workspaceAssociationKeySchema),
+    roots: Type.Readonly(Type.Unsafe<readonly string[]>(Type.Array(Type.String({ minLength: 1 })))),
 });
 
 export const workspaceAssociationsResolveSchema = Type.Object({
-    workspace: workspaceIdSchema,
+    workspace: Type.Readonly(workspaceIdSchema),
 });

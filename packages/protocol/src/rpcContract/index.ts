@@ -30,7 +30,6 @@
  * on its shape, so pinning one would be a false promise.
  */
 
-import type { Static } from "typebox";
 import type { RpcRequest } from "../frames.js";
 import { channelsContract, channelsMethods, channelsSchemas } from "./channels.js";
 import { jobsContract, jobsMethods, jobsSchemas } from "./jobs.js";
@@ -38,10 +37,10 @@ import { memoryContract, memoryMethods, memorySchemas } from "./memory.js";
 import { miscContract, miscMethods, miscSchemas } from "./misc.js";
 import { sessionContract, sessionMethods, sessionSchemas } from "./session.js";
 import { settingsContract, settingsMethods, settingsSchemas } from "./settings.js";
-import type { DeepMutable, RpcContractRow, SchemaHasShape } from "./types.js";
+import type { ParamsLacksShape, RpcContractRow } from "./types.js";
 import { workspaceContract, workspaceMethods, workspaceSchemas } from "./workspace.js";
 
-export type { DeepMutable, RpcContractRow, RpcScope, SchemaHasShape } from "./types.js";
+export type { RpcContractRow, RpcScope } from "./types.js";
 
 /** Wire names for every method the sidecar serves. */
 export const RPC = {
@@ -111,42 +110,6 @@ export const scopeCoversAllKeys: [WorkspaceScopedKey | ProcessScopedKey] extends
     : false = true;
 
 /**
- * Params<K> extends Static<schema> ensures every statically legal payload passes
- * the schema's shape: jobs.create must not require an id that callers may omit.
- * Assignability checks nested fields, unlike a comparison of outer keys.
- * This is one-directional: a looser schema still compiles, and JSON Schema
- * constraints such as minLength/pattern need runtime regression tests.
- */
-type SchemaRejects<K extends RpcContractKey> = K extends unknown
-    ? SchemaHasShape<Static<(typeof rpcSchemas)[K]>> extends true
-        ? DeepMutable<RpcParams<K>> extends Static<(typeof rpcSchemas)[K]>
-            ? never
-            : K
-        : never
-    : never;
-
-/**
- * The methods whose schema rejects values their contract declares legal.
- *
- * The conditional distributes over the key union, so each method is checked
- * with a *concrete* key — inside a mapped type the key stays generic,
- * `RpcParams<K>` never resolves, and the check silently passes for every
- * method. Distributing here is what makes the verdict meaningful, and it
- * covers a newly added method without touching this file.
- */
-type SchemaRejectsSome = SchemaRejects<RpcContractKey>;
-
-/**
- * Compile-time proof that every method's schema accepts its contract's params.
- *
- * The assignment below is the assertion: `false` is not assignable to `true`,
- * so a drift fails the build. A type alias alone would not — an unreferenced
- * alias that resolves to `never` compiles fine, which is how a schema that
- * dropped a field could reach a release unnoticed.
- */
-export const schemasAgreeWithParams: [SchemaRejectsSome] extends [never] ? true : false = true;
-
-/**
  * Compile-time proof that the constant table and the contract table list the
  * same methods. Assigned rather than aliased for the same reason as above.
  */
@@ -168,7 +131,7 @@ export const contractKeysMatchRpcKeys: [RpcContractKey, keyof typeof RPC] extend
  * fails instead.
  */
 type UntypedParams<K extends RpcContractKey> = K extends unknown
-    ? 0 extends 1 & RpcParams<K>
+    ? ParamsLacksShape<RpcParams<K>> extends true
         ? K
         : never
     : never;

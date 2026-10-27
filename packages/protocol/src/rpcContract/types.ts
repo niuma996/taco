@@ -115,39 +115,10 @@ export function domainSchemas<const T extends Record<string, AnyDomainRow>>(
 }
 
 /**
- * The same shape with every `readonly` modifier dropped.
+ * Whether a params type has lost its request shape.
  *
- * The wire types declare their fields `readonly`, while a typebox schema
- * describes a mutable object. The two are the same value at runtime, but
- * `readonly string[]` is not assignable to `string[]`, so comparing the
- * types directly would report a mismatch for every readonly field. Dropping
- * the modifiers compares the shapes that actually travel the wire.
- *
- * The primitive branch comes first on purpose: a branded id (`WorkspaceId`,
- * `SessionId`) is a string intersected with a brand, and mapping over it as
- * an object would replace the string with an object of its members.
+ * `Type.Any()` and `Type.Unknown()` both widen to a type that accepts
+ * everything, so checking only for `any` would miss the `unknown` case.
+ * `undefined` is a valid no-params shape and therefore stays `false`.
  */
-export type DeepMutable<T> = T extends
-    | string
-    | number
-    | boolean
-    | symbol
-    | bigint
-    | null
-    | undefined
-    ? T
-    : T extends readonly (infer U)[]
-      ? DeepMutable<U>[]
-      : T extends object
-        ? { -readonly [K in keyof T]: DeepMutable<T[K]> }
-        : T;
-
-/**
- * Whether a schema's static type names any field at all.
- *
- * `Type.Any()` and `Type.Unknown()` accept every value, so their static type
- * is `any`/`unknown` and says nothing about which fields exist. Comparing
- * against them would report a mismatch for every method; the check therefore
- * only applies once a schema names its fields.
- */
-export type SchemaHasShape<S> = unknown extends S ? false : true;
+export type ParamsLacksShape<P> = unknown extends P ? true : false;

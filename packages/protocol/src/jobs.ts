@@ -23,7 +23,7 @@ import type {
     jobScheduleSchema,
     jobSchema,
     jobsCreateSchema,
-    jobsGetSchema,
+    jobsIdSchema,
     jobsListSchema,
     jobsUpdateSchema,
     sessionStrategySchema,
@@ -58,6 +58,17 @@ export type Actor = ParamsOf<typeof actorSchema>;
 export type Job = ParamsOf<typeof jobSchema>;
 
 /**
+ * Outcome of one job fire, surfaced to `jobs.runNow` callers so a force-fire
+ * reports what actually happened instead of only whether the lock was
+ * acquired. `skipped` = an overlapping fire held the lock; `failed` carries
+ * the invocation error.
+ */
+export interface JobRunResult {
+    status: "ok" | "skipped" | "failed";
+    error?: string;
+}
+
+/**
  * A job body as `jobs.create` receives it.
  *
  * `id` is optional because the daemon mints it: the server ignores whatever
@@ -67,7 +78,7 @@ export type Job = ParamsOf<typeof jobSchema>;
 export type JobCreate = ParamsOf<typeof jobCreateBody>;
 
 /** Params shared by the id-targeting methods. */
-export type JobsIdParams = ParamsOf<typeof jobsGetSchema>;
+export type JobsIdParams = ParamsOf<typeof jobsIdSchema>;
 
 /** Params for `jobs.update` — the job body must carry its id. */
 export type JobsUpdateParams = ParamsOf<typeof jobsUpdateSchema>;
@@ -94,21 +105,10 @@ export interface JobsDeleteResult {
     deleted: boolean;
 }
 
-/**
- * Outcome of one job fire, surfaced to `jobs.runNow` callers so a force-fire
- * reports what actually happened instead of only whether the lock was
- * acquired. `skipped` = an overlapping fire held the lock; `failed` carries
- * the invocation error.
- */
-export interface JobRunResult {
-    status: "ok" | "skipped" | "failed";
-    error?: string;
-}
-
 export interface JobsHistoryResult {
     /**
-     * The history entries, or `null` when the job does not exist. Mirrors
-     * the controller's return type directly rather than indexing into `Job`:
+     * The history entries, or `null` when the job does not exist. Mirrors the
+     * controller's return type directly rather than indexing into `Job`:
      * the wire shape should not silently follow a change to whether `Job`
      * carries its history inline.
      */

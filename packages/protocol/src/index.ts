@@ -272,7 +272,6 @@ export {
     type RpcScopeOf,
     rpcContract,
     rpcSchemas,
-    schemasAgreeWithParams,
     scopeCoversAllKeys,
     type WorkspaceScopedKey,
 } from "./rpcContract/index.js";

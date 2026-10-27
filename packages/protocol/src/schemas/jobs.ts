@@ -124,10 +124,13 @@ export const jobsListSchema = Type.Object({
     actor: Type.Optional(actorSchema),
 });
 
-export const jobsGetSchema = Type.Object({
+/** Envelope shared by every id-targeting method. */
+export const jobsIdSchema = Type.Object({
     id: jobIdSchema,
     actor: Type.Optional(actorSchema),
 });
+
+export const jobsGetSchema = jobsIdSchema;
 
 export const jobsCreateSchema = Type.Object({
     job: jobCreateBody,
@@ -139,17 +142,8 @@ export const jobsUpdateSchema = Type.Object({
     actor: Type.Optional(actorSchema),
 });
 
-export const jobsDeleteSchema = Type.Object({
-    id: jobIdSchema,
-    actor: Type.Optional(actorSchema),
-});
+export const jobsDeleteSchema = jobsIdSchema;
 
-export const jobsRunNowSchema = Type.Object({
-    id: jobIdSchema,
-    actor: Type.Optional(actorSchema),
-});
+export const jobsRunNowSchema = jobsIdSchema;
 
-export const jobsHistorySchema = Type.Object({
-    id: jobIdSchema,
-    actor: Type.Optional(actorSchema),
-});
+export const jobsHistorySchema = jobsIdSchema;

@@ -8,17 +8,15 @@
  * ordinary string.
  */
 import { Type } from "typebox";
-import type { ImageInput, SessionId, ToolCallId, WorkspaceId } from "../frames.js";
+import type { SessionId, ToolCallId, WorkspaceId } from "../frames.js";
 
 export const workspaceIdSchema = Type.Unsafe<WorkspaceId>(Type.String({ minLength: 1 }));
 export const sessionIdSchema = Type.Unsafe<SessionId>(Type.String({ minLength: 1 }));
 export const toolCallIdSchema = Type.Unsafe<ToolCallId>(Type.String({ minLength: 1 }));
 
 /** An image attached to a prompt. */
-export const imageInputSchema = Type.Unsafe<ImageInput>(
-    Type.Object({
-        type: Type.Literal("image"),
-        data: Type.String(),
-        mimeType: Type.String(),
-    }),
-);
+export const imageInputSchema = Type.Object({
+    type: Type.Literal("image"),
+    data: Type.String(),
+    mimeType: Type.String(),
+});

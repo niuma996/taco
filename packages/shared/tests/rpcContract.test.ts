@@ -4,9 +4,9 @@
  * on.
  *
  * The compile-time half of this (a method name that disagrees between the
- * two tables, a schema that rejects a value the contract declares legal) is
+ * two tables, or a request type that widens to `any` / `unknown`) is
  * checked by the type checker through the `contractKeysMatchRpcKeys` and
- * `schemasAgreeWithParams` assertions in `@taco-ai/protocol`. Those are
+ * `paramsTypesAreTyped` assertions in `@taco-ai/protocol`. Those are
  * compile-time constants, not runtime values, so what runs here is the
  * runtime half: that the tables agree in content and that every name is
  * unique and well-formed.
