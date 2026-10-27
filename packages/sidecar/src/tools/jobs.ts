@@ -21,7 +21,14 @@ import type {
     RpcMethodResult,
     SessionStrategy,
 } from "@taco-ai/protocol";
-import { RPC } from "@taco-ai/protocol";
+import {
+    jobIdSchema,
+    jobMaxConsecutiveFailuresSchema,
+    jobMaxRunsSchema,
+    jobScheduleSchema,
+    RPC,
+    sessionStrategySchema,
+} from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
@@ -29,28 +36,10 @@ import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
 
-const sessionStrategySchema = Type.Union([
-    Type.Literal("new"),
-    Type.Literal("reuse"),
-    Type.Literal("pin"),
-]);
-
-const scheduleSchema = Type.Union([
-    Type.Object({
-        kind: Type.Literal("cron"),
-        expr: Type.String({ minLength: 1 }),
-        tz: Type.Optional(Type.String()),
-    }),
-    Type.Object({
-        kind: Type.Literal("interval"),
-        ms: Type.Integer({ minimum: 1 }),
-    }),
-]);
-
 const jobSchema = Type.Object({
-    id: Type.Optional(Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" })),
+    id: Type.Optional(jobIdSchema),
     name: Type.String({ minLength: 1, maxLength: 120 }),
-    schedule: scheduleSchema,
+    schedule: jobScheduleSchema,
     // The scheduler dispatcher only routes `agent.invoke` to a fresh agent
     // session — every fire spins up the agent with this command's `args.prompt`
     // as the initial user message. Any shell-style command you want to run
@@ -84,31 +73,8 @@ const jobSchema = Type.Object({
     ),
     enabled: Type.Boolean(),
     run_on_startup: Type.Boolean(),
-    max_runs: Type.Optional(
-        Type.Integer({
-            minimum: 1,
-            description:
-                "Cap on SUCCESSFUL runs, after which the job disables itself " +
-                "(the record and its history are kept, so you can still read the " +
-                "result). Omit for an unlimited recurring job. Use " +
-                "`max_runs: 1` for a one-shot task — that is the correct way to " +
-                'ask for "run this once, now": create it, call jobsRunNow, and it ' +
-                "retires itself. Do NOT fake a one-shot with a long interval you " +
-                "intend to delete later; a forgotten delete keeps firing forever. " +
-                "Failed fires do not count toward this cap, so a run that errors " +
-                "is retried on schedule.",
-        }),
-    ),
-    max_consecutive_failures: Type.Optional(
-        Type.Integer({
-            minimum: 0,
-            description:
-                "Circuit breaker: disable the job after this many CONSECUTIVE " +
-                "failed fires (any success resets the count). Omit to use the " +
-                "default of 5; set 0 to disable the breaker. Guards against a job " +
-                "whose command is permanently broken retrying on schedule forever.",
-        }),
-    ),
+    max_runs: Type.Optional(jobMaxRunsSchema),
+    max_consecutive_failures: Type.Optional(jobMaxConsecutiveFailuresSchema),
     sessionStrategy: Type.Optional(sessionStrategySchema),
     pinnedSessionId: Type.Optional(Type.String()),
 });
@@ -116,7 +82,7 @@ const jobSchema = Type.Object({
 const jobsListSchema = Type.Object({});
 
 const jobsGetSchema = Type.Object({
-    id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    id: jobIdSchema,
 });
 
 const jobsCreateSchema = Type.Object({
@@ -126,16 +92,16 @@ const jobsCreateSchema = Type.Object({
 const jobsUpdateSchema = Type.Object({
     job: Type.Object({
         ...jobSchema.properties,
-        id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+        id: jobIdSchema,
     }),
 });
 
 const jobsDeleteSchema = Type.Object({
-    id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    id: jobIdSchema,
 });
 
 const jobsRunNowSchema = Type.Object({
-    id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    id: jobIdSchema,
 });
 
 export type JobsListInput = Static<typeof jobsListSchema>;

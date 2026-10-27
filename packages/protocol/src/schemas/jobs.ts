@@ -6,9 +6,26 @@
  * This module is also the source of the wire shapes: the request types in
  * `packages/protocol/src/jobs.ts` are derived from these schemas, so a field
  * is declared exactly once.
+ *
+ * The field schemas below are exported individually because the sidecar's
+ * model-facing tools reuse them verbatim. Guidance for the model therefore
+ * lives here, as the schema's `description` — a second copy in the tool
+ * layer is a copy that drifts.
  */
 
 import { Type } from "typebox";
+
+/**
+ * A job's id — the record key, and the id every id-targeting method takes.
+ *
+ * The daemon mints ids on create, so a caller only supplies one when it
+ * already knows it (the desktop's edit path echoes the id it read back).
+ */
+export const jobIdSchema = Type.String({
+    minLength: 1,
+    maxLength: 128,
+    pattern: "^[a-zA-Z0-9_-]+$",
+});
 
 /**
  * Per-call caller identity, attached to `jobs.*` params so the server can
@@ -55,6 +72,37 @@ export const sessionStrategySchema = Type.Union([
     Type.Literal("pin"),
 ]);
 
+/**
+ * Cap on successful runs — the job disables itself once the cap is reached;
+ * the record and its history are kept, so the outcome stays readable.
+ */
+export const jobMaxRunsSchema = Type.Integer({
+    minimum: 1,
+    description:
+        "Cap on SUCCESSFUL runs, after which the job disables itself " +
+        "(the record and its history are kept, so you can still read the " +
+        "result). Omit for an unlimited recurring job. Use " +
+        "`max_runs: 1` for a one-shot task — that is the correct way to " +
+        'ask for "run this once, now": create it, call jobsRunNow, and it ' +
+        "retires itself. Do NOT fake a one-shot with a long interval you " +
+        "intend to delete later; a forgotten delete keeps firing forever. " +
+        "Failed fires do not count toward this cap, so a run that errors " +
+        "is retried on schedule.",
+});
+
+/**
+ * Circuit breaker — the job disables itself after this many consecutive
+ * failed fires; any success resets the count.
+ */
+export const jobMaxConsecutiveFailuresSchema = Type.Integer({
+    minimum: 0,
+    description:
+        "Circuit breaker: disable the job after this many CONSECUTIVE " +
+        "failed fires (any success resets the count). Omit to use the " +
+        "default of 5; set 0 to disable the breaker. Guards against a job " +
+        "whose command is permanently broken retrying on schedule forever.",
+});
+
 /** One past run of a job. */
 export const jobHistoryEntrySchema = Type.Object({
     started_at: Type.String(),
@@ -79,9 +127,9 @@ const jobBody = {
     builtin: Type.Optional(Type.Boolean()),
     enabled: Type.Boolean(),
     run_on_startup: Type.Boolean(),
-    max_runs: Type.Optional(Type.Integer({ minimum: 1 })),
+    max_runs: Type.Optional(jobMaxRunsSchema),
     run_count: Type.Optional(Type.Integer({ minimum: 0 })),
-    max_consecutive_failures: Type.Optional(Type.Integer({ minimum: 0 })),
+    max_consecutive_failures: Type.Optional(jobMaxConsecutiveFailuresSchema),
     consecutive_failures: Type.Optional(Type.Integer({ minimum: 0 })),
     disabled_reason: Type.Optional(Type.String()),
     last_run_at: Type.Optional(Type.String()),
@@ -103,7 +151,7 @@ const jobBody = {
  */
 export const jobSchema = Type.Object({
     ...jobBody,
-    id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    id: jobIdSchema,
 });
 
 /**
@@ -117,8 +165,6 @@ export const jobCreateBody = Type.Object({
     ...jobBody,
     id: Type.Optional(Type.String()),
 });
-
-const jobIdSchema = Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" });
 
 export const jobsListSchema = Type.Object({
     actor: Type.Optional(actorSchema),

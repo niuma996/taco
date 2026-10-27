@@ -9,7 +9,15 @@
  * `tools/context.ts`); the schema only carries business fields.
  */
 
-import { MEMORY_CONTENT_MAX_CHARS, RPC } from "@taco-ai/protocol";
+import {
+    MEMORY_CONTENT_MAX_CHARS,
+    memoryTopicActionSchema,
+    memoryTopicDescriptionSchema,
+    memoryTopicIdSchema,
+    memoryTopicNameSchema,
+    memoryTopicTypeSchema,
+    RPC,
+} from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
@@ -17,36 +25,22 @@ import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
 
-const actionSchema = Type.Union([
-    Type.Literal("add"),
-    Type.Literal("replace"),
-    Type.Literal("remove"),
-]);
-
 // Schema is the flat envelope the model sends. The action dispatch happens
 // server-side in the memory.upsert RPC handler; this tool is a thin
 // self-RPC wrapper. Keep the shape flat (action at top level) so the model
 // does not have to nest {action: {action: ...}} — that's the trap the
 // previous nested schema kept falling into.
 const memoryToolSchema = Type.Object({
-    action: actionSchema,
-    // Whitelisted by the handler as `^[a-z0-9-]{1,64}$`. Express the same
-    // rule here so the JSON Schema is the contract, not the handler's
-    // post-hoc sanitizer.
-    id: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z0-9-]+$" }),
-    name: Type.Optional(
-        Type.String({
-            maxLength: 60,
-            description: "Short human-readable title for this memory. Not a sentence.",
-        }),
-    ),
-    description: Type.Optional(
-        Type.String({
-            maxLength: 120,
-            description:
-                "One line stating what this memory is about, used to judge relevance in later sessions. Defaults to `name`.",
-        }),
-    ),
+    // The id / action / name / description / type fields are the wire
+    // contract's own field schemas (`memory.upsert`): the tool reuses them
+    // so the model and the server can never disagree about a shape.
+    action: memoryTopicActionSchema,
+    id: memoryTopicIdSchema,
+    name: Type.Optional(memoryTopicNameSchema),
+    description: Type.Optional(memoryTopicDescriptionSchema),
+    // `content` is the one field the tool narrows: the wire leaves the
+    // length to the handler, but the model gets the ceiling in its schema
+    // so an oversized body is rejected before the round-trip.
     content: Type.Optional(
         Type.String({
             maxLength: MEMORY_CONTENT_MAX_CHARS,
@@ -60,14 +54,7 @@ const memoryToolSchema = Type.Object({
                 "For feedback/project types, follow the fact with a short `Why:` clause.",
         }),
     ),
-    type: Type.Optional(
-        Type.Union([
-            Type.Literal("user"),
-            Type.Literal("feedback"),
-            Type.Literal("project"),
-            Type.Literal("reference"),
-        ]),
-    ),
+    type: Type.Optional(memoryTopicTypeSchema),
 });
 
 export type MemoryToolInput = Static<typeof memoryToolSchema>;
