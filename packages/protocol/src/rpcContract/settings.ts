@@ -23,10 +23,10 @@ import type {
     McpTransportKind,
     TacoGlobalConfigView,
 } from "../config.js";
-import { commandPermissionResolveSchema } from "../schemas/commandPermission.js";
-import { extensionsStatusSchema } from "../schemas/extensions.js";
-import { configPatchSchema, settingsWriteSchema } from "../schemas/globalConfig.js";
 import {
+    commandPermissionResolveSchema,
+    configPatchSchema,
+    extensionsStatusSchema,
     mcpCreateConfigSchema,
     mcpDeleteConfigSchema,
     mcpGetConfigSchema,
@@ -37,7 +37,8 @@ import {
     providersRevealKeySchema,
     providerTestConnectionSchema,
     settingsGetSchema,
-} from "../schemas/index.js";
+    settingsWriteSchema,
+} from "../schemas/settings.js";
 import type {
     ProviderListModelsResult,
     ProvidersListResult,

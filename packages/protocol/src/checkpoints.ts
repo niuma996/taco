@@ -8,7 +8,7 @@
  */
 
 import type { ParamsOf } from "./rpcContract/types.js";
-import type { checkpointsListSchema, checkpointsRestoreSchema } from "./schemas/checkpoints.js";
+import type { checkpointsListSchema, checkpointsRestoreSchema } from "./schemas/memory.js";
 
 /** One file captured in a checkpoint. */
 export interface CheckpointFileEntry {

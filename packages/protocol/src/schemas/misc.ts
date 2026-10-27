@@ -1,19 +1,19 @@
 /**
- * agents.* RPC param schemas — typebox validators consumed by
- * `registerMethod` in `packages/sidecar/src/server/handlers/agents.ts`.
+ * tools.* / agents.* / skills.* RPC param schemas — the catalog reads.
  *
- * The write/delete bodies carry the concrete wire validation; list/content
- * only need the routing envelope.
+ * These schemas are the single definition of the request shape: the exported
+ * `*Params` types are derived from them.
  */
-
 import { Type } from "typebox";
 import { workspaceIdSchema } from "./fields.js";
+
+const workspace = workspaceIdSchema;
+
+export const toolsListSchema = Type.Object({ workspace });
 
 /** Shared with the desktop editor and sidecar's semantic validator. */
 export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 export const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
-
-const workspace = workspaceIdSchema;
 
 export const agentsListSchema = Type.Object({ workspace });
 
@@ -31,7 +31,7 @@ const agentType = Type.String({
 const agentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")]);
 
 export const agentsWriteSchema = Type.Object({
-    workspace: workspaceIdSchema,
+    workspace,
     // Omitted means "global" on create and unchanged on edit. IM conversations
     // reject "workspace" because they have no project directory.
     scope: Type.Optional(agentScope),
@@ -71,6 +71,13 @@ export const agentsWriteSchema = Type.Object({
 });
 
 export const agentsDeleteSchema = Type.Object({
-    workspace: workspaceIdSchema,
+    workspace,
     agentType,
+});
+
+export const skillsListSchema = Type.Object({ workspace });
+
+export const skillContentSchema = Type.Object({
+    workspace,
+    filePath: Type.String({ minLength: 1 }),
 });

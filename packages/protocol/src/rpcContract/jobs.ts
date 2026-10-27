@@ -22,7 +22,7 @@ import {
     jobsListSchema,
     jobsRunNowSchema,
     jobsUpdateSchema,
-} from "../schemas/index.js";
+} from "../schemas/jobs.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const jobsRows = {

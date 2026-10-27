@@ -31,7 +31,7 @@ import {
     memoryRestoreTopicSchema,
     memoryUpsertSchema,
     memoryWriteSchema,
-} from "../schemas/index.js";
+} from "../schemas/memory.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const memoryRows = {

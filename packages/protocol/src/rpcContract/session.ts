@@ -35,7 +35,7 @@ import {
     sessionTaskHistoryGetSchema,
     sessionTasksGetSchema,
     subagentAbortSchema,
-} from "../schemas/index.js";
+} from "../schemas/session.js";
 import type {
     AbortResult,
     CancelQueuedResult,

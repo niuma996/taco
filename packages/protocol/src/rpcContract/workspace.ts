@@ -14,7 +14,7 @@ import {
     workspaceDisposeSchema,
     workspaceEnsureSchema,
     workspaceListSchema,
-} from "../schemas/index.js";
+} from "../schemas/workspace.js";
 import type {
     WorkspaceAssociationsGetResult,
     WorkspaceAssociationsResolveResult,

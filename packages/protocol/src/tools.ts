@@ -14,7 +14,7 @@ import type {
     skillsListSchema,
     toolsListSchema,
 } from "./schemas/index.js";
-import type { sessionSubmitAnswersSchema } from "./schemas/sessionTurn.js";
+import type { sessionSubmitAnswersSchema } from "./schemas/session.js";
 
 // tools.list
 

@@ -14,7 +14,7 @@ import {
     skillContentSchema,
     skillsListSchema,
     toolsListSchema,
-} from "../schemas/index.js";
+} from "../schemas/misc.js";
 import type {
     AgentsContentResult,
     AgentsDeleteResult,

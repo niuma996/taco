@@ -11,39 +11,35 @@ import type { AgentMessage } from "./messages.js";
 import type { PlanStateUpdatedParams, TasksUpdatedParams } from "./push.js";
 import type { ParamsOf } from "./rpcContract/types.js";
 import type {
+    sessionAbortSchema,
+    sessionAttachSchema,
+    sessionCancelQueuedSchema,
+    sessionCompactSchema,
+    sessionContextInfoSchema,
+    sessionCreateSchema,
+    sessionDeleteSchema,
+    sessionDetachSchema,
+    sessionEventsGetSchema,
+    sessionHistorySchema,
+    sessionListModelsSchema,
+    sessionListSchema,
+    sessionPlanStateGetSchema,
+    sessionPromptSchema,
+    sessionRenameSchema,
+    sessionSetModelSchema,
+    sessionSetThinkingLevelSchema,
+    sessionSnapshotGetSchema,
+    sessionSteerSchema,
+    sessionTaskHistoryGetSchema,
+    sessionTasksGetSchema,
+    subagentAbortSchema,
+} from "./schemas/session.js";
+import type {
     providerListModelsSchema,
     providersListSchema,
     providersRevealKeySchema,
     providerTestConnectionSchema,
-    sessionListModelsSchema,
-} from "./schemas/catalog.js";
-import type {
-    sessionAttachSchema,
-    sessionCreateSchema,
-    sessionDeleteSchema,
-    sessionDetachSchema,
-    sessionListSchema,
-    sessionRenameSchema,
-} from "./schemas/sessionLifecycle.js";
-import type {
-    sessionEventsGetSchema,
-    sessionHistorySchema,
-    sessionPlanStateGetSchema,
-    sessionSnapshotGetSchema,
-    sessionTaskHistoryGetSchema,
-    sessionTasksGetSchema,
-} from "./schemas/sessionRead.js";
-import type {
-    sessionAbortSchema,
-    sessionCancelQueuedSchema,
-    sessionCompactSchema,
-    sessionContextInfoSchema,
-    sessionPromptSchema,
-    sessionSetModelSchema,
-    sessionSetThinkingLevelSchema,
-    sessionSteerSchema,
-    subagentAbortSchema,
-} from "./schemas/sessionTurn.js";
+} from "./schemas/settings.js";
 
 export interface SessionMeta {
     id: SessionId;

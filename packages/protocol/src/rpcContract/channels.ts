@@ -29,7 +29,7 @@ import {
     imPolicyGetSchema,
     imPolicySetChannelDefaultSchema,
     imPolicySetChatOverrideSchema,
-} from "../schemas/index.js";
+} from "../schemas/channels.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 const channelsRows = {

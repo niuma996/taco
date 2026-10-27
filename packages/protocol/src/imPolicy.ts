@@ -21,7 +21,7 @@ import type {
     imPolicyGetSchema,
     imPolicySetChannelDefaultSchema,
     imPolicySetChatOverrideSchema,
-} from "./schemas/imPolicy.js";
+} from "./schemas/channels.js";
 
 /** (channelId, peerId, chatId) — identity of one IM conversation. */
 export interface ImRoute {

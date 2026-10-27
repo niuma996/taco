@@ -1,14 +1,13 @@
 /**
- * memory.* RPC param schemas — typebox validators consumed by
- * `registerMethod` in `packages/sidecar/src/server/handlers/memory.ts`.
+ * memory.* and checkpoints.* RPC param schemas.
  *
- * The schema validates the envelope before dispatch; the handler still owns
- * the semantic checks (topic id whitelist, content length, stale-hash
- * conflicts).
+ * These schemas are the single definition of the request shape: the exported
+ * `*Params` types are derived from them. The handlers keep the semantic
+ * checks (topic id whitelist, content length, stale-hash conflicts) a
+ * shape cannot express.
  */
-
 import { Type } from "typebox";
-import { workspaceIdSchema } from "./fields.js";
+import { sessionIdSchema, workspaceIdSchema } from "./fields.js";
 
 const workspace = workspaceIdSchema;
 
@@ -47,21 +46,32 @@ export const memoryUpsertSchema = Type.Object({
     ),
 });
 
-export const memoryDreamRunSchema = Type.Object({ workspace: workspaceIdSchema });
+export const memoryDreamRunSchema = Type.Object({ workspace });
 
 export const memoryDreamApplySchema = Type.Object({
-    workspace: workspaceIdSchema,
+    workspace,
     previewId: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }),
 });
 
-export const memoryDreamDiscardSchema = Type.Object({ workspace: workspaceIdSchema });
+export const memoryDreamDiscardSchema = Type.Object({ workspace });
 
 export const memoryDreamUndoSchema = Type.Object({
-    workspace: workspaceIdSchema,
+    workspace,
     reportId: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }),
 });
 
 export const memoryRestoreTopicSchema = Type.Object({
-    workspace: workspaceIdSchema,
+    workspace,
     id: Type.String({ minLength: 1, maxLength: 128 }),
+});
+
+export const checkpointsListSchema = Type.Object({
+    workspace,
+    sessionId: Type.Optional(sessionIdSchema),
+});
+
+export const checkpointsRestoreSchema = Type.Object({
+    workspace,
+    checkpointId: Type.String({ minLength: 1 }),
+    sessionId: Type.Optional(sessionIdSchema),
 });
