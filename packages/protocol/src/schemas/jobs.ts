@@ -15,12 +15,7 @@
 
 import { Type } from "typebox";
 
-/**
- * A job's id — the record key, and the id every id-targeting method takes.
- *
- * The daemon mints ids on create, so a caller only supplies one when it
- * already knows it (the desktop's edit path echoes the id it read back).
- */
+/** Existing job ids used by updates and id-targeting methods; create ignores caller ids. */
 export const jobIdSchema = Type.String({
     minLength: 1,
     maxLength: 128,
@@ -83,7 +78,7 @@ export const jobMaxRunsSchema = Type.Integer({
         "(the record and its history are kept, so you can still read the " +
         "result). Omit for an unlimited recurring job. Use " +
         "`max_runs: 1` for a one-shot task — that is the correct way to " +
-        'ask for "run this once, now": create it, call jobsRunNow, and it ' +
+        'ask for "run this once, now": create it, call jobsRunNow (the jobs.runNow RPC), and it ' +
         "retires itself. Do NOT fake a one-shot with a long interval you " +
         "intend to delete later; a forgotten delete keeps firing forever. " +
         "Failed fires do not count toward this cap, so a run that errors " +
@@ -91,15 +86,18 @@ export const jobMaxRunsSchema = Type.Integer({
 });
 
 /**
- * Circuit breaker — the job disables itself after this many consecutive
- * failed fires; any success resets the count.
+ * Default budget when `max_consecutive_failures` is omitted. A timeout also
+ * records a failure, so the budget tolerates a few slow model turns.
  */
+export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 5;
+
+/** Circuit breaker — any successful fire resets the consecutive-failure count. */
 export const jobMaxConsecutiveFailuresSchema = Type.Integer({
     minimum: 0,
     description:
         "Circuit breaker: disable the job after this many CONSECUTIVE " +
         "failed fires (any success resets the count). Omit to use the " +
-        "default of 5; set 0 to disable the breaker. Guards against a job " +
+        `default of ${DEFAULT_MAX_CONSECUTIVE_FAILURES}; set 0 to disable the breaker. Guards against a job ` +
         "whose command is permanently broken retrying on schedule forever.",
 });
 

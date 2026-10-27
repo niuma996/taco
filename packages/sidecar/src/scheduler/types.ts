@@ -99,8 +99,4 @@ export type JobRunResult = ProtocolJobRunResult;
 
 export const HISTORY_LIMIT = 20;
 
-/** Consecutive-failure budget applied when a job sets no explicit
- *  `max_consecutive_failures`. Deliberately not 1–2: a fire that exceeds
- *  `fireTimeoutMs` also records `err`, so a job whose model turn is merely
- *  slow can accumulate a few non-genuine failures before doing real work. */
-export const DEFAULT_MAX_CONSECUTIVE_FAILURES = 5;
+export { DEFAULT_MAX_CONSECUTIVE_FAILURES } from "@taco-ai/protocol";

@@ -71,11 +71,9 @@ src/
 ├── frames.ts         # RpcRequest / RpcResponse / ServerPush + version
 ├── session.ts        # session.* RPC types
 ├── channels.ts       # channels.* RPC + IM cwd helpers
-├── checkpoints.ts    # checkpoints.* types
 ├── config.ts         # TacoGlobalConfigShape / View — the on-disk config only
 ├── configPatch.ts    # the open-body global-config request types
-├── imPolicy.ts       # imPolicy.* types
-├── memory.ts         # memory.* types
+├── memory.ts         # memory.* / checkpoints.* types
 ├── rpcContract/      # domain contracts + their request/result types, scope assertions
 ├── schemas/          # RPC parameter validators — the source of every request shape
 │   └── fields.ts     # shared branded-id and payload field schemas
@@ -92,6 +90,16 @@ pnpm protocol:build    # tsc -p tsconfig.build.json → dist/
 The build emits `.js` files (Node loads them under `NodeNext`);
 downstream consumers (e.g. `@taco-ai/shared`) import from
 `@taco-ai/protocol` and let Node resolve to `dist/`.
+
+For local development, rebuild after changing protocol source or switching
+branches, before starting sidecar or running its tests. Consumers load the
+built package, so stale `dist/` can cause missing named-export errors (for
+example, `does not provide an export named 'jobIdSchema'`). Run
+`pnpm protocol:build` from the repository root to refresh it.
+
+Exported schemas include `description` metadata shared with model-facing
+tools. Description edits affect the published schema objects but do not
+change validation behavior.
 
 ## License
 

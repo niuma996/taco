@@ -169,20 +169,9 @@ export const sessionSubmitAnswersSchema = Type.Object({
 });
 
 /**
- * The schema stays `Type.Unknown()` — the gate is deliberately open — but the
- * static type is pinned to `InitializeParams` so the contract table still
- * declares what a well-formed `initialize` carries. `Type.Unsafe` changes
- * only the static side: at runtime the schema still accepts anything, which
- * is the point of keeping the gate open.
- */
-/**
- * The `initialize` gate is deliberately permissive: `Type.Unknown()` accepts
- * ANY value, so this schema performs no validation. The real check lives in
- * the handler, which rejects a missing or non-numeric
- * `protocolVersion.{major,minor}` with `invalid_params` and an incompatible
- * version with `incompatible_protocol`. A client that sends a partial
- * capability payload must still reach the handler's version-negotiation path
- * instead of being rejected at the envelope.
+ * Keep version negotiation in the handler: partial capabilities must reach
+ * its `invalid_params` / `incompatible_protocol` paths. `Type.Unknown()`
+ * accepts any input; `Type.Unsafe` pins only the static `InitializeParams`.
  */
 export const initializeSchema = Type.Unsafe<InitializeParams>(Type.Unknown());
 

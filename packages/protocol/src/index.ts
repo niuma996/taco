@@ -305,7 +305,6 @@ export type {
 } from "./rpcContract/workspace.js";
 // RPC param schemas (typebox) — wire validators consumed by registerMethod.
 export * from "./schemas/index.js";
-export { AGENT_TOOL_NAME_PATTERN, AGENT_TYPE_PATTERN } from "./schemas/tools.js";
 // session.* RPC types (lifecycle / turn / runtime / snapshot / read).
 export type {
     AbortParams,

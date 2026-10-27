@@ -45,11 +45,6 @@ export const configPatchSchema = Type.Unsafe<ConfigPatchParams>(
     }),
 );
 
-/**
- * The two provider probes take a discriminated shape: either the id of a
- * saved provider or the fields of one the user is still typing. The schema
- * mirrors that split so a half-filled form fails before the request leaves.
- */
 export const providersListSchema = Type.Object({ workspace });
 
 export const providersRevealKeySchema = Type.Object({
@@ -57,6 +52,7 @@ export const providersRevealKeySchema = Type.Object({
     providerId: Type.String({ minLength: 1 }),
 });
 
+/** Probe a saved provider by id or an unsaved endpoint by its connection fields. */
 export const providerListModelsSchema = Type.Union([
     Type.Object({ providerId: Type.String({ minLength: 1 }) }),
     Type.Object({
@@ -66,6 +62,7 @@ export const providerListModelsSchema = Type.Union([
     }),
 ]);
 
+/** Test a model against a saved provider or an unsaved endpoint. */
 export const providerTestConnectionSchema = Type.Union([
     Type.Object({
         providerId: Type.String({ minLength: 1 }),

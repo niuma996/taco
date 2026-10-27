@@ -49,13 +49,6 @@ export const channelsRetrySchema = Type.Object({ channelId });
 
 const toolVerdict = Type.Union([Type.Literal("deny"), Type.Literal("allow")]);
 
-/**
- * A policy patch uses `null` to clear a field at the current layer (so the
- * parent layer decides again) and `undefined` to leave it untouched — the
- * schemas keep that distinction, which is why the nullable branches are
- * spelled out rather than folded into an optional.
- */
-
 /** One layer's tool grants. `null` clears the field at this layer. */
 const toolsPatch = Type.Object({
     fsTools: Type.Optional(Type.Union([toolVerdict, Type.Null()])),
@@ -75,7 +68,11 @@ const executionDir = Type.Object({
     path: Type.Optional(Type.String()),
 });
 
-/** The patch body shared by the channel-default and chat-override writes. */
+/**
+ * Shared by channel-default and chat-override writes. `null` clears a field
+ * so the parent layer decides; omission leaves it untouched. Keep nullable
+ * branches distinct from optional fields throughout the nested patches.
+ */
 const policyPatch = Type.Object({
     tools: Type.Optional(toolsPatch),
     commands: Type.Optional(commandsPatch),

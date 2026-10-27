@@ -5,6 +5,7 @@
 
 import type { SessionId } from "./frames.js";
 import type { ParamsOf } from "./rpcContract/types.js";
+import type { sessionSubmitAnswersSchema } from "./schemas/session.js";
 import type {
     agentsContentSchema,
     agentsDeleteSchema,
@@ -13,8 +14,7 @@ import type {
     skillContentSchema,
     skillsListSchema,
     toolsListSchema,
-} from "./schemas/index.js";
-import type { sessionSubmitAnswersSchema } from "./schemas/session.js";
+} from "./schemas/tools.js";
 
 // tools.list
 
