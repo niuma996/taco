@@ -45,9 +45,12 @@ Runtime schema construction depends on TypeBox.
    `foo: row<FooResult>()("foo.bar", "workspace", fooSchema)`.
 
 The contract table reads the params type off the schema, so the
-row carries no second copy of the shape. A schema that must stay
-looser than its type — an open body, or a deliberately permissive
-gate — pins the type with `Type.Unsafe<T>(...)`.
+row carries no second copy of the shape. For branded ids, use the
+shared `workspaceIdSchema` / `sessionIdSchema` / `toolCallIdSchema`
+from `schemas/fields.ts` instead of a bare `Type.String()`; otherwise
+the brand is silently lost. A schema that must stay looser than its
+type — an open body, or a deliberately permissive gate — pins the
+type with `Type.Unsafe<T>(...)`.
 
 ## Stability
 
@@ -74,6 +77,7 @@ src/
 ├── memory.ts         # memory.* types
 ├── rpcContract/      # domain contracts, typed request builder, scope assertions
 ├── schemas/          # RPC parameter validators — the source of every request shape
+│   └── fields.ts     # shared branded-id and payload field schemas
 ├── push.ts           # PushMethods + push payload types
 └── tools.ts          # tools.* / agents.* / skills.* types
 ```

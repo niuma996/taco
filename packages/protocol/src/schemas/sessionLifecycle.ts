@@ -23,6 +23,7 @@ const locale = Type.Union([Type.Literal("zh"), Type.Literal("en")]);
 
 export const sessionListSchema = Type.Object({
     workspace: workspaceIdSchema,
+    // Omitted or <= 0 means SESSION_LIST_DEFAULT_LIMIT; the server clamps to SESSION_LIST_MAX_LIMIT.
     limit: Type.Optional(Type.Number()),
     cursor: Type.Optional(Type.Object({ updatedAt: Type.String(), id: sessionIdSchema })),
     full: Type.Optional(Type.Boolean()),
@@ -32,9 +33,12 @@ export const sessionCreateSchema = Type.Object({
     workspace: workspaceIdSchema,
     sessionId: Type.Optional(sessionIdSchema),
     initialPrompt: Type.Optional(Type.String()),
+    // May accompany an empty initialPrompt: image-only first turns are valid.
     initialImages: Type.Optional(Type.Array(imageInputSchema)),
     thinkingLevel: Type.Optional(thinkingLevel),
+    // Sets the first reply-language hook for this new session; never persisted.
     uiLocale: Type.Optional(locale),
+    // Authoritative IM route, written to jsonl metadata when the session is created.
     imRouting: Type.Optional(
         Type.Object({
             channelId: Type.String({ minLength: 1 }),

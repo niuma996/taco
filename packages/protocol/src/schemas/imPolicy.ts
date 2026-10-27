@@ -61,6 +61,11 @@ export const imPolicySetChatOverrideSchema = Type.Object({
     patch: policyPatch,
 });
 
+/**
+ * Clear by the full route triple (peerId + chatId) or by the raw sha256
+ * chatKey when the conversation is no longer routed. Supplying both routes or
+ * neither is ambiguous and is rejected by the handler.
+ */
 export const imPolicyClearChatOverrideSchema = Type.Object({
     channelId,
     peerId: Type.Optional(Type.String({ minLength: 1 })),

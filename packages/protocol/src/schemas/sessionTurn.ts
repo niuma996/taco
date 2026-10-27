@@ -30,7 +30,10 @@ export const sessionPromptSchema = Type.Object({
     ...sessionTarget,
     text: Type.String(),
     images: Type.Optional(Type.Array(imageInputSchema)),
+    // Transient per-turn language hook; also updates the live locale for later turns.
     uiLocale: Type.Optional(locale),
+    // Only honored when this prompt attaches a new session. For an attached
+    // session, callers must switch models with session.setModel instead.
     model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
 });
 

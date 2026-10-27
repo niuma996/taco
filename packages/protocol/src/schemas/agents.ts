@@ -32,6 +32,8 @@ const agentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")
 
 export const agentsWriteSchema = Type.Object({
     workspace: workspaceIdSchema,
+    // Omitted means "global" on create and unchanged on edit. IM conversations
+    // reject "workspace" because they have no project directory.
     scope: Type.Optional(agentScope),
     agentType,
     description: Type.String({ minLength: 1, maxLength: 1024 }),
@@ -59,8 +61,12 @@ export const agentsWriteSchema = Type.Object({
             Type.Literal("inherit"),
         ]),
     ),
+    // claude-code only: an absolute workspace or associated directory. The
+    // handler rejects paths outside that set; omitted means the calling workspace.
     cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
     systemPrompt: Type.String({ maxLength: 65536 }),
+    // Present on rename: after the new file is written, the old definition is
+    // deleted. Changing scope moves the definition and removes the old file too.
     previousAgentType: Type.Optional(agentType),
 });
 

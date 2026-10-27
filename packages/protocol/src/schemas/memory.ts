@@ -30,9 +30,13 @@ export const memoryUpsertSchema = Type.Object({
     workspace,
     action: Type.Union([Type.Literal("add"), Type.Literal("replace"), Type.Literal("remove")]),
     id: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z0-9-]+$" }),
+    // Required on add. The handler applies the same length limit as the schema.
     name: Type.Optional(Type.String({ maxLength: 60 })),
+    // Optional on add; one-line relevance hint. Defaults to name in the handler.
     description: Type.Optional(Type.String({ maxLength: 120 })),
+    // Required on add/replace; the handler enforces MEMORY_CONTENT_MAX_CHARS.
     content: Type.Optional(Type.String()),
+    // Required on add.
     type: Type.Optional(
         Type.Union([
             Type.Literal("user"),
