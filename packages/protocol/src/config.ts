@@ -1,23 +1,16 @@
 /**
- * taco.json wire shape + settings/custom-provider/command-permission/extension
- * types. The plaintext apiKey fields live in `TacoGlobalConfigShape` only —
- * use `TacoGlobalConfigView` (masked) for RPC returns.
+ * The on-disk config shape — `taco.json` — plus the views that project it.
+ *
+ * The plaintext apiKey fields live in `TacoGlobalConfigShape` only; use
+ * `TacoGlobalConfigView` (masked) for anything that leaves the process. The
+ * RPC request and result types live with their contract rows in
+ * `rpcContract/settings.ts`, and the open-body patch types in
+ * `configPatch.ts`.
  */
 
 import type { ChannelInstanceConfig } from "./channels.js";
-import type { SessionId, ToolCallId, WorkspaceId } from "./frames.js";
+import type { SessionId, ToolCallId } from "./frames.js";
 import type { ThinkingLevel } from "./messages.js";
-import type { ParamsOf } from "./rpcContract/types.js";
-import type { commandPermissionResolveSchema } from "./schemas/commandPermission.js";
-import type { extensionsStatusSchema } from "./schemas/extensions.js";
-import type {
-    mcpCreateConfigSchema,
-    mcpDeleteConfigSchema,
-    mcpGetConfigSchema,
-    mcpListServersSchema,
-    mcpUpdateConfigSchema,
-} from "./schemas/mcp.js";
-import type { settingsGetSchema } from "./schemas/settings.js";
 
 /**
  * Wire shape of `taco.json` on disk — the protocol-layer contract.
@@ -180,10 +173,6 @@ export interface CommandPermissionDecision {
     evaluation: CommandEvaluation;
     denialReason?: CommandPermissionDenialReason;
 }
-export type CommandPermissionResolveParams = ParamsOf<typeof commandPermissionResolveSchema>;
-export interface CommandPermissionResolveResult {
-    resolved: boolean;
-}
 
 /**
  * Protocols supported by custom providers. Maps to pi's three APIs:
@@ -265,52 +254,6 @@ export interface McpServerConfig {
      * resident from session start. Everything else is deferred.
      */
     alwaysLoaded?: string[];
-}
-
-/**
- * Per-server health snapshot returned by `mcp.listServers`.
- *
- * - `status: "ok"`     — the server connected and listTools succeeded.
- * - `status: "error"`  — connect or listTools failed; `connectError` carries the reason.
- * - `status: "skipped"` — the server is `enabled: false` and the handler chose
- *                        not to spawn it (see `mcp.listServers` for the policy).
- *                        `tools` is empty and `connectError` is undefined.
- */
-export interface McpServerView {
-    id: string;
-    transport: McpTransportKind;
-    status: "ok" | "error" | "skipped";
-    /** Number of tools exposed by this server. */
-    toolCount: number;
-    /** Raw tool names, in the order returned by the server. */
-    tools: string[];
-    /** Set when status === "error"; undefined otherwise. */
-    connectError?: string;
-}
-
-export interface McpListServersResult {
-    servers: McpServerView[];
-}
-
-/** `mcp.listServers` params — which servers to probe, and whether to force a probe. */
-export type McpListServersParams = ParamsOf<typeof mcpListServersSchema>;
-
-/** `mcp.getConfig` params — fetch one raw MCP server config for editing. */
-export type McpGetConfigParams = ParamsOf<typeof mcpGetConfigSchema>;
-export interface McpGetConfigResult {
-    config: McpServerConfig;
-}
-export type McpCreateConfigParams = ParamsOf<typeof mcpCreateConfigSchema>;
-/** Shared result for create / update — safe summary + restart requirement. */
-export interface McpMutateConfigResult {
-    server: McpServerConfigView;
-    requiresRestart: true;
-}
-export type McpUpdateConfigParams = ParamsOf<typeof mcpUpdateConfigSchema>;
-export type McpDeleteConfigParams = ParamsOf<typeof mcpDeleteConfigSchema>;
-export interface McpDeleteConfigResult {
-    deleted: string;
-    requiresRestart: true;
 }
 
 /**
@@ -409,69 +352,6 @@ export interface TacoGlobalConfigView
     mcpServers?: McpServerConfigView[];
 }
 
-/** `settings.get` RPC params (currently no required input; reserved for future). */
-export type SettingsGetParams = ParamsOf<typeof settingsGetSchema>;
-
-/** `settings.get` RPC result — sidecar global config view (key fields masked, never plaintext). */
-export interface SettingsGetResult {
-    /** From the sidecar process (reads ~/.taco/taco.json); key fields are masked. */
-    global: TacoGlobalConfigView;
-}
-
-/**
- * `settings.write` RPC params — write the sidecar global config to
- * `~/.taco/taco.json`.
- *
- * NOTE: this RPC does not accept client-side patches. Client-local
- * settings (theme / debugMode, ...) are written by the client itself to
- * localStorage / Tauri app config, not via the sidecar. `SettingsWriteParams.client`
- * is intentionally absent to prevent misuse of the RPC.
- */
-export interface SettingsWriteParams {
-    /** Sidecar config patch, merged back to `~/.taco/taco.json`. */
-    global?: GlobalConfigPatch;
-}
-
-/**
- * A `settings.write` patch: `TacoGlobalConfigShape` with `null` allowed on the
- * scalar fields `saveGlobalConfig` documents as clearable, as the explicit
- * "clear this field" value.
- *
- * `undefined` cannot express that over the wire — `JSON.stringify` drops an
- * undefined-valued key, so the field never reaches the sidecar and the stored
- * value survives a patch the client believed cleared it. `null` survives
- * serialization. Composite fields (nested config blocks, arrays, maps) keep
- * their existing merge semantics and are not part of this contract.
- */
-export type GlobalConfigPatch = Partial<
-    Omit<
-        TacoGlobalConfigShape,
-        | "defaultModel"
-        | "defaultProvider"
-        | "sessionsRoot"
-        | "systemPrompt"
-        | "thinkingLevel"
-        | "anthropicApiKey"
-        | "openaiApiKey"
-    >
-> & {
-    /** Incremental permission changes applied atomically to the latest disk state. */
-    commandPermissionsEdit?: {
-        mode?: CommandPermissionMode;
-        addAllow?: CommandPermissionRule[];
-        removeAllow?: CommandPermissionRule[];
-        addDeny?: CommandPermissionRule[];
-        removeDeny?: CommandPermissionRule[];
-    };
-    defaultModel?: string | null;
-    defaultProvider?: string | null;
-    sessionsRoot?: string | null;
-    systemPrompt?: string | null;
-    thinkingLevel?: ThinkingLevel | null;
-    anthropicApiKey?: string | null;
-    openaiApiKey?: string | null;
-};
-
 /**
  * Project-context instructions injection — controls whether TACO reads
  * CLAUDE.md / AGENTS.md / DESIGN.md from the workspace and parent directories,
@@ -509,50 +389,6 @@ export interface InstructionsConfig {
     inheritToSubagents?: boolean;
 }
 
-/** `settings.write` RPC result — latest view after write-back (key fields masked). */
-export interface SettingsWriteResult {
-    /** Sidecar global config view after write-back; key fields are masked. */
-    global: TacoGlobalConfigView;
-}
-
-/**
- * `config.patch` RPC params — the model's path to the global config.
- *
- * Distinct from `settings.write`: the desktop writes the config itself and
- * needs no approval, while a change proposed by a model must be approved by
- * the user first. A config change can disable the very approvals that would
- * review it, so the write is gated here rather than by the caller.
- */
-export interface ConfigPatchParams {
-    /** Workspace the calling session belongs to. */
-    workspace: WorkspaceId;
-    /** Session the change was proposed from — the approval prompt routes to it. */
-    sessionId: SessionId;
-    /** Tool call that proposed the change, so the prompt lands on its card. */
-    toolCallId: ToolCallId;
-    /** The fields to change. Only these are touched. */
-    patch: GlobalConfigPatch;
-}
-
-/** `config.patch` RPC result. */
-export interface ConfigPatchResult {
-    /** True when the user approved the change and it was written. */
-    approved: boolean;
-    /** The config fields the patch touched. */
-    fields: string[];
-    /**
-     * Why the change was not approved. Absent when `approved` is true.
-     *
-     * The tool turns this into guidance, and the difference matters: a
-     * `user_denied` means the user said no (do not retry, do not work around
-     * it), while `timeout` or `no_approver` means nobody answered (ask, or
-     * tell the user to approve it in the desktop app).
-     */
-    denialReason?: CommandPermissionDenialReason;
-    /** Config view after the write (masked). Absent when declined. */
-    global?: TacoGlobalConfigView;
-}
-
 /**
  * Extension contract primitives. This is the single source of truth —
  * `@taco-ai/sidecar`'s extension types re-export these (protocol is a leaf
@@ -568,33 +404,3 @@ export type ExtensionPermission =
     | "tags";
 /** Discriminator used to bucket extension contributions by origin. */
 export type ExtensionSource = "builtin" | "external";
-
-/** `extensions.status` RPC — returns the current extension registry's status. */
-export type ExtensionsStatusParams = ParamsOf<typeof extensionsStatusSchema>;
-
-export interface ExtensionStatusEntry {
-    name: string;
-    version: string;
-    source: ExtensionSource;
-    permissions: ReadonlyArray<ExtensionPermission>;
-    /** Short description ("what it does"), from manifest `taco.description`. May be absent. */
-    description?: string;
-    /** Activation hint ("when to use"), from manifest `taco.whenToUse`. May be absent. */
-    whenToUse?: string;
-    /** Tag names registered by this extension via `registerTag`. Only populated for loaded entries. */
-    tags?: ReadonlyArray<string>;
-}
-
-export interface ExtensionsStatusResult {
-    loaded: ExtensionStatusEntry[];
-    failed: Array<{ name: string; reason: string }>;
-    unauthorized: Array<{ name: string; method: string }>;
-    /**
-     * Extension names disabled via `disabledExtensions` and therefore not
-     * loaded. Only the name is exposed — disabled = not loaded = manifest
-     * unread, so version/permissions/description are unavailable. Mutually
-     * exclusive with `loaded`/`failed`/`unauthorized` (the loader routes
-     * them at the subtraction step).
-     */
-    disabled: string[];
-}

@@ -72,10 +72,11 @@ src/
 ├── session.ts        # session.* RPC types
 ├── channels.ts       # channels.* RPC + IM cwd helpers
 ├── checkpoints.ts    # checkpoints.* types
-├── config.ts         # TacoGlobalConfigShape / View + constants
+├── config.ts         # TacoGlobalConfigShape / View — the on-disk config only
+├── configPatch.ts    # the open-body global-config request types
 ├── imPolicy.ts       # imPolicy.* types
 ├── memory.ts         # memory.* types
-├── rpcContract/      # domain contracts, typed request builder, scope assertions
+├── rpcContract/      # domain contracts + their request/result types, scope assertions
 ├── schemas/          # RPC parameter validators — the source of every request shape
 │   └── fields.ts     # shared branded-id and payload field schemas
 ├── push.ts           # PushMethods + push payload types

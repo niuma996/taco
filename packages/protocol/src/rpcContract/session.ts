@@ -6,13 +6,10 @@
  * `rpcSchemas` tables from those rows.
  */
 
-import type { CommandPermissionResolveResult } from "../config.js";
-
 import type { InitializeResult, SessionId } from "../frames.js";
 
 import type { PlanStateUpdatedParams, TaskItem, TasksUpdatedParams } from "../push.js";
 import {
-    commandPermissionResolveSchema,
     initializeSchema,
     sessionAbortSchema,
     sessionAttachSchema,
@@ -161,11 +158,6 @@ const sessionRows = {
     ),
     sessionAbort: row<AbortResult>()("session.abort", "workspace", sessionAbortSchema),
     subagentAbort: row<SubagentAbortResult>()("subagent.abort", "workspace", subagentAbortSchema),
-    commandPermissionResolve: row<CommandPermissionResolveResult>()(
-        "commandPermission.resolve",
-        "workspace",
-        commandPermissionResolveSchema,
-    ),
     sessionSetModel: row<SessionSetModelResult>()(
         "session.setModel",
         "workspace",

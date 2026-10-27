@@ -2,12 +2,12 @@
  * The global-config write schemas — `settings.write` and `config.patch`.
  *
  * They live apart from `settings.ts` because their body is the open
- * `GlobalConfigPatch` shape, which is defined in `config.ts`. Keeping the
+ * `GlobalConfigPatch` shape, which is defined in `configPatch.ts`. Keeping the
  * schemas that reference it in their own module means `config.ts` never has
  * to import a schema module that imports back — the dependency stays one-way.
  */
 import { Type } from "typebox";
-import type { ConfigPatchParams, SettingsWriteParams } from "../config.js";
+import type { ConfigPatchParams, SettingsWriteParams } from "../configPatch.js";
 import { sessionIdSchema, toolCallIdSchema, workspaceIdSchema } from "./fields.js";
 
 /** The open patch body: the config's field set evolves, so it stays loose. */
