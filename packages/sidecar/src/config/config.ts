@@ -7,7 +7,6 @@
  *   3. CLI args (--default-model, ...)
  */
 
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import {
@@ -31,14 +30,13 @@ import {
     type TacoGlobalConfigShape,
 } from "@taco-ai/protocol";
 import type { ChannelConfig } from "../channels/registry.ts";
-import { restrictOwnerSync } from "../lib/fsPermissions.ts";
-import { createLogger } from "../lib/logger.ts";
 import { validatePermissionRule } from "../permissions/shellRuleMatching.ts";
 import type { ThinkingLevel } from "../runtime/pi/types.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
+import { ConfigStore } from "./configStore.ts";
 import { tacoHome } from "./tacoHome.ts";
 
-const log = createLogger("config");
+const configStore = new ConfigStore();
 
 export { tacoHome };
 
@@ -347,25 +345,8 @@ export function defaultSessionsRoot(override?: string): string {
     return resolvePath(tacoHome(), "sessions");
 }
 
-// Process-local cache keyed by config path. The permission broker reads global
-// config on every shell command; without this cache each shell call would hit
-// disk synchronously. saveGlobalConfig invalidates it after a successful
-// atomic rename. TACO_HOME changes (tests) produce a different path key, so
-// cross-test leakage is impossible.
-let globalConfigCache: { path: string; config: TacoGlobalConfigShape } | undefined;
-
-/**
- * Read the global config with a process-level cache. Only a *successful* read
- * is cached — a failed read throws (see readJsonOrEmpty) and leaves the cache
- * untouched, so a transient read error is retried on the next call instead of
- * being frozen into the process for its whole lifetime.
- */
 function loadGlobalConfig(): TacoGlobalConfigShape {
-    const path = tacoGlobalConfigPath();
-    if (globalConfigCache?.path === path) return globalConfigCache.config;
-    const config = readJsonOrEmpty(path) as TacoGlobalConfigShape;
-    globalConfigCache = { path, config };
-    return config;
+    return configStore.read(tacoGlobalConfigPath());
 }
 
 /**
@@ -399,8 +380,13 @@ export function resolveConfig(
         instructions: cliOverrides.instructions ?? global.instructions,
         apiKeys: {
             ...global.apiKeys,
-            anthropic: cliOverrides.anthropicApiKey ?? global.anthropicApiKey ?? "",
-            openai: cliOverrides.openaiApiKey ?? global.openaiApiKey ?? "",
+            anthropic:
+                cliOverrides.anthropicApiKey ??
+                global.apiKeys?.anthropic ??
+                global.anthropicApiKey ??
+                "",
+            openai:
+                cliOverrides.openaiApiKey ?? global.apiKeys?.openai ?? global.openaiApiKey ?? "",
             ...(cliOverrides.apiKeys ?? {}),
         },
         extensions: cliOverrides.extensions ?? global.extensions,
@@ -787,11 +773,25 @@ export function validateCommandPermissions(
  * the `apiKeys` field uses shallow merge (only the provided keys are overwritten).
  */
 export function saveGlobalConfig(patch: GlobalConfigPatch): TacoGlobalConfigShape {
+    return updateGlobalConfig(() => patch);
+}
+
+/** Derive collection edits from the latest disk state while holding the config lock. */
+export function updateGlobalConfig(
+    derivePatch: (current: TacoGlobalConfigShape) => GlobalConfigPatch,
+): TacoGlobalConfigShape {
+    return configStore.update(tacoGlobalConfigPath(), (current) =>
+        mergeGlobalConfigPatch(current, derivePatch(current)),
+    );
+}
+
+function mergeGlobalConfigPatch(
+    current: TacoGlobalConfigShape,
+    patch: GlobalConfigPatch,
+): TacoGlobalConfigShape {
     if (!patch || typeof patch !== "object") {
         throw new Error("saveGlobalConfig: patch must be an object");
     }
-    const path = tacoGlobalConfigPath();
-    const current = readJsonOrEmpty(path) as TacoGlobalConfigShape;
     const next: TacoGlobalConfigShape = { ...current };
 
     // A `null` clear arrives from the wire (see `GlobalConfigPatch`); the stored
@@ -912,23 +912,6 @@ export function saveGlobalConfig(patch: GlobalConfigPatch): TacoGlobalConfigShap
     // so a patch with them is rejected at the TypeScript layer — no need to filter here,
     // avoiding a residual runtime slot for "client fields".
 
-    // atomic rename: write to temp file in the same dir, fsync-friendly before rename.
-    const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-    writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, {
-        encoding: "utf8",
-    });
-    restrictOwnerSync(tmp, 0o600);
-    try {
-        renameSync(tmp, path);
-    } catch (e) {
-        try {
-            unlinkSync(tmp);
-        } catch {
-            // Ignore cleanup failure
-        }
-        throw e;
-    }
-    globalConfigCache = undefined;
     return next;
 }
 
@@ -957,21 +940,4 @@ export function injectApiKeysToEnv(apiKeys: Record<string, string>): Record<stri
 
 function resolveAbsolute(p: string): string {
     return isAbsolute(p) ? p : resolvePath(p);
-}
-
-/**
- * Read a JSON config file. Missing file → `{}` (legitimately unconfigured).
- * Any read or parse failure throws — silently returning `{}` here poisons
- * `globalConfigCache` with an empty config for the process lifetime, which
- * makes the desktop settings panes (MCP / providers / channels) go blank
- * while the tools loaded at startup from the same file keep working.
- */
-function readJsonOrEmpty(path: string): Record<string, unknown> {
-    if (!existsSync(path)) return {};
-    try {
-        return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    } catch (err) {
-        log.error(`failed to read config ${path}:`, err);
-        throw err;
-    }
 }

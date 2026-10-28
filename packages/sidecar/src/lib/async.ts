@@ -203,3 +203,18 @@ export class SingleFlight<K, V> {
         this.inflight.clear();
     }
 }
+
+/** Release every resource in dependency order, then report failures together. */
+export async function disposeInOrder(
+    disposers: ReadonlyArray<() => void | Promise<void>>,
+): Promise<void> {
+    const errors: unknown[] = [];
+    for (const dispose of disposers) {
+        try {
+            await dispose();
+        } catch (error) {
+            errors.push(error);
+        }
+    }
+    if (errors.length) throw new AggregateError(errors, "resource disposal failed");
+}

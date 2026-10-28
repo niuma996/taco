@@ -3,11 +3,16 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { join } from "node:path";
-import { describe, it } from "node:test";
-import type { RpcRequest } from "@taco-ai/protocol";
-import { makeImCwd, parseImCwd } from "@taco-ai/protocol";
-import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
-import { MockChannel, mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
+import { describe, it, type TestContext } from "node:test";
+import type { RpcRequest, RpcResponse } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    makeImCwd,
+    parseImCwd,
+    SIDECAR_PROTOCOL_VERSION,
+} from "@taco-ai/protocol";
+import { mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelBindStatus } from "../../src/channels/channelBindBroker.ts";
 import { ChannelBindBroker } from "../../src/channels/channelBindBroker.ts";
 import { ConversationRouter } from "../../src/channels/conversationRouter.ts";
@@ -20,6 +25,9 @@ import {
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { ServerRpcSurface } from "../../src/runtime/serverRpcSurface.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
+import { ConnectionServer } from "../../src/server/connectionServer.ts";
+import { NullTransport } from "../../src/server/nullTransport.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { defaultTools } from "../../src/tools/index.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
@@ -403,209 +411,128 @@ describe("daemonOwnership", () => {
         config: {},
     };
 
-    useTempTacoHome("daemon-ownership");
+    const home = useTempTacoHome("daemon-ownership");
     stubModelFetch();
 
-    /** Helper: start a fresh owner that uses the (mock) channel stack, then
-     *  start a non-owner connection server that shares it. Returns all three
-     *  servers + the shared registry so callers can inspect ownership state. */
-    async function startPair(opts?: { registerChannel?: boolean }): Promise<{
-        owner: SidecarServer;
-        nonOwner: SidecarServer;
-        secondNonOwner: SidecarServer;
-        sharedRegistry: SidecarServer["channelRegistry"];
-    }> {
-        const owner = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
-        await owner.start(new InMemoryTransport(), [mockChannelConfig]);
-
-        // Register the mock channel manually — start() with the config list
-        // calls loadAndStart, but we want a deterministic single channel in
-        // shared state so the test can inspect startedIds directly.
-        if (opts?.registerChannel !== false) {
-            const channel = new MockChannel();
-            const handle = (await channel.start(
-                owner.buildChannelContext("mock-1"),
-            )) as MockChannelHandle;
-            owner.channelRegistry.register("mock-1", channel, handle);
+    // Pushes may precede the reply, so frame count alone cannot identify an RPC response.
+    async function request(transport: InMemoryTransport, req: RpcRequest): Promise<RpcResponse> {
+        transport.simulateRequest(JSON.stringify(req));
+        const deadline = Date.now() + 5000;
+        for (;;) {
+            const response = transport.sent.find(
+                (frame): frame is RpcResponse => "ok" in frame && frame.id === req.id,
+            );
+            if (response) return response;
+            await transport.waitForPushCount(
+                transport.sent.length + 1,
+                Math.max(1, deadline - Date.now()),
+            );
         }
-
-        const sharedRegistry = owner.channelRegistry;
-        const nonOwner = new SidecarServer({
-            providerKeyStore: new ProviderKeyStore({}),
-            channelRegistry: owner.channelRegistry,
-            channelBindBroker: owner.channelBindBroker,
-            conversationRouter: owner.conversationRouterView,
-            imHost: owner,
-        });
-        await nonOwner.start(new InMemoryTransport(), []);
-        const secondNonOwner = new SidecarServer({
-            providerKeyStore: new ProviderKeyStore({}),
-            channelRegistry: owner.channelRegistry,
-            channelBindBroker: owner.channelBindBroker,
-            conversationRouter: owner.conversationRouterView,
-            imHost: owner,
-        });
-        await secondNonOwner.start(new InMemoryTransport(), []);
-        return { owner, nonOwner, secondNonOwner, sharedRegistry };
     }
 
-    describe("daemon ownership", () => {
-        it("non-owner does not duplicate the resident channel", async () => {
-            const { owner, nonOwner, secondNonOwner, sharedRegistry } = await startPair();
-            try {
-                assert.equal(sharedRegistry.has("mock-1"), true);
-                assert.deepEqual(sharedRegistry.startedIds(), ["mock-1"]);
-                // Non-owner advertises the resident's started set, not its own.
-                assert.deepEqual(nonOwner.getServerCapabilities().channels, ["mock-1"]);
-                assert.deepEqual(secondNonOwner.getServerCapabilities().channels, ["mock-1"]);
-                // Owner doesn't list channels either — its transport is NullTransport,
-                // so nothing for it to surface. But it started one.
-                assert.deepEqual(owner.getServerCapabilities().channels, ["mock-1"]);
-            } finally {
-                await secondNonOwner.stop();
-                await nonOwner.stop();
-                await owner.stop();
-            }
+    async function startPair(t: TestContext) {
+        const sinks = new ClientSinkRegistry();
+        const owner = new SidecarServer({
+            providerKeyStore: new ProviderKeyStore({}),
+            clientSinkRegistry: sinks,
         });
-
-        it("non-owner forwards im:// session.list and sees the resident's session id", async () => {
-            const { owner, nonOwner } = await startPair();
-            try {
-                // Resident submits via owner — creates a session under im://mock-1/u1/c1.
-                const submitRes = await owner.buildChannelContext("mock-1").ingress.submit({
-                    channelId: "mock-1",
-                    peerId: "u1",
-                    chatId: "c1",
-                    platformMessageId: "msg-1",
-                    text: "hello",
-                });
-                const residentSessionId = submitRes.sessionId;
-                assert.ok(residentSessionId.length > 0);
-
-                // Connection server forwards session.list for the same im:// cwd.
-                const imCwd = "im://mock-1/u1/c1";
-                const resp = await nonOwner.handleRpcRequest({
-                    id: "t-1",
-                    method: "session.list",
-                    params: { workspace: imCwd },
-                } as never);
-                assert.equal(resp.ok, true);
-                const result = resp.result as { sessions: { id: string }[] };
-                assert.ok(
-                    result.sessions.some((s) => s.id === residentSessionId),
-                    `expected session.list on non-owner to contain resident session ${residentSessionId}, got ${JSON.stringify(result.sessions)}`,
-                );
-
-                // The forward path must NOT have built a local im:// workspace
-                // — the connection server's workspace registry should hold zero im://
-                // workspaces (forwarding rather than hosting is the contract).
-                const imWorkspaces = nonOwner.workspaceIds().filter((id) => id.startsWith("im://"));
-                assert.deepEqual(imWorkspaces, []);
-            } finally {
-                await nonOwner.stop();
-                await owner.stop();
-            }
+        const transports = [new InMemoryTransport(), new InMemoryTransport()];
+        const connections = transports.map(
+            (transport) => new ConnectionServer(owner, transport, sinks),
+        );
+        t.after(async () => {
+            await Promise.all(connections.map((connection) => connection.stop()));
+            await owner.stop();
         });
+        await owner.start(new NullTransport(), [mockChannelConfig]);
+        const initialized = [];
+        for (const [index, connection] of connections.entries()) {
+            await connection.start();
+            const response = await request(transports[index], {
+                id: `init-${index}`,
+                method: "initialize",
+                params: { protocolVersion: SIDECAR_PROTOCOL_VERSION, clientCapabilities: {} },
+            });
+            assert.ok(response.ok, JSON.stringify(response));
+            initialized.push(response.result as { serverCapabilities: { channels: string[] } });
+        }
+        return { owner, transports, connections, initialized, sinks };
+    }
 
-        it("non-owner.stop() leaves the resident's channels running", async () => {
-            const { owner, nonOwner, sharedRegistry } = await startPair();
-            try {
-                assert.equal(sharedRegistry.has("mock-1"), true);
-                // The resident continues serving inbound IM even after every
-                // desktop disconnects — closing one connection must not kill
-                // the daemon's IM bots.
-                await nonOwner.stop();
-                assert.equal(sharedRegistry.has("mock-1"), true);
-                // Owner can still submit a new message to the same channel.
-                const r = await owner.buildChannelContext("mock-1").ingress.submit({
-                    channelId: "mock-1",
-                    peerId: "u2",
-                    chatId: "c1",
-                    platformMessageId: "msg-after-disconnect",
-                    text: "still here",
-                });
-                assert.ok(r.sessionId.length > 0);
-            } finally {
-                await owner.stop();
-            }
+    it("two initialized clients advertise the single host's running channel", async (t) => {
+        const { owner, initialized } = await startPair(t);
+        assert.deepEqual(owner.channelRegistry.startedIds(), ["mock-1"]);
+        for (const result of initialized) {
+            assert.deepEqual(result.serverCapabilities.channels, ["mock-1"]);
+        }
+    });
+
+    it("two clients list the same session created by IM ingress", async (t) => {
+        const { owner, transports } = await startPair(t);
+        const { sessionId } = await owner.buildChannelContext("mock-1").ingress.submit({
+            channelId: "mock-1",
+            peerId: "u1",
+            chatId: "c1",
+            platformMessageId: "msg-list",
+            text: "hello",
         });
+        const workspace = "im://mock-1/u1/c1";
+        for (const [index, transport] of transports.entries()) {
+            const response = await request(transport, {
+                id: `list-${index}`,
+                method: "session.list",
+                params: { workspace },
+            });
+            assert.ok(response.ok, JSON.stringify(response));
+            const result = response.result as { sessions: { id: string }[] };
+            assert.ok(result.sessions.some((session) => session.id === sessionId));
+        }
+        assert.deepEqual(owner.workspaceIds(), [workspace]);
+        assert.equal(owner.conversationRouterView?.findRouteBySessionId(sessionId)?.peerId, "u1");
+    });
 
-        it("two non-owners see the same routing.json entry — no fork", async () => {
-            const { owner, nonOwner, secondNonOwner } = await startPair();
-            try {
-                const ctx = owner.buildChannelContext("mock-1");
-                const r = await ctx.ingress.submit({
-                    channelId: "mock-1",
-                    peerId: "u3",
-                    chatId: "c1",
-                    platformMessageId: "msg-routing",
-                    text: "routing",
-                });
-                // Both non-owners hold the same router; findRouteBySessionId
-                // must return the same peer without either one writing routing.json.
-                const router = owner.conversationRouterView;
-                assert.ok(router);
-                const peer1 = router.findRouteBySessionId(r.sessionId)?.peerId;
-                const peer2 = nonOwner.conversationRouterView?.findRouteBySessionId(
-                    r.sessionId,
-                )?.peerId;
-                const peer3 = secondNonOwner.conversationRouterView?.findRouteBySessionId(
-                    r.sessionId,
-                )?.peerId;
-                assert.equal(peer1, "u3");
-                assert.equal(peer2, "u3");
-                assert.equal(peer3, "u3");
-            } finally {
-                await secondNonOwner.stop();
-                await nonOwner.stop();
-                await owner.stop();
-            }
+    it("disconnecting every client leaves the host's channel serving IM ingress", async (t) => {
+        const { owner, connections, sinks } = await startPair(t);
+        await Promise.all(connections.map((connection) => connection.stop()));
+        assert.equal(sinks.hasClient(), false);
+        assert.deepEqual(owner.channelRegistry.startedIds(), ["mock-1"]);
+        const { sessionId } = await owner.buildChannelContext("mock-1").ingress.submit({
+            channelId: "mock-1",
+            peerId: "u2",
+            chatId: "c1",
+            platformMessageId: "msg-after-disconnect",
+            text: "still here",
         });
+        const workspace = await owner.ensureWorkspace(
+            asWorkspaceId(makeImCwd("mock-1", "u2", "c1")),
+        );
+        assert.ok((await workspace.listSessions()).some((session) => session.id === sessionId));
+        assert.equal(owner.channelRegistry.has("mock-1"), true);
+    });
 
-        it("non-owner imPolicy writes delegate to the resident and broadcast locally", async () => {
-            const { owner, nonOwner } = await startPair();
-            try {
-                const docBefore = owner.imPolicyStore.readDocument("mock-1");
-                assert.equal(docBefore.default, undefined, "precondition: no policy written yet");
-
-                // Real patch shape: any subset of ImWorkspacePolicyPatch fields.
-                // `tools: { fsTools: "allow" }` exercises the merge path without
-                // depending on a specific admin rule.
-                await nonOwner.setImChannelDefault("mock-1", { tools: { fsTools: "allow" } });
-
-                // The resident must hold the canonical store entry — writes
-                // from a connection server must reach the host, not a parallel
-                // copy. Otherwise the host keeps the old policy until restart.
-                const stored = owner.imPolicyStore.readDocument("mock-1");
-                assert.ok(stored.default, "expected resident to have received the delegated write");
-                assert.equal(stored.default?.tools?.fsTools, "allow");
-            } finally {
-                await nonOwner.stop();
-                await owner.stop();
-            }
+    it("filesystem requests use the host runtime alongside IM workspaces", async (t) => {
+        const { owner, transports } = await startPair(t);
+        await owner.ensureWorkspace(asWorkspaceId(makeImCwd("mock-1", "u3", "c1")));
+        const cwd = asWorkspaceId(mkdtempSync(join(home, "fs-workspace-")));
+        const runtime = await owner.ensureWorkspace(cwd);
+        const response = await request(transports[0], {
+            id: "fs-create",
+            method: "session.create",
+            params: { workspace: cwd, sessionId: "host-fs-session" },
         });
-
-        it("non-owner does not forward non-im:// RPCs", async () => {
-            const { owner, nonOwner } = await startPair();
-            try {
-                // session.list on a fs path must execute locally on the
-                // connection server (which has its own workspace registry), not
-                // on the resident. The resident has no fs workspaces, so a
-                // forwarded call would return [] and the connection server
-                // would publish a wrong view.
-                const resp = await nonOwner.handleRpcRequest({
-                    id: "t-1",
-                    method: "session.list",
-                    params: { workspace: "/tmp/nonexistent" },
-                } as never);
-                assert.equal(resp.ok, true);
-                // Don't assert contents — the test just confirms no throw and
-                // a non-error response, which proves the non-im:// path executed.
-            } finally {
-                await nonOwner.stop();
-                await owner.stop();
-            }
+        assert.ok(response.ok, JSON.stringify(response));
+        const attached = await request(transports[0], {
+            id: "fs-attach",
+            method: "session.attach",
+            params: { workspace: cwd, sessionId: "host-fs-session" },
         });
+        assert.ok(attached.ok, JSON.stringify(attached));
+        assert.equal(await owner.ensureWorkspace(cwd), runtime);
+        assert.ok(runtime.getAttached(asSessionId("host-fs-session")));
+        assert.ok(
+            (await runtime.listSessions()).some((session) => session.id === "host-fs-session"),
+        );
+        assert.deepEqual(new Set(owner.workspaceIds()), new Set(["im://mock-1/u3/c1", cwd]));
     });
 });
 

@@ -16,10 +16,7 @@ import {
     type Socket,
 } from "node:net";
 import { dirname, join } from "node:path";
-import { IM_CWD_PREFIX } from "@taco-ai/protocol";
-import { ChannelBindBroker } from "./channels/channelBindBroker.ts";
 import { ConversationRouter } from "./channels/conversationRouter.ts";
-import { ChannelRegistry } from "./channels/registry.ts";
 import { defaultSessionsRoot, resolveConfig, THINKING_LEVELS, tacoHome } from "./config/config.ts";
 import { loadExtensions } from "./extensions/index.ts";
 import type { ExtensionRegistry } from "./extensions/registry.ts";
@@ -36,11 +33,11 @@ import { JobsController } from "./scheduler/jobsController.ts";
 import { Scheduler } from "./scheduler/runner.ts";
 import { JobStore } from "./scheduler/store.ts";
 import { ClientSinkRegistry } from "./server/clientSinkRegistry.ts";
+import { ConnectionServer } from "./server/connectionServer.ts";
 import { handleControlChannel } from "./server/controlChannel.ts";
 import { DurablePushLog } from "./server/durablePushLog.ts";
 import { NullTransport } from "./server/nullTransport.ts";
-import { type SharedSidecarDeps, SidecarServer, startServer } from "./server/server.ts";
-import { ServerRegistry } from "./server/serverRegistry.ts";
+import { SidecarServer, type SidecarServerOptions } from "./server/server.ts";
 import { StdioTransport } from "./server/stdioTransport.ts";
 import { DEFAULT_MARKER_PATH, UpgradeOrchestrator } from "./upgrader/orchestrator.ts";
 
@@ -114,7 +111,7 @@ async function resolveDeps(): Promise<ResolvedDeps> {
     return { args, cfg, providerKeyStore, extensionRegistry, sessionsRoot };
 }
 
-function toSharedSidecarDeps(deps: ResolvedDeps): SharedSidecarDeps {
+function toSidecarOptions(deps: ResolvedDeps): SidecarServerOptions {
     return {
         sessionsRoot: deps.sessionsRoot,
         defaultModel: deps.cfg.defaultModel,
@@ -139,9 +136,9 @@ function toSharedSidecarDeps(deps: ResolvedDeps): SharedSidecarDeps {
  *  Activated by TACO_DAEMON_MODE=1; the launcher writes TACO_SOCKET (NDJSON
  *  socket) and TACO_CONTROL_SOCKET (single-instance marker — see runDaemon).
  *
- * Each NDJSON connection gets its own SidecarServer so workspace state,
- * channels, and the initialize handshake are scoped per UI. The daemon
- * keeps running across disconnects; the launcher terminates it via
+ * One SidecarServer owns every workspace and channel. Each NDJSON connection
+ * owns only its handshake and transport. Disconnecting a client leaves turns
+ * running on the daemon; the launcher terminates it via
  * SIGTERM (or its launchd / schtasks wrapper).
  *
  * Lifecycle invariants:
@@ -173,22 +170,10 @@ function unlinkSocketSync(path: string): void {
     }
 }
 
-/** Tear down a listening server and any sockets it already accepted.
- *
- *  `server.close()` only stops accepting new connections; long-lived NDJSON
- *  sessions keep the event loop alive so the `close` callback never fires
- *  and the shutdown path hangs forever on its `await`. `closeAllConnections()`
- *  (Node ≥ 18.2; we're on 22) destroys accepted sockets in userspace so
- *  `close` resolves immediately. The control socket is included even
- *  though its sessions are short-lived — a client stuck mid-shutdown can
- *  wedge the callback too. The cast is needed because @types/node@22
- *  doesn't expose the method on `net.Server` (it's runtime-only). */
-function closeServer(server: Server): Promise<void> {
-    type Closable = Server & { closeAllConnections?: () => void };
-    return new Promise<void>((resolve) => {
-        (server as Closable).closeAllConnections?.();
-        server.close(() => resolve());
-    });
+/** net.Server has no closeAllConnections; explicitly destroy accepted sockets. */
+function closeServer(server: Server, sockets?: Set<Socket>): Promise<void> {
+    for (const socket of sockets ?? []) socket.destroy();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 /** Connect-probe the NDJSON socket path. Returns true if a listener is alive.
@@ -288,7 +273,11 @@ async function runDaemon(
     let ndjsonServer!: Server;
     let shutdown: ((sig: string) => Promise<void>) | undefined;
     let shutdownRequestedDuringStartup = false;
+    const controlSockets = new Set<Socket>();
+    const clientSockets = new Set<Socket>();
     const controlServer = createNetServer((socket: Socket) => {
+        controlSockets.add(socket);
+        socket.once("close", () => controlSockets.delete(socket));
         handleControlChannel(socket, async () => {
             if (shutdown) {
                 await shutdown("CONTROL_SHUTDOWN");
@@ -335,93 +324,29 @@ async function runDaemon(
     });
 
     try {
-        // PR4: scheduler boots once per process; every per-connection
-        // SidecarServer shares the same JobsController so jobs.create/update/
-        // delete mutate the single process-wide scheduler.
+        // One scheduler serves client requests and background invocations.
         const jobsDir = join(tacoHome(), "jobs");
         const jobStore = new JobStore(jobsDir);
 
-        // Process-level IM channel stack. Constructed once and shared with every
-        // NDJSON connection's SidecarServer so a desktop disconnect cannot kill
-        // inbound IM bots and only one routing.json writer exists. `imHost` is
-        // the resident host that owns the channel stack — connection servers
-        // forward im:// RPCs to it via dispatchRpc.
-        //
-        // The resident is constructed BEFORE the single-instance probe so a
-        // hostile / stale probe can't race channel startup. Channel startup
-        // failures are isolated: a bot failing to bind must not block the
-        // socket bind or fs-workspace RPCs.
+        // One runtime owns workspaces, sessions, channels and sequenced events.
+        // Connections only own handshakes and response transports.
         const conversationRouter = await ConversationRouter.load(tacoHome());
-        const sharedChannelStack = {
-            channelRegistry: new ChannelRegistry(),
-            channelBindBroker: new ChannelBindBroker(),
-            conversationRouter,
-        };
-        // Phase 2: process-level fan-out registry. The resident uses it to push
-        // IM frames to every connected desktop's NDJSON transport so an open
-        // IM session view stays live (new peer messages, mid-turn updates).
-        // Without this the host's emitPush would only hit NullTransport and
-        // Phase 1's regression — already-open IM views going stale — would
-        // remain. Each SidecarServer adds its own transport on start().
         const clientSinkRegistry = new ClientSinkRegistry();
-        // One writer per stream file, process-wide: seq numbering lives in each
-        // server's replay ring, so two DurablePushLog instances over the same
-        // directory would race the read-merge-rename compaction path. Shared by
-        // the IM host and every NDJSON connection; `schedulerSidecar` is
-        // deliberately excluded (NullTransport — no client cursor to preserve).
         const pushLog = new DurablePushLog(join(tacoHome(), "push-log"));
-        // Settings-setter fan-out: settings.write invoked from any
-        // NDJSON connection must reach BOTH residents (imHost +
-        // schedulerSidecar). The desktop's per-RPC server is a third
-        // non-resident; without this registry, schedulerSidecar would
-        // keep boot-time defaultModel/customProviders for the life of
-        // the daemon. See ServerRegistry JSDoc for the daemon layout.
-        const serverRegistry = new ServerRegistry();
-
-        // Two runtimes, one process:
-        //  - `imHost` owns IM workspaces + the channel stack; im:// cwd sessions
-        //    run here so a desktop disconnect never kills the inbound IM bot.
-        //  - `schedulerSidecar` owns fs workspaces; fs cwd sessions invoked by
-        //    scheduled jobs run here so the scheduler doesn't depend on any
-        //    desktop connection being up. It does NOT share the channel stack
-        //    (no IM traffic) and does NOT register with clientSinkRegistry
-        //    (desktop sessions don't track scheduler-generated sched-* ids).
-        //
-        // Both must be constructed AND started before Scheduler.start(), which
-        // may fire boot-replay jobs as fire-and-forget invokes; the resolver
-        // closes over both references.
-        const imHost = new SidecarServer({
-            ...toSharedSidecarDeps(deps),
-            ...sharedChannelStack,
+        const runtime = new SidecarServer({
+            ...toSidecarOptions(deps),
+            resolveConfig: () => resolveCliConfig(deps.args),
+            conversationRouter,
             clientSinkRegistry,
-            serverRegistry,
             pushLog,
         });
-        // No `pushLog`: its pushes go to a NullTransport, so there is no client
-        // cursor to keep continuous, and writing its ring's seqs into a
-        // desktop's tail would corrupt the continuity the tail exists for.
-        const schedulerSidecar = new SidecarServer({
-            ...toSharedSidecarDeps(deps),
-            serverRegistry,
-        });
-        await imHost.start(new NullTransport(), deps.cfg.channels ?? []).catch((err: unknown) => {
-            log.error(`IM host failed to start: ${String(err)}`);
-        });
-        // `NullTransport` is no-op for open/close/send, so the scheduler
-        // runtime has no remote client and no channel bots. start() still
-        // wires broker/router subscriptions + command-record sweeper + the
-        // transport field that getTransport() falls back to — without
-        // setting it, emitPush inside job invokes would create a fresh
-        // StdioTransport and write to actual stdout.
-        await schedulerSidecar.start(new NullTransport(), []).catch((err: unknown) => {
-            log.error(`scheduler runtime failed to start: ${String(err)}`);
-        });
+        await runtime.start(new NullTransport(), deps.cfg.channels ?? []);
 
         const scheduler = new Scheduler({
             store: jobStore,
             lockDir: jobsDir,
             invoke: createJobDispatcher(
-                (workspace) => (workspace.startsWith(IM_CWD_PREFIX) ? imHost : schedulerSidecar),
+                () => runtime,
                 // Pin strategy writes the created sessionId back to the job so
                 // subsequent fires can attach the same session. The callback
                 // here IS a write — earlier comments claimed "the dispatcher
@@ -454,8 +379,7 @@ async function runDaemon(
         // window — the controller never fires jobs of its own, so
         // construction before scheduler.start() has no risk of recursion.
         const jobsController = new JobsController(jobStore, scheduler, jobsDir);
-        imHost.setJobsControl(jobsController);
-        schedulerSidecar.setJobsControl(jobsController);
+        runtime.setJobsControl(jobsController);
         // Seed before start() so a missed nightly run replays at this boot.
         await jobsController.seedBuiltin(defaultMemoryDreamJob()).catch((err: unknown) => {
             log.error(`failed to seed the memory consolidation job: ${String(err)}`);
@@ -463,30 +387,6 @@ async function runDaemon(
         await scheduler.start().catch((err: unknown) => {
             log.error(`scheduler failed to start: ${String(err)}`);
         });
-
-        const sharedDeps = {
-            ...toSharedSidecarDeps(deps),
-            ...sharedChannelStack,
-            jobs: jobsController,
-            imHost,
-            clientSinkRegistry,
-            serverRegistry,
-            pushLog,
-        };
-
-        const currentSharedDeps = () => {
-            try {
-                return {
-                    ...sharedDeps,
-                    ...toSharedSidecarDeps({ ...deps, cfg: resolveCliConfig(deps.args) }),
-                };
-            } catch (err) {
-                log.warn(
-                    `config re-read failed, using boot config for this connection: ${String(err)}`,
-                );
-                return sharedDeps;
-            }
-        };
 
         // Stale-socket cleanup before we try to bind. A previous daemon that
         // crashed (kill -9 / power loss) leaves the socket file on disk; bind()
@@ -499,17 +399,18 @@ async function runDaemon(
         }
 
         ndjsonServer = createNetServer((socket: Socket) => {
+            clientSockets.add(socket);
+            socket.once("close", () => clientSockets.delete(socket));
             const transport = new StdioTransport(socket, socket);
-            // Re-resolve config per connection: settings.write only reaches
-            // servers that already exist, so boot-time catalog fields would
-            // make a reconnecting desktop save a stale model list back to disk.
-            const started = startServer(currentSharedDeps(), transport);
-            started.ready.catch((err) => {
-                log.error(`connection failed to start: ${err?.stack ?? err}`);
+            const connection = new ConnectionServer(runtime, transport, clientSinkRegistry);
+            void connection.start().catch((err) => {
+                log.error(`connection failed to start: ${String(err)}`);
                 socket.destroy();
             });
             socket.on("close", () => {
-                started.stop().catch((err) => log.error(`stop failed: ${err?.stack ?? err}`));
+                void connection
+                    .stop()
+                    .catch((err) => log.error(`connection stop failed: ${String(err)}`));
             });
             socket.on("error", (err) => log.error(`ndjson socket error: ${err.message}`));
         });
@@ -519,7 +420,7 @@ async function runDaemon(
         // release the control ownership so the next launch can recover.
         await new Promise<void>((resolve, reject) => {
             ndjsonServer.once("error", (err: Error) => {
-                void closeServer(controlServer).finally(() => {
+                void closeServer(controlServer, controlSockets).finally(() => {
                     unlinkSocketSync(controlSocketPath);
                     reject(err);
                 });
@@ -579,8 +480,8 @@ async function runDaemon(
                 // up to 5.3s of cold-start latency caused entirely by the
                 // *previous* exit. See the matching rationale in the
                 // SIGINT/SIGTERM path below.
-                await closeServer(ndjsonServer);
-                await closeServer(controlServer);
+                await closeServer(ndjsonServer, clientSockets);
+                await closeServer(controlServer, controlSockets);
                 unlinkSocketSync(socketPath);
                 unlinkSocketSync(controlSocketPath);
                 unlinkSocketSync(pidPath);
@@ -610,25 +511,13 @@ async function runDaemon(
             // next daemon to bind a fresh inode while this one is still exiting
             // — the unlinks below cannot then delete the *new* daemon's socket,
             // because they have already run.
-            await closeServer(ndjsonServer);
-            await closeServer(controlServer);
+            await closeServer(ndjsonServer, clientSockets);
+            await closeServer(controlServer, controlSockets);
             unlinkSocketSync(socketPath);
             unlinkSocketSync(controlSocketPath);
             unlinkSocketSync(pidPath);
-            // Now the slow part, with no client able to reach us any more. The
-            // resident goes first so its channels cancel — long-poll / webhook
-            // handlers otherwise keep the event loop alive across process.exit.
-            // These awaits are why the teardown above must not be last: this
-            // stop() alone takes ~3s when a WeChat long-poll is in flight.
-            await imHost.stop().catch((err: unknown) => {
-                log.error(`IM host stop failed: ${String(err)}`);
-            });
-            // Scheduler runtime last: any in-flight job invokes have already
-            // been cancelled by scheduler.stop() above, so tearing this down
-            // only reclaims the fs workspaces the scheduler built. NullTransport
-            // close is a no-op; the value of stop() is disposing live workspaces.
-            await schedulerSidecar.stop().catch((err: unknown) => {
-                log.error(`scheduler runtime stop failed: ${String(err)}`);
+            await runtime.stop().catch((err: unknown) => {
+                log.error(`runtime stop failed: ${String(err)}`);
             });
             process.exit(0);
         };
@@ -664,7 +553,7 @@ async function runDaemon(
             });
         });
     } catch (err) {
-        await closeServer(controlServer).catch(() => undefined);
+        await closeServer(controlServer, controlSockets).catch(() => undefined);
         unlinkSocketSync(controlSocketPath);
         throw err;
     }
@@ -678,7 +567,8 @@ async function runDaemon(
  */
 async function runStdio(deps: ResolvedDeps): Promise<void> {
     const server = new SidecarServer({
-        ...toSharedSidecarDeps(deps),
+        ...toSidecarOptions(deps),
+        resolveConfig: () => resolveCliConfig(deps.args),
         // Single server in this process, so it owns every stream file outright.
         pushLog: new DurablePushLog(join(tacoHome(), "push-log")),
     });

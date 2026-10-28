@@ -7,11 +7,13 @@
  */
 
 import {
+    type ClientCapabilities,
     CURRENT_SESSION_FORMAT_VERSION,
     ErrorCodes,
     type InitializeParams,
     isCompatibleClientProtocol,
     SIDECAR_PROTOCOL_VERSION,
+    type SidecarCapabilities,
 } from "@taco-ai/protocol";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
@@ -43,41 +45,50 @@ type LooseInitializeParams = {
 
 const SIDECAR_VERSION_STRING = sidecarVersion();
 
-export function registerInitializeHandler(): void {
-    registerMethod("initialize", false, async ({ params, server }) => {
-        const p = (params ?? {}) as LooseInitializeParams;
-        const incoming = p.protocolVersion;
-        if (!incoming || typeof incoming.major !== "number" || typeof incoming.minor !== "number") {
-            throw new RpcHandlerError(
-                ErrorCodes.InvalidParams,
-                "initialize requires params.protocolVersion.{major,minor} as numbers",
-            );
-        }
-        if (
-            !isCompatibleClientProtocol({
-                major: incoming.major,
-                minor: incoming.minor,
-            })
-        ) {
-            throw new RpcHandlerError(
-                ErrorCodes.IncompatibleProtocol,
-                `client protocol ${incoming.major}.${incoming.minor} is not supported; server is ${SIDECAR_PROTOCOL_VERSION.major}.${SIDECAR_PROTOCOL_VERSION.minor}`,
-            );
-        }
-        // Capability payload is opaque; the index signature in ClientCapabilities
-        // accepts arbitrary future fields. We persist as-is for diagnostic surfaces.
-        const clientCapabilities =
-            p.clientCapabilities && typeof p.clientCapabilities === "object"
-                ? (p.clientCapabilities as Record<string, unknown>)
-                : {};
-        server.markInitialized(clientCapabilities);
-        return {
+export function initializeClient(params: unknown, serverCapabilities: SidecarCapabilities) {
+    const p = (params ?? {}) as LooseInitializeParams;
+    const incoming = p.protocolVersion;
+    if (!incoming || typeof incoming.major !== "number" || typeof incoming.minor !== "number") {
+        throw new RpcHandlerError(
+            ErrorCodes.InvalidParams,
+            "initialize requires params.protocolVersion.{major,minor} as numbers",
+        );
+    }
+    if (
+        !isCompatibleClientProtocol({
+            major: incoming.major,
+            minor: incoming.minor,
+        })
+    ) {
+        throw new RpcHandlerError(
+            ErrorCodes.IncompatibleProtocol,
+            `client protocol ${incoming.major}.${incoming.minor} is not supported; server is ${SIDECAR_PROTOCOL_VERSION.major}.${SIDECAR_PROTOCOL_VERSION.minor}`,
+        );
+    }
+    // Capability payload is opaque; the index signature in ClientCapabilities
+    // accepts arbitrary future fields. We persist as-is for diagnostic surfaces.
+    const clientCapabilities =
+        p.clientCapabilities && typeof p.clientCapabilities === "object"
+            ? (p.clientCapabilities as Record<string, unknown>)
+            : {};
+
+    return {
+        capabilities: clientCapabilities as ClientCapabilities,
+        result: {
             serverVersion: SIDECAR_VERSION_STRING,
-            serverCapabilities: server.getServerCapabilities(),
+            serverCapabilities,
             protocolVersion: SIDECAR_PROTOCOL_VERSION,
             sessionFormatVersion: CURRENT_SESSION_FORMAT_VERSION,
             instanceId: SIDECAR_INSTANCE_ID,
             pid: process.pid,
-        };
+        },
+    };
+}
+
+export function registerInitializeHandler(): void {
+    registerMethod("initialize", false, async ({ params, server }) => {
+        const { capabilities, result } = initializeClient(params, server.getServerCapabilities());
+        server.markInitialized(capabilities);
+        return result;
     });
 }

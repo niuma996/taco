@@ -8,7 +8,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ServerPush } from "@taco-ai/protocol";
+import { asWorkspaceId, type ServerPush } from "@taco-ai/protocol";
 import { TacoClient } from "@taco-ai/shared/node";
 import { createDefaultSidecarSpawn } from "@taco-ai/shared/spawn";
 
@@ -52,7 +52,7 @@ async function main(): Promise<number> {
     const repoRoot = resolvePath(__dirname, "../../..");
     // Use a fresh directory so session history cannot affect event-count assertions.
     const sandboxRoot = `/tmp/taco-e2e-${Date.now()}`;
-    const cwd = `${sandboxRoot}/workspace`;
+    const cwd = asWorkspaceId(`${sandboxRoot}/workspace`);
     mkdirSync(cwd, { recursive: true });
 
     const client = new TacoClient(
@@ -100,7 +100,9 @@ async function main(): Promise<number> {
         }
     });
     client.on("warn", (w: unknown) => process.stderr.write(`[warn] ${JSON.stringify(w)}\n`));
-    client.on("stderr", (s: string) => process.stderr.write(`[sidecar] ${s}`));
+    client.on("stderr", (s: unknown) => {
+        if (typeof s === "string") process.stderr.write(`[sidecar] ${s}`);
+    });
 
     try {
         await client.start();

@@ -1,95 +1,127 @@
-/**
- * Registry of live WorkspaceRuntime instances, keyed by workspaceKey
- * (im:// URL for IM workspaces, fs path for IDE workspaces).
- *
- * Split out of `SidecarServer` because the map is the process-level
- * workspace table while the server is connection-scoped: every config
- * hot-reload setter, broadcast, and shutdown path walks it. The
- * single-flight shares the key space so concurrent ensureWorkspace()
- * calls for the same cwd share one build promise — without this N
- * parallel RPCs each run the full asset-load + MCP-discovery +
- * push-wire path, leaking the loser's MCP handles and double-writing
- * the imPolicyStore.
- *
- * Publish-timing contract: builders call `publish()` themselves at the
- * exact point the runtime is fully constructed but before any yield —
- * never in `ensure()` after the build settles. A post-build set would
- * reopen the half-built-state window (see
- * SidecarServer.buildWorkspace's set() comment for the full race).
- */
-
 import type { WorkspaceId } from "@taco-ai/protocol";
-import { SingleFlight } from "../lib/async.ts";
 import type { WorkspaceRuntime } from "../runtime/workspace.ts";
 
-export class WorkspaceRegistry {
-    private readonly map = new Map<WorkspaceId, WorkspaceRuntime>();
-    private readonly flight: SingleFlight<WorkspaceId, WorkspaceRuntime>;
+interface WorkspaceEntry {
+    state: "starting" | "ready" | "closing";
+    runtime?: WorkspaceRuntime;
+    build?: Promise<WorkspaceRuntime>;
+    close?: Promise<WorkspaceRuntime | undefined>;
+}
 
-    constructor(build: (cwd: WorkspaceId) => Promise<WorkspaceRuntime>) {
-        this.flight = new SingleFlight(build);
-    }
+class WorkspaceInvalidatedError extends Error {}
+
+/** Owns publication and closing so a runtime is never reused during disposal. */
+export class WorkspaceRegistry {
+    private readonly entries = new Map<WorkspaceId, WorkspaceEntry>();
+    private closingAll?: Promise<void>;
+    private stopped = false;
+
+    constructor(private readonly build: (cwd: WorkspaceId) => Promise<WorkspaceRuntime>) {}
 
     get(cwd: WorkspaceId): WorkspaceRuntime | undefined {
-        return this.map.get(cwd);
+        const entry = this.entries.get(cwd);
+        return entry?.state === "ready" ? entry.runtime : undefined;
     }
 
-    /** All live runtimes — config hot-reload fan-out iterates this. */
     list(): WorkspaceRuntime[] {
-        return [...this.map.values()];
+        return [...this.entries.values()].flatMap((entry) =>
+            entry.state === "ready" && entry.runtime ? [entry.runtime] : [],
+        );
     }
 
     keys(): WorkspaceId[] {
-        return [...this.map.keys()];
+        return [...this.entries.keys()].filter((key) => this.get(key) !== undefined);
     }
 
     async ensure(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
-        const cached = this.map.get(cwd);
-        if (cached) return cached;
-        return this.flight.run(cwd);
-    }
-
-    /**
-     * Register a freshly built runtime. Exists as a method (rather than
-     * a raw map) only to keep the builder-side publish timing explicit
-     * — see the class doc.
-     */
-    publish(key: WorkspaceId, ws: WorkspaceRuntime): void {
-        this.map.set(key, ws);
-    }
-
-    unpublish(key: WorkspaceId): void {
-        this.map.delete(key);
-    }
-
-    /**
-     * Dispose and remove one workspace. Returns the disposed runtime, or
-     * undefined when the key was absent (no dispose attempted). A
-     * dispose() rejection propagates and the entry stays — the historical
-     * inline behavior.
-     */
-    async remove(cwd: WorkspaceId): Promise<WorkspaceRuntime | undefined> {
-        const ws = this.map.get(cwd);
-        if (!ws) return undefined;
-        await ws.dispose();
-        this.map.delete(cwd);
-        return ws;
-    }
-
-    /** Dispose every workspace in insertion order, then clear the map. */
-    async disposeAll(): Promise<void> {
-        for (const ws of this.map.values()) {
-            await ws.dispose();
+        if (this.stopped) throw new Error("workspace registry is stopped");
+        if (this.closingAll) await this.closingAll;
+        if (this.stopped) throw new Error("workspace registry is stopped");
+        const existing = this.entries.get(cwd);
+        if (existing?.state === "ready" && existing.runtime) return existing.runtime;
+        if (existing?.state === "starting" && existing.build) return existing.build;
+        if (existing?.state === "closing") {
+            await existing.close;
+            return this.ensure(cwd);
         }
-        this.map.clear();
+        const entry: WorkspaceEntry = { state: "starting" };
+        this.entries.set(cwd, entry);
+        entry.build = Promise.resolve().then(async () => {
+            try {
+                const runtime = await this.build(cwd);
+                if (entry.state === "closing") {
+                    await runtime.dispose();
+                    throw new WorkspaceInvalidatedError(
+                        `workspace ${cwd} invalidated during construction`,
+                    );
+                }
+                entry.runtime = runtime;
+                entry.state = "ready";
+                return runtime;
+            } catch (error) {
+                if (entry.state !== "closing" && this.entries.get(cwd) === entry) {
+                    this.entries.delete(cwd);
+                }
+                throw error;
+            }
+        });
+        return entry.build;
     }
 
-    /**
-     * Drop in-flight construction promises. Distinct from disposeAll:
-     * reloadMcpServers wants workspaces gone but lets racing builders
-     * finish, while stop() must also cancel the single-flight table.
-     */
-    clearFlight(): void {
-        this.flight.clear();
+    /** Inject a ready runtime, primarily for isolated server tests. */
+    publish(key: WorkspaceId, runtime: WorkspaceRuntime): void {
+        if (this.entries.has(key)) throw new Error(`workspace ${key} already registered`);
+        this.entries.set(key, { state: "ready", runtime });
+    }
+
+    async remove(cwd: WorkspaceId): Promise<WorkspaceRuntime | undefined> {
+        const entry = this.entries.get(cwd);
+        if (!entry) return undefined;
+        if (entry.state === "closing") return entry.close;
+        entry.state = "closing";
+        entry.close = Promise.resolve().then(async () => {
+            try {
+                if (entry.runtime) {
+                    await entry.runtime.dispose();
+                    return entry.runtime;
+                }
+                try {
+                    await entry.build;
+                } catch (error) {
+                    if (!(error instanceof WorkspaceInvalidatedError)) throw error;
+                }
+                return undefined;
+            } finally {
+                if (this.entries.get(cwd) === entry) this.entries.delete(cwd);
+            }
+        });
+        return entry.close;
+    }
+
+    start(): void {
+        this.stopped = false;
+    }
+
+    stop(): Promise<void> {
+        this.stopped = true;
+        return this.disposeAll();
+    }
+
+    /** Wait for constructors and attempt every close even when one fails. */
+    disposeAll(): Promise<void> {
+        if (this.closingAll) return this.closingAll;
+        const closes = [...this.entries.keys()].map((key) => this.remove(key));
+        const closing = Promise.allSettled(closes)
+            .then((results) => {
+                const errors = results.flatMap((result) =>
+                    result.status === "rejected" ? [result.reason] : [],
+                );
+                if (errors.length) throw new AggregateError(errors, "workspace disposal failed");
+            })
+            .finally(() => {
+                if (this.closingAll === closing) this.closingAll = undefined;
+            });
+        this.closingAll = closing;
+        return closing;
     }
 }

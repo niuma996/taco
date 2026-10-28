@@ -1,3 +1,4 @@
+import { disposeInOrder } from "../../lib/async.ts";
 /**
  * SessionRegistry — owns session lifecycle and state within a workspace.
  *
@@ -1111,9 +1112,11 @@ export class SessionRegistry extends EventEmitter {
     }
 
     async dispose(): Promise<void> {
-        for (const sessionId of [...this.attached.keys()]) {
-            await this.detach(sessionId);
-        }
-        this.removeAllListeners();
+        await disposeInOrder([
+            ...[...this.attached.keys()].map((sessionId) => () => this.detach(sessionId)),
+            () => {
+                this.removeAllListeners();
+            },
+        ]);
     }
 }

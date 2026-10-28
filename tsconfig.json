@@ -12,11 +12,16 @@
     "noEmit": true,
     "isolatedModules": true
   },
-  "include": [
-    "packages/**/src/**/*.ts",
-    "packages/**/tests/**/*.ts",
-    "clients/**/src/**/*.{ts,tsx}",
-    "clients/**/tests/**/*.{ts,tsx}"
+  "files": [],
+  "references": [
+    { "path": "./packages/cli/tsconfig.json" },
+    { "path": "./packages/protocol/tsconfig.json" },
+    { "path": "./packages/shared/tsconfig.json" },
+    { "path": "./packages/sidecar/tsconfig.json" },
+    { "path": "./packages/sidecar/tsconfig.test.json" },
+    { "path": "./clients/debug-console/tsconfig.json" },
+    { "path": "./clients/taco-desktop/tsconfig.json" },
+    { "path": "./clients/taco-desktop/tsconfig.test.json" }
   ],
   "exclude": ["**/node_modules", "**/dist"]
 }

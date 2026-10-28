@@ -804,3 +804,25 @@ test("an explicit rpcTimeoutMs overrides the fast tier in both directions", asyn
     );
     await client.dispose();
 });
+
+test("independent desktop clients never reuse a command id in the same millisecond", async (t) => {
+    t.mock.method(Date, "now", () => 123456789);
+    const sidecars = [new FakeSidecarClient(), new FakeSidecarClient()];
+    const clients = sidecars.map((sidecar) => new TacoClient({ sidecar, rpcTimeoutMs: 500 }));
+    const cwd = asWorkspaceId("/shared-workspace");
+    try {
+        await Promise.all(clients.map((client) => client.start(cwd)));
+        const pending = clients.map((client) => client.call(cwd, "workspace.ensure", { cwd }));
+        await flush();
+        const ids = sidecars.map((sidecar) => sidecar.lastNonInitializeId());
+        for (const [index, sidecar] of sidecars.entries()) {
+            const id = ids[index];
+            assert.ok(id);
+            sidecar.emitResponse(id, true, { result: { cwd } });
+        }
+        await Promise.all(pending);
+        assert.notEqual(ids[0], ids[1]);
+    } finally {
+        await Promise.all(clients.map((client) => client.dispose()));
+    }
+});

@@ -1,3 +1,4 @@
+import { disposeInOrder } from "../lib/async.ts";
 /**
  * WorkspaceRuntime — facade for a single workspace's runtime.
  *
@@ -1458,21 +1459,20 @@ export class WorkspaceRuntime extends EventEmitter {
     }
 
     async dispose(): Promise<void> {
-        // Ordering:
-        //  - permissionBroker.cleanupAll first: any pending command approvals are
-        //    rejected so shell tools don't hang waiting for a disposed workspace.
-        //  - sessionRegistry disposes last: it walks attached sessions calling
-        //    harness.abort(), the real path that stops in-flight subagents
-        //  - agentSpawner.removeAllListeners() first: drops the subagent.spawned
-        //    forwarding subscription so no pushes bubble up after abort
-        //  - modelRegistry needs no dispose: the catalog is permanent and it does
-        //    not subscribe to ProviderKeyStore
-        await this.skillHotReload.dispose();
-        this.permissionBroker.cleanupAll();
-        this.agentSpawner.removeAllListeners();
-        await this.sessionRegistry.dispose();
-        await this.toolRegistry.dispose?.();
-        this.removeAllListeners();
+        await disposeInOrder([
+            () => {
+                this.permissionBroker.cleanupAll();
+            },
+            () => {
+                this.agentSpawner.removeAllListeners();
+            },
+            () => this.skillHotReload.dispose(),
+            () => this.sessionRegistry.dispose(),
+            () => this.toolRegistry.dispose?.(),
+            () => {
+                this.removeAllListeners();
+            },
+        ]);
     }
 }
 

@@ -26,7 +26,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "build": "node esbuild.config.mjs",
     "package:runtime": "node scripts/buildRuntime.mjs",
     "package:archive": "node scripts/archiveRuntime.mjs",

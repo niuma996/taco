@@ -355,12 +355,24 @@ sidecar 两种运行模式的隔离语义不同：
   Unix 上 data + control socket 落在不同目录，Windows 上 pipe slug
   从该目录派生，debug / release 不会抢同一条全局 pipe。
 
-同一个 daemon（daemon 模式）内部的路由：
+一个 daemon 内只有一个 `SidecarServer`，统一持有工作区注册表、会话、
+命令去重闸门、渠道和带序号的事件日志。调度器也调用同一个运行时。
+`ConnectionServer` 只持有传输、初始化状态和客户端能力；RPC 响应仅返回
+发起连接，push 广播给已初始化的客户端。断开连接不会终止会话或销毁工作区。
 
-- 只有一个 workspace 的 TUI / IDE 客户端：仍接入同一 daemon
-- 多 workspace：单进程内部按 `Map<cwd, WorkspaceRuntime>` 路由
-- session 并发不受 workspace 限制：`SessionRegistry.attached` 按 `sessionId` 索引，一个 workspace 可同时挂载任意多个 active session
-- 唯一的并发闸门是 `SidecarServer.activeTurnCommands`，key 为 `(workspace, sessionId)`：同一 session 的第二个 turn 命令返回 `session_busy`，跨 session、跨 workspace 均不受影响。仅 `session.prompt` 与 `session.submitAnswers` 参与该闸门（`turnStart: true`）
+`WorkspaceRegistry` 按 key 管理 starting、ready、closing 状态。并发构建
+共享结果；关闭中的实例不再对新请求可见，新请求等待关闭完成后重建。
+构建期间被失效的实例会释放资源；关闭 daemon 时禁止新建，并尝试关闭所有
+资源，即使其中一个失败也继续清理。
+
+所有配置写入经过 `ConfigStore` 事务。带 owner token 的跨进程锁覆盖读取、
+集合修改和原子替换；活进程的锁不会因过期被抢占，竞争等待上限为一秒。
+读取能发现其他进程的原子替换。重连及访问工作区时按 CLI 覆盖优先级重新解析
+配置，只应用发生变化的派生状态。MCP 或构建期设置变化会关闭工作区；渠道和
+扩展变化仍需要重启 daemon。
+
+不同工作区、不同 session 可并发运行。`CommandIdempotencyGate` 按
+`(workspace, sessionId)` 限制同一会话的 turn 命令，并跨连接去重重试。
 
 ## 3. 客户端
 

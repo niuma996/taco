@@ -2,9 +2,14 @@ import { strict as assert } from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it, type TestContext } from "node:test";
 import type { RpcRequest, RpcResponse, ServerPush } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    PushMethods,
+    SIDECAR_PROTOCOL_VERSION,
+} from "@taco-ai/protocol";
 import {
     chunkText,
     extractReplyText,
@@ -33,6 +38,7 @@ import type {
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { ServerRpcSurface } from "../../src/runtime/serverRpcSurface.ts";
 import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
+import { ConnectionServer } from "../../src/server/connectionServer.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import type { ServerFrame, Transport } from "../../src/server/transport.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
@@ -712,120 +718,99 @@ describe("clientSinkFanout", () => {
         });
     });
 
-    /**
-     * End-to-end: host emits an im:// push frame and every connected desktop's
-     * transport receives it. Builds the same owner + non-owner pair as
-     * daemonOwnership.test.ts, with the addition of a shared ClientSinkRegistry.
-     */
-    async function startOwnerWithSink(): Promise<{
-        owner: SidecarServer;
-        nonOwner: SidecarServer;
-        nonOwnerTransport: InMemoryTransport;
-        sinkRegistry: ClientSinkRegistry;
-    }> {
+    async function waitForFrame(
+        transport: InMemoryTransport,
+        predicate: (frame: ServerFrame) => boolean,
+    ): Promise<ServerFrame> {
+        const deadline = Date.now() + 5000;
+        for (;;) {
+            const frame = transport.sent.find(predicate);
+            if (frame) return frame;
+            await transport.waitForPushCount(
+                transport.sent.length + 1,
+                Math.max(1, deadline - Date.now()),
+            );
+        }
+    }
+
+    async function startOwnerWithSink(t: TestContext) {
         const sinkRegistry = new ClientSinkRegistry();
         const owner = new SidecarServer({
             providerKeyStore: new ProviderKeyStore({}),
             clientSinkRegistry: sinkRegistry,
         });
-        await owner.start(new InMemoryTransport(), [mockChannelConfig]);
-
-        const channel = new MockChannel();
-        const handle = (await channel.start(
-            owner.buildChannelContext("mock-1"),
-        )) as MockChannelHandle;
-        owner.channelRegistry.register("mock-1", channel, handle);
-
-        const nonOwnerTransport = new InMemoryTransport();
-        const nonOwner = new SidecarServer({
-            providerKeyStore: new ProviderKeyStore({}),
-            channelRegistry: owner.channelRegistry,
-            channelBindBroker: owner.channelBindBroker,
-            conversationRouter: owner.conversationRouterView,
-            imHost: owner,
-            clientSinkRegistry: sinkRegistry,
+        const ownerTransport = new InMemoryTransport();
+        const clientTransport = new InMemoryTransport();
+        const connection = new ConnectionServer(owner, clientTransport, sinkRegistry);
+        t.after(async () => {
+            await connection.stop();
+            await owner.stop();
         });
-        await nonOwner.start(nonOwnerTransport, []);
-        return { owner, nonOwner, nonOwnerTransport, sinkRegistry };
+        await owner.start(ownerTransport, [mockChannelConfig]);
+        await connection.start();
+        clientTransport.simulateRequest(
+            JSON.stringify({
+                id: "init-client",
+                method: "initialize",
+                params: { protocolVersion: SIDECAR_PROTOCOL_VERSION, clientCapabilities: {} },
+            }),
+        );
+        const response = await waitForFrame(
+            clientTransport,
+            (frame) => "ok" in frame && frame.id === "init-client",
+        );
+        assert.ok("ok" in response && response.ok, JSON.stringify(response));
+        return { owner, ownerTransport, connection, clientTransport, sinkRegistry };
     }
 
-    describe("client-sink fan-out (Phase 2)", () => {
-        it("host im:// push reaches every connected desktop transport", async () => {
-            const { owner, nonOwner, nonOwnerTransport } = await startOwnerWithSink();
-            try {
-                // Submit via owner — this creates the IM session and kicks off
-                // session.prompt, which emits at least one push frame (the
-                // channel handle receives it too — see the existing integration
-                // test for the same observation).
-                const ctx = owner.buildChannelContext("mock-1");
-                const r = await ctx.ingress.submit({
-                    channelId: "mock-1",
-                    peerId: "u1",
-                    chatId: "c1",
-                    platformMessageId: "msg-1",
-                    text: "hello",
-                });
-                const sessionId = r.sessionId;
-
-                // Wait until the host's emitPush has delivered its first
-                // im:// frame to the non-owner's transport. Without the
-                // registry, nonOwnerTransport stays empty — the regression
-                // Phase 1 introduced and Phase 2 closes.
-                const frames = await nonOwnerTransport.waitForPushCount(1, 5000);
-                const imFrames = frames.filter(
-                    (f) =>
-                        (f as ServerPush).workspace === "im://mock-1/u1/c1" &&
-                        (f as ServerPush).session === sessionId,
-                );
-                assert.ok(
-                    imFrames.length >= 1,
-                    `expected at least one im:// push frame on the desktop transport; got ${frames.length} frame(s)`,
-                );
-            } finally {
-                await nonOwner.stop();
-                await owner.stop();
-            }
+    describe("client-sink fan-out", () => {
+        it("host im:// push reaches an initialized desktop transport", async (t) => {
+            const { owner, clientTransport } = await startOwnerWithSink(t);
+            const { sessionId } = await owner.buildChannelContext("mock-1").ingress.submit({
+                channelId: "mock-1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "msg-1",
+                text: "hello",
+            });
+            const frame = await waitForFrame(
+                clientTransport,
+                (frame) =>
+                    "method" in frame &&
+                    frame.workspace === "im://mock-1/u1/c1" &&
+                    frame.session === sessionId,
+            );
+            assert.ok("method" in frame);
         });
 
-        it("removing a sink stops fan-out — disconnected desktop no longer receives", async () => {
-            const { owner, nonOwner, nonOwnerTransport, sinkRegistry } = await startOwnerWithSink();
-            try {
-                // Drain whatever's already in flight.
-                await new Promise((resolve) => setTimeout(resolve, 100));
-                const before = nonOwnerTransport.sent.length;
+        it("disconnecting a desktop stops delivery while the host still emits IM pushes", async (t) => {
+            const { owner, ownerTransport, connection, clientTransport, sinkRegistry } =
+                await startOwnerWithSink(t);
+            const before = clientTransport.sent.length;
+            const connectedSinks = sinkRegistry.size();
+            await connection.stop();
+            assert.equal(sinkRegistry.size(), connectedSinks - 1);
 
-                // Stop the non-owner → start() had registered its transport,
-                // stop() must deregister it before close. Any subsequent
-                // emitPush on the host must not reach the dead transport.
-                await nonOwner.stop();
-
-                // Submit another message: owner → channel handle → emitPush
-                // for im://mock-1/u2/c2. The host's fanout must NOT hit the
-                // deregistered nonOwnerTransport.
-                const ctx = owner.buildChannelContext("mock-1");
-                await ctx.ingress.submit({
-                    channelId: "mock-1",
-                    peerId: "u2",
-                    chatId: "c2",
-                    platformMessageId: "msg-after-disconnect",
-                    text: "still here",
-                });
-                // Allow fanout to run.
-                await new Promise((resolve) => setTimeout(resolve, 200));
-
-                assert.equal(
-                    sinkRegistry.size(),
-                    1,
-                    "after nonOwner.stop, registry holds only the host's NullTransport",
-                );
-                assert.equal(
-                    nonOwnerTransport.sent.length,
-                    before,
-                    "deregistered transport must not receive further frames",
-                );
-            } finally {
-                await owner.stop();
-            }
+            const { sessionId } = await owner.buildChannelContext("mock-1").ingress.submit({
+                channelId: "mock-1",
+                peerId: "u2",
+                chatId: "c2",
+                platformMessageId: "msg-after-disconnect",
+                text: "still here",
+            });
+            // The owner's transport proves that a real push was emitted after disconnect.
+            await waitForFrame(
+                ownerTransport,
+                (frame) =>
+                    "method" in frame &&
+                    frame.workspace === "im://mock-1/u2/c2" &&
+                    frame.session === sessionId,
+            );
+            assert.equal(
+                clientTransport.sent.length,
+                before,
+                "disconnected transport must not receive further frames",
+            );
         });
     });
 });

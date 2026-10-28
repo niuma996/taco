@@ -384,20 +384,30 @@ The runtime has two running modes, with different isolation semantics:
   sockets land on a different path (Unix: a different directory;
   Windows: a different pipe slug derived from that directory).
 
-Within a single daemon (daemon mode), the inner routing looks like:
+Within one daemon, a single `SidecarServer` owns the workspace registry,
+attached sessions, command-idempotency gate, channels and sequenced event log.
+The scheduler dispatches into that same runtime. `ConnectionServer` holds only
+its transport, initialization state and client capabilities; responses return
+to the requesting connection, while pushes fan out to initialized clients.
+Disconnecting a socket does not abort sessions or release workspace resources.
 
-- A TUI / IDE client that only uses one workspace: still talks to the
-  same daemon.
-- Multiple workspaces: one process, internal routing via
-  `Map<cwd, WorkspaceRuntime>`.
-- Session concurrency is not bounded by workspace:
-  `SessionRegistry.attached` is keyed by `sessionId`, so one workspace
-  can hold any number of concurrently active sessions.
-- The only concurrency gate is `SidecarServer.activeTurnCommands`, keyed
-  by `(workspace, sessionId)`: a second turn command on the same session
-  returns `session_busy`. Cross-session and cross-workspace are
-  unaffected. Only `session.prompt` and `session.submitAnswers`
-  participate (`turnStart: true`).
+`WorkspaceRegistry` transitions each key through starting, ready and closing.
+Concurrent construction is shared; closing entries are hidden from reads and
+new callers wait for disposal before rebuilding. Invalidated constructors
+release their resources rather than publishing them. Shutdown prevents new
+construction and attempts every close even if one resource fails.
+
+Configuration writes use `ConfigStore` transactions across every entry point.
+The owner-token lock covers reading, deriving collection edits and atomic
+replacement. A live lock is never reclaimed by age; contention fails after one
+second. Reads detect external atomic replacements. Reconnection and workspace
+access re-resolve configuration with CLI overrides; only changed derived state
+is applied. Changes to MCP or construction-only settings close workspaces;
+channels and extensions still require a daemon restart.
+
+Sessions in separate workspaces or with different ids can run concurrently.
+`CommandIdempotencyGate` serializes turn commands by `(workspace, sessionId)`
+and deduplicates command retries across client connections.
 
 ## 3. Clients
 

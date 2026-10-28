@@ -3,6 +3,7 @@
 
 import { resolve as resolvePath } from "node:path";
 import * as readline from "node:readline";
+import { asSessionId, asWorkspaceId, type SessionId } from "@taco-ai/protocol";
 import { TacoClient } from "@taco-ai/shared/node";
 import { createDefaultSidecarSpawn } from "@taco-ai/shared/spawn";
 
@@ -42,8 +43,8 @@ async function cmdStart() {
         "[taco] sidecar ready, type commands: /list, /send <text>, /cd <cwd>, /checkpoints, /restore <id>, /quit\n",
     );
 
-    let currentCwd = process.cwd();
-    let currentSession: string | null = null;
+    let currentCwd = asWorkspaceId(process.cwd());
+    let currentSession: SessionId | null = null;
 
     // Wrap stdin so `/restore` can prompt for confirmation on the same line
     // editor the REPL already uses. Anything that is not clearly yes or no is
@@ -131,7 +132,7 @@ async function cmdStart() {
         }
 
         if (trimmed.startsWith("/cd ")) {
-            currentCwd = resolvePath(trimmed.slice(4));
+            currentCwd = asWorkspaceId(resolvePath(trimmed.slice(4)));
             process.stderr.write(`[taco] cwd -> ${currentCwd}\n`);
             currentSession = null;
             continue;
@@ -172,7 +173,7 @@ async function cmdSend(cwd: string, text: string) {
     const client = await createClient();
     await client.handshake();
     const r = await client.sessionCreate({
-        workspace: resolvePath(cwd),
+        workspace: asWorkspaceId(resolvePath(cwd)),
         initialPrompt: text,
     });
     console.log(JSON.stringify(r, null, 2));
@@ -182,7 +183,7 @@ async function cmdSend(cwd: string, text: string) {
 async function cmdHistory(cwd: string, sessionId: string) {
     const client = await createClient();
     await client.handshake();
-    const r = await client.sessionHistory(resolvePath(cwd), sessionId);
+    const r = await client.sessionHistory(asWorkspaceId(resolvePath(cwd)), asSessionId(sessionId));
     console.log(JSON.stringify(r, null, 2));
     await client.dispose();
 }
@@ -191,7 +192,7 @@ async function cmdWatch(cwd: string) {
     const client = await createClient();
     await client.handshake();
     // Ensure the workspace on the server.
-    await client.workspaceEnsure(resolvePath(cwd));
+    await client.workspaceEnsure(asWorkspaceId(resolvePath(cwd)));
     process.stderr.write(`[taco] watching ${cwd} (ctrl-c to exit)\n`);
     await new Promise(() => {});
 }

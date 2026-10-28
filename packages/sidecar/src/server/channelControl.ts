@@ -24,7 +24,7 @@ import { hasStoredCredentials } from "../channels/channelConfigStore.ts";
 import { isValidChannelId } from "../channels/configValidator.ts";
 import type { ConversationRouter } from "../channels/conversationRouter.ts";
 import type { ChannelConfig, ChannelRegistry } from "../channels/registry.ts";
-import { readGlobalConfig, saveGlobalConfig } from "../config/config.ts";
+import { readGlobalConfig, updateGlobalConfig } from "../config/config.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { ChannelControl } from "../runtime/serverRpcSurface.ts";
 import type { ImChannelContext } from "../tags/index.ts";
@@ -83,8 +83,11 @@ export function createChannelControl(deps: ChannelControlDeps): ChannelControlSu
      * runtime `ChannelConfig`, since only the on-disk fields reach the wire.
      */
     function readConfiguredChannels(): ChannelInstanceConfig[] {
+        return mergeConfiguredChannels(readGlobalConfig().channels ?? []);
+    }
+
+    function mergeConfiguredChannels(onDisk: ChannelInstanceConfig[]): ChannelInstanceConfig[] {
         const configs = deps.getChannelConfigs();
-        const onDisk = readGlobalConfig().channels ?? [];
         const byId = new Map(configs.map((c) => [c.channelId, c]));
         const merged: ChannelInstanceConfig[] = [];
         const seen = new Set<string>();
@@ -167,25 +170,29 @@ export function createChannelControl(deps: ChannelControlDeps): ChannelControlSu
             const id = channelId ?? name;
             if (!isValidChannelId(id)) throw new Error(`invalid channelId: ${id}`);
 
-            // Merge disk and in-memory: another writer may have added an
-            // instance since startup, and `channels.list` reads through this
-            // same helper so the two paths can't disagree about what exists.
-            const existing = readConfiguredChannels();
-            if (existing.some((c) => c.channelId === id)) {
-                throw new Error(`channelId already exists: ${id}`);
-            }
-            saveGlobalConfig({
-                channels: [
-                    ...existing,
-                    {
-                        channelId: id,
-                        manifest: {
-                            name: manifest.name,
-                            version: manifest.version,
+            updateGlobalConfig((current) => {
+                const onDisk = current.channels ?? [];
+                const byId = new Map(onDisk.map((cfg) => [cfg.channelId, cfg]));
+                // Preserve persisted config; the startup snapshot only supplies missing instances.
+                const existing = mergeConfiguredChannels(onDisk).map(
+                    (cfg) => byId.get(cfg.channelId) ?? cfg,
+                );
+                if (existing.some((c) => c.channelId === id)) {
+                    throw new Error(`channelId already exists: ${id}`);
+                }
+                return {
+                    channels: [
+                        ...existing,
+                        {
+                            channelId: id,
+                            manifest: {
+                                name: manifest.name,
+                                version: manifest.version,
+                            },
+                            config: {},
                         },
-                        config: {},
-                    },
-                ],
+                    ],
+                };
             });
             // Channels load statically at startup (same as extensions), so the
             // new instance is not bindable until the sidecar restarts.

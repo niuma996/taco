@@ -6,6 +6,7 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "strict": true,
+    "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
@@ -16,6 +17,6 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["*.ts", "tests/*.ts"],
-  "exclude": ["**/node_modules", "**/dist", "**/*.test.ts", "**/*.typecheck.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["**/node_modules", "**/dist", "tests", "**/*.test.ts", "**/*.typecheck.ts"]
 }

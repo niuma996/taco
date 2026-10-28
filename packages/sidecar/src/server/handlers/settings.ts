@@ -252,7 +252,6 @@ export function applyGlobalConfigPatch(
 }
 
 export function registerSettingsHandlers(): void {
-    let writeQueue: Promise<void> = Promise.resolve();
     registerMethod("settingsGet", false, async ({ params }) => {
         // params is currently unused; structure is kept for future
         // workspace-scoped layering.
@@ -261,30 +260,20 @@ export function registerSettingsHandlers(): void {
     });
 
     registerMethod("settingsWrite", false, async ({ params, server, serverRegistry }) => {
-        let release!: () => void;
-        const previous = writeQueue;
-        writeQueue = new Promise<void>((resolve) => {
-            release = resolve;
-        });
-        await previous;
+        const { global: globalPatch } = params ?? {};
+        if (!globalPatch || typeof globalPatch !== "object") {
+            throw new RpcHandlerError(
+                ErrorCodes.InvalidParams,
+                "settings.write: global must be an object",
+            );
+        }
         try {
-            const { global: globalPatch } = params ?? {};
-            if (!globalPatch || typeof globalPatch !== "object") {
-                throw new RpcHandlerError(
-                    ErrorCodes.InvalidParams,
-                    "settings.write: global must be an object",
-                );
-            }
-            try {
-                return { global: applyGlobalConfigPatch(server, serverRegistry, globalPatch) };
-            } catch (e) {
-                throw new RpcHandlerError(
-                    ErrorCodes.InvalidValue,
-                    e instanceof Error ? e.message : "settings.write failed",
-                );
-            }
-        } finally {
-            release();
+            return { global: applyGlobalConfigPatch(server, serverRegistry, globalPatch) };
+        } catch (e) {
+            throw new RpcHandlerError(
+                ErrorCodes.InvalidValue,
+                e instanceof Error ? e.message : "settings.write failed",
+            );
         }
     });
 }

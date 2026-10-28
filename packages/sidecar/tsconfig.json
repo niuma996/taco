@@ -6,11 +6,14 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "strict": true,
+    "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
+    "types": ["node"],
     "noEmit": true
   },
+  "include": ["src"],
   "exclude": ["**/node_modules", "**/dist"]
 }

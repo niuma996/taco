@@ -28,7 +28,7 @@ import { ErrorCodes } from "@taco-ai/protocol";
 import {
     readGlobalConfig,
     readMcpServers,
-    saveGlobalConfig,
+    updateGlobalConfig,
     validateMcpServers,
 } from "../../config/config.ts";
 import { createLogger } from "../../lib/logger.ts";
@@ -143,11 +143,12 @@ export function registerMcpHandlers(): void {
             // (duplicate id, bad transport, invalid url, ...) — map it to a
             // contract error here so clients see invalid_params, not internal.
             try {
-                const next = validateMcpServers(
-                    [...readMcpServers(), params.config],
-                    "mcp.createConfig",
-                );
-                saveGlobalConfig({ mcpServers: next });
+                updateGlobalConfig((current) => ({
+                    mcpServers: validateMcpServers(
+                        [...(current.mcpServers ?? []), params.config],
+                        "mcp.createConfig",
+                    ),
+                }));
                 // Invalidate every workspace so the next ensureWorkspace
                 // discovers the new server's candidates. reloadMcpServers is
                 // optional on the surface (test stubs may omit it).
@@ -172,21 +173,28 @@ export function registerMcpHandlers(): void {
             if (!params.patch || typeof params.patch !== "object") {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "patch is required");
             }
-            const servers = readMcpServers();
-            const target = requireServerConfig(servers, params.id);
-            const merged = { ...target, ...params.patch, id: params.id };
             // Same malformed-input mapping as mcp.createConfig — a bad patch
             // (e.g. duplicate id against another server) must surface as
             // invalid_params rather than internal.
             try {
-                const next = validateMcpServers(
-                    servers.map((s) => (s.id === params.id ? merged : s)),
-                    "mcp.updateConfig",
-                );
-                saveGlobalConfig({ mcpServers: next });
+                const next = updateGlobalConfig((current) => {
+                    const servers = current.mcpServers ?? [];
+                    const target = requireServerConfig(servers, params.id);
+                    const merged = { ...target, ...params.patch, id: params.id };
+                    return {
+                        mcpServers: validateMcpServers(
+                            servers.map((s) => (s.id === params.id ? merged : s)),
+                            "mcp.updateConfig",
+                        ),
+                    };
+                });
                 await server?.reloadMcpServers?.();
-                return { server: mcpServerToView(merged), requiresRestart: true };
+                return {
+                    server: mcpServerToView(requireServerConfig(next.mcpServers ?? [], params.id)),
+                    requiresRestart: true,
+                };
             } catch (e) {
+                if (e instanceof RpcHandlerError) throw e;
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,
                     e instanceof Error ? e.message : String(e),
@@ -202,9 +210,11 @@ export function registerMcpHandlers(): void {
             if (typeof params?.id !== "string" || params.id.length === 0) {
                 throw new RpcHandlerError(ErrorCodes.InvalidParams, "id is required");
             }
-            const servers = readMcpServers();
-            requireServerConfig(servers, params.id);
-            saveGlobalConfig({ mcpServers: servers.filter((s) => s.id !== params.id) });
+            updateGlobalConfig((current) => {
+                const servers = current.mcpServers ?? [];
+                requireServerConfig(servers, params.id);
+                return { mcpServers: servers.filter((s) => s.id !== params.id) };
+            });
             await server?.reloadMcpServers?.();
             return { deleted: params.id, requiresRestart: true };
         },

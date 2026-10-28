@@ -20,15 +20,9 @@
  * appending to one file interleave two independent seq sequences and hydrate
  * would adopt whichever landed last. Two invariants keep that from happening:
  *
- *  - **One instance per process.** A daemon runs several `SidecarServer`s
- *    (see `SharedSidecarDeps.pushLog`); they share this object so its
- *    per-file chain serializes every append and compaction. Separate
- *    instances would race on the read-merge-rename compaction path.
- *  - **Only client-observed streams get a tail.** A server whose frames no
- *    client can see (the daemon's scheduler sidecar, which pushes into a
- *    `NullTransport`) is constructed without a `pushLog`: it has no client
- *    cursor to preserve, and writing its ring's seqs into a desktop's tail
- *    would corrupt exactly the continuity this file exists to provide.
+ * The daemon's single runtime owns one ring and one disk-tail instance.
+ * Separate sidecars must use separate stream files; sharing a file between
+ * independently numbered rings is invalid even if appends are serialized.
  *
  * Best-effort by contract: appends are buffered and flushed on a short
  * timer, and a crash may lose the unflushed window or tear the last line.

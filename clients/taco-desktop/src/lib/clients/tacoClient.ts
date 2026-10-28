@@ -102,6 +102,8 @@ export interface TacoClient extends TacoClientBase {}
 // biome-ignore lint/suspicious/noUnsafeDeclarationMerging: see interface comment above; suppress until TacoClient declares methods directly (see TODO above).
 export class TacoClient extends TacoClientBase {
     private rpcSeq = 0;
+    // The daemon deduplicates commands across connections and desktop processes.
+    private readonly requestPrefix = globalThis.crypto.randomUUID();
     private unlisten?: () => void;
     private unlistenExit?: () => void;
     /** In-flight or settled subscription, shared by concurrent start() calls. */
@@ -331,7 +333,7 @@ export class TacoClient extends TacoClientBase {
         method: string,
         params: TParams,
     ): Promise<TResult> {
-        const id = `r${++this.rpcSeq}_${Date.now()}`;
+        const id = `${this.requestPrefix}_r${++this.rpcSeq}`;
         const req: RpcRequest<TParams> = { id, commandId: id, method, params };
         // Register pending before send: if the server responds very fast, the
         // response frame could arrive before registerPending and be dropped as
@@ -681,7 +683,7 @@ export class TacoClient extends TacoClientBase {
         // dispose-time rejection on the dispatcher could escape as an
         // unhandledRejection. Sending it ourselves lets us attach a catch
         // exactly once before any await.
-        const id = `init_${++this.rpcSeq}_${Date.now()}`;
+        const id = `${this.requestPrefix}_init_${++this.rpcSeq}`;
         const req: RpcRequest = {
             id,
             commandId: id,
