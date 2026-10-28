@@ -19,7 +19,6 @@ import { createLogger } from "../../lib/logger.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { registerMethod } from "../methodRegistry.ts";
-import type { ServerRegistry } from "../serverRegistry.ts";
 import {
     type AgentScopeContext,
     agentScopeOf,
@@ -29,20 +28,12 @@ import {
 
 const log = createLogger("agents");
 
-async function reloadAgentsEverywhere(
-    server: ServerRpcSurface,
-    serverRegistry: ServerRegistry | undefined,
-): Promise<void> {
-    const targets = serverRegistry?.all() ?? [server];
-    await Promise.all(
-        targets.map(async (target) => {
-            try {
-                await target.reloadAgents?.();
-            } catch (error) {
-                log.warn("agent catalog hot reload failed", { error: String(error) });
-            }
-        }),
-    );
+async function reloadAgents(server: ServerRpcSurface): Promise<void> {
+    try {
+        await server.reloadAgents?.();
+    } catch (error) {
+        log.warn("agent catalog hot reload failed", { error: String(error) });
+    }
 }
 
 /**
@@ -106,9 +97,9 @@ export function registerAgentsHandlers(): void {
     registerMethod(
         "agentsWrite",
         true,
-        async ({ server, serverRegistry, workspace, params }): Promise<AgentsWriteResult> => {
+        async ({ server, workspace, params }): Promise<AgentsWriteResult> => {
             await writeUserAgent(params, workspace.agents, scopeContext(workspace));
-            await reloadAgentsEverywhere(server, serverRegistry);
+            await reloadAgents(server);
             return { ok: true };
         },
     );
@@ -116,9 +107,9 @@ export function registerAgentsHandlers(): void {
     registerMethod(
         "agentsDelete",
         true,
-        async ({ server, serverRegistry, workspace, params }): Promise<AgentsDeleteResult> => {
+        async ({ server, workspace, params }): Promise<AgentsDeleteResult> => {
             await deleteUserAgent(params.agentType, workspace.agents, scopeContext(workspace));
-            await reloadAgentsEverywhere(server, serverRegistry);
+            await reloadAgents(server);
             return { ok: true };
         },
     );

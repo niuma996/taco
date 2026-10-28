@@ -6,12 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 import type { AgentsWriteParams } from "@taco-ai/protocol";
-import { asSessionId } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import { parseAgentMarkdown } from "../../../src/agents/loadAgents.ts";
 import type { AgentDefinition } from "../../../src/agents/types.ts";
 import { readGlobalConfig, saveGlobalConfig } from "../../../src/config/config.ts";
 import { PermissionBroker } from "../../../src/permissions/permissionBroker.ts";
-import type { ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
+import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import {
     AgentWriteError,
     agentScopeOf,
@@ -23,7 +23,7 @@ import {
 import { ensureAttached, requireAttached } from "../../../src/server/handlers/attachGuard.ts";
 import { RpcHandlerError } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
-import { ServerRegistry } from "../../../src/server/serverRegistry.ts";
+import { SidecarServer } from "../../../src/server/server.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
@@ -486,85 +486,86 @@ describe("agents.write", () => {
         });
     });
 
-    describe("agents.write/delete server fan-out", () => {
-        /** The fields the agents handlers read off a workspace. */
-        const stubWorkspace = (agents: AgentDefinition[]) => ({
-            agents,
-            executionCwd: "/w",
-            imRouting: undefined,
-            associatedRoots: () => [],
+    describe("agents.write/delete runtime reload", () => {
+        const home = useTempTacoHome("agents-runtime");
+        let server: SidecarServer;
+        beforeEach(() => {
+            server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
         });
-
-        useTempTacoHome("agents-fanout");
-
-        it("reloads every registered server after writing a definition", async () => {
-            registerBuiltinMethods();
-            const calls = [0, 0, 0];
-            const servers = calls.map(
-                (_, i) =>
-                    ({
-                        async reloadAgents() {
-                            calls[i] = (calls[i] ?? 0) + 1;
-                        },
-                    }) as unknown as ServerRpcSurface,
-            );
-            const registry = new ServerRegistry();
-            servers.forEach((server) => {
-                registry.add(server);
-            });
-            const workspace = stubWorkspace([]);
-            await callMethod("agents.write", {
-                server: servers[0],
-                serverRegistry: registry,
-                params: params({ agentType: "fanout" }),
-                workspace,
-            });
-            assert.deepEqual(calls, [1, 1, 1]);
+        afterEach(async () => {
+            await server.stop();
         });
+        const workspace = () =>
+            server.ensureWorkspace(asWorkspaceId(mkdtempSync(join(home, "workspace-"))));
 
-        it("reloads every server after deletion and isolates reload failures", async () => {
-            registerBuiltinMethods();
-            const calls = [0, 0, 0];
-            const servers = calls.map(
-                (_, i) =>
-                    ({
-                        async reloadAgents() {
-                            calls[i] = (calls[i] ?? 0) + 1;
-                            if (i === 1) throw new Error("stale server");
-                        },
-                    }) as unknown as ServerRpcSurface,
-            );
-            const registry = new ServerRegistry();
-            servers.forEach((server) => {
-                registry.add(server);
-            });
-            await writeUserAgent(params({ agentType: "to-delete" }), []);
-
-            await callMethod("agents.delete", {
-                server: servers[0],
-                serverRegistry: registry,
-                params: { workspace: "/w", agentType: "to-delete" },
-                workspace: stubWorkspace([def({ agentType: "to-delete" })]),
-            });
-
-            assert.deepEqual(calls, [1, 1, 1]);
-            assert.equal(readdirSync(userAgentsDir()).includes("to-delete.md"), false);
-        });
-
-        it("falls back to reloading the request server without a registry", async () => {
-            registerBuiltinMethods();
-            let calls = 0;
-            const server = {
-                async reloadAgents() {
-                    calls++;
-                },
-            } as unknown as ServerRpcSurface;
+        it("reloads the real workspace catalog after writing and deleting a definition", async (t) => {
+            const ws = await workspace();
+            const reload = t.mock.method(server, "reloadAgents");
             await callMethod("agents.write", {
                 server,
-                params: params({ agentType: "single" }),
-                workspace: stubWorkspace([]),
+                workspace: ws,
+                params: params({ agentType: "runtime-agent" }),
             });
-            assert.equal(calls, 1);
+            assert.equal(ws.findAgent("runtime-agent")?.systemPrompt, "You read files.");
+            assert.equal(reload.mock.callCount(), 1);
+            await callMethod("agents.delete", {
+                server,
+                workspace: ws,
+                params: { workspace: ws.executionCwd, agentType: "runtime-agent" },
+            });
+            assert.equal(ws.findAgent("runtime-agent"), undefined);
+            assert.equal(existsSync(join(userAgentsDir(), "runtime-agent.md")), false);
+            assert.equal(reload.mock.callCount(), 2);
+        });
+
+        it("keeps a successful write when catalog reload fails and logs a warning", async (t) => {
+            const ws = await workspace();
+            t.mock.method(server, "reloadAgents", async () => {
+                throw new Error("synthetic reload failure");
+            });
+            const stderr = t.mock.method(process.stderr, "write", () => true);
+            const result = await callMethod("agents.write", {
+                server,
+                workspace: ws,
+                params: params({ agentType: "saved-on-failure" }),
+            });
+            assert.deepEqual(result, { ok: true });
+            assert.match(
+                readFileSync(join(userAgentsDir(), "saved-on-failure.md"), "utf8"),
+                /You read files/,
+            );
+            assert.ok(
+                stderr.mock.calls.some((call) =>
+                    /\[warn\].*agent catalog hot reload failed.*synthetic reload failure/.test(
+                        String(call.arguments[0]),
+                    ),
+                ),
+            );
+        });
+
+        it("keeps a successful deletion when catalog reload fails", async (t) => {
+            const ws = await workspace();
+            await callMethod("agents.write", {
+                server,
+                workspace: ws,
+                params: params({ agentType: "delete-on-failure" }),
+            });
+            t.mock.method(server, "reloadAgents", async () => {
+                throw new Error("synthetic reload failure");
+            });
+            const stderr = t.mock.method(process.stderr, "write", () => true);
+            const result = await callMethod("agents.delete", {
+                server,
+                workspace: ws,
+                params: { workspace: ws.executionCwd, agentType: "delete-on-failure" },
+            });
+            assert.deepEqual(result, { ok: true });
+            assert.equal(existsSync(join(userAgentsDir(), "delete-on-failure.md")), false);
+            assert.ok(
+                stderr.mock.calls.some((call) =>
+                    /\[warn\].*agent catalog hot reload failed/.test(String(call.arguments[0])),
+                ),
+            );
         });
     });
 });

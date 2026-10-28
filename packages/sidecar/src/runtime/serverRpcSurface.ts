@@ -16,14 +16,11 @@ import type {
     ChannelsListResult,
     ChannelsRetryResult,
     ClientCapabilities,
-    CustomModelEntry,
     CustomProviderApi,
-    CustomProviderConfig,
     ImPolicyGetParams,
     ImPolicyGetResult,
     ImRoute,
     ImWorkspacePolicyPatch,
-    InstructionsConfig,
     RpcRequest,
     RpcResponse,
     SessionEventsGetResult,
@@ -150,24 +147,8 @@ export interface ServerRpcSurface {
      * (silent best-effort). TypeScript enforces coverage at compile time.
      */
     readonly providerKeyStore: ProviderKeyStore;
-    /**
-     * Replace the custom provider set (called by handler after settings.write changes customProviders).
-     * Existing workspaces' ModelRegistry receives the update and reconciles (add/remove custom ids, builtin untouched);
-     * newly created workspaces read the latest value automatically.
-     */
-    setCustomProviders?(next: readonly CustomProviderConfig[]): void;
-    /**
-     * Replace the user's model-list edits for built-in providers (called by the
-     * handler after settings.write changes providerExtraModels or
-     * providerHiddenModels). Existing workspaces' ModelRegistry re-registers
-     * the wrapped built-ins; newly created workspaces read the latest values
-     * automatically. Both maps go through one call — the same wrapper applies
-     * the hide filter and the extras append.
-     */
-    setProviderModelEdits?(
-        extras: Record<string, CustomModelEntry[]>,
-        hidden: Record<string, string[]>,
-    ): void;
+    /** Re-resolve effective configuration and apply each changed field once. */
+    refreshConfiguration(): Promise<void>;
     /**
      * Resolve a registered provider's endpoint for model discovery
      * (provider.listModels "saved" branch). Undefined for unknown providers.
@@ -181,39 +162,6 @@ export interface ServerRpcSurface {
      * target an added model. Undefined for unknown providers.
      */
     buildProvider?(providerId: string): Provider | undefined;
-    /**
-     * Update the default model/provider at runtime (called by handler after
-     * settings.write changes defaultModel/defaultProvider). Updates held
-     * options for future workspaces and pushes into existing ones so the next
-     * session.create resolves the configured default instead of the
-     * construction-time fallback.
-     */
-    setDefaultModel?(defaultModel?: string, defaultProvider?: string): void;
-    /**
-     * Invalidate compaction caches for all workspaces' attached sessions.
-     * Called by `settings.write` after writing the compaction field, ensuring a threshold change
-     * takes effect immediately in the current session's next `effectiveCompaction()` call
-     * (without waiting for TTL expiry).
-     *
-     * Required: SidecarServer must implement this method; handlers call it directly, not `?.()`
-     * (silent best-effort). TypeScript enforces coverage at compile time.
-     */
-    invalidateCompactionCaches(): void;
-    /**
-     * Hot-reload the `InstructionsConfig` for every workspace. Called by the
-     * `settings.write` handler after writing the `instructions` field so the
-     * next LLM call in every session picks up the new behavior. The context
-     * hook reads via a lazy thunk on every call, so this swap is sufficient
-     * — no per-session invalidation is required.
-     */
-    refreshInstructions(next: InstructionsConfig | undefined): void;
-    /**
-     * Broadcast a `models.changed` push to every workspace. Called by the
-     * `settings.write` handler after `apiKeys` or `customProviders` change,
-     * so the desktop re-pulls `providers.list` / `session.listModels`
-     * without a restart.
-     */
-    broadcastModelsChanged(): void;
     /**
      * IM channel control surface, consumed by the `channels.*` handlers.
      * Optional so non-SidecarServer hooks (tests) need not implement it;

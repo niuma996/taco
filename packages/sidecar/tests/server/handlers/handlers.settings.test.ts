@@ -1,123 +1,155 @@
-/** Consolidated from 8 test files; behaviour unchanged. */
-
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
-import type { InstructionsConfig } from "@taco-ai/protocol";
+import { afterEach, before, beforeEach, describe, it } from "node:test";
 import { asWorkspaceId } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../../src/config/config.ts";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
-import type { ServerRpcSurface } from "../../../src/runtime/serverRpcSurface.ts";
-import { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import { maskKey, toView } from "../../../src/server/handlers/settings.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
-import { ServerRegistry } from "../../../src/server/serverRegistry.ts";
+import { SidecarServer } from "../../../src/server/server.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
-describe("settings.broadcastModelsChanged", () => {
-    /**
-     * settings.write handler — broadcastModelsChanged trigger conditions:
-     *  broadcasts only when the patch contains apiKeys or customProviders;
-     *  unrelated fields (defaultModel, compaction, etc.) do not trigger it.
-     *
-     * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/settings.broadcastModelsChanged.test.ts
-     */
+const CUSTOM_A = {
+    id: "custom:relay-a",
+    name: "Relay A",
+    api: "chatcomplete" as const,
+    baseUrl: "https://relay-a.example.com/v1",
+    models: [{ id: "m1" }, { id: "m2" }],
+};
+const CUSTOM_B = {
+    ...CUSTOM_A,
+    id: "custom:relay-b",
+    name: "Relay B",
+    models: [{ id: "other-model" }],
+};
 
-    useTempTacoHome("settings-broadcast");
+describe("settings.write on a real server", () => {
+    const home = useTempTacoHome("settings-runtime");
+    let server: SidecarServer;
 
-    before(() => {
-        registerBuiltinMethods();
+    beforeEach(() => {
+        writeFileSync(join(home, "taco.json"), "{}");
+        server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+    });
+    afterEach(async () => {
+        await server.stop();
     });
 
-    function makeServer(): { server: unknown; getCalls: () => number } {
-        let calls = 0;
-        return {
-            server: {
-                providerKeyStore: new ProviderKeyStore({}),
-                setCustomProviders(): void {},
-                broadcastModelsChanged(): void {
-                    calls++;
-                },
-            },
-            getCalls: () => calls,
-        };
-    }
-
-    describe("settings.write — broadcastModelsChanged trigger", () => {
-        it("broadcasts once when customProviders changes", async () => {
-            const { server, getCalls } = makeServer();
-            await callMethod("settings.write", {
-                server,
-                params: { global: { customProviders: [] } },
-            });
-            assert.equal(getCalls(), 1);
+    const write = (global: unknown) =>
+        callMethod<{ global: unknown }>("settings.write", {
+            server,
+            params: { global },
         });
+    const workspace = () =>
+        server.ensureWorkspace(asWorkspaceId(mkdtempSync(join(home, "workspace-"))));
 
-        it("does NOT broadcast when patch touches only unrelated fields", async () => {
-            const { server, getCalls } = makeServer();
-            await callMethod("settings.write", {
-                server,
-                params: { global: { defaultModel: "anthropic/claude-x" } },
-            });
-            assert.equal(getCalls(), 0, "defaultModel-only patch must not broadcast");
-        });
-    });
-});
-
-describe("settings.compaction.invalidate", () => {
-    /**
-     * settings.write handler — compaction invalidation path:
-     *   when patch includes a compaction field, the handler calls
-     *   server.invalidateCompactionCaches so every workspace's next
-     *   effectiveCompaction() immediately reads the new disk value.
-     *
-     * Same structure as settings.customProviders.test.ts (handler spy + real disk round-trip).
-     */
-
-    useTempTacoHome("settings-compaction-invalidate");
-
-    before(() => {
-        registerBuiltinMethods();
+    it("updates keys and returns a masked view after refreshing the runtime", async (t) => {
+        const broadcasts = t.mock.method(server, "broadcastModelsChanged");
+        const key = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+        const result = await write({ apiKeys: { anthropic: key } });
+        assert.equal(server.providerKeyStore.get("anthropic"), key);
+        assert.equal(readGlobalConfig().apiKeys?.anthropic, key);
+        assert.deepEqual(result.global, toView(readGlobalConfig()));
+        assert.ok(!JSON.stringify(result).includes(key));
+        assert.equal(broadcasts.mock.callCount(), 1);
     });
 
-    describe("settings.write — compaction invalidation", () => {
-        it("does NOT call invalidateCompactionCaches when patch omits compaction", async () => {
-            let invalidateCount = 0;
-            const server = {
-                providerKeyStore: undefined,
-                invalidateCompactionCaches(): void {
-                    invalidateCount++;
-                },
-            };
-            // Only changing defaultModel, not touching compaction
-            await callMethod("settings.write", {
-                server,
-                params: { global: { defaultModel: "anthropic/claude-x" } },
-            });
-            assert.equal(invalidateCount, 0, "unrelated fields must not trigger invalidate");
+    it("persists and reconciles custom providers in an existing and a future workspace", async () => {
+        const existing = await workspace();
+        await write({ customProviders: [CUSTOM_A] });
+        assert.deepEqual(readGlobalConfig().customProviders, [CUSTOM_A]);
+        assert.equal(existing.models.getModel(CUSTOM_A.id, "m1")?.id, "m1");
+        assert.deepEqual(server.getProviderEndpoint(CUSTOM_A.id), {
+            baseUrl: CUSTOM_A.baseUrl,
+            api: CUSTOM_A.api,
         });
+        const future = await workspace();
+        assert.equal(future.models.getModel(CUSTOM_A.id, "m2")?.id, "m2");
+        await write({ customProviders: [CUSTOM_B] });
+        for (const ws of [existing, future]) {
+            assert.equal(ws.models.getModel(CUSTOM_A.id, "m1"), undefined);
+            assert.equal(ws.models.getModel(CUSTOM_B.id, "other-model")?.id, "other-model");
+        }
+        await write({ customProviders: [] });
+        assert.deepEqual(readGlobalConfig().customProviders, []);
+        assert.equal(server.buildProvider(CUSTOM_B.id), undefined);
+        assert.equal(existing.models.getModel(CUSTOM_B.id, "other-model"), undefined);
+    });
 
-        it("rejects invalid compaction and skips invalidate", async () => {
-            let invalidateCount = 0;
-            const server = {
-                providerKeyStore: undefined,
-                invalidateCompactionCaches(): void {
-                    invalidateCount++;
-                },
-            };
-            // Invalid threshold (out of range) → saveGlobalConfig throws
-            await assert.rejects(
-                callMethod("settings.write", {
-                    server,
-                    params: { global: { compaction: { threshold: 0.05 } } },
-                }),
-                /invalid compaction\.threshold/,
-            );
-            assert.equal(invalidateCount, 0, "validation failure must not trigger invalidate");
+    it("announces custom-provider changes once and ignores identical writes", async (t) => {
+        const broadcasts = t.mock.method(server, "broadcastModelsChanged");
+        await write({ customProviders: [CUSTOM_A] });
+        assert.equal(broadcasts.mock.callCount(), 1);
+        await write({ customProviders: [CUSTOM_A] });
+        assert.equal(broadcasts.mock.callCount(), 1);
+        await write({ customProviders: [] });
+        assert.equal(broadcasts.mock.callCount(), 2);
+    });
+
+    it("leaves catalogs and compaction caches untouched for an unrelated patch", async (t) => {
+        const custom = t.mock.method(server, "setCustomProviders");
+        const broadcasts = t.mock.method(server, "broadcastModelsChanged");
+        const invalidations = t.mock.method(server, "invalidateCompactionCaches");
+        const defaults = t.mock.method(server, "setDefaultModel");
+        await write({ thinkingLevel: "low" });
+        for (const spy of [custom, broadcasts, invalidations, defaults]) {
+            assert.equal(spy.mock.callCount(), 0);
+        }
+    });
+
+    it("invalidates existing workspace compaction caches after a valid change", async (t) => {
+        const ws = await workspace();
+        const invalidate = t.mock.method(ws, "invalidateCompactionCache");
+        await write({ compaction: { enabled: false, threshold: 0.5 } });
+        assert.deepEqual(readGlobalConfig().compaction, { enabled: false, threshold: 0.5 });
+        assert.equal(invalidate.mock.callCount(), 1);
+    });
+
+    it("rejects invalid compaction before changing disk or runtime", async (t) => {
+        const invalidations = t.mock.method(server, "invalidateCompactionCaches");
+        const refresh = t.mock.method(server, "refreshConfiguration");
+        await assert.rejects(
+            write({ compaction: { threshold: 0.05 } }),
+            /invalid compaction\.threshold/,
+        );
+        assert.equal(readFileSync(join(home, "taco.json"), "utf8"), "{}");
+        assert.equal(invalidations.mock.callCount(), 0);
+        assert.equal(refresh.mock.callCount(), 0);
+    });
+
+    it("changes existing workspace defaults when only the provider changes", async () => {
+        const second = { ...CUSTOM_B, models: [{ id: "m1", contextWindow: 654321 }] };
+        await write({
+            customProviders: [CUSTOM_A, second],
+            defaultModel: "m1",
+            defaultProvider: CUSTOM_A.id,
         });
+        const ws = await workspace();
+        assert.equal(ws.defaultModel?.provider, CUSTOM_A.id);
+        await write({ defaultProvider: CUSTOM_B.id });
+        assert.equal(ws.defaultModel?.provider, CUSTOM_B.id);
+        assert.equal(ws.defaultModel?.contextWindow, 654321);
+        await write({ defaultModel: "m2", defaultProvider: CUSTOM_A.id });
+        assert.equal(ws.defaultModel?.id, "m2");
+    });
+
+    it("propagates merged instructions to existing and future workspaces", async () => {
+        await write({
+            instructions: { enabled: true, files: { agentsMd: false, claudeMd: true } },
+        });
+        const existing = await workspace();
+        await write({
+            instructions: { enabled: false, files: { agentsMd: true }, inheritToSubagents: true },
+        });
+        const persisted = readGlobalConfig().instructions;
+        assert.equal(persisted?.enabled, false);
+        assert.equal(persisted?.files?.agentsMd, true);
+        assert.equal(persisted?.files?.claudeMd, true);
+        assert.equal(persisted?.inheritToSubagents, true);
+        assert.deepEqual(existing.instructionsConfig, persisted);
+        assert.deepEqual((await workspace()).instructionsConfig, persisted);
     });
 });
 
@@ -140,6 +172,14 @@ describe("settings.corrupt", () => {
      */
 
     const home = useTempTacoHome("settings-corrupt");
+    let server: SidecarServer;
+    beforeEach(() => {
+        writeFileSync(join(home, "taco.json"), "{}");
+        server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+    });
+    afterEach(async () => {
+        await server.stop();
+    });
 
     before(() => {
         registerBuiltinMethods();
@@ -153,7 +193,7 @@ describe("settings.corrupt", () => {
         it("settings.get rejects with a parse error rather than returning an empty view", async () => {
             writeCorruptConfig();
             await assert.rejects(
-                () => callMethod("settings.get"),
+                () => callMethod("settings.get", { server }),
                 /Unexpected token|Expected|JSON/,
             );
         });
@@ -161,7 +201,7 @@ describe("settings.corrupt", () => {
         it("mcp.listServers rejects on corrupt config (no silent empty list)", async () => {
             writeCorruptConfig();
             await assert.rejects(
-                () => callMethod("mcp.listServers", { params: {} }),
+                () => callMethod("mcp.listServers", { server, params: {} }),
                 /Unexpected token|Expected|JSON/,
             );
         });
@@ -171,523 +211,12 @@ describe("settings.corrupt", () => {
             await assert.rejects(
                 () =>
                     callMethod("settings.write", {
+                        server,
                         params: { global: { defaultProvider: "anthropic" } },
                     }),
                 /Unexpected token|Expected|JSON/,
             );
-        });
-    });
-});
-
-describe("settings.customProviders", () => {
-    /**
-     * settings.write handler — customProviders push path:
-     *   when patch includes customProviders, the handler calls server.setCustomProviders
-     *   so existing workspace catalogs are reconciled in real time (add/delete custom ids;
-     *   builtin providers untouched).
-     *
-     * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/settings.customProviders.test.ts
-     */
-
-    useTempTacoHome("settings-customproviders");
-
-    before(() => {
-        registerBuiltinMethods();
-    });
-
-    const CUSTOM_A = {
-        id: "custom:relay-a",
-        name: "Relay A",
-        api: "chatcomplete" as const,
-        baseUrl: "https://relay-a.example.com/v1",
-        models: [{ id: "m1" }, { id: "m2" }],
-    };
-
-    const CUSTOM_B = {
-        id: "custom:relay-b",
-        name: "Relay B",
-        api: "anthropic" as const,
-        baseUrl: "https://relay-b.example.com",
-        models: [{ id: "claude-relay" }],
-    };
-
-    describe("settings.write — customProviders push", () => {
-        it("persists customProviders and calls server.setCustomProviders", async () => {
-            let pushCount = 0;
-            let lastReceived: readonly unknown[] | undefined;
-            const server = {
-                providerKeyStore: undefined,
-                setCustomProviders(next: readonly unknown[]): void {
-                    pushCount++;
-                    lastReceived = next;
-                },
-                broadcastModelsChanged(): void {},
-            };
-            await callMethod("settings.write", {
-                server,
-                params: { global: { customProviders: [CUSTOM_A] } },
-            });
-
-            // Disk persisted
-            const onDisk = readGlobalConfig();
-            assert.deepEqual(
-                onDisk.customProviders?.map((c) => c.id),
-                ["custom:relay-a"],
-            );
-            // server received push
-            assert.equal(pushCount, 1);
-            assert.equal((lastReceived?.[0] as { id: string }).id, "custom:relay-a");
-        });
-
-        it("replace: old custom deleted, new custom upserted via single push", async () => {
-            const received: unknown[][] = [];
-            const server = {
-                providerKeyStore: undefined,
-                setCustomProviders(next: readonly unknown[]): void {
-                    received.push([...next]);
-                },
-                broadcastModelsChanged(): void {},
-            };
-            await callMethod("settings.write", {
-                server,
-                params: { global: { customProviders: [CUSTOM_B] } },
-            });
-
-            assert.equal(received.length, 1);
-            const ids = (received[0] as Array<{ id: string }>).map((c) => c.id);
-            assert.deepEqual(ids, ["custom:relay-b"]);
-        });
-
-        it("does NOT call setCustomProviders when patch omits customProviders", async () => {
-            let pushCount = 0;
-            const server = {
-                providerKeyStore: undefined,
-                setCustomProviders(): void {
-                    pushCount++;
-                },
-                broadcastModelsChanged(): void {},
-            };
-            // Only changing defaultModel, not touching customProviders
-            await callMethod("settings.write", {
-                server,
-                params: { global: { defaultModel: "anthropic/claude-x" } },
-            });
-            assert.equal(pushCount, 0, "unrelated fields must not trigger push");
-        });
-
-        it("empty array is a valid push (clears customs)", async () => {
-            let pushCount = 0;
-            const server = {
-                providerKeyStore: undefined,
-                setCustomProviders(next: readonly unknown[]): void {
-                    pushCount++;
-                    assert.equal(next.length, 0);
-                },
-                broadcastModelsChanged(): void {},
-            };
-            await callMethod("settings.write", {
-                server,
-                params: { global: { customProviders: [] } },
-            });
-            assert.equal(pushCount, 1);
-            assert.deepEqual(readGlobalConfig().customProviders, []);
-        });
-    });
-});
-
-describe("settings.defaultModel", () => {
-    /**
-     * settings.write handler — defaultModel push path:
-     *   when patch includes defaultModel and/or defaultProvider, the handler calls
-     *   server.setDefaultModel so existing workspaces re-resolve their default
-     *   model in real time. Without this, a workspace built before the user picked
-     *   a provider keeps its construction-time fallback (first catalog model) and
-     *   the next session.create fails with "Provider is not configured".
-     *
-     * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/settings.defaultModel.test.ts
-     */
-
-    useTempTacoHome("settings-defaultmodel");
-
-    before(() => {
-        registerBuiltinMethods();
-    });
-
-    interface DefaultModelCall {
-        defaultModel?: string;
-        defaultProvider?: string;
-    }
-
-    function makeServer(calls: DefaultModelCall[]) {
-        return {
-            providerKeyStore: undefined,
-            setCustomProviders(): void {},
-            broadcastModelsChanged(): void {},
-            setDefaultModel(defaultModel?: string, defaultProvider?: string): void {
-                calls.push({ defaultModel, defaultProvider });
-            },
-        };
-    }
-
-    describe("settings.write — defaultModel push", () => {
-        it("fires when only defaultProvider changes (it scopes the model lookup)", async () => {
-            const calls: DefaultModelCall[] = [];
-            const server = makeServer(calls);
-            // defaultModel already on disk from the previous test; change provider only.
-            await callMethod("settings.write", {
-                server,
-                params: { global: { defaultProvider: "minimax" } },
-            });
-
-            assert.equal(calls.length, 1);
-            assert.equal(calls[0].defaultProvider, "minimax");
-        });
-
-        it("does NOT push when the patch touches neither field", async () => {
-            const calls: DefaultModelCall[] = [];
-            const server = makeServer(calls);
-            await callMethod("settings.write", {
-                server,
-                params: { global: { thinkingLevel: "low" } },
-            });
-
-            assert.equal(calls.length, 0);
-        });
-    });
-});
-
-describe("settings.fanout", () => {
-    /**
-     * settings.write handler — multi-server fan-out:
-     *   when a `ServerRegistry` is provided on MethodCtx, every one of the
-     *   five setters (setCustomProviders, setDefaultModel,
-     *   invalidateCompactionCaches, refreshInstructions,
-     *   broadcastModelsChanged) must reach every registered server in the
-     *   process. Without a registry, the handler falls back to the per-RPC
-     *   `server` argument — single-element iteration, byte-identical to the
-     *   pre-fix behaviour.
-     *
-     * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/settings.fanout.test.ts
-     */
-
-    useTempTacoHome("settings-fanout");
-
-    before(() => {
-        registerBuiltinMethods();
-    });
-
-    /** Recorder stub. Tracks every call on every method we expect to fan out. */
-    function makeRecorder(label: string) {
-        const calls = {
-            setCustomProviders: 0,
-            broadcastModelsChanged: 0,
-            invalidateCompactionCaches: 0,
-            refreshInstructions: 0,
-            setDefaultModel: 0,
-            setCustomProvidersValue: undefined as unknown,
-            refreshInstructionsValue: undefined as unknown,
-            setDefaultModelValue: undefined as { model?: string; provider?: string } | undefined,
-            lastInstructionsInstructions: undefined as unknown,
-        };
-        // Real ProviderKeyStore so the handler's unconditional
-        // providerKeyStore.update() call (when apiKeys is in the patch) doesn't
-        // NPE — the handler reads/writes the in-memory store before any of our
-        // fan-out setters run.
-        // ServerRpcSurface has 15+ methods; the fan-out helper only
-        // touches five of them. Cast through `unknown` so this test
-        // focuses on those five without duplicating the whole surface.
-        const server = {
-            providerKeyStore: new ProviderKeyStore({}),
-            setCustomProviders(next: readonly unknown[]) {
-                calls.setCustomProviders++;
-                calls.setCustomProvidersValue = next;
-            },
-            setDefaultModel(defaultModel: string | undefined, defaultProvider: string | undefined) {
-                calls.setDefaultModel++;
-                calls.setDefaultModelValue = { model: defaultModel, provider: defaultProvider };
-            },
-            invalidateCompactionCaches() {
-                calls.invalidateCompactionCaches++;
-            },
-            refreshInstructions(next: unknown) {
-                calls.refreshInstructions++;
-                calls.refreshInstructionsValue = next;
-                calls.lastInstructionsInstructions = next;
-            },
-            broadcastModelsChanged() {
-                calls.broadcastModelsChanged++;
-            },
-        } as unknown as ServerRpcSurface;
-        return { server, calls, label };
-    }
-
-    describe("settings.write — server fan-out", () => {
-        it("falls back to [server] when no registry is provided", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            // Caller is A; serverRegistry is intentionally undefined so the
-            // fan-out helper iterates the single-element [server] fallback.
-            // B exists only to assert it stays untouched (it is not the
-            // per-RPC server and the registry hook is not wired).
-            await callMethod("settings.write", {
-                server: a.server,
-                params: { global: { apiKeys: { foo: "bar" } } },
-            });
-
-            assert.equal(a.calls.broadcastModelsChanged, 1, "A: broadcastModelsChanged fires");
-            assert.equal(b.calls.broadcastModelsChanged, 0, "B: must NOT receive the broadcast");
-        });
-
-        it("fans setCustomProviders to every registered server", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            const c = makeRecorder("C");
-            const registry = new ServerRegistry();
-            registry.add(a.server);
-            registry.add(b.server);
-            registry.add(c.server);
-
-            const provider = [
-                {
-                    id: "custom:openrouter",
-                    name: "OpenRouter",
-                    baseUrl: "https://x.test",
-                    api: "chatcomplete",
-                    models: [{ id: "openrouter/test", name: "test" }],
-                },
-            ];
-            await callMethod("settings.write", {
-                server: a.server,
-                params: { global: { customProviders: provider } },
-                serverRegistry: registry,
-            });
-
-            for (const r of [a, b, c]) {
-                assert.equal(r.calls.setCustomProviders, 1, `${r.label}: setCustomProviders fires`);
-                assert.deepEqual(
-                    r.calls.setCustomProvidersValue,
-                    provider,
-                    `${r.label}: setCustomProviders receives the persisted value`,
-                );
-            }
-        });
-
-        it("fans broadcastModelsChanged to every server when apiKeys change", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            const registry = new ServerRegistry();
-            registry.add(a.server);
-            registry.add(b.server);
-
-            await callMethod("settings.write", {
-                server: a.server,
-                params: { global: { apiKeys: { anthropic: "sk-test" } } },
-                serverRegistry: registry,
-            });
-
-            assert.equal(a.calls.broadcastModelsChanged, 1);
-            assert.equal(b.calls.broadcastModelsChanged, 1);
-        });
-
-        it("fans invalidateCompactionCaches when compaction is patched", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            const registry = new ServerRegistry();
-            registry.add(a.server);
-            registry.add(b.server);
-
-            await callMethod("settings.write", {
-                server: a.server,
-                params: { global: { compaction: { enabled: true, threshold: 0.5 } } },
-                serverRegistry: registry,
-            });
-
-            assert.equal(a.calls.invalidateCompactionCaches, 1);
-            assert.equal(b.calls.invalidateCompactionCaches, 1);
-        });
-
-        it("fans refreshInstructions with the persisted (post-merge) value", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            const registry = new ServerRegistry();
-            registry.add(a.server);
-            registry.add(b.server);
-
-            const patch = { instructions: { enabled: false, files: { "AGENTS.md": true } } };
-            await callMethod("settings.write", {
-                server: a.server,
-                params: { global: patch },
-                serverRegistry: registry,
-            });
-
-            for (const r of [a, b]) {
-                assert.equal(
-                    r.calls.refreshInstructions,
-                    1,
-                    `${r.label}: refreshInstructions fires`,
-                );
-                assert.deepEqual(
-                    r.calls.refreshInstructionsValue,
-                    { enabled: false, files: { "AGENTS.md": true } },
-                    `${r.label}: receives persisted value`,
-                );
-            }
-            // Disk was also persisted (the handler's primary contract).
-            assert.deepEqual(readGlobalConfig().instructions, {
-                enabled: false,
-                files: { "AGENTS.md": true },
-            });
-        });
-
-        it("fans setDefaultModel when defaultModel/defaultProvider change", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            const registry = new ServerRegistry();
-            registry.add(a.server);
-            registry.add(b.server);
-
-            await callMethod("settings.write", {
-                server: a.server,
-                params: {
-                    global: { defaultModel: "claude-sonnet-4.5", defaultProvider: "anthropic" },
-                },
-                serverRegistry: registry,
-            });
-
-            for (const r of [a, b]) {
-                assert.equal(r.calls.setDefaultModel, 1, `${r.label}: setDefaultModel fires`);
-                assert.deepEqual(r.calls.setDefaultModelValue, {
-                    model: "claude-sonnet-4.5",
-                    provider: "anthropic",
-                });
-            }
-        });
-
-        it("survives a single server throwing without blocking the others", async () => {
-            const a = makeRecorder("A");
-            const b = makeRecorder("B");
-            // Wrap B's broadcast so it throws — fan-out helper must catch +
-            // continue so A still receives the patch.
-            const origBroadcast = b.server.broadcastModelsChanged.bind(b.server);
-            b.server.broadcastModelsChanged = () => {
-                origBroadcast();
-                throw new Error("synthetic broadcast failure");
-            };
-            const registry = new ServerRegistry();
-            registry.add(a.server);
-            registry.add(b.server);
-
-            // Suppress console.error noise from the fan-out helper's try/catch
-            // — the assertion below is what matters.
-            const originalErr = console.error;
-            console.error = () => {};
-            try {
-                await callMethod("settings.write", {
-                    server: a.server,
-                    params: { global: { apiKeys: { foo: "bar" } } },
-                    serverRegistry: registry,
-                });
-            } finally {
-                console.error = originalErr;
-            }
-
-            assert.equal(a.calls.broadcastModelsChanged, 1, "A still receives the broadcast");
-            assert.equal(b.calls.broadcastModelsChanged, 1, "B's broadcast fired before its throw");
-        });
-    });
-});
-
-describe("settings.instructions", () => {
-    /**
-     * settings.write handler — instructionsConfig propagation regression.
-     *
-     * The bug: `SidecarServer.buildWorkspace` did not pass
-     * `instructionsConfig` from `SidecarServerOptions` to the
-     * `new WorkspaceRuntime({...})` constructor call. Result: every
-     * workspace started with `instructionsConfig: undefined`, falling back to
-     * `mergeWithDefaults()` and silently dropping the user's
-     * `taco.json instructions` block. The fix: capture on `this` in the
-     * constructor, then thread through `buildWorkspace`.
-     *
-     * The handler-level contract (refreshInstructions fan-out) is already
-     * covered by `settings.fanout.test.ts`. This file covers the OTHER half
-     * of the fix: the workspace-build path. We construct a real
-     * `WorkspaceRuntime` with instructionsConfig and assert the value lands
-     * on the instance — that is the same field `buildWorkspace` reads, so
-     * a passing test means the wiring works end-to-end.
-     *
-     * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/settings.instructions.test.ts
-     */
-
-    // settings.write persists to $TACO_HOME/taco.json — keep it off the real ~/.taco.
-    useTempTacoHome("settings-instructions");
-
-    let tmpDir: string;
-
-    before(() => {
-        tmpDir = mkdtempSync(join(tmpdir(), "taco-settings-instructions-"));
-    });
-
-    after(() => {
-        rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    const providerKeyStore = () => new ProviderKeyStore({});
-
-    describe("WorkspaceRuntime — instructionsConfig plumbing", () => {
-        it("stores the constructor-supplied instructionsConfig on the instance", () => {
-            const cfg: InstructionsConfig = {
-                enabled: false,
-                files: { agentsMd: true, claudeMd: false },
-            };
-            const ws = new WorkspaceRuntime({
-                providerKeyStore: providerKeyStore(),
-                cwd: asWorkspaceId(tmpDir),
-                instructionsConfig: cfg,
-            });
-            assert.deepEqual(ws.instructionsConfig, cfg);
-        });
-    });
-
-    describe("settings.write — instructions reaches refreshInstructions with persisted value", () => {
-        before(() => {
-            registerBuiltinMethods();
-        });
-
-        it("refreshInstructions receives the post-merge value from disk", () => {
-            let received: InstructionsConfig | undefined;
-            const server = {
-                providerKeyStore: providerKeyStore(),
-                setCustomProviders(): void {},
-                broadcastModelsChanged(): void {},
-                invalidateCompactionCaches(): void {},
-                refreshInstructions(next: InstructionsConfig | undefined): void {
-                    received = next;
-                },
-                setDefaultModel(): void {},
-            };
-
-            return callMethod("settings.write", {
-                server,
-                params: {
-                    global: {
-                        instructions: {
-                            enabled: false,
-                            files: { agentsMd: true },
-                            inheritToSubagents: true,
-                        },
-                    },
-                },
-            }).then(() => {
-                // saveGlobalConfig merges with defaults (claudeMd/agentsMd/
-                // designMd are filled in), so the persisted value carries
-                // the full file set; the patch's intent (AGENTS.md=true,
-                // others false) is preserved within the merged object.
-                assert.ok(received);
-                assert.equal(received?.enabled, false);
-                assert.equal(received?.inheritToSubagents, true);
-                assert.deepEqual(received?.files?.agentsMd, true);
-            });
+            assert.equal(readFileSync(join(home, "taco.json"), "utf8"), "{this is not valid json");
         });
     });
 });

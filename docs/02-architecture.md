@@ -404,8 +404,10 @@ Configuration writes use `ConfigStore` transactions across every entry point.
 The owner-token lock covers reading, deriving collection edits and atomic
 replacement. A live lock is never reclaimed by age; contention fails after one
 second. Reads detect external atomic replacements. Reconnection and workspace
-access re-resolve configuration with CLI overrides; only changed derived state
-is applied. Hot updates preserve running sessions. MCP, memory, system prompt
+access re-resolve configuration with CLI overrides. `settings.write` and approved
+`config.patch` writes await this same refresh path. Each effective change is
+applied once; catalogs reconcile before defaults are resolved and model changes
+are announced after application. Hot updates preserve running sessions. MCP, memory, system prompt
 and default thinking settings are captured at workspace construction: new
 workspaces use the refreshed defaults, while existing ones retain their snapshot
 until explicitly released or the daemon restarts. Neither configuration refresh

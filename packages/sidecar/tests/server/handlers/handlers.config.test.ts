@@ -79,8 +79,7 @@ describe("config", () => {
             id: "test-id",
             workspace: { getSessionKind: () => "main", ...workspace } as WorkspaceRuntime,
             cwd,
-            server: { providerKeyStore: { update: () => {} } },
-            serverRegistry: undefined,
+            server: new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) }),
             params,
         } as unknown as Parameters<
             NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]

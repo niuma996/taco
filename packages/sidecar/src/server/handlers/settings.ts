@@ -17,13 +17,9 @@ import type {
 } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../config/config.ts";
-import { createLogger } from "../../lib/logger.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
-import type { ServerRegistry } from "../serverRegistry.ts";
 import { mcpServerToView } from "./mcpView.ts";
-
-const log = createLogger("settings");
 
 /**
  * Mask a single key string. Keeps the first 7 chars (covers known
@@ -94,160 +90,13 @@ export function toView(raw: TacoGlobalConfigShape): TacoGlobalConfigView {
     return v;
 }
 
-/**
- * Fan out a no-return setter across every SidecarServer in the process.
- * Falls back to `[server]` when no registry is present (stdio / tests).
- *
- * Errors are caught and logged per-target: a single server failing must
- * not prevent the others from receiving the patch, but we also do not
- * want to throw and roll back the persisted disk state. The setters
- * involved are best-effort hot-reload operations; the next
- * session.create will re-resolve from disk anyway.
- */
-function fanoutSetter(
+/** Persist a patch, then apply the effective configuration through the runtime's refresh path. */
+export async function applyGlobalConfigPatch(
     server: ServerRpcSurface,
-    serverRegistry: ServerRegistry | undefined,
-    fn: (s: ServerRpcSurface) => void,
-    label: string,
-): void {
-    const targets = serverRegistry ? serverRegistry.all() : [server];
-    for (const s of targets) {
-        try {
-            fn(s);
-        } catch (err) {
-            // Disk has already been persisted; the target server may now
-            // diverge from disk until the next session.create re-resolves.
-            // Logged as a warning so operators see a server missed the
-            // patch; not raised, so the other servers still get it.
-            log.warn(`settings.write: ${label} failed`, { error: String(err) });
-        }
-    }
-}
-
-/**
- * Write a global-config patch and propagate it to every live workspace.
- *
- * Shared by `settings.write` (the desktop's own path — the user is at the
- * settings pane) and `config.patch` (the model's path — the change is
- * approved first). Both must land the same way: a config change that
- * persists but does not reach the running workspaces would leave the app
- * showing stale settings until the next restart.
- *
- * Returns the masked view of the config after the write.
- */
-export function applyGlobalConfigPatch(
-    server: ServerRpcSurface,
-    serverRegistry: ServerRegistry | undefined,
     globalPatch: GlobalConfigPatch,
-): TacoGlobalConfigView {
-    // Accept raw patch (may include raw key strings for write),
-    // persist as-is, but return a masked view.
+): Promise<TacoGlobalConfigView> {
     const next = saveGlobalConfig(globalPatch);
-    // Hot-update apiKeys: push the latest merged apiKeys from disk
-    // into ProviderKeyStore. pi reads keys lazily via
-    // CredentialStore.read per provider id — no catalog recompute.
-    if (globalPatch.apiKeys !== undefined) {
-        server.providerKeyStore.update(next.apiKeys ?? {});
-    }
-    // Replace custom providers: push to existing workspaces'
-    // ModelRegistry for reconcile (add/remove custom ids, leave
-    // built-ins alone); new workspaces read the latest on creation.
-    // Only when the patch itself contains customProviders — since
-    // saveGlobalConfig is a merge, an unrelated field write would
-    // also make next.customProviders non-empty and trigger a
-    // pointless push.
-    if ("customProviders" in globalPatch) {
-        fanoutSetter(
-            server,
-            serverRegistry,
-            (s) => s.setCustomProviders?.(next.customProviders ?? []),
-            "setCustomProviders",
-        );
-    }
-    // Both model-list maps go through one call: the registry applies
-    // the hide filter and the extras append in the same wrapper, so
-    // pushing only the changed half would drop the other one's
-    // effect. Unchanged halves come from the merged `next`.
-    const modelListsChanged =
-        "providerExtraModels" in globalPatch || "providerHiddenModels" in globalPatch;
-    if (modelListsChanged) {
-        fanoutSetter(
-            server,
-            serverRegistry,
-            (s) =>
-                s.setProviderModelEdits?.(
-                    next.providerExtraModels ?? {},
-                    next.providerHiddenModels ?? {},
-                ),
-            "setProviderModelEdits",
-        );
-    }
-    // Notify the desktop that the model catalog may have changed
-    // (new apiKeys unlocked a provider, customProviders added/removed
-    // entries). Desktop re-pulls providers.list / session.listModels
-    // to refresh the Model menu without a restart.
-    if (
-        "apiKeys" in globalPatch ||
-        "customProviders" in globalPatch ||
-        "providerExtraModels" in globalPatch ||
-        "providerHiddenModels" in globalPatch
-    ) {
-        fanoutSetter(
-            server,
-            serverRegistry,
-            (s) => s.broadcastModelsChanged(),
-            "broadcastModelsChanged",
-        );
-    }
-    // Invalidate compaction caches across all workspaces: after
-    // a user changes the threshold, the current session's next
-    // `effectiveCompaction()` reads the new value immediately
-    // (no TTL wait). Only when the patch itself contains
-    // compaction — same merge-semantics reason as above.
-    if ("compaction" in globalPatch) {
-        fanoutSetter(
-            server,
-            serverRegistry,
-            (s) => s.invalidateCompactionCaches(),
-            "invalidateCompactionCaches",
-        );
-    }
-    // Hot-reload instructions config across all workspaces. The
-    // context hook reads via a lazy thunk on every LLM call, so
-    // no per-session invalidation is needed. Like compaction,
-    // only fire when the patch itself contains the field — a
-    // merge that happens to land on the key without the user
-    // editing it would otherwise trigger a pointless re-resolve.
-    if ("instructions" in globalPatch) {
-        fanoutSetter(
-            server,
-            serverRegistry,
-            (s) => s.refreshInstructions(next.instructions),
-            "refreshInstructions",
-        );
-    }
-    // Hot-reload the default model across all workspaces. Without
-    // this, a workspace built before the user picked a provider
-    // keeps its construction-time fallback (first catalog model,
-    // typically anthropic/*), so the next session.create fails
-    // with "Provider is not configured" even though the user set
-    // a valid default. Fire when either field is in the patch —
-    // defaultProvider scopes the defaultModel lookup, so a change
-    // to either must re-resolve.
-    //
-    // A model-list edit moves the catalog under the default too:
-    // renaming an extra model leaves `defaultModel` pointing at
-    // an id that is gone, and the workspace would keep serving
-    // the stale model object. Re-resolve after the catalog has
-    // been rewritten (the model-edit fanout above runs first).
-    if ("defaultModel" in globalPatch || "defaultProvider" in globalPatch || modelListsChanged) {
-        fanoutSetter(
-            server,
-            serverRegistry,
-            (s) => s.setDefaultModel?.(next.defaultModel, next.defaultProvider),
-            "setDefaultModel",
-        );
-    }
+    await server.refreshConfiguration();
     return toView(next);
 }
 
@@ -259,7 +108,7 @@ export function registerSettingsHandlers(): void {
         return { global: toView(readGlobalConfig()) };
     });
 
-    registerMethod("settingsWrite", false, async ({ params, server, serverRegistry }) => {
+    registerMethod("settingsWrite", false, async ({ params, server }) => {
         const { global: globalPatch } = params ?? {};
         if (!globalPatch || typeof globalPatch !== "object") {
             throw new RpcHandlerError(
@@ -268,7 +117,7 @@ export function registerSettingsHandlers(): void {
             );
         }
         try {
-            return { global: applyGlobalConfigPatch(server, serverRegistry, globalPatch) };
+            return { global: await applyGlobalConfigPatch(server, globalPatch) };
         } catch (e) {
             throw new RpcHandlerError(
                 ErrorCodes.InvalidValue,

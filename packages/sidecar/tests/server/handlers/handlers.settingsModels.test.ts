@@ -1,10 +1,13 @@
 /** Consolidated from 3 test files; behaviour unchanged. */
 
 import { strict as assert } from "node:assert";
+import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { before, beforeEach, describe, it, mock } from "node:test";
+import { join } from "node:path";
+import { afterEach, before, beforeEach, describe, it, mock } from "node:test";
 import type { Api, AssistantMessage, Model, Provider } from "@earendil-works/pi-ai";
+import { asWorkspaceId } from "@taco-ai/protocol";
 import { readGlobalConfig } from "../../../src/config/config.ts";
 import { buildCustomProvider } from "../../../src/runtime/models/customProvider.ts";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
@@ -23,65 +26,89 @@ import {
     registerProviderTestHandlers,
 } from "../../../src/server/handlers/providerTest.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
+import { SidecarServer } from "../../../src/server/server.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
 
 describe("settings.providerExtraModels", () => {
-    /**
-     * settings.write handler — providerExtraModels push path:
-     * when patch includes providerExtraModels, the handler persists it, calls
-     * server.setProviderExtraModels so existing workspace catalogs re-register
-     * wrapped built-ins, and broadcasts models.changed.
-     *
-     * Run: cd packages/sidecar && pnpm exec tsx --test tests/server/handlers/settings.providerExtraModels.test.ts
-     */
+    // Settings writes exercise the host's production configuration refresh;
+    // observers below retain the setters' actual catalog behavior.
 
-    useTempTacoHome("settings-providerextramodels");
+    const home = useTempTacoHome("settings-providerextramodels");
+    const servers: SidecarServer[] = [];
+    afterEach(async () => {
+        await Promise.all(servers.splice(0).map((server) => server.stop()));
+    });
 
     before(() => {
         registerBuiltinMethods();
     });
 
     function makeServer(track: { pushes: unknown[][]; broadcasts: number }) {
-        return {
-            providerKeyStore: undefined,
-            setProviderModelEdits(extras: unknown, hidden: unknown): void {
-                track.pushes.push([extras, hidden]);
-            },
-            broadcastModelsChanged(): void {
-                track.broadcasts++;
-            },
+        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+        servers.push(server);
+        const apply = server.setProviderModelEdits.bind(server);
+        server.setProviderModelEdits = (extras, hidden) => {
+            track.pushes.push([extras, hidden]);
+            apply(extras, hidden);
         };
+        const broadcast = server.broadcastModelsChanged.bind(server);
+        server.broadcastModelsChanged = () => {
+            track.broadcasts++;
+            broadcast();
+        };
+        return server;
     }
 
     describe("settings.write — providerExtraModels push", () => {
         it("persists providerExtraModels and calls server.setProviderModelEdits", async () => {
             const track = { pushes: [] as unknown[][], broadcasts: 0 };
+            const server = makeServer(track);
             await callMethod("settings.write", {
-                server: makeServer(track),
+                server,
                 params: { global: { providerExtraModels: { minimax: [{ id: "MiniMax-M3.1" }] } } },
             });
 
             assert.deepEqual(readGlobalConfig().providerExtraModels, {
                 minimax: [{ id: "MiniMax-M3.1" }],
             });
+            assert.ok(
+                server
+                    .buildProvider("minimax")
+                    ?.getModels()
+                    .some((model) => model.id === "MiniMax-M3.1"),
+            );
             assert.equal(track.pushes.length, 1);
             // Both halves travel together so the registry wrapper never loses one.
             assert.deepEqual(track.pushes[0], [{ minimax: [{ id: "MiniMax-M3.1" }] }, {}]);
-            assert.ok(track.broadcasts > 0, "models.changed broadcast fired");
+            assert.equal(track.broadcasts, 1, "models.changed broadcast fired once");
         });
 
         it("whole-object replace: a second write replaces the first", async () => {
             const track = { pushes: [] as unknown[][], broadcasts: 0 };
+            const server = makeServer(track);
             await callMethod("settings.write", {
-                server: makeServer(track),
+                server,
                 params: { global: { providerExtraModels: { deepseek: [{ id: "d-1" }] } } },
             });
             assert.deepEqual(readGlobalConfig().providerExtraModels, { deepseek: [{ id: "d-1" }] });
+            assert.ok(
+                server
+                    .buildProvider("deepseek")
+                    ?.getModels()
+                    .some((model) => model.id === "d-1"),
+            );
+            assert.equal(
+                server
+                    .buildProvider("minimax")
+                    ?.getModels()
+                    .some((model) => model.id === "MiniMax-M3.1"),
+                false,
+            );
         });
 
         it("settings.get view passes providerExtraModels through", async () => {
-            const result = (await callMethod("settings.get", { server: {} })) as {
+            const result = (await callMethod("settings.get")) as {
                 global: { providerExtraModels?: unknown };
             };
             assert.deepEqual(result.global.providerExtraModels, { deepseek: [{ id: "d-1" }] });
@@ -123,8 +150,9 @@ describe("settings.providerExtraModels", () => {
 
         it("does NOT call setProviderModelEdits when patch omits both maps", async () => {
             const track = { pushes: [] as unknown[][], broadcasts: 0 };
+            const server = makeServer(track);
             await callMethod("settings.write", {
-                server: makeServer(track),
+                server,
                 params: { global: { defaultModel: "m-x" } },
             });
             assert.equal(track.pushes.length, 0);
@@ -134,8 +162,9 @@ describe("settings.providerExtraModels", () => {
     describe("settings.write — providerHiddenModels push", () => {
         it("persists providerHiddenModels and pushes it with the current extras", async () => {
             const track = { pushes: [] as unknown[][], broadcasts: 0 };
+            const server = makeServer(track);
             await callMethod("settings.write", {
-                server: makeServer(track),
+                server,
                 params: { global: { providerHiddenModels: { minimax: ["MiniMax-M2"] } } },
             });
 
@@ -150,7 +179,7 @@ describe("settings.providerExtraModels", () => {
         });
 
         it("settings.get view passes providerHiddenModels through", async () => {
-            const result = (await callMethod("settings.get", { server: {} })) as {
+            const result = (await callMethod("settings.get")) as {
                 global: { providerHiddenModels?: unknown };
             };
             assert.deepEqual(result.global.providerHiddenModels, { minimax: ["MiniMax-M2"] });
@@ -176,13 +205,30 @@ describe("settings.providerExtraModels", () => {
         });
     });
 
+    it("hides a real catalog model while preserving previously added extras", async () => {
+        const server = makeServer({ pushes: [], broadcasts: 0 });
+        const ws = await server.ensureWorkspace(
+            asWorkspaceId(mkdtempSync(join(home, "workspace-"))),
+        );
+        const model = server.buildProvider("minimax")?.getModels()[0];
+        assert.ok(model);
+        await callMethod("settings.write", {
+            server,
+            params: {
+                global: {
+                    providerExtraModels: { deepseek: [{ id: "test-extra" }] },
+                    providerHiddenModels: { minimax: [model.id] },
+                },
+            },
+        });
+        assert.equal(ws.models.getModel("minimax", model.id), undefined);
+        assert.equal(ws.models.getModel("deepseek", "test-extra")?.id, "test-extra");
+    });
+
     describe("providers.revealKey", () => {
         it("returns the plaintext key from the provider key store", async () => {
-            const server = {
-                providerKeyStore: {
-                    get: (id: string) => (id === "minimax" ? "sk-plain-text" : undefined),
-                },
-            };
+            const server = makeServer({ pushes: [], broadcasts: 0 });
+            server.providerKeyStore.update({ minimax: "sk-plain-text" });
             const result = (await callMethod("providers.revealKey", {
                 server,
                 params: { workspace: "/tmp/ws", providerId: "minimax" },
@@ -191,7 +237,7 @@ describe("settings.providerExtraModels", () => {
         });
 
         it("returns null when no key is configured", async () => {
-            const server = { providerKeyStore: { get: () => undefined } };
+            const server = makeServer({ pushes: [], broadcasts: 0 });
             const result = (await callMethod("providers.revealKey", {
                 server,
                 params: { workspace: "/tmp/ws", providerId: "nope" },
@@ -203,7 +249,7 @@ describe("settings.providerExtraModels", () => {
             await assert.rejects(
                 () =>
                     callMethod("providers.revealKey", {
-                        server: { providerKeyStore: { get: () => undefined } },
+                        server: makeServer({ pushes: [], broadcasts: 0 }),
                         params: { workspace: "/tmp/ws", providerId: " " },
                     }),
                 /providerId/,

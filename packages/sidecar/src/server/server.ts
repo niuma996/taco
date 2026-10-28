@@ -73,6 +73,7 @@ import {
     type ResolvedCompaction,
     type ResolvedTacoConfig,
     readGlobalConfig,
+    resolveConfig,
     type SkillDirInput,
     validateCommandPermissions,
 } from "../config/config.ts";
@@ -141,7 +142,6 @@ import {
     toCommandOutcome,
     withRequestId,
 } from "./rpcResponse.ts";
-import type { ServerRegistry } from "./serverRegistry.ts";
 import { SessionEventLog } from "./sessionEventLog.ts";
 import { StdioTransport } from "./stdioTransport.ts";
 import type { Transport } from "./transport.ts";
@@ -175,7 +175,7 @@ export interface SidecarServerOptions {
      * Project-context instructions injection (CLAUDE.md / AGENTS.md /
      * DESIGN.md). Threaded into every `WorkspaceRuntime` constructed
      * by `buildWorkspace`. Hot-reloadable via `settings.write` →
-     * `refreshInstructions` (which iterates `serverRegistry` if present).
+     * `refreshConfiguration`.
      *
      * Without this being passed at construction, every workspace falls
      * back to `mergeWithDefaults()` and the user's `taco.json
@@ -230,14 +230,6 @@ export interface SidecarServerOptions {
     conversationRouter?: ConversationRouter;
     /** Delivers runtime pushes to initialized daemon connections. */
     clientSinkRegistry?: ClientSinkRegistry;
-    /**
-     * Process-level fan-out registry for settings setters. The
-     * `settings.write` handler iterates `serverRegistry.all() ?? [server]`
-     * so a desktop-initiated patch reaches every SidecarServer in the
-     * process. Omit on stdio / tests — the handler falls back
-     * to `[server]` and behaviour matches the pre-fix single-server path.
-     */
-    serverRegistry?: ServerRegistry;
 }
 
 interface RuntimePushEvent {
@@ -307,7 +299,7 @@ export class SidecarServer implements ServerRpcSurface {
     private readonly sessionEvents: SessionEventLog;
     /** Live workspace table + cold-start single-flight — see workspaceRegistry.ts. */
     private readonly workspaces: WorkspaceRegistry;
-    private readonly options: SidecarServerOptions;
+    private readonly options: SidecarServerOptions & { resolveConfig: () => ResolvedTacoConfig };
     /** Command-idempotency cache + turn gate — see commandIdempotency.ts. */
     private readonly idempotency: CommandIdempotencyGate;
     /** IM workspace policy store — admin-granted, survives channel unbind. */
@@ -393,8 +385,6 @@ export class SidecarServer implements ServerRpcSurface {
     }
     /** Process-level fan-out registry for all shared workspace pushes. */
     private readonly clientSinkRegistry?: ClientSinkRegistry;
-    /** Settings-setter fan-out — see SidecarServerOptions.serverRegistry. */
-    private readonly serverRegistry?: ServerRegistry;
     /** taco.json channel instances, kept so channels.list can report the
      *  configured set independently of which ones actually started. */
     private channelConfigs: readonly ChannelConfig[] = [];
@@ -411,7 +401,6 @@ export class SidecarServer implements ServerRpcSurface {
      */
     private stopped = false;
     private configSnapshot?: ResolvedTacoConfig;
-    private configRefresh?: Promise<void>;
 
     /** Lazily creates a StdioTransport if transport is not set (for tests that call server methods without start()). */
     private getTransport(): Transport {
@@ -482,8 +471,31 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     constructor(options: SidecarServerOptions) {
-        this.options = options;
-        this.configSnapshot = options.resolveConfig?.();
+        const resolver =
+            options.resolveConfig ??
+            (() =>
+                resolveConfig({
+                    defaultModel: options.defaultModel,
+                    defaultProvider: options.defaultProvider,
+                    systemPrompt: options.systemPrompt,
+                    thinkingLevel: options.defaultThinkingLevel,
+                    compaction: options.compaction,
+                    memoryEnabled: options.memoryEnabled,
+                    instructions: options.instructionsConfig,
+                }));
+        const config = resolver();
+        this.options = {
+            ...config,
+            ...options,
+            defaultModel: options.defaultModel ?? config.defaultModel,
+            defaultProvider: options.defaultProvider ?? config.defaultProvider,
+            systemPrompt: options.systemPrompt ?? config.systemPrompt,
+            compaction: options.compaction ?? config.compaction,
+            memoryEnabled: options.memoryEnabled ?? config.memoryEnabled,
+            defaultThinkingLevel: options.defaultThinkingLevel ?? config.defaultThinkingLevel,
+            resolveConfig: resolver,
+        };
+        this.configSnapshot = config;
         this.workspaces =
             options.workspaceRegistry ?? new WorkspaceRegistry((cwd) => this.buildWorkspace(cwd));
         this.idempotency = new CommandIdempotencyGate({
@@ -493,22 +505,25 @@ export class SidecarServer implements ServerRpcSurface {
         });
         this.extensionRegistry = options.extensionRegistry;
         this.providerKeyStore = options.providerKeyStore;
+        // Embedded hosts may seed credentials directly; only configured initial keys override them.
+        this.providerKeyStore.update(
+            Object.fromEntries(Object.entries(config.apiKeys).filter(([, value]) => value !== "")),
+        );
         this._jobs = options.jobs;
-        this.customProviders = options.customProviders ?? [];
-        this.providerExtraModels = options.providerExtraModels ?? {};
-        this.providerHiddenModels = options.providerHiddenModels ?? {};
+        this.customProviders = options.customProviders ?? config.customProviders ?? [];
+        this.providerExtraModels = options.providerExtraModels ?? config.providerExtraModels ?? {};
+        this.providerHiddenModels =
+            options.providerHiddenModels ?? config.providerHiddenModels ?? {};
         // instructionsConfig is captured at construction so every
         // workspace built by buildWorkspace() sees the same value. The
         // existing refreshInstructions() hot-reload path stays
-        // unchanged — it pushes updates to already-built workspaces via
-        // the serverRegistry fan-out.
-        this.instructionsConfig = options.instructionsConfig;
-        this.mcpServers = options.mcpServers ?? [];
+        // unchanged — it updates already-built workspaces.
+        this.instructionsConfig = options.instructionsConfig ?? config.instructions;
+        this.mcpServers = options.mcpServers ?? config.mcpServers ?? [];
         this.imPolicyStore = new ImWorkspacePolicyStore();
         this.associationStore = new WorkspaceAssociationStore();
         this.sessionEvents = new SessionEventLog(512, options.pushLog);
         this.clientSinkRegistry = options.clientSinkRegistry;
-        this.serverRegistry = options.serverRegistry;
         this.channelRegistry = new ChannelRegistry();
         this.channelBindBroker = new ChannelBindBroker();
         this.conversationRouter = options.conversationRouter;
@@ -575,7 +590,6 @@ export class SidecarServer implements ServerRpcSurface {
         transport.onRequest((line) => void this.handleLine(line));
         await transport.open();
         this.clientSinkRegistry?.add(transport);
-        this.serverRegistry?.add(this);
 
         this.conversationRouter ??= await ConversationRouter.load(tacoHome());
         this.conversationRouter.on("conversation", this.onRouterConversation);
@@ -617,7 +631,6 @@ export class SidecarServer implements ServerRpcSurface {
         if (this.transport) {
             this.clientSinkRegistry?.remove(this.transport);
         }
-        this.serverRegistry?.remove(this);
         this.channelBindBroker.off("status", this.onBrokerStatus);
         this.conversationRouter?.off("conversation", this.onRouterConversation);
         this.idempotency.stop();
@@ -808,7 +821,6 @@ export class SidecarServer implements ServerRpcSurface {
                 workspace: workspace as WorkspaceRuntime,
                 cwd,
                 server: this,
-                serverRegistry: this.serverRegistry,
                 params: req.params,
             };
             const result = await reg.handler(ctx);
@@ -1011,10 +1023,8 @@ export class SidecarServer implements ServerRpcSurface {
         return this.workspaces.ensure(cwd);
     }
 
-    /** Apply changed resolved fields without resetting unaffected sessions on reconnect. */
+    /** Apply effective configuration once; construction-only settings wait for a new workspace. */
     async refreshConfiguration(): Promise<void> {
-        if (!this.options.resolveConfig) return;
-        if (this.configRefresh) return this.configRefresh;
         let next: ResolvedTacoConfig;
         try {
             next = this.options.resolveConfig();
@@ -1026,53 +1036,44 @@ export class SidecarServer implements ServerRpcSurface {
             return;
         }
         const previous = this.configSnapshot;
-        if (JSON.stringify(next) === JSON.stringify(previous)) return;
         const changed = (key: keyof ResolvedTacoConfig) =>
             JSON.stringify(next[key]) !== JSON.stringify(previous?.[key]);
-        const refresh = Promise.resolve()
-            .then(() => {
-                if (changed("apiKeys")) {
-                    const removed = Object.fromEntries(
-                        Object.keys(previous?.apiKeys ?? {})
-                            .filter((key) => !(key in next.apiKeys))
-                            .map((key) => [key, ""]),
-                    );
-                    this.providerKeyStore.update({ ...removed, ...next.apiKeys });
-                }
-                if (changed("customProviders")) this.setCustomProviders(next.customProviders ?? []);
-                if (changed("providerExtraModels") || changed("providerHiddenModels")) {
-                    this.setProviderModelEdits(
-                        next.providerExtraModels ?? {},
-                        next.providerHiddenModels ?? {},
-                    );
-                }
-                if (
-                    changed("defaultModel") ||
-                    changed("defaultProvider") ||
-                    changed("customProviders") ||
-                    changed("providerExtraModels") ||
-                    changed("providerHiddenModels")
-                ) {
-                    this.setDefaultModel(next.defaultModel, next.defaultProvider);
-                }
-                if (changed("instructions")) this.refreshInstructions(next.instructions);
-                if (changed("compaction")) {
-                    this.options.compaction = next.compaction;
-                    this.invalidateCompactionCaches();
-                }
-                // Construction-only settings apply on the next build. Disposing here
-                // can abort unrelated turns or deadlock a turn waiting on self-RPC.
-                this.options.memoryEnabled = next.memoryEnabled;
-                this.options.systemPrompt = next.systemPrompt;
-                this.options.defaultThinkingLevel = next.defaultThinkingLevel;
-                this.mcpServers = next.mcpServers ?? [];
-                this.configSnapshot = next;
-            })
-            .finally(() => {
-                if (this.configRefresh === refresh) this.configRefresh = undefined;
-            });
-        this.configRefresh = refresh;
-        return refresh;
+        const catalogChanged =
+            changed("customProviders") ||
+            changed("providerExtraModels") ||
+            changed("providerHiddenModels");
+        if (changed("apiKeys")) {
+            const removed = Object.fromEntries(
+                Object.keys(previous?.apiKeys ?? {})
+                    .filter((key) => !(key in next.apiKeys))
+                    .map((key) => [key, ""]),
+            );
+            this.providerKeyStore.update({ ...removed, ...next.apiKeys });
+        }
+        if (changed("customProviders")) this.setCustomProviders(next.customProviders ?? []);
+        if (changed("providerExtraModels") || changed("providerHiddenModels")) {
+            this.setProviderModelEdits(
+                next.providerExtraModels ?? {},
+                next.providerHiddenModels ?? {},
+            );
+        }
+        // Catalog reconciliation must finish before resolving the default model.
+        if (changed("defaultModel") || changed("defaultProvider") || catalogChanged) {
+            this.setDefaultModel(next.defaultModel, next.defaultProvider);
+        }
+        if (changed("instructions")) this.refreshInstructions(next.instructions);
+        if (changed("compaction")) {
+            this.options.compaction = next.compaction;
+            this.invalidateCompactionCaches();
+        }
+        // Disposal on this path can abort unrelated turns or deadlock a turn waiting on self-RPC.
+        if (changed("memoryEnabled")) this.options.memoryEnabled = next.memoryEnabled;
+        if (changed("systemPrompt")) this.options.systemPrompt = next.systemPrompt;
+        if (changed("defaultThinkingLevel"))
+            this.options.defaultThinkingLevel = next.defaultThinkingLevel;
+        if (changed("mcpServers")) this.mcpServers = next.mcpServers ?? [];
+        if (changed("apiKeys") || catalogChanged) this.broadcastModelsChanged();
+        this.configSnapshot = next;
     }
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {

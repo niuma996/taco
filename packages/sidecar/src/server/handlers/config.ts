@@ -26,7 +26,7 @@ export function registerConfigHandlers(): void {
     registerMethod(
         "configPatch",
         true,
-        async ({ cwd, workspace, params, server, serverRegistry }): Promise<ConfigPatchResult> => {
+        async ({ cwd, workspace, params, server }): Promise<ConfigPatchResult> => {
             // Defense-in-depth for the configPatch tool's own main-session
             // check: the RPC is also reachable from any client with a
             // dispatcher, so re-verify the claimed workspace is local and the
@@ -80,7 +80,7 @@ export function registerConfigHandlers(): void {
             }
 
             try {
-                const global = applyGlobalConfigPatch(server, serverRegistry, patch);
+                const global = await applyGlobalConfigPatch(server, patch);
                 log.info(`config patched: ${fields.join(", ")}`);
                 return { approved: true, fields, global };
             } catch (e) {

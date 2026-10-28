@@ -9,6 +9,7 @@ import type { RpcResponse } from "@taco-ai/protocol";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { hashOf, LocalMemoryStore, NoOpMemoryStore } from "../../../src/memory/index.ts";
 import type { MemoryEntry } from "../../../src/memory/types.ts";
+import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
 import type { MethodCtx } from "../../../src/server/methodRegistry.ts";
 import { getRegisteredMethod, RpcHandlerError } from "../../../src/server/methodRegistry.ts";
@@ -290,7 +291,7 @@ describe("jobs", () => {
         controllerCalls: string[],
     ): Promise<RpcResponse> {
         const { SidecarServer } = await import("../../../src/server/server.ts");
-        const server = new SidecarServer({ providerKeyStore: {} as never });
+        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
         const stubServer = makeStubServer(controllerCalls);
         // SidecarServer stores its own `jobs` reference on construction; replace
         // it with the stub so the handler sees our recording controller. The
@@ -346,7 +347,7 @@ describe("jobs", () => {
             });
 
             const { SidecarServer } = await import("../../../src/server/server.ts");
-            const server = new SidecarServer({ providerKeyStore: {} as never });
+            const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
             server.setJobsControl?.(jobs);
             const resp = await server.handleRpcRequest({
                 id: "test-2",
