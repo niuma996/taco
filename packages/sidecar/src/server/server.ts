@@ -391,8 +391,7 @@ export class SidecarServer implements ServerRpcSurface {
     get conversationRouterView(): ConversationRouter | undefined {
         return this.conversationRouter;
     }
-    /** Process-level fan-out registry. The owner uses it to deliver im://
-     *  push frames to every connected desktop's NDJSON transport. */
+    /** Process-level fan-out registry for all shared workspace pushes. */
     private readonly clientSinkRegistry?: ClientSinkRegistry;
     /** Settings-setter fan-out — see SidecarServerOptions.serverRegistry. */
     private readonly serverRegistry?: ServerRegistry;
@@ -1031,7 +1030,7 @@ export class SidecarServer implements ServerRpcSurface {
         const changed = (key: keyof ResolvedTacoConfig) =>
             JSON.stringify(next[key]) !== JSON.stringify(previous?.[key]);
         const refresh = Promise.resolve()
-            .then(async () => {
+            .then(() => {
                 if (changed("apiKeys")) {
                     const removed = Object.fromEntries(
                         Object.keys(previous?.apiKeys ?? {})
@@ -1061,17 +1060,12 @@ export class SidecarServer implements ServerRpcSurface {
                     this.options.compaction = next.compaction;
                     this.invalidateCompactionCaches();
                 }
-                const rebuild =
-                    changed("memoryEnabled") ||
-                    changed("systemPrompt") ||
-                    changed("defaultThinkingLevel");
+                // Construction-only settings apply on the next build. Disposing here
+                // can abort unrelated turns or deadlock a turn waiting on self-RPC.
                 this.options.memoryEnabled = next.memoryEnabled;
                 this.options.systemPrompt = next.systemPrompt;
                 this.options.defaultThinkingLevel = next.defaultThinkingLevel;
-                const mcpChanged =
-                    JSON.stringify(this.mcpServers) !== JSON.stringify(next.mcpServers ?? []);
                 this.mcpServers = next.mcpServers ?? [];
-                if (rebuild || mcpChanged) await this.workspaces.disposeAll();
                 this.configSnapshot = next;
             })
             .finally(() => {
@@ -1170,10 +1164,8 @@ export class SidecarServer implements ServerRpcSurface {
                 resolveAssociatedRoots: () =>
                     this.associationStore.resolve(paths.workspaceKey).roots,
                 toolRegistry,
-                // IM prompts fan out to every connected desktop, so any one can
-                // answer. Other workspaces only reach this server's transport:
-                // the daemon's scheduler runtime sits on a NullTransport, where
-                // an ask would otherwise wait out the full broker timeout.
+                // Shared workspace approvals, including scheduler runs, reach every
+                // initialized desktop. Headless runs deny asks immediately.
                 hasApprover: this.clientSinkRegistry
                     ? () => this.clientSinkRegistry?.hasClient() ?? true
                     : () => this.getTransport().interactive !== false,
@@ -1587,22 +1579,9 @@ export class SidecarServer implements ServerRpcSurface {
         }
     }
 
-    /**
-     * Dispose + clear every workspace so the next `ensureWorkspace` rebuilds
-     * against the latest disk config. Called by the `mcp.*` mutation handlers
-     * after persisting a change so newly enabled / removed MCP servers are
-     * discovered on demand instead of requiring a sidecar restart. Active
-     * chat sessions in those workspaces are interrupted — acceptable for a
-     * rare config mutation.
-     */
+    /** Update MCP defaults for future builds; live sessions retain their toolset until release. */
     async reloadMcpServers(): Promise<void> {
-        // Refresh the cached snapshot so the next ensureWorkspace discovers
-        // newly enabled / removed servers. Mirrors setCustomProviders /
-        // setDefaultModel: invalidate-then-propagate, so the disk read happens
-        // once per mcp mutation rather than on every ensureWorkspace. The three
-        // mcp.* mutation handlers are the only callers.
         this.mcpServers = readGlobalConfig().mcpServers ?? [];
-        await this.workspaces.disposeAll();
     }
 
     /**

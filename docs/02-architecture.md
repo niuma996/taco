@@ -388,7 +388,10 @@ Within one daemon, a single `SidecarServer` owns the workspace registry,
 attached sessions, command-idempotency gate, channels and sequenced event log.
 The scheduler dispatches into that same runtime. `ConnectionServer` holds only
 its transport, initialization state and client capabilities; responses return
-to the requesting connection, while pushes fan out to initialized clients.
+to the requesting connection, while pushes for both filesystem and IM workspaces
+fan out to all initialized clients, including session events and permission
+requests. Scheduled runs may wait for desktop approval when a client is connected;
+without an interactive client, approval requests are denied immediately.
 Disconnecting a socket does not abort sessions or release workspace resources.
 
 `WorkspaceRegistry` transitions each key through starting, ready and closing.
@@ -402,8 +405,16 @@ The owner-token lock covers reading, deriving collection edits and atomic
 replacement. A live lock is never reclaimed by age; contention fails after one
 second. Reads detect external atomic replacements. Reconnection and workspace
 access re-resolve configuration with CLI overrides; only changed derived state
-is applied. Changes to MCP or construction-only settings close workspaces;
-channels and extensions still require a daemon restart.
+is applied. Hot updates preserve running sessions. MCP, memory, system prompt
+and default thinking settings are captured at workspace construction: new
+workspaces use the refreshed defaults, while existing ones retain their snapshot
+until explicitly released or the daemon restarts. Neither configuration refresh
+nor MCP configuration writes dispose workspaces on the request path. Channels
+and extensions still require a daemon restart.
+
+Server-generated notices currently carry rendered text in the shared push frame.
+The initiating request's locale determines that text; IM ingress without a client
+request context defaults to English. Notices are not localized per recipient.
 
 Sessions in separate workspaces or with different ids can run concurrently.
 `CommandIdempotencyGate` serializes turn commands by `(workspace, sessionId)`

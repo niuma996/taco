@@ -149,9 +149,7 @@ export function registerMcpHandlers(): void {
                         "mcp.createConfig",
                     ),
                 }));
-                // Invalidate every workspace so the next ensureWorkspace
-                // discovers the new server's candidates. reloadMcpServers is
-                // optional on the surface (test stubs may omit it).
+                // New workspace builds use the saved config; existing toolsets stay live.
                 await server?.reloadMcpServers?.();
                 return { server: mcpServerToView(params.config), requiresRestart: true };
             } catch (e) {

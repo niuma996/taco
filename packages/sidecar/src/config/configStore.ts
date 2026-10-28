@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import type { TacoGlobalConfigShape } from "@taco-ai/protocol";
+import { restrictOwnerSync } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 
 const log = createLogger("config");
@@ -59,6 +60,7 @@ export class ConfigStore {
                 mode: 0o600,
                 flag: "wx",
             });
+            restrictOwnerSync(tmp);
             renameSync(tmp, path);
             this.cache = undefined;
             return next;

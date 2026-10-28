@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type RpcRequest, type RpcResponse, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
 import { ConnectionServer } from "../../src/server/connectionServer.ts";
 import { registerAdhocMethod } from "../../src/server/methodRegistry.ts";
@@ -196,10 +197,21 @@ test("reconnection refreshes resolved config without rebuilding unchanged worksp
         };
         assert.equal(await host.ensureWorkspace(cwd), original);
         assert.equal(original.defaultModel?.contextWindow, 654321);
-        config = { ...config, memoryEnabled: false };
+        config = {
+            ...config,
+            memoryEnabled: false,
+            systemPrompt: "Refreshed system prompt",
+            defaultThinkingLevel: "high",
+        };
         const next = await host.ensureWorkspace(cwd);
-        assert.notEqual(next, original);
-        assert.equal(await host.ensureWorkspace(cwd), next);
+        assert.equal(next, original);
+        await host.disposeWorkspace(cwd);
+        const rebuilt = await host.ensureWorkspace(cwd);
+        assert.notEqual(rebuilt, original);
+        assert.equal(rebuilt.defaultThinkingLevel, "high");
+        assert.ok(rebuilt.systemPrompt.includes("Refreshed system prompt"));
+        assert.equal(rebuilt.memoryStore.constructor.name, "NoOpMemoryStore");
+        assert.equal(await host.ensureWorkspace(cwd), rebuilt);
     } finally {
         await connection.stop();
         await host.stop();
@@ -226,5 +238,101 @@ test("a malformed external config does not block reconnection with the last vali
         assert.equal((await request(transport, initialize("fallback"))).ok, true);
     } finally {
         await connection.stop();
+    }
+});
+
+for (const patch of [
+    { memoryEnabled: false },
+    { systemPrompt: "Updated prompt" },
+    { defaultThinkingLevel: "high" as const },
+    {
+        mcpServers: [
+            { id: "deferred", transport: "stdio" as const, command: "unused", enabled: false },
+        ],
+    },
+]) {
+    test(`config refresh preserves running workspaces for ${Object.keys(patch)[0]}`, async () => {
+        const { asWorkspaceId } = await import("@taco-ai/protocol");
+        const { resolveConfig } = await import("../../src/config/config.ts");
+        const { WorkspaceRegistry } = await import("../../src/server/workspaceRegistry.ts");
+        const config = resolveConfig();
+        let current = config;
+        let disposals = 0;
+        let endTurn!: () => void;
+        const turn = new Promise<void>((done) => {
+            endTurn = done;
+        });
+        const workspace = {
+            dispose: async () => {
+                disposals++;
+                await turn;
+            },
+        };
+        const registry = new WorkspaceRegistry(async () => workspace as WorkspaceRuntime);
+        const cwd = asWorkspaceId("/running");
+        const other = asWorkspaceId("/other-running");
+        registry.publish(cwd, workspace as WorkspaceRuntime);
+        registry.publish(other, workspace as WorkspaceRuntime);
+        const host = new SidecarServer({
+            providerKeyStore: new ProviderKeyStore({}),
+            workspaceRegistry: registry,
+            resolveConfig: () => current,
+        });
+        const connection = new ConnectionServer(
+            host,
+            new InMemoryTransport(),
+            new ClientSinkRegistry(),
+        );
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            current = { ...config, ...patch };
+            // Disposal waits for the turn, which is waiting for this self-RPC's workspace lookup.
+            const lookup = host.ensureWorkspace(cwd);
+            const result = await Promise.race([
+                lookup,
+                new Promise<never>((_, reject) => {
+                    timer = setTimeout(
+                        () => reject(new Error("workspace lookup blocked on its own turn")),
+                        500,
+                    );
+                }),
+            ]);
+            assert.equal(result, workspace);
+            await connection.start();
+            assert.equal(await host.ensureWorkspace(other), workspace);
+            assert.equal(disposals, 0);
+        } finally {
+            clearTimeout(timer);
+            endTurn();
+            await connection.stop();
+            await host.stop();
+        }
+    });
+}
+
+test("MCP mutation defers workspace disposal until explicit release", async () => {
+    const { asWorkspaceId } = await import("@taco-ai/protocol");
+    const { WorkspaceRegistry } = await import("../../src/server/workspaceRegistry.ts");
+    let disposed = 0;
+    const workspace = {
+        dispose: async () => {
+            disposed++;
+        },
+    };
+    const registry = new WorkspaceRegistry(async () => workspace as WorkspaceRuntime);
+    const cwd = asWorkspaceId("/running-mcp");
+    registry.publish(cwd, workspace as WorkspaceRuntime);
+    const host = new SidecarServer({
+        providerKeyStore: new ProviderKeyStore({}),
+        workspaceRegistry: registry,
+    });
+    try {
+        await host.reloadMcpServers();
+        assert.equal(await host.ensureWorkspace(cwd), workspace);
+        assert.equal(disposed, 0);
+        await host.disposeWorkspace(cwd);
+        assert.equal(disposed, 1);
+    } finally {
+        await host.stop();
     }
 });

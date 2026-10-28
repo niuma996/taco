@@ -340,7 +340,10 @@ async function runDaemon(
             clientSinkRegistry,
             pushLog,
         });
-        await runtime.start(new NullTransport(), deps.cfg.channels ?? []);
+        // Channel/router startup failures must not block filesystem RPCs or socket binding.
+        await runtime.start(new NullTransport(), deps.cfg.channels ?? []).catch((err: unknown) => {
+            log.error(`runtime failed to start: ${String(err)}`);
+        });
 
         const scheduler = new Scheduler({
             store: jobStore,
