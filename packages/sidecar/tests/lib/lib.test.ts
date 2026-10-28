@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it, test } from "node:test";
@@ -677,6 +678,98 @@ describe("stderrTee", () => {
             }
             assert.deepEqual(cap.chunks, ["hello tee\n"]);
             assert.match(readFileSync(logPath, "utf8"), /hello tee/);
+        });
+
+        it("keeps skipPrefix chunks on stderr but out of the log file", async () => {
+            const cap = stubStderr();
+            const handle = installStderrTee(logPath, { skipPrefix: "[taco:llm]" });
+            assert.ok(handle);
+            try {
+                process.stderr.write("[taco:llm] payload\n");
+                process.stderr.write("kept line\n");
+            } finally {
+                await handle.dispose();
+                cap.restore();
+            }
+            assert.deepEqual(cap.chunks, ["[taco:llm] payload\n", "kept line\n"]);
+            const raw = readFileSync(logPath, "utf8");
+            assert.match(raw, /kept line/);
+            assert.doesNotMatch(raw, /payload/);
+        });
+
+        it("rotates to <path>.1 once maxBytes is reached and keeps one generation", async () => {
+            const cap = stubStderr();
+            const handle = installStderrTee(logPath, { maxBytes: 64 });
+            assert.ok(handle);
+            try {
+                for (let i = 0; i < 10; i++) process.stderr.write(`${"x".repeat(30)} line-${i}\n`);
+            } finally {
+                await handle.dispose();
+                cap.restore();
+            }
+            // Each line is 38 bytes, so a 64-byte budget rotates every second
+            // line; the newest line may sit at the end of either file.
+            const current = readFileSync(logPath, "utf8");
+            const previous = readFileSync(`${logPath}.1`, "utf8");
+            assert.match(previous + current, /line-9\n$/);
+            assert.ok(Buffer.byteLength(current) < 64);
+            assert.ok(Buffer.byteLength(previous) < 64 + 38);
+            assert.doesNotMatch(previous + current, /line-0\n/, "older generations are dropped");
+        });
+
+        it("closes the append fd before renaming so Windows can rotate", async () => {
+            const originalOpenSync = fs.openSync;
+            const originalCloseSync = fs.closeSync;
+            const originalRenameSync = fs.renameSync;
+            let mirrorFd: number | undefined;
+            let renamedWhileOpen = false;
+            fs.openSync = (path, flags, mode) => {
+                const opened = originalOpenSync(path, flags, mode);
+                if (path === logPath && flags === "a") mirrorFd = opened;
+                return opened;
+            };
+            fs.closeSync = (fd) => {
+                if (fd === mirrorFd) mirrorFd = undefined;
+                originalCloseSync(fd);
+            };
+            fs.renameSync = (oldPath, newPath) => {
+                if (oldPath === logPath && mirrorFd !== undefined) renamedWhileOpen = true;
+                originalRenameSync(oldPath, newPath);
+            };
+            syncBuiltinESMExports();
+
+            const cap = stubStderr();
+            let handle: ReturnType<typeof installStderrTee>;
+            try {
+                handle = installStderrTee(logPath, { maxBytes: 8 });
+                assert.ok(handle);
+                process.stderr.write("exceeds budget\n");
+            } finally {
+                await handle?.dispose();
+                cap.restore();
+                fs.openSync = originalOpenSync;
+                fs.closeSync = originalCloseSync;
+                fs.renameSync = originalRenameSync;
+                syncBuiltinESMExports();
+            }
+
+            assert.equal(renamedWhileOpen, false, "Windows cannot rename an open append fd");
+            assert.equal(readFileSync(`${logPath}.1`, "utf8"), "exceeds budget\n");
+        });
+
+        it("moves an oversized file aside before appending", async () => {
+            writeFileSync(logPath, "y".repeat(200));
+            const cap = stubStderr();
+            const handle = installStderrTee(logPath, { maxBytes: 100 });
+            assert.ok(handle);
+            try {
+                process.stderr.write("fresh\n");
+            } finally {
+                await handle.dispose();
+                cap.restore();
+            }
+            assert.equal(readFileSync(logPath, "utf8"), "fresh\n");
+            assert.equal(readFileSync(`${logPath}.1`, "utf8").length, 200);
         });
 
         it("restores the original stderr.write on dispose", () => {

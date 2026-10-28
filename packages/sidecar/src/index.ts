@@ -43,6 +43,11 @@ import { DEFAULT_MARKER_PATH, UpgradeOrchestrator } from "./upgrader/orchestrato
 
 const log = createLogger("sidecar");
 
+/** Push tails untouched this long are pruned at daemon start. */
+const PUSH_TAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** Rotate the stderr tee target past this size; one previous file is kept. */
+const STDERR_LOG_MAX_BYTES = 32 * 1024 * 1024;
+
 function parseThinkingLevel(raw: string | undefined): ThinkingLevel | undefined {
     if (raw === undefined) return undefined;
     if (!THINKING_LEVELS.has(raw as ThinkingLevel)) {
@@ -333,6 +338,14 @@ async function runDaemon(
         const conversationRouter = await ConversationRouter.load(tacoHome());
         const clientSinkRegistry = new ClientSinkRegistry();
         const pushLog = new DurablePushLog(join(tacoHome(), "push-log"));
+        // Before any stream is touched: a tail older than this has no client
+        // left that could resume from it.
+        await pushLog
+            .prune(PUSH_TAIL_MAX_AGE_MS)
+            .then((removed) => {
+                if (removed > 0) log.info(`pruned ${removed} stale push tail(s)`);
+            })
+            .catch((err: unknown) => log.warn(`push tail prune failed: ${String(err)}`));
         const runtime = new SidecarServer({
             ...toSidecarOptions(deps),
             resolveConfig: () => resolveCliConfig(deps.args),
@@ -642,7 +655,12 @@ async function main(): Promise<void> {
             // volume meant more fds meant more errors to log. A single stream
             // holds exactly one fd and serializes writes internally.
             const { installStderrTee } = await import("./lib/stderrTee.ts");
-            const handle = installStderrTee(logPath);
+            // Bounded, and without `[taco:llm]` payload dumps: the desktop
+            // reads those off live stderr into its opt-in llm-dump.log.
+            const handle = installStderrTee(logPath, {
+                maxBytes: STDERR_LOG_MAX_BYTES,
+                skipPrefix: "[taco:llm]",
+            });
             if (handle) {
                 log.info("stderr tee active -> " + handle.targetPath);
                 // process.on('exit') runs synchronously after the event loop

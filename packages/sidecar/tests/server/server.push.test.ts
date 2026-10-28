@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -744,6 +744,52 @@ describe("durablePushLog", () => {
             } finally {
                 await rm(dir, { recursive: true, force: true });
             }
+        });
+
+        it("prune removes tails older than maxAge and keeps fresh or active ones", async () => {
+            const dir = await mkdtemp(join(tmpdir(), "taco-push-log-"));
+            try {
+                const writer = new DurablePushLog(dir, { flushDelayMs: 60_000 });
+                const owner = ring();
+                for (const sid of ["stale", "fresh", "active"]) {
+                    writer.scheduleAppend(frame(sid, 1), owner);
+                }
+                await writer.flush();
+                const names = await readdir(dir);
+                assert.equal(names.length, 3);
+                await writeFile(join(dir, "leftover.jsonl.tmp"), "");
+                await writeFile(join(dir, "unrelated.txt"), "");
+                const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+                const byStream = async (sid: string) =>
+                    join(dir, (await readdir(dir)).find((n) => n.startsWith(`${sid}-`)) as string);
+                for (const path of [
+                    await byStream("stale"),
+                    await byStream("active"),
+                    join(dir, "leftover.jsonl.tmp"),
+                    join(dir, "unrelated.txt"),
+                ]) {
+                    await utimes(path, old, old);
+                }
+
+                // A restarted process touches "active" before pruning runs.
+                const restarted = new DurablePushLog(dir, { flushDelayMs: 60_000 });
+                await restarted.loadTail(WS, asSessionId("active"), 512, ring());
+                const removed = await restarted.prune(60 * 60 * 1000);
+
+                assert.equal(removed, 2);
+                const left = (await readdir(dir)).sort();
+                assert.equal(left.length, 3);
+                assert.ok(left.some((n) => n.startsWith("fresh-")));
+                assert.ok(left.some((n) => n.startsWith("active-")));
+                assert.ok(left.includes("unrelated.txt"), "non-tail files are left alone");
+            } finally {
+                await rm(dir, { recursive: true, force: true });
+            }
+        });
+
+        it("prune tolerates a missing root", async () => {
+            const disk = new DurablePushLog(join(tmpdir(), `taco-push-log-missing-${Date.now()}`));
+            assert.equal(await disk.prune(0), 0);
         });
 
         it("remove deletes the file and drops buffered frames", async () => {

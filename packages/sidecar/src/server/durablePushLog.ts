@@ -39,7 +39,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServerPush, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
@@ -260,6 +260,39 @@ export class DurablePushLog {
             this.files.set(key, state);
         }
         return state;
+    }
+
+    /**
+     * Delete tails not written within `maxAgeMs`. A tail only bridges seq
+     * continuity across a restart; once its client has reconnected (or gone),
+     * nothing reads it again. A missing tail costs one snapshot recovery, so
+     * age alone is a safe criterion. Streams this process already touched are
+     * skipped: their file may be mid-write. Returns the number removed.
+     */
+    async prune(maxAgeMs: number, now = Date.now()): Promise<number> {
+        let names: string[];
+        try {
+            names = await readdir(this.root);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+            throw error;
+        }
+        let removed = 0;
+        for (const name of names) {
+            if (!name.endsWith(".jsonl") && !name.endsWith(".jsonl.tmp")) continue;
+            if (this.files.has(name.replace(/\.jsonl(\.tmp)?$/, ""))) continue;
+            const path = join(this.root, name);
+            try {
+                if (now - (await stat(path)).mtimeMs < maxAgeMs) continue;
+                await unlink(path);
+                removed++;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    log.warn("failed to prune push tail", { path, error: String(error) });
+                }
+            }
+        }
+        return removed;
     }
 
     /** Serialize one operation after this stream file's pending work. */
