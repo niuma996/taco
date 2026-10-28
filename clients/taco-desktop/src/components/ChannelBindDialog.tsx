@@ -109,7 +109,11 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
                 inputRef.current?.focus();
             }}
         >
-            {error && <p className="channel-bind-error">{error}</p>}
+            {error && (
+                <p className="channel-bind-error" role="alert">
+                    {error}
+                </p>
+            )}
 
             {state === "awaiting_scan" &&
                 (channel?.qrUrl ? (
@@ -211,11 +215,13 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
             )}
 
             {state === "expired" && (
-                <p className="channel-bind-error">{t("channels.expiredHint")}</p>
+                <p className="channel-bind-error" role="status">
+                    {t("channels.expiredHint")}
+                </p>
             )}
 
             {state === "error" && (
-                <p className="channel-bind-error">
+                <p className="channel-bind-error" role="alert">
                     {channel?.message ?? t("channels.genericError")}
                 </p>
             )}

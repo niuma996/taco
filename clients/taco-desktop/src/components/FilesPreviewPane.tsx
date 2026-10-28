@@ -97,7 +97,7 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                     <ForbiddenPreview absPath={absPath} onGrantAccess={onGrantAccess} />
                 )}
                 {!loading && block === null && error && !forbidden && (
-                    <div className="files-preview-error">
+                    <div className="files-preview-error" role="alert">
                         {t("files.previewError")}: {error}
                     </div>
                 )}

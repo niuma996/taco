@@ -198,7 +198,7 @@ function SubagentDetail({
                 </div>
             )}
             {error !== null && (
-                <div className="subagent-detail-error">
+                <div className="subagent-detail-error" role="alert">
                     {t("subagents.historyFailed")}: {error}
                     <div className="subagent-detail-retry">
                         <Button variant="ghost" onClick={() => pull(pullKey)}>

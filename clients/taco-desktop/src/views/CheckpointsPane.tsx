@@ -33,7 +33,12 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
     const [pendingRestore, setPendingRestore] = useState<CheckpointEntry | null>(null);
 
     if (!data) {
-        if (error) return <div className="pane-error">{error}</div>;
+        if (error)
+            return (
+                <div className="pane-error" role="alert">
+                    {error}
+                </div>
+            );
         return <div className="pane-empty">{t("checkpoints.loading")}</div>;
     }
 

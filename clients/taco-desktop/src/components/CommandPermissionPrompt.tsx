@@ -154,7 +154,11 @@ export function CommandPermissionPrompt({
                         {t("settings.permissionsDeny")}
                     </button>
                 </div>
-                {error && <span className="permission-error">{error}</span>}
+                {error && (
+                    <span className="permission-error" role="alert">
+                        {error}
+                    </span>
+                )}
             </div>
         </div>
     );

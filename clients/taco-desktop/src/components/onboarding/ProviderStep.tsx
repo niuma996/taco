@@ -32,7 +32,7 @@ export function ProviderStep(props: ProviderStepProps) {
                 onKeysChanged={refresh}
             />
             {configuredCount === 0 && (
-                <div className="error-banner" role="alert">
+                <div className="error-banner" role="status">
                     {t("onboarding.providerRequired")}
                 </div>
             )}

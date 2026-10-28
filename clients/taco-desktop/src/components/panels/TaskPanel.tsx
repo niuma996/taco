@@ -235,7 +235,7 @@ function HistoryRow({
                         <div className="task-history-loading">{t("tasks.historyLoading")}</div>
                     )}
                     {error && (
-                        <div className="task-history-error">
+                        <div className="task-history-error" role="alert">
                             {t("tasks.historyLoadFailed", { error })}
                         </div>
                     )}

@@ -184,7 +184,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                 <div className="memory-list">
                     <div className="pane-header">{t("memory.title")}</div>
                 </div>
-                <div className="memory-detail memory-detail-error">
+                <div className="memory-detail memory-detail-error" role="alert">
                     {error ?? t("memory.errorLoad")}
                 </div>
             </div>

@@ -97,7 +97,7 @@ export function ModelStep(props: ModelStepProps) {
                 <p className="settings-tab-desc">{t("settings.providerFirst")}</p>
             )}
             {!selected && filteredOptions.length > 0 && (
-                <div className="error-banner" role="alert">
+                <div className="error-banner" role="status">
                     {t("onboarding.modelRequired")}
                 </div>
             )}

@@ -221,7 +221,9 @@ export function AgentsPane({
                         {contentLoading ? (
                             <p className="agents-detail-loading">{t("activity.loading")}</p>
                         ) : contentError ? (
-                            <p className="agents-detail-content-error">{contentError}</p>
+                            <p className="agents-detail-content-error" role="alert">
+                                {contentError}
+                            </p>
                         ) : content ? (
                             content.systemPrompt.trim() === "" ? (
                                 <p className="agents-detail-content-empty">

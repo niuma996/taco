@@ -145,7 +145,9 @@ export function SkillsPane({
                         {contentLoading ? (
                             <p className="skills-detail-loading">{t("activity.loading")}</p>
                         ) : contentError ? (
-                            <p className="skills-detail-content-error">{contentError}</p>
+                            <p className="skills-detail-content-error" role="alert">
+                                {contentError}
+                            </p>
                         ) : content ? (
                             /* Frontmatter stripped: name/description are already
                                shown above, and `---` under text is setext syntax

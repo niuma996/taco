@@ -15,7 +15,7 @@
  */
 
 import type { Job, JobScheduleSpec, SessionStrategy } from "@taco-ai/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
@@ -241,6 +241,9 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
     const isEdit = existing !== undefined;
     const isBuiltinDream = existing?.builtin === true && existing.command === "memory.dream";
 
+    const enabledId = useId();
+    const runOnStartupId = useId();
+
     const [draft, setDraft] = useState<ScheduleDraft>(EMPTY_DRAFT);
 
     // Sync the draft whenever the dialog opens so closing & reopening
@@ -345,7 +348,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                 }
                 return t(
                     "schedules.errorArgsNotObject",
-                    "args 必须是 JSON 对象，不能是数组或基本类型。",
+                    "args must be a JSON object, not an array or primitive.",
                 );
             }
             return match.message;
@@ -440,7 +443,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         label={t("schedules.fieldCronExpr", "Cron expression")}
                         hint={t(
                             "schedules.fieldCronExprHint",
-                            "标准 5 段 cron 表达式，例如 30 22 * * *。",
+                            "Standard 5-field cron expression, e.g. 30 22 * * *.",
                         )}
                         error={
                             errorFor("cronExpr")
@@ -459,7 +462,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         label={t("schedules.fieldCronTz", "Timezone (optional)")}
                         hint={t(
                             "schedules.fieldCronTzHint",
-                            "留空则使用宿主本地时区，例如 Asia/Shanghai。",
+                            "Leave empty to use the host local timezone, e.g. Asia/Shanghai.",
                         )}
                     >
                         <TextInput
@@ -533,7 +536,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     label={t("schedules.fieldArgs", "Args (JSON object)")}
                     hint={t(
                         "schedules.fieldArgsHint",
-                        "传递给命令的 JSON 对象，例如 { workspace, prompt }。",
+                        "JSON object passed to the command, e.g. { workspace, prompt }.",
                     )}
                     error={errorFor("argsJson")}
                 >
@@ -554,7 +557,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         isImWorkspace
                             ? t(
                                   "schedules.sessionStrategyImHint",
-                                  "im:// 工作区只能复用当前会话，服务器会拒绝其他选项。",
+                                  "im:// workspaces can only reuse the current session; the server rejects other strategies.",
                               )
                             : undefined
                     }
@@ -574,7 +577,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     label={t("schedules.fieldMaxRuns", "Max runs")}
                     hint={t(
                         "schedules.fieldMaxRunsHint",
-                        "达到该成功运行次数后任务自动停用（记录保留）。留空表示不限次数。",
+                        "The job disables itself after this many successful runs (its record is kept). Leave empty for unlimited; set 1 for a one-shot task.",
                     )}
                     error={
                         errorFor("maxRuns")
@@ -596,9 +599,9 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             ) : null}
 
             <div className="schedules-modal-toggles">
-                <label className="schedules-modal-toggle" htmlFor="schedules-form-enabled">
+                <label className="schedules-modal-toggle" htmlFor={enabledId}>
                     <Switch
-                        id="schedules-form-enabled"
+                        id={enabledId}
                         checked={draft.enabled}
                         onChange={(next) => setDraft({ ...draft, enabled: next })}
                         label={t("schedules.fieldEnabled", "Enabled")}
@@ -606,12 +609,9 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     <span>{t("schedules.fieldEnabled", "Enabled")}</span>
                 </label>
                 {!isBuiltinDream ? (
-                    <label
-                        className="schedules-modal-toggle"
-                        htmlFor="schedules-form-run-on-startup"
-                    >
+                    <label className="schedules-modal-toggle" htmlFor={runOnStartupId}>
                         <Switch
-                            id="schedules-form-run-on-startup"
+                            id={runOnStartupId}
                             checked={draft.run_on_startup}
                             onChange={(next) => setDraft({ ...draft, run_on_startup: next })}
                             label={t("schedules.fieldRunOnStartup", "Run on startup")}

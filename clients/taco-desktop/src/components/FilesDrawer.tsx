@@ -119,7 +119,7 @@ export function FilesDrawer(props: FilesDrawerProps) {
                     <div className="files-drawer-body">
                         <div className="files-tree-pane">
                             {tree.error && (
-                                <div className="files-preview-error">
+                                <div className="files-preview-error" role="alert">
                                     {t("files.loadError")}: {tree.error}
                                 </div>
                             )}
