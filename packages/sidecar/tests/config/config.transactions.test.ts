@@ -111,19 +111,43 @@ describe("global config transactions", () => {
         assert.equal(readGlobalConfig().defaultModel, "fixed");
     });
 
-    it("bounds contention without stealing a live process lock", () => {
+    it("bounds contention without stealing a live process lock", async () => {
+        saveGlobalConfig({ defaultModel: "kept" });
+        const alive = worker(
+            home,
+            "await new Promise(resolve => process.stdin.once('data', resolve));",
+        );
+        const lock = join(home, "taco.json.lock");
+        mkdirSync(lock);
+        writeFileSync(join(lock, `${alive.child.pid}-live-owner`), "");
+        try {
+            const started = performance.now();
+            assert.throws(
+                () => saveGlobalConfig({ defaultModel: "lost" }),
+                /timed out.*taco\.json\.lock/i,
+            );
+            assert.ok(performance.now() - started < 4000);
+            assert.equal(
+                JSON.parse(readFileSync(join(home, "taco.json"), "utf8")).defaultModel,
+                "kept",
+            );
+            assert.deepEqual(readdirSync(lock), [`${alive.child.pid}-live-owner`]);
+        } finally {
+            alive.child.stdin.end("done");
+            await alive.done;
+        }
+    });
+
+    it("reclaims a same-process lock left by a reused PID", () => {
         saveGlobalConfig({ defaultModel: "kept" });
         const lock = join(home, "taco.json.lock");
         mkdirSync(lock);
-        writeFileSync(join(lock, `${process.pid}-other-owner`), "");
+        writeFileSync(join(lock, `${process.pid}-reused-pid`), "");
         const started = performance.now();
-        assert.throws(() => saveGlobalConfig({ defaultModel: "lost" }), /timed out.*config lock/i);
-        assert.ok(performance.now() - started < 4000);
-        assert.equal(
-            JSON.parse(readFileSync(join(home, "taco.json"), "utf8")).defaultModel,
-            "kept",
-        );
-        assert.deepEqual(readdirSync(lock), [`${process.pid}-other-owner`]);
+        saveGlobalConfig({ defaultModel: "recovered" });
+        assert.ok(performance.now() - started < 500);
+        assert.equal(readGlobalConfig().defaultModel, "recovered");
+        assert.deepEqual(readdirSync(home), ["taco.json"]);
     });
 
     it("recovers a dead process lock and removes only its own owner token", async () => {
@@ -246,7 +270,11 @@ describe("global config transactions", () => {
         }
     });
 
-    it("handles EACCES as contention only when the lock exists", () => {
+    it("handles EACCES as contention only when the lock exists", async () => {
+        const alive = worker(
+            home,
+            "await new Promise(resolve => process.stdin.once('data', resolve));",
+        );
         const realRename = fs.renameSync;
         mock.method(fs, "renameSync", (...args: Parameters<typeof fs.renameSync>) => {
             if (String(args[1]).endsWith(".lock")) {
@@ -259,11 +287,13 @@ describe("global config transactions", () => {
             assert.throws(() => saveGlobalConfig({}), /access denied/);
             const lock = join(home, "taco.json.lock");
             mkdirSync(lock);
-            writeFileSync(join(lock, `${process.pid}-live`), "");
+            writeFileSync(join(lock, `${alive.child.pid}-live`), "");
             assert.throws(() => saveGlobalConfig({}), /timed out.*config lock/i);
         } finally {
             mock.restoreAll();
             syncBuiltinESMExports();
+            alive.child.stdin.end("done");
+            await alive.done;
         }
     });
 

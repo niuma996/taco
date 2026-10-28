@@ -405,7 +405,8 @@ construction and attempts every close even if one resource fails.
 Configuration writes use `ConfigStore` transactions across every entry point.
 The owner-token lock covers reading, deriving collection edits and atomic
 replacement. A live lock is never reclaimed by age; contention fails after one
-second. Reads detect external atomic replacements. Reconnection and workspace
+second. An owner token carrying this process's PID with no live transaction was
+left by a reused PID and is reclaimed. Reads detect external atomic replacements. Reconnection and workspace
 access re-resolve configuration with CLI overrides. `settings.write` and approved
 `config.patch` writes await this same refresh path. Each effective change is
 applied once; catalogs reconcile before defaults are resolved and model changes

@@ -20,6 +20,9 @@ const LOCK_TIMEOUT_MS = 1000;
 const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
 // Only finished transactions may retry cleanup; an active same-process lock stays exclusive.
 const pendingReleases = new Set<() => void>();
+// Tokens of transactions live in this process. A same-PID token outside this set
+// was left by a previous process whose PID was reused and can be reclaimed.
+const liveLockTokens = new Set<string>();
 
 function missing(error: unknown): boolean {
     return (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -112,6 +115,7 @@ export class ConfigStore {
         }
         const lock = `${path}.lock`;
         const token = `${process.pid}-${randomUUID()}`;
+        liveLockTokens.add(token);
         const candidate = `${lock}-${token}`;
         mkdirSync(candidate, { mode: 0o700 });
         let acquired = false;
@@ -123,7 +127,13 @@ export class ConfigStore {
                     // Publish a nonempty directory atomically: no ownerless creation window.
                     renameSync(candidate, lock);
                     acquired = true;
-                    return () => this.removeOwner(lock, token);
+                    return () => {
+                        try {
+                            this.removeOwner(lock, token);
+                        } finally {
+                            liveLockTokens.delete(token);
+                        }
+                    };
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
                     if (
@@ -134,7 +144,9 @@ export class ConfigStore {
                         throw error;
                 }
                 if (performance.now() >= deadline) {
-                    throw new Error(`Timed out acquiring config lock: ${path}`);
+                    throw new Error(
+                        `Timed out acquiring config lock: ${lock} (remove it if no taco process is running)`,
+                    );
                 }
                 let owners: string[];
                 try {
@@ -153,23 +165,13 @@ export class ConfigStore {
                     }
                     continue;
                 }
-                const owner = owners.length === 1 ? owners[0] : undefined;
-                const pid = owner && /^(\d+)-/.exec(owner)?.[1];
-                if (pid && Number(pid) > 0) {
-                    try {
-                        process.kill(Number(pid), 0);
-                    } catch (error) {
-                        // EPERM still means a live owner. Age alone never permits stealing.
-                        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-                            this.removeOwner(lock, owner);
-                        }
-                    }
-                }
+                for (const owner of owners) this.reclaimIfDead(lock, owner);
                 // The public API is synchronous; keep main-thread contention bounded.
                 Atomics.wait(waitBuffer, 0, 0, 10);
             }
         } finally {
             if (!acquired) {
+                liveLockTokens.delete(token);
                 try {
                     this.removeOwner(candidate, token);
                 } catch (error) {
@@ -180,6 +182,21 @@ export class ConfigStore {
                     });
                 }
             }
+        }
+    }
+
+    private reclaimIfDead(lock: string, owner: string): void {
+        const pid = Number(/^(\d+)-/.exec(owner)?.[1]);
+        if (!Number.isInteger(pid) || pid <= 0) return;
+        if (pid === process.pid) {
+            if (!liveLockTokens.has(owner)) this.removeOwner(lock, owner);
+            return;
+        }
+        try {
+            process.kill(pid, 0);
+        } catch (error) {
+            // EPERM still means a live owner. Age alone never permits stealing.
+            if ((error as NodeJS.ErrnoException).code === "ESRCH") this.removeOwner(lock, owner);
         }
     }
 
