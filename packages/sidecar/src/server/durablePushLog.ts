@@ -31,13 +31,15 @@
  * `flush()` drains the buffer on graceful shutdown so the common
  * restart-by-the-user case loses nothing.
  *
- * The file is bounded: when it exceeds `maxFileBytes` the flush path
- * rewrites it with only the most recent `keep` lines (same bound as the
- * in-memory ring), so a long session never grows an unbounded tail.
+ * The file is bounded: the flush path rewrites it with only the most recent
+ * `keep` lines (same bound as the in-memory ring) once it holds `2 × keep`
+ * lines or outgrows its byte budget. The byte budget doubles to twice the
+ * compacted size, so frames larger than `maxFileBytes / keep` cannot make
+ * every flush rewrite the whole file; compaction stays amortized O(1) per byte.
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServerPush, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
@@ -51,7 +53,7 @@ const DEFAULT_KEEP = 512;
 export interface DurablePushLogOptions {
     /** Buffered flush window; a crash may lose at most this much. */
     flushDelayMs?: number;
-    /** Rewrite (compact) a session file once it exceeds this size. */
+    /** Minimum byte budget before a session file is compacted. */
     maxFileBytes?: number;
     /** Lines kept after compaction — mirror of the ring capacity. */
     keep?: number;
@@ -70,6 +72,14 @@ interface FileState {
      * from any other ring are dropped. See `claimedBy` on the class.
      */
     owner?: object;
+    /** On-disk counters kept by this writer; undefined means re-measure from the file. */
+    disk?: DiskState;
+}
+
+interface DiskState {
+    lines: number;
+    size: number;
+    budget: number;
 }
 
 export class DurablePushLog {
@@ -152,6 +162,7 @@ export class DurablePushLog {
             if (complete !== raw) {
                 // Repair the torn line before any later append lands after it.
                 await writeFile(this.pathFor(key), complete, "utf8");
+                state.disk = undefined;
             }
             const frames: ServerPush[] = [];
             for (const line of complete.split("\n")) {
@@ -183,6 +194,7 @@ export class DurablePushLog {
         }
         state.pending = [];
         state.missing = false;
+        state.disk = undefined;
         // The stream is gone; a future session reusing this key starts fresh.
         state.owner = undefined;
         this.warnedStreams.delete(key);
@@ -271,26 +283,53 @@ export class DurablePushLog {
         const path = this.pathFor(key);
         await mkdir(this.root, { recursive: true });
         state.missing = false;
-        let size = 0;
-        try {
-            size = (await stat(path)).size;
-        } catch {
-            size = 0;
+        let disk = state.disk;
+        // Clear first: a failed write below leaves the counters re-measured, not stale.
+        state.disk = undefined;
+        let torn = false;
+        if (!disk) {
+            const raw = await readTail(path);
+            torn = raw !== "" && !raw.endsWith("\n");
+            disk = this.measure(raw);
         }
         const batch = `${lines.join("\n")}\n`;
-        if (size + batch.length > this.maxFileBytes) {
+        if (
+            torn ||
+            disk.lines + lines.length > 2 * this.keep ||
+            disk.size + batch.length > disk.budget
+        ) {
             // Compact: keep only the most recent `keep` lines across the
             // existing file plus this batch. Temp file + rename keeps the
-            // replacement atomic against concurrent readers.
-            const existing = await readFile(path, "utf8").catch(() => "");
-            const merged = [...parseLines(existing), ...lines];
-            const kept = merged.slice(-this.keep);
+            // replacement atomic against concurrent readers, and drops a torn
+            // tail before new JSON could be welded onto it.
+            const merged = [...completeLines(await readTail(path)), ...lines];
+            const kept = `${merged.slice(-this.keep).join("\n")}\n`;
             const tmp = `${path}.tmp`;
-            await writeFile(tmp, `${kept.join("\n")}\n`, "utf8");
+            await writeFile(tmp, kept, "utf8");
             await rename(tmp, path);
+            state.disk = this.measure(kept);
             return;
         }
         await writeFile(path, batch, { encoding: "utf8", flag: "a" });
+        state.disk = {
+            lines: disk.lines + lines.length,
+            size: disk.size + batch.length,
+            budget: disk.budget,
+        };
+    }
+
+    /**
+     * Sizes are UTF-16 code units, matching how batches are measured. The budget
+     * is twice the measured size, so a tail of frames larger than
+     * `maxFileBytes / keep` does not trigger a full rewrite on every flush.
+     */
+    private measure(raw: string): DiskState {
+        const complete = raw.slice(0, raw.lastIndexOf("\n") + 1);
+        return {
+            lines: completeLines(complete).length,
+            size: complete.length,
+            budget: Math.max(this.maxFileBytes, 2 * complete.length),
+        };
     }
 
     private pathFor(key: string): string {
@@ -312,16 +351,17 @@ function streamKey(workspace: WorkspaceId, session: SessionId): string {
     return `${safeSession}-${hash}`;
 }
 
-function parseLines(raw: string): string[] {
+/** Newline-terminated lines only; a torn final line is dropped. Interior lines are not parsed: loadTail skips bad ones. */
+function completeLines(raw: string): string[] {
     return raw
+        .slice(0, raw.lastIndexOf("\n") + 1)
         .split("\n")
-        .filter((line) => line !== "")
-        .filter((line) => {
-            try {
-                JSON.parse(line);
-                return true;
-            } catch {
-                return false;
-            }
-        });
+        .filter((line) => line !== "");
+}
+
+function readTail(path: string): Promise<string> {
+    return readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return "";
+        throw error;
+    });
 }

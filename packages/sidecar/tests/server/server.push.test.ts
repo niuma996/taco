@@ -669,13 +669,78 @@ describe("durablePushLog", () => {
                     await disk.loadTail(WS, sid, 1, owner); // forces a flush through the chain
                 }
 
-                const tail = await disk.loadTail(WS, sid, 512, owner);
+                // Amortized compaction keeps between `keep` and `2 × keep` newest lines.
+                const seqs = (await disk.loadTail(WS, sid, 512, owner)).map((event) => event.seq);
+                assert.equal(seqs.at(-1), 10);
+                assert.ok(seqs.length >= 3 && seqs.length <= 6, `kept ${seqs.join(",")}`);
                 assert.deepEqual(
-                    tail.map((event) => event.seq),
-                    [8, 9, 10],
+                    seqs,
+                    seqs.map((_, i) => 10 - seqs.length + 1 + i),
                 );
                 const raw = await readFile(await soleFile(dir), "utf8");
                 assert.ok(raw.length < 200 * 10);
+            } finally {
+                await rm(dir, { recursive: true, force: true });
+            }
+        });
+
+        // Regression: a compacted tail of large frames is itself above the byte
+        // budget, so a size-only trigger rewrote the whole file on every flush
+        // and saturated the daemon's event loop during streaming.
+        it("amortizes compaction when the kept tail outgrows maxFileBytes", async () => {
+            const sid = asSessionId("large-frames");
+            const dir = await mkdtemp(join(tmpdir(), "taco-push-log-"));
+            try {
+                const owner = ring();
+                const keep = 8;
+                const disk = new DurablePushLog(dir, {
+                    flushDelayMs: 60_000,
+                    maxFileBytes: 1024,
+                    keep,
+                });
+                const pad = "x".repeat(4096);
+                let compactions = 0;
+                let previous = 0;
+                for (let seq = 1; seq <= 200; seq++) {
+                    disk.scheduleAppend(frame(sid, seq, { pad }), owner);
+                    await disk.flush();
+                    const size = (await readFile(await soleFile(dir), "utf8")).length;
+                    if (size < previous) compactions++;
+                    previous = size;
+                }
+
+                // One compaction per `keep` flushes at most, not one per flush.
+                assert.ok(compactions > 0);
+                assert.ok(compactions <= 200 / keep, `compacted ${compactions} times`);
+                const tail = await disk.loadTail(WS, sid, 512, owner);
+                assert.equal(tail.at(-1)?.seq, 200);
+                assert.ok(tail.length >= keep && tail.length <= 2 * keep);
+            } finally {
+                await rm(dir, { recursive: true, force: true });
+            }
+        });
+
+        it("drops a torn tail left by a crash before appending to it", async () => {
+            const sid = asSessionId("torn-append");
+            const dir = await mkdtemp(join(tmpdir(), "taco-push-log-"));
+            try {
+                const owner = ring();
+                const first = new DurablePushLog(dir, { flushDelayMs: 60_000 });
+                first.scheduleAppend(frame(sid, 1), owner);
+                await first.flush();
+                const path = await soleFile(dir);
+                await writeFile(path, `${await readFile(path, "utf8")}{"seq":2,"tor`);
+
+                // A restarted writer appends without hydrating first.
+                const second = new DurablePushLog(dir, { flushDelayMs: 60_000 });
+                second.scheduleAppend(frame(sid, 3), owner);
+                await second.flush();
+
+                const seqs = (await readFile(path, "utf8"))
+                    .split("\n")
+                    .filter((line) => line !== "")
+                    .map((line) => (JSON.parse(line) as { seq: number }).seq);
+                assert.deepEqual(seqs, [1, 3]);
             } finally {
                 await rm(dir, { recursive: true, force: true });
             }
