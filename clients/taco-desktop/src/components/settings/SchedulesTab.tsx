@@ -28,6 +28,7 @@ import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { Tag } from "../ui/Tag.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
 
 export interface SchedulesTabProps {
@@ -356,9 +357,9 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
             <td className="schedules-cell-name">
                 <span>{job.name}</span>
                 {job.builtin ? (
-                    <span className="schedules-builtin-badge">
+                    <Tag size="sm" className="schedules-builtin-badge">
                         {t("schedules.builtin", "Built-in")}
-                    </span>
+                    </Tag>
                 ) : null}
             </td>
             <td className="schedules-cell-schedule">

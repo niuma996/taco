@@ -22,6 +22,7 @@ import { useProviders } from "../../hooks/useProviders.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../../lib/globalConfig.ts";
+import { Tag } from "../ui/Tag.tsx";
 import { ProviderDetailModal } from "./ProviderDetailModal.tsx";
 
 export interface ProviderSectionProps {
@@ -211,10 +212,10 @@ export function ProviderSection(props: ProviderSectionProps) {
                                     })}
                                 </span>
                                 {p.custom && cfg && (
-                                    <span className="provider-row-badge">
+                                    <Tag className="provider-row-badge">
                                         {t("settings.customBadge")} ·{" "}
                                         {t(`settings.providerApiShort_${cfg.api}`)}
-                                    </span>
+                                    </Tag>
                                 )}
                             </span>
                         </button>

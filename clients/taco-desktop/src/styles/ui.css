@@ -562,6 +562,28 @@
     color: var(--fg);
 }
 
+/* ── Tag ── */
+
+.ui-tag {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+}
+.ui-tag--md {
+    padding: 0.05rem 0.4rem;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.ui-tag--sm {
+    padding: 0 var(--space-1);
+    font-size: var(--text-2xs);
+}
+.ui-tag--strong {
+    border-color: var(--fg-dim);
+}
+
 /* ── Divider ── */
 
 .ui-divider {

@@ -1,7 +1,7 @@
 /**
- * Base components in `src/components/ui/` — Modal, Select, Slider, Switch and
+ * Base components in `src/components/ui/` — Modal, Select, Slider, Switch, Tag and
  * TextInput. Consolidated into one file so vitest pays the jsdom setup cost
- * once instead of five times; every assertion is unchanged.
+ * once instead of six times.
  *
  * The contracts locked here:
  *  - Modal: Escape / scrim dismiss, `dismissible={false}`, focus restoration,
@@ -9,6 +9,7 @@
  *  - Select: Radix combobox roles + value reporting (native <select> is banned).
  *  - Slider: discrete steps, arrow-key stepping, commit semantics, marks overlay.
  *  - Switch: role="switch" / aria-checked / disabled behaviour.
+ *  - Tag: size / tone modifier classes, className merge, native span props.
  *  - TextInput: `.ui-input` class, className merge, React 19 ref-as-prop.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -20,6 +21,7 @@ import { Modal, type ModalProps } from "../../../src/components/ui/Modal";
 import { Select } from "../../../src/components/ui/Select";
 import { Slider } from "../../../src/components/ui/Slider";
 import { Switch } from "../../../src/components/ui/Switch";
+import { Tag } from "../../../src/components/ui/Tag";
 import { TextInput } from "../../../src/components/ui/TextInput";
 
 afterEach(cleanup);
@@ -267,6 +269,35 @@ describe("Switch", () => {
         render(<Switch checked label="Enabled" disabled onChange={onChange} />);
         await user.click(screen.getByRole("switch", { name: "Enabled" }));
         expect(onChange).not.toHaveBeenCalled();
+    });
+});
+
+// ─── Tag ────────────────────────────────────────────────────────────────────
+
+describe("Tag", () => {
+    it("defaults to the md size with no tone modifier", () => {
+        render(<Tag>stdio</Tag>);
+        expect(screen.getByText("stdio").className).toBe("ui-tag ui-tag--md");
+    });
+
+    it("applies the sm size and strong tone modifiers", () => {
+        render(
+            <Tag size="sm" tone="strong">
+                disabled
+            </Tag>,
+        );
+        expect(screen.getByText("disabled").className).toBe("ui-tag ui-tag--sm ui-tag--strong");
+    });
+
+    it("merges an extra className last and passes native span props", () => {
+        render(
+            <Tag className="extra" title="hint">
+                x
+            </Tag>,
+        );
+        const el = screen.getByText("x");
+        expect(el.className).toBe("ui-tag ui-tag--md extra");
+        expect(el.getAttribute("title")).toBe("hint");
     });
 });
 

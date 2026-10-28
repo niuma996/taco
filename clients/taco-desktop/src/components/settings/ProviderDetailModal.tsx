@@ -30,6 +30,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { SecretInput } from "../ui/SecretInput.tsx";
 import { Select } from "../ui/Select.tsx";
+import { Tag } from "../ui/Tag.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
 export interface ProviderDetailModalProps {
@@ -584,9 +585,9 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                             <span className="provider-detail-model-id" title={m.id}>
                                 {m.id}
                             </span>
-                            <span className="provider-row-badge">
+                            <Tag className="provider-row-badge">
                                 {t("settings.providerOriginBuiltin")}
-                            </span>
+                            </Tag>
                             <IconButton
                                 size="sm"
                                 tone="danger"
@@ -606,18 +607,18 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                                     {m.id}
                                 </span>
                                 {!isCustom && (
-                                    <span className="provider-row-badge">
+                                    <Tag className="provider-row-badge">
                                         {t("settings.providerOriginExtra")}
-                                    </span>
+                                    </Tag>
                                 )}
-                                <span
+                                <Tag
                                     className="provider-row-badge"
                                     title={t("settings.providerModelWindow")}
                                 >
                                     {m.contextWindow === undefined
                                         ? t("settings.providerModelWindowDefault")
                                         : formatModelWindow(m.contextWindow)}
-                                </span>
+                                </Tag>
                                 <IconButton
                                     size="sm"
                                     aria-label={t("settings.providerModelWindowEdit")}
@@ -697,9 +698,9 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                             <span className="provider-detail-model-id" title={mid}>
                                 {mid}
                             </span>
-                            <span className="provider-row-badge">
+                            <Tag className="provider-row-badge">
                                 {t("settings.providerOriginHidden")}
-                            </span>
+                            </Tag>
                             <IconButton
                                 size="sm"
                                 aria-label={t("settings.providerModelRestore")}

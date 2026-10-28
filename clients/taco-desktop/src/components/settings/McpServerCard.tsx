@@ -8,6 +8,7 @@ import { Pencil, Trash } from "lucide-react";
 import { useT } from "../../i18n/useI18n.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { Tag } from "../ui/Tag.tsx";
 
 export interface McpServerCardProps {
     /** Masked server summary — never carries command/args/env/headers/url. */
@@ -41,12 +42,8 @@ export function McpServerCard(props: McpServerCardProps) {
             <div className="mcp-server-card-head">
                 <div className="mcp-server-card-info">
                     <span className="mcp-server-name">{cfg.id}</span>
-                    <span className="mcp-server-badge">{cfg.transport}</span>
-                    {!isEnabled && (
-                        <span className="mcp-server-disabled-badge">
-                            {t("settings.mcpServerDisabled")}
-                        </span>
-                    )}
+                    <Tag>{cfg.transport}</Tag>
+                    {!isEnabled && <Tag tone="strong">{t("settings.mcpServerDisabled")}</Tag>}
                     {ok ? (
                         <span className="mcp-server-status mcp-server-status--ok">
                             {t("settings.mcpServerStatusOk", {

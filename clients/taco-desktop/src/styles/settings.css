@@ -332,13 +332,6 @@
     text-overflow: ellipsis;
 }
 .provider-row-badge {
-    font-size: var(--text-xs);
-    padding: 0.05rem 0.4rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     /* Badge keeps its shape; the count text truncates first. */
     flex-shrink: 0;
 }
@@ -651,24 +644,6 @@
     font-family: var(--mono);
     font-size: var(--text-sm);
 }
-.mcp-server-badge {
-    font-size: var(--text-xs);
-    padding: 0.05rem 0.4rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-.mcp-server-disabled-badge {
-    font-size: var(--text-xs);
-    padding: 0.05rem 0.4rem;
-    border: 1px solid var(--fg-dim);
-    border-radius: var(--radius-pill);
-    color: var(--fg-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
 .mcp-server-status {
     font-size: var(--text-xs);
     color: var(--fg-dim);
@@ -943,13 +918,7 @@
 
 /* Built-in jobs keep their identity visible without offering a destructive action. */
 .schedules-builtin-badge {
-    display: inline-block;
     margin-left: var(--space-2);
-    padding: 0 var(--space-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    color: var(--fg-dim);
-    font-size: var(--text-2xs);
     vertical-align: middle;
 }
 
