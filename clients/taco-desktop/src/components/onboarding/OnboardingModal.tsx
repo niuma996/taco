@@ -7,6 +7,7 @@ import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { type OnboardingStatus, writeDesktopConfig } from "../../lib/desktopConfig.js";
 import type { ModelSelection } from "../settings/ModelPicker.js";
 import { Button } from "../ui/Button.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { DoneStep } from "./DoneStep.js";
 import { ModelStep } from "./ModelStep.js";
 import { ProviderStep } from "./ProviderStep.js";
@@ -190,95 +191,103 @@ export function OnboardingModal(props: OnboardingModalProps) {
     const stepIndex = STEP_SEQUENCE.indexOf(step as Exclude<Step, "done">);
 
     return (
-        <div className="onboarding-overlay">
-            <div className="onboarding-modal">
-                <div className="onboarding-header">
-                    <div className="onboarding-steps">
-                        {STEP_SEQUENCE.map((s, i, arr) => (
-                            <span key={s} style={{ display: "contents" }}>
-                                <span className={`step${step === s ? " is-current" : ""}`}>
-                                    <span className="step-num">{i + 1}</span>
-                                    {t(`onboarding.step${s[0].toUpperCase()}${s.slice(1)}`)}
-                                </span>
-                                {i < arr.length - 1 && <span className="step-sep">·</span>}
+        <Modal
+            open
+            // Escape and scrim clicks stay inert: the wizard's only exits are the
+            // explicit Skip and finish actions, which record the onboarding status.
+            dismissible={false}
+            onClose={skip}
+            bare
+            title={t("onboarding.dialogLabel")}
+            className="onboarding-modal"
+            backdropClassName="onboarding-backdrop"
+        >
+            <div className="onboarding-header">
+                <div className="onboarding-steps">
+                    {STEP_SEQUENCE.map((s, i, arr) => (
+                        <span key={s} style={{ display: "contents" }}>
+                            <span className={`step${step === s ? " is-current" : ""}`}>
+                                <span className="step-num">{i + 1}</span>
+                                {t(`onboarding.step${s[0].toUpperCase()}${s.slice(1)}`)}
                             </span>
-                        ))}
-                    </div>
-                    <Button variant="ghost" onClick={skip}>
-                        {t("onboarding.skipOnboarding")}
-                    </Button>
+                            {i < arr.length - 1 && <span className="step-sep">·</span>}
+                        </span>
+                    ))}
                 </div>
-
-                <div className="onboarding-body">
-                    {step === "welcome" && <WelcomeStep onStart={() => setStep("workspace")} />}
-                    {step === "workspace" && (
-                        <WorkspaceStep
-                            // Parent-owned cwd so leaving and returning to
-                            // the step shows whatever the user last picked
-                            // (or the system default if they haven't picked
-                            // anything). Without this, WorkspaceStep's
-                            // local `cwd` re-initialises from
-                            // `props.defaultCwd` on remount and the input
-                            // jumps back to the system default.
-                            defaultCwd={workspaceCwd || props.defaultCwd}
-                            onChange={(cwd) => {
-                                // Sync only — footer Next is the commit point.
-                                setWorkspaceCwd(cwd);
-                            }}
-                        />
-                    )}
-                    {openError && step === "workspace" && (
-                        <div className="error-banner" role="alert">
-                            {openError}
-                        </div>
-                    )}
-                    {/* Both steps query the sidecar per workspace, so neither
-                        can render without one. `goNext` only leaves the
-                        workspace step once `openWorkspace` succeeded, so this
-                        is a guard against an unreachable state rather than a
-                        visible branch. */}
-                    {step === "provider" && workspace && (
-                        <ProviderStep
-                            client={props.client}
-                            workspace={workspace}
-                            onConfigured={handleProviderConfigured}
-                        />
-                    )}
-                    {step === "model" && workspace && (
-                        <ModelStep
-                            client={props.client}
-                            workspace={workspace}
-                            onSelect={(sel) => setSelectedModel(sel)}
-                        />
-                    )}
-                    {step === "done" && (
-                        <DoneStep
-                            workspace={workspaceCwd}
-                            providerCount={configuredProviderCount}
-                            model={selectedModel}
-                            onFinish={finish}
-                        />
-                    )}
-                </div>
-
-                <div className="onboarding-actions">
-                    {canGoBack && (
-                        <Button variant="ghost" onClick={goBack}>
-                            {t("onboarding.back")}
-                        </Button>
-                    )}
-                    {stepIndex >= 0 && step !== "welcome" && (
-                        <button
-                            type="button"
-                            className="onboarding-cta"
-                            onClick={goNext}
-                            disabled={!canGoNext || goingNext}
-                        >
-                            {t("onboarding.next")}
-                        </button>
-                    )}
-                </div>
+                <Button variant="ghost" onClick={skip}>
+                    {t("onboarding.skipOnboarding")}
+                </Button>
             </div>
-        </div>
+
+            <div className="onboarding-body">
+                {step === "welcome" && <WelcomeStep onStart={() => setStep("workspace")} />}
+                {step === "workspace" && (
+                    <WorkspaceStep
+                        // Parent-owned cwd so leaving and returning to
+                        // the step shows whatever the user last picked
+                        // (or the system default if they haven't picked
+                        // anything). Without this, WorkspaceStep's
+                        // local `cwd` re-initialises from
+                        // `props.defaultCwd` on remount and the input
+                        // jumps back to the system default.
+                        defaultCwd={workspaceCwd || props.defaultCwd}
+                        onChange={(cwd) => {
+                            // Sync only — footer Next is the commit point.
+                            setWorkspaceCwd(cwd);
+                        }}
+                    />
+                )}
+                {openError && step === "workspace" && (
+                    <div className="error-banner" role="alert">
+                        {openError}
+                    </div>
+                )}
+                {/* Both steps query the sidecar per workspace, so neither
+                    can render without one. `goNext` only leaves the
+                    workspace step once `openWorkspace` succeeded, so this
+                    is a guard against an unreachable state rather than a
+                    visible branch. */}
+                {step === "provider" && workspace && (
+                    <ProviderStep
+                        client={props.client}
+                        workspace={workspace}
+                        onConfigured={handleProviderConfigured}
+                    />
+                )}
+                {step === "model" && workspace && (
+                    <ModelStep
+                        client={props.client}
+                        workspace={workspace}
+                        onSelect={(sel) => setSelectedModel(sel)}
+                    />
+                )}
+                {step === "done" && (
+                    <DoneStep
+                        workspace={workspaceCwd}
+                        providerCount={configuredProviderCount}
+                        model={selectedModel}
+                        onFinish={finish}
+                    />
+                )}
+            </div>
+
+            <div className="onboarding-actions">
+                {canGoBack && (
+                    <Button variant="ghost" onClick={goBack}>
+                        {t("onboarding.back")}
+                    </Button>
+                )}
+                {stepIndex >= 0 && step !== "welcome" && (
+                    <button
+                        type="button"
+                        className="onboarding-cta"
+                        onClick={goNext}
+                        disabled={!canGoNext || goingNext}
+                    >
+                        {t("onboarding.next")}
+                    </button>
+                )}
+            </div>
+        </Modal>
     );
 }

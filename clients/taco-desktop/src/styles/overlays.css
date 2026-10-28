@@ -400,23 +400,21 @@ html *:hover {
 }
 
 /* ── first-launch onboarding wizard ── */
-.onboarding-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--overlay-scrim);
+/* The wizard keeps the app behind it out of focus by blurring the shared
+   scrim rather than by owning a second overlay implementation. */
+.ui-modal-backdrop.onboarding-backdrop {
     backdrop-filter: blur(4px);
-    padding: 2rem;
-    overflow-x: hidden;
 }
 
+/* Feature class on .ui-modal: a taller, wider panel than the default dialog,
+   with its own padding rhythm and an elevated surface. */
 .onboarding-modal {
     width: min(600px, 100%);
+    /* Overrides .ui-modal's 420px cap. */
+    max-width: none;
     height: min(680px, 92vh);
-    overflow: hidden;
+    /* .ui-modal caps at calc(100vh - 4rem); restate so the vh budget here wins. */
+    max-height: min(680px, 92vh);
     box-sizing: border-box;
     padding: 2.25rem 2.5rem 2rem;
     border-radius: var(--radius-lg);
@@ -424,8 +422,6 @@ html *:hover {
     box-shadow:
         0 4px 12px var(--shadow-color),
         0 24px 64px var(--shadow-color-strong);
-    display: flex;
-    flex-direction: column;
     gap: 1.5rem;
 }
 
@@ -770,27 +766,16 @@ html *:hover {
     min-height: 0;
 }
 
-/* File preview popup — centered floating window above the app. Fixed height:
-   content scrolls inside, so the popup doesn't grow/shrink with the file. */
-.files-preview-backdrop {
-    position: fixed;
-    inset: 0;
-    background: var(--overlay-scrim);
-    z-index: 1000;
-}
+/* File preview popup — a bare .ui-modal: the shell supplies the backdrop,
+   centering, border and surface, this class only widens it to document size
+   and fixes the height so content scrolls inside instead of resizing with
+   the file. */
 .files-preview-popup {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1001;
     width: min(960px, 92vw);
+    /* Overrides .ui-modal's 420px cap. */
+    max-width: none;
     height: 76vh;
-    display: flex;
-    flex-direction: column;
     padding: 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: 0 8px 32px var(--shadow-color-strong);
 }

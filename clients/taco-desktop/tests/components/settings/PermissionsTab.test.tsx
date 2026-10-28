@@ -58,6 +58,11 @@ describe("PermissionsTab — removeRule", () => {
         if (!secondRemove) throw new Error("expected at least two remove buttons");
         await user.click(secondRemove);
 
+        // Removal edits global config, so it goes through the shared confirm dialog.
+        await user.click(
+            await screen.findByRole("button", { name: "settings.permissionsRemoveConfirm" }),
+        );
+
         // Send only the removed rule; the server preserves newer rules.
         await waitFor(() => {
             expect(settingsWrite).toHaveBeenCalledTimes(1);
@@ -133,6 +138,9 @@ describe("PermissionsTab — blacklist editing", () => {
         const firstRemove = screen.getAllByRole("button", { name: REMOVE })[0];
         if (!firstRemove) throw new Error("expected a blacklist remove button");
         await user.click(firstRemove);
+        await user.click(
+            await screen.findByRole("button", { name: "settings.permissionsRemoveConfirm" }),
+        );
         await waitFor(() =>
             expect(settingsWrite).toHaveBeenLastCalledWith({
                 global: {

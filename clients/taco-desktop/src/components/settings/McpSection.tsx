@@ -23,6 +23,7 @@ import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { applyGlobalConfig, getGlobalConfig } from "../../lib/globalConfig.ts";
+import { ConfirmModal } from "../ConfirmModal.tsx";
 import { McpServerCard } from "./McpServerCard.tsx";
 import { McpServerForm } from "./McpServerForm.tsx";
 
@@ -51,6 +52,8 @@ export function McpSection(props: McpSectionProps) {
     const [panel, setPanel] = useState<Panel>({ kind: "list" });
     /** A config mutation (create/update/delete) is in flight — disables CRUD. */
     const [mutating, setMutating] = useState(false);
+    /** Server id awaiting the shared confirm dialog — deletion is irreversible. */
+    const [pendingDelete, setPendingDelete] = useState<string | null>(null);
     const {
         error: mutationError,
         fail: failMutation,
@@ -255,7 +258,7 @@ export function McpSection(props: McpSectionProps) {
                             disabled={mutating || restarting}
                             onToggle={handleToggle}
                             onEdit={(c) => void handleEdit(c)}
-                            onDelete={handleDelete}
+                            onDelete={(id) => setPendingDelete(id)}
                         />
                     ))}
                 </div>
@@ -280,6 +283,19 @@ export function McpSection(props: McpSectionProps) {
             )}
 
             {mutationError && <div className="error-banner">{mutationError}</div>}
+            <ConfirmModal
+                open={pendingDelete !== null}
+                title={t("settings.mcpServerDeleteConfirmTitle")}
+                message={pendingDelete ?? ""}
+                confirmLabel={t("settings.mcpServerDeleteConfirm")}
+                cancelLabel={t("settings.mcpServerCancel")}
+                onConfirm={() => {
+                    const id = pendingDelete;
+                    setPendingDelete(null);
+                    if (id !== null) void handleDelete(id);
+                }}
+                onCancel={() => setPendingDelete(null)}
+            />
         </section>
     );
 }

@@ -1,10 +1,9 @@
 /**
- * FilePreviewPopup — the floating file-preview window (Radix Dialog).
+ * FilePreviewPopup — the floating file-preview window.
  *
  * Shared by the file tree and the `read` tool card so both entry points open
  * the same preview surface. It renders nothing when no file is selected.
  */
-import * as Dialog from "@radix-ui/react-dialog";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { X } from "lucide-react";
 import type { UseFilePreviewApi } from "../hooks/useFilePreview";
@@ -13,6 +12,7 @@ import { resolveFsPath } from "../lib/clients/fsClient";
 import { lastSegment } from "../lib/workspaceStorage";
 import { FilesPreviewPane } from "./FilesPreviewPane";
 import { IconButton } from "./ui/IconButton";
+import { Modal } from "./ui/Modal";
 
 export interface FilePreviewPopupProps {
     preview: UseFilePreviewApi;
@@ -37,41 +37,35 @@ export function FilePreviewPopup({ preview, cwd }: FilePreviewPopupProps) {
     };
 
     return (
-        <Dialog.Root
+        <Modal
             open
-            onOpenChange={(next) => {
-                if (!next) preview.clear();
-            }}
+            onClose={() => preview.clear()}
+            bare
+            title={lastSegment(path)}
+            className="files-preview-popup"
         >
-            <Dialog.Portal>
-                <Dialog.Overlay className="files-preview-backdrop" />
-                <Dialog.Content className="files-preview-popup" aria-label={path}>
-                    <div className="right-panel-topbar">
-                        <Dialog.Title asChild>
-                            <h3 className="right-panel-title">{lastSegment(path)}</h3>
-                        </Dialog.Title>
-                        <IconButton
-                            onClick={() => preview.clear()}
-                            aria-label={t("app.dismiss")}
-                            title={t("app.dismiss")}
-                        >
-                            <X size={14} aria-hidden="true" />
-                        </IconButton>
-                    </div>
-                    {/* Keyed by path: resets the markdown rendered/source toggle per file. */}
-                    <FilesPreviewPane
-                        key={path}
-                        selectedRelPath={path}
-                        content={preview.content}
-                        block={preview.block}
-                        error={preview.error}
-                        loading={preview.loading}
-                        absPath={absPath}
-                        forbidden={preview.forbidden}
-                        onGrantAccess={grantAccess}
-                    />
-                </Dialog.Content>
-            </Dialog.Portal>
-        </Dialog.Root>
+            <div className="right-panel-topbar">
+                <h3 className="right-panel-title">{lastSegment(path)}</h3>
+                <IconButton
+                    onClick={() => preview.clear()}
+                    aria-label={t("app.dismiss")}
+                    title={t("app.dismiss")}
+                >
+                    <X size={14} aria-hidden="true" />
+                </IconButton>
+            </div>
+            {/* Keyed by path: resets the markdown rendered/source toggle per file. */}
+            <FilesPreviewPane
+                key={path}
+                selectedRelPath={path}
+                content={preview.content}
+                block={preview.block}
+                error={preview.error}
+                loading={preview.loading}
+                absPath={absPath}
+                forbidden={preview.forbidden}
+                onGrantAccess={grantAccess}
+            />
+        </Modal>
     );
 }

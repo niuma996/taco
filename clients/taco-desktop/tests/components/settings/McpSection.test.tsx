@@ -162,6 +162,12 @@ describe("McpSection", () => {
         const deleteBtn = await screen.findByLabelText("settings.mcpServerDelete");
         await user.click(deleteBtn);
 
+        // Deleting a server is irreversible, so it goes through the shared
+        // confirm dialog before mcpDeleteConfig is called.
+        await user.click(
+            await screen.findByRole("button", { name: "settings.mcpServerDeleteConfirm" }),
+        );
+
         await waitFor(() => {
             expect(mcpDeleteConfig).toHaveBeenCalledWith("echo");
         });

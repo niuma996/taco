@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
 import { createJobsClient } from "../../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
 
@@ -110,6 +111,8 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
      *  user assumes the click was a no-op. Cleared in the same finally
      *  block whether the fire was accepted or skipped. */
     const [runningId, setRunningId] = useState<string | null>(null);
+    /** Job awaiting the shared confirm dialog — deletion discards its run history. */
+    const [pendingDelete, setPendingDelete] = useState<Job | null>(null);
 
     const sorted = useMemo(
         () => [...jobs.list].sort((a, b) => a.name.localeCompare(b.name)),
@@ -287,16 +290,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                     setRunningId((prev) => (prev === job.id ? null : prev));
                                 }
                             }}
-                            onDelete={() => {
-                                void jobs
-                                    .delete(job.id)
-                                    .then(() => jobs.refresh())
-                                    .catch((err: unknown) =>
-                                        jobs.setActionError(
-                                            err instanceof Error ? err.message : String(err),
-                                        ),
-                                    );
-                            }}
+                            onDelete={() => setPendingDelete(job)}
                             onEdit={() => openEdit(job)}
                         />
                     ))}
@@ -310,6 +304,26 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                 errorMessage={dialogErrorMessage}
                 onSave={(submit) => handleSave(dialog, submit)}
                 onCancel={closeDialog}
+            />
+
+            <ConfirmModal
+                open={pendingDelete !== null}
+                title={t("schedules.deleteConfirmTitle", "Delete this schedule?")}
+                message={pendingDelete?.name ?? ""}
+                confirmLabel={t("schedules.actionDeleteConfirm", "Delete")}
+                cancelLabel={t("schedules.actionCancel", "Cancel")}
+                onConfirm={() => {
+                    const job = pendingDelete;
+                    setPendingDelete(null);
+                    if (job === null) return;
+                    void jobs
+                        .delete(job.id)
+                        .then(() => jobs.refresh())
+                        .catch((err: unknown) =>
+                            jobs.setActionError(err instanceof Error ? err.message : String(err)),
+                        );
+                }}
+                onCancel={() => setPendingDelete(null)}
             />
         </div>
     );

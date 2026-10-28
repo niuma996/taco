@@ -1,13 +1,12 @@
 /* toolCards.css — agent tool card + askUser tool card (rendered in message stream); split from panes.css */
 
 /* Agent tool card — subagent delegate entry point. Shows type + description +
-   status; click opens the child session in the right-side subagent panel. */
+   status; click opens the child session in the right-side subagent panel.
+   Frameless: this is the body of a .tool-card, which already supplies the
+   border, radius and surface — a second frame nested inside it double-ringed
+   the card. */
 .agent-card {
     margin-top: 0.4rem;
-    border: 1px solid var(--border);
-    /* Same tier as .tool-card — both are tool frames in the message stream. */
-    border-radius: var(--radius-lg);
-    background: var(--surface-tint);
     font-size: 0.85em;
     overflow: hidden;
     min-width: 0;

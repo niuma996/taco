@@ -67,6 +67,16 @@
     color: var(--fg-dim);
 }
 
+/* System notices are stream chrome, not a speaker turn: dropping the shared
+   frame keeps a "context compacted" line from reading as a speech bubble. */
+.message.system {
+    border: none;
+    background: transparent;
+    padding: var(--space-1) 0;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+}
+
 /* End-of-turn meta row: timestamp + copy button. Floats to the right so it
    reads as an afterthought rather than a sibling of the message content.
    Anchored to the bubble's bottom edge — the bubble's own border-radius
@@ -102,8 +112,10 @@
     color: var(--fg);
 }
 .message-meta__copy:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
+    /* Same contract as .user-message-guide__marker below: the ring is a
+       box-shadow, so it cannot be built into an outline. */
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 .message-meta__copy[data-state="copied"] {
     color: var(--success);
@@ -222,8 +234,8 @@
     color: var(--fg);
 }
 .thinking-expand:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
 .thinking-chevron {

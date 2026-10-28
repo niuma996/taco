@@ -56,9 +56,12 @@
     box-sizing: border-box;
 }
 .ui-input:focus-visible {
+    /* --focus-ring is a full shadow value, not a colour: nesting it inside
+       `0 0 0 1px` yields an invalid shadow, so the whole declaration is
+       dropped and the field shows no ring at all. */
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--focus-ring);
+    box-shadow: var(--focus-ring);
 }
 .ui-input::placeholder {
     color: var(--fg-dim);
@@ -257,7 +260,7 @@
 .ui-select-trigger:focus-visible {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--focus-ring);
+    box-shadow: var(--focus-ring);
 }
 .ui-select-trigger:disabled {
     opacity: 0.5;

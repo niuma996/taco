@@ -7,6 +7,7 @@ import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import type { ClientRuleValidationError } from "../../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleClient.ts";
+import { ConfirmModal } from "../ConfirmModal.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
@@ -28,6 +29,8 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
     const [newRule, setNewRule] = useState("");
     const [ruleError, setRuleError] = useState<ClientRuleValidationError | null>(null);
     const [list, setList] = useState<"allow" | "deny">("allow");
+    /** Rule text awaiting the shared confirm dialog — removal edits config. */
+    const [pendingRemove, setPendingRemove] = useState<string | null>(null);
 
     function addRule() {
         const result = validatePermissionRuleClient(newRule, {
@@ -51,9 +54,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
             .catch(() => {});
     }
 
-    function removeRule(index: number) {
-        const rule = (list === "allow" ? allow : deny)[index];
-        if (rule === undefined) return;
+    function removeRule(rule: string) {
         void save({
             kind: "global",
             patch: {
@@ -150,7 +151,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                 <p className="settings-tab-desc">{t("settings.permissionsNoRules")}</p>
             ) : (
                 <ul className="permission-rule-list">
-                    {(list === "allow" ? allow : deny).map((rule: string, i: number) => (
+                    {(list === "allow" ? allow : deny).map((rule: string) => (
                         <li key={rule}>
                             <span className="permission-rule-text">
                                 <code>{rule}</code>
@@ -160,7 +161,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                                 disabled={saving}
                                 title={t("settings.permissionsRemoveRule")}
                                 aria-label={t("settings.permissionsRemoveRule")}
-                                onClick={() => removeRule(i)}
+                                onClick={() => setPendingRemove(rule)}
                             >
                                 <X size={12} aria-hidden="true" />
                             </IconButton>
@@ -170,6 +171,19 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
             )}
             {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
             {error && <div className="error-banner">{error}</div>}
+            <ConfirmModal
+                open={pendingRemove !== null}
+                title={t("settings.permissionsRemoveConfirmTitle")}
+                message={pendingRemove ?? ""}
+                confirmLabel={t("settings.permissionsRemoveConfirm")}
+                cancelLabel={t("settings.permissionsCancel")}
+                onConfirm={() => {
+                    const rule = pendingRemove;
+                    setPendingRemove(null);
+                    if (rule !== null) removeRule(rule);
+                }}
+                onCancel={() => setPendingRemove(null)}
+            />
         </section>
     );
 }

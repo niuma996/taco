@@ -42,7 +42,7 @@ interface ScriptedJobsClient {
     list: () => Promise<unknown>;
     create: (params: Record<string, unknown>) => Promise<unknown>;
     update: (params: Record<string, unknown>) => Promise<unknown>;
-    delete: () => Promise<unknown>;
+    delete: (params: Record<string, unknown>) => Promise<unknown>;
     runNow: () => Promise<unknown>;
     history: () => Promise<unknown>;
 }
@@ -68,7 +68,7 @@ function makeClient(jobs: Partial<ScriptedJobsClient> = {}): TacoClient {
             if (method === "jobs.list") return full.list();
             if (method === "jobs.create") return full.create(params);
             if (method === "jobs.update") return full.update(params);
-            if (method === "jobs.delete") return full.delete();
+            if (method === "jobs.delete") return full.delete(params);
             if (method === "jobs.runNow") return full.runNow();
             if (method === "jobs.history") return full.history();
             throw new Error(`unexpected method ${method}`);
@@ -535,6 +535,60 @@ describe("SchedulesTab — modal add / edit flow", () => {
         await waitFor(() => {
             expect(screen.getByText("daemon crash")).toBeTruthy();
         });
+    });
+});
+
+describe("SchedulesTab — delete confirmation", () => {
+    it("deletes the job only after confirming in the shared dialog", async () => {
+        const deleteSpy = vi.fn(() => Promise.resolve({ deleted: true }));
+        const client = makeClient({
+            list: () => Promise.resolve({ jobs: [sampleJob("row-1")] }),
+            delete: deleteSpy,
+        });
+        const user = userEvent.setup();
+        render(<SchedulesTab client={client} />);
+
+        await waitFor(() => {
+            expect(screen.getByText("row-1")).toBeTruthy();
+        });
+
+        // Deleting a schedule discards its run history, so the row button
+        // only opens the shared confirm dialog — jobs.delete must not fire yet.
+        await user.click(screen.getByRole("button", { name: "schedules.actionDelete" }));
+        expect(deleteSpy).not.toHaveBeenCalled();
+
+        await user.click(
+            await screen.findByRole("button", { name: "schedules.actionDeleteConfirm" }),
+        );
+        await waitFor(() => {
+            expect(deleteSpy).toHaveBeenCalledTimes(1);
+        });
+        expect(deleteSpy).toHaveBeenCalledWith({ id: "row-1" });
+    });
+
+    it("canceling the confirm dialog leaves the job untouched", async () => {
+        const deleteSpy = vi.fn(() => Promise.resolve({ deleted: true }));
+        const client = makeClient({
+            list: () => Promise.resolve({ jobs: [sampleJob("row-1")] }),
+            delete: deleteSpy,
+        });
+        const user = userEvent.setup();
+        render(<SchedulesTab client={client} />);
+
+        await waitFor(() => {
+            expect(screen.getByText("row-1")).toBeTruthy();
+        });
+
+        await user.click(screen.getByRole("button", { name: "schedules.actionDelete" }));
+        await user.click(await screen.findByRole("button", { name: "schedules.actionCancel" }));
+
+        expect(deleteSpy).not.toHaveBeenCalled();
+        await waitFor(() => {
+            expect(
+                screen.queryByRole("button", { name: "schedules.actionDeleteConfirm" }),
+            ).toBeNull();
+        });
+        expect(screen.getByText("row-1")).toBeTruthy();
     });
 });
 

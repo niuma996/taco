@@ -165,22 +165,6 @@ aside.sidebar .session-item.active {
     font-variant-numeric: tabular-nums;
 }
 
-.layout {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-}
-
-/* Right column: topbar → content area → input, top-to-bottom filling remaining width and full height. */
-.main-col {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-}
-
 /* lucide-react v1.x sets fill="none" on <svg>, but the attribute does not inherit to
    children — they fall back to default fill=black, rendering outlined icons as solid black.
    Explicitly reset child fill to none; stroke is inherited from the svg. */
