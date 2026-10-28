@@ -200,6 +200,9 @@ export class TacoClient extends TacoClientBase {
      * TACO_DEBUG_LLM_PAYLOAD=1 (spawn-time env, invisible to sidecar runtime).
      */
     async start(cwd: WorkspaceId): Promise<void> {
+        // restartSidecar() reuses this client after dispose(); a latched flag
+        // would silently disable reconnect for the rest of the app's life.
+        this.disposed = false;
         await this.ensureListeners();
         if (this.ensuredCwds.has(cwd)) return;
         // Set the handshake fallback channel BEFORE awaiting ensureWorkspace —

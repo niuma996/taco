@@ -611,6 +611,26 @@ test("PR4: dispose() does not schedule a reconnect (deliberate shutdown)", async
     assert.strictEqual(ensureCalls, callsAfterStart);
 });
 
+// restartSidecar() reuses the client: dispose() then start(). A daemon exit
+// after that must still reconnect, or the Rust slot stays empty and every
+// call fails with "sidecar not started".
+test("a client restarted after dispose() still reconnects on sidecar exit", async (t) => {
+    const sidecar = new FakeSidecarClient();
+    const client = new TacoClient({ sidecar });
+    await client.start(asWorkspaceId("/workspace/a"));
+    await client.dispose();
+    await client.start(asWorkspaceId("/workspace/a"));
+    const before = sidecar.initializeCount();
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+
+    sidecar.emitExit({ code: undefined });
+    t.mock.timers.tick(500);
+    await flush();
+
+    assert.equal(sidecar.initializeCount(), before + 1, "reconnect must re-handshake");
+    await client.dispose();
+});
+
 test("PR4: multiple sidecar exits during one reconnect only schedule one loop", async (t) => {
     const sidecar = new FakeSidecarClient();
     const client = new TacoClient({ sidecar });
