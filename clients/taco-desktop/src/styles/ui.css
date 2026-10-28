@@ -584,6 +584,16 @@
     border-color: var(--fg-dim);
 }
 
+/* ── Empty (inline placeholder inside a list column) ── */
+
+.ui-empty {
+    padding: var(--space-3);
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    font-style: italic;
+    line-height: var(--leading-normal);
+}
+
 /* ── Divider ── */
 
 .ui-divider {

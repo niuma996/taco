@@ -188,7 +188,7 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                 </div>
                 <div className="tools-list-body">
                     {filtered.length === 0 ? (
-                        <div className="tools-list-empty">{t("tools.noMatch")}</div>
+                        <div className="ui-empty">{t("tools.noMatch")}</div>
                     ) : (
                         filtered.map((tool) => (
                             <button

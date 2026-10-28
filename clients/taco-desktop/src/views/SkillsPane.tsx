@@ -91,7 +91,7 @@ export function SkillsPane({
                         </div>
                     )}
                     {skills.length === 0 ? (
-                        <div className="skills-list-empty">
+                        <div className="ui-empty">
                             {query ? (
                                 t("activity.skillsNoMatch")
                             ) : (

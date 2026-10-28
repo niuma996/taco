@@ -171,7 +171,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                 <div className="memory-pane">
                     <div className="memory-list">
                         <div className="pane-header">{t("memory.title")}</div>
-                        <div className="memory-list-empty">{t("memory.loading")}</div>
+                        <div className="ui-empty">{t("memory.loading")}</div>
                     </div>
                     <div className="memory-detail memory-detail-placeholder">
                         {t("memory.loading")}
@@ -434,7 +434,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                     </button>
 
                     {visibleTopics.length === 0 ? (
-                        <div className="memory-list-empty">
+                        <div className="ui-empty">
                             {terms.length > 0
                                 ? t("pane.noMatch")
                                 : data.topics.length > 0

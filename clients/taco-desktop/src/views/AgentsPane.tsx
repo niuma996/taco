@@ -124,7 +124,7 @@ export function AgentsPane({
                 )}
                 <div className="agents-list-body">
                     {filtered.length === 0 ? (
-                        <div className="agents-empty">
+                        <div className="ui-empty">
                             {query ? t("pane.noMatch") : t("activity.noAgents")}
                         </div>
                     ) : (

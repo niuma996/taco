@@ -76,13 +76,6 @@
     text-overflow: ellipsis;
 }
 
-.tools-list-empty {
-    padding: 0.75rem;
-    color: var(--fg-dim);
-    font-size: 0.8rem;
-    font-style: italic;
-}
-
 .tools-list-item {
     display: flex;
     align-items: center;

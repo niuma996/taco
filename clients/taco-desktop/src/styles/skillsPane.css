@@ -26,13 +26,6 @@
     padding: 0.25rem 0 0.5rem;
 }
 
-.skills-list-empty {
-    padding: 0.75rem;
-    color: var(--fg-dim);
-    font-size: 0.8rem;
-    line-height: 1.6;
-}
-
 /* Header/search styles live in paneShared.css as .pane-header / .pane-search — shared
    across Skills/Agents/Tools/Memory. */
 

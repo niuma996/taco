@@ -73,13 +73,6 @@
     padding: 0 0 var(--space-2);
 }
 
-.memory-list-empty {
-    padding: var(--space-3);
-    color: var(--fg-dim);
-    font-size: var(--text-sm);
-    line-height: var(--leading-normal);
-}
-
 /* Sticky so a long list still says which section it is in at row 80. */
 .memory-list-section-label {
     position: sticky;
