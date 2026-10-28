@@ -50,7 +50,7 @@ aside.sidebar .session-item {
     /* Matches the left icon rail's shadow block height (56px). Applied to all
        rows (not just .active) so row height doesn't change on selection. */
     min-height: 56px;
-    /* Subtle surface tint over the list bg — more transparent than pure --chat-bg.
+    /* Subtle surface tint over the list bg, not an opaque surface.
        Text uses dim to distinguish from active state. */
     background: var(--surface-tint);
     color: var(--fg-dim);

@@ -696,28 +696,28 @@ button.topbar-context-indicator {
 }
 
 .topbar-context-indicator--warn .topbar-context-indicator__ring-fill {
-    stroke: var(--warning, #ebcb8b);
+    stroke: var(--warning);
 }
 .topbar-context-indicator--warn .topbar-context-indicator__ring-text {
-    fill: var(--warning, #ebcb8b);
+    fill: var(--warning);
 }
 
 .topbar-context-indicator--danger .topbar-context-indicator__ring-fill,
 .topbar-context-indicator--overflow .topbar-context-indicator__ring-fill {
-    stroke: var(--error, #bf616a);
+    stroke: var(--error);
 }
 .topbar-context-indicator--danger .topbar-context-indicator__ring-text,
 .topbar-context-indicator--overflow .topbar-context-indicator__ring-text {
-    fill: var(--error, #bf616a);
+    fill: var(--error);
 }
 
 /* ContextIndicator — compacting state. Number frozen, ring pulses to show activity.
    --warning color avoids false danger/overflow red alerts. */
 .topbar-context-indicator--compacting .topbar-context-indicator__ring-fill {
-    stroke: var(--warning, #ebcb8b);
+    stroke: var(--warning);
 }
 .topbar-context-indicator--compacting .topbar-context-indicator__ring-text {
-    fill: var(--warning, #ebcb8b);
+    fill: var(--warning);
 }
 
 .topbar-context-indicator--compacting .topbar-context-indicator__ring-fill {
@@ -728,7 +728,7 @@ button.topbar-context-indicator {
     margin-left: 0.2rem;
     font-size: 0.7rem;
     letter-spacing: 0.04em;
-    color: var(--warning, #ebcb8b);
+    color: var(--warning);
 }
 
 /* ContextIndicator — click to open detail popover.
@@ -765,12 +765,12 @@ button.topbar-context-indicator {
 }
 
 .context-indicator-popover__row--cache {
-    color: var(--cache-hit, #a3be8c);
+    color: var(--cache-hit);
     font-weight: 500;
 }
 
 .context-indicator-popover__row--warn {
-    color: var(--warning, #ebcb8b);
+    color: var(--warning);
 }
 
 .context-indicator-popover__actions {
@@ -855,7 +855,7 @@ button.topbar-context-indicator {
     padding: 8px 12px 12px;
     overflow-y: auto;
     border-left: 1px solid var(--divider-panel);
-    background: var(--bg-secondary, transparent);
+    background: var(--bg-secondary);
     font-size: 13px;
     line-height: 1.4;
 }
@@ -937,7 +937,7 @@ button.topbar-context-indicator {
        inherited the body size and dwarfed the other two. */
     font-size: var(--text-base);
     margin: 0;
-    color: var(--fg-primary, inherit);
+    color: var(--fg-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1076,7 +1076,7 @@ button.topbar-context-indicator {
 
 .task-history-error {
     font-size: 11px;
-    color: var(--error, #bf616a);
+    color: var(--error);
     padding: 2px 0;
 }
 

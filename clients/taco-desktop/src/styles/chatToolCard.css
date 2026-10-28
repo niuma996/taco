@@ -41,7 +41,7 @@
 }
 .tool-card-summary {
     color: var(--fg-dim);
-    font-family: var(--mono, monospace);
+    font-family: var(--mono);
     word-break: break-all;
     /* Takes the slack so the raw-args toggle stays pinned right; min-width keeps
        a long summary from pushing the button out of the card. */
@@ -108,7 +108,7 @@
 }
 /* Shared by the tool card and the pending-approvals modal (CommandPermissionPrompt). */
 .permission-prompt-command {
-    font-family: var(--mono, monospace);
+    font-family: var(--mono);
     font-size: 0.85em;
     margin-top: 0.25rem;
     padding: 0.25rem 0.35rem;

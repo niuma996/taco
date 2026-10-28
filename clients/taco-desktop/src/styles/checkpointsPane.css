@@ -38,7 +38,7 @@
     padding: 10px 12px;
     background: var(--input-bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
+    border-radius: var(--radius-md);
 }
 
 .checkpoint-meta {

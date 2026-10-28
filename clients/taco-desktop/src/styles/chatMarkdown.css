@@ -158,11 +158,11 @@
 .md-code-block {
     position: relative;
     margin: 0.6em 0;
-    background: var(--terminal-bg, #1f2227);
-    border: 1px solid var(--code-block-border, #d4c9b0);
+    background: var(--terminal-bg);
+    border: 1px solid var(--code-block-border);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    color: var(--terminal-fg, #d4d4d4);
+    color: var(--terminal-fg);
     /* Same flex-shrink guard as .message/.tool-card — long <pre> content
        must not push the assistant message wider than the chat pane. */
     min-width: 0;
@@ -255,12 +255,12 @@
     border: 0;
     padding: 0;
     font-family: var(--mono);
-    /* Default text color on dark bg — fallback for no token highlighting or fallback rendering. */
-    color: var(--terminal-fg, #d4d4d4);
+    /* Default text color on dark bg — for no token highlighting or fallback rendering. */
+    color: var(--terminal-fg);
 }
 .md-code-block pre {
-    /* Fallback: same fg as .md-code-block container. Prevents a white flash before tokens render. */
-    color: var(--terminal-fg, #d4d4d4);
+    /* Same fg as .md-code-block container. Prevents a white flash before tokens render. */
+    color: var(--terminal-fg);
 }
 
 .md-copy-btn {

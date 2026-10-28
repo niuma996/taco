@@ -36,12 +36,11 @@
 .plugins-card-source {
     font-size: 11px;
     padding: 1px 6px;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: var(--radius-sm);
     background: var(--surface-tint);
     color: var(--fg-dim);
 }
 .plugins-card-when,
-.plugins-card-hint,
 .plugins-card-reason {
     font-size: 13px;
     margin: 0;

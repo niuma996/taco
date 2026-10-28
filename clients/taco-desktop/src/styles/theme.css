@@ -3,9 +3,7 @@
 :root {
     color-scheme: dark;
     --bg: #0f1115;
-    /* Chat area background, slightly lighter than --bg to distinguish from sidebar/pane-bg. */
-    --chat-bg: #13151a;
-    /* Chat panel + input top-half: slightly brighter than --chat-bg, aligns with sidebar bg. */
+    /* Chat panel + input top-half: slightly brighter than --bg, aligns with sidebar bg. */
     --chat-panel-bg: #171a1f;
     --fg: #d8dee9;
     --fg-dim: #7a8390;
@@ -186,7 +184,6 @@
     --text-base: 0.85rem;
     --text-md: 0.95rem;
     --text-lg: 1.15rem;
-    --text-xl: 1.4rem;
 
     /* Line-heights: tight for headings, normal for secondary text, relaxed for reading prose. */
     --leading-tight: 1.3;
@@ -246,7 +243,6 @@
     --warm-gray-4: #e8e5e0;
 
     --bg: var(--warm-gray-2);
-    --chat-bg: var(--warm-gray-1);
     --chat-panel-bg: var(--warm-gray-1);
     --fg: #2b2620;
     --fg-dim: #8a8177;

@@ -1,7 +1,7 @@
 /* overlays.css — error banner, drawer, toast, debug tab, llm dump panel, global scrollbar — split from styles.css on 2026-07-20.
    The shared modal shell (.ui-modal*) lives in ui.css with the ui/Modal component. */
 
-/* Rename modal: spacing between the input and the bottom buttons (formerly .modal-input margin-bottom). */
+/* Rename modal: spacing between the input and the bottom buttons. */
 .rename-modal-form .ui-input {
     margin-bottom: 1rem;
 }
@@ -94,15 +94,6 @@
 }
 .toast-card button:hover {
     color: var(--fg);
-}
-
-/* ── New session override hint ── */
-.session-override {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.75rem;
-    color: var(--fg-dim);
 }
 
 /* LLM dump fab + panel (originally L1757-1847) */
@@ -669,7 +660,6 @@ html *:hover {
     margin-top: auto;
 }
 
-.onboarding-actions .prompt-button,
 .onboarding-actions .ui-btn,
 .onboarding-actions .onboarding-cta {
     padding: 0 1.25rem;

@@ -24,7 +24,7 @@
     cursor: not-allowed;
 }
 .ui-switch:focus-visible {
-    outline: 2px solid var(--accent, #4a9eff);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
 .ui-switch-thumb {

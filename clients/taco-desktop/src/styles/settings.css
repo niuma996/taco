@@ -320,7 +320,7 @@
     flex-shrink: 0;
 }
 .provider-row-dot--ok {
-    background: var(--success, var(--fg));
+    background: var(--success);
 }
 .provider-row-name {
     font-weight: 500;
@@ -602,9 +602,9 @@
 .mcp-info-banner {
     margin-top: 0.6rem;
     padding: 0.5rem 0.8rem;
-    border: 1px solid var(--success, var(--border));
+    border: 1px solid var(--success);
     border-radius: var(--radius-sm);
-    color: var(--success, var(--fg));
+    color: var(--success);
     font-size: var(--text-sm);
     background: var(--bg);
 }
@@ -674,7 +674,7 @@
     color: var(--fg-dim);
 }
 .mcp-server-status--ok {
-    color: var(--success, var(--fg));
+    color: var(--success);
 }
 .mcp-server-status--error {
     color: var(--error);
@@ -809,30 +809,9 @@
     font-family: var(--mono);
 }
 
-.schedules-schedule {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.5rem 0.75rem;
-    color: var(--fg-dim);
-}
-
-.schedules-toggle {
-    flex-direction: row !important;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.schedules-form-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-
 .schedules-error {
     color: var(--error);
-    background: var(--error-bg, var(--bg-elevated));
+    background: var(--error-bg);
     border: 1px solid var(--error);
     padding: 0.5rem 0.75rem;
     border-radius: var(--radius-sm);

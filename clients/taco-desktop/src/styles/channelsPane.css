@@ -225,7 +225,6 @@
     flex-direction: column;
     gap: 14px;
 }
-.channels-bind-qr,
 .channel-bind-qr {
     display: flex;
     flex-direction: column;

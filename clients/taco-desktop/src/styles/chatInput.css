@@ -40,9 +40,9 @@ footer.input {
     padding: 0.4rem 0.75rem;
     font-size: 0.82rem;
     border-radius: var(--radius-lg);
-    border: 1px solid var(--warning, #ebcb8b);
-    color: var(--warning, #ebcb8b);
-    background: color-mix(in srgb, var(--warning, #ebcb8b) 8%, transparent);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
 
 .input-status__dot {
@@ -50,7 +50,7 @@ footer.input {
     width: 0.5rem;
     height: 0.5rem;
     border-radius: var(--radius-circle);
-    background: var(--warning, #ebcb8b);
+    background: var(--warning);
     animation: input-status-pulse 1.4s ease-in-out infinite;
 }
 

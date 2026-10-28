@@ -98,14 +98,6 @@
     gap: 1rem;
 }
 
-.askuser-waiting {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--fg-dim);
-    font-size: 0.85em;
-}
-
 .askuser-no-questions {
     color: var(--fg-dim);
     font-style: italic;
