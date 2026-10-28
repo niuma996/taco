@@ -15,7 +15,6 @@ import type {
     ChannelsListConversationsResult,
     ChannelsListResult,
     ChannelsRetryResult,
-    ClientCapabilities,
     CustomProviderApi,
     ImPolicyGetParams,
     ImPolicyGetResult,
@@ -215,13 +214,6 @@ export interface ServerRpcSurface {
      * `SidecarServer` always provides this; other implementations may omit it.
      */
     dispatchRpc?(req: RpcRequest): Promise<RpcResponse>;
-    /**
-     * Mark this sidecar process as initialized by the connected stdio client.
-     * Called by the `initialize` handler after the client's protocol version
-     * is accepted; subsequent RPCs from that client pass the
-     * `not_initialized` guard. In-process callers are never gated.
-     */
-    markInitialized(capabilities: ClientCapabilities): void;
     /**
      * Authoritative server capability advertisement, returned by `initialize`.
      */

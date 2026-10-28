@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { test } from "node:test";
 import { type RpcRequest, type RpcResponse, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
@@ -11,14 +12,12 @@ import { SidecarServer } from "../../src/server/server.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 
 async function request(transport: InMemoryTransport, req: RpcRequest): Promise<RpcResponse> {
-    const count = transport.sent.length + 1;
     transport.simulateRequest(JSON.stringify(req));
-    await transport.waitForPushCount(count);
-    const response = [...transport.sent]
-        .reverse()
-        .find((frame) => "ok" in frame && frame.id === req.id);
-    assert.ok(response && "ok" in response);
-    return response;
+    for (;;) {
+        const response = transport.sent.find((frame) => "ok" in frame && frame.id === req.id);
+        if (response && "ok" in response) return response;
+        await transport.waitForPushCount(transport.sent.length + 1);
+    }
 }
 const initialize = (id: string): RpcRequest => ({
     id,
@@ -336,3 +335,118 @@ test("MCP mutation defers workspace disposal until explicit release", async () =
         await host.stop();
     }
 });
+
+for (const mode of ["stdio", "socket"] as const) {
+    test(`${mode} connection drops responses when closed during an in-flight RPC`, async () => {
+        let finish!: () => void;
+        let started!: () => void;
+        const gate = new Promise<void>((done) => {
+            finish = done;
+        });
+        const entered = new Promise<void>((done) => {
+            started = done;
+        });
+        registerAdhocMethod(`test.closing${mode}`, false, async () => {
+            started();
+            await gate;
+            return {};
+        });
+        const host = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+        const transport = new InMemoryTransport();
+        const connection =
+            mode === "socket"
+                ? new ConnectionServer(host, transport, new ClientSinkRegistry())
+                : undefined;
+        if (connection) await connection.start();
+        else await host.start(transport, []);
+        try {
+            await request(transport, initialize(`init-${mode}`));
+            transport.simulateRequest(
+                JSON.stringify({ id: "pending", method: `test.closing${mode}`, params: {} }),
+            );
+            await entered;
+            if (connection) await connection.stop();
+            else await host.stop();
+            finish();
+            await new Promise((done) => setImmediate(done));
+            assert.equal(
+                transport.sent.some((frame) => frame.id === "pending"),
+                false,
+            );
+            // A closed connection also ignores new inbound frames.
+            transport.simulateRequest(
+                JSON.stringify({ id: "after-close", method: "workspace.list", params: {} }),
+            );
+            await new Promise((done) => setImmediate(done));
+            assert.equal(
+                transport.sent.some((frame) => frame.id === "after-close"),
+                false,
+            );
+        } finally {
+            finish();
+            await connection?.stop();
+            await host.stop();
+        }
+    });
+}
+
+for (const mode of ["stdio", "socket"] as const) {
+    test(`${mode} connection enables approvals only after handshake and retains request locale`, async () => {
+        const { mkdtemp, rm } = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const { asWorkspaceId } = await import("@taco-ai/protocol");
+        const cwd = asWorkspaceId(await mkdtemp(join(tmpdir(), "taco-approval-client-")));
+        const sinks = new ClientSinkRegistry();
+        const host = new SidecarServer({
+            providerKeyStore: new ProviderKeyStore({}),
+            clientSinkRegistry: sinks,
+        });
+        const transport = new InMemoryTransport();
+        const connection =
+            mode === "socket" ? new ConnectionServer(host, transport, sinks) : undefined;
+        if (connection) {
+            await host.start(new NullTransport(), []);
+            await connection.start();
+        } else await host.start(transport, []);
+        try {
+            const workspace = await host.ensureWorkspace(cwd);
+            const decision = await workspace.permissionBroker.requestConfigApproval({
+                sessionId: "headless",
+                toolCallId: "headless-tool",
+                fields: ["defaultModel"],
+            });
+            assert.equal(decision.approved, false);
+            assert.equal(decision.denialReason, "no_approver");
+            await request(transport, initialize("init-approval"));
+            registerAdhocMethod(`test.locale${mode}`, false, async () => {
+                const requested = once(workspace.permissionBroker, "requested");
+                const approval = workspace.permissionBroker.requestConfigApproval({
+                    sessionId: "localized",
+                    toolCallId: "localized-tool",
+                    fields: ["defaultModel"],
+                });
+                await requested;
+                const frame = transport.sent.find(
+                    (item) => "method" in item && item.method === "command_permission.requested",
+                );
+                assert.ok(frame && "params" in frame);
+                const params = frame.params as { text: string; requestId: string };
+                assert.match(params.text, /需要人工审批/);
+                workspace.permissionBroker.resolve(params.requestId, true, "once");
+                return { approved: (await approval).approved };
+            });
+            const response = await request(transport, {
+                id: "locale",
+                method: `test.locale${mode}`,
+                params: {},
+            });
+            assert.ok(response.ok, JSON.stringify(response));
+            assert.deepEqual(response.result, { approved: true });
+        } finally {
+            await connection?.stop();
+            await host.stop();
+            await rm(cwd, { recursive: true, force: true });
+        }
+    });
+}

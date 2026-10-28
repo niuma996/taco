@@ -121,9 +121,10 @@ import {
     WorkspaceAssociationStore,
 } from "../workspace/associationStore.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
-import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
+import { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CommandIdempotencyGate } from "./commandIdempotency.ts";
 import { CompactionPushAdapter } from "./compactionPushAdapter.ts";
+import { ConnectionServer } from "./connectionServer.ts";
 import type { DurablePushLog } from "./durablePushLog.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
 import { getRegisteredMethod, listRegisteredMethods, type MethodCtx } from "./methodRegistry.ts";
@@ -311,25 +312,10 @@ export class SidecarServer implements ServerRpcSurface {
      * process without a rebuild.
      */
     readonly associationStore: WorkspaceAssociationStore;
-    /**
-     * Whether the connected client has completed the `initialize` handshake.
-     * Every RPC except `initialize` is rejected with `not_initialized` while
-     * this is false. Reset to false in `stop()` so a re-`start()` requires
-     * a fresh handshake.
-     */
-    private isInitialized = false;
-    /**
-     * UI locale the connected client declared at `initialize` time.
-     * Server-side notices (e.g. the IM "local tools granted" banner) key off
-     * this so users see their own language instead of a hardcoded fallback.
-     * Undefined until `initialize` completes; defaults to "en" for any locale
-     * we don't ship a translation for.
-     */
-    private clientUiLocale: SupportedLocale | undefined;
     private readonly clientContext = new AsyncLocalStorage<ClientCapabilities>();
 
     private get requestUiLocale(): SupportedLocale | undefined {
-        return this.clientContext.getStore()?.uiLocale ?? this.clientUiLocale;
+        return this.clientContext.getStore()?.uiLocale;
     }
     /**
      * Snapshot of the channel ids that actually started during the most
@@ -384,7 +370,7 @@ export class SidecarServer implements ServerRpcSurface {
         return this.conversationRouter;
     }
     /** Process-level fan-out registry for all shared workspace pushes. */
-    private readonly clientSinkRegistry?: ClientSinkRegistry;
+    private readonly clientSinkRegistry: ClientSinkRegistry;
     /** taco.json channel instances, kept so channels.list can report the
      *  configured set independently of which ones actually started. */
     private channelConfigs: readonly ChannelConfig[] = [];
@@ -392,12 +378,12 @@ export class SidecarServer implements ServerRpcSurface {
     /** IM channel control surface — see `channelControl.ts`. */
     private readonly channelControl: ChannelControlSurface;
     private transport?: Transport;
+    private connection?: ConnectionServer;
     /**
      * True once stop() has run. Used by buildWorkspace to drop a workspace it
      * was constructing when shutdown raced in — without this the worker would
      * silently publish a ws that no caller will ever see (the registry was
-     * cleared). Distinct from `isInitialized`, which tracks the initialize
-     * RPC handshake and is false for IM-only sidecars that never call it.
+     * cleared). Connection handshake state belongs to ConnectionServer.
      */
     private stopped = false;
     private configSnapshot?: ResolvedTacoConfig;
@@ -448,17 +434,6 @@ export class SidecarServer implements ServerRpcSurface {
 
     lookupRoute(workspace: string): { sessionId: string } | undefined {
         return this.conversationRouter?.lookupByWorkspace(workspace);
-    }
-
-    /**
-     * `ServerRpcSurface.markInitialized` — flip the `not_initialized` guard after the
-     * `initialize` handler accepts the client's protocol version. Idempotent.
-     * Only `uiLocale` is retained — IM notices key off it. Other capability
-     * fields are accepted for forward compatibility but not stored.
-     */
-    markInitialized(capabilities: ClientCapabilities): void {
-        this.isInitialized = true;
-        this.clientUiLocale = capabilities.uiLocale;
     }
 
     /** Authoritative capability advertisement returned by `initialize`. */
@@ -523,7 +498,7 @@ export class SidecarServer implements ServerRpcSurface {
         this.imPolicyStore = new ImWorkspacePolicyStore();
         this.associationStore = new WorkspaceAssociationStore();
         this.sessionEvents = new SessionEventLog(512, options.pushLog);
-        this.clientSinkRegistry = options.clientSinkRegistry;
+        this.clientSinkRegistry = options.clientSinkRegistry ?? new ClientSinkRegistry();
         this.channelRegistry = new ChannelRegistry();
         this.channelBindBroker = new ChannelBindBroker();
         this.conversationRouter = options.conversationRouter;
@@ -587,9 +562,8 @@ export class SidecarServer implements ServerRpcSurface {
         this.stopped = false;
         this.workspaces.start();
         this.transport = transport;
-        transport.onRequest((line) => void this.handleLine(line));
-        await transport.open();
-        this.clientSinkRegistry?.add(transport);
+        this.connection = new ConnectionServer(this, transport, this.clientSinkRegistry);
+        await this.connection.start();
 
         this.conversationRouter ??= await ConversationRouter.load(tacoHome());
         this.conversationRouter.on("conversation", this.onRouterConversation);
@@ -628,14 +602,11 @@ export class SidecarServer implements ServerRpcSurface {
     /** Stop — close all harnesses held by runtimes */
     async stop(): Promise<void> {
         this.stopped = true;
-        if (this.transport) {
-            this.clientSinkRegistry?.remove(this.transport);
-        }
         this.channelBindBroker.off("status", this.onBrokerStatus);
         this.conversationRouter?.off("conversation", this.onRouterConversation);
         this.idempotency.stop();
         const resources = disposeInOrder([
-            () => this.transport?.close(),
+            () => this.connection?.stop(),
             () => {
                 this.channelBindBroker.cancelAll();
             },
@@ -659,8 +630,6 @@ export class SidecarServer implements ServerRpcSurface {
             log.warn(`push tail flush on shutdown failed: ${String(err)}`);
         });
         this.sessionEvents.clear();
-        this.isInitialized = false;
-        this.clientUiLocale = undefined;
         this.startedChannelIds = [];
         if (failure) throw failure;
     }
@@ -687,43 +656,13 @@ export class SidecarServer implements ServerRpcSurface {
 
     // ─────────── internals ───────────
 
-    private async handleLine(line: string): Promise<void> {
-        let req: RpcRequest;
-        try {
-            req = JSON.parse(line);
-        } catch {
-            return; // ignore bad frames
-        }
-        if (!req || typeof req.id !== "string" || typeof req.method !== "string") {
-            return;
-        }
-        // The handshake guard lives here, on the external transport boundary —
-        // NOT in handleRpcRequest. In-process callers (IM channel ingress,
-        // ConversationRouter, the memory self-RPC tool) share handleRpcRequest
-        // and have no client to perform `initialize`; gating them would break
-        // headless sidecars. Only a stdio peer must handshake first.
-        if (!this.isInitialized && req.method !== "initialize") {
-            void this.getTransport().send(
-                err(
-                    req.id,
-                    ErrorCodes.NotInitialized,
-                    "sidecar must be initialized before calling other methods; call initialize first",
-                ),
-            );
-            return;
-        }
-        const resp = await this.handleRpcRequest(req);
-        void this.getTransport().send(resp);
-    }
-
     /**
      * Handles an RpcRequest via the same path as NDJSON dispatch — handler
      * registry + middleware + RpcHandlerError -> RpcResponse.error translation
      * are all preserved. Used by in-process tools that self-RPC (see
      * `RpcDispatch.call` on the sidecar side) to avoid splitting RPC across
      * processes. No `not_initialized` gate here: in-process callers have no
-     * handshake to perform. The gate lives in `handleLine`, the only path a
-     * remote stdio client can reach.
+     * handshake to perform. ConnectionServer gates both stdio and socket clients.
      */
     async handleRpcRequest(req: RpcRequest): Promise<RpcResponse> {
         const reg = getRegisteredMethod(req.method);
@@ -1167,9 +1106,7 @@ export class SidecarServer implements ServerRpcSurface {
                 toolRegistry,
                 // Shared workspace approvals, including scheduler runs, reach every
                 // initialized desktop. Headless runs deny asks immediately.
-                hasApprover: this.clientSinkRegistry
-                    ? () => this.clientSinkRegistry?.hasClient() ?? true
-                    : () => this.getTransport().interactive !== false,
+                hasApprover: () => this.clientSinkRegistry.hasClient(),
                 // Hot-reload wiring: only the user-writable dirs are watched —
                 // the builtin dir ships with the binary and only changes via
                 // an app upgrade (a full restart), not hot-editing. Passing
@@ -1826,7 +1763,7 @@ export class SidecarServer implements ServerRpcSurface {
                       makePushFrame({ method, workspace, session, sessionKind, seq, params, id }),
                   );
         void this.getTransport().send(frame);
-        this.clientSinkRegistry?.fanout(frame, this.transport);
+        this.clientSinkRegistry.fanout(frame, this.transport);
         // im:// workspaces additionally fan-out channel pushes (additive sink; no return; stdio always sends)
         if (workspace.startsWith(IM_CWD_PREFIX)) {
             const parsed = parseImCwd(workspace);

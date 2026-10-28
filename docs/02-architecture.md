@@ -387,7 +387,9 @@ The runtime has two running modes, with different isolation semantics:
 Within one daemon, a single `SidecarServer` owns the workspace registry,
 attached sessions, command-idempotency gate, channels and sequenced event log.
 The scheduler dispatches into that same runtime. `ConnectionServer` holds only
-its transport, initialization state and client capabilities; responses return
+its transport, initialization state and client capabilities. Stdio uses the same
+connection adapter, including handshake validation, request locale and suppression
+of responses after closure; in-process RPC needs no handshake. Responses return
 to the requesting connection, while pushes for both filesystem and IM workspaces
 fan out to all initialized clients, including session events and permission
 requests. Scheduled runs may wait for desktop approval when a client is connected;

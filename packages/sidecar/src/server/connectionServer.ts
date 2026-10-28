@@ -4,11 +4,16 @@ import {
     type RpcRequest,
     type RpcResponse,
 } from "@taco-ai/protocol";
+import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { initializeClient } from "./handlers/initialize.ts";
 import { err, normalizeError, ok } from "./rpcResponse.ts";
-import type { SidecarServer } from "./server.ts";
 import type { Transport } from "./transport.ts";
+
+interface ConnectionHost
+    extends Pick<ServerRpcSurface, "refreshConfiguration" | "getServerCapabilities"> {
+    dispatchClientRpc(req: RpcRequest, capabilities: ClientCapabilities): Promise<RpcResponse>;
+}
 
 /** Connection state stays local; runtime, command deduplication and sessions belong to the host. */
 export class ConnectionServer {
@@ -16,7 +21,7 @@ export class ConnectionServer {
     private closed = false;
 
     constructor(
-        private readonly host: SidecarServer,
+        private readonly host: ConnectionHost,
         private readonly transport: Transport,
         private readonly sinks: ClientSinkRegistry,
     ) {}

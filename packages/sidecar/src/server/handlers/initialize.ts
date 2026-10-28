@@ -87,8 +87,6 @@ export function initializeClient(params: unknown, serverCapabilities: SidecarCap
 
 export function registerInitializeHandler(): void {
     registerMethod("initialize", false, async ({ params, server }) => {
-        const { capabilities, result } = initializeClient(params, server.getServerCapabilities());
-        server.markInitialized(capabilities);
-        return result;
+        return initializeClient(params, server.getServerCapabilities()).result;
     });
 }
