@@ -80,23 +80,16 @@ export type CompactionFailureReason =
 
 /** Current wire compatibility contract. A major mismatch is not interoperable.
  *  v2 dropped the `sidecar.hello` push frame; v1 clients are not accepted.
- *  2.1 added `session.cancelQueued` and gave `session.steer` a result body
- *  (`{ mode, entryId }`); a 2.0 daemon still answers steer with `null`, which
- *  a 2.1 client would misread as a successful enqueue.
- *  2.2 added `providers.revealKey`, the `{ providerId }` shape of
- *  `provider.listModels`, and the `providerExtraModels` /
- *  `providerHiddenModels` config fields. A 2.1 daemon drops those fields on
- *  `settings.write` while still answering ok, so a 2.2 client must refuse it
- *  rather than lose the user's model-list edits silently.
- *  2.3 added the `workspace.associations.get` / `.set` / `.resolve` RPCs,
- *  the `config.patch` RPC and the `workspace.associations_changed` push. A
- *  2.2 daemon does not know them, so a 2.3 client must refuse it up front
- *  rather than fail on one particular RPC later.
- *  2.4 added the `memory.dreamRun` / `.dreamApply` / `.dreamDiscard` /
- *  `.dreamUndo` and `memory.restoreTopic` RPCs, plus the optional `dream` /
- *  `dreamScheduled` fields on `memory.list`. A 2.3 daemon does not know the
- *  RPCs, so a 2.4 client must refuse it up front. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 4 } as const;
+ *  A minor bump means an older daemon would fail or, worse, answer ok while
+ *  dropping the new fields, so the newer client must refuse it up front. The
+ *  per-minor history lives in docs/sidecar-protocol.md.
+ *  2.1 gave `session.steer` a result body; a 2.0 daemon answers `null`, which a
+ *  2.1 client would misread as a successful enqueue.
+ *  2.2 added the `providerExtraModels` / `providerHiddenModels` config fields;
+ *  a 2.1 daemon drops them on `settings.write` while still answering ok.
+ *  2.5 added `attachment.stage` and the `attachments` params on session
+ *  prompts; a 2.4 daemon would ignore the ids and send the files nowhere. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 5 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

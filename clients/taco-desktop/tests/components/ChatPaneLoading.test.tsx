@@ -23,6 +23,14 @@ vi.spyOn(useI18n, "useT").mockReturnValue({
         opts ? `${key} ${Object.values(opts).join(" ")}` : key,
 } as unknown as ReturnType<typeof useI18n.useT>);
 
+// The attachment hook registers a native drag-drop listener and opens the OS picker;
+// neither exists under jsdom.
+vi.mock("@tauri-apps/api/webview", () => ({
+    getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (p: string) => `asset://${p}` }));
+
 // Children that reach for the client or global config; their own tests cover them.
 vi.mock("../../src/components/CommandPermissionModeSelector", () => ({
     CommandPermissionModeSelector: () => null,
@@ -66,7 +74,16 @@ function renderPane(ws: WorkspaceState) {
         client: {} as ChatPaneProps["client"],
         ws,
         input: "draft",
-        attachments: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+        attachments: [
+            { id: "att-1", name: "shot.png", mimeType: "image/png", size: 1024, kind: "image" },
+        ],
+        onStageAttachment: async () => ({
+            id: "att-2",
+            name: "x.txt",
+            mimeType: "text/plain",
+            size: 1,
+            kind: "file",
+        }),
         busy: false,
         runInFlight: false,
         queuedItems: [],
@@ -99,7 +116,7 @@ function renderPane(ws: WorkspaceState) {
 }
 
 describe("ChatPane composer while a session opens", () => {
-    it("locks text, images, attachment removal, model and send", () => {
+    it("locks text, attaching, attachment removal, model and send", () => {
         renderPane(workspace({ loadingSessionId: "b" }));
         assert.equal(screen.getByRole("textbox").hasAttribute("disabled"), true);
         assert.equal(
@@ -114,9 +131,10 @@ describe("ChatPane composer while a session opens", () => {
             screen.getByRole("button", { name: "input.send" }).hasAttribute("disabled"),
             true,
         );
-        // The image picker is the one control with no accessible name of its own.
-        const picker = document.querySelector("input[type=file]")?.nextElementSibling;
-        assert.equal(picker?.hasAttribute("disabled"), true);
+        assert.equal(
+            screen.getByRole("button", { name: "input.attachFiles" }).hasAttribute("disabled"),
+            true,
+        );
     });
 
     it("unlocks once the session has opened", () => {

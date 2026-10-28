@@ -87,10 +87,12 @@
     "sendSteer": "插话发送",
     "stop": "停止",
     "runningIndicator": "代理运行中",
-    "attachImages": "附加图片",
     "removeAttachment": "移除附件",
-    "attachLimitWarn_one": "已拒绝 {{count}} 个文件:不是图片、超过 5MB,或超过 {{limit}} 张图片的上限。",
-    "attachLimitWarn_other": "已拒绝 {{count}} 个文件:不是图片、超过 5MB,或超过 {{limit}} 张图片的上限。"
+    "attachFiles": "添加文件",
+    "attachTooMany": "每条消息最多 {{limit}} 个文件,{{count}} 个未添加。",
+    "attachTooLarge": "{{count}} 个文件过大,未添加。",
+    "attachFailed": "{{count}} 个文件添加失败。",
+    "dropFiles": "松开以添加文件"
   },
   "queue": {
     "title": "排队中的消息",
@@ -764,7 +766,9 @@
     "guideImageOnly": "图片消息",
     "guideEmpty": "空消息",
     "guideImageCount": "{{count}} 张图片",
-    "guideTruncated": "内容已截断，点击查看完整消息"
+    "guideTruncated": "内容已截断，点击查看完整消息",
+    "guideFilesOnly_other": "{{count}} 个文件",
+    "guideFileCount_other": "附带 {{count}} 个文件"
   },
   "plan": {
     "modeTooltip": "Plan 模式:仅 plan 文档与只读 shell 命令可写;扩展贡献的工具不在约束范围内,使用前请人工核查其输出。"

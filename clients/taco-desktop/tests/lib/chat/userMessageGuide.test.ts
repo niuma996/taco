@@ -29,9 +29,9 @@ describe("buildUserMessageGuide — 条目抽取", () => {
         ];
 
         assert.deepEqual(buildUserMessageGuide(messages), [
-            { id: "u1", messageIndex: 1, text: "hello", images: [] },
-            { id: "u2", messageIndex: 2, text: "", images: [IMAGE] },
-            { id: "u3", messageIndex: 3, text: "after", images: [] },
+            { id: "u1", messageIndex: 1, text: "hello", images: [], attachments: [] },
+            { id: "u2", messageIndex: 2, text: "", images: [IMAGE], attachments: [] },
+            { id: "u3", messageIndex: 3, text: "after", images: [], attachments: [] },
         ]);
     });
 

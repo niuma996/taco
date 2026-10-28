@@ -177,6 +177,7 @@ export interface HookWiringOptions {
     mutationGateReadRoots?: {
         readonly primary: string;
         readonly getAssociated?: () => readonly string[];
+        readonly extra?: readonly string[];
     };
     /**
      * Turn-scoped pre-write snapshots. When present, the mutation gate captures

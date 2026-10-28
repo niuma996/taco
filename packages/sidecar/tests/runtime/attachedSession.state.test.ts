@@ -62,6 +62,7 @@ describe("attachedSession.modelIdentity", () => {
             taskStore: taskStoreStub(),
             planState: createPlanModeState(),
             tasksDir: tmp,
+            attachmentsDir: tmp,
             sessionCwd: tmp as never,
             getToolContext: () => ({ env, workspace: tmp as never }) as never,
             memoryStore: options.memoryStore,

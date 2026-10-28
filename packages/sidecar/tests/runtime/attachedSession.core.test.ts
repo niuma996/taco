@@ -88,6 +88,7 @@ describe("attachedSession.streaming", () => {
             } as unknown as TaskStore,
             planState: createPlanModeState(),
             tasksDir: tmp,
+            attachmentsDir: tmp,
             sessionCwd: tmp as never,
             getToolContext: () => ({ env, workspace: tmp as never }) as never,
         } as never);
@@ -164,6 +165,7 @@ describe("attachedSession.streaming", () => {
                     } as unknown as TaskStore,
                     planState: createPlanModeState(),
                     tasksDir: tmp,
+                    attachmentsDir: tmp,
                     sessionCwd: tmp as never,
                     getToolContext: () => ({ env, workspace: tmp as never }) as never,
                 } as never);
@@ -513,6 +515,7 @@ describe("attachedSession.deferredTools", () => {
             } as unknown as TaskStore,
             planState: createPlanModeState(),
             tasksDir: tmpDir,
+            attachmentsDir: tmpDir,
             toolRegistry,
             sessionCwd: tmpDir as never,
             // Dynamic-tool tests don't exercise the tool context path; tools that
@@ -650,6 +653,7 @@ describe("attachedSession.deferredTools", () => {
                 } as unknown as TaskStore,
                 planState: createPlanModeState(),
                 tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
                 toolRegistry: registry,
                 sessionCwd: tmpDir as never,
                 getToolContext: (): TacoToolContextBase => ({
@@ -720,6 +724,7 @@ describe("attachedSession.deferredTools", () => {
                 } as unknown as TaskStore,
                 planState: createPlanModeState(),
                 tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
                 toolRegistry: registry,
                 sessionCwd: tmpDir as never,
                 getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),
@@ -789,6 +794,7 @@ describe("attachedSession.deferredTools", () => {
                 } as unknown as TaskStore,
                 planState: createPlanModeState(),
                 tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
                 toolRegistry: registry,
                 sessionCwd: tmpDir as never,
                 getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),
@@ -842,6 +848,7 @@ describe("attachedSession.deferredTools", () => {
                 } as unknown as TaskStore,
                 planState: createPlanModeState(),
                 tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
                 toolRegistry: registry,
                 sessionCwd: tmpDir as never,
                 getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),

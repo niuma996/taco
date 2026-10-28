@@ -24,6 +24,8 @@ export async function callMethod<T = unknown>(
         server?: unknown;
         params?: unknown;
         workspace?: unknown;
+        /** Resolved workspace id; handlers that key state by workspace read this. */
+        cwd?: unknown;
     } = {},
 ): Promise<T> {
     const reg = getRegisteredMethod(name);
@@ -42,7 +44,7 @@ export async function callMethod<T = unknown>(
     const ctx: MethodCtx<unknown> = {
         id: "test",
         workspace: args.workspace as never,
-        cwd: undefined as never,
+        cwd: args.cwd as never,
         server: (args.server ?? ownedServer) as never,
         params: args.params,
     };

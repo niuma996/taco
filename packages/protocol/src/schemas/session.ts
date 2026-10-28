@@ -7,7 +7,9 @@
  * express.
  */
 import { Type } from "typebox";
+import { ATTACHMENT_MAX_COUNT } from "../attachment.js";
 import type { InitializeParams } from "../frames.js";
+import { attachmentIdSchema } from "./attachment.js";
 import {
     imageInputSchema,
     sessionIdSchema,
@@ -16,6 +18,13 @@ import {
 } from "./fields.js";
 
 const workspace = workspaceIdSchema;
+
+// Staged ids from attachment.stage, committed into the session on send. The
+// schema bound turns an absurd array into a validation error before any id is
+// looked up.
+const attachmentIds = Type.Optional(
+    Type.Array(attachmentIdSchema, { maxItems: ATTACHMENT_MAX_COUNT }),
+);
 
 const thinkingLevel = Type.Union([
     Type.Literal("off"),
@@ -42,6 +51,7 @@ export const sessionCreateSchema = Type.Object({
     initialPrompt: Type.Optional(Type.String()),
     // May accompany an empty initialPrompt: image-only first turns are valid.
     initialImages: Type.Optional(Type.Array(imageInputSchema)),
+    initialAttachments: attachmentIds,
     thinkingLevel: Type.Optional(thinkingLevel),
     // Sets the first reply-language hook for this new session; never persisted.
     uiLocale: Type.Optional(locale),
@@ -115,6 +125,7 @@ export const sessionPromptSchema = Type.Object({
     ...sessionTarget,
     text: Type.String(),
     images: Type.Optional(Type.Array(imageInputSchema)),
+    attachments: attachmentIds,
     // Transient per-turn language hook; also updates the live locale for later turns.
     uiLocale: Type.Optional(locale),
     // Only honored when this prompt attaches a new session. For an attached
@@ -126,6 +137,7 @@ export const sessionSteerSchema = Type.Object({
     ...sessionTarget,
     text: Type.String(),
     images: Type.Optional(Type.Array(imageInputSchema)),
+    attachments: attachmentIds,
     uiLocale: Type.Optional(locale),
 });
 

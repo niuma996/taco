@@ -46,6 +46,7 @@ import {
 import { Value } from "typebox/value";
 import { loadAgents } from "../agents/loadAgents.ts";
 import type { AgentDefinition } from "../agents/types.ts";
+import { viewUserContent } from "../attachments/userMessageView.ts";
 import type { ChannelBindStatus } from "../channels/channelBindBroker.ts";
 import { ChannelBindBroker } from "../channels/channelBindBroker.ts";
 import { FileChannelConfigStore } from "../channels/channelConfigStore.ts";
@@ -112,7 +113,6 @@ import {
     readSkillFrontmatter,
 } from "../skills/skillFrontmatter.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
-import { applyTuiVisibilityToContent, isContentEmptyAfterVisibility } from "../tags/index.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { configToolCandidates } from "../tools/configCandidates.ts";
 import { sessionHistoryToolCandidates } from "../tools/sessionSearch.ts";
@@ -1187,10 +1187,19 @@ export class SidecarServer implements ServerRpcSurface {
                 evt.message?.role === "user" &&
                 evt.message.content !== undefined
             ) {
-                const content = applyTuiVisibilityToContent(evt.message.content);
-                if (isContentEmptyAfterVisibility(content)) return;
+                const view = viewUserContent(evt.message.content);
+                if (view.empty) return;
                 this.emitPush(PushMethods.Event, workspaceKey, e.sessionId, {
-                    event: { ...evt, message: { ...evt.message, content } },
+                    event: {
+                        ...evt,
+                        message: {
+                            ...evt.message,
+                            content: view.content,
+                            ...(view.attachments.length > 0
+                                ? { attachments: view.attachments }
+                                : {}),
+                        },
+                    },
                 });
                 return;
             }

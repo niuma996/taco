@@ -16,6 +16,7 @@ import type {
     AgentsListResult,
     AgentsWriteParams,
     AgentsWriteResult,
+    AttachmentStageResult,
     CancelQueuedResult,
     ChannelsBindParams,
     ChannelsBindResult,
@@ -194,6 +195,7 @@ export interface TypedRpc {
         images?: ImageInput[],
         uiLocale?: SupportedLocale,
         model?: { provider: string; id: string },
+        attachments?: string[],
     ): Promise<PromptResult>;
     /**
      * Enqueue a mid-run steering message, consumed at the next tool-batch
@@ -207,6 +209,7 @@ export interface TypedRpc {
         text: string,
         images?: ImageInput[],
         uiLocale?: SupportedLocale,
+        attachments?: string[],
     ): Promise<SteerResult>;
     /**
      * Like sessionSteer, but consumed only once the run would otherwise finish —
@@ -219,6 +222,7 @@ export interface TypedRpc {
         text: string,
         images?: ImageInput[],
         uiLocale?: SupportedLocale,
+        attachments?: string[],
     ): Promise<FollowUpResult>;
     /** Remove one not-yet-consumed queue entry; "already_consumed" / "not_found" are normal outcomes. */
     sessionCancelQueued(
@@ -275,6 +279,15 @@ export interface TypedRpc {
      * Fetch current session context info (tokens used, model window, ratio, last compact time).
      * The authoritative data source for the desktop top-bar indicator.
      */
+    /**
+     * Stage a file for the next prompt. Pass `{ path }` to have the sidecar copy
+     * a local file, or `{ name, data }` for bytes the client already holds
+     * (paste). The returned `id` is what a prompt names in `attachments`.
+     */
+    attachmentStage(
+        workspace: WorkspaceId,
+        source: { path: string } | { name: string; data: string; mimeType?: string },
+    ): Promise<AttachmentStageResult>;
     sessionContextInfo(
         workspace: WorkspaceId,
         sessionId: SessionId,
@@ -511,31 +524,34 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
             contract.call(RPC.sessionPlanStateGet, workspace, { workspace, sessionId }),
 
         // sessionPrompt: workspace + sessionId + text + optional images + optional uiLocale
-        sessionPrompt: (workspace, sessionId, text, images, uiLocale, model) =>
+        sessionPrompt: (workspace, sessionId, text, images, uiLocale, model, attachments) =>
             contract.call(RPC.sessionPrompt, workspace, {
                 workspace,
                 sessionId,
                 text,
                 ...(images && images.length > 0 ? { images } : {}),
+                ...(attachments && attachments.length > 0 ? { attachments } : {}),
                 ...(uiLocale ? { uiLocale } : {}),
                 ...(model ? { model } : {}),
             }),
 
         // sessionSteer / sessionFollowUp: workspace + sessionId + text + optional images + optional uiLocale
-        sessionSteer: (workspace, sessionId, text, images, uiLocale) =>
+        sessionSteer: (workspace, sessionId, text, images, uiLocale, attachments) =>
             contract.call(RPC.sessionSteer, workspace, {
                 workspace,
                 sessionId,
                 text,
                 ...(images && images.length > 0 ? { images } : {}),
+                ...(attachments && attachments.length > 0 ? { attachments } : {}),
                 ...(uiLocale ? { uiLocale } : {}),
             }),
-        sessionFollowUp: (workspace, sessionId, text, images, uiLocale) =>
+        sessionFollowUp: (workspace, sessionId, text, images, uiLocale, attachments) =>
             contract.call(RPC.sessionFollowUp, workspace, {
                 workspace,
                 sessionId,
                 text,
                 ...(images && images.length > 0 ? { images } : {}),
+                ...(attachments && attachments.length > 0 ? { attachments } : {}),
                 ...(uiLocale ? { uiLocale } : {}),
             }),
         sessionCancelQueued: (workspace, sessionId, entryId) =>
@@ -607,6 +623,10 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
                 // Omit `customInstructions` from the RPC frame when absent, avoiding an undefined placeholder.
                 ...(customInstructions ? { customInstructions } : {}),
             }),
+
+        // attachmentStage: workspace + exactly one source (path | name+data)
+        attachmentStage: (workspace, source) =>
+            contract.call(RPC.attachmentStage, workspace, { workspace, ...source }),
 
         // sessionContextInfo: workspace + sessionId snapshot
         sessionContextInfo: (workspace, sessionId) =>

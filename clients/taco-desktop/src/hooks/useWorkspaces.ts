@@ -7,11 +7,18 @@
  * input / pendingDeleteSession / confirmNewSession stay in App.tsx (UI state).
  */
 
-import type { ImageInput, SupportedLocale, ThinkingLevel } from "@taco-ai/protocol";
+import type {
+    AttachmentStageResult,
+    ImageInput,
+    SupportedLocale,
+    ThinkingLevel,
+} from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import { useT } from "../i18n/useI18n";
+import type { StagedAttachment, StageInput } from "../lib/attachments";
+import { toMessageAttachments } from "../lib/attachments";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
 import {
     type WorkspaceAction,
@@ -118,13 +125,23 @@ export interface UseWorkspacesApi {
      * steer rather than rejected. See STEER_PROMPT_HANDOFF for why the handoff
      * cannot bounce more than once.
      */
-    sendPrompt: (text: string, images?: ImageInput[]) => Promise<boolean>;
+    sendPrompt: (
+        text: string,
+        images?: ImageInput[],
+        attachments?: StagedAttachment[],
+    ) => Promise<boolean>;
     /**
      * Enqueue a steer message on the session's active run. Same return contract
      * as sendPrompt. If the server reports the run is already over (`mode:
      * "idle"`), this degrades to sendPrompt once so the text is not lost.
      */
-    steerPrompt: (text: string, images?: ImageInput[]) => Promise<boolean>;
+    steerPrompt: (
+        text: string,
+        images?: ImageInput[],
+        attachments?: StagedAttachment[],
+    ) => Promise<boolean>;
+    /** Copy/stage a file for the next prompt in the active workspace. */
+    stageAttachment: (source: StageInput) => Promise<AttachmentStageResult>;
     /** Cancel one not-yet-consumed queue entry by server entryId (QueueBar row). */
     cancelQueued: (entryId: string) => Promise<void>;
     /**
@@ -504,13 +521,15 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     async function sendPrompt(
         text: string,
         images?: ImageInput[],
+        attachments?: StagedAttachment[],
         handoff: SteerHandoff = "allowed",
     ): Promise<boolean> {
         const trimmed = text.trim();
         // Allow image-only prompts (text empty but attachments present) — they go through the
         // full sessionCreate / sessionPrompt path (sidecar already supports params.initialPrompt ?? "").
         // The only return-false condition is text AND images both empty (nothing to send).
-        if (!trimmed && (!images || images.length === 0)) return false;
+        const hasFiles = !!attachments && attachments.length > 0;
+        if (!trimmed && (!images || images.length === 0) && !hasFiles) return false;
         const cwd = activeCwd;
         const ws = workspacesRef.current[cwd];
         const uiLocale = getGlobalConfig().client.uiLanguage;
@@ -536,6 +555,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     text: trimmed,
                     ts: now,
                     ...(images && images.length > 0 ? { images } : {}),
+                    ...(hasFiles ? { attachments: toMessageAttachments(attachments) } : {}),
                 };
                 dispatchWs({ type: "APPEND_USER", cwd, msg: optimisticUserMsg });
 
@@ -579,6 +599,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     text,
                     trimmed,
                     images,
+                    attachments,
                     uiLocale,
                     handoff,
                     initialModel ?? undefined,
@@ -587,7 +608,16 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 pendingCreateRef.current = false;
             }
         }
-        return deliverPrompt(cwd, ws.activeSession, text, trimmed, images, uiLocale, handoff);
+        return deliverPrompt(
+            cwd,
+            ws.activeSession,
+            text,
+            trimmed,
+            images,
+            attachments,
+            uiLocale,
+            handoff,
+        );
     }
 
     /**
@@ -604,6 +634,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         text: string,
         trimmed: string,
         images: ImageInput[] | undefined,
+        attachments: StagedAttachment[] | undefined,
         uiLocale: SupportedLocale | undefined,
         handoff: SteerHandoff,
         model?: { provider: string; id: string },
@@ -627,6 +658,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     images,
                     uiLocale,
                     model,
+                    attachments?.map((a) => a.id),
                 )
             ).assistantMessage;
             // Auto-title is persisted inside server-side session.prompt and invalidateListCache'd,
@@ -674,7 +706,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // Pending deliberately stays set: session_busy means a run really is
             // in flight, and its run_end is what clears the slot.
             if ((err as { code?: string }).code === ErrorCodes.SessionBusy) {
-                if (handoff === "allowed") return steerPrompt(text, images, "exhausted");
+                if (handoff === "allowed") {
+                    return steerPrompt(text, images, attachments, "exhausted");
+                }
                 pushNotification("Prompt failed: the session is busy; try again");
                 return false;
             }
@@ -687,10 +721,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     async function steerPrompt(
         text: string,
         images?: ImageInput[],
+        attachments?: StagedAttachment[],
         handoff: SteerHandoff = "allowed",
     ): Promise<boolean> {
         const trimmed = text.trim();
-        if (!trimmed && (!images || images.length === 0)) return false;
+        const hasFiles = !!attachments && attachments.length > 0;
+        if (!trimmed && (!images || images.length === 0) && !hasFiles) return false;
         const cwd = activeCwd;
         const ws = workspacesRef.current[cwd];
         const uiLocale = getGlobalConfig().client.uiLanguage;
@@ -716,6 +752,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 trimmed,
                 images,
                 uiLocale,
+                attachments?.map((a) => a.id),
             );
             if (result.mode !== "idle") return true;
             // The run ended between the composer's steer and the server's check,
@@ -725,7 +762,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 pushNotification("Steer failed: the session stopped accepting input; try again");
                 return false;
             }
-            return sendPrompt(text, images, "exhausted");
+            return sendPrompt(text, images, attachments, "exhausted");
         } catch (err) {
             console.error("[taco] sessionSteer failed", err);
             pushNotification(`Steer failed: ${(err as Error).message}`);
@@ -812,6 +849,11 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         }
     }
 
+    /** Stage a file against the active workspace; the id goes back with the prompt. */
+    async function stageAttachment(source: StageInput) {
+        return client.attachmentStage(asWorkspaceId(activeCwd), source);
+    }
+
     return {
         workspaces,
         activeCwd,
@@ -838,6 +880,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         beginPendingNewSession,
         sendPrompt,
         steerPrompt,
+        stageAttachment,
         cancelQueued,
         abortPrompt,
         setSessionModel: settings.setSessionModel,

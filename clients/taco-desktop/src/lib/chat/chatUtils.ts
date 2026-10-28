@@ -9,7 +9,7 @@
  * to AgentHarness event formats. Notify server / shared when changing.
  */
 
-import type { AgentMessage, ImageInput } from "@taco-ai/protocol";
+import type { AgentMessage, ImageInput, MessageAttachment } from "@taco-ai/protocol";
 
 export interface ContentPart {
     type?: string;
@@ -272,7 +272,15 @@ export interface UiThinkingBlock {
 }
 
 export type UiMessage =
-    | { id: string; kind: "user"; text: string; ts: number; images?: ImageInput[] }
+    | {
+          id: string;
+          kind: "user";
+          text: string;
+          ts: number;
+          images?: ImageInput[];
+          /** Files sent with the message; rendered as chips under the text. */
+          attachments?: MessageAttachment[];
+      }
     | {
           id: string;
           kind: "assistant";
@@ -499,12 +507,14 @@ export function historyToUiMessages(
 
         if (role === "user") {
             const images = extractImageParts(content);
+            const attachments = extractAttachments(m);
             out.push({
                 id: entryId || `user-${ts}`,
                 kind: "user",
                 text: foldTextParts(content) ?? "",
                 ts,
                 ...(images.length > 0 ? { images } : {}),
+                ...(attachments.length > 0 ? { attachments } : {}),
             });
         } else if (role === "assistant") {
             const { text, tools, thinking } = splitAssistantContent(content);
@@ -769,6 +779,30 @@ export function appendAssistantError(
  *  no images (callers omit the `images` field when undefined).
  *  Exported for applyEventToMessages to reuse — single source of truth for
  *  the extraction lives here in chatUtils. */
+/**
+ * Attachments the sidecar attached to a pushed or replayed user message.
+ * Read defensively: the field is optional on the wire and its shape is data
+ * from another process.
+ */
+export function extractAttachments(message: unknown): MessageAttachment[] {
+    const raw = (message as { attachments?: unknown } | null | undefined)?.attachments;
+    if (!Array.isArray(raw)) return [];
+    const out: MessageAttachment[] = [];
+    for (const a of raw) {
+        if (!a || typeof a !== "object") continue;
+        const x = a as Partial<MessageAttachment>;
+        if (typeof x.name !== "string" || typeof x.mimeType !== "string") continue;
+        out.push({
+            name: x.name,
+            mimeType: x.mimeType,
+            size: typeof x.size === "number" ? x.size : 0,
+            path: typeof x.path === "string" ? x.path : "",
+            kind: x.kind === "image" ? "image" : "file",
+        });
+    }
+    return out;
+}
+
 export function extractImageParts(content: unknown): ImageInput[] {
     if (!Array.isArray(content)) return [];
     const out: ImageInput[] = [];

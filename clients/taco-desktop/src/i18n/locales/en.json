@@ -88,10 +88,12 @@
     "sendSteer": "Send steer",
     "stop": "Stop",
     "runningIndicator": "Agent is running",
-    "attachImages": "Attach images",
     "removeAttachment": "Remove attachment",
-    "attachLimitWarn_one": "{{count}} file rejected: not an image, larger than 5MB, or would exceed {{limit}}-image limit.",
-    "attachLimitWarn_other": "{{count}} files rejected: not an image, larger than 5MB, or would exceed {{limit}}-image limit."
+    "attachFiles": "Attach files",
+    "attachTooMany": "Only {{limit}} files per message; {{count}} not added.",
+    "attachTooLarge": "{{count}} file too large and not added.",
+    "attachFailed": "Could not attach {{count}} file.",
+    "dropFiles": "Drop files to attach"
   },
   "queue": {
     "title": "Queued messages",
@@ -767,7 +769,11 @@
     "guideImageOnly": "Image message",
     "guideEmpty": "Empty message",
     "guideImageCount": "{{count}} images",
-    "guideTruncated": "Content truncated — open the message to read it all"
+    "guideTruncated": "Content truncated — open the message to read it all",
+    "guideFilesOnly_one": "{{count}} file",
+    "guideFilesOnly_other": "{{count}} files",
+    "guideFileCount_one": "{{count}} file attached",
+    "guideFileCount_other": "{{count}} files attached"
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."

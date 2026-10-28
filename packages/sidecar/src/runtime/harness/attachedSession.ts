@@ -181,6 +181,12 @@ export interface AttachedSessionOptions {
     planState: PlanModeState;
     tasksDir: string;
     /**
+     * This session's committed attachment directory. An IM session's reads are
+     * fenced to the workspace; this one extra root keeps the files the sender
+     * attached to the conversation readable.
+     */
+    attachmentsDir: string;
+    /**
      * Workspace-shared checkpoint store. When present, create() builds a
      * per-session CheckpointManager so pre-write snapshots are attributable to
      * the session that made the edits.
@@ -642,6 +648,7 @@ export class AttachedSession extends EventEmitter {
                     ? {
                           primary: args.env.cwd,
                           getAssociated: args.getAssociatedRoots,
+                          extra: [args.attachmentsDir],
                       }
                     : undefined,
                 checkpointManager: attached.checkpoints,
@@ -831,6 +838,16 @@ export class AttachedSession extends EventEmitter {
     /** Effective UI locale — read by the reply_language hook on every context build. */
     getUiLocale(): SupportedLocale | undefined {
         return this.uiLocale ?? this.defaultUiLocale;
+    }
+
+    /**
+     * Whether the session's current model accepts image input. Read off the
+     * lane on every call, not cached: a model switch changes the answer, and
+     * attachments are composed per message.
+     */
+    async modelSeesImages(): Promise<boolean> {
+        const model = await this.lane.getModel(harnessContext);
+        return model?.input.includes("image") ?? false;
     }
 
     /** Switch model (persisted to the session). */

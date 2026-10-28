@@ -472,6 +472,18 @@ describe("methods.sessionDelete", () => {
             );
         });
 
+        it("removes the session's committed attachments", async () => {
+            const root = await mkdtemp(join(tmpdir(), "taco-del-"));
+            const dir = join(root, "parent", "attachments");
+            await mkdir(dir, { recursive: true });
+            await writeFile(join(dir, "id-report.pdf"), "pdf", "utf8");
+            const stub = makeStub(root, { parent: undefined });
+
+            await deleteWith(stub, "parent");
+
+            assert.deepEqual(await readdir(root), []);
+        });
+
         it("removes every deleted descendant's auxiliary directory", async () => {
             const root = await mkdtemp(join(tmpdir(), "taco-del-"));
             // A subagent's tasks/ is keyed by its own id, not its parent's.

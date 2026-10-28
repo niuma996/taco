@@ -8,6 +8,7 @@
  * shared building blocks and stays private to this directory.
  */
 
+export * from "./attachment.js";
 export * from "./channels.js";
 export * from "./jobs.js";
 export * from "./memory.js";

@@ -120,6 +120,11 @@ export interface MutationGateOptions {
     readonly readRoots?: {
         readonly primary: string;
         readonly getAssociated?: () => readonly string[];
+        /**
+         * Fixed extra roots that are readable but not writable and not
+         * workspace directories, e.g. the session's attachment directory.
+         */
+        readonly extra?: readonly string[];
     };
     /**
      * Snapshot the pre-write content of an allowed target. Invoked only after
@@ -155,7 +160,11 @@ const READ_PATH_TOOLS = new Set(["read", "grep", "glob"]);
  */
 async function fenceReadPath(
     event: ToolCallGateEvent,
-    roots: { primary: string; getAssociated?: () => readonly string[] },
+    roots: {
+        primary: string;
+        getAssociated?: () => readonly string[];
+        extra?: readonly string[];
+    },
 ): Promise<ToolCallGateResult | undefined> {
     if (!READ_PATH_TOOLS.has(event.toolName)) return undefined;
     const raw = event.input.path;
@@ -163,7 +172,7 @@ async function fenceReadPath(
     // inside the primary root by construction.
     if (typeof raw !== "string" || raw.trim() === "") return undefined;
     const target = normalizeBuiltinToolPath(raw);
-    const associated = roots.getAssociated?.() ?? [];
+    const associated = [...(roots.getAssociated?.() ?? []), ...(roots.extra ?? [])];
     const resolved = await resolveWithinRootSet(roots.primary, associated, target);
     if (resolved.ok) return undefined;
     return {

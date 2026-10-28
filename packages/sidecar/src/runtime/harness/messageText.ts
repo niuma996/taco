@@ -5,10 +5,21 @@
  * composer instead of being lost.
  */
 
+import { applyTuiVisibility } from "../../tags/index.ts";
 import type { AgentMessage } from "../pi/types.ts";
 
-/** Concatenate the text parts of a message; "" for non-text content. */
+/**
+ * Concatenate the text parts of a message; "" for non-text content.
+ *
+ * Hidden tags are stripped. This text goes back into the user's composer, so
+ * a steer that carried an `attachments` tag must not hand its paths back as
+ * if the user had typed them.
+ */
 export function textFromAgentMessage(message: AgentMessage): string {
+    return applyTuiVisibility(rawTextFromAgentMessage(message)).trim();
+}
+
+function rawTextFromAgentMessage(message: AgentMessage): string {
     const content = (message as { content?: unknown }).content;
     if (typeof content === "string") return content;
     if (!Array.isArray(content)) return "";

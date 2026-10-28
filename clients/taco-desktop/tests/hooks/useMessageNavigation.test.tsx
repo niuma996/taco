@@ -62,7 +62,7 @@ class FakeResizeObserver {
 }
 
 function entry(id: string, messageIndex: number): UserMessageGuideEntry {
-    return { id, messageIndex, text: id, images: [] };
+    return { id, messageIndex, text: id, images: [], attachments: [] };
 }
 
 interface HarnessProps {

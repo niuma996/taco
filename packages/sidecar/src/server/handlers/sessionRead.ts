@@ -7,15 +7,11 @@
 
 import type { AttachParams, SessionHistory, SessionId, SessionSnapshot } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
+import { viewUserContent } from "../../attachments/userMessageView.ts";
 import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
-
 import { resolveSessionByPrefix } from "../../runtime/session/sessionLookup.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
-import {
-    applyTuiVisibilityToContent,
-    isContentEmptyAfterVisibility,
-    rehydrateAskUserDetails,
-} from "../../tags/index.ts";
+import { rehydrateAskUserDetails } from "../../tags/index.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { ensureAttached } from "./attachGuard.ts";
 import { buildHistoryListDetail, buildTasksGetResult } from "./sessionTasksGet.ts";
@@ -32,14 +28,18 @@ function toSessionHistory(
             | { role?: unknown; content?: string | (TextContent | ImageContent)[] }
             | undefined;
         if (msg && msg.role === "user" && msg.content !== undefined) {
-            const content = applyTuiVisibilityToContent(msg.content);
-            if (isContentEmptyAfterVisibility(content)) return [];
+            const view = viewUserContent(msg.content);
+            if (view.empty) return [];
             return [
                 {
                     id: e.id,
                     parentId: e.parentId,
                     type: e.type,
-                    payload: { ...msg, content } as Payload,
+                    payload: {
+                        ...msg,
+                        content: view.content,
+                        ...(view.attachments.length > 0 ? { attachments: view.attachments } : {}),
+                    } as Payload,
                     // pi 0.85 stores epoch millis; the wire contract is an ISO string.
                     timestamp: new Date(e.timestamp).toISOString(),
                 },

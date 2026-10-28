@@ -25,6 +25,7 @@ import {
     SESSION_LIST_DEFAULT_LIMIT,
     SESSION_LIST_MAX_LIMIT,
 } from "@taco-ai/protocol";
+import { composeForSession } from "../../attachments/composePrompt.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { JsonlSessionMetadata } from "../../runtime/pi/types.ts";
@@ -32,6 +33,7 @@ import { uuidv7 } from "../../runtime/pi/values.ts";
 import { isHiddenSubagentSession, type SessionFacts } from "../../runtime/session/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
+import { rethrowAttachmentError } from "./attachment.ts";
 
 const log = createLogger("session:lifecycle");
 
@@ -123,7 +125,9 @@ export function registerSessionLifecycleHandlers(): void {
             let assistantMessage: AgentMessage | null = null;
             const hasInitialImages =
                 params.initialImages !== undefined && params.initialImages.length > 0;
-            if (params.initialPrompt || hasInitialImages) {
+            const hasInitialAttachments =
+                params.initialAttachments !== undefined && params.initialAttachments.length > 0;
+            if (params.initialPrompt || hasInitialImages || hasInitialAttachments) {
                 try {
                     const attached = await workspace.attach(asSessionId(meta.id), {
                         thinkingLevel: params.thinkingLevel,
@@ -139,9 +143,17 @@ export function registerSessionLifecycleHandlers(): void {
                             log.error("setPlaceholderTitle failed:", e);
                         }
                     }
-                    assistantMessage = await attached.prompt(
+                    const turn = await composeForSession(
+                        workspace,
+                        attached,
+                        meta.id,
                         params.initialPrompt ?? "",
                         params.initialImages,
+                        params.initialAttachments,
+                    ).catch(rethrowAttachmentError);
+                    assistantMessage = await attached.prompt(
+                        turn.text,
+                        turn.images,
                         params.uiLocale,
                     );
                     workspace.invalidateListCache();

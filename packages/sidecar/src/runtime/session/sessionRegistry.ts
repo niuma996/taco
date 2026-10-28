@@ -23,6 +23,7 @@ import type {
     SubagentProgressSink,
     SubagentSpawnContext,
 } from "../../agents/types.ts";
+import { sessionAttachmentsDir } from "../../attachments/attachmentStore.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
 import type { WorkspaceExtensionSet } from "../../extensions/index.ts";
@@ -990,6 +991,7 @@ export class SessionRegistry extends EventEmitter {
                     taskStore: resolvedTaskState.taskStore,
                     planState: resolvedTaskState.planState,
                     tasksDir: resolvedTaskState.tasksDir,
+                    attachmentsDir: sessionAttachmentsDir(this.sessionsRoot, sessionId),
                     checkpointStore: this.checkpointStore,
                     toolRegistry: this.toolRegistry,
                     // Main sessions only: a subagent's toolset is deliberately narrowed

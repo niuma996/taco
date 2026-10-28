@@ -74,7 +74,14 @@ function GuidePreview({ entry, index, total }: GuidePreviewProps) {
                 >
                     {entry.images.length > 0
                         ? t("message.guideImageOnly")
-                        : t("message.guideEmpty")}
+                        : entry.attachments.length > 0
+                          ? t("message.guideFilesOnly", { count: entry.attachments.length })
+                          : t("message.guideEmpty")}
+                </div>
+            )}
+            {entry.attachments.length > 0 && entry.text !== "" && (
+                <div className="user-message-guide__preview-image-count">
+                    {t("message.guideFileCount", { count: entry.attachments.length })}
                 </div>
             )}
             {entry.images.length > 0 && (

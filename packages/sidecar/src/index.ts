@@ -16,6 +16,7 @@ import {
     type Socket,
 } from "node:net";
 import { dirname, join } from "node:path";
+import { sweepStaging } from "./attachments/attachmentStore.ts";
 import { ConversationRouter } from "./channels/conversationRouter.ts";
 import { defaultSessionsRoot, resolveConfig, THINKING_LEVELS, tacoHome } from "./config/config.ts";
 import { loadExtensions } from "./extensions/index.ts";
@@ -113,6 +114,9 @@ async function resolveDeps(): Promise<ResolvedDeps> {
     if (!existsSync(sessionsRoot)) {
         mkdirSync(sessionsRoot, { recursive: true });
     }
+    // Staged attachments that never made it into a message. Best-effort: a
+    // sweep that fails must not keep the sidecar from starting.
+    void sweepStaging().catch(() => undefined);
     return { args, cfg, providerKeyStore, extensionRegistry, sessionsRoot };
 }
 

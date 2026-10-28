@@ -14,6 +14,7 @@ import type {
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
 
+import { composeForSession } from "../../attachments/composePrompt.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
 import { textsFromAgentMessages } from "../../runtime/harness/messageText.ts";
@@ -25,6 +26,7 @@ import {
 } from "../../tools/askUserInjectionText.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { ensureAttached, requireAttached } from "./attachGuard.ts";
+import { rethrowAttachmentError } from "./attachment.ts";
 
 const log = createLogger("session:turn");
 
@@ -88,6 +90,10 @@ function rethrowBusyAsSessionBusy(e: unknown): never {
     throw e;
 }
 
+/** `composeForSession`, with attachment refusals surfaced as wire errors. */
+const composeTurn: typeof composeForSession = (...args) =>
+    composeForSession(...args).catch(rethrowAttachmentError);
+
 export function registerSessionTurnHandlers(): void {
     registerMethod(
         "sessionPrompt",
@@ -110,6 +116,14 @@ export function registerSessionTurnHandlers(): void {
             // LLM summary (TitleSummarizer, run_end-triggered) — otherwise every
             // follow-up message would clobber a name the user chose, or a real
             // summary, with a raw truncation of whatever was just typed.
+            const turn = await composeTurn(
+                workspace,
+                attached,
+                params.sessionId,
+                params.text,
+                params.images,
+                params.attachments,
+            );
             const title = params.text.slice(0, 60).replace(/\n+/g, " ").trim();
             if (title) {
                 try {
@@ -119,7 +133,7 @@ export function registerSessionTurnHandlers(): void {
                 }
             }
             const assistantMessage = await attached
-                .prompt(params.text, params.images, params.uiLocale)
+                .prompt(turn.text, turn.images, params.uiLocale)
                 .catch(rethrowBusyAsSessionBusy);
             workspace.invalidateListCache();
             const result: PromptResult = { assistantMessage };
@@ -137,10 +151,18 @@ export function registerSessionTurnHandlers(): void {
             // retryable session_busy — never a silent enqueue that sits
             // unconsumed behind a compaction.
             await requireCompactionSettled(server, params.workspace, params.sessionId);
-            const result: SteerResult = await attached.enqueue(
-                "steer",
+            const turn = await composeTurn(
+                workspace,
+                attached,
+                params.sessionId,
                 params.text,
                 params.images,
+                params.attachments,
+            );
+            const result: SteerResult = await attached.enqueue(
+                "steer",
+                turn.text,
+                turn.images,
                 params.uiLocale,
             );
             return result;
@@ -154,10 +176,18 @@ export function registerSessionTurnHandlers(): void {
         async ({ workspace, server, params }) => {
             const attached = requireAttached(workspace, params.sessionId);
             await requireCompactionSettled(server, params.workspace, params.sessionId);
-            const result: FollowUpResult = await attached.enqueue(
-                "followUp",
+            const turn = await composeTurn(
+                workspace,
+                attached,
+                params.sessionId,
                 params.text,
                 params.images,
+                params.attachments,
+            );
+            const result: FollowUpResult = await attached.enqueue(
+                "followUp",
+                turn.text,
+                turn.images,
                 params.uiLocale,
             );
             return result;

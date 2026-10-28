@@ -10,6 +10,19 @@
  * the internal dependency graph converges at file granularity.
  */
 
+// Attachment staging — types and limits.
+export type {
+    AttachmentKind,
+    AttachmentRefusalReason,
+    AttachmentStageParams,
+    AttachmentStageResult,
+    MessageAttachment,
+} from "./attachment.js";
+export {
+    ATTACHMENT_MAX_BYTES,
+    ATTACHMENT_MAX_COUNT,
+    ATTACHMENT_STAGE_INLINE_MAX_BYTES,
+} from "./attachment.js";
 // channels.* RPC types — IM channel listing / binding.
 export type {
     ChannelState,

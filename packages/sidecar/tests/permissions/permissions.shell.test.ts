@@ -757,6 +757,47 @@ describe("mutationGate", () => {
                 });
                 assert.equal(result?.block, true);
             });
+
+            describe("extra roots", () => {
+                let attachments: string;
+                let withExtra: ReturnType<typeof createMutationGateHook>;
+
+                beforeEach(() => {
+                    attachments = join(outside, "attachments");
+                    mkdirSync(attachments, { recursive: true });
+                    withExtra = createMutationGateHook({
+                        root,
+                        getPlanState: () => planState,
+                        isKnownReadOnly,
+                        readRoots: { primary: root, extra: [attachments] },
+                    });
+                });
+
+                it("allows a read inside an extra root", async () => {
+                    const result = await withExtra({
+                        toolName: "read",
+                        input: { path: join(attachments, "1-a.pdf") },
+                    });
+                    assert.equal(result, undefined);
+                });
+
+                it("still refuses a sibling of the extra root", async () => {
+                    const result = await withExtra({
+                        toolName: "read",
+                        input: { path: join(outside, "secret.txt") },
+                    });
+                    assert.equal(result?.block, true);
+                });
+
+                it("does not let a symlink inside the extra root reach outside it", async () => {
+                    symlinkSync(outside, join(attachments, "link"), "dir");
+                    const result = await withExtra({
+                        toolName: "read",
+                        input: { path: join(attachments, "link", "secret.txt") },
+                    });
+                    assert.equal(result?.block, true);
+                });
+            });
         });
     });
 });

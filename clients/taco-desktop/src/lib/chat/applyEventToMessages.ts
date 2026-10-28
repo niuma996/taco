@@ -33,6 +33,7 @@ import {
     appendAssistantError,
     assistantFailureText,
     extractAssistantTextAndThinking,
+    extractAttachments,
     extractImageParts,
     findLastAssistant,
     isEmptyAssistant,
@@ -163,6 +164,7 @@ function handleMessageEnd(
         // dedup-by-id prevents a late server push from stacking on top, and the
         // `images` field keeps the optimistic copy.
         const images = extractImageParts(m.content);
+        const attachments = extractAttachments(m);
         const text = textFromMessage(m);
         // Optimistic user message already on screen (from sendPrompt's lazy
         // branch): swap it for the server entry in place — match by text
@@ -172,8 +174,14 @@ function handleMessageEnd(
         // matches, append the server entry normally.
         const serverImageSig =
             images.length === 0 ? "" : `${images.length}:${images[0]?.data?.slice(0, 16) ?? ""}`;
+        // Files are matched by name list for the same reason: two sends with the
+        // same text but different attachments must not swap chips.
+        const serverFilesSig = attachments.map((a) => a.name).join("\u0000");
         const optimisticIdx = messages.findIndex((x) => {
             if (x.kind !== "user" || !x.id.startsWith("optimistic-user-") || x.text !== text) {
+                return false;
+            }
+            if ((x.attachments ?? []).map((a) => a.name).join("\u0000") !== serverFilesSig) {
                 return false;
             }
             const xImages = x.images ?? [];
@@ -189,6 +197,7 @@ function handleMessageEnd(
                 text,
                 ts: opts.now,
                 ...(images.length > 0 ? { images } : {}),
+                ...(attachments.length > 0 ? { attachments } : {}),
             };
             return { messages: next };
         }
@@ -201,6 +210,7 @@ function handleMessageEnd(
                     text,
                     ts: opts.now,
                     ...(images.length > 0 ? { images } : {}),
+                    ...(attachments.length > 0 ? { attachments } : {}),
                 },
             ],
         };

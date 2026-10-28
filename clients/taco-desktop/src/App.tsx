@@ -878,6 +878,7 @@ export default function App() {
                                             }
                                             input={input}
                                             attachments={attachments}
+                                            onStageAttachment={wsApi.stageAttachment}
                                             busy={busy}
                                             runInFlight={runInFlight}
                                             queuedItems={
@@ -903,16 +904,16 @@ export default function App() {
                                             onAttachmentsChange={setAttachments}
                                             onSend={async () => {
                                                 const text = input;
-                                                const imgs = attachments;
+                                                const files = attachments;
                                                 setInput("");
                                                 setAttachments([]);
                                                 if (textareaRef.current) {
                                                     textareaRef.current.style.height = "auto";
                                                 }
                                                 const send = runInFlight ? steerPrompt : sendPrompt;
-                                                if (!(await send(text, imgs))) {
+                                                if (!(await send(text, undefined, files))) {
                                                     setInput(text);
-                                                    setAttachments(imgs);
+                                                    setAttachments(files);
                                                 }
                                             }}
                                             onAbort={() => {
@@ -949,16 +950,16 @@ export default function App() {
                                             textareaRef={textareaRef}
                                             onEnter={async () => {
                                                 const text = input;
-                                                const imgs = attachments;
+                                                const files = attachments;
                                                 setInput("");
                                                 setAttachments([]);
                                                 if (textareaRef.current) {
                                                     textareaRef.current.style.height = "auto";
                                                 }
                                                 const send = runInFlight ? steerPrompt : sendPrompt;
-                                                if (!(await send(text, imgs))) {
+                                                if (!(await send(text, undefined, files))) {
                                                     setInput(text);
-                                                    setAttachments(imgs);
+                                                    setAttachments(files);
                                                 }
                                             }}
                                             onCopySessionId={(sid) => void copySessionId(sid)}

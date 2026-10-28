@@ -8,13 +8,13 @@
 
 import type {
     CommandPermissionScope,
-    ImageInput,
     SessionContextInfoResult,
     ThinkingLevel,
 } from "@taco-ai/protocol";
-import { ArrowUp, Image, Square } from "lucide-react";
+import { ArrowUp, Paperclip, Square } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useRef } from "react";
+import { AttachmentChip } from "../components/AttachmentChip";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
 import { ContextIndicator } from "../components/ContextIndicator";
 import { EmptyChatState } from "../components/EmptyChatState";
@@ -25,25 +25,27 @@ import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
 import { UserMessageGuide } from "../components/UserMessageGuide";
 import { Button } from "../components/ui/Button";
+import { useAttachments } from "../hooks/primitives/useAttachments";
 import { useDelayedFlag } from "../hooks/primitives/useDelayedFlag";
-import { useImageAttachments } from "../hooks/primitives/useImageAttachments";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
 import { useMessageNavigation } from "../hooks/useMessageNavigation";
 import { useMessageWindow } from "../hooks/useMessageWindow";
 import { useStableUserMessageGuide } from "../hooks/useStableUserMessageGuide";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
+import { ATTACHMENT_MAX_COUNT, type StagedAttachment, type StageFn } from "../lib/attachments";
 import type { QueuedUiItem, UiMessage } from "../lib/chat/chatUtils";
 import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
-import { MAX_ATTACHMENTS } from "../lib/imageAttachment";
 
 export interface ChatPaneProps {
     client: TacoClient;
     ws: WorkspaceState | undefined;
     input: string;
-    attachments: ImageInput[];
+    attachments: StagedAttachment[];
+    /** Stage a file against the active workspace; resolves with the id a prompt sends back. */
+    onStageAttachment: StageFn;
     /**
      * Anything in flight that warrants a Stop button: the active session's run
      * OR agent-tool cards streaming from background sessions.
@@ -77,7 +79,7 @@ export interface ChatPaneProps {
         sessionBusy?: boolean;
     };
     onInputChange: (next: string) => void;
-    onAttachmentsChange: (next: ImageInput[]) => void;
+    onAttachmentsChange: (next: StagedAttachment[]) => void;
     onSend: () => void;
     onAbort: () => void;
     onEnter: () => void;
@@ -191,6 +193,7 @@ export function ChatPane(props: ChatPaneProps) {
         onToggleSidebar,
         input,
         attachments,
+        onStageAttachment,
         busy,
         runInFlight,
         queuedItems,
@@ -224,17 +227,18 @@ export function ChatPane(props: ChatPaneProps) {
         isIm,
         llmDumpDock,
     } = props;
-    const fileInputRef = useRef<HTMLInputElement | null>(null);
-    const { addFiles, handlePaste, removeAttachment } = useImageAttachments(
-        attachments,
-        onAttachmentsChange,
-    );
-    const { t } = useT();
-
     // Another session is opening: `ws` still holds the previous one, so sends,
     // stop and the run indicator would all target the wrong session.
     const loadingSession = ws?.loadingSessionId !== undefined;
-    // Text and image input are locked while compacting, and while another
+    const { pick, handlePaste, removeAttachment, dragging } = useAttachments(
+        attachments,
+        onAttachmentsChange,
+        onStageAttachment,
+        !compacting && !loadingSession,
+    );
+    const { t } = useT();
+
+    // Text and attachment input are locked while compacting, and while another
     // session opens: the draft is one shared field, so anything typed now
     // would land in the session being opened, not the one still on screen.
     const composerLocked = compacting || loadingSession;
@@ -396,31 +400,24 @@ export function ChatPane(props: ChatPaneProps) {
                     )}
                     <QueueBar items={queuedItems} onCancel={onCancelQueued} />
                     <div className="input-card">
+                        {dragging && (
+                            <div className="attachment-drop-hint" aria-hidden="true">
+                                {t("input.dropFiles")}
+                            </div>
+                        )}
                         {attachments.length > 0 && (
                             <div className="attachment-bar">
                                 {attachments.map((a, i) => (
-                                    // Thumbnail key uses mimeType + first/last 8 chars of the data payload — the
-                                    // same image yields the same key, so removing a middle
-                                    // attachment won't be mistaken for a reorder by React.
-                                    <div
-                                        key={`${a.mimeType}-${a.data.slice(0, 8)}-${a.data.slice(-8)}`}
-                                        className="attachment-thumb-wrap"
-                                    >
-                                        <img
-                                            className="attachment-thumb"
-                                            src={`data:${a.mimeType};base64,${a.data}`}
-                                            alt=""
-                                        />
-                                        <button
-                                            type="button"
-                                            className="attachment-remove"
-                                            aria-label={t("input.removeAttachment")}
-                                            disabled={composerLocked}
-                                            onClick={() => removeAttachment(i)}
-                                        >
-                                            ×
-                                        </button>
-                                    </div>
+                                    <AttachmentChip
+                                        key={a.id}
+                                        name={a.name}
+                                        size={a.size}
+                                        kind={a.kind}
+                                        previewUrl={a.previewUrl}
+                                        removeLabel={t("input.removeAttachment")}
+                                        removeDisabled={composerLocked}
+                                        onRemove={() => removeAttachment(i)}
+                                    />
                                 ))}
                             </div>
                         )}
@@ -461,31 +458,20 @@ export function ChatPane(props: ChatPaneProps) {
                             }
                         />
                         <div className="input-controls">
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                hidden
-                                onChange={(e) => {
-                                    const files = e.target.files;
-                                    if (files && files.length > 0) void addFiles(files);
-                                    // Allow re-selecting the same file to retrigger the change — clear value.
-                                    e.target.value = "";
-                                }}
-                            />
                             <button
                                 type="button"
                                 className="prompt-button attach"
-                                aria-label={t("input.attachImages")}
-                                title={t("input.attachImages")}
-                                onClick={() => fileInputRef.current?.click()}
-                                // Unlocked during a run: steer passthrough carries images
-                                // (session.steer accepts `images`). Compaction still locks —
-                                // its handler refuses new input until the compaction settles.
-                                disabled={composerLocked || attachments.length >= MAX_ATTACHMENTS}
+                                aria-label={t("input.attachFiles")}
+                                title={t("input.attachFiles")}
+                                onClick={() => void pick()}
+                                // Unlocked during a run: steer carries attachments too.
+                                // Compaction still locks — its handler refuses new input
+                                // until the compaction settles.
+                                disabled={
+                                    composerLocked || attachments.length >= ATTACHMENT_MAX_COUNT
+                                }
                             >
-                                <Image size={16} aria-hidden="true" />
+                                <Paperclip size={16} aria-hidden="true" />
                             </button>
                             {activeModel && (
                                 <ModelMenu

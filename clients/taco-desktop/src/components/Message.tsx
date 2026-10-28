@@ -20,6 +20,7 @@ import {
     type UiToolCall,
 } from "../lib/chat/chatUtils";
 import { AssistantMarkdown } from "./AssistantMarkdown";
+import { AttachmentChip } from "./AttachmentChip";
 import {
     CommandPermissionPrompt,
     type CommandPermissionPromptRequest,
@@ -92,6 +93,19 @@ export const Message = memo(function Message({
                                 className="message-image"
                                 src={`data:${img.mimeType};base64,${img.data}`}
                                 alt=""
+                            />
+                        ))}
+                    </div>
+                )}
+                {m.attachments && m.attachments.length > 0 && (
+                    <div className="message-attachments">
+                        {m.attachments.map((a, i) => (
+                            <AttachmentChip
+                                key={`${a.path || a.name}-${i}`}
+                                name={a.name}
+                                size={a.size}
+                                kind={a.kind}
+                                path={a.path}
                             />
                         ))}
                     </div>

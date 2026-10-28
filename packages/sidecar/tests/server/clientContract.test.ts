@@ -141,7 +141,7 @@ test("every facade method serializes a payload accepted by its registered schema
     });
     const workspace = asWorkspaceId("/w");
     const id = asSessionId("s");
-    await client.initialize({ major: 2, minor: 4 });
+    await client.initialize({ major: 2, minor: 5 });
     await client.workspaceList();
     await client.sessionList(workspace);
     await client.sessionCreate({ workspace });
@@ -169,6 +169,11 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.sessionSetThinkingLevel(workspace, id, "max");
     await client.sessionCompact(workspace, id, "brief");
     await client.sessionContextInfo(workspace, id);
+    await client.attachmentStage(workspace, { path: "/tmp/a.pdf" });
+    await client.attachmentStage(workspace, { name: "a.txt", data: "AA", mimeType: "text/plain" });
+    await client.sessionPrompt(workspace, id, "with files", undefined, "zh", undefined, ["a"]);
+    await client.sessionSteer(workspace, id, "with files", undefined, undefined, ["a"]);
+    await client.sessionFollowUp(workspace, id, "with files", undefined, undefined, ["a"]);
     await client.commandPermissionResolve(workspace, {
         requestId: "request",
         approved: true,

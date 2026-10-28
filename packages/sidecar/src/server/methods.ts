@@ -7,6 +7,7 @@
  */
 
 import { registerAgentsHandlers } from "./handlers/agents.ts";
+import { registerAttachmentHandlers } from "./handlers/attachment.ts";
 import { registerCatalogHandlers } from "./handlers/catalog.ts";
 import { registerChannelsHandlers } from "./handlers/channels.ts";
 import { registerCheckpointsHandlers } from "./handlers/checkpoints.ts";
@@ -43,6 +44,7 @@ export function registerBuiltinMethods(): void {
     registerSessionLifecycleHandlers();
     registerSessionReadHandlers();
     registerSessionTurnHandlers();
+    registerAttachmentHandlers();
     registerSessionRuntimeHandlers();
     registerSubagentHandlers();
     registerCatalogHandlers();

@@ -1,5 +1,5 @@
-import type { ImageInput } from "@taco-ai/protocol";
 import { type Dispatch, type SetStateAction, useState } from "react";
+import type { StagedAttachment } from "../../lib/attachments";
 
 /** UI-only state for the chat input area + the modals it drives.
  *
@@ -17,8 +17,8 @@ export interface UseChatInputStateResult {
     input: string;
     setInput: Dispatch<SetStateAction<string>>;
     /** Pending image attachments for the next sendPrompt. */
-    attachments: ImageInput[];
-    setAttachments: Dispatch<SetStateAction<ImageInput[]>>;
+    attachments: StagedAttachment[];
+    setAttachments: Dispatch<SetStateAction<StagedAttachment[]>>;
     /** "Discard unsent draft and create a new session" confirm modal. */
     confirmNewSession: boolean;
     setConfirmNewSession: Dispatch<SetStateAction<boolean>>;
@@ -45,7 +45,7 @@ export interface UseChatInputStateResult {
 export function useChatInputState(): UseChatInputStateResult {
     const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
     const [input, setInput] = useState("");
-    const [attachments, setAttachments] = useState<ImageInput[]>([]);
+    const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
     const [confirmNewSession, setConfirmNewSession] = useState(false);
     const [pendingNewSessionCwd, setPendingNewSessionCwd] = useState<string | null>(null);
     const [pendingDeleteSession, setPendingDeleteSession] = useState<{

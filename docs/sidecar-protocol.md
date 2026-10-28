@@ -101,6 +101,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.2 | `providers.revealKey`; `provider.listModels` `{ providerId }` shape and discovery for every protocol; `providers.list` `baseUrl` / `api` / `models[].origin`; `providerExtraModels` / `providerHiddenModels` config fields; `provider.testConnection` |
 | 2.3 | `workspace.associations.get` / `.set` / `.resolve`; `config.patch`; the `workspace.associations_changed` push; `PermissionRequestKind` `config`; `AgentsContentResult.cwdChoices`; `ProviderView.models[].contextWindow` / `.maxTokens` |
 | 2.4 | `memory.dreamRun` / `.dreamApply` / `.dreamDiscard` / `.dreamUndo`; `memory.restoreTopic`; `MemoryListResult.dream` / `.dreamScheduled`; `Job.builtin` and `JobHistoryEntry.summary` on `jobs.*` |
+| 2.5 | `attachment.stage`; `attachments` on `session.prompt` / `.steer` / `.followUp` and `initialAttachments` on `session.create`; user `message` pushes and history carry `attachments` |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
@@ -141,6 +142,7 @@ fields of `settings.get` or `settings.write`.
 | `agents.delete` | agents.* |
 | `agents.list` | agents.* |
 | `agents.write` | agents.* |
+| `attachment.stage` | attachment.* |
 | `channels.bind` | channels.* |
 | `channels.create` | channels.* |
 | `channels.list` | channels.* |

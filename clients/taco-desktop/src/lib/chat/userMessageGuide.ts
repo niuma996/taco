@@ -9,7 +9,7 @@
  * and what that entry carries.
  */
 
-import type { ImageInput } from "@taco-ai/protocol";
+import type { ImageInput, MessageAttachment } from "@taco-ai/protocol";
 
 import type { UiMessage } from "./chatUtils";
 
@@ -23,6 +23,8 @@ export interface UserMessageGuideEntry {
     text: string;
     /** Attached images. Empty when the prompt carries none. */
     images: readonly ImageInput[];
+    /** Files sent with the message. Empty when the prompt carries none. */
+    attachments: readonly MessageAttachment[];
 }
 
 /**
@@ -40,6 +42,7 @@ export function buildUserMessageGuide(messages: readonly UiMessage[]): UserMessa
             messageIndex,
             text: message.text,
             images: message.images ?? [],
+            attachments: message.attachments ?? [],
         });
     }
     return entries;

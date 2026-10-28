@@ -23,9 +23,9 @@ afterEach(cleanup);
 const IMAGE = { type: "image", data: "QUJD", mimeType: "image/png" } as const;
 
 const ENTRIES: UserMessageGuideEntry[] = [
-    { id: "u1", messageIndex: 1, text: "hello", images: [] },
-    { id: "u2", messageIndex: 2, text: "", images: [IMAGE] },
-    { id: "u3", messageIndex: 3, text: "after", images: [] },
+    { id: "u1", messageIndex: 1, text: "hello", images: [], attachments: [] },
+    { id: "u2", messageIndex: 2, text: "", images: [IMAGE], attachments: [] },
+    { id: "u3", messageIndex: 3, text: "after", images: [], attachments: [] },
 ];
 
 function marker(index: number): HTMLElement {
@@ -122,6 +122,7 @@ describe("UserMessageGuide — 键盘交互", () => {
             messageIndex: i,
             text: "",
             images: [],
+            attachments: [],
         }));
         const { rerender } = render(<UserMessageGuide entries={many} onNavigate={vi.fn()} />);
         // The focus walked to the last marker of the long list.
@@ -141,7 +142,7 @@ describe("UserMessageGuide — 悬停预览", () => {
     it("预览保留原始多行文本", async () => {
         const user = userEvent.setup();
         const entries: UserMessageGuideEntry[] = [
-            { id: "u1", messageIndex: 0, text: "line one\nline two", images: [] },
+            { id: "u1", messageIndex: 0, text: "line one\nline two", images: [], attachments: [] },
         ];
         render(<UserMessageGuide entries={entries} onNavigate={vi.fn()} />);
 
@@ -170,7 +171,7 @@ describe("UserMessageGuide — 悬停预览", () => {
     it("空消息显示空占位", async () => {
         const user = userEvent.setup();
         const entries: UserMessageGuideEntry[] = [
-            { id: "u1", messageIndex: 0, text: "", images: [] },
+            { id: "u1", messageIndex: 0, text: "", images: [], attachments: [] },
         ];
         render(<UserMessageGuide entries={entries} onNavigate={vi.fn()} />);
 
@@ -184,7 +185,7 @@ describe("UserMessageGuide — 悬停预览", () => {
     it("超长文本被截断并给出提示", async () => {
         const user = userEvent.setup();
         const entries: UserMessageGuideEntry[] = [
-            { id: "u1", messageIndex: 0, text: "x".repeat(900), images: [] },
+            { id: "u1", messageIndex: 0, text: "x".repeat(900), images: [], attachments: [] },
         ];
         render(<UserMessageGuide entries={entries} onNavigate={vi.fn()} />);
 

@@ -139,6 +139,23 @@ const BUILTIN_TAG_REGISTRY = {
         description: "Reminder to update the task list via TodoWrite when it goes stale",
     }),
 
+    /** Files the user attached to a message — paths the model can read. */
+    attachments: defineTag({
+        name: "attachments",
+        scope: "user-request",
+        // NOT `drop`: that policy runs on every LLM call, so the model would
+        // never see the paths. NOT `pin`: in a long IM session the notices
+        // would pile up forever. `summarize` leaves it as ordinary
+        // conversation content; the files stay on disk if a summary drops it.
+        compression: { kind: "summarize" },
+        // Hidden: the desktop renders attachment chips from the structured
+        // list the sidecar attaches to the pushed message. Showing the raw
+        // tag would put machine-facing paths in the user's own bubble.
+        tuiVisibility: "hidden",
+        parser: { kind: "xml-balanced" },
+        description: "Files attached to the user's message — absolute paths on disk",
+    }),
+
     /** Injected into a parent session when one of its background subagents settles. */
     subagent_result: defineTag({
         name: "subagent_result",

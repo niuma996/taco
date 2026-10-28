@@ -1,6 +1,6 @@
 /* chatAttachments.css — attachment thumbnail bar + sent-message image grid; split from chat.css */
 
-/* Attachment thumbnail bar above the textarea. */
+/* Attachment chip bar above the textarea. */
 .attachment-bar {
     display: flex;
     flex-wrap: wrap;
@@ -8,44 +8,102 @@
     padding: 0.25rem 0;
 }
 
-.attachment-thumb-wrap {
+/* One attached file: thumbnail or icon, name over size, optional remove. */
+.attachment-chip {
     position: relative;
-    width: 64px;
-    height: 64px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 220px;
+    min-height: 40px;
+    padding: 0.25rem 0.5rem 0.25rem 0.25rem;
     border-radius: var(--radius-sm);
-    overflow: hidden;
     border: 1px solid var(--border);
     background: var(--bg);
 }
 
-.attachment-thumb {
-    width: 100%;
-    height: 100%;
+.attachment-chip-thumb,
+.attachment-chip-icon {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+}
+
+.attachment-chip-thumb {
     object-fit: cover;
     display: block;
 }
 
-.attachment-remove {
-    position: absolute;
-    top: 2px;
-    right: 2px;
+.attachment-chip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-muted);
+    background: var(--input-bg);
+}
+
+.attachment-chip-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.attachment-chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+}
+
+.attachment-chip-size {
+    font-size: var(--text-2xs);
+    color: var(--fg-muted);
+}
+
+.attachment-chip-remove {
+    flex: none;
     width: 18px;
     height: 18px;
     padding: 0;
-    line-height: 1;
-    font-size: 14px;
-    border-radius: var(--radius-circle);
+    margin-left: 0.125rem;
     border: none;
-    background: var(--tooltip-bg);
-    color: var(--tooltip-fg);
+    border-radius: var(--radius-circle);
+    background: transparent;
+    color: var(--fg-muted);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
 }
 
-.attachment-remove:hover {
+.attachment-chip-remove:hover {
+    background: var(--input-bg);
+    color: var(--fg);
+}
+
+/* Window-wide drop hint while a file is dragged over the app. */
+.attachment-drop-hint {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius-md);
     background: var(--overlay-scrim);
+    color: var(--fg);
+    pointer-events: none;
+}
+
+/* Sent message: the files that went with it. */
+.message-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.25rem 0;
 }
 
 /* Sent user message image grid — max 200px tall, horizontal wrap. */
