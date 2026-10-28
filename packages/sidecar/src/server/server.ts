@@ -120,6 +120,7 @@ import {
     associationAffectsWorkspace,
     WorkspaceAssociationStore,
 } from "../workspace/associationStore.ts";
+import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import { ClientSinkRegistry } from "./clientSinkRegistry.ts";
 import { CommandIdempotencyGate } from "./commandIdempotency.ts";
@@ -774,64 +775,34 @@ export class SidecarServer implements ServerRpcSurface {
      * im:// URL as key and route to an isolated per-channel scratch root;
      * fs workspaces pass through with fs tools enabled.
      */
-    private resolveWorkspacePaths(cwd: WorkspaceId): {
-        workspaceKey: WorkspaceId;
-        fsCwd: string;
-        sessionsRoot: string | undefined;
-        isIm: boolean;
-        disableFsTools: boolean;
-        executionCwd: string;
+    private resolveWorkspacePaths(key: WorkspaceId): {
+        scope: WorkspaceScope;
+        sessionsRoot?: string;
         imPolicy?: ImWorkspacePolicy;
-        imRoute?: ImRoute;
     } {
-        // IM workspace: cwd may be the fsCwd (scratch path) when called from
-        // executeRpcRequest — detect the IM URL pattern before the isIm branch.
-        const parsedIm = cwd.startsWith(IM_CWD_PREFIX) ? parseImCwd(cwd) : undefined;
-        const isIm = !!parsedIm;
-        let workspaceKey = cwd;
-        let fsCwd = cwd;
-        let disableFsTools = false;
-        let executionCwd = cwd;
-        let imPolicy: ImWorkspacePolicy | undefined;
-        let sessionsRoot = this.options.sessionsRoot;
-
-        if (isIm && parsedIm) {
-            sessionsRoot = makeImSessionsRoot(tacoHome(), parsedIm.channelId);
-            fsCwd = asWorkspaceId(join(sessionsRoot, "scratch"));
-            mkdirSync(fsCwd, { recursive: true });
-            workspaceKey = cwd; // im:// URL keys the workspace registry + emitPush
-            disableFsTools = true;
-            // Register channel → workspace reverse index (for P2 single-channel restart)
-            this.channelRegistry.trackWorkspace(parsedIm.channelId, cwd);
-
-            // Resolve the workspace policy and where its tools actually run.
-            imPolicy = this.imPolicyStore.resolve(parsedIm);
-            const exec = resolveImExecutionCwd({ sessionsRoot, route: parsedIm, policy: imPolicy });
-            executionCwd = asWorkspaceId(exec.executionCwd);
-            if (exec.warning) {
-                log.warn(exec.warning);
-            }
-            const toolsGranted =
-                imPolicy.tools.shell === "allow" || imPolicy.tools.fsTools === "allow";
-            if (toolsGranted && exec.shared) {
-                log.warn(
-                    `IM chat ${cwd} now has local tools but shares ${executionCwd} with every other ` +
-                        `chat on channel ${parsedIm.channelId} — set executionDir to per-chat or custom to isolate it.`,
-                );
-            }
+        const route = parseImCwd(key);
+        if (!route)
+            return { scope: createWorkspaceScope(key), sessionsRoot: this.options.sessionsRoot };
+        const sessionsRoot = makeImSessionsRoot(tacoHome(), route.channelId);
+        const sessionCwd = join(sessionsRoot, "scratch");
+        mkdirSync(sessionCwd, { recursive: true });
+        this.channelRegistry.trackWorkspace(route.channelId, key);
+        const imPolicy = this.imPolicyStore.resolve(route);
+        const exec = resolveImExecutionCwd({ sessionsRoot, route, policy: imPolicy });
+        if (exec.warning) log.warn(exec.warning);
+        if (
+            (imPolicy.tools.shell === "allow" || imPolicy.tools.fsTools === "allow") &&
+            exec.shared
+        ) {
+            log.warn(
+                `IM chat ${key} now has local tools but shares ${exec.executionCwd} with every other ` +
+                    `chat on channel ${route.channelId} — set executionDir to per-chat or custom to isolate it.`,
+            );
         }
-
         return {
-            workspaceKey,
-            fsCwd,
+            scope: createWorkspaceScope(key, sessionCwd, exec.executionCwd),
             sessionsRoot,
-            isIm,
-            disableFsTools,
-            executionCwd,
             imPolicy,
-            // Returned so the workspace can re-resolve the policy per turn
-            // instead of reusing the snapshot taken above.
-            imRoute: parsedIm,
         };
     }
 
@@ -932,25 +903,28 @@ export class SidecarServer implements ServerRpcSurface {
      * filesystem, so they are awaited before the synchronous WorkspaceRuntime
      * constructor.
      */
-    private async loadWorkspaceAssets(
-        fsCwd: string,
-        isIm: boolean,
-    ): Promise<{
+    private async loadWorkspaceAssets(scope: WorkspaceScope): Promise<{
         skills: TacoSkill[];
         skillDiagnostics: SkillDiagnosticEntry[];
         agents: AgentDefinition[];
         extensions?: Readonly<WorkspaceExtensionSet>;
     }> {
-        const { skills, diagnostics: skillDiagnostics } = await this.loadSkills(fsCwd);
+        const { skills, diagnostics: skillDiagnostics } = await this.loadSkills(scope.executionCwd);
 
         // Load agents (builtin + user-defined). Same pattern as skills:
         // file I/O is awaited here.
         const builtinDir = join(resourceRoot(), "agents", "builtin");
-        const agents = await loadAgents({ builtinDir, userDirs: defaultAgentDirs(fsCwd) });
+        const agents = await loadAgents({
+            builtinDir,
+            userDirs: defaultAgentDirs(scope.executionCwd),
+        });
 
         // Activate extensions: workspace activators are called here and
         // produce a frozen WorkspaceExtensionSet.
-        const extensions = await activateExtensions(this.extensionRegistry, { cwd: fsCwd, isIm });
+        const extensions = await activateExtensions(this.extensionRegistry, {
+            cwd: scope.executionCwd,
+            isIm: scope.kind === "im",
+        });
 
         return { skills, skillDiagnostics, agents, extensions };
     }
@@ -1016,11 +990,9 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
-        const paths = this.resolveWorkspacePaths(cwd);
-        const { skills, skillDiagnostics, agents, extensions } = await this.loadWorkspaceAssets(
-            paths.executionCwd,
-            paths.isIm,
-        );
+        const { scope, sessionsRoot, imPolicy } = this.resolveWorkspacePaths(cwd);
+        const { skills, skillDiagnostics, agents, extensions } =
+            await this.loadWorkspaceAssets(scope);
 
         // Discover MCP tools (stdio cwd defaults to the workspace dir) and build
         // the dynamic-tool registry from them. Discovery failure is isolated per
@@ -1032,10 +1004,10 @@ export class SidecarServer implements ServerRpcSurface {
         // its directory was moved or deleted. Handing a missing dir to spawn
         // fails every stdio server with an ENOENT that names the command, so
         // fall back to letting the child inherit our cwd instead.
-        const workspaceCwdUsable = existsSync(paths.fsCwd);
+        const workspaceCwdUsable = existsSync(scope.executionCwd);
         if (!workspaceCwdUsable && this.mcpServers.length > 0) {
             log.warn(
-                `workspace dir missing (${paths.fsCwd}); stdio MCP servers without an explicit cwd will inherit the sidecar's`,
+                `workspace dir missing (${scope.executionCwd}); stdio MCP servers without an explicit cwd will inherit the sidecar's`,
             );
         }
         const mcpProvider = await discoverMcpTools({
@@ -1044,7 +1016,7 @@ export class SidecarServer implements ServerRpcSurface {
                 ...(s.cwd !== undefined
                     ? { cwd: s.cwd }
                     : workspaceCwdUsable
-                      ? { cwd: paths.fsCwd }
+                      ? { cwd: scope.executionCwd }
                       : {}),
             })),
             log,
@@ -1055,7 +1027,7 @@ export class SidecarServer implements ServerRpcSurface {
                 ...configToolCandidates(),
                 // Not offered to IM workspaces: a third party drives those, and
                 // the transcripts are the user's private history.
-                ...(paths.imRoute ? [] : sessionHistoryToolCandidates()),
+                ...(scope.kind === "im" ? [] : sessionHistoryToolCandidates()),
             ],
             dispose: () => mcpProvider.dispose(),
         });
@@ -1068,9 +1040,8 @@ export class SidecarServer implements ServerRpcSurface {
         let ws: WorkspaceRuntime | undefined;
         try {
             ws = new WorkspaceRuntime({
-                cwd: asWorkspaceId(paths.fsCwd),
-                workspaceKey: paths.workspaceKey,
-                sessionsRoot: paths.sessionsRoot,
+                scope,
+                sessionsRoot,
                 defaultModel: this.options.defaultModel,
                 defaultProvider: this.options.defaultProvider,
                 systemPrompt: this.options.systemPrompt,
@@ -1086,14 +1057,13 @@ export class SidecarServer implements ServerRpcSurface {
                 agents,
                 resources: { skills },
                 skillDiagnostics,
-                executionCwd: paths.executionCwd,
-                imPolicy: paths.imPolicy,
+                imPolicy,
                 // Re-resolve per turn rather than freezing the constructor-time
                 // value: the store reads the file on each call (deliberately
                 // uncached), so a policy edited by hand or from another process
                 // reaches a live conversation on its next message.
                 resolveImPolicy: (() => {
-                    const route = paths.imRoute;
+                    const route = scope.kind === "im" ? scope.route : undefined;
                     return route ? () => this.imPolicyStore.resolve(route) : undefined;
                 })(),
                 // The directories associated with this workspace — the ones it
@@ -1101,8 +1071,7 @@ export class SidecarServer implements ServerRpcSurface {
                 // root. Resolved per use (the store is uncached), so a grant
                 // added or removed reaches a live conversation on its next
                 // message without rebuilding the workspace.
-                resolveAssociatedRoots: () =>
-                    this.associationStore.resolve(paths.workspaceKey).roots,
+                resolveAssociatedRoots: () => this.associationStore.resolve(scope.key).roots,
                 toolRegistry,
                 // Shared workspace approvals, including scheduler runs, reach every
                 // initialized desktop. Headless runs deny asks immediately.
@@ -1113,10 +1082,10 @@ export class SidecarServer implements ServerRpcSurface {
                 // both together is what makes WorkspaceRuntime opt into
                 // watching; omitting either leaves reload off (e.g. tests that
                 // construct WorkspaceRuntime directly without a live server).
-                skillDirs: defaultSkillDirs(paths.executionCwd)
+                skillDirs: defaultSkillDirs(scope.executionCwd)
                     .filter((d) => d.source === "user")
                     .map((d) => d.path),
-                reloadSkills: () => this.loadSkills(paths.executionCwd),
+                reloadSkills: () => this.loadSkills(scope.executionCwd),
                 // IM channel identity for the <im_channel> context tag — the
                 // workspace only calls this for IM workspaces, passing the
                 // route's channelId; peer/chat ids never reach it.
@@ -1135,7 +1104,7 @@ export class SidecarServer implements ServerRpcSurface {
                 ),
             });
 
-            this.wireWorkspacePush(ws, paths.workspaceKey);
+            this.wireWorkspacePush(ws, scope.key);
         } catch (err) {
             // WorkspaceRuntime / push wiring failed. Dispose the provider
             // BEFORE rethrowing so its stdio children / HTTP sockets are
@@ -1149,11 +1118,10 @@ export class SidecarServer implements ServerRpcSurface {
         // One-time notice when a chat's local tools are first enabled. Keyed by
         // workspaceKey (policy is per-chat), not sessionId, so a session switch
         // does not repeat the notice. Skipped for non-IM workspaces.
-        if (paths.imPolicy) {
-            const granted =
-                paths.imPolicy.tools.shell === "allow" || paths.imPolicy.tools.fsTools === "allow";
-            if (granted && !this.imPolicyStore.hasNotified(paths.workspaceKey)) {
-                this.emitPush(PushMethods.ImToolsEnabled, paths.workspaceKey, undefined, {
+        if (imPolicy) {
+            const granted = imPolicy.tools.shell === "allow" || imPolicy.tools.fsTools === "allow";
+            if (granted && !this.imPolicyStore.hasNotified(scope.key)) {
+                this.emitPush(PushMethods.ImToolsEnabled, scope.key, undefined, {
                     text: imToolsEnabledNotice(this.requestUiLocale),
                 });
                 // The push already fired. A write failure must not surface as
@@ -1162,9 +1130,9 @@ export class SidecarServer implements ServerRpcSurface {
                 // notice repeating after a sidecar restart, which is
                 // acceptable.
                 try {
-                    await this.imPolicyStore.markNotified(paths.workspaceKey);
+                    await this.imPolicyStore.markNotified(scope.key);
                 } catch (e) {
-                    log.warn(`markNotified failed for ${paths.workspaceKey}: ${e}`);
+                    log.warn(`markNotified failed for ${scope.key}: ${e}`);
                 }
             }
         }

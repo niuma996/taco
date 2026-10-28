@@ -11,7 +11,6 @@ import { disposeInOrder } from "../lib/async.ts";
 
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { resolve as resolvePath } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
     CustomModelEntry,
@@ -27,7 +26,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -87,6 +86,7 @@ import {
 import type { SelfRpcCall, TacoToolContextBase } from "../tools/context.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
+import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
 import { DefaultDeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
@@ -162,8 +162,10 @@ function probeGitEnvironment(
 
 export type { AttachOptions };
 
-export interface WorkspaceRuntimeOptions {
-    cwd: WorkspaceId;
+export type WorkspaceRuntimeOptions = WorkspaceRuntimeConfig &
+    ({ scope: WorkspaceScope; cwd?: never } | { cwd: WorkspaceId; scope?: never });
+
+interface WorkspaceRuntimeConfig {
     /** Session persistence root; defaults to $TACO_HOME/sessions (~/.taco/sessions). */
     sessionsRoot?: string;
     /** Default model — either a string id or a Model object. */
@@ -237,16 +239,10 @@ export interface WorkspaceRuntimeOptions {
     taskPushAdapter?: TaskPushAdapter;
     /** Entry point for `plan.state.updated` pushes; defaults to NoopPlanPushAdapter. */
     planPushAdapter?: PlanPushAdapter;
-    /** Routing key (im:// virtual key); defaults to fsCwd. Used only as the registry key / push frame workspace field. */
-    workspaceKey?: string;
-    /** Real fs cwd for IM workspace (scratch root). IDE paths are resolved via resolvePath(cwd). */
-    fsCwd?: string;
-    /** Pass true for IM workspaces to remove fs/process-class tools. */
-    disableFsTools?: boolean;
     /**
      * Resolved IM workspace policy. Absent for non-IM workspaces (nothing
      * filtered). When present, `executionCwd` is used for tool execution
-     * while `sessionCwd` (the fsCwd) stays the storage identity.
+     * while `sessionCwd` stays the storage identity.
      */
     imPolicy?: ImWorkspacePolicy;
     /**
@@ -276,8 +272,6 @@ export interface WorkspaceRuntimeOptions {
     resolveAssociatedRoots?: () => readonly string[];
     /** Whether a client can answer command approvals now. See PermissionBrokerOptions.hasApprover. */
     hasApprover?: () => boolean;
-    /** Where tools run (shell, fs tools, plan files). Defaults to the session cwd. */
-    executionCwd?: string;
     /**
      * In-process self-RPC entry (injected by SidecarServer) so the memory
      * and jobs tools can route through the sidecar's own `dispatchRpc`.
@@ -319,13 +313,16 @@ export interface WorkspaceRuntimeOptions {
 }
 
 export class WorkspaceRuntime extends EventEmitter {
-    /** Session storage identity — the cwd JsonlSessionRepo partitions by. Never
-     *  changes once a workspace exists (moving it would hide all JSONL). */
-    readonly sessionCwd: WorkspaceId;
-    /** Where shell / fs tools and plan files run. May differ from sessionCwd
-     *  for IM workspaces whose policy binds a local directory or per-chat scratch. */
-    readonly executionCwd: WorkspaceId;
-    readonly workspaceKey: string;
+    readonly scope: WorkspaceScope;
+    get sessionCwd(): WorkspaceId {
+        return this.scope.sessionCwd;
+    }
+    get executionCwd(): WorkspaceId {
+        return this.scope.executionCwd;
+    }
+    get workspaceKey(): WorkspaceId {
+        return this.scope.key;
+    }
     readonly sessionsRoot: string;
     /** Execution environment — cwd is executionCwd. */
     readonly env: NodeExecutionEnv;
@@ -333,10 +330,6 @@ export class WorkspaceRuntime extends EventEmitter {
     readonly sessionEnv: NodeExecutionEnv;
     readonly repo: JsonlSessionRepo;
     readonly models: MutableModels;
-    /** True for IM workspaces. Snapshot of the constructor-time check — used
-     *  by `rebuildSystemPrompt` so hot reload rebuilds with the same
-     *  `hideWorkspacePath` behavior as the original construction. */
-    private readonly isIm: boolean;
     /** System-prompt contributors other than the `<available_skills>` section
      *  (config override + extension contributors). `rebuildSystemPrompt`
      *  appends a fresh skills contributor on top of this fixed base so hot
@@ -495,39 +488,16 @@ export class WorkspaceRuntime extends EventEmitter {
         return this.resolveAssociatedRoots();
     }
 
-    /** IM routing triple, parsed from workspaceKey (im:// URL) if this is an IM workspace. */
+    /** IM conversation identity, resolved with the workspace scope. */
     get imRouting(): { channelId: string; peerId: string; chatId: string } | undefined {
-        const parsed = parseImCwd(this.workspaceKey);
-        return parsed
-            ? { channelId: parsed.channelId, peerId: parsed.peerId, chatId: parsed.chatId }
-            : undefined;
+        return this.scope.kind === "im" ? this.scope.route : undefined;
     }
 
     constructor(options: WorkspaceRuntimeOptions) {
         super();
-        const isIm = options.cwd.startsWith(IM_CWD_PREFIX);
-        // IM channel identity resolver is only meaningful for IM workspaces.
-        // Capture the route's channelId once (workspaceKey is immutable for the
-        // workspace's lifetime) so the im_channel thunk never needs imRouting
-        // and peerId/chatId stay out of the prompt path entirely.
-        // Use options.workspaceKey if already supplied, otherwise fall back to
-        // options.cwd for IM routing before this.workspaceKey is assigned.
-        const imRoute = isIm ? parseImCwd(options.workspaceKey ?? options.cwd) : undefined;
-        const imChannelId = imRoute?.channelId;
-        // sessionCwd: IM uses the scratch root; IDE resolves to a real fs path.
-        // workspaceKey is stored separately for push frame / parseImCwd routing.
-        // sessionCwd is the storage identity and MUST NOT change once a session
-        // exists — JsonlSessionRepo partitions by it (encodeCwd).
-        this.sessionCwd = asWorkspaceId(
-            isIm ? (options.fsCwd ?? resolvePath(options.cwd)) : resolvePath(options.cwd),
-        );
-        // executionCwd is a soft association: where shell/fs tools run. It may
-        // be repointed by IM policy (local binding / per-chat scratch) without
-        // affecting session storage.
-        this.executionCwd = asWorkspaceId(
-            options.executionCwd ? resolvePath(options.executionCwd) : this.sessionCwd,
-        );
-        this.workspaceKey = options.workspaceKey ?? this.sessionCwd;
+        this.scope = options.scope ?? createWorkspaceScope(options.cwd);
+        const isIm = this.scope.kind === "im";
+        const imChannelId = this.scope.kind === "im" ? this.scope.route.channelId : undefined;
         this.sessionsRoot = defaultSessionsRoot(options.sessionsRoot);
         // executionCwd, not sessionCwd — defaultSkillDirs (inside
         // formatSkillAuthoringGuidance) is what actually gets scanned against
@@ -577,8 +547,7 @@ export class WorkspaceRuntime extends EventEmitter {
 
         this.toolRegistry =
             options.toolRegistry ?? new DefaultDeferredToolRegistry({ candidates: [] });
-        const imPolicy =
-            options.imPolicy ?? (options.disableFsTools ? DEFAULT_IM_WORKSPACE_POLICY : undefined);
+        const imPolicy = options.imPolicy ?? (isIm ? DEFAULT_IM_WORKSPACE_POLICY : undefined);
         // Tool assembly re-reads the policy through this thunk rather than
         // closing over the value above, so a policy edited after the workspace
         // was constructed is picked up on the next turn. `resolveImPolicy` is
@@ -632,7 +601,6 @@ export class WorkspaceRuntime extends EventEmitter {
         this.tools = tools;
         this.toolsBuilder = toolsBuilder;
 
-        this.isIm = isIm;
         this.resources = options.resources ?? {};
         const promptSnapshots = this.assemblePromptSnapshots(options, isIm);
         this.baseSystemPromptContributors = promptSnapshots.baseContributors;
@@ -660,9 +628,7 @@ export class WorkspaceRuntime extends EventEmitter {
         // One store per workspace, shared by every session in it, so a restore
         // can reach snapshots an earlier session took. Files are written under
         // executionCwd, so snapshots track that tree. Off when fs tools are denied.
-        const fsToolsEnabled = imPolicy
-            ? imPolicy.tools.fsTools === "allow"
-            : !options.disableFsTools;
+        const fsToolsEnabled = imPolicy ? imPolicy.tools.fsTools === "allow" : true;
         this.checkpointStore = fsToolsEnabled ? new CheckpointStore(this.executionCwd) : undefined;
 
         const agents = options.agents ?? [];
@@ -1085,7 +1051,7 @@ export class WorkspaceRuntime extends EventEmitter {
             environmentContext: this.environmentContextSnapshot,
             contributors: contributors.length > 0 ? contributors : undefined,
             sessionKind: { role: "main", depth: 0 },
-            hideWorkspacePath: this.isIm,
+            hideWorkspacePath: this.scope.kind === "im",
         });
     }
 

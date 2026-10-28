@@ -396,6 +396,15 @@ requests. Scheduled runs may wait for desktop approval when a client is connecte
 without an interactive client, approval requests are denied immediately.
 Disconnecting a socket does not abort sessions or release workspace resources.
 
+`WorkspaceScope` carries the public routing key, local/IM kind, IM route,
+immutable session-storage cwd, and execution cwd. IM sessions keep their existing
+channel scratch storage partition when policy changes the execution directory.
+Skills, agents, extension activation, shell/filesystem tools and the default
+stdio MCP cwd use the execution directory; an explicit MCP cwd takes precedence.
+Runtime prompt privacy and channel context use the scope's IM identity rather
+than guessing from a filesystem path. Local runtime construction also accepts a
+cwd shorthand; IM construction requires an explicit scope with filesystem paths.
+
 `WorkspaceRegistry` transitions each key through starting, ready and closing.
 Concurrent construction is shared; closing entries are hidden from reads and
 new callers wait for disposal before rebuilding. Invalidated constructors

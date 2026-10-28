@@ -30,6 +30,7 @@ import { ConnectionServer } from "../../src/server/connectionServer.ts";
 import { NullTransport } from "../../src/server/nullTransport.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { defaultTools } from "../../src/tools/index.ts";
+import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 import { stubModelFetch } from "../_helpers/stubModelFetch.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
@@ -382,17 +383,14 @@ describe("virtualWorkspace", () => {
     });
 
     describe("WorkspaceRuntime im:// construction", () => {
-        it("constructs without crashing and disables fs tools", () => {
+        it("constructs with an IM scope and denies filesystem and shell tools by default", () => {
             const scratch = mkdtempSync(path.join(tmpdir(), "im-scratch-"));
             const sessionsRoot = mkdtempSync(path.join(tmpdir(), "im-sessions-"));
             const ws = new WorkspaceRuntime({
-                cwd: "im://mock-1/u1/c1",
-                fsCwd: scratch,
-                workspaceKey: "im://mock-1/u1/c1",
+                providerKeyStore: new ProviderKeyStore({}),
+                scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), scratch),
                 sessionsRoot,
-                disableFsTools: true,
-                // Remaining required options follow the minimal construction from existing runtime tests.
-            } as ConstructorParameters<typeof WorkspaceRuntime>[0]);
+            });
             assert.equal(ws.sessionCwd, scratch);
             assert.equal(ws.workspaceKey, "im://mock-1/u1/c1");
             const names = ws.tools.map((t) => t.name);

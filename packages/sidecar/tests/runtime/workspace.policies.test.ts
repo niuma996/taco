@@ -23,6 +23,7 @@ import { type SessionFacts, writeSessionFacts } from "../../src/runtime/session/
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
+import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
@@ -651,12 +652,11 @@ describe("WorkspaceRuntime PermissionBroker im-policy wiring", () => {
     it("the broker's imCommandPolicy thunk reads the current resolveImPolicy(), not a snapshot", () => {
         let policy: ImWorkspacePolicy = ASK_POLICY;
         ws = new WorkspaceRuntime({
-            cwd: "im://mock-2/u1/c1",
-            fsCwd: cwd,
-            workspaceKey: "im://mock-2/u1/c1",
+            providerKeyStore: new ProviderKeyStore({}),
+            scope: createWorkspaceScope(asWorkspaceId("im://mock-2/u1/c1"), cwd),
             sessionsRoot,
             resolveImPolicy: () => policy,
-        } as ConstructorParameters<typeof WorkspaceRuntime>[0]);
+        });
 
         const thunk = getBrokerPolicyThunk(ws);
         assert.deepEqual(thunk(), ASK_POLICY.commands);

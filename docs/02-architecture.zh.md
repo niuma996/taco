@@ -364,6 +364,12 @@ RPC 响应仅返回
 所有已初始化的客户端。定时任务在桌面连接时也可以等待桌面审批；没有交互客户端
 时直接拒绝审批请求。断开连接不会终止会话或销毁工作区。
 
+`WorkspaceScope` 统一保存公开路由 key、本地/IM 类型、IM route、固定的会话存储
+目录及工具执行目录。IM 策略改变执行目录时，已有会话仍使用原来的 channel scratch
+存储分区。技能、agent、扩展激活、shell/文件工具及默认 stdio MCP cwd 均使用执行
+目录；显式 MCP cwd 优先。提示词路径隐藏和渠道上下文根据 scope 的 IM 身份确定。
+本地 runtime 构造保留 cwd 简写；IM 构造必须显式传入含文件系统路径的 scope。
+
 `WorkspaceRegistry` 按 key 管理 starting、ready、closing 状态。并发构建
 共享结果；关闭中的实例不再对新请求可见，新请求等待关闭完成后重建。
 构建期间被失效的实例会释放资源；关闭 daemon 时禁止新建，并尝试关闭所有

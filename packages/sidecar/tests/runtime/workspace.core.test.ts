@@ -17,8 +17,9 @@ import { ExtensionRegistry } from "../../src/extensions/registry.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { buildSystemPrompt } from "../../src/prompts/buildSystemPrompt.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
-import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
+import { WorkspaceRuntime, type WorkspaceRuntimeOptions } from "../../src/runtime/workspace.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
+import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 let tmpDirCore: string;
@@ -170,22 +171,25 @@ const SHELL_ALLOW_POLICY: ImWorkspacePolicy = {
 };
 
 function makeRuntime(
-    opts: Partial<ConstructorParameters<typeof WorkspaceRuntime>[0]> = {},
+    opts: Partial<Omit<WorkspaceRuntimeOptions, "cwd" | "scope">> & {
+        executionCwd?: string;
+    } = {},
 ): WorkspaceRuntime {
     const scratch = mkdtempSync(join(tmpdir(), "ws-cwd-scratch-"));
     const sessionsRoot = mkdtempSync(join(tmpdir(), "ws-cwd-sessions-"));
+    const { executionCwd, ...runtimeOptions } = opts;
     return new WorkspaceRuntime({
-        cwd: "im://mock-1/u1/c1",
-        fsCwd: scratch,
-        workspaceKey: "im://mock-1/u1/c1",
+        providerKeyStore: new ProviderKeyStore({}),
+        scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), scratch, executionCwd),
         sessionsRoot,
-        ...opts,
-    } as ConstructorParameters<typeof WorkspaceRuntime>[0]);
+        ...runtimeOptions,
+    });
 }
 
 describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
-    it("sessionCwd is the fsCwd and defaults executionCwd to the same dir", () => {
+    it("sessionCwd is the scope storage dir and defaults executionCwd to the same dir", () => {
         const ws = makeRuntime();
+        assert.equal(ws.sessionCwd, ws.scope.sessionCwd);
         assert.equal(ws.sessionCwd, ws.executionCwd); // default: same dir
     });
 
@@ -218,9 +222,9 @@ describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
         assert.ok(!allowedNames.includes("read"), "expected read still removed");
     });
 
-    it("legacy disableFsTools behaves exactly like the default deny policy", () => {
-        const legacy = makeRuntime({ disableFsTools: true });
-        const names = legacy.tools.map((t) => t.name);
+    it("an IM scope defaults to denying filesystem and shell tools without an explicit policy", () => {
+        const ws = makeRuntime();
+        const names = ws.tools.map((t) => t.name);
         for (const tool of ["read", "write", "edit", "grep", "glob", "shell"]) {
             assert.ok(!names.includes(tool), `expected ${tool} removed`);
         }
@@ -391,8 +395,7 @@ describe("IM workspace withholds the path from parent and children alike", () =>
         localCwd = mkdtempSync(join(tmpdir(), "taco-chansafe-local-"));
         im = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
-            cwd: asWorkspaceId("im://mock-1/u1/c1"),
-            workspaceKey: "im://mock-1/u1/c1",
+            scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), sessionsRoot),
             sessionsRoot,
         });
         local = new WorkspaceRuntime({
@@ -480,9 +483,7 @@ describe("skills catalog withholds host paths when the session cannot read files
 
     it("drops location on the default IM policy but keeps the skill listed", () => {
         const ws = make({
-            cwd: asWorkspaceId("im://mock-1/u1/c1"),
-            workspaceKey: "im://mock-1/u1/c1",
-            disableFsTools: true,
+            scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), sessionsRoot),
         });
         assert.ok(ws.systemPrompt.includes("<name>deploy</name>"));
         assert.ok(!ws.systemPrompt.includes("<location>"));
@@ -491,8 +492,7 @@ describe("skills catalog withholds host paths when the session cannot read files
 
     it("keeps location when an IM policy grants file tools", () => {
         const ws = make({
-            cwd: asWorkspaceId("im://mock-1/u1/c1"),
-            workspaceKey: "im://mock-1/u1/c1",
+            scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), sessionsRoot),
             imPolicy: { tools: { fsTools: "allow", shell: "deny" }, commands: { mode: "ask" } },
         });
         assert.ok(ws.systemPrompt.includes("<location>"));

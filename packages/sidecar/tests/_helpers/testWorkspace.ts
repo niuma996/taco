@@ -18,7 +18,7 @@ export interface TestWorkspace {
 }
 
 export function createTestWorkspace(
-    opts: Omit<WorkspaceRuntimeOptions, "cwd" | "sessionsRoot" | "providerKeyStore"> & {
+    opts: Omit<WorkspaceRuntimeOptions, "cwd" | "scope" | "sessionsRoot" | "providerKeyStore"> & {
         /** Temp-dir name tag, so a leaked dir points back at its test file. */
         prefix?: string;
         /** Runs after the dirs exist and before the runtime is built — e.g. seed a CLAUDE.md the constructor reads. */
