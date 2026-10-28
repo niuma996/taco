@@ -117,7 +117,11 @@ export function AgentsPane({
                         }}
                     />
                 </PaneHeader>
-                {error && <div className="error-banner">{error}</div>}
+                {error && (
+                    <div className="error-banner" role="alert">
+                        {error}
+                    </div>
+                )}
                 <div className="agents-list-body">
                     {filtered.length === 0 ? (
                         <div className="agents-empty">

@@ -871,10 +871,11 @@
     width: 28%;
 }
 .schedules-table col.schedules-col-command {
-    width: 22%;
+    width: 21%;
 }
+/* Sized for the 38px switch plus the cell's 24px horizontal padding. */
 .schedules-table col.schedules-col-enabled {
-    width: 8%;
+    width: 9%;
 }
 .schedules-table col.schedules-col-actions {
     width: 20%;
@@ -929,6 +930,8 @@
     gap: 0.5rem;
     color: var(--fg-dim);
     font-size: var(--text-sm);
+    /* The wrapping <label> forwards clicks to the switch inside it. */
+    cursor: pointer;
 }
 
 /* Updates tab action buttons (Check now + Restart sidecar) share a fixed

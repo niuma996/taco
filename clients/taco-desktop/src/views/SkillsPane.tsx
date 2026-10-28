@@ -59,7 +59,11 @@ export function SkillsPane({
                     query={query}
                     onQueryChange={onQueryChange}
                 />
-                {skillsError && <div className="error-banner">{skillsError}</div>}
+                {skillsError && (
+                    <div className="error-banner" role="alert">
+                        {skillsError}
+                    </div>
+                )}
                 <div className="skills-list-body">
                     {problemDiagnostics.length > 0 && (
                         <div className="skills-diagnostics" role="status">

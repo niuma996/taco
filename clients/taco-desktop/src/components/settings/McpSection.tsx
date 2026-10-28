@@ -236,11 +236,15 @@ export function McpSection(props: McpSectionProps) {
             </div>
 
             {probeError && (
-                <div className="error-banner">
+                <div className="error-banner" role="alert">
                     {t("settings.mcpServersProbeError", { error: probeError })}
                 </div>
             )}
-            {restartError && <div className="error-banner">{restartError}</div>}
+            {restartError && (
+                <div className="error-banner" role="alert">
+                    {restartError}
+                </div>
+            )}
             {restarted && servers.length > 0 && (
                 <div className="mcp-info-banner">{t("settings.mcpServersRestarted")}</div>
             )}
@@ -282,7 +286,11 @@ export function McpSection(props: McpSectionProps) {
                 />
             )}
 
-            {mutationError && <div className="error-banner">{mutationError}</div>}
+            {mutationError && (
+                <div className="error-banner" role="alert">
+                    {mutationError}
+                </div>
+            )}
             <ConfirmModal
                 open={pendingDelete !== null}
                 title={t("settings.mcpServerDeleteConfirmTitle")}

@@ -142,7 +142,11 @@ export function UpdatesTab(props: UpdatesTabProps) {
                         : t("settings.updates.restartSidecar")}
                 </Button>
             </div>
-            {restartError && <div className="error-banner">{restartError}</div>}
+            {restartError && (
+                <div className="error-banner" role="alert">
+                    {restartError}
+                </div>
+            )}
         </div>
     );
 }

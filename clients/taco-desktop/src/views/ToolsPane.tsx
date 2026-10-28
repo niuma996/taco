@@ -136,7 +136,11 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                     query={query}
                     onQueryChange={setQuery}
                 />
-                {error && <div className="error-banner">{error}</div>}
+                {error && (
+                    <div className="error-banner" role="alert">
+                        {error}
+                    </div>
+                )}
                 <div className="tools-list-controls">
                     <div className="tools-filters">
                         <div className="tools-filter">

@@ -50,7 +50,11 @@ export function ConfirmModal(props: ConfirmModalProps) {
                 </>
             }
         >
-            {error ? <div className="error-banner">{error}</div> : null}
+            {error ? (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            ) : null}
         </Modal>
     );
 }

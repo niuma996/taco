@@ -63,7 +63,11 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                 </div>
             )}
 
-            {error && <div className="error-banner">{error}</div>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
             {loading && <div className="pane-loading">{t("plugins.loading")}</div>}
 
             {status && (

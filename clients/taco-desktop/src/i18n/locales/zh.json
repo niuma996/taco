@@ -623,9 +623,6 @@
     "saveConfirmInterrupt": "保存该策略会立即生效，并可能中断正在进行的对话。确定继续？",
     "loading": "加载中…"
   },
-  "drawer": {
-    "savingInline": "保存中…"
-  },
   "debug": {
     "llmRequestDump": "LLM 请求转储",
     "showLlmRequestDump": "显示 LLM 请求转储",
@@ -928,7 +925,6 @@
     "browse": "浏览…",
     "remove": "移除目录",
     "save": "保存",
-    "saving": "保存中…",
     "cancel": "取消",
     "pathPlaceholder": "/绝对路径",
     "scopeLabel": "作用范围",

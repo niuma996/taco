@@ -338,7 +338,10 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             // the same translation pipeline as the rest of the form.
             if (field === "argsJson") {
                 if (match.message.startsWith("JSON parse")) {
-                    return t("schedules.errorArgsJson", "JSON 解析失败，请检查括号和引号。");
+                    return t(
+                        "schedules.errorArgsJson",
+                        "JSON parse failed — check braces and quotes.",
+                    );
                 }
                 return t(
                     "schedules.errorArgsNotObject",
@@ -361,8 +364,14 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             }
             description={
                 isEdit
-                    ? t("schedules.editDescription", "修改这条定时任务的参数；保存后立即生效。")
-                    : t("schedules.newDescription", "填好下面这几项就可以把任务挂到调度器上。")
+                    ? t(
+                          "schedules.editDescription",
+                          "Update this schedule — changes apply on save.",
+                      )
+                    : t(
+                          "schedules.newDescription",
+                          "Fill in the fields below to register a job with the scheduler.",
+                      )
             }
             className="schedules-modal"
             actions={
@@ -404,10 +413,16 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             {draft.schedule.kind === "interval" ? (
                 <FormField
                     label={t("schedules.fieldIntervalMs", "Interval (ms)")}
-                    hint={t("schedules.fieldIntervalMsHint", "触发间隔（毫秒）。需为正整数。")}
+                    hint={t(
+                        "schedules.fieldIntervalMsHint",
+                        "Trigger interval in milliseconds. Must be a positive integer.",
+                    )}
                     error={
                         errorFor("intervalMs")
-                            ? t("schedules.errorIntervalMs", "Interval (ms) 必须是正整数。")
+                            ? t(
+                                  "schedules.errorIntervalMs",
+                                  "Interval (ms) must be a positive integer.",
+                              )
                             : undefined
                     }
                 >
@@ -429,7 +444,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         )}
                         error={
                             errorFor("cronExpr")
-                                ? t("schedules.errorCronExpr", "Cron 表达式不能为空。")
+                                ? t("schedules.errorCronExpr", "Cron expression must not be empty.")
                                 : undefined
                         }
                     >
@@ -563,7 +578,10 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     )}
                     error={
                         errorFor("maxRuns")
-                            ? t("schedules.errorMaxRuns", "最大运行次数必须是正整数。")
+                            ? t(
+                                  "schedules.errorMaxRuns",
+                                  "Max runs must be a positive integer, or empty for unlimited.",
+                              )
                             : undefined
                     }
                 >
@@ -578,23 +596,28 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             ) : null}
 
             <div className="schedules-modal-toggles">
-                <div className="schedules-modal-toggle">
+                <label className="schedules-modal-toggle" htmlFor="schedules-form-enabled">
                     <Switch
+                        id="schedules-form-enabled"
                         checked={draft.enabled}
                         onChange={(next) => setDraft({ ...draft, enabled: next })}
                         label={t("schedules.fieldEnabled", "Enabled")}
                     />
                     <span>{t("schedules.fieldEnabled", "Enabled")}</span>
-                </div>
+                </label>
                 {!isBuiltinDream ? (
-                    <div className="schedules-modal-toggle">
+                    <label
+                        className="schedules-modal-toggle"
+                        htmlFor="schedules-form-run-on-startup"
+                    >
                         <Switch
+                            id="schedules-form-run-on-startup"
                             checked={draft.run_on_startup}
                             onChange={(next) => setDraft({ ...draft, run_on_startup: next })}
                             label={t("schedules.fieldRunOnStartup", "Run on startup")}
                         />
                         <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
-                    </div>
+                    </label>
                 ) : null}
             </div>
 

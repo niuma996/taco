@@ -94,11 +94,13 @@ export function ModelTab(props: ModelTabProps) {
                             onOpen={props.onRefreshModels}
                             placement="down"
                         />
-                        {saving && (
-                            <span className="settings-saving">{t("drawer.savingInline")}</span>
-                        )}
+                        {saving && <span className="settings-saving">{t("app.saving")}</span>}
                     </div>
-                    {error && <div className="error-banner">{error}</div>}
+                    {error && (
+                        <div className="error-banner" role="alert">
+                            {error}
+                        </div>
+                    )}
                 </>
             ) : (
                 <p className="settings-tab-desc">{t("settings.providerFirst")}</p>
@@ -112,11 +114,13 @@ export function ModelTab(props: ModelTabProps) {
                     onChange={onSetThinking}
                     disabled={savingThinking}
                 />
-                {savingThinking && (
-                    <span className="settings-saving">{t("drawer.savingInline")}</span>
-                )}
+                {savingThinking && <span className="settings-saving">{t("app.saving")}</span>}
             </div>
-            {thinkingError && <div className="error-banner">{thinkingError}</div>}
+            {thinkingError && (
+                <div className="error-banner" role="alert">
+                    {thinkingError}
+                </div>
+            )}
         </section>
     );
 }

@@ -435,8 +435,16 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                 </>
             }
         >
-            {clientError !== null && <div className="error-banner">{clientError}</div>}
-            {policy.error !== null && <div className="error-banner">{policy.error}</div>}
+            {clientError !== null && (
+                <div className="error-banner" role="alert">
+                    {clientError}
+                </div>
+            )}
+            {policy.error !== null && (
+                <div className="error-banner" role="alert">
+                    {policy.error}
+                </div>
+            )}
             {policy.loading && <div className="pane-loading">{t("imPolicy.loading")}</div>}
 
             <div className="im-policy-body">

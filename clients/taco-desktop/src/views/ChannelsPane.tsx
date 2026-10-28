@@ -265,7 +265,11 @@ function BindingsTab(props: {
                 </div>
             )}
 
-            {error && <div className="error-banner">{error}</div>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
             {loading && <div className="pane-loading">{t("channels.loading")}</div>}
 
             {status && (
@@ -339,7 +343,11 @@ function ConversationsTab(props: {
     const { conversations, loading, error, onOpenConversation, activeCwd, onOpenPolicy, t } = props;
 
     if (error) {
-        return <div className="error-banner">{error}</div>;
+        return (
+            <div className="error-banner" role="alert">
+                {error}
+            </div>
+        );
     }
     if (loading && !conversations) {
         return <div className="pane-loading">{t("channels.loading")}</div>;

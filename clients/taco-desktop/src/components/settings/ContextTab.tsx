@@ -152,7 +152,11 @@ export function ContextTab(props: ContextTabProps) {
                     label={t("settings.contextInheritLabel")}
                 />
             </div>
-            {error && <div className="error-banner">{error}</div>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
         </section>
     );
 }

@@ -259,7 +259,11 @@ export function ProviderSection(props: ProviderSectionProps) {
                     onClose={() => setDetail(null)}
                 />
             )}
-            {detail === null && error && <div className="error-banner">{error}</div>}
+            {detail === null && error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
         </section>
     );
 }

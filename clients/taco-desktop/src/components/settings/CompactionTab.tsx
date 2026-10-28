@@ -120,8 +120,12 @@ export function CompactionTab(props: CompactionTabProps) {
             </div>
             <p className="settings-tab-desc">{t("settings.compactionThresholdHint")}</p>
             <p className="settings-tab-desc">{t("settings.compactionManualHint")}</p>
-            {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
-            {error && <div className="error-banner">{error}</div>}
+            {saving && <span className="settings-saving">{t("app.saving")}</span>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
         </section>
     );
 }

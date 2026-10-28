@@ -273,11 +273,14 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                                     const result = await jobs.runNow(job.id);
                                     if (result.status === "skipped") {
                                         jobs.setActionError(
-                                            t("schedules.busy", "上次运行还没结束，请稍候再触发"),
+                                            t(
+                                                "schedules.busy",
+                                                "Previous run still in progress, please wait",
+                                            ),
                                         );
                                     } else if (result.status === "failed") {
                                         jobs.setActionError(
-                                            result.error ?? t("schedules.runFailed", "触发失败"),
+                                            result.error ?? t("schedules.runFailed", "Run failed"),
                                         );
                                     } else {
                                         jobs.setActionError(null);
@@ -354,7 +357,7 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
                 <span>{job.name}</span>
                 {job.builtin ? (
                     <span className="schedules-builtin-badge">
-                        {t("schedules.builtin", "内置")}
+                        {t("schedules.builtin", "Built-in")}
                     </span>
                 ) : null}
             </td>
@@ -378,7 +381,7 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
                 <div className="schedules-row-actions">
                     <Button size="sm" variant="default" onClick={onRunNow} disabled={isRunning}>
                         {isRunning
-                            ? t("schedules.runningNow", "运行中…")
+                            ? t("schedules.runningNow", "Running…")
                             : t("schedules.actionRunNow", "Run now")}
                     </Button>
                     <Button size="sm" variant="default" onClick={onEdit}>

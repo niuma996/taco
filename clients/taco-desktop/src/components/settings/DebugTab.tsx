@@ -138,7 +138,7 @@ export function DebugTab(props: DebugTabProps) {
                     />
                 </div>
             )}
-            {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
+            {saving && <span className="settings-saving">{t("app.saving")}</span>}
             <p className="settings-tab-desc debug-restart-hint">{t("settings.restartHint")}</p>
             {!restarted && (
                 <div className="settings-row">
@@ -152,7 +152,11 @@ export function DebugTab(props: DebugTabProps) {
                     </Button>
                 </div>
             )}
-            {error && <div className="error-banner">{error}</div>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
         </section>
     );
 }

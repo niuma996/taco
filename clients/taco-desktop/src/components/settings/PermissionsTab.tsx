@@ -139,7 +139,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                 </button>
             </div>
             {ruleError && (
-                <div className="error-banner">
+                <div className="error-banner" role="alert">
                     {ruleError.kind === "empty"
                         ? t("settings.permissionsRuleErrorEmpty")
                         : t("settings.permissionsRuleErrorShellWrapper", {
@@ -169,8 +169,12 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                     ))}
                 </ul>
             )}
-            {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
-            {error && <div className="error-banner">{error}</div>}
+            {saving && <span className="settings-saving">{t("app.saving")}</span>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
             <ConfirmModal
                 open={pendingRemove !== null}
                 title={t("settings.permissionsRemoveConfirmTitle")}

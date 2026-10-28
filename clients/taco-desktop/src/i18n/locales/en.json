@@ -626,9 +626,6 @@
     "saveConfirmInterrupt": "Saving this policy will immediately apply it and may interrupt in-progress conversations. Continue?",
     "loading": "Loading…"
   },
-  "drawer": {
-    "savingInline": "Saving…"
-  },
   "debug": {
     "llmRequestDump": "LLM request dump",
     "showLlmRequestDump": "Show LLM request dump",
@@ -932,7 +929,6 @@
     "browse": "Browse…",
     "remove": "Remove directory",
     "save": "Save",
-    "saving": "Saving…",
     "cancel": "Cancel",
     "pathPlaceholder": "/absolute/path",
     "scopeLabel": "Applies to",

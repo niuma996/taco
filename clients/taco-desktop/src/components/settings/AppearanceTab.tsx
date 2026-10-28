@@ -58,7 +58,7 @@ export function AppearanceTab(props: AppearanceTabProps) {
                     disabled={saving}
                     label={t("app.theme")}
                 />
-                {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
+                {saving && <span className="settings-saving">{t("app.saving")}</span>}
             </div>
             <section className="settings-tab-subsection">
                 <h3>{t("settings.languageTitle")}</h3>
@@ -77,10 +77,14 @@ export function AppearanceTab(props: AppearanceTabProps) {
                         disabled={saving}
                         label={t("app.language")}
                     />
-                    {saving && <span className="settings-saving">{t("drawer.savingInline")}</span>}
+                    {saving && <span className="settings-saving">{t("app.saving")}</span>}
                 </div>
             </section>
-            {error && <div className="error-banner">{error}</div>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
         </section>
     );
 }

@@ -818,7 +818,11 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                 </div>
             )}
 
-            {props.saveError && <div className="error-banner">{props.saveError}</div>}
+            {props.saveError && (
+                <div className="error-banner" role="alert">
+                    {props.saveError}
+                </div>
+            )}
 
             {isCustom && !isCreate && (
                 <ConfirmModal

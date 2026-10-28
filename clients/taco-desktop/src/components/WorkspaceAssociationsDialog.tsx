@@ -141,7 +141,7 @@ export function WorkspaceAssociationsDialog({
                         {t("associations.cancel")}
                     </Button>
                     <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
-                        {saving ? t("associations.saving") : t("associations.save")}
+                        {saving ? t("app.saving") : t("associations.save")}
                     </Button>
                 </>
             }

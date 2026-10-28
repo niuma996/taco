@@ -207,7 +207,11 @@ export function AgentForm(props: AgentFormProps) {
                 </>
             }
         >
-            {props.error ? <div className="error-banner">{props.error}</div> : null}
+            {props.error ? (
+                <div className="error-banner" role="alert">
+                    {props.error}
+                </div>
+            ) : null}
             {isCc && (
                 <div className="agent-form-notice agent-form-notice--warn" role="note">
                     {t("agents.form.ccCwdNotice")}

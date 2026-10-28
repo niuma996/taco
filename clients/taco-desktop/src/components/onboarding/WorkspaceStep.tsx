@@ -55,7 +55,11 @@ export function WorkspaceStep(props: WorkspaceStepProps) {
                     {t("onboarding.workspaceChooseOther")}
                 </Button>
             </div>
-            {error && <div className="error-banner">{error}</div>}
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
         </div>
     );
 }
