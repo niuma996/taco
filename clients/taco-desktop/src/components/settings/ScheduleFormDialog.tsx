@@ -21,6 +21,7 @@ import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
+import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
@@ -577,25 +578,23 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
             ) : null}
 
             <div className="schedules-modal-toggles">
-                <label className="schedules-modal-toggle">
-                    <input
-                        type="checkbox"
+                <div className="schedules-modal-toggle">
+                    <Switch
                         checked={draft.enabled}
-                        onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+                        onChange={(next) => setDraft({ ...draft, enabled: next })}
+                        label={t("schedules.fieldEnabled", "Enabled")}
                     />
                     <span>{t("schedules.fieldEnabled", "Enabled")}</span>
-                </label>
+                </div>
                 {!isBuiltinDream ? (
-                    <label className="schedules-modal-toggle">
-                        <input
-                            type="checkbox"
+                    <div className="schedules-modal-toggle">
+                        <Switch
                             checked={draft.run_on_startup}
-                            onChange={(e) =>
-                                setDraft({ ...draft, run_on_startup: e.target.checked })
-                            }
+                            onChange={(next) => setDraft({ ...draft, run_on_startup: next })}
+                            label={t("schedules.fieldRunOnStartup", "Run on startup")}
                         />
                         <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
-                    </label>
+                    </div>
                 ) : null}
             </div>
 

@@ -13,6 +13,7 @@ import type { AskUserQuestion } from "@taco-ai/protocol";
 import { CircleCheck } from "lucide-react";
 import { useState } from "react";
 import { type AskUserAnswers, useAskUser } from "../../hooks/useAskUser";
+import { useT } from "../../i18n/useI18n";
 import { type ToolViewProps, toolViews } from "./registry";
 
 type AnswerValue = string | string[];
@@ -34,6 +35,7 @@ function normalizeAnswers(raw: unknown): AskUserAnswers {
 
 export function AskUserToolView({ tool }: ToolViewProps) {
     const { answerAskUser, setAskUserAnswers } = useAskUser();
+    const { t } = useT();
 
     const details = tool.details as
         | { questions?: AskUserQuestion[]; answers?: unknown; waiting?: boolean }
@@ -117,7 +119,7 @@ export function AskUserToolView({ tool }: ToolViewProps) {
     if (questions.length === 0) {
         return (
             <div className="askuser-card">
-                <p className="askuser-no-questions">Waiting for questions…</p>
+                <p className="askuser-no-questions">{t("activity.askUserWaiting")}</p>
             </div>
         );
     }
@@ -189,8 +191,11 @@ export function AskUserToolView({ tool }: ToolViewProps) {
                         </div>
                         {answered && isAnswer(current) && current.length > 0 && (
                             <p className="askuser-answer-note">
-                                Selected:{" "}
-                                {Array.isArray(current) ? `[${current.join(", ")}]` : current}
+                                {t("activity.askUserSelected", {
+                                    value: Array.isArray(current)
+                                        ? `[${current.join(", ")}]`
+                                        : current,
+                                })}
                             </p>
                         )}
                     </div>
@@ -204,7 +209,7 @@ export function AskUserToolView({ tool }: ToolViewProps) {
                         disabled={!allAnswered}
                         onClick={submitAnswers}
                     >
-                        提交
+                        {t("activity.askUserSubmit")}
                     </button>
                 </div>
             )}

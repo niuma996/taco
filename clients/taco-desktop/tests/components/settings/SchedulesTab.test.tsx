@@ -194,7 +194,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
         await waitFor(() => {
             expect(screen.getByText("row-1")).toBeTruthy();
         });
-        // Toggle the row's enabled checkbox → triggers jobs.update →
+        // Toggle the row's enabled switch → triggers jobs.update →
         // rejection lands in the global actionError bucket.
         const toggle = screen.getByLabelText("schedules.toggleAria");
         await user.click(toggle);

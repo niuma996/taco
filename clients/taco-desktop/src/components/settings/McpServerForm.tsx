@@ -14,6 +14,7 @@ import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
+import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
 const TRANSPORT_OPTIONS: ReadonlyArray<{ value: McpTransportKind; labelKey: string }> = [
@@ -213,8 +214,7 @@ export function McpServerForm(props: McpServerFormProps) {
                         label={t("settings.mcpServerArgs")}
                         hint={t("settings.mcpServerArgsHint")}
                     >
-                        <textarea
-                            className="ui-input ui-textarea"
+                        <Textarea
                             value={args}
                             rows={3}
                             placeholder="--flag value\n--option key=value"
@@ -226,8 +226,7 @@ export function McpServerForm(props: McpServerFormProps) {
                         label={t("settings.mcpServerEnv")}
                         hint={t("settings.mcpServerEnvHint")}
                     >
-                        <textarea
-                            className="ui-input ui-textarea"
+                        <Textarea
                             value={env}
                             rows={3}
                             placeholder="API_KEY=sk-…\nDEBUG=true"
@@ -267,8 +266,7 @@ export function McpServerForm(props: McpServerFormProps) {
                         label={t("settings.mcpServerHeaders")}
                         hint={t("settings.mcpServerHeadersHint")}
                     >
-                        <textarea
-                            className="ui-input ui-textarea"
+                        <Textarea
                             value={headers}
                             rows={3}
                             placeholder="Authorization: Bearer sk-…\nX-Custom-Header: value"
@@ -294,8 +292,7 @@ export function McpServerForm(props: McpServerFormProps) {
                 label={t("settings.mcpServerAlwaysLoaded")}
                 hint={t("settings.mcpServerAlwaysLoadedHint")}
             >
-                <textarea
-                    className="ui-input ui-textarea"
+                <Textarea
                     value={alwaysLoaded}
                     rows={3}
                     placeholder={t("settings.mcpServerAlwaysLoadedPlaceholder")}

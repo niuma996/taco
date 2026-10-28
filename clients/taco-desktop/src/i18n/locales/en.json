@@ -183,6 +183,9 @@
     "readImage": "Read image",
     "readOpenFile": "View file content",
     "toolRawArgs": "Show raw input",
+    "askUserWaiting": "Waiting for questions…",
+    "askUserSelected": "Selected: {{value}}",
+    "askUserSubmit": "Submit",
     "switchWorkspace": "Switch workspace",
     "openFolder": "Open folder",
     "manageAssociations": "Associated directories…",
@@ -754,6 +757,10 @@
     "copied": "Copied",
     "copyFailed": "Copy failed",
     "thinkingShowAll": "Show all",
+    "thinkingRedacted": "Thinking (redacted)",
+    "thinkingStreaming": "Thinking…",
+    "thinkingDone": "Thought",
+    "thinkingDuration": "Thought for {{seconds}}s",
     "showEarlier_one": "Show {{count}} earlier message",
     "showEarlier_other": "Show {{count}} earlier messages",
     "loadingSession": "Loading session",
@@ -827,7 +834,20 @@
     "dreamModelHint": "Leave empty for the default model. Use provider/modelId or modelId."
   },
   "tasks": {
-    "empty": "No tasks yet"
+    "empty": "No tasks yet",
+    "title": "Tasks",
+    "closeLabel": "Close task panel",
+    "activeLabel": "Current task",
+    "historyLabel": "Task history",
+    "statusInProgress": "In progress",
+    "statusPending": "Pending",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "historyBadgeCompleted": "{{completed}}/{{total}} completed",
+    "historyBadgeFailed": "{{failed}} failed",
+    "historyLoading": "Loading…",
+    "historyLoadFailed": "Failed to load: {{error}}",
+    "historyEmpty": "(empty)"
   },
   "agents": {
     "new": "Add subagent",

@@ -59,16 +59,16 @@ export function TaskPanel({
 
     return (
         <RightPanel
-            title={active ? active.name : "任务"}
+            title={active ? active.name : t("tasks.title")}
             onClose={onClose}
-            closeLabel="关闭任务面板"
+            closeLabel={t("tasks.closeLabel")}
             className="task-panel"
             resizeHandleProps={resizeHandleProps}
             resizeLabel={resizeLabel}
         >
             {!hasTasks && <div className="task-panel-empty">{t("tasks.empty")}</div>}
             {active && (
-                <section className="task-panel-active" aria-label="当前任务">
+                <section className="task-panel-active" aria-label={t("tasks.activeLabel")}>
                     <ul className="task-list">
                         {active.tasks.map((t) => (
                             <TaskRow key={t.id} task={t} />
@@ -77,8 +77,8 @@ export function TaskPanel({
                 </section>
             )}
             {history.length > 0 && (
-                <section className="task-panel-history" aria-label="历史任务">
-                    <h3 className="task-history-heading">历史任务</h3>
+                <section className="task-panel-history" aria-label={t("tasks.historyLabel")}>
+                    <h3 className="task-history-heading">{t("tasks.historyLabel")}</h3>
                     <ul className="task-history-list">
                         {history.map((h) => (
                             <HistoryRow
@@ -113,17 +113,34 @@ function TaskRow({ task }: { task: TaskItem }) {
 
 /** Status icon: 1:1 mapping with status, preserving original semantics. */
 function StatusIcon({ status }: { status: TaskItem["status"] }) {
+    const { t } = useT();
     switch (status) {
         case "in_progress":
-            return <LoaderCircle size={14} className="task-icon spinning" aria-label="进行中" />;
+            return (
+                <LoaderCircle
+                    size={14}
+                    className="task-icon spinning"
+                    aria-label={t("tasks.statusInProgress")}
+                />
+            );
         case "pending":
-            return <Circle size={14} className="task-icon" aria-label="待办" />;
+            return <Circle size={14} className="task-icon" aria-label={t("tasks.statusPending")} />;
         case "completed":
             return (
-                <CircleCheck size={14} className="task-icon task-icon-done" aria-label="已完成" />
+                <CircleCheck
+                    size={14}
+                    className="task-icon task-icon-done"
+                    aria-label={t("tasks.statusCompleted")}
+                />
             );
         case "failed":
-            return <CircleX size={14} className="task-icon task-icon-failed" aria-label="已失败" />;
+            return (
+                <CircleX
+                    size={14}
+                    className="task-icon task-icon-failed"
+                    aria-label={t("tasks.statusFailed")}
+                />
+            );
     }
 }
 
@@ -157,6 +174,7 @@ function HistoryRow({
     const [expanded, setExpanded] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const { t } = useT();
 
     const failedCount = loaded?.filter((t) => t.status === "failed").length ?? 0;
 
@@ -203,18 +221,28 @@ function HistoryRow({
                 )}
                 <span className="task-history-name">{name}</span>
                 <span className="task-history-badge">
-                    {completedCount}/{taskCount} 已完成
-                    {failedCount > 0 && ` · ${failedCount} 失败`}
+                    {t("tasks.historyBadgeCompleted", {
+                        completed: completedCount,
+                        total: taskCount,
+                    })}
+                    {failedCount > 0 &&
+                        ` · ${t("tasks.historyBadgeFailed", { failed: failedCount })}`}
                 </span>
             </button>
             {expanded && (
                 <div className="task-history-detail">
-                    {loading && <div className="task-history-loading">loading…</div>}
-                    {error && <div className="task-history-error">加载失败:{error}</div>}
+                    {loading && (
+                        <div className="task-history-loading">{t("tasks.historyLoading")}</div>
+                    )}
+                    {error && (
+                        <div className="task-history-error">
+                            {t("tasks.historyLoadFailed", { error })}
+                        </div>
+                    )}
                     {!loading && !error && loaded && (
                         <ul className="task-list">
                             {loaded.length === 0 ? (
-                                <li className="task-history-empty">(空)</li>
+                                <li className="task-history-empty">{t("tasks.historyEmpty")}</li>
                             ) : (
                                 loaded.map((t) => <TaskRow key={t.id} task={t} />)
                             )}

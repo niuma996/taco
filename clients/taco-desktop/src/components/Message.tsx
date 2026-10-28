@@ -226,12 +226,12 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
     };
 
     const label = (() => {
-        if (block.redacted) return "Thinking (redacted)";
-        if (isStreaming) return "Thinking…";
-        if (isHistorical) return "Thought";
+        if (block.redacted) return t("message.thinkingRedacted");
+        if (isStreaming) return t("message.thinkingStreaming");
+        if (isHistorical) return t("message.thinkingDone");
         const endedAt = block.endedAt as number;
         const seconds = (endedAt - (block.startedAt ?? endedAt)) / 1000;
-        return `Thought for ${seconds.toFixed(1)}s`;
+        return t("message.thinkingDuration", { seconds: seconds.toFixed(1) });
     })();
 
     return (

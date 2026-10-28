@@ -182,6 +182,9 @@
     "readImage": "已读取图片",
     "readOpenFile": "查看文件内容",
     "toolRawArgs": "查看原始入参",
+    "askUserWaiting": "等待问题…",
+    "askUserSelected": "已选：{{value}}",
+    "askUserSubmit": "提交",
     "switchWorkspace": "切换工作区",
     "openFolder": "打开文件夹",
     "manageAssociations": "关联目录…",
@@ -751,6 +754,10 @@
     "copied": "已复制",
     "copyFailed": "复制失败",
     "thinkingShowAll": "展开全部",
+    "thinkingRedacted": "思考过程（已隐藏）",
+    "thinkingStreaming": "思考中…",
+    "thinkingDone": "已思考",
+    "thinkingDuration": "思考用时 {{seconds}} 秒",
     "showEarlier_other": "显示更早的 {{count}} 条消息",
     "loadingSession": "正在加载会话",
     "guideLabel": "用户消息导航",
@@ -823,7 +830,20 @@
     "dreamModelHint": "留空使用当前默认模型；格式为 provider/modelId 或 modelId。"
   },
   "tasks": {
-    "empty": "暂无任务"
+    "empty": "暂无任务",
+    "title": "任务",
+    "closeLabel": "关闭任务面板",
+    "activeLabel": "当前任务",
+    "historyLabel": "历史任务",
+    "statusInProgress": "进行中",
+    "statusPending": "待办",
+    "statusCompleted": "已完成",
+    "statusFailed": "已失败",
+    "historyBadgeCompleted": "{{completed}}/{{total}} 已完成",
+    "historyBadgeFailed": "{{failed}} 失败",
+    "historyLoading": "加载中…",
+    "historyLoadFailed": "加载失败：{{error}}",
+    "historyEmpty": "（空）"
   },
   "agents": {
     "new": "添加子代理",

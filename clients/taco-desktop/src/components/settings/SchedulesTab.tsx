@@ -27,6 +27,7 @@ import { createJobsClient } from "../../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Switch } from "../ui/Switch.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
 
 export interface SchedulesTabProps {
@@ -367,11 +368,10 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
                 ) : null}
             </td>
             <td>
-                <input
-                    type="checkbox"
+                <Switch
                     checked={job.enabled}
-                    onChange={(event) => onToggle(event.target.checked)}
-                    aria-label={t("schedules.toggleAria", "Toggle schedule enabled")}
+                    onChange={onToggle}
+                    label={t("schedules.toggleAria", "Toggle schedule enabled")}
                 />
             </td>
             <td className="schedules-cell-actions">
