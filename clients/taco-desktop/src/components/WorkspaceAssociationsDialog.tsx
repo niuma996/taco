@@ -146,7 +146,11 @@ export function WorkspaceAssociationsDialog({
                 </>
             }
         >
-            {error && <div className="ui-form-error">{error}</div>}
+            {error && (
+                <div className="ui-form-error" role="alert">
+                    {error}
+                </div>
+            )}
             {canChooseScope && (
                 <div className="workspace-associations-scope">
                     <span className="workspace-associations-scope-label">

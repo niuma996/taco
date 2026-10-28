@@ -406,7 +406,6 @@
     "mcpServerDisabled": "disabled",
     "mcpServerDisabledHint": "Takes effect after sidecar restart",
     "tabSchedules": "Schedules",
-    "sectionNavAria": "Settings sections",
     "tabUpdates": "App",
     "updates": {
       "title": "App",

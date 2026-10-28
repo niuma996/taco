@@ -320,7 +320,9 @@ function BindingsTab(props: {
                             {status.failed.map((f) => (
                                 <div key={f.channelId} className="pane-card channels-card-bad">
                                     <span className="pane-card-name">{f.channelId}</span>
-                                    <span className="channels-card-error">{f.error}</span>
+                                    <span className="channels-card-error" role="status">
+                                        {f.error}
+                                    </span>
                                 </div>
                             ))}
                         </ChannelSection>

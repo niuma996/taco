@@ -37,7 +37,11 @@ export function FormField(props: FormFieldProps): ReactElement {
                 </span>
             )}
             {children}
-            {error !== undefined && <span className="ui-form-error">{error}</span>}
+            {error !== undefined && (
+                <span className="ui-form-error" role="status">
+                    {error}
+                </span>
+            )}
             {hint !== undefined && <span className="ui-form-hint">{hint}</span>}
         </div>
     );

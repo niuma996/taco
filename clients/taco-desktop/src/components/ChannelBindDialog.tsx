@@ -221,7 +221,8 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
             )}
 
             {state === "error" && (
-                <p className="channel-bind-error" role="alert">
+                // The pane-level `error` above already announces; both stay visible.
+                <p className="channel-bind-error" role={error ? undefined : "alert"}>
                     {channel?.message ?? t("channels.genericError")}
                 </p>
             )}

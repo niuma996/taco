@@ -103,7 +103,11 @@ export function McpServerCard(props: McpServerCardProps) {
                     </IconButton>
                 </div>
             </div>
-            {errorMsg && <p className="mcp-server-error">{errorMsg}</p>}
+            {errorMsg && (
+                <p className="mcp-server-error" role="status">
+                    {errorMsg}
+                </p>
+            )}
             {tools.length > 0 && <p className="mcp-server-tools">{tools.join(", ")}</p>}
         </div>
     );
