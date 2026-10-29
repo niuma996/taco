@@ -124,7 +124,7 @@ describe("wechatChannel", () => {
     }
 
     function harness(
-        opts: { credentials?: boolean; peer?: string; listPeers?: string[] } = {},
+        opts: { credentials?: boolean; peer?: string; listPeers?: string[]; logger?: Logger } = {},
     ): Harness {
         const bot = new FakeBot();
         const broker = new ChannelBindBroker();
@@ -144,7 +144,7 @@ describe("wechatChannel", () => {
         });
         const ctx: ChannelContext = {
             channelId: "wechat",
-            logger: silentLogger(),
+            logger: opts.logger ?? silentLogger(),
             config: memoryStore(opts.credentials ? { credentials: { token: "t" } } : {}),
             ingress: {
                 submit: async (msg) => {
@@ -322,7 +322,15 @@ describe("wechatChannel", () => {
         });
 
         it("drops a media message whose download fails", async () => {
-            const h = harness();
+            const warns: string[] = [];
+            const logger: Logger = {
+                debug: () => {},
+                info: () => {},
+                warn: (msg) => warns.push(msg),
+                error: () => {},
+                child: () => logger,
+            };
+            const h = harness({ logger });
             await h.channel.start(h.ctx);
             h.bot.download = async () => {
                 throw new Error("expired");
@@ -334,6 +342,8 @@ describe("wechatChannel", () => {
                 raw: { message_id: 11, create_time_ms: 1_700_000_000_011 },
             });
             assert.equal(h.submitted.length, 0);
+            assert.match(warns.join("\n"), /11/);
+            assert.equal(warns.join("\n").includes("u1"), false);
         });
     });
 
@@ -612,6 +622,7 @@ describe("wecomChannel", () => {
         opts: {
             credentials?: ChannelsBindCreds;
             route?: { channelId: string; peerId: string; chatId: string };
+            logger?: Logger;
         } = {},
     ): Harness {
         const clients: FakeClient[] = [];
@@ -631,7 +642,7 @@ describe("wecomChannel", () => {
         });
         const ctx: ChannelContext = {
             channelId: "wecom",
-            logger: silentLogger(),
+            logger: opts.logger ?? silentLogger(),
             config: {
                 get: <T>(name: string) => store.get(name) as T | undefined,
                 set: async <T>(name: string, value: T) => {
@@ -796,7 +807,15 @@ describe("wecomChannel", () => {
         });
 
         it("drops an inbound image whose download fails", async () => {
-            const h = harness({ credentials: { botId: "b", secret: "s" } });
+            const warns: string[] = [];
+            const logger: Logger = {
+                debug: () => {},
+                info: () => {},
+                warn: (msg) => warns.push(msg),
+                error: () => {},
+                child: () => logger,
+            };
+            const h = harness({ credentials: { botId: "b", secret: "s" }, logger });
             const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
             h.client.downloadFile = async () => {
                 throw new Error("expired");
@@ -810,6 +829,8 @@ describe("wecomChannel", () => {
             });
             await new Promise((r) => setImmediate(r));
             assert.equal(h.submitted.length, 0);
+            assert.match(warns.join("\n"), /m-img/);
+            assert.equal(warns.join("\n").includes("u1"), false);
             await handle.close();
         });
 

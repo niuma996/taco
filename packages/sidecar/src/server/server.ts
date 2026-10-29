@@ -115,6 +115,7 @@ import {
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { configToolCandidates } from "../tools/configCandidates.ts";
+import { pdfToolCandidates } from "../tools/pdfCandidates.ts";
 import { sessionHistoryToolCandidates } from "../tools/sessionSearch.ts";
 import {
     associationAffectsWorkspace,
@@ -1025,6 +1026,9 @@ export class SidecarServer implements ServerRpcSurface {
             candidates: [
                 ...mcpProvider.candidates(),
                 ...configToolCandidates(),
+                // Registered for IM workspaces too: the policy decides whether
+                // they are offered, and it can change while the workspace lives.
+                ...pdfToolCandidates(),
                 // Not offered to IM workspaces: a third party drives those, and
                 // the transcripts are the user's private history.
                 ...(scope.kind === "im" ? [] : sessionHistoryToolCandidates()),

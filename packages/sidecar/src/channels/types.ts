@@ -104,11 +104,11 @@ export interface ChannelMediaRef {
         | { kind: "fileId"; value: string }
         | { kind: "base64"; mimeType: string; data: string };
     /**
-     * The file name the platform knows it by, extension included.
+     * The file name the platform knows it by.
      *
-     * It is the only name the model ever sees, so it has to survive: a
-     * document called `report.pdf` must not arrive as `file`. A channel that
-     * has no name (a sticker, a voice note) may leave it out.
+     * It is what the model reads, so `report.pdf` must not arrive as `file`.
+     * Ingress adds an extension only when this name has none. A channel that
+     * has no name may leave it out.
      */
     readonly name?: string;
 }

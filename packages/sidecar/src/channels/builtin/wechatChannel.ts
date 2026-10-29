@@ -279,7 +279,7 @@ export class WeChatChannel implements Channel {
             // dropped: its text is a placeholder ("[image]"), and sending
             // that would put a word where the sender meant a picture.
             if (hasMedia(msg) && !media) {
-                log.warn("media download failed, message dropped");
+                log.warn(`media download failed, message dropped: ${platformMessageId}`);
                 return;
             }
             try {

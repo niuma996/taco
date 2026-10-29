@@ -358,6 +358,14 @@ describe("mutationGate", () => {
                     }
                 });
 
+                it("allows a PDF write inside an extra root", async () => {
+                    const result = await withExtra({
+                        toolName: "pdfFill",
+                        input: { output: join(extra, "out.pdf") },
+                    });
+                    assert.equal(result, undefined);
+                });
+
                 it("still blocks a sibling of the extra root", async () => {
                     const result = await withExtra({
                         toolName: "write",
@@ -435,6 +443,14 @@ describe("mutationGate", () => {
                     }
                 });
 
+                it("allows a PDF write inside an associated root", async () => {
+                    const result = await withAssociated({
+                        toolName: "pdfFill",
+                        input: { output: join(associated, "out.pdf") },
+                    });
+                    assert.equal(result, undefined);
+                });
+
                 it("still blocks a path that is in neither root", async () => {
                     const result = await withAssociated({
                         toolName: "write",
@@ -495,6 +511,122 @@ describe("mutationGate", () => {
             });
         });
 
+        describe("pdf write tools", () => {
+            const writes = [
+                ["pdfFill", "output"],
+                ["pdfMerge", "output"],
+                ["pdfSplit", "outputDir"],
+            ] as const;
+
+            it("allows a relative write inside the workspace", async () => {
+                const allowed = [
+                    { toolName: "pdfFill", input: { output: "out.pdf", input: "form.pdf" } },
+                    { toolName: "pdfMerge", input: { output: "out.pdf", inputs: ["a.pdf"] } },
+                    { toolName: "pdfSplit", input: { outputDir: "parts", input: "a.pdf" } },
+                ];
+                for (const call of allowed) {
+                    assert.equal(await gate(call), undefined, call.toolName);
+                }
+            });
+
+            it("blocks a write that leaves the workspace", async () => {
+                for (const [toolName, key] of writes) {
+                    for (const bad of [
+                        "../outside/a.pdf",
+                        join(outside, "a.pdf"),
+                        "~/.taco/taco.json",
+                    ]) {
+                        const result = await gate({
+                            toolName,
+                            input: { [key]: bad, input: "form.pdf", inputs: ["a.pdf"] },
+                        });
+                        assert.equal(result?.block, true, `${toolName} ${bad}`);
+                    }
+                }
+            });
+
+            it("blocks an empty write target", async () => {
+                for (const [toolName, key] of writes) {
+                    const result = await gate({ toolName, input: { [key]: "" } });
+                    assert.equal(result?.block, true, toolName);
+                    assert.match(result?.reason ?? "", /must not be empty/);
+                }
+            });
+
+            it("blocks a split into the filesystem root", async () => {
+                const result = await gate({
+                    toolName: "pdfSplit",
+                    input: { outputDir: "/", input: "a.pdf" },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("requires the write argument", async () => {
+                const result = await gate({ toolName: "pdfMerge", input: { inputs: ["a.pdf"] } });
+                assert.equal(result?.block, true);
+                assert.match(result?.reason ?? "", /requires a string "output"/);
+            });
+
+            it("blocks a write through an escaping symlink", async () => {
+                symlinkSync(outside, join(root, "escape"), "dir");
+                const result = await gate({
+                    toolName: "pdfFill",
+                    input: { output: "escape/out.pdf" },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("does not fence a read when no read roots are set", async () => {
+                const allowed = await gate({
+                    toolName: "pdfMerge",
+                    input: { inputs: [join(outside, "a.pdf")], output: "out.pdf" },
+                });
+                assert.equal(allowed, undefined);
+                const blocked = await gate({
+                    toolName: "pdfMerge",
+                    input: { inputs: ["a.pdf"], output: join(outside, "out.pdf") },
+                });
+                assert.equal(blocked?.block, true);
+            });
+
+            it("snapshots an allowed write and not a refused read", async () => {
+                const snapped: string[] = [];
+                const snapping = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    isKnownReadOnly,
+                    captureBeforeWrite: async (path) => {
+                        snapped.push(path);
+                        return { ok: true };
+                    },
+                });
+                const allowed = await snapping({
+                    toolName: "pdfFill",
+                    input: { output: "out.pdf", input: "form.pdf" },
+                });
+                assert.equal(allowed, undefined);
+                assert.equal(snapped.length, 1);
+
+                const refused: string[] = [];
+                const fenced = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    isKnownReadOnly,
+                    readRoots: { primary: root },
+                    captureBeforeWrite: async (path) => {
+                        refused.push(path);
+                        return { ok: true };
+                    },
+                });
+                const blocked = await fenced({
+                    toolName: "pdfFill",
+                    input: { output: "out.pdf", input: join(outside, "form.pdf") },
+                });
+                assert.equal(blocked?.block, true);
+                assert.deepEqual(refused, []);
+            });
+        });
+
         describe("plan mode", () => {
             beforeEach(() => {
                 enterPlanMode(planState, "2026-08-09-abc123");
@@ -504,6 +636,26 @@ describe("mutationGate", () => {
                 const result = await gate({ toolName: "write", input: { path: "src/a.ts" } });
                 assert.equal(result?.block, true);
                 assert.match(result?.reason ?? "", /plan mode is read-only/);
+            });
+
+            it("blocks a PDF write outside the plan directory", async () => {
+                for (const call of [
+                    { toolName: "pdfFill", input: { output: "out.pdf" } },
+                    { toolName: "pdfMerge", input: { output: "out.pdf" } },
+                    { toolName: "pdfSplit", input: { outputDir: "parts" } },
+                ]) {
+                    const result = await gate(call);
+                    assert.equal(result?.block, true, call.toolName);
+                    assert.match(result?.reason ?? "", /plan mode is read-only/);
+                }
+            });
+
+            it("allows a PDF write under the plan directory", async () => {
+                const result = await gate({
+                    toolName: "pdfFill",
+                    input: { output: ".taco/plans/out.pdf" },
+                });
+                assert.equal(result, undefined);
             });
 
             it("blocks an edit to an existing project file", async () => {
@@ -721,6 +873,37 @@ describe("mutationGate", () => {
                 assert.equal(result?.block, true);
                 assert.match(result?.reason ?? "", /no access outside/);
                 assert.match(result?.reason ?? "", /Do not retry it/);
+            });
+
+            it("fences a PDF read the same way", async () => {
+                const outsidePdf = join(outside, "secret.pdf");
+                const calls = [
+                    {
+                        toolName: "pdfMerge",
+                        input: { inputs: ["a.pdf", outsidePdf], output: "out.pdf" },
+                    },
+                    {
+                        toolName: "pdfFill",
+                        input: { input: outsidePdf, output: "out.pdf" },
+                    },
+                    { toolName: "pdfFields", input: { input: outsidePdf } },
+                ];
+                for (const call of calls) {
+                    const result = await fenced(call);
+                    assert.equal(result?.block, true, call.toolName);
+                    assert.match(result?.reason ?? "", /no access outside/);
+                    assert.match(result?.reason ?? "", /Do not retry it/);
+                }
+                const listed = await fenced({
+                    toolName: "pdfFields",
+                    input: { input: "form.pdf" },
+                });
+                assert.equal(listed, undefined);
+                const ignored = await fenced({
+                    toolName: "pdfMerge",
+                    input: { inputs: ["a.pdf", 1, ""], output: "out.pdf" },
+                });
+                assert.equal(ignored, undefined);
             });
 
             it("refuses a relative path that escapes the workspace", async () => {

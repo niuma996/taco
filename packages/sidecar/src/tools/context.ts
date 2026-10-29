@@ -54,6 +54,13 @@ export interface TacoToolContextBase {
      *  (admin / test workspaces); JobsController treats undefined actor as
      *  "see everything". */
     actor?: Actor;
+    /**
+     * True when the workspace's IM policy denies filesystem tools. Resident
+     * fs tools are removed from the tool list; a deferred fs tool that was
+     * loaded anyway (PDF) reads this to refuse. Absent for local workspaces
+     * and for IM workspaces that allow fs tools.
+     */
+    fsToolsDenied?: boolean;
 }
 
 export interface TacoToolContext extends TacoToolContextBase {

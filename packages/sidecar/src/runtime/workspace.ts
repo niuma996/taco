@@ -32,6 +32,7 @@ import {
     DEFAULT_IM_WORKSPACE_POLICY,
     type ImWorkspacePolicy,
 } from "../channels/imWorkspacePolicy.ts";
+import { IM_FS_TOOL_NAMES } from "../channels/virtualWorkspace.ts";
 import { CheckpointManager } from "../checkpoints/manager.ts";
 import type { CheckpointMeta, RestoreOutcome } from "../checkpoints/store.ts";
 import { CheckpointStore } from "../checkpoints/store.ts";
@@ -876,6 +877,9 @@ export class WorkspaceRuntime extends EventEmitter {
             workspace: asWorkspaceId(this.workspaceKey),
             ...(selfRpc ? { call: selfRpc } : {}),
             ...(actor ? { actor } : {}),
+            // Re-resolved per evaluation, like tool assembly: a deferred fs
+            // tool already loaded in an IM session must see a revocation.
+            ...(this.resolveImPolicy()?.tools.fsTools === "deny" ? { fsToolsDenied: true } : {}),
         });
     }
 
@@ -1031,8 +1035,17 @@ export class WorkspaceRuntime extends EventEmitter {
             includeLocation: toolNames.has("read") || toolNames.has("shell"),
         });
         if (skillsPrompt) contributors.push({ append: skillsPrompt, requires: ["skills"] });
+        const deniedDeferredToolNames = new Set(
+            this.resolveImPolicy()?.tools.fsTools === "deny" ? IM_FS_TOOL_NAMES : [],
+        );
         const deferredPrompt = formatDeferredToolsForSystemPrompt(
-            this.toolRegistry.listDeferred().map((c) => ({ name: c.name, summary: c.summary })),
+            // A deferred fs tool bypasses `filterToolsForImPolicy` (it is not
+            // in the resident set), so hide it from the catalog under the same
+            // policy that would have removed it.
+            this.toolRegistry
+                .listDeferred()
+                .filter((c) => !deniedDeferredToolNames.has(c.name))
+                .map((c) => ({ name: c.name, summary: c.summary })),
         );
         if (deferredPrompt) contributors.push({ append: deferredPrompt });
         const agentsPrompt = formatAgentsForSystemPrompt(

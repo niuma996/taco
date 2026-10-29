@@ -310,7 +310,9 @@ export class WeComChannelHandle implements ChannelHandle {
         try {
             downloaded = await client.downloadFile(media.url, media.aesKey);
         } catch (e) {
-            log.warn(`media download failed: ${e instanceof Error ? e.message : String(e)}`);
+            log.warn(
+                `media download failed (${platformMessageId}): ${e instanceof Error ? e.message : String(e)}`,
+            );
             return;
         }
         const name = downloaded.filename ?? media.name;

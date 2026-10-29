@@ -29,7 +29,6 @@ import { createGrepTool } from "./grep.ts";
 import { createJobsTools } from "./jobs.ts";
 import { createMemoryTool } from "./memory.ts";
 import { readPdf, readPdfBytes } from "./pdfIntercept.ts";
-import { createPdfTools } from "./pdfTools.ts";
 import { createPlanEnterTool } from "./planEnter.ts";
 import { createPlanExitTool } from "./planExit.ts";
 import { createShellTool } from "./shellTool.ts";
@@ -183,7 +182,7 @@ export function defaultTools(opts?: {
     };
     tools.push(annotatedShell);
     tools.push(createMemoryTool());
-    tools.push(...createPdfTools());
+    // PDF editing tools are deferred (see `pdfCandidates.ts`): loaded on demand.
     const disabled = new Set(opts?.disabledTools ?? []);
     const filtered = disabled.size > 0 ? tools.filter((t) => !disabled.has(t.name)) : tools;
     return orderTools(filtered);

@@ -2,12 +2,22 @@
 name: pdf-edit
 description: Use when the user asks to merge, combine, split, cut, extract pages from, or fill in a PDF — merging documents into one, cutting a document into parts, or filling a form's fields. Also use when a PDF has form fields to complete.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Editing PDFs
 
-Three tools do the work: `pdfMerge`, `pdfSplit`, `pdfFill`. Each takes file paths, writes a new file, and says where it wrote it.
+Four tools do the work. `pdfMerge`, `pdfSplit`, and `pdfFill` each take file paths, write a new file, and say where it wrote it. `pdfFields` only lists a form's fields.
+
+They are not resident. Load the ones the task needs before the first call:
+
+```
+addTools("pdfMerge")           → merging
+addTools("pdfSplit")           → splitting
+addTools("pdfFields,pdfFill")  → filling a form
+```
+
+The loaded tools are usable from the next turn. In an IM conversation they are available only when its policy allows file tools.
 
 **Read a PDF with the `read` tool.** It returns the text layer; a scanned document has none. Nothing here reads a PDF's content — these tools move pages and set fields.
 

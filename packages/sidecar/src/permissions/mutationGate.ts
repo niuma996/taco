@@ -4,9 +4,9 @@
  * Three guarantees that a system prompt cannot provide, because the model is
  * free to ignore prose:
  *   1. Plan mode is read-only. Only the plan document may be written.
- *   2. `write` / `edit` targets stay inside the workspace root, inside one of
- *      the workspace's associated directories, or inside one of the
- *      caller-supplied `extraWriteRoots`.
+ *   2. Built-in write targets stay inside the workspace root, an associated
+ *      directory, or an `extraWriteRoots` entry. PDF tools write `output` /
+ *      `outputDir`, which the unknown-tool path fence does not see.
  *   3. Absolute path arguments of unknown tools (MCP servers, extensions) stay
  *      inside the workspace root — the tool may do anything with them, but a
  *      target that escapes the root (including via a symlinked ancestor) is
@@ -40,10 +40,20 @@ export interface ToolCallGateResult {
 }
 
 /**
- * Built-in tools that can change the filesystem. `read` / `grep` / `glob` /
- * `askUser` and the task / plan bookkeeping tools are absent by design.
+ * Built-in tools that write a file, and the argument that names the target.
+ *
+ * The PDF tools write through `output` / `outputDir`, not `path`. Those
+ * names are not in PATH_LIKE_KEYS, and a relative value is not fenced
+ * there anyway, so `../` and `~/.taco/taco.json` would both be allowed.
+ * They take the same containment check as `write` / `edit`.
  */
-const FS_MUTATING_TOOLS = new Set(["write", "edit"]);
+const WRITE_ARG: Readonly<Record<string, string>> = {
+    write: "path",
+    edit: "path",
+    pdfMerge: "output",
+    pdfFill: "output",
+    pdfSplit: "outputDir",
+};
 const SHELL_TOOL = "shell";
 
 /**
@@ -57,19 +67,14 @@ const SHELL_TOOL = "shell";
  */
 const PATH_LIKE_KEYS = ["path", "file_path", "filepath", "filename", "file", "target"] as const;
 
-function pathArg(input: Record<string, unknown>): string | undefined {
-    const value = input.path;
-    return typeof value === "string" ? value : undefined;
-}
-
 export interface MutationGateOptions {
-    /** Workspace root; every `write` / `edit` target must resolve inside it. */
+    /** Workspace root; every built-in write target must resolve inside it. */
     readonly root: string;
     /**
      * The workspace's associated directories, resolved on every call.
      *
      * They widen the set of directories the workspace may write to: a
-     * `write` / `edit` target inside one of them is allowed, and a shell
+     * built-in write target inside one of them is allowed, and a shell
      * command may `cd` into one. They do NOT merge another workspace's tool
      * configuration — MCP servers, tool sets and subagent toolsets stay
      * anchored to the workspace's own root — and they do not widen the
@@ -81,7 +86,7 @@ export interface MutationGateOptions {
     readonly getAssociatedRoots?: () => readonly string[];
     readonly getPlanState: () => PlanModeState;
     /**
-     * Additional directories built-in `write` / `edit` may target outside
+     * Additional directories a built-in write may target outside
      * `root`, checked with the same symlink-safe containment. Plan mode
      * ignores them (it still allows only the plan document), and the
      * unknown-tool path fence does not consult them: an MCP or extension tool
@@ -143,8 +148,41 @@ export interface MutationGateOptions {
 /**
  * The read-only tools whose `path` argument names a file or a search root.
  * `read` takes a file; `grep` and `glob` take a directory to search in.
+ * PDF tools name their reads `input` / `inputs`; see `knownReadPaths`.
  */
 const READ_PATH_TOOLS = new Set(["read", "grep", "glob"]);
+
+/**
+ * Paths a known tool reads, when this gate knows them.
+ *
+ * Undefined means the tool is not one of these. An empty list means it
+ * takes a path but this call did not name one (`grep` / `glob` default to
+ * the cwd, which is inside the primary root).
+ */
+function knownReadPaths(event: ToolCallGateEvent): readonly string[] | undefined {
+    if (READ_PATH_TOOLS.has(event.toolName)) {
+        const raw = event.input.path;
+        if (typeof raw !== "string" || raw.trim() === "") return [];
+        return [raw];
+    }
+    if (
+        event.toolName === "pdfFields" ||
+        event.toolName === "pdfSplit" ||
+        event.toolName === "pdfFill"
+    ) {
+        const raw = event.input.input;
+        if (typeof raw !== "string" || raw.trim() === "") return [];
+        return [raw];
+    }
+    if (event.toolName === "pdfMerge") {
+        const inputs = event.input.inputs;
+        if (!Array.isArray(inputs)) return [];
+        return inputs.filter(
+            (value): value is string => typeof value === "string" && value.trim() !== "",
+        );
+    }
+    return undefined;
+}
 
 /**
  * Refuse a read that lands outside the allowed roots.
@@ -166,19 +204,65 @@ async function fenceReadPath(
         extra?: readonly string[];
     },
 ): Promise<ToolCallGateResult | undefined> {
-    if (!READ_PATH_TOOLS.has(event.toolName)) return undefined;
-    const raw = event.input.path;
-    // `read` requires a path; `grep` / `glob` default to the cwd, which is
-    // inside the primary root by construction.
-    if (typeof raw !== "string" || raw.trim() === "") return undefined;
-    const target = normalizeBuiltinToolPath(raw);
+    const paths = knownReadPaths(event);
+    if (!paths) return undefined;
     const associated = [...(roots.getAssociated?.() ?? []), ...(roots.extra ?? [])];
-    const resolved = await resolveWithinRootSet(roots.primary, associated, target);
-    if (resolved.ok) return undefined;
-    return {
-        block: true,
-        reason: `${event.toolName} cannot read ${raw}: this session has no access outside its own directory. Do not retry it or look for another way to read the file — tell the user it is outside your access.`,
-    };
+    for (const raw of paths) {
+        const target = normalizeBuiltinToolPath(raw);
+        const resolved = await resolveWithinRootSet(roots.primary, associated, target);
+        if (resolved.ok) continue;
+        return {
+            block: true,
+            reason: `${event.toolName} cannot read ${raw}: this session has no access outside its own directory. Do not retry it or look for another way to read the file — tell the user it is outside your access.`,
+        };
+    }
+    return undefined;
+}
+
+/**
+ * Resolve a built-in write target the way `write` / `edit` are resolved.
+ *
+ * Extra roots are ignored in plan mode, and a relative path is never
+ * re-anchored onto one: pi resolves a relative path against cwd.
+ */
+async function containWrite(
+    opts: MutationGateOptions,
+    plansDir: string,
+    planActive: boolean,
+    toolName: string,
+    raw: string,
+): Promise<{ ok: true; absolutePath: string } | { ok: false; block: ToolCallGateResult }> {
+    // Normalise first: pi expands `~/…`, strips a leading `@` and
+    // decodes `file://…` before writing, so checking the raw string
+    // let `~/.taco/taco.json` pass as if it were inside the root.
+    const target = normalizeBuiltinToolPath(raw);
+    let resolved = await resolveWithinRootSet(opts.root, opts.getAssociatedRoots?.() ?? [], target);
+    if (!resolved.ok && !planActive && opts.extraWriteRoots?.length) {
+        const absoluteTarget = resolve(opts.root, target);
+        for (const extra of opts.extraWriteRoots) {
+            const inExtra = await resolveWithinRoot(extra, absoluteTarget);
+            if (inExtra.ok) {
+                resolved = inExtra;
+                break;
+            }
+        }
+    }
+    if (!resolved.ok) {
+        return { ok: false, block: { block: true, reason: resolved.reason } };
+    }
+    if (planActive) {
+        const withinPlans = await resolveWithinRoot(plansDir, resolved.absolutePath);
+        if (!withinPlans.ok) {
+            return {
+                ok: false,
+                block: {
+                    block: true,
+                    reason: `plan mode is read-only: refused ${toolName} on ${raw}. Only the plan document under ${plansDir} may be written; call planExit to get approval first.`,
+                },
+            };
+        }
+    }
+    return { ok: true, absolutePath: resolved.absolutePath };
 }
 
 export function createMutationGateHook(
@@ -212,61 +296,33 @@ export function createMutationGateHook(
             };
         }
 
-        if (FS_MUTATING_TOOLS.has(event.toolName)) {
-            const raw = pathArg(event.input);
-            if (raw === undefined) {
+        const writeKey = WRITE_ARG[event.toolName];
+        if (writeKey) {
+            const raw = event.input[writeKey];
+            if (typeof raw !== "string") {
                 return {
                     block: true,
-                    reason: `${event.toolName} requires a string "path" argument`,
+                    reason: `${event.toolName} requires a string "${writeKey}" argument`,
                 };
             }
+            const contained = await containWrite(opts, plansDir, planActive, event.toolName, raw);
+            if (!contained.ok) return contained.block;
 
-            // Normalise first: pi expands `~/…`, strips a leading `@` and
-            // decodes `file://…` before writing, so checking the raw string
-            // let `~/.taco/taco.json` pass as if it were inside the root.
-            const target = normalizeBuiltinToolPath(raw);
-            let resolved = await resolveWithinRootSet(
-                opts.root,
-                opts.getAssociatedRoots?.() ?? [],
-                target,
-            );
-            // Outside the workspace: try the extra roots, never in plan mode.
-            // Resolve against `root` first — pi resolves a relative path
-            // against cwd, so an extra root must only ever match an absolute
-            // target, never re-anchor a relative one.
-            if (!resolved.ok && !planActive && opts.extraWriteRoots?.length) {
-                const absoluteTarget = resolve(opts.root, target);
-                for (const extra of opts.extraWriteRoots) {
-                    const inExtra = await resolveWithinRoot(extra, absoluteTarget);
-                    if (inExtra.ok) {
-                        resolved = inExtra;
-                        break;
-                    }
-                }
-            }
-            if (!resolved.ok) {
-                return { block: true, reason: resolved.reason };
-            }
-
-            if (planActive) {
-                const withinPlans = await resolveWithinRoot(plansDir, resolved.absolutePath);
-                if (!withinPlans.ok) {
-                    return {
-                        block: true,
-                        reason: `plan mode is read-only: refused ${event.toolName} on ${raw}. Only the plan document under ${plansDir} may be written; call planExit to get approval first.`,
-                    };
-                }
+            // This branch returns, so a PDF tool's reads never reach the fence
+            // below. Check them here, and only when reads are fenced at all.
+            if (opts.readRoots) {
+                const refusal = await fenceReadPath(event, opts.readRoots);
+                if (refusal) return refusal;
             }
 
             // Allowed from here on, so this is the last point at which the file's
             // pre-write content still exists.
             if (opts.captureBeforeWrite) {
-                const snapshot = await opts.captureBeforeWrite(resolved.absolutePath);
+                const snapshot = await opts.captureBeforeWrite(contained.absolutePath);
                 if (!snapshot.ok) {
-                    opts.onSnapshotFailure?.(resolved.absolutePath, snapshot.reason ?? "unknown");
+                    opts.onSnapshotFailure?.(contained.absolutePath, snapshot.reason ?? "unknown");
                 }
             }
-
             return undefined;
         }
 

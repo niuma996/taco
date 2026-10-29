@@ -83,18 +83,23 @@ export function registerToolsHandlers(): void {
             loading: "always",
         });
 
-        // mcp: tools provided by MCP servers, registered via the
-        // workspace's deferred-tool registry. They live separately from
-        // `workspace.tools` because they are loaded lazily (or eagerly
-        // for "always") — UI surfaces both here so users can see what
-        // their MCP config exposes, alongside the static toolset.
+        // Deferred: tools provided by MCP servers or built into taco (PDF,
+        // config, session history), registered via the workspace's
+        // deferred-tool registry. They live separately from `workspace.tools`
+        // because they are loaded lazily (or eagerly for "always") — UI
+        // surfaces both here so users can see what is reachable, alongside
+        // the static toolset.
         const registry = workspace.toolRegistry;
-        const mcpEntries: ToolEntry[] = registry
+        const deferredEntries: ToolEntry[] = registry
             ? await Promise.all(
                   registry.listCandidates().map(async (candidate) => {
                       const tool = await candidate.load();
                       return {
-                          ...toEntry(tool, "mcp", computeVisible(candidate.name)),
+                          ...toEntry(
+                              tool,
+                              candidate.source === "builtin" ? "builtin" : "mcp",
+                              computeVisible(candidate.name),
+                          ),
                           source: candidate.source,
                           loading: candidate.loading,
                       };
@@ -102,6 +107,6 @@ export function registerToolsHandlers(): void {
               )
             : [];
 
-        return { tools: [...builtin, ...external, ...mcpEntries, ...session] };
+        return { tools: [...builtin, ...external, ...deferredEntries, ...session] };
     });
 }

@@ -63,6 +63,21 @@ describe("mcpToolName", () => {
 /** The PNG magic bytes, base64-encoded: enough for the MIME sniff. */
 const PNG_BASE64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
 
+/** A PNG with an acTL chunk. The CRC is unchecked; the type is what matters. */
+function animatedPng(): string {
+    const chunk = (type: string, length: number): Buffer => {
+        const head = Buffer.alloc(8);
+        head.writeUInt32BE(length, 0);
+        head.write(type, 4, "ascii");
+        return Buffer.concat([head, Buffer.alloc(length), Buffer.alloc(4)]);
+    };
+    return Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk("IHDR", 13),
+        chunk("acTL", 8),
+    ]).toString("base64");
+}
+
 describe("mcpToolAdapter", () => {
     const info = (overrides: Partial<McpToolInfo> = {}): McpToolInfo => ({
         name: "raw_tool",
@@ -191,6 +206,46 @@ describe("mcpToolAdapter", () => {
             const texts = result.content.filter((c) => c.type === "text");
             assert.equal(images.length, 5);
             assert.equal(texts.length, 3);
+        });
+
+        it("forwards an image whose base64 is wrapped in whitespace", async () => {
+            const wrapped = PNG_BASE64.replace(/(.{4})/g, "$1\n");
+            assert.notEqual(wrapped, PNG_BASE64);
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: [{ type: "image", data: wrapped, mimeType: "image/png" }],
+            }));
+            const result = await invokeTool(makeTool({ handle }), {}, {} as never, {
+                toolCallId: "t1",
+            });
+            assert.deepEqual(result.content, [
+                { type: "image", data: PNG_BASE64, mimeType: "image/png" },
+            ]);
+        });
+
+        it("accepts the URL-safe alphabet and forwards standard base64", async () => {
+            const urlSafe = "iVBORw0KGgr77_8";
+            assert.ok(/[-_]/.test(urlSafe));
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: [{ type: "image", data: urlSafe, mimeType: "image/png" }],
+            }));
+            const result = await invokeTool(makeTool({ handle }), {}, {} as never, {
+                toolCallId: "t1",
+            });
+            assert.deepEqual(result.content, [
+                { type: "image", data: "iVBORw0KGgr77/8=", mimeType: "image/png" },
+            ]);
+        });
+
+        it("does not forward an animated PNG", async () => {
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: [{ type: "image", data: animatedPng(), mimeType: "image/png" }],
+            }));
+            const result = await invokeTool(makeTool({ handle }), {}, {} as never, {
+                toolCallId: "t1",
+            });
+            assert.equal(result.content.length, 1);
+            assert.equal(result.content[0].type, "text");
+            assert.ok(textOf(result.content[0]).includes("image"));
         });
 
         it("propagates MCP isError as details.isError", async () => {

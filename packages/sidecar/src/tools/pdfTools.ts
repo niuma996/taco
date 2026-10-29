@@ -6,19 +6,41 @@
  * the model's way to reach it.
  *
  * Files are read and written through the execution env, so paths resolve the
- * same way they do for `read` and `write`, and the workspace boundary
- * applies unchanged.
+ * same way they do for `read` and `write`. The mutation gate fences the write
+ * target the same way it fences `write` / `edit`. The env does not contain
+ * a path.
+ *
+ * These are loaded on demand (see `pdfCandidates.ts`), so the resident-set
+ * IM filter does not see them. Each tool refuses an IM session whose policy
+ * denies filesystem tools instead — the same verdict `read` / `write` are
+ * removed under.
  */
 
+import { basename, join } from "node:path";
 import { type Static, Type } from "typebox";
-import type { AgentHarnessTool, Context, ExecutionToolContext } from "../runtime/pi/types.ts";
+import type { AgentHarnessTool, Context } from "../runtime/pi/types.ts";
 import { getOrThrow } from "../runtime/pi/values.ts";
+import type { TacoToolContext } from "./context.ts";
 import { fillPdf, mergePdfs, readFormFields, splitPdf } from "./pdfOps.ts";
 
-export type PdfTool = AgentHarnessTool<ExecutionToolContext>;
+export type PdfTool = AgentHarnessTool<TacoToolContext>;
+
+const IM_REFUSAL =
+    "The PDF tools are not available in this session. IM conversations deny file access, " +
+    "and these tools read and write files.";
+
+function refuseInIm(ctx: TacoToolContext): void {
+    if (ctx.fsToolsDenied) throw new Error(IM_REFUSAL);
+}
 
 /** How many pages a split may produce from one document. */
 const MAX_SPLIT_PARTS = 50;
+
+/**
+ * How many pages a merge may name. Omitting `pages` already copies every
+ * page, so this only bounds an explicit selection.
+ */
+const MAX_MERGE_PAGES = 500;
 
 const mergeSchema = Type.Object({
     inputs: Type.Array(Type.String({ description: "Path of a PDF to merge, in order." }), {
@@ -35,6 +57,7 @@ const mergeSchema = Type.Object({
             {
                 description:
                     "Which pages go into the result, in order. Omit to take every page of every input.",
+                maxItems: MAX_MERGE_PAGES,
             },
         ),
     ),
@@ -75,7 +98,7 @@ const fieldsSchema = Type.Object({
 
 /** Read a PDF through the execution env, so paths resolve like `read` does. */
 async function readPdfFile(
-    toolContext: ExecutionToolContext,
+    toolContext: TacoToolContext,
     path: string,
     context: Context,
 ): Promise<Uint8Array> {
@@ -85,7 +108,7 @@ async function readPdfFile(
 
 /** Write a PDF through the execution env, so it lands where `write` would. */
 async function writePdfFile(
-    toolContext: ExecutionToolContext,
+    toolContext: TacoToolContext,
     path: string,
     bytes: Uint8Array,
     context: Context,
@@ -98,6 +121,10 @@ async function writePdfFile(
 function failureText(failure: { kind: string } & Record<string, unknown>): string {
     switch (failure.kind) {
         case "no_such_page":
+            // `source` is 0-based: the tool subtracted 1 before calling mergePdfs.
+            if (failure.pages === 0 && typeof failure.source === "number") {
+                return `There is no input ${String(failure.source + 1)}.`;
+            }
             return `That page does not exist: page ${String(failure.page)} of ${String(failure.pages)}.`;
         case "no_such_field":
             return `The form has no field named "${String(failure.field)}". List the fields first.`;
@@ -129,10 +156,11 @@ export function createPdfMergeTool(): PdfTool {
             _toolCallId: string,
             params: Static<typeof mergeSchema>,
             _onUpdate: unknown,
-            toolContext: ExecutionToolContext,
+            toolContext: TacoToolContext,
             _invocation: unknown,
             context: Context,
         ) {
+            refuseInIm(toolContext);
             const sources: Uint8Array[] = [];
             for (const input of params.inputs) {
                 sources.push(await readPdfFile(toolContext, input, context));
@@ -149,12 +177,12 @@ export function createPdfMergeTool(): PdfTool {
                     details: undefined,
                 };
             }
-            await writePdfFile(toolContext, params.output, merged.value, context);
+            await writePdfFile(toolContext, params.output, merged.value.bytes, context);
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Merged ${params.inputs.length} file(s) into ${params.output}.`,
+                        text: `Merged ${params.inputs.length} file(s), ${merged.value.pageCount} page(s), into ${params.output}.`,
                     },
                 ],
                 details: undefined,
@@ -180,10 +208,11 @@ export function createPdfSplitTool(): PdfTool {
             _toolCallId: string,
             params: Static<typeof splitSchema>,
             _onUpdate: unknown,
-            toolContext: ExecutionToolContext,
+            toolContext: TacoToolContext,
             _invocation: unknown,
             context: Context,
         ) {
+            refuseInIm(toolContext);
             const bytes = await readPdfFile(toolContext, params.input, context);
             const parts = await splitPdf(bytes, params.ranges);
             if (!parts.ok) {
@@ -192,14 +221,13 @@ export function createPdfSplitTool(): PdfTool {
                     details: undefined,
                 };
             }
-            const stem =
-                params.input
-                    .split(/[\\/]/)
-                    .pop()
-                    ?.replace(/\.pdf$/i, "") ?? "part";
+            // basename keeps one segment, so a stem of `..` cannot traverse.
+            // join keeps "" inside the cwd. "/" is still the filesystem root;
+            // the mutation gate refuses that.
+            const stem = basename(params.input).replace(/\.pdf$/i, "") || "part";
             const written: string[] = [];
             for (const [index, part] of parts.value.entries()) {
-                const path = `${params.outputDir.replace(/[/\\]+$/, "")}/${stem}-${index + 1}.pdf`;
+                const path = join(params.outputDir, `${stem}-${index + 1}.pdf`);
                 await writePdfFile(toolContext, path, part, context);
                 written.push(path);
             }
@@ -233,10 +261,11 @@ export function createPdfFillTool(): PdfTool {
             _toolCallId: string,
             params: Static<typeof fillSchema>,
             _onUpdate: unknown,
-            toolContext: ExecutionToolContext,
+            toolContext: TacoToolContext,
             _invocation: unknown,
             context: Context,
         ) {
+            refuseInIm(toolContext);
             const bytes = await readPdfFile(toolContext, params.input, context);
             const filled = await fillPdf(bytes, params.values, params.flatten ?? true);
             if (!filled.ok) {
@@ -276,10 +305,11 @@ export function createPdfFieldsTool(): PdfTool {
             _toolCallId: string,
             params: Static<typeof fieldsSchema>,
             _onUpdate: unknown,
-            toolContext: ExecutionToolContext,
+            toolContext: TacoToolContext,
             _invocation: unknown,
             context: Context,
         ) {
+            refuseInIm(toolContext);
             const bytes = await readPdfFile(toolContext, params.input, context);
             const fields = await readFormFields(bytes);
             if (!fields.ok) {

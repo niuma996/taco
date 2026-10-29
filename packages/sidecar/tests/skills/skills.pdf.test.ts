@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseYamlFrontmatter } from "../../src/skills/skillFrontmatter.ts";
 import { defaultTools } from "../../src/tools/index.ts";
+import { pdfToolCandidates } from "../../src/tools/pdfCandidates.ts";
 
 const DR_HERE = dirname(fileURLToPath(import.meta.url));
 const SKILL_PATH = join(DR_HERE, "..", "..", "src", "skills", "builtin", "pdf-edit", "SKILL.md");
@@ -39,12 +40,25 @@ describe("pdf-edit builtin skill", () => {
     });
 
     it("names only tools that exist", () => {
-        const registered = new Set(defaultTools().map((t) => t.name));
+        // The PDF tools are deferred, so they live in the registry rather than
+        // the resident set; a name in neither sends the model after nothing.
+        const registered = new Set([
+            ...defaultTools().map((t) => t.name),
+            ...pdfToolCandidates().map((c) => c.name),
+        ]);
         const mentioned = body().match(/\bpdf[A-Z]\w*/g) ?? [];
         assert.ok(mentioned.length > 0, "the skill should name its tools");
         for (const name of mentioned) {
             assert.ok(registered.has(name), `${name} is not a registered tool`);
         }
+    });
+
+    it("tells the model to load the tools before using them", () => {
+        // They are not resident; a body that skips the load step describes
+        // tools the model cannot call yet.
+        const text = body();
+        assert.match(text, /addTools\("pdfMerge"\)/);
+        assert.match(text, /addTools\("pdfFields,pdfFill"\)/);
     });
 
     it("tells the model to list the fields before filling them", () => {

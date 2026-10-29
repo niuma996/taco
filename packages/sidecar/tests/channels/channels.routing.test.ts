@@ -33,6 +33,7 @@ import { ConnectionServer } from "../../src/server/connectionServer.ts";
 import { NullTransport } from "../../src/server/nullTransport.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { defaultTools } from "../../src/tools/index.ts";
+import { pdfToolCandidates } from "../../src/tools/pdfCandidates.ts";
 import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 import { stubModelFetch } from "../_helpers/stubModelFetch.ts";
@@ -180,6 +181,67 @@ describe("conversationRouter", () => {
             assert.equal(committed[0]?.name, "report.pdf");
             assert.equal(committed[0]?.kind, "file");
             assert.equal(readFileSync(committed[0]?.path ?? "").toString(), "%PDF-1.7");
+        });
+
+        it("adds an extension from the bytes when the channel name has none", async () => {
+            const home = useTempTacoHome("ingress-name-extension");
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-ext",
+                text: "",
+                media: [
+                    {
+                        kind: "image",
+                        name: "image",
+                        source: {
+                            kind: "base64",
+                            mimeType: "application/octet-stream",
+                            data: Buffer.from([
+                                0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+                            ]).toString("base64"),
+                        },
+                    },
+                    {
+                        kind: "file",
+                        name: "file",
+                        source: {
+                            kind: "base64",
+                            mimeType: "application/octet-stream",
+                            data: Buffer.from("%PDF-1.7").toString("base64"),
+                        },
+                    },
+                ],
+            } as never);
+            const ids = prompts[0]?.attachments as string[] | undefined;
+            const committed = await commitAttachments(
+                ids ?? [],
+                "im://ch1/u1/c1",
+                join(home, "sessions"),
+                "sid-ext",
+            );
+            assert.deepEqual(committed.map((item) => item.name).sort(), ["file.pdf", "image.png"]);
         });
 
         it("keeps the text when the media cannot be staged", async () => {
@@ -524,12 +586,14 @@ describe("virtualWorkspace", () => {
         });
 
         it("IM fs/shell tool names match the registered tool names", () => {
-            const registered = defaultTools({}).map((t) => t.name);
+            // The PDF tools are deferred candidates, not resident; both
+            // surfaces register a name the IM deny list can refer to.
+            const registered = new Set([
+                ...defaultTools({}).map((t) => t.name),
+                ...pdfToolCandidates().map((c) => c.name),
+            ]);
             for (const disabled of IM_FS_TOOL_NAMES) {
-                assert.ok(
-                    registered.includes(disabled),
-                    `disabled tool ${disabled} is not registered`,
-                );
+                assert.ok(registered.has(disabled), `disabled tool ${disabled} is not registered`);
             }
             // Guard: non-fs tools must never be in the disabled list (would break IM sessions).
             // The PDF tools count as fs tools: they read and write files.
@@ -548,7 +612,7 @@ describe("virtualWorkspace", () => {
                 assert.ok(fsTools.has(disabled), `${disabled} is not an fs tool`);
             }
             assert.equal(IM_SHELL_TOOL_NAME, "shell");
-            assert.ok(registered.includes(IM_SHELL_TOOL_NAME), "shell tool is registered");
+            assert.ok(registered.has(IM_SHELL_TOOL_NAME), "shell tool is registered");
         });
     });
 

@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import type { PromptParams, SteerResult } from "@taco-ai/protocol";
 import {
     ATTACHMENT_MAX_COUNT,
@@ -8,6 +9,7 @@ import {
     RPC,
 } from "@taco-ai/protocol";
 import { stageFromData } from "../attachments/attachmentStore.ts";
+import { sniffImageMime } from "../attachments/mimeType.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -153,7 +155,7 @@ async function stageMedia(
         try {
             const staged = await stageFromData(
                 workspaceId,
-                m.name ?? mediaName(m),
+                stagedName(m),
                 m.source.data,
                 m.source.mimeType,
             );
@@ -167,15 +169,58 @@ async function stageMedia(
     return ids.length > 0 ? ids : undefined;
 }
 
-/** The name a staged file carries, extension included — it decides the MIME. */
+/** Mime to extension, shared by the fallback name and the sniffed suffix. */
+const EXTENSION_BY_MIME: Record<string, string> = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "application/pdf": ".pdf",
+};
+
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
+/**
+ * The name the model reads.
+ *
+ * Channels send `image` / `file` with no extension, and the declared mime is
+ * a guess from that same name. The extension comes from the bytes. A name
+ * that already has one is kept.
+ */
+function stagedName(m: ChannelMediaRef): string {
+    const given = m.name?.trim();
+    const base = given && given.length > 0 ? given : mediaName(m);
+    if (extname(base).length > 1) return base;
+    const ext = sniffedExtension(m);
+    return ext ? `${base}${ext}` : base;
+}
+
+/** The name a staged file carries when the channel sent none. */
 function mediaName(m: ChannelMediaRef): string {
-    const ext = m.source.kind === "base64" ? m.source.mimeType : "";
-    const known: Record<string, string> = {
-        "image/jpeg": "image.jpg",
-        "image/png": "image.png",
-        "image/gif": "image.gif",
-        "image/webp": "image.webp",
-        "application/pdf": "file.pdf",
-    };
-    return known[ext] ?? "file";
+    const mime = m.source.kind === "base64" ? m.source.mimeType : "";
+    const ext = EXTENSION_BY_MIME[mime];
+    if (ext === ".pdf") return `file${ext}`;
+    if (ext) return `image${ext}`;
+    return "file";
+}
+
+function sniffedExtension(m: ChannelMediaRef): string | undefined {
+    if (m.source.kind !== "base64") return undefined;
+    const fromBytes = extensionFromBytes(decodeBase64Prefix(m.source.data));
+    return fromBytes ?? EXTENSION_BY_MIME[m.source.mimeType];
+}
+
+/** A short prefix is enough to sniff; the whole file is not decoded here. */
+function decodeBase64Prefix(data: string): Buffer | undefined {
+    const stripped = data.replace(/\s+/g, "").slice(0, 64);
+    if (stripped.length < 4) return undefined;
+    return Buffer.from(stripped, "base64");
+}
+
+function extensionFromBytes(head: Buffer | undefined): string | undefined {
+    if (!head) return undefined;
+    const sniffed = sniffImageMime(head);
+    if (sniffed) return EXTENSION_BY_MIME[sniffed];
+    if (PDF_MAGIC.every((byte, index) => head[index] === byte)) return ".pdf";
+    return undefined;
 }

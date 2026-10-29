@@ -42,22 +42,67 @@ const MAX_MCP_IMAGES = 5;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
 /**
- * An MCP image block as a pi image block, when its bytes are a raster format
- * a model provider accepts.
+ * Standard base64, or undefined when the payload is not base64.
  *
- * The bytes decide, not the declared mime type: a server that labels a
- * non-image as `image/png` must not have its bytes sent to a provider as an
- * image. A model without image input is handled by pi, which replaces the
- * block with a placeholder before the request leaves.
+ * MCP servers wrap the payload and sometimes send the URL-safe alphabet.
+ * The image block carries the standard form, so a later decode does not
+ * have to guess.
+ */
+function normalizeBase64(data: string): string | undefined {
+    const stripped = data.replace(/\s+/g, "");
+    if (stripped.length === 0 || stripped.length > IMAGE_INPUT_MAX_BASE64_LENGTH) return undefined;
+    if (BASE64_PATTERN.test(stripped)) return stripped;
+    if (!/^[A-Za-z0-9_-]+={0,2}$/.test(stripped)) return undefined;
+    const standard = stripped.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = standard.length % 4 === 0 ? "" : "=".repeat(4 - (standard.length % 4));
+    const padded = standard + pad;
+    if (padded.length > IMAGE_INPUT_MAX_BASE64_LENGTH || !BASE64_PATTERN.test(padded)) {
+        return undefined;
+    }
+    return padded;
+}
+
+/**
+ * True when a PNG carries an `acTL` chunk before `IDAT`.
+ *
+ * Providers reject animated PNGs, and pi's read tool refuses them. The
+ * attachment sniff reads 16 bytes and cannot see the chunk, so the check
+ * walks this buffer only — storage still calls an animated PNG an image.
+ */
+function isAnimatedPng(bytes: Buffer): boolean {
+    const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    if (bytes.length < signature.length || !bytes.subarray(0, signature.length).equals(signature)) {
+        return false;
+    }
+    let offset = signature.length;
+    while (offset + 8 <= bytes.length) {
+        const length = bytes.readUInt32BE(offset) >>> 0;
+        const type = bytes.toString("ascii", offset + 4, offset + 8);
+        if (type === "acTL") return true;
+        if (type === "IDAT") return false;
+        const next = offset + 12 + length;
+        if (next <= offset || next > bytes.length) return false;
+        offset = next;
+    }
+    return false;
+}
+
+/**
+ * An MCP image block as a pi image block, when its bytes are a raster a
+ * provider accepts. The bytes decide, not the declared mime. Whitespace and
+ * base64url are normalised first. An animated PNG is refused. A model
+ * without image input is handled by pi, which replaces the block before the
+ * request leaves.
  */
 function toImageContent(data: unknown): ImageContent | undefined {
-    if (typeof data !== "string" || data.length === 0) return undefined;
-    if (data.length > IMAGE_INPUT_MAX_BASE64_LENGTH) return undefined;
-    if (!BASE64_PATTERN.test(data)) return undefined;
-    const bytes = Buffer.from(data, "base64");
+    if (typeof data !== "string") return undefined;
+    const normalized = normalizeBase64(data);
+    if (!normalized) return undefined;
+    const bytes = Buffer.from(normalized, "base64");
     const sniffed = sniffImageMime(bytes);
     if (!sniffed || !isModelImageMime(sniffed)) return undefined;
-    return { type: "image", data, mimeType: sniffed };
+    if (sniffed === "image/png" && isAnimatedPng(bytes)) return undefined;
+    return { type: "image", data: normalized, mimeType: sniffed };
 }
 
 /**

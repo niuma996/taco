@@ -23,13 +23,25 @@ async function pageTexts(bytes: Uint8Array): Promise<string[]> {
     return doc.getPages().map((_, index) => `page ${index + 1}`);
 }
 
+/** A document whose page widths are the only way to tell the pages apart. */
+async function pdfWithWidths(widths: number[]): Promise<Uint8Array> {
+    const doc = await PDFDocument.create();
+    for (const width of widths) doc.addPage([width, 100]);
+    return doc.save();
+}
+
+async function pageWidths(bytes: Uint8Array): Promise<number[]> {
+    const doc = await PDFDocument.load(bytes);
+    return doc.getPages().map((page) => page.getWidth());
+}
+
 describe("mergePdfs", () => {
     it("joins documents in order, keeping every page", async () => {
         const a = buildTextPdf(["first"], 1);
         const b = buildTextPdf(["second"], 2);
         const merged = await mergePdfs([a, b]);
         assert.ok(merged.ok);
-        const doc = await PDFDocument.load(merged.value);
+        const doc = await PDFDocument.load(merged.value.bytes);
         // 1 page from the first document, 2 from the second.
         assert.equal(doc.getPageCount(), 3);
     });
@@ -45,8 +57,31 @@ describe("mergePdfs", () => {
             ],
         );
         assert.ok(merged.ok);
-        const doc = await PDFDocument.load(merged.value);
+        const doc = await PDFDocument.load(merged.value.bytes);
         assert.equal(doc.getPageCount(), 2);
+    });
+
+    it("copies a page list in the order given, not grouped by source", async () => {
+        const a = await pdfWithWidths([200, 210]);
+        const b = await pdfWithWidths([300, 310, 500]);
+        const merged = await mergePdfs(
+            [a, b],
+            [
+                { source: 1, page: 3 },
+                { source: 0, page: 1 },
+            ],
+        );
+        assert.ok(merged.ok);
+        assert.deepEqual(await pageWidths(merged.value.bytes), [500, 200]);
+    });
+
+    it("reports a source the call does not have", async () => {
+        const merged = await mergePdfs([buildTextPdf(["only"], 1)], [{ source: 2, page: 1 }]);
+        assert.ok(!merged.ok);
+        assert.equal(merged.failure.kind, "no_such_page");
+        if (merged.failure.kind !== "no_such_page") return;
+        assert.equal(merged.failure.source, 2);
+        assert.equal(merged.failure.pages, 0);
     });
 
     it("reports a page that does not exist", async () => {
@@ -85,6 +120,9 @@ describe("splitPdf", () => {
         const parts = await splitPdf(bytes, [{ from: 1, to: 4 }]);
         assert.ok(!parts.ok);
         assert.equal(parts.failure.kind, "no_such_page");
+        if (parts.failure.kind !== "no_such_page") return;
+        assert.equal(parts.failure.page, 4);
+        assert.equal(parts.failure.pages, 1);
     });
 });
 

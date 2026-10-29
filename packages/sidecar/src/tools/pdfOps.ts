@@ -14,16 +14,27 @@ import { PDFDocument, type PDFField } from "pdf-lib";
 /** Why a PDF operation failed. */
 export type PdfOpFailure =
     | { kind: "unreadable"; reason: string }
-    | { kind: "no_such_page"; page: number; pages: number }
+    | { kind: "no_such_page"; page: number; pages: number; source?: number }
     | { kind: "no_such_field"; field: string }
     | { kind: "field_not_fillable"; field: string; kind_: string }
     | { kind: "empty" };
 
 export type PdfOpResult<T> = { ok: true; value: T } | { ok: false; failure: PdfOpFailure };
 
-/** One page of a source document, as `pdf-lib` counts them (1-based). */
+/** A merged document, and how many pages it holds. */
+export interface MergedPdf {
+    readonly bytes: Uint8Array;
+    readonly pageCount: number;
+}
+
+/**
+ * One page to copy.
+ *
+ * `source` is 0-based — the tool subtracts 1 before calling, because the
+ * model counts inputs from 1. `page` is 1-based.
+ */
 export interface PageSpec {
-    /** Which source document the page comes from. */
+    /** Which source document, 0-based. */
     readonly source: number;
     /** The page within that document, 1-based. */
     readonly page: number;
@@ -32,39 +43,53 @@ export interface PageSpec {
 /**
  * Merge documents into one.
  *
- * `sources` are the documents in order; `pages` picks what goes into the
- * result. A page list of `[1]` for each source, in order, is the common case.
+ * Omit `pages` to take every page of every source, sources in order. A
+ * page list is copied in the order given, not grouped by source.
  */
 export async function mergePdfs(
     sources: readonly Uint8Array[],
     pages?: readonly PageSpec[],
-): Promise<PdfOpResult<Uint8Array>> {
+): Promise<PdfOpResult<MergedPdf>> {
     if (sources.length === 0) return { ok: false, failure: { kind: "empty" } };
-    const out = await PDFDocument.create();
-    for (const [index, bytes] of sources.entries()) {
+    const docs: PDFDocument[] = [];
+    for (const bytes of sources) {
         const loaded = await load(bytes);
         if (!loaded.ok) return loaded;
-        const doc = loaded.value;
-        const wanted = pages?.filter((p) => p.source === index);
-        const indices = wanted ? wanted.map((p) => p.page - 1) : range(0, doc.getPageCount());
-        for (const pageIndex of indices) {
-            // pdf-lib throws on an out-of-range page rather than returning
-            // nothing, so the bound is checked before it is asked.
-            if (pageIndex < 0 || pageIndex >= doc.getPageCount()) {
-                return {
-                    ok: false,
-                    failure: {
-                        kind: "no_such_page",
-                        page: pageIndex + 1,
-                        pages: doc.getPageCount(),
-                    },
-                };
-            }
-            const [copied] = await out.copyPages(doc, [pageIndex]);
-            out.addPage(copied);
-        }
+        docs.push(loaded.value);
     }
-    return { ok: true, value: await out.save() };
+    const picked =
+        pages ??
+        docs.flatMap((doc, source) =>
+            range(1, doc.getPageCount() + 1).map((page) => ({ source, page })),
+        );
+    const out = await PDFDocument.create();
+    for (const spec of picked) {
+        const doc = docs[spec.source];
+        // A source past the end is a failed merge, not a shorter document.
+        if (!doc) {
+            return {
+                ok: false,
+                failure: { kind: "no_such_page", page: spec.page, pages: 0, source: spec.source },
+            };
+        }
+        const pageIndex = spec.page - 1;
+        // pdf-lib throws on an out-of-range page rather than returning
+        // nothing, so the bound is checked before it is asked.
+        if (pageIndex < 0 || pageIndex >= doc.getPageCount()) {
+            return {
+                ok: false,
+                failure: {
+                    kind: "no_such_page",
+                    page: spec.page,
+                    pages: doc.getPageCount(),
+                    source: spec.source,
+                },
+            };
+        }
+        const [copied] = await out.copyPages(doc, [pageIndex]);
+        out.addPage(copied);
+    }
+    return { ok: true, value: { bytes: await out.save(), pageCount: out.getPageCount() } };
 }
 
 /**
@@ -85,8 +110,9 @@ export async function splitPdf(
     const total = doc.getPageCount();
     const out: Uint8Array[] = [];
     for (const range of ranges) {
-        if (range.from < 1 || range.to > total || range.from > range.to) {
-            return { ok: false, failure: { kind: "no_such_page", page: range.from, pages: total } };
+        const illegal = offendingPage(range, total);
+        if (illegal !== undefined) {
+            return { ok: false, failure: { kind: "no_such_page", page: illegal, pages: total } };
         }
         const part = await PDFDocument.create();
         const indices = [];
@@ -180,7 +206,20 @@ async function load(bytes: Uint8Array): Promise<PdfOpResult<PDFDocument>> {
     }
 }
 
-/** The page indices `from` to `to`, exclusive of `to`. */
+/**
+ * The bound that makes a range illegal, or undefined when the range fits.
+ *
+ * Reporting `from` when `to` is the one past the end sends the model back
+ * to a page that exists.
+ */
+function offendingPage(range: { from: number; to: number }, total: number): number | undefined {
+    if (range.from < 1 || range.from > total) return range.from;
+    if (range.to > total) return range.to;
+    if (range.from > range.to) return range.from;
+    return undefined;
+}
+
+/** The page numbers `from` to `to`, exclusive of `to`. */
 function range(from: number, to: number): number[] {
     const out: number[] = [];
     for (let i = from; i < to; i++) out.push(i);
