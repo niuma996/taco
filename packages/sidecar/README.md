@@ -86,6 +86,12 @@ regardless of whether the SDK is installed, but `channels.bind`
 returns the channel's `<channel>_sdk_missing` error so the desktop
 can offer a one-click install.
 
+`@napi-rs/canvas` is declared as an `optionalDependencies` too. The `read`
+tool uses it to rasterise the pages of a scanned PDF — a document with no text
+layer — so a model that can see images can read it. It is a native binary,
+30-40MB per platform, so it is not installed by default; without it a scan
+still reads, and the result says the pages could not be rendered.
+
 Agents with `runtime: claude-code` run on the user's own Claude Code CLI
 (`claude` on PATH, signed in) through `@anthropic-ai/claude-agent-sdk`.
 The SDK is not declared as a dependency at all — it carries a ~240 MB

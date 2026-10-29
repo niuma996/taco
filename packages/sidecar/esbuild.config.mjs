@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { copyPdfJsAssets } from "./scripts/copyPdfJsAssets.mjs";
 import { copyShellParserAssets } from "./scripts/copyShellParserAssets.mjs";
 
 await build({
@@ -21,8 +22,11 @@ await build({
     // intentionally skip the override to preserve the provider identity).
     keepNames: true,
     // Optional deps stay out of the bundle; loaded at runtime via dynamic import
-    // (see channelFactory, claudeCodeSdk).
-    external: ["@wechatbot/wechatbot", "@anthropic-ai/claude-agent-sdk"],
+    // (see channelFactory, claudeCodeSdk, pdfRender).
+    // @napi-rs/canvas is a native binary — bundling it would fail, and it is
+    // 30-40MB per platform, so it stays a runtime import.
+    external: ["@wechatbot/wechatbot", "@anthropic-ai/claude-agent-sdk", "@napi-rs/canvas"],
 });
 
 copyShellParserAssets("lib");
+copyPdfJsAssets("lib");

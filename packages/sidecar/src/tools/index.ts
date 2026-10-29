@@ -28,6 +28,7 @@ import { createGlobTool } from "./glob.ts";
 import { createGrepTool } from "./grep.ts";
 import { createJobsTools } from "./jobs.ts";
 import { createMemoryTool } from "./memory.ts";
+import { isPdfBytes, readPathBytes, readPdf } from "./pdfIntercept.ts";
 import { createPlanEnterTool } from "./planEnter.ts";
 import { createPlanExitTool } from "./planExit.ts";
 import { createShellTool } from "./shellTool.ts";
@@ -101,6 +102,23 @@ export function defaultTools(opts?: {
         invocation,
         context,
     ) => {
+        // A PDF is parsed, not decoded: pi would hand back mojibake. The bytes
+        // are read here so the text layer can be extracted before the decoder
+        // ever sees them. A scan has no text layer, so its pages are rendered
+        // as images instead.
+        const bytes = await readPathBytes(toolContext.env, params.path, context);
+        if (bytes && isPdfBytes(bytes)) {
+            const pdf = await readPdf(bytes, params.path, params.offset, params.limit);
+            const images = (pdf.images ?? []).map((page) => ({
+                type: "image" as const,
+                data: page.data,
+                mimeType: page.mimeType,
+            }));
+            return {
+                content: [{ type: "text", text: pdf.text }, ...images],
+                details: undefined,
+            };
+        }
         const result = await readBase.execute(
             toolCallId,
             params,
@@ -120,10 +138,10 @@ export function defaultTools(opts?: {
     };
     const read: TacoTool = {
         ...readBase,
-        description: `${readBase.description} Binary files (PDF, Office, archives, and files with NUL bytes) are not decoded as text; the result names the format and what to use instead.`,
+        description: `${readBase.description} PDF files are parsed: their text layer is returned, and a scanned document (no text layer) has its pages rendered as images. Other binary files (Office, archives, and files with NUL bytes) are not decoded as text, and the result names the format and what to use instead.`,
         taco: {
             promptSummary:
-                "Read a file — prefer it over `shell cat` for truncation-aware output and image support. Text is truncated to ~30k tokens / 2000 lines; use `offset` and `limit` to page. Images (jpg/png/gif/webp) come back as attachments. PDF, Office, and other binary files are not decoded as text; the result says what to use instead.",
+                "Read a file — prefer it over `shell cat` for truncation-aware output and image support. Text is truncated to ~30k tokens / 2000 lines; use `offset` and `limit` to page. Images (jpg/png/gif/webp) come back as attachments. A PDF returns its text; a scanned PDF returns page images. Other binary files are not decoded.",
             mutates: false,
         },
         execute: readExecute,

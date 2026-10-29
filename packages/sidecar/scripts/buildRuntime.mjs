@@ -26,6 +26,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { copyPdfJsAssets } from "./copyPdfJsAssets.mjs";
 import { copyShellParserAssets } from "./copyShellParserAssets.mjs";
 import { assertTripleMatchesHost, currentTriple, parseTargetCli } from "./triple.mjs";
 
@@ -90,6 +91,15 @@ function main() {
             // esbuild `define` replaces all occurrences with the string literal, eliminating the identifier.
             __TACO_SIDECAR_VERSION__: JSON.stringify(sidecarVersion),
         },
+        // Optional native deps stay out of the bundle: @napi-rs/canvas is a
+        // per-platform binary that cannot be bundled, and the rest are loaded
+        // at runtime only when a channel that needs them is created.
+        external: [
+            "@wechatbot/wechatbot",
+            "@wecom/aibot-node-sdk",
+            "@anthropic-ai/claude-agent-sdk",
+            "@napi-rs/canvas",
+        ],
         // Source uses explicit .ts extensions (esbuild by default strips them for `target:node`,
         // but `target:node22` keeps .ts intact — good, esbuild bundle handles .ts loading).
         loader: { ".ts": "ts" },
@@ -98,6 +108,7 @@ function main() {
     });
 
     copyShellParserAssets(libDir);
+    copyPdfJsAssets(libDir);
 
     // Copy assets: agents / skills builtin — clear dest first for idempotent builds.
     // (Removing entries from src won't leave stale .md in dist; see smoke.test.ts builtin assertions).

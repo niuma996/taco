@@ -10,6 +10,7 @@ import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { binaryReadHint } from "../../src/tools/binaryRead.ts";
 import { defaultTools } from "../../src/tools/index.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
+import { buildImageOnlyPdf, buildTextPdf } from "./pdfFixtures.ts";
 
 const PNG = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -139,15 +140,30 @@ describe("read tool binary guard", () => {
         assert.ok(image.content.some((block) => block.type === "image"));
     });
 
-    it("replaces a PDF and a NUL file with a hint, and still throws when the file is missing", async () => {
-        writeFileSync(join(cwd, "report.pdf"), "%PDF-1.4\n1 0 obj\nendobj\n");
+    it("replaces a NUL file with a hint, and still throws when the file is missing", async () => {
         writeFileSync(join(cwd, "data.bin"), Buffer.from([0x00, 0x01, 0xff, 0xfe]));
-        const pdf = textOf(await read("report.pdf"));
-        assert.match(pdf, /PDF/);
-        assert.equal(pdf.includes("endobj"), false);
         const bin = textOf(await read("data.bin"));
         assert.match(bin, /binary/);
         await assert.rejects(() => read("missing.txt"));
+    });
+
+    it("extracts a PDF's text instead of decoding its bytes", async () => {
+        writeFileSync(
+            join(cwd, "report.pdf"),
+            buildTextPdf(["Quarterly revenue", "up 12 percent"]),
+        );
+        const pdf = textOf(await read("report.pdf"));
+        assert.match(pdf, /Quarterly revenue/);
+        assert.match(pdf, /up 12 percent/);
+        assert.equal(pdf.includes("obj"), false);
+    });
+
+    it("returns page images for a scanned PDF that has no text layer", async () => {
+        writeFileSync(join(cwd, "scan.pdf"), buildImageOnlyPdf());
+        const result = await read("scan.pdf");
+        const images = result.content.filter((block) => block.type === "image");
+        assert.equal(images.length, 1);
+        assert.equal((images[0] as { mimeType: string }).mimeType, "image/png");
     });
 
     it("points an Office file at officecli, including install steps only when the binary is absent", async () => {

@@ -1,11 +1,13 @@
 /**
  * Hint text for a `read` that would otherwise return decoded binary.
  *
- * pi TextDecodes every non-image file. PDF and Office are identified by
- * magic and refused — guessing from a raw dump is worse than no bytes.
- * A NUL or a high replacement-character ratio is only a maybe: legacy
- * encodings look the same, so that path keeps a short decode and names
- * a way to convert it.
+ * pi TextDecodes every non-image file. PDF is intercepted before the decoder
+ * (see `pdfIntercept.ts`), so a PDF reaching this function is one the
+ * interception could not parse — the hint then names the way out.
+ * Office is identified by magic and refused: guessing from a raw dump is
+ * worse than no bytes. A NUL or a high replacement-character ratio is only a
+ * maybe: legacy encodings look the same, so that path keeps a short decode
+ * and names a way to convert it.
  */
 
 import { extname } from "node:path";

@@ -15,6 +15,7 @@
     "node": ">=22"
   },
   "optionalDependencies": {
+    "@napi-rs/canvas": "1.0.13",
     "@wechatbot/wechatbot": "2.2.0",
     "@wecom/aibot-node-sdk": "1.0.7"
   },
@@ -59,7 +60,9 @@
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
     "ignore": "^7.0.14",
+    "pdfjs-dist": "6.4.299",
     "typebox": "^1.4.3",
+    "unpdf": "1.9.1",
     "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
