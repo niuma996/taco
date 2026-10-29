@@ -754,6 +754,55 @@ describe("attachedSession.deferredTools", () => {
             await reloaded.abort();
         });
 
+        it("re-attach activates a workspace tool the persisted allowlist predates", async () => {
+            // An IM policy flipped from deny to allow between two daemon runs: the
+            // lane's allowlist was written under the old policy and survives the
+            // restart, while the workspace now defines `read`. The per-turn
+            // refresher sees no change inside the new process, so only the
+            // attach-time alignment can make the tool callable — otherwise the
+            // prompt offers it and pi answers `Tool "read" is unavailable`.
+            const registry = new DefaultDeferredToolRegistry({ candidates: [] });
+            const session = await repo.create({ cwd: tmpDir }, harnessContext);
+            const build = (tools: TacoTool[]) =>
+                AttachedSession.create({
+                    session,
+                    models,
+                    model: stubModel,
+                    env,
+                    systemPrompt: "test prompt",
+                    tools,
+                    resources: {},
+                    streamOptions: {},
+                    taskStore: {
+                        getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                        setTaskState: () => {},
+                    } as unknown as TaskStore,
+                    planState: createPlanModeState(),
+                    tasksDir: tmpDir,
+                    attachmentsDir: tmpDir,
+                    toolRegistry: registry,
+                    sessionCwd: tmpDir as never,
+                    getToolContext: (): TacoToolContextBase => ({
+                        env,
+                        workspace: tmpDir as never,
+                    }),
+                    sessionKind: "main",
+                } as AttachedSessionOptions);
+
+            const first = await build([fakeTool("builtin-tool")]);
+            assert.ok(
+                !((await first.toolController?.activeToolNames()) ?? []).includes("read"),
+                "precondition: the persisted allowlist lacks read",
+            );
+            await first.abort();
+
+            const reloaded = await build([fakeTool("builtin-tool"), fakeTool("read")]);
+            const active = (await reloaded.toolController?.activeToolNames()) ?? [];
+            assert.ok(active.includes("read"), `read must be active, got: ${active.join(", ")}`);
+            assert.ok(active.includes("builtin-tool"), "existing names must be kept");
+            await reloaded.abort();
+        });
+
         it("a turn converges the toolset and the system prompt together", async () => {
             // Convergence happens per turn rather than only at attach, so a policy
             // edited mid-conversation reaches the very next message. The refresher

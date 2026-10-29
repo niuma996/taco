@@ -59,3 +59,37 @@ export function createToolsetRefresher(args: ToolsetRefreshArgs): () => Promise<
         await lane.setActiveTools(active, harnessContext);
     };
 }
+
+export interface AlignActiveToolsArgs {
+    readonly harness: AgentHarness<TacoToolContext>;
+    readonly lane: AgentLane;
+    /** Names the workspace offers this session right now. */
+    readonly workspaceToolNames: readonly string[];
+}
+
+/**
+ * Add the workspace tools a persisted allowlist is missing.
+ *
+ * The allowlist is written when the session first runs and survives restarts,
+ * while the workspace set is rebuilt from current config on every start. Once
+ * the two drift (an IM policy flipped from deny to allow), the per-turn
+ * refresher cannot see it: it compares the workspace set against the previous
+ * one *in this process*, finds them equal, and writes nothing — the prompt
+ * then offers `read` while pi rejects the call as unavailable.
+ *
+ * Add-only on purpose: a persisted name with no definition may be a tool whose
+ * load failed this time (an MCP server that is down), and dropping it would
+ * lose the tool for good. Returns whether the allowlist changed; an equal list
+ * is left untouched so the steady state stays byte-identical.
+ */
+export async function alignActiveTools(args: AlignActiveToolsArgs): Promise<boolean> {
+    const { harness, lane, workspaceToolNames } = args;
+    const defined = new Set((await harness.getTools(harnessContext)).map((t) => t.name));
+    const active = await lane.getActiveTools(harnessContext);
+    const missing = workspaceToolNames.filter(
+        (name) => defined.has(name) && !active.includes(name),
+    );
+    if (missing.length === 0) return false;
+    await lane.setActiveTools([...active, ...missing], harnessContext);
+    return true;
+}

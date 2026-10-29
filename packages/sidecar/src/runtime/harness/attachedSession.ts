@@ -85,7 +85,7 @@ import {
     DefaultSessionToolController,
     type SessionToolController,
 } from "./sessionToolController.ts";
-import { createToolsetRefresher } from "./toolsetRefresh.ts";
+import { alignActiveTools, createToolsetRefresher } from "./toolsetRefresh.ts";
 import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
 
 const log = createLogger("attachedSession");
@@ -499,6 +499,21 @@ export class AttachedSession extends EventEmitter {
                 });
                 await lane.setModel({ provider: live.provider, modelId: live.id }, harnessContext);
             }
+        }
+
+        // The lane's persisted allowlist predates this process's toolset;
+        // converge it before the first turn rather than waiting on a refresh
+        // that only fires when the workspace set changes mid-process.
+        if (
+            await alignActiveTools({
+                harness,
+                lane,
+                workspaceToolNames: args.tools.map((t) => t.name),
+            })
+        ) {
+            log.info("realigned persisted active tools with the workspace toolset", {
+                sessionId: args.session.metadata.id,
+            });
         }
 
         // Bind the tool surface — controller constructed first, bound after:
