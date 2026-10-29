@@ -7,6 +7,7 @@ import {
     RPC,
     type RpcRequest,
     readValidationIssues,
+    SIDECAR_PROTOCOL_VERSION,
 } from "@taco-ai/protocol";
 import { createTypedRpc, describeRpcError, type RpcDispatch } from "@taco-ai/shared";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
@@ -141,7 +142,7 @@ test("every facade method serializes a payload accepted by its registered schema
     });
     const workspace = asWorkspaceId("/w");
     const id = asSessionId("s");
-    await client.initialize({ major: 2, minor: 5 });
+    await client.initialize(SIDECAR_PROTOCOL_VERSION);
     await client.workspaceList();
     await client.sessionList(workspace);
     await client.sessionCreate({ workspace });

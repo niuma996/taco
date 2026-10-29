@@ -88,8 +88,12 @@ export type CompactionFailureReason =
  *  2.2 added the `providerExtraModels` / `providerHiddenModels` config fields;
  *  a 2.1 daemon drops them on `settings.write` while still answering ok.
  *  2.5 added `attachment.stage` and the `attachments` params on session
- *  prompts; a 2.4 daemon would ignore the ids and send the files nowhere. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 5 } as const;
+ *  prompts; a 2.4 daemon would ignore the ids and send the files nowhere.
+ *  2.6 added optional `input` on provider model entries (`providers.list`,
+ *  and the config fields `settings.write` replaces). A 2.5 daemon drops
+ *  `input` on write while still answering ok, so a saved image switch
+ *  would not stick. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 6 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

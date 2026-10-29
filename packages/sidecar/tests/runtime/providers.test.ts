@@ -5,7 +5,8 @@
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, describe, it } from "node:test";
-import { validateCustomProviders } from "../../src/config/config.ts";
+import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
+import { validateCustomProviders, validateProviderExtraModels } from "../../src/config/config.ts";
 import { buildCustomProvider } from "../../src/runtime/models/customProvider.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { withTacoUserAgent } from "../../src/runtime/models/requestHeaders.ts";
@@ -56,6 +57,49 @@ describe("customProvider", () => {
             const p = buildCustomProvider({ ...VALID, api: "anthropic", id: "custom:ant" });
             const m = p.getModels()[0] as unknown as { api: string };
             assert.equal(m.api, "anthropic-messages");
+        });
+
+        it("a model is text-only unless the user declares images", () => {
+            const p = buildCustomProvider({
+                ...VALID,
+                models: [{ id: "plain" }, { id: "eyes", input: ["text", "image"] }],
+            });
+            const [plain, eyes] = p.getModels();
+            assert.deepEqual(plain?.input, ["text"]);
+            assert.deepEqual(eyes?.input, ["text", "image"]);
+        });
+
+        it("keeps text even when the user declares only images", () => {
+            const p = buildCustomProvider({ ...VALID, models: [{ id: "m", input: ["image"] }] });
+            assert.deepEqual(p.getModels()[0]?.input, ["text", "image"]);
+        });
+
+        // The bug this guards: every added model was hardwired text-only, and
+        // pi replaces image blocks with a placeholder for such a model, so a
+        // vision model added by hand silently never saw an image.
+        it("pi passes images through to a model declared as seeing them", () => {
+            const p = buildCustomProvider({
+                ...VALID,
+                models: [{ id: "plain" }, { id: "eyes", input: ["text", "image"] }],
+            });
+            const [plain, eyes] = p.getModels();
+            assert.ok(plain && eyes);
+            const turn = [
+                {
+                    role: "user" as const,
+                    content: [
+                        { type: "text" as const, text: "what is this" },
+                        { type: "image" as const, data: "AAAA", mimeType: "image/png" },
+                    ],
+                    timestamp: 0,
+                },
+            ];
+            const kinds = (model: typeof plain) =>
+                transformMessages(turn, model).flatMap((m) =>
+                    Array.isArray(m.content) ? m.content.map((b) => b.type) : [],
+                );
+            assert.deepEqual(kinds(eyes), ["text", "image"]);
+            assert.ok(!kinds(plain).includes("image"), "a text-only model has the image replaced");
         });
 
         it("emits a Credential-resolvable api key auth (envApiKeyAuth with no env fallback)", () => {
@@ -143,6 +187,35 @@ describe("customProvider", () => {
                     ),
                 /each model needs a string id/,
             );
+        });
+
+        it("rejects an input that is not a list of known kinds", () => {
+            for (const input of ["image", ["text", "video"], [1], []]) {
+                assert.throws(
+                    () =>
+                        validateCustomProviders(
+                            [{ ...VALID, models: [{ id: "m", input: input as never }] }],
+                            "test",
+                        ),
+                    /input of m must be a non-empty array/,
+                );
+                assert.throws(
+                    () =>
+                        validateProviderExtraModels(
+                            { openai: [{ id: "m", input: input as never }] },
+                            "test",
+                        ),
+                    /input of m must be a non-empty array/,
+                );
+            }
+        });
+
+        it("accepts a declared image input", () => {
+            const out = validateCustomProviders(
+                [{ ...VALID, models: [{ id: "m", input: ["text", "image"] }] }],
+                "test",
+            );
+            assert.deepEqual(out?.[0]?.models[0]?.input, ["text", "image"]);
         });
     });
 });

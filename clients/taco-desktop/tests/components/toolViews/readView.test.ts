@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { BINARY_READ_MARKER } from "@taco-ai/protocol";
 import { countReadLines } from "../../../src/components/toolViews/readView.tsx";
 
 /** Every truncation note the tool can emit, at the time of writing. */
@@ -61,5 +62,9 @@ describe("countReadLines", () => {
         // No blank line before it, so it is content — a TOML section header,
         // a markdown link reference, etc.
         assert.equal(countReadLines("a\n[section]\nb"), 3);
+    });
+
+    it("二进制未解码提示不计为文件行", () => {
+        assert.equal(countReadLines(`${BINARY_READ_MARKER}\nThis file is binary.\nline`), 0);
     });
 });

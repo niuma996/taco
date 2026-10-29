@@ -8,7 +8,7 @@
  *    aria-describedby wiring.
  *  - Select: Radix combobox roles + value reporting (native <select> is banned).
  *  - Slider: discrete steps, arrow-key stepping, commit semantics, marks overlay.
- *  - Switch: role="switch" / aria-checked / disabled behaviour.
+ *  - Switch: role="switch" / aria-checked / disabled behaviour. labelledBy names it from visible text and does not also set aria-label.
  *  - Tag: size / tone modifier classes, className merge, native span props.
  *  - TextInput: `.ui-input` class, className merge, React 19 ref-as-prop.
  */
@@ -269,6 +269,18 @@ describe("Switch", () => {
         render(<Switch checked label="Enabled" disabled onChange={onChange} />);
         await user.click(screen.getByRole("switch", { name: "Enabled" }));
         expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("names itself from visible text without a second aria-label", () => {
+        render(
+            <>
+                <span id="images">Image input</span>
+                <Switch checked labelledBy="images" onChange={() => {}} />
+            </>,
+        );
+        const sw = screen.getByRole("switch", { name: "Image input" });
+        expect(sw.getAttribute("aria-labelledby")).toBe("images");
+        expect(sw.hasAttribute("aria-label")).toBe(false);
     });
 });
 

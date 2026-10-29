@@ -13,16 +13,11 @@
 
 import { open } from "node:fs/promises";
 import { extname } from "node:path";
+import { MODEL_IMAGE_MIME_TYPES, type ModelImageMimeType } from "@taco-ai/protocol";
 
-/** Image types providers accept as image input. */
-const MODEL_IMAGE_MIMES: ReadonlySet<string> = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-]);
+const MODEL_IMAGE_MIMES: ReadonlySet<string> = new Set(MODEL_IMAGE_MIME_TYPES);
 
-export function isModelImageMime(mimeType: string): boolean {
+export function isModelImageMime(mimeType: string): mimeType is ModelImageMimeType {
     return MODEL_IMAGE_MIMES.has(mimeType);
 }
 

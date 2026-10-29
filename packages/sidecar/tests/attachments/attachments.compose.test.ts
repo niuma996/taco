@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { MessageAttachment } from "@taco-ai/protocol";
-import { ErrorCodes } from "@taco-ai/protocol";
+import {
+    ATTACHMENT_MAX_COUNT,
+    ErrorCodes,
+    IMAGE_INPUT_MAX_BASE64_LENGTH,
+    MODEL_IMAGE_MIME_TYPES,
+    rpcSchemas,
+} from "@taco-ai/protocol";
+import { Value } from "typebox/value";
 
 import { stageFromData } from "../../src/attachments/attachmentStore.ts";
 import { buildAttachmentsTag, parseAttachmentsTags } from "../../src/attachments/attachmentsTag.ts";
@@ -328,6 +335,32 @@ describe("attachment.stage handler", () => {
                 const fault = e as { data?: { reason?: string } };
                 return fault.data?.reason === "not_found";
             },
+        );
+    });
+});
+
+describe("prompt image bounds", () => {
+    const base = { workspace: "/w", sessionId: "s", text: "hi" };
+    const ok = (images: unknown) =>
+        [...Value.Errors(rpcSchemas.sessionPrompt, { ...base, images })].length === 0;
+    const img = (mimeType: string, data = "AA") => ({ type: "image", data, mimeType });
+
+    it("accepts the formats providers take", () => {
+        for (const m of MODEL_IMAGE_MIME_TYPES) assert.ok(ok([img(m)]), m);
+    });
+
+    it("refuses SVG and other image types providers reject", () => {
+        for (const m of ["image/svg+xml", "image/bmp", "image/tiff", "text/plain"]) {
+            assert.equal(ok([img(m)]), false, m);
+        }
+    });
+
+    it("refuses a body over the frame bound and more images than a message carries", () => {
+        assert.equal(ok([img("image/png", "A".repeat(IMAGE_INPUT_MAX_BASE64_LENGTH + 1))]), false);
+        assert.ok(ok([img("image/png", "A".repeat(IMAGE_INPUT_MAX_BASE64_LENGTH))]));
+        assert.equal(
+            ok(Array.from({ length: ATTACHMENT_MAX_COUNT + 1 }, () => img("image/png"))),
+            false,
         );
     });
 });

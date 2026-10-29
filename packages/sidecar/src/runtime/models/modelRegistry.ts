@@ -27,6 +27,7 @@ import type {
     CustomModelEntry,
     CustomProviderApi,
     CustomProviderConfig,
+    ModelInputKind,
     SessionId,
 } from "@taco-ai/protocol";
 import type { Api, Model } from "../pi/types.ts";
@@ -35,6 +36,7 @@ import {
     buildCustomProvider,
     DEFAULT_CUSTOM_CONTEXT_WINDOW,
     DEFAULT_CUSTOM_MAX_TOKENS,
+    modelInput,
 } from "./customProvider.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
 
@@ -50,6 +52,8 @@ export interface ModelInfo {
     maxTokens?: number;
     /** Whether the model reasons before answering, as the user declared it. */
     reasoning?: boolean;
+    /** Input kinds — the catalog's own, or only what the user declared for an added model. */
+    input?: ModelInputKind[];
 }
 
 /** Per-provider availability view (used by the UI to render provider rows and filter models). */
@@ -194,7 +198,9 @@ function toExtraModel(entry: CustomModelEntry, base: Provider): Model<Api> | und
         // thinking to a model that only accepts effort levels.
         ...(template.compat ? { compat: template.compat } : {}),
         ...extraThinkingLevelMap(template),
-        input: ["text"],
+        // Declared, never inherited: the template is picked for its api and
+        // thinking support, not for whether this hand-added id sees images.
+        input: modelInput(entry),
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: entry.contextWindow ?? DEFAULT_CUSTOM_CONTEXT_WINDOW,
         maxTokens: entry.maxTokens ?? template.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,
@@ -420,6 +426,7 @@ export class ModelRegistry {
             name: m.name,
             contextWindow: m.contextWindow,
             maxTokens: m.maxTokens,
+            input: [...m.input],
         }));
     }
 
@@ -450,7 +457,7 @@ export class ModelRegistry {
                 if (!extraIds.has(m.id)) {
                     return { ...m, origin: "builtin" as const };
                 }
-                const { contextWindow: _w, maxTokens: _t, reasoning: _r, ...rest } = m;
+                const { contextWindow: _w, maxTokens: _t, reasoning: _r, input: _i, ...rest } = m;
                 const declared = declaredExtras.get(m.id);
                 return {
                     ...rest,
@@ -463,6 +470,7 @@ export class ModelRegistry {
                     // provider's business, and writing it back would pin the
                     // model to today's catalog.
                     ...(declared?.reasoning === undefined ? {} : { reasoning: declared.reasoning }),
+                    ...(declared?.input === undefined ? {} : { input: declared.input }),
                 };
             });
             // One factory instance serves both reads below: the endpoint the
@@ -485,6 +493,7 @@ export class ModelRegistry {
                             origin: "hidden" as const,
                             contextWindow: m.contextWindow,
                             maxTokens: m.maxTokens,
+                            input: [...m.input],
                         });
                     }
                 }
@@ -511,7 +520,7 @@ export class ModelRegistry {
                 baseUrl: cfg.baseUrl,
                 api: cfg.api,
                 models: this.listAvailableModels(cfg.id).map((m) => {
-                    const { contextWindow: _w, maxTokens: _t, ...rest } = m;
+                    const { contextWindow: _w, maxTokens: _t, input: _i, ...rest } = m;
                     const declared = declaredModels.get(m.id);
                     return {
                         ...rest,
@@ -522,6 +531,7 @@ export class ModelRegistry {
                         ...(declared?.maxTokens === undefined
                             ? {}
                             : { maxTokens: declared.maxTokens }),
+                        ...(declared?.input === undefined ? {} : { input: declared.input }),
                     };
                 }),
             };

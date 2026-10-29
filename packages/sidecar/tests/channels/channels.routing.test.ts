@@ -16,12 +16,14 @@ import { mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelBindStatus } from "../../src/channels/channelBindBroker.ts";
 import { ChannelBindBroker } from "../../src/channels/channelBindBroker.ts";
 import { ConversationRouter } from "../../src/channels/conversationRouter.ts";
+import { DefaultChannelContext } from "../../src/channels/ingress.ts";
 import type { ChannelConfig } from "../../src/channels/registry.ts";
 import {
     IM_FS_TOOL_NAMES,
     IM_SHELL_TOOL_NAME,
     makeImSessionsRoot,
 } from "../../src/channels/virtualWorkspace.ts";
+import { createLogger } from "../../src/lib/logger.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { ServerRpcSurface } from "../../src/runtime/serverRpcSurface.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
@@ -61,6 +63,55 @@ describe("conversationRouter", () => {
         } as unknown as ServerRpcSurface & { created: string[] };
         return hook;
     }
+
+    describe("ingress images", () => {
+        it("forwards only images the prompt schema accepts, so the text still lands", async () => {
+            const home = mkdtempSync(path.join(tmpdir(), "ingress-"));
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-1",
+                text: "look",
+                media: [
+                    {
+                        kind: "image",
+                        source: { kind: "base64", mimeType: "image/png", data: "AA" },
+                    },
+                    {
+                        kind: "image",
+                        source: { kind: "base64", mimeType: "image/bmp", data: "BB" },
+                    },
+                    { kind: "image", source: { kind: "url", value: "https://x/y.png" } },
+                ],
+            } as never);
+            assert.equal(prompts.length, 1);
+            assert.equal(prompts[0]?.text, "look");
+            assert.deepEqual(prompts[0]?.images, [
+                { type: "image", data: "AA", mimeType: "image/png" },
+            ]);
+        });
+    });
 
     describe("ConversationRouter", () => {
         it("routes a triple to a stable sessionId and reuses it", async () => {

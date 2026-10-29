@@ -211,11 +211,15 @@ workspace 的 catalog。
 
 | Key | 类型 | 说明 |
 |---|---|---|
-| `providerExtraModels` | `Record<id, { id, name?, contextWindow?, maxTokens? }[]>` | 追加在静态列表之后，沿用该 provider 自身的协议与端点 |
+| `providerExtraModels` | `Record<id, { id, name?, contextWindow?, maxTokens?, input? }[]>` | 追加在静态列表之后，沿用该 provider 自身的协议与端点 |
 | `providerHiddenModels` | `Record<id, string[]>` | 从 catalog 中移除的静态模型 id。设置界面仍以 `origin: "hidden"` 列出，方便恢复 |
 
 两者相互独立：隐藏某个静态 id 不会连带删除同名的用户追加项。空数组会被拒绝
 ——请直接删掉该 key。这两个字段需要协议 2.2；旧版 daemon 写入时会丢弃它们。
+
+`input` 若出现，取值为 `"text"` 和/或 `"image"`（省略表示仅文本）。
+`customProviders[].models` 上有同一个可选字段。它需要协议 2.6；2.5 的 daemon
+在 `settings.write` 时会丢掉该字段却仍然返回成功，保存的图片开关因此不会生效。
 
 ### 3.4 没有 per-workspace config
 

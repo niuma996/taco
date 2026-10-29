@@ -482,6 +482,7 @@ export function validateCustomProviders(
                     `invalid customProviders from ${source}: each model needs a string id (${e.id})`,
                 );
             }
+            requireModelInput(m as CustomModelEntry, source, "customProviders", e.id);
             models.push(m as CustomModelEntry);
         }
         out.push({
@@ -493,6 +494,26 @@ export function validateCustomProviders(
         });
     }
     return out;
+}
+
+/** `input`, when set, must be a non-empty list of the kinds pi knows. An empty list is not "unset". */
+function requireModelInput(
+    entry: CustomModelEntry,
+    source: string,
+    field: string,
+    owner: string,
+): void {
+    const input: unknown = entry.input;
+    if (input === undefined) return;
+    if (
+        !Array.isArray(input) ||
+        input.length === 0 ||
+        !input.every((k) => k === "text" || k === "image")
+    ) {
+        throw new Error(
+            `invalid ${field} from ${source}: input of ${entry.id} must be a non-empty array of "text" / "image" (${owner})`,
+        );
+    }
 }
 
 /**
@@ -531,6 +552,7 @@ export function validateProviderExtraModels(
                 );
             }
             const entry = m as CustomModelEntry;
+            requireModelInput(entry, source, "providerExtraModels", providerId);
             if (seen.has(entry.id)) {
                 throw new Error(
                     `invalid providerExtraModels from ${source}: duplicate model id ${entry.id} (${providerId})`,

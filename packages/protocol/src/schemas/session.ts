@@ -7,11 +7,11 @@
  * express.
  */
 import { Type } from "typebox";
-import { ATTACHMENT_MAX_COUNT } from "../attachment.js";
+import { ATTACHMENT_MAX_COUNT } from "../attachmentLimits.js";
 import type { InitializeParams } from "../frames.js";
 import { attachmentIdSchema } from "./attachment.js";
 import {
-    imageInputSchema,
+    imageInputsSchema,
     sessionIdSchema,
     toolCallIdSchema,
     workspaceIdSchema,
@@ -50,7 +50,7 @@ export const sessionCreateSchema = Type.Object({
     sessionId: Type.Optional(sessionIdSchema),
     initialPrompt: Type.Optional(Type.String()),
     // May accompany an empty initialPrompt: image-only first turns are valid.
-    initialImages: Type.Optional(Type.Array(imageInputSchema)),
+    initialImages: Type.Optional(imageInputsSchema),
     initialAttachments: attachmentIds,
     thinkingLevel: Type.Optional(thinkingLevel),
     // Sets the first reply-language hook for this new session; never persisted.
@@ -124,7 +124,7 @@ const sessionTarget = { workspace: workspaceIdSchema, sessionId: sessionIdSchema
 export const sessionPromptSchema = Type.Object({
     ...sessionTarget,
     text: Type.String(),
-    images: Type.Optional(Type.Array(imageInputSchema)),
+    images: Type.Optional(imageInputsSchema),
     attachments: attachmentIds,
     // Transient per-turn language hook; also updates the live locale for later turns.
     uiLocale: Type.Optional(locale),
@@ -136,7 +136,7 @@ export const sessionPromptSchema = Type.Object({
 export const sessionSteerSchema = Type.Object({
     ...sessionTarget,
     text: Type.String(),
-    images: Type.Optional(Type.Array(imageInputSchema)),
+    images: Type.Optional(imageInputsSchema),
     attachments: attachmentIds,
     uiLocale: Type.Optional(locale),
 });

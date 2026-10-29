@@ -1,5 +1,14 @@
 import type { ImageInput, PromptParams, SteerResult } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, createRpcRequest, ErrorCodes, RPC } from "@taco-ai/protocol";
+import {
+    ATTACHMENT_MAX_COUNT,
+    asSessionId,
+    asWorkspaceId,
+    createRpcRequest,
+    ErrorCodes,
+    IMAGE_INPUT_MAX_BASE64_LENGTH,
+    RPC,
+} from "@taco-ai/protocol";
+import { isModelImageMime } from "../attachments/mimeType.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -58,7 +67,8 @@ export class DefaultChannelContext implements ChannelContext {
                     images: msg.media
                         ?.filter((m) => m.kind === "image")
                         .map(toImageInput)
-                        .filter((i): i is ImageInput => i !== undefined),
+                        .filter((i): i is ImageInput => i !== undefined)
+                        .slice(0, ATTACHMENT_MAX_COUNT),
                 };
                 const res = await this.hook.dispatchRpc?.(
                     createRpcRequest(id, RPC.sessionPrompt, params, id),
@@ -121,10 +131,17 @@ export class DefaultChannelContext implements ChannelContext {
     }
 }
 
-/** ChannelMediaRef -> ImageInput. P0 handles only { kind: "base64" }; url/fileId deferred to P1. */
+/**
+ * ChannelMediaRef -> ImageInput. Only `{ kind: "base64" }` is handled;
+ * url/fileId are deferred.
+ *
+ * An image the prompt schema would refuse (a format providers reject, or a
+ * body over the frame bound) is dropped here, not forwarded: the schema
+ * rejects the whole prompt, so one odd sticker would cost the sender's text.
+ */
 function toImageInput(m: ChannelMediaRef): ImageInput | undefined {
-    if (m.source.kind === "base64") {
-        return { type: "image", data: m.source.data, mimeType: m.source.mimeType };
-    }
-    return undefined;
+    if (m.source.kind !== "base64") return undefined;
+    if (!isModelImageMime(m.source.mimeType)) return undefined;
+    if (m.source.data.length > IMAGE_INPUT_MAX_BASE64_LENGTH) return undefined;
+    return { type: "image", data: m.source.data, mimeType: m.source.mimeType };
 }

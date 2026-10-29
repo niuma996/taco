@@ -17,11 +17,14 @@ export type {
     AttachmentStageParams,
     AttachmentStageResult,
     MessageAttachment,
+    ModelImageMimeType,
 } from "./attachment.js";
 export {
     ATTACHMENT_MAX_BYTES,
     ATTACHMENT_MAX_COUNT,
     ATTACHMENT_STAGE_INLINE_MAX_BYTES,
+    IMAGE_INPUT_MAX_BASE64_LENGTH,
+    MODEL_IMAGE_MIME_TYPES,
 } from "./attachment.js";
 // channels.* RPC types — IM channel listing / binding.
 export type {
@@ -94,6 +97,7 @@ export type {
     McpServerConfig,
     McpServerConfigView,
     McpTransportKind,
+    ModelInputKind,
     PermissionRequestKind,
     TacoGlobalConfigShape,
     TacoGlobalConfigView,
@@ -397,6 +401,7 @@ export type {
     ToolsListParams,
     ToolsListResult,
 } from "./tools.js";
+export { BINARY_READ_MARKER } from "./tools.js";
 // Workspace association types — directories a workspace may reach beyond its root.
 export type {
     WorkspaceAssociationKey,

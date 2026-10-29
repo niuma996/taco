@@ -330,3 +330,86 @@ describe("buildSkillReinjector", () => {
         assert.equal(result.messages, messages, "should return the same array reference");
     });
 });
+
+describe("officecli missing binary", () => {
+    it("says how to install when the skill is activated and the binary is absent", async () => {
+        const workDir = mkdtempSync(join(tmpdir(), "taco-skilltool-"));
+        try {
+            const fp = writeSkill(workDir, "officecli", "name: officecli\nrunAs: inline", "# body");
+            const skill = mkInlineSkill("officecli", fp);
+            skill.content = "# body";
+            preloadSkillFrontmatter([skill]);
+            const enqueued: AgentMessage[] = [];
+            const handle: SkillReinjectorHandle = {
+                markInvoked: () => undefined,
+                enqueueInlineInjection: (m) => enqueued.push(m),
+            };
+            const tool = createSkillTool(() => [skill], {
+                parentSessionId: "sess-1",
+                getReinjector: () => handle,
+                commandOnPath: () => false,
+            });
+            const res = await invokeTool(tool, { skill: "officecli" }, undefined);
+            const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+            assert.match(text, /not on PATH/);
+            assert.match(text, /https:\/\/d\.officecli\.ai\/install\.sh/);
+            assert.equal(enqueued.length, 1);
+            const body = String((enqueued[0] as { content?: unknown }).content);
+            assert.match(body, /not on PATH/);
+            assert.match(body, /# body/);
+        } finally {
+            rmSync(workDir, { recursive: true, force: true });
+        }
+    });
+
+    it("does not mention a missing binary when officecli is on PATH, or for another skill", async () => {
+        const workDir = mkdtempSync(join(tmpdir(), "taco-skilltool-"));
+        try {
+            const fp = writeSkill(workDir, "officecli", "name: officecli\nrunAs: inline", "# body");
+            const skill = mkInlineSkill("officecli", fp);
+            preloadSkillFrontmatter([skill]);
+            const present = createSkillTool(() => [skill], {
+                parentSessionId: "sess-1",
+                getReinjector: () => undefined,
+                commandOnPath: () => true,
+            });
+            const presentText = (
+                await invokeTool(present, { skill: "officecli" }, undefined)
+            ).content
+                .map((c) => (c.type === "text" ? c.text : ""))
+                .join("");
+            assert.equal(presentText.includes("not on PATH"), false);
+
+            const other = mkInlineSkill("demo", fp);
+            const otherTool = createSkillTool(() => [other], {
+                parentSessionId: "sess-1",
+                getReinjector: () => undefined,
+                commandOnPath: () => false,
+            });
+            const otherText = (await invokeTool(otherTool, { skill: "demo" }, undefined)).content
+                .map((c) => (c.type === "text" ? c.text : ""))
+                .join("");
+            assert.equal(otherText.includes("not on PATH"), false);
+        } finally {
+            rmSync(workDir, { recursive: true, force: true });
+        }
+    });
+
+    it("repeats the install note when a compacted officecli skill is reinjected", () => {
+        const { hook, handle } = buildSkillReinjector(
+            { skills: [mkReinjectSkill("officecli")] },
+            { commandOnPath: () => false },
+        );
+        handle.markInvoked("officecli");
+        const result = hook({
+            messages: [
+                { role: "user", content: "please continue", timestamp: Date.now() } as AgentMessage,
+            ],
+        });
+        const body = result.messages
+            .map((m) => String((m as { content?: unknown }).content ?? ""))
+            .join("\n");
+        assert.match(body, /not on PATH/);
+        assert.match(body, /officecli body/);
+    });
+});

@@ -13,6 +13,7 @@
  */
 
 import type { SessionId } from "@taco-ai/protocol";
+import { commandOnPath } from "../lib/commandOnPath.ts";
 import type { PermissionBroker } from "../permissions/permissionBroker.ts";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import type { PlanSnapshotPublisher } from "../plan/planPushAdapter.ts";
@@ -21,6 +22,7 @@ import { createEditTool, createReadTool, createWriteTool } from "../runtime/pi/v
 import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 import type { TaskStore } from "../tasks/taskTypes.ts";
 import { createAskUserTool } from "./askUser.ts";
+import { binaryReadHint } from "./binaryRead.ts";
 import type { TacoToolContext } from "./context.ts";
 import { createGlobTool } from "./glob.ts";
 import { createGrepTool } from "./grep.ts";
@@ -87,13 +89,44 @@ export function defaultTools(opts?: {
     // pi-agent-core owns read/write/edit's schema and execute; we add the
     // prompt-routing metadata on top so the system-prompt builder has a
     // single source of truth for each tool (its factory, or this wrap site).
+    // pi decodes non-images as text. Rewrite binary results so the model does not
+    // treat mojibake as the file contents. Path resolution and image blocks stay in pi.
+    // Typed against readBase, not TacoTool: that annotation widens params to unknown.
+    const readBase = createReadTool();
+    const readExecute: typeof readBase.execute = async (
+        toolCallId,
+        params,
+        onUpdate,
+        toolContext,
+        invocation,
+        context,
+    ) => {
+        const result = await readBase.execute(
+            toolCallId,
+            params,
+            onUpdate,
+            toolContext,
+            invocation,
+            context,
+        );
+        if (result.content.some((block) => block.type === "image")) return result;
+        const text = result.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n");
+        const hint = binaryReadHint(text, params.path, () => commandOnPath("officecli"));
+        if (!hint) return result;
+        return { content: [{ type: "text", text: hint }], details: undefined };
+    };
     const read: TacoTool = {
-        ...createReadTool(),
+        ...readBase,
+        description: `${readBase.description} Binary files (PDF, Office, archives, and files with NUL bytes) are not decoded as text; the result names the format and what to use instead.`,
         taco: {
             promptSummary:
-                "Read a file — prefer it over `shell cat` for truncation-aware output and image support. Text is truncated to ~30k tokens / 2000 lines (whichever hits first); use `offset` and `limit` to page through. Supports images (jpg/png/gif/webp) as attachments.",
+                "Read a file — prefer it over `shell cat` for truncation-aware output and image support. Text is truncated to ~30k tokens / 2000 lines; use `offset` and `limit` to page. Images (jpg/png/gif/webp) come back as attachments. PDF, Office, and other binary files are not decoded as text; the result says what to use instead.",
             mutates: false,
         },
+        execute: readExecute,
     };
     const write: TacoTool = {
         ...createWriteTool(),

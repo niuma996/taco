@@ -216,7 +216,20 @@ export interface CustomModelEntry {
      * with no text at all.
      */
     reasoning?: boolean;
+    /**
+     * Input the model accepts. Unset means text only: an endpoint exposes no
+     * catalog to read this from, and claiming image support the model lacks
+     * fails the request, while the reverse only downgrades images to a note.
+     *
+     * Not inherited from the provider's template model: the template is the
+     * first thinking model in the catalog, which says nothing about whether a
+     * hand-added id sees images.
+     */
+    input?: ModelInputKind[];
 }
+
+/** What a model can take as input. pi drops image blocks for a text-only model. */
+export type ModelInputKind = "text" | "image";
 
 /** Custom provider config (persisted as `customProviders` in `taco.json`). */
 export interface CustomProviderConfig {

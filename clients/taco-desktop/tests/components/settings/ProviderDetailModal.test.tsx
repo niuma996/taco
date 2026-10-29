@@ -593,6 +593,79 @@ describe("ProviderDetailModal — built-in provider", () => {
         await waitFor(() => expect(within(candidateList()).getByText("brand-new")).toBeTruthy());
         expect(listModels).toHaveBeenCalledWith({ providerId: "minimax" });
     });
+
+    it("saves image input when the switch is turned on", async () => {
+        const user = userEvent.setup();
+        const { onSaveBuiltin } = renderBuiltin();
+        const row = within(modelList())
+            .getByText("MiniMax-M3.1")
+            .closest(".provider-detail-model-row") as HTMLElement;
+        expect(within(row).queryByText("settings.providerModelImagesBadge")).toBeNull();
+        await user.click(
+            within(row).getByRole("button", { name: "settings.providerModelWindowEdit" }),
+        );
+        const sw = within(row.parentElement as HTMLElement).getByRole("switch", {
+            name: "settings.providerModelImages",
+        });
+        expect(sw.hasAttribute("aria-label")).toBe(false);
+        await user.click(sw);
+        expect(within(row).getByText("settings.providerModelImagesBadge")).toBeTruthy();
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(
+                undefined,
+                [{ id: "MiniMax-M3.1", input: ["text", "image"] }],
+                [],
+            ),
+        );
+    });
+
+    it("drops image input when the switch is turned off", async () => {
+        const user = userEvent.setup();
+        const withImages: ProviderView = {
+            ...provider,
+            models: [
+                { provider: "minimax", id: "MiniMax-M2", origin: "builtin" },
+                {
+                    provider: "minimax",
+                    id: "MiniMax-M3.1",
+                    origin: "extra",
+                    input: ["text", "image"],
+                },
+            ],
+        };
+        const onSaveBuiltin = vi.fn().mockResolvedValue(undefined);
+        render(
+            <ProviderDetailModal
+                client={{ providersRevealKey: vi.fn() } as unknown as TacoClient}
+                workspace={WS}
+                provider={withImages}
+                existingIds={[]}
+                mask="sk-ant-…AbCd"
+                saving={false}
+                onSaveBuiltin={onSaveBuiltin}
+                onClose={vi.fn()}
+            />,
+        );
+        const row = within(modelList())
+            .getByText("MiniMax-M3.1")
+            .closest(".provider-detail-model-row") as HTMLElement;
+        expect(within(row).getByText("settings.providerModelImagesBadge")).toBeTruthy();
+        await user.click(
+            within(row).getByRole("button", { name: "settings.providerModelWindowEdit" }),
+        );
+        await user.click(
+            within(row.parentElement as HTMLElement).getByRole("switch", {
+                name: "settings.providerModelImages",
+            }),
+        );
+        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+
+        await waitFor(() =>
+            expect(onSaveBuiltin).toHaveBeenCalledWith(undefined, [{ id: "MiniMax-M3.1" }], []),
+        );
+    });
 });
 
 describe("ProviderDetailModal — test connection", () => {

@@ -11,17 +11,14 @@
 import type { ParamsOf } from "./rpcContract/types.js";
 import type { attachmentStageSchema } from "./schemas/attachment.js";
 
-/** Largest file `attachment.stage` accepts, from a path or an inline body. */
-export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
-
-/**
- * Largest inline (`data`) body. Lower than the file cap because the body
- * travels as base64 inside one NDJSON frame, ~33% larger than the file.
- */
-export const ATTACHMENT_STAGE_INLINE_MAX_BYTES = 8 * 1024 * 1024;
-
-/** Most attachments one message may carry. */
-export const ATTACHMENT_MAX_COUNT = 8;
+export type { ModelImageMimeType } from "./attachmentLimits.js";
+export {
+    ATTACHMENT_MAX_BYTES,
+    ATTACHMENT_MAX_COUNT,
+    ATTACHMENT_STAGE_INLINE_MAX_BYTES,
+    IMAGE_INPUT_MAX_BASE64_LENGTH,
+    MODEL_IMAGE_MIME_TYPES,
+} from "./attachmentLimits.js";
 
 /** `image` when the bytes are a raster format models accept; `file` otherwise. */
 export type AttachmentKind = "image" | "file";

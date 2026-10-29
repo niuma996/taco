@@ -206,12 +206,17 @@ without forking the provider; both are keyed by built-in provider id
 
 | Key | Type | Meaning |
 |---|---|---|
-| `providerExtraModels` | `Record<id, { id, name?, contextWindow?, maxTokens? }[]>` | Appended after the static list. They stream through the provider's own protocol and endpoint. |
+| `providerExtraModels` | `Record<id, { id, name?, contextWindow?, maxTokens?, input? }[]>` | Appended after the static list. They stream through the provider's own protocol and endpoint. |
 | `providerHiddenModels` | `Record<id, string[]>` | Static ids removed from the catalog. The settings UI still lists them as `origin: "hidden"` so they can be restored. |
 
 The two are independent: hiding a static id does not drop a user-added
 entry with the same id. Empty arrays are rejected — remove the key instead.
 Both fields need protocol 2.2; an older daemon drops them on write.
+
+`input`, when present, is `"text"` and/or `"image"` (omitted means text only).
+The same optional field exists on `customProviders[].models`. It needs
+protocol 2.6; a 2.5 daemon drops it on write and still answers ok, so a saved
+image switch would not stick.
 
 ## 4. CLI flags
 

@@ -7,6 +7,7 @@
  * Failures keep the raw text: the error message is the useful part.
  */
 
+import { BINARY_READ_MARKER } from "@taco-ai/protocol";
 import { FileText } from "lucide-react";
 import type { ReactElement } from "react";
 import { useFilePreviewOpener } from "../../hooks/useFilePreviewOpener";
@@ -40,6 +41,8 @@ const IMAGE_RESULT_RE = /^Read image file \[/;
  * a line of its own.
  */
 export function countReadLines(resultText: string): number {
+    // The marker's lines are a hint, not file content.
+    if (resultText.startsWith(BINARY_READ_MARKER)) return 0;
     if (ONLY_NOTE_RE.test(resultText)) return 0;
     const body = resultText.replace(TRUNCATION_NOTE_RE, "");
     if (body === "") return 0;
@@ -66,9 +69,12 @@ export function ReadToolView({ tool }: ToolViewProps): ReactElement | null {
     }
 
     const isImage = IMAGE_RESULT_RE.test(resultText);
+    const isBinary = resultText.startsWith(BINARY_READ_MARKER);
     const summary = isImage
         ? t("activity.readImage")
-        : t("activity.readLines", { count: countReadLines(resultText) });
+        : isBinary
+          ? t("activity.readBinary")
+          : t("activity.readLines", { count: countReadLines(resultText) });
 
     return (
         <div className="tool-card-read">

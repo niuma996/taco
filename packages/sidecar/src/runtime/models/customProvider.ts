@@ -46,9 +46,18 @@ function toApiStreams(api: CustomProviderApi) {
 }
 
 /**
- * Maps `CustomModelEntry` to a pi-ai `Model`. `input` cannot be probed;
- * `reasoning` is the user's own claim, since a custom endpoint exposes no
- * catalog to read it from.
+ * The input kinds a user-added model accepts: what the user declared, text
+ * only otherwise. Text is always included — pi cannot send a turn to a model
+ * that takes no text.
+ */
+export function modelInput(entry: CustomModelEntry): ("text" | "image")[] {
+    return entry.input?.includes("image") ? ["text", "image"] : ["text"];
+}
+
+/**
+ * Maps `CustomModelEntry` to a pi-ai `Model`. `input` and `reasoning` are the
+ * user's own claims, since a custom endpoint exposes no catalog to read them
+ * from.
  */
 export function toModel(entry: CustomModelEntry, cfg: CustomProviderConfig): Model<Api> {
     return {
@@ -58,7 +67,7 @@ export function toModel(entry: CustomModelEntry, cfg: CustomProviderConfig): Mod
         provider: cfg.id,
         baseUrl: cfg.baseUrl,
         reasoning: entry.reasoning ?? false,
-        input: ["text"],
+        input: modelInput(entry),
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: entry.contextWindow ?? DEFAULT_CUSTOM_CONTEXT_WINDOW,
         maxTokens: entry.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,

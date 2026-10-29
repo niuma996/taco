@@ -30,6 +30,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { SecretInput } from "../ui/SecretInput.tsx";
 import { Select } from "../ui/Select.tsx";
+import { Switch } from "../ui/Switch.tsx";
 import { Tag } from "../ui/Tag.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
@@ -125,6 +126,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                 // A declared thinking flag must survive a save: dropping it
                 // would let the model fall back to the provider's default.
                 ...(m.reasoning === undefined ? {} : { reasoning: m.reasoning }),
+                ...(m.input === undefined ? {} : { input: m.input }),
             }));
     });
     const [hidden, setHidden] = useState<string[]>(() =>
@@ -302,6 +304,17 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                 if (m.id !== mid) return m;
                 const { contextWindow: _drop, ...rest } = m;
                 return contextWindow === undefined ? rest : { ...rest, contextWindow };
+            }),
+        );
+    };
+
+    /** Declare whether the model takes images. Off drops the field: text-only is the default. */
+    const writeModelImages = (mid: string, images: boolean) => {
+        setModels(
+            models.map((m) => {
+                if (m.id !== mid) return m;
+                const { input: _drop, ...rest } = m;
+                return images ? { ...rest, input: ["text", "image"] } : rest;
             }),
         );
     };
@@ -619,6 +632,11 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                                         ? t("settings.providerModelWindowDefault")
                                         : formatModelWindow(m.contextWindow)}
                                 </Tag>
+                                {m.input?.includes("image") && (
+                                    <Tag className="provider-row-badge">
+                                        {t("settings.providerModelImagesBadge")}
+                                    </Tag>
+                                )}
                                 <IconButton
                                     size="sm"
                                     aria-label={t("settings.providerModelWindowEdit")}
@@ -686,6 +704,19 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                                             ]}
                                         />
                                     )}
+                                    {/* editedModel opens one editor, so this id stays unique. */}
+                                    <span
+                                        id="provider-detail-model-images"
+                                        className="provider-detail-model-editor-label"
+                                    >
+                                        {t("settings.providerModelImages")}
+                                    </span>
+                                    <Switch
+                                        labelledBy="provider-detail-model-images"
+                                        checked={m.input?.includes("image") ?? false}
+                                        disabled={props.saving}
+                                        onChange={(on) => writeModelImages(m.id, on)}
+                                    />
                                 </div>
                             )}
                         </Fragment>

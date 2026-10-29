@@ -11,6 +11,7 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { SubagentProgressSink } from "../agents/types.ts";
+import { officecliMissingNote } from "../lib/officecliHint.ts";
 import type {
     AgentHarnessTool,
     AgentHarnessToolUpdateCallback,
@@ -19,7 +20,6 @@ import type {
     ExecutionToolContext,
     Skill,
 } from "../runtime/pi/types.ts";
-
 import { readSkillFrontmatter, type SkillFrontmatter } from "./skillFrontmatter.ts";
 import { createSkillBodyMessage } from "./skillMessages.ts";
 import type { SkillReinjectorHandle } from "./skillReinjector.ts";
@@ -84,6 +84,11 @@ export function createSkillTool(
          * (e.g. ad-hoc test construction) get the base description unchanged.
          */
         skillAuthoringGuidance?: string;
+        /**
+         * PATH lookup for the officecli missing-binary note. Tests pass a stub;
+         * production walks process.env.PATH, already merged with the login shell.
+         */
+        commandOnPath?: (name: string) => boolean;
     },
 ): AgentHarnessTool<ExecutionToolContext, typeof skillSchema, SkillToolDetails> {
     const { parentSessionId, getReinjector, spawnSkillSubagent, skillAuthoringGuidance } = options;
@@ -126,6 +131,11 @@ export function createSkillTool(
 
             const skillFrontmatter = readSkillFrontmatter(skill.filePath);
             const runAs = skillFrontmatter.runAs ?? "inline";
+            // The skill body says how to install, but not whether the binary is
+            // missing right now. Say so here so the model does not learn it from
+            // `command not found`.
+            const note = officecliMissingNote(skill.name, options.commandOnPath);
+            const skillBody = note ? { ...skill, content: `${note}\n\n${skill.content}` } : skill;
 
             // inlineOnly: a skill that only makes sense in the calling session.
             // The fan-out skill is the canonical example — it teaches the model
@@ -162,7 +172,7 @@ export function createSkillTool(
                     parentSessionId,
                     parentToolCallId: toolCallId,
                     skillName: skill.name,
-                    skillContent: skill.content,
+                    skillContent: skillBody.content,
                     skillFrontmatter,
                     args: params.args ?? "",
                     signal,
@@ -170,7 +180,7 @@ export function createSkillTool(
                 });
 
                 const text = result.isError
-                    ? `skill subagent error: ${result.resultText}`
+                    ? `skill subagent error: ${result.resultText}${note ? `\n\n${note}` : ""}`
                     : result.resultText;
 
                 return {
@@ -183,7 +193,7 @@ export function createSkillTool(
             const reinjector = getReinjector();
             if (reinjector) {
                 reinjector.markInvoked(skill.name);
-                const msg = createSkillBodyMessage(skill, params.args ?? "");
+                const msg = createSkillBodyMessage(skillBody, params.args ?? "");
                 reinjector.enqueueInlineInjection(msg);
             }
 
@@ -191,9 +201,11 @@ export function createSkillTool(
                 content: [
                     {
                         type: "text",
-                        text: reinjector
-                            ? `Skill "${skill.name}" activated. The skill body is now available in context.`
-                            : `Skill "${skill.name}" activation has no session reinjector wired — body not injected.`,
+                        text: `${
+                            reinjector
+                                ? `Skill "${skill.name}" activated. The skill body is now available in context.`
+                                : `Skill "${skill.name}" activation has no session reinjector wired — body not injected.`
+                        }${note ? `\n\n${note}` : ""}`,
                     },
                 ],
                 details: { skillName: skill.name, found: true, runAs: "inline" },

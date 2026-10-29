@@ -775,6 +775,40 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             assert.equal(view?.models.find((m) => m.id === "extra-2")?.contextWindow, undefined);
         });
 
+        it("an added model sees images only when the user declares it, not from its template", () => {
+            const store = new ProviderKeyStore({});
+            const template = stubProvider("stub-a", "model-a").getModels()[0];
+            assert.ok(template);
+            // The template sees images; that must not leak onto a hand-added id.
+            const vision = {
+                ...stubProvider("stub-a", "model-a"),
+                getModels: () => [
+                    { ...template, input: ["text", "image"] as ("text" | "image")[] },
+                ],
+            };
+            const mr = new ModelRegistry({
+                models,
+                sessionRegistry: makeSessionRegistry(),
+                providerKeyStore: store,
+                builtinProviders: [{ id: "stub-a", name: "Stub A", factory: () => vision }],
+                providerExtraModels: {
+                    "stub-a": [{ id: "plain" }, { id: "eyes", input: ["text", "image"] }],
+                },
+            });
+            assert.deepEqual(models.getModel("stub-a", "plain")?.input, ["text"]);
+            assert.deepEqual(models.getModel("stub-a", "eyes")?.input, ["text", "image"]);
+
+            const view = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
+            // Declared only: an undeclared extra must not round-trip a default into config.
+            assert.equal(view?.models.find((m) => m.id === "plain")?.input, undefined);
+            assert.deepEqual(view?.models.find((m) => m.id === "eyes")?.input, ["text", "image"]);
+            // A catalog model reports pi's own input kinds.
+            assert.deepEqual(view?.models.find((m) => m.id === "model-a")?.input, [
+                "text",
+                "image",
+            ]);
+        });
+
         it("keeps the static model canonical when an extra reuses its id", () => {
             const store = new ProviderKeyStore({});
             const mr = new ModelRegistry({

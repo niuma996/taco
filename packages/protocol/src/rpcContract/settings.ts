@@ -19,6 +19,7 @@ import type {
     McpServerConfig,
     McpServerConfigView,
     McpTransportKind,
+    ModelInputKind,
     TacoGlobalConfigView,
 } from "../config.js";
 import {
@@ -206,6 +207,12 @@ export interface ProviderView {
          * for an added model. Absent means the provider's default applies.
          */
         reasoning?: boolean;
+        /**
+         * Input the model accepts. A catalog model carries pi's own; an added
+         * model carries only what the user declared, so a save does not pin
+         * the text-only default into the config.
+         */
+        input?: ModelInputKind[];
     }>;
 }
 

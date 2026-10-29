@@ -16,6 +16,12 @@ import type {
     toolsListSchema,
 } from "./schemas/tools.js";
 
+/**
+ * First line of a `read` result that replaced undecoded bytes. The desktop
+ * card matches this instead of counting those lines as file content.
+ */
+export const BINARY_READ_MARKER = "[binary file not decoded]";
+
 // tools.list
 
 /** `tools.list` RPC params. */

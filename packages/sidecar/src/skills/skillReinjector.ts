@@ -8,9 +8,9 @@
  * messages + skills compacted away before the last user message.
  */
 
+import { officecliMissingNote } from "../lib/officecliHint.ts";
 import type { AgentMessage, Skill, TextContent } from "../runtime/pi/types.ts";
 import { findBalancedTagsSkippingFences } from "../tags/fenceAware.ts";
-
 import { createSkillBodyMessage } from "./skillMessages.ts";
 
 const PENDING_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -66,7 +66,10 @@ export interface SkillReinjectorHandle {
  * Both pieces share the same closure — disposing the harness (and hence the
  * hook) implicitly drops the state. No module globals.
  */
-export function buildSkillReinjector(store: SkillStore): {
+export function buildSkillReinjector(
+    store: SkillStore,
+    options?: { commandOnPath?: (name: string) => boolean },
+): {
     hook: (event: { messages: AgentMessage[] }) => { messages: AgentMessage[] };
     handle: SkillReinjectorHandle;
 } {
@@ -108,7 +111,13 @@ export function buildSkillReinjector(store: SkillStore): {
         for (const name of invokedSkills.keys()) {
             if (!inContext.has(name)) {
                 const skill = store.skills.find((s) => s.name === name);
-                if (skill) toReinject.push(createSkillBodyMessage(skill));
+                if (skill) {
+                    const note = officecliMissingNote(skill.name, options?.commandOnPath);
+                    const body = note
+                        ? { ...skill, content: `${note}\n\n${skill.content}` }
+                        : skill;
+                    toReinject.push(createSkillBodyMessage(body));
+                }
             }
         }
 
