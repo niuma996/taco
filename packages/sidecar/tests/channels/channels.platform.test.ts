@@ -108,8 +108,13 @@ describe("wechatChannel", () => {
         emit(event: string, ...args: unknown[]): void {
             for (const h of this.listeners.get(event) ?? []) h(...args);
         }
+        /** The channel's batch window; `deliver` waits it out before returning. */
+        quietMs = 0;
+
         async deliver(msg: IncomingLike): Promise<void> {
             await this.messageHandler?.(msg);
+            // Batched submits land on a timer, not on the handler's return.
+            await new Promise((resolve) => setTimeout(resolve, this.quietMs + 5));
         }
     }
 
@@ -141,6 +146,7 @@ describe("wechatChannel", () => {
                 return bot;
             },
             listPeers: (_channelId: string) => opts.listPeers ?? [],
+            mergeWindowMs: 0,
         });
         const ctx: ChannelContext = {
             channelId: "wechat",
@@ -404,6 +410,64 @@ describe("wechatChannel", () => {
             assert.equal(h.submitted[0].media?.[0].name, "report.pdf");
         });
 
+        it("submits a picture and the words sent with it as one prompt", async () => {
+            // The platform delivers them as two messages, and the poller does
+            // not wait for one batch before emitting the next. One prompt per
+            // message starts a run on whichever arrives first and demotes the
+            // other to a follow-up the model only sees after answering.
+            const h = harness();
+            await h.channel.start(h.ctx);
+            let release: () => void = () => {};
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            h.bot.download = async () => {
+                await gate;
+                return { data: Buffer.from("PNGBYTES"), type: "image" };
+            };
+            const image = h.bot.deliver({
+                userId: "u1",
+                text: "[image]",
+                images: [{}],
+                raw: { message_id: 20, create_time_ms: 1_700_000_000_020 },
+            });
+            const caption = h.bot.deliver({
+                userId: "u1",
+                text: "what is in the picture",
+                raw: { message_id: 21, create_time_ms: 1_700_000_000_021 },
+            });
+            release();
+            await Promise.all([image, caption]);
+            assert.equal(h.submitted.length, 1, "one prompt, not two messages");
+            const msg = h.submitted[0];
+            assert.equal(msg.text, "what is in the picture");
+            assert.equal(msg.kind, "media");
+            assert.equal(msg.media?.[0].kind, "image");
+        });
+
+        it("keeps different senders in one group as separate prompts", async () => {
+            // The group shares a session, but two people writing are two turns;
+            // merging them would make the agent answer both as one message.
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = { data: Buffer.from("PNGBYTES"), type: "image" };
+            await h.bot.deliver({
+                userId: "u1",
+                text: "[image]",
+                images: [{}],
+                raw: { message_id: 22, group_id: "g1", create_time_ms: 1_700_000_000_022 },
+            });
+            await h.bot.deliver({
+                userId: "u2",
+                text: "hello",
+                raw: { message_id: 23, group_id: "g1", create_time_ms: 1_700_000_000_023 },
+            });
+            assert.deepEqual(
+                h.submitted.map((m) => m.peerId),
+                ["u1", "u2"],
+            );
+        });
+
         it("drops a media message whose download fails", async () => {
             const warns: string[] = [];
             const logger: Logger = {
@@ -656,9 +720,16 @@ describe("wecomChannel", () => {
             this.sent.push({ chatid, body });
             return {};
         }
+        /** The channel's batch window; deliver helpers wait it out. */
+        quietMs = 0;
+        /** Batched submits land on a timer, not on the emit. */
+        private async settle(): Promise<void> {
+            await new Promise((resolve) => setTimeout(resolve, this.quietMs + 5));
+        }
         /** Test helper — emit a typed message.text frame. */
-        deliverText(frame: WeComTextFrameLike): void {
+        async deliverText(frame: WeComTextFrameLike): Promise<void> {
             this.emit("message.text", frame);
+            await this.settle();
         }
         /** What the next downloadFile call returns. */
         downloadResult: { buffer: Buffer; filename?: string } = { buffer: Buffer.alloc(0) };
@@ -672,12 +743,14 @@ describe("wecomChannel", () => {
             return this.downloadResult;
         }
         /** Test helper — emit an image frame. */
-        deliverImage(frame: WeComMediaFrameLike): void {
+        async deliverImage(frame: WeComMediaFrameLike): Promise<void> {
             this.emit("message.image", frame);
+            await this.settle();
         }
         /** Test helper — emit a file frame. */
-        deliverFile(frame: WeComMediaFrameLike): void {
+        async deliverFile(frame: WeComMediaFrameLike): Promise<void> {
             this.emit("message.file", frame);
+            await this.settle();
         }
         /** Test helper — emit the SDK's authenticated success. */
         markAuthenticated(): void {
@@ -722,6 +795,7 @@ describe("wecomChannel", () => {
                 clients.push(c);
                 return c;
             },
+            mergeWindowMs: 0,
         });
         const ctx: ChannelContext = {
             channelId: "wecom",
@@ -797,7 +871,7 @@ describe("wecomChannel", () => {
         it("routes an inbound text message with msgid as platformMessageId, chatid falling back to the peer userid for 1:1 chats", async () => {
             const h = harness({ credentials: { botId: "b", secret: "s" } });
             const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
-            h.client.deliverText({
+            await h.client.deliverText({
                 body: {
                     msgid: "m-123",
                     chattype: "single",
@@ -805,7 +879,7 @@ describe("wecomChannel", () => {
                     text: { content: "hello" },
                 },
             });
-            h.client.deliverText({
+            await h.client.deliverText({
                 body: {
                     msgid: "m-empty",
                     chatid: "",
@@ -814,7 +888,7 @@ describe("wecomChannel", () => {
                     text: { content: "hi" },
                 },
             });
-            h.client.deliverText({
+            await h.client.deliverText({
                 body: {
                     msgid: "m-grp",
                     chatid: "g-77",
@@ -839,11 +913,71 @@ describe("wecomChannel", () => {
             await handle.close();
         });
 
+        it("submits a picture and the words sent with it as one prompt", async () => {
+            const h = harness({ credentials: { botId: "b", secret: "s" } });
+            const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+            h.client.downloadResult = { buffer: Buffer.from("PNGBYTES") };
+            // The platform sends them as two frames; emitted together, they
+            // belong to one user turn.
+            const image = h.client.deliverImage({
+                body: {
+                    msgid: "m-img",
+                    chatid: "g-1",
+                    from: { userid: "u1" },
+                    image: { url: "https://example.test/i", aeskey: "key-1" },
+                },
+            });
+            const text = h.client.deliverText({
+                body: {
+                    msgid: "m-cap",
+                    chatid: "g-1",
+                    chattype: "group",
+                    from: { userid: "u1" },
+                    text: { content: "what is this" },
+                },
+            });
+            await Promise.all([image, text]);
+            assert.equal(h.submitted.length, 1);
+            assert.equal(h.submitted[0].text, "what is this");
+            assert.equal(h.submitted[0].kind, "media");
+            assert.equal(h.submitted[0].media?.[0].kind, "image");
+            await handle.close();
+        });
+
+        it("keeps different senders in one group as separate prompts", async () => {
+            const h = harness({ credentials: { botId: "b", secret: "s" } });
+            const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+            h.client.downloadResult = { buffer: Buffer.from("PNGBYTES") };
+            const image = h.client.deliverImage({
+                body: {
+                    msgid: "m-img",
+                    chatid: "g-1",
+                    from: { userid: "u1" },
+                    image: { url: "https://example.test/i", aeskey: "key-1" },
+                },
+            });
+            const text = h.client.deliverText({
+                body: {
+                    msgid: "m-cap",
+                    chatid: "g-1",
+                    chattype: "group",
+                    from: { userid: "u2" },
+                    text: { content: "hello" },
+                },
+            });
+            await Promise.all([image, text]);
+            assert.deepEqual(
+                h.submitted.map((m) => m.peerId),
+                ["u1", "u2"],
+            );
+            await handle.close();
+        });
+
         it("downloads an inbound image and submits it as media", async () => {
             const h = harness({ credentials: { botId: "b", secret: "s" } });
             const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
             h.client.downloadResult = { buffer: Buffer.from("PNGBYTES") };
-            h.client.deliverImage({
+            await h.client.deliverImage({
                 body: {
                     msgid: "m-img",
                     chatid: "g-1",
@@ -871,7 +1005,7 @@ describe("wecomChannel", () => {
             const h = harness({ credentials: { botId: "b", secret: "s" } });
             const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
             h.client.downloadResult = { buffer: Buffer.from("%PDF-1.7"), filename: "report.pdf" };
-            h.client.deliverFile({
+            await h.client.deliverFile({
                 body: {
                     msgid: "m-file",
                     chatid: "g-1",
@@ -903,7 +1037,7 @@ describe("wecomChannel", () => {
             h.client.downloadFile = async () => {
                 throw new Error("expired");
             };
-            h.client.deliverImage({
+            await h.client.deliverImage({
                 body: {
                     msgid: "m-img",
                     from: { userid: "u1" },
@@ -923,8 +1057,8 @@ describe("wecomChannel", () => {
                 route: { channelId: "wecom", peerId: "u1", chatId: "u1" },
             });
             const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
-            h.client.deliverText({ body: { from: { userid: "" }, text: { content: "x" } } });
-            h.client.deliverText({ body: { msgid: "ok", from: { userid: "u1" } } });
+            await h.client.deliverText({ body: { from: { userid: "" }, text: { content: "x" } } });
+            await h.client.deliverText({ body: { msgid: "ok", from: { userid: "u1" } } });
             await new Promise((r) => setImmediate(r));
             assert.equal(h.submitted.length, 0);
             await handle.close();

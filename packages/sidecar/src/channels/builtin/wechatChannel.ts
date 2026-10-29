@@ -15,6 +15,13 @@ import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
+import {
+    DEFAULT_MERGE_MAX_WAIT_MS,
+    DEFAULT_MERGE_WINDOW_MS,
+    InboundBatcher,
+    type PreparedInbound,
+    submitPreparedBatch,
+} from "../inboundBatcher.ts";
 import type {
     Channel,
     ChannelContext,
@@ -40,6 +47,10 @@ export interface WeChatChannelOptions {
      *  a workspace-dimensioned frame (no session) can broadcast to all peers.
      *  Receives the channelId so the resolver need not close over the context. */
     listPeers?: (channelId: string) => string[];
+    /** Quiet window that closes a chat's inbound batch. Tests set 0. */
+    mergeWindowMs?: number;
+    /** Upper bound on how long a batch's first message waits for the window. */
+    mergeMaxWaitMs?: number;
 }
 
 /** Whether the message carried anything the SDK can download. */
@@ -120,6 +131,51 @@ async function downloadMessageMedia(
             },
         },
     ];
+}
+
+/**
+ * Download whatever the message carried and take the SDK's media lines out of
+ * its text. Returns undefined for a message that is dropped: it carried media
+ * the downloader could not fetch, so its text would be a placeholder where the
+ * sender meant a picture.
+ */
+async function prepareInbound(
+    ctx: ChannelContext,
+    log: Logger,
+    bot: WeChatBotLike,
+    msg: IncomingLike,
+    peerId: string,
+    chatId: string,
+): Promise<PreparedInbound | undefined> {
+    // platformMessageId must be stable across redeliveries (long-poll cursor
+    // rewinds, iLink retries) so session.prompt's commandId dedup
+    // catches them. `peerId-chatId` alone would also dedup two distinct
+    // messages from the same peer; we tag on a monotonic upstream
+    // identifier — message_id → client_id → seq → create_time_ms —
+    // each stable for one delivery. The fallback chain is a safety
+    // net for an SDK upgrade that drops `message_id`; the type
+    // system forbids it today, the chain keeps us alive tomorrow.
+    const raw = msg.raw;
+    const platformMessageId = String(
+        raw.message_id ?? raw.client_id ?? raw.seq ?? `${peerId}-${chatId}-${raw.create_time_ms}`,
+    );
+    const media = await downloadMessageMedia(bot, msg);
+    if (hasMedia(msg) && !media) {
+        log.warn(`media download failed, message dropped: ${platformMessageId}`);
+        return undefined;
+    }
+    return {
+        platformMessageId,
+        channelId: ctx.channelId,
+        peerId,
+        chatId,
+        // The SDK's text for a media message is derived from the media — a
+        // placeholder, the media's url, its file name. A real caption is the
+        // sender's words and stays; the rest would only be noise the model
+        // reads past.
+        text: media ? captionFor(msg.text, [media[0]?.name, ...sdkFileNames(msg)]) : msg.text,
+        media,
+    };
 }
 
 /** The slice of the SDK surface this channel uses. */
@@ -284,7 +340,23 @@ export class WeChatChannel implements Channel {
             broker.setState(ctx.channelId, "error", { message });
         });
 
-        bot.onMessage(async (msg) => {
+        // A picture and the words sent with it are separate platform messages
+        // with no guaranteed order between them, and the poller does not wait
+        // for one batch before emitting the next. One prompt per message starts
+        // a run on whichever arrives first and demotes the other to a follow-up
+        // the model only sees after it has answered. Hold each chat's messages
+        // for a short quiet window and submit them as one prompt instead.
+        const batcher = new InboundBatcher<PreparedInbound | undefined>({
+            quietMs: this.options.mergeWindowMs ?? DEFAULT_MERGE_WINDOW_MS,
+            maxWaitMs: this.options.mergeMaxWaitMs ?? DEFAULT_MERGE_MAX_WAIT_MS,
+            flush: (_key, items) => {
+                // A dropped message (failed download) leaves a hole, not text.
+                const ready = items.filter((item): item is PreparedInbound => item !== undefined);
+                if (ready.length > 0) void submitPreparedBatch(ctx, log, ready);
+            },
+        });
+
+        bot.onMessage((msg) => {
             markHealthy();
             // chatId groups a conversation: a group shares one session, a 1:1
             // chat falls back to the peer's own id.
@@ -295,52 +367,12 @@ export class WeChatChannel implements Channel {
             // silently breaks the reply path (no peer resolves for the session).
             const peerId = msg.userId;
             const chatId = msg.raw.group_id?.trim() || msg.userId;
-            // platformMessageId must be stable across redeliveries (long-poll cursor
-            // rewinds, iLink retries) so session.prompt's commandId dedup
-            // catches them. `peerId-chatId` alone would also dedup two distinct
-            // messages from the same peer; we tag on a monotonic upstream
-            // identifier — message_id → client_id → seq → create_time_ms —
-            // each stable for one delivery. The fallback chain is a safety
-            // net for an SDK upgrade that drops `message_id`; the type
-            // system forbids it today, the chain keeps us alive tomorrow.
-            const raw = msg.raw;
-            const platformMessageId = String(
-                raw.message_id ??
-                    raw.client_id ??
-                    raw.seq ??
-                    `${peerId}-${chatId}-${raw.create_time_ms}`,
+            // The sender is part of the key as well as the chat: two people
+            // writing in a group are two turns, not one.
+            batcher.push(
+                `${peerId}\u0000${chatId}`,
+                prepareInbound(ctx, log, bot, msg, peerId, chatId),
             );
-            const media = await downloadMessageMedia(bot, msg);
-            // A message that carried media but whose download failed is
-            // dropped: its text comes from the media (a placeholder, its url),
-            // and sending that would put a word where the sender meant a
-            // picture.
-            if (hasMedia(msg) && !media) {
-                log.warn(`media download failed, message dropped: ${platformMessageId}`);
-                return;
-            }
-            try {
-                const { sessionId } = await ctx.ingress.submit({
-                    platformMessageId,
-                    channelId: ctx.channelId,
-                    peerId,
-                    chatId,
-                    kind: media ? "media" : "text",
-                    // The SDK's text for a media message is derived from the
-                    // media — a placeholder, the media's url, its file name.
-                    // A real caption is the sender's words and stays; the
-                    // rest would only be noise the model reads past.
-                    text: media
-                        ? captionFor(msg.text, [media[0]?.name, ...sdkFileNames(msg)])
-                        : msg.text,
-                    media,
-                });
-                // peerId/chatId are platform user identifiers and logs persist
-                // to disk — only sessionId is safe to record.
-                log.child({ sid: sessionId }).info("inbound message routed");
-            } catch (e) {
-                log.error(`inbound submit failed: ${e instanceof Error ? e.message : String(e)}`);
-            }
         });
 
         // Only auto-start when credentials already exist; a fresh install must
@@ -367,6 +399,7 @@ export class WeChatChannel implements Channel {
             resolveRoute,
             broker,
             callbacks,
+            () => batcher.dispose(),
             listPeers ? () => listPeers(ctx.channelId) : undefined,
         );
     }
@@ -379,6 +412,7 @@ class WeChatChannelHandle implements ChannelHandle {
         private readonly resolveRoute: ChannelRouteResolver,
         private readonly broker: ChannelBindBroker,
         private readonly callbacks: SdkLoginCallbacks,
+        private readonly onClose: () => void,
         readonly listPeers?: () => string[],
     ) {}
 
@@ -429,6 +463,7 @@ class WeChatChannelHandle implements ChannelHandle {
     async close(): Promise<void> {
         this.broker.cancel(this.ctx.channelId, "channel closing");
         this.bot.stop();
+        this.onClose();
     }
 }
 

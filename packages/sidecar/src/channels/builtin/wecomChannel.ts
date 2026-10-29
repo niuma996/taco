@@ -26,6 +26,13 @@ import { WSClient } from "@wecom/aibot-node-sdk";
 import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
+import {
+    DEFAULT_MERGE_MAX_WAIT_MS,
+    DEFAULT_MERGE_WINDOW_MS,
+    InboundBatcher,
+    type PreparedInbound,
+    submitPreparedBatch,
+} from "../inboundBatcher.ts";
 import type {
     Channel,
     ChannelContext,
@@ -93,6 +100,10 @@ export interface WeComChannelOptions {
     resolveRoute: ChannelRouteResolver;
     /** Injectable for tests; defaults to the real `WSClient` cast structurally. */
     createClient?: (opts: WeComClientFactoryOptions) => WeComClientLike;
+    /** Quiet window that closes a chat's inbound batch. Tests set 0. */
+    mergeWindowMs?: number;
+    /** Upper bound on how long a batch's first message waits for the window. */
+    mergeMaxWaitMs?: number;
 }
 
 export interface WeComClientFactoryOptions {
@@ -114,6 +125,10 @@ export class WeComChannel implements Channel {
             broker,
             resolveRoute,
             this.options.createClient ?? defaultCreateClient,
+            {
+                mergeWindowMs: this.options.mergeWindowMs ?? DEFAULT_MERGE_WINDOW_MS,
+                mergeMaxWaitMs: this.options.mergeMaxWaitMs ?? DEFAULT_MERGE_MAX_WAIT_MS,
+            },
         );
 
         // Auto-connect when credentials are already on disk (channel was
@@ -137,12 +152,18 @@ export class WeComChannelHandle implements ChannelHandle {
      *  `disconnected` event doesn't surface as a broker error. Cleared by the
      *  next reconnect, since each reconnect builds a fresh client. */
     private intentionalClose = false;
+    /** One per live client; a stale client's handlers never reach the new one. */
+    private batcher?: InboundBatcher<PreparedInbound | undefined>;
 
     constructor(
         private readonly ctx: ChannelContext,
         private readonly broker: ChannelBindBroker,
         private readonly resolveRoute: ChannelRouteResolver,
         private readonly createClient: (opts: WeComClientFactoryOptions) => WeComClientLike,
+        private readonly batchWindow: { mergeWindowMs: number; mergeMaxWaitMs: number } = {
+            mergeWindowMs: DEFAULT_MERGE_WINDOW_MS,
+            mergeMaxWaitMs: DEFAULT_MERGE_MAX_WAIT_MS,
+        },
     ) {}
 
     async push(frame: ServerPush): Promise<void> {
@@ -204,6 +225,18 @@ export class WeComChannelHandle implements ChannelHandle {
         // its late `disconnected` must not clobber the new client's state.
         const stale = () => this.client !== client;
 
+        // Picture and wording arrive as separate frames, so a chat's messages
+        // are held for a short window and submitted as one prompt.
+        this.batcher?.dispose();
+        this.batcher = new InboundBatcher<PreparedInbound | undefined>({
+            quietMs: this.batchWindow.mergeWindowMs,
+            maxWaitMs: this.batchWindow.mergeMaxWaitMs,
+            flush: (_key, items) => {
+                const ready = items.filter((item): item is PreparedInbound => item !== undefined);
+                if (ready.length > 0) void submitPreparedBatch(this.ctx, this.ctx.logger, ready);
+            },
+        });
+
         client.on("authenticated", () => {
             if (stale()) return;
             broker.setState(ctx.channelId, "connected");
@@ -228,12 +261,16 @@ export class WeComChannelHandle implements ChannelHandle {
             if (!frame?.body?.msgid || !media?.url) return;
             const peerId = frame.body.from?.userid;
             if (!peerId) return;
-            void this.submitMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
-                url: media.url,
-                aesKey: media.aeskey,
-                name: "image",
-                kind: "image",
-            });
+            this.enqueue(
+                peerId,
+                frame.body.chatid,
+                this.prepareMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
+                    url: media.url,
+                    aesKey: media.aeskey,
+                    name: "image",
+                    kind: "image",
+                }),
+            );
         });
 
         client.on("message.file", (...args: unknown[]) => {
@@ -243,12 +280,16 @@ export class WeComChannelHandle implements ChannelHandle {
             if (!frame?.body?.msgid || !media?.url) return;
             const peerId = frame.body.from?.userid;
             if (!peerId) return;
-            void this.submitMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
-                url: media.url,
-                aesKey: media.aeskey,
-                name: "file",
-                kind: "file",
-            });
+            this.enqueue(
+                peerId,
+                frame.body.chatid,
+                this.prepareMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
+                    url: media.url,
+                    aesKey: media.aeskey,
+                    name: "file",
+                    kind: "file",
+                }),
+            );
         });
 
         client.on("message.text", (...args: unknown[]) => {
@@ -269,76 +310,77 @@ export class WeComChannelHandle implements ChannelHandle {
             // redeliveries. Falling back to the user/chat pair is a safety
             // net for an SDK upgrade that drops the field.
             const platformMessageId = body.msgid || `${peerId}-${chatId}-${Date.now()}`;
-            void ctx.ingress
-                .submit({
+            this.enqueue(
+                peerId,
+                chatId,
+                Promise.resolve({
                     platformMessageId,
                     channelId: ctx.channelId,
                     peerId,
                     chatId,
-                    kind: "text",
                     text: body.text.content,
-                })
-                .then(({ sessionId }) => {
-                    // peerId / chatId are platform user identifiers and logs
-                    // persist to disk — only sessionId is safe to record.
-                    ctx.logger.child({ sid: sessionId }).info("inbound message routed");
-                })
-                .catch((e: unknown) => {
-                    ctx.logger.error(
-                        `inbound submit failed: ${e instanceof Error ? e.message : String(e)}`,
-                    );
-                });
+                    media: undefined,
+                }),
+            );
         });
     }
 
     /**
-     * Download a media file the platform sent and hand it to the ingress.
+     * Queue one message into its chat's batch. The sender is part of the key:
+     * two people writing in a group are two turns, not one.
+     */
+    private enqueue(
+        peerId: string,
+        chatId: string | undefined,
+        item: Promise<PreparedInbound | undefined>,
+    ): void {
+        this.batcher?.push(`${peerId}\u0000${chatId?.trim() || peerId}`, item);
+    }
+
+    /**
+     * Download a media file the platform sent and turn it into a batch item.
      *
      * The download happens here rather than in the sidecar because the SDK
      * holds the decryption key: the platform's URL serves an encrypted body
-     * that only the SDK's downloader can turn into bytes.
+     * that only the SDK's downloader can turn into bytes. A failed download
+     * yields undefined, which the batch drops rather than submitting a
+     * placeholder.
      */
-    private async submitMedia(
+    private async prepareMedia(
         client: WeComClientLike,
         platformMessageId: string,
         peerId: string,
         chatId: string | undefined,
         media: { url: string; aesKey?: string; name: string; kind: "image" | "file" },
-    ): Promise<void> {
-        const log = this.ctx.logger;
+    ): Promise<PreparedInbound | undefined> {
         let downloaded: { buffer: Buffer; filename?: string };
         try {
             downloaded = await client.downloadFile(media.url, media.aesKey);
         } catch (e) {
-            log.warn(
+            this.ctx.logger.warn(
                 `media download failed (${platformMessageId}): ${e instanceof Error ? e.message : String(e)}`,
             );
-            return;
+            return undefined;
         }
         const name = downloaded.filename ?? media.name;
-        try {
-            await this.ctx.ingress.submit({
-                platformMessageId,
-                channelId: this.ctx.channelId,
-                peerId,
-                chatId: chatId?.trim() || peerId,
-                kind: "media",
-                text: "",
-                media: [
-                    {
-                        kind: media.kind,
-                        name,
-                        source: {
-                            kind: "base64",
-                            mimeType: mimeTypeFromName(name),
-                            data: downloaded.buffer.toString("base64"),
-                        },
+        return {
+            platformMessageId,
+            channelId: this.ctx.channelId,
+            peerId,
+            chatId: chatId?.trim() || peerId,
+            text: "",
+            media: [
+                {
+                    kind: media.kind,
+                    name,
+                    source: {
+                        kind: "base64",
+                        mimeType: mimeTypeFromName(name),
+                        data: downloaded.buffer.toString("base64"),
                     },
-                ],
-            });
-        } catch (e) {
-            log.warn(`media submit failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
+                },
+            ],
+        };
     }
 
     /** Drops the current client, marking the disconnect intentional so its
@@ -416,6 +458,7 @@ export class WeComChannelHandle implements ChannelHandle {
     async close(): Promise<void> {
         this.broker.cancel(this.ctx.channelId, "channel closing");
         this.closeClient();
+        this.batcher?.dispose();
     }
 }
 
