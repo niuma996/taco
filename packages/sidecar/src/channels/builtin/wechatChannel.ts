@@ -14,10 +14,12 @@ import { WeChatBot } from "@wechatbot/wechatbot";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
+import { guessMimeType } from "../mediaMime.ts";
 import type {
     Channel,
     ChannelContext,
     ChannelHandle,
+    ChannelMediaRef,
     ChannelRouteResolver,
     Logger,
 } from "../types.ts";
@@ -40,6 +42,50 @@ export interface WeChatChannelOptions {
     listPeers?: (channelId: string) => string[];
 }
 
+/** Whether the message carried anything the SDK can download. */
+function hasMedia(msg: IncomingLike): boolean {
+    return (
+        (msg.images?.length ?? 0) > 0 ||
+        (msg.files?.length ?? 0) > 0 ||
+        (msg.voices?.length ?? 0) > 0 ||
+        (msg.videos?.length ?? 0) > 0
+    );
+}
+
+/**
+ * Download the media an incoming message carried, if it carried any.
+ *
+ * The SDK's downloader picks the file and decrypts it; this only decides
+ * whether to call it and names what came back. A message with no media
+ * returns undefined, and so does a download that fails — the sender's text
+ * still arrives either way.
+ */
+async function downloadMessageMedia(
+    bot: WeChatBotLike,
+    msg: IncomingLike,
+): Promise<ChannelMediaRef[] | undefined> {
+    if (!hasMedia(msg)) return undefined;
+    let downloaded: DownloadedMediaLike | null;
+    try {
+        downloaded = await bot.download(msg);
+    } catch {
+        return undefined;
+    }
+    if (!downloaded) return undefined;
+    const name = downloaded.fileName ?? (downloaded.type === "image" ? "image" : "file");
+    return [
+        {
+            kind: downloaded.type === "image" ? "image" : "file",
+            name,
+            source: {
+                kind: "base64",
+                mimeType: guessMimeType(name),
+                data: downloaded.data.toString("base64"),
+            },
+        },
+    ];
+}
+
 /** The slice of the SDK surface this channel uses. */
 export interface WeChatBotLike {
     login(options?: { force?: boolean; callbacks?: SdkLoginCallbacks }): Promise<unknown>;
@@ -48,7 +94,16 @@ export interface WeChatBotLike {
     send(userId: string, content: string): Promise<void>;
     onMessage(handler: (msg: IncomingLike) => void | Promise<void>): unknown;
     on(event: string, handler: (...args: unknown[]) => void): unknown;
+    /** Fetch and decrypt a media file the platform offered. */
+    download(message: IncomingLike): Promise<DownloadedMediaLike | null>;
     readonly isRunning: boolean;
+}
+
+/** What the SDK's downloader returns for one media file. */
+export interface DownloadedMediaLike {
+    data: Buffer;
+    type: "image" | "file" | "video" | "voice";
+    fileName?: string;
 }
 
 /**
@@ -65,6 +120,17 @@ export interface WeChatBotLike {
 export interface IncomingBaseLike {
     userId: string;
     text: string;
+    /**
+     * The media the message carried.
+     *
+     * The SDK's downloader reads these arrays, so the seam keeps them: a
+     * channel that does not look at them can still hand the message back to
+     * the downloader unchanged.
+     */
+    images?: unknown[];
+    files?: unknown[];
+    voices?: unknown[];
+    videos?: unknown[];
     raw: {
         message_id: number;
         create_time_ms: number;
@@ -208,14 +274,26 @@ export class WeChatChannel implements Channel {
                     raw.seq ??
                     `${peerId}-${chatId}-${raw.create_time_ms}`,
             );
+            const media = await downloadMessageMedia(bot, msg);
+            // A message that carried media but whose download failed is
+            // dropped: its text is a placeholder ("[image]"), and sending
+            // that would put a word where the sender meant a picture.
+            if (hasMedia(msg) && !media) {
+                log.warn("media download failed, message dropped");
+                return;
+            }
             try {
                 const { sessionId } = await ctx.ingress.submit({
                     platformMessageId,
                     channelId: ctx.channelId,
                     peerId,
                     chatId,
-                    kind: "text",
-                    text: msg.text,
+                    kind: media ? "media" : "text",
+                    // A media message's text is a placeholder ("[image]"),
+                    // so the file is the message; the text would only add
+                    // noise the model has to read past.
+                    text: media ? "" : msg.text,
+                    media,
                 });
                 // peerId/chatId are platform user identifiers and logs persist
                 // to disk — only sessionId is safe to record.

@@ -103,6 +103,14 @@ export interface ChannelMediaRef {
         | { kind: "url"; value: string }
         | { kind: "fileId"; value: string }
         | { kind: "base64"; mimeType: string; data: string };
+    /**
+     * The file name the platform knows it by, extension included.
+     *
+     * It is the only name the model ever sees, so it has to survive: a
+     * document called `report.pdf` must not arrive as `file`. A channel that
+     * has no name (a sticker, a voice note) may leave it out.
+     */
+    readonly name?: string;
 }
 
 /** Channel-facing logger contract — a structural subset of `lib/logger.ts`'s

@@ -12,6 +12,7 @@ import {
     parseImCwd,
     SIDECAR_PROTOCOL_VERSION,
 } from "@taco-ai/protocol";
+import { commitAttachments } from "../../src/attachments/attachmentStore.ts";
 import { mockChannelManifest } from "../../src/channels/builtin/mockChannel.ts";
 import type { ChannelBindStatus } from "../../src/channels/channelBindBroker.ts";
 import { ChannelBindBroker } from "../../src/channels/channelBindBroker.ts";
@@ -64,8 +65,8 @@ describe("conversationRouter", () => {
         return hook;
     }
 
-    describe("ingress images", () => {
-        it("forwards only images the prompt schema accepts, so the text still lands", async () => {
+    describe("ingress media", () => {
+        it("stages images as attachments so the composer inlines them once", async () => {
             const home = mkdtempSync(path.join(tmpdir(), "ingress-"));
             const hook = stubHook();
             const prompts: Array<Record<string, unknown>> = [];
@@ -107,9 +108,116 @@ describe("conversationRouter", () => {
             } as never);
             assert.equal(prompts.length, 1);
             assert.equal(prompts[0]?.text, "look");
-            assert.deepEqual(prompts[0]?.images, [
-                { type: "image", data: "AA", mimeType: "image/png" },
-            ]);
+            // Images travel as attachments, not as inline image blocks: the
+            // composer inlines them when the model can see one, so sending
+            // them both ways would show the model the same picture twice.
+            assert.equal(prompts[0]?.images, undefined);
+            // Both base64 items stage; the url one cannot — the sidecar
+            // cannot fetch what a channel only referenced.
+            const ids = prompts[0]?.attachments as string[] | undefined;
+            assert.equal(ids?.length, 2);
+        });
+    });
+
+    describe("ingress attachments", () => {
+        it("stages channel media so the prompt names it as an attachment", async () => {
+            const home = useTempTacoHome("ingress-attachments");
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-1",
+                text: "",
+                media: [
+                    {
+                        kind: "file",
+                        name: "report.pdf",
+                        source: {
+                            kind: "base64",
+                            mimeType: "application/pdf",
+                            data: Buffer.from("%PDF-1.7").toString("base64"),
+                        },
+                    },
+                ],
+            } as never);
+            assert.equal(prompts.length, 1);
+            // The prompt names the staged file, so the sidecar commits it into
+            // the session and names it in the hidden tag — the same pipeline
+            // a desktop attachment takes.
+            const ids = prompts[0]?.attachments as string[] | undefined;
+            assert.equal(ids?.length, 1);
+            assert.match(ids?.[0] ?? "", /^[0-9a-f-]{36}$/);
+
+            // The id must resolve under the workspace the prompt will be
+            // composed under, or the file is lost at commit time.
+            const committed = await commitAttachments(
+                ids ?? [],
+                "im://ch1/u1/c1",
+                join(home, "sessions"),
+                "sid-1",
+            );
+            assert.equal(committed.length, 1);
+            assert.equal(committed[0]?.name, "report.pdf");
+            assert.equal(committed[0]?.kind, "file");
+            assert.equal(readFileSync(committed[0]?.path ?? "").toString(), "%PDF-1.7");
+        });
+
+        it("keeps the text when the media cannot be staged", async () => {
+            const home = useTempTacoHome("ingress-attachments-fail");
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-2",
+                text: "hello",
+                media: [
+                    // Not base64: the sidecar cannot stage what it cannot read.
+                    { kind: "file", source: { kind: "url", value: "https://x/y.pdf" } },
+                ],
+            } as never);
+            assert.equal(prompts.length, 1);
+            assert.equal(prompts[0]?.text, "hello");
+            assert.equal(prompts[0]?.attachments, undefined);
         });
     });
 

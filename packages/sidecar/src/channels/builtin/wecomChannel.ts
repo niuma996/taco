@@ -25,6 +25,7 @@ import type { Logger as SdkLogger } from "@wecom/aibot-node-sdk";
 import { WSClient } from "@wecom/aibot-node-sdk";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
+import { guessMimeType } from "../mediaMime.ts";
 import type {
     Channel,
     ChannelContext,
@@ -53,6 +54,8 @@ export interface WeComClientLike {
         chatid: string,
         body: { msgtype: string; [key: string]: unknown },
     ): Promise<unknown>;
+    /** Fetch a media file the platform offered. The SDK decrypts it. */
+    downloadFile(url: string, aesKey?: string): Promise<{ buffer: Buffer; filename?: string }>;
 }
 
 /** Minimum aibot text frame this channel reads. Fields beyond what's consumed
@@ -65,6 +68,23 @@ export interface WeComTextFrameLike {
         chattype?: "single" | "group";
         from?: { userid?: string };
         text?: { content?: string };
+    };
+}
+
+/**
+ * The parts of an image / file frame this channel reads.
+ *
+ * The platform's download URL is valid for five minutes and the body is
+ * encrypted, so the bytes come from the SDK's own downloader rather than a
+ * plain fetch.
+ */
+export interface WeComMediaFrameLike {
+    body?: {
+        msgid?: string;
+        chatid?: string;
+        from?: { userid?: string };
+        image?: { url?: string; aeskey?: string };
+        file?: { url?: string; aeskey?: string };
     };
 }
 
@@ -201,6 +221,36 @@ export class WeComChannelHandle implements ChannelHandle {
             broker.setState(ctx.channelId, "error", { message: `disconnected: ${reason}` });
         });
 
+        client.on("message.image", (...args: unknown[]) => {
+            if (stale()) return;
+            const frame = args[0] as WeComMediaFrameLike | undefined;
+            const media = frame?.body?.image;
+            if (!frame?.body?.msgid || !media?.url) return;
+            const peerId = frame.body.from?.userid;
+            if (!peerId) return;
+            void this.submitMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
+                url: media.url,
+                aesKey: media.aeskey,
+                name: "image",
+                kind: "image",
+            });
+        });
+
+        client.on("message.file", (...args: unknown[]) => {
+            if (stale()) return;
+            const frame = args[0] as WeComMediaFrameLike | undefined;
+            const media = frame?.body?.file;
+            if (!frame?.body?.msgid || !media?.url) return;
+            const peerId = frame.body.from?.userid;
+            if (!peerId) return;
+            void this.submitMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
+                url: media.url,
+                aesKey: media.aeskey,
+                name: "file",
+                kind: "file",
+            });
+        });
+
         client.on("message.text", (...args: unknown[]) => {
             if (stale()) return;
             const frame = args[0] as WeComTextFrameLike | undefined;
@@ -239,6 +289,54 @@ export class WeComChannelHandle implements ChannelHandle {
                     );
                 });
         });
+    }
+
+    /**
+     * Download a media file the platform sent and hand it to the ingress.
+     *
+     * The download happens here rather than in the sidecar because the SDK
+     * holds the decryption key: the platform's URL serves an encrypted body
+     * that only the SDK's downloader can turn into bytes.
+     */
+    private async submitMedia(
+        client: WeComClientLike,
+        platformMessageId: string,
+        peerId: string,
+        chatId: string | undefined,
+        media: { url: string; aesKey?: string; name: string; kind: "image" | "file" },
+    ): Promise<void> {
+        const log = this.ctx.logger;
+        let downloaded: { buffer: Buffer; filename?: string };
+        try {
+            downloaded = await client.downloadFile(media.url, media.aesKey);
+        } catch (e) {
+            log.warn(`media download failed: ${e instanceof Error ? e.message : String(e)}`);
+            return;
+        }
+        const name = downloaded.filename ?? media.name;
+        try {
+            await this.ctx.ingress.submit({
+                platformMessageId,
+                channelId: this.ctx.channelId,
+                peerId,
+                chatId: chatId?.trim() || peerId,
+                kind: "media",
+                text: "",
+                media: [
+                    {
+                        kind: media.kind,
+                        name,
+                        source: {
+                            kind: "base64",
+                            mimeType: guessMimeType(name),
+                            data: downloaded.buffer.toString("base64"),
+                        },
+                    },
+                ],
+            });
+        } catch (e) {
+            log.warn(`media submit failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
     }
 
     /** Drops the current client, marking the disconnect intentional so its

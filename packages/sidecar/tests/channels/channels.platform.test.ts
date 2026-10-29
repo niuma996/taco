@@ -7,6 +7,7 @@ import { interruptNoticeText } from "../../src/channels/builtin/channelReply.ts"
 import type { MockChannelHandle } from "../../src/channels/builtin/mockChannel.ts";
 import { MockChannel } from "../../src/channels/builtin/mockChannel.ts";
 import type {
+    DownloadedMediaLike,
     IncomingLike,
     SdkLoginCallbacks,
     WeChatBotFactoryOptions,
@@ -17,6 +18,7 @@ import type {
     WeComChannelHandle,
     WeComClientFactoryOptions,
     WeComClientLike,
+    WeComMediaFrameLike,
     WeComTextFrameLike,
 } from "../../src/channels/builtin/wecomChannel.ts";
 import { WeComChannel } from "../../src/channels/builtin/wecomChannel.ts";
@@ -91,6 +93,11 @@ describe("wechatChannel", () => {
         onMessage(handler: (msg: IncomingLike) => void | Promise<void>): unknown {
             this.messageHandler = handler;
             return this;
+        }
+        /** What the next download call returns; null means "no media". */
+        downloadResult: DownloadedMediaLike | null = null;
+        async download(): Promise<DownloadedMediaLike | null> {
+            return this.downloadResult;
         }
         on(event: string, handler: (...a: unknown[]) => void): unknown {
             const list = this.listeners.get(event) ?? [];
@@ -272,6 +279,61 @@ describe("wechatChannel", () => {
 
             await h.factoryOpts?.storage.set("cursor", "next");
             assert.equal(h.broker.status("wechat").state, "awaiting_scan");
+        });
+    });
+
+    describe("WeChatChannel media", () => {
+        it("downloads an inbound image and submits it as media", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = { data: Buffer.from("PNGBYTES"), type: "image" };
+            await h.bot.deliver({
+                userId: "u1",
+                text: "[image]",
+                images: [{}],
+                raw: { message_id: 9, create_time_ms: 1_700_000_000_009 },
+            });
+            assert.equal(h.submitted.length, 1);
+            const msg = h.submitted[0];
+            assert.equal(msg.kind, "media");
+            // The placeholder text would only be noise the model reads past.
+            assert.equal(msg.text, "");
+            assert.equal(msg.media?.[0].kind, "image");
+            assert.equal(msg.media?.[0].source.kind, "base64");
+        });
+
+        it("keeps the platform file name when it submits a file", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = {
+                data: Buffer.from("%PDF-1.7"),
+                type: "file",
+                fileName: "report.pdf",
+            };
+            await h.bot.deliver({
+                userId: "u1",
+                text: "report.pdf",
+                files: [{}],
+                raw: { message_id: 10, create_time_ms: 1_700_000_000_010 },
+            });
+            assert.equal(h.submitted.length, 1);
+            assert.equal(h.submitted[0].media?.[0].kind, "file");
+            assert.equal(h.submitted[0].media?.[0].name, "report.pdf");
+        });
+
+        it("drops a media message whose download fails", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.download = async () => {
+                throw new Error("expired");
+            };
+            await h.bot.deliver({
+                userId: "u1",
+                text: "[image]",
+                images: [{}],
+                raw: { message_id: 11, create_time_ms: 1_700_000_000_011 },
+            });
+            assert.equal(h.submitted.length, 0);
         });
     });
 
@@ -505,6 +567,25 @@ describe("wecomChannel", () => {
         deliverText(frame: WeComTextFrameLike): void {
             this.emit("message.text", frame);
         }
+        /** What the next downloadFile call returns. */
+        downloadResult: { buffer: Buffer; filename?: string } = { buffer: Buffer.alloc(0) };
+        /** The arguments the last downloadFile call received. */
+        lastDownload?: { url: string; aesKey?: string };
+        async downloadFile(
+            url: string,
+            aesKey?: string,
+        ): Promise<{ buffer: Buffer; filename?: string }> {
+            this.lastDownload = { url, aesKey };
+            return this.downloadResult;
+        }
+        /** Test helper — emit an image frame. */
+        deliverImage(frame: WeComMediaFrameLike): void {
+            this.emit("message.image", frame);
+        }
+        /** Test helper — emit a file frame. */
+        deliverFile(frame: WeComMediaFrameLike): void {
+            this.emit("message.file", frame);
+        }
         /** Test helper — emit the SDK's authenticated success. */
         markAuthenticated(): void {
             this.emit("authenticated");
@@ -661,6 +742,74 @@ describe("wecomChannel", () => {
             });
             assert.equal(h.submitted[1].chatId, "u1");
             assert.equal(h.submitted[2].chatId, "g-77");
+            await handle.close();
+        });
+
+        it("downloads an inbound image and submits it as media", async () => {
+            const h = harness({ credentials: { botId: "b", secret: "s" } });
+            const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+            h.client.downloadResult = { buffer: Buffer.from("PNGBYTES") };
+            h.client.deliverImage({
+                body: {
+                    msgid: "m-img",
+                    chatid: "g-1",
+                    from: { userid: "u1" },
+                    image: { url: "https://example.test/i", aeskey: "key-1" },
+                },
+            });
+            await new Promise((r) => setImmediate(r));
+            assert.equal(h.submitted.length, 1);
+            const msg = h.submitted[0];
+            assert.equal(msg.kind, "media");
+            assert.equal(msg.text, "");
+            assert.equal(msg.media?.length, 1);
+            assert.equal(msg.media?.[0].kind, "image");
+            // The platform's download key travels with the request: only the
+            // SDK can decrypt the body.
+            assert.deepEqual(h.client.lastDownload, {
+                url: "https://example.test/i",
+                aesKey: "key-1",
+            });
+            await handle.close();
+        });
+
+        it("keeps the platform file name when it submits a file", async () => {
+            const h = harness({ credentials: { botId: "b", secret: "s" } });
+            const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+            h.client.downloadResult = { buffer: Buffer.from("%PDF-1.7"), filename: "report.pdf" };
+            h.client.deliverFile({
+                body: {
+                    msgid: "m-file",
+                    chatid: "g-1",
+                    from: { userid: "u1" },
+                    file: { url: "https://example.test/f" },
+                },
+            });
+            await new Promise((r) => setImmediate(r));
+            assert.equal(h.submitted.length, 1);
+            const media = h.submitted[0].media?.[0];
+            assert.equal(media?.kind, "file");
+            // The name is the only thing the model ever sees of the file.
+            assert.equal(media?.name, "report.pdf");
+            assert.equal(media?.source.kind, "base64");
+            await handle.close();
+        });
+
+        it("drops an inbound image whose download fails", async () => {
+            const h = harness({ credentials: { botId: "b", secret: "s" } });
+            const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+            h.client.downloadFile = async () => {
+                throw new Error("expired");
+            };
+            h.client.deliverImage({
+                body: {
+                    msgid: "m-img",
+                    from: { userid: "u1" },
+                    image: { url: "https://example.test/i" },
+                },
+            });
+            await new Promise((r) => setImmediate(r));
+            assert.equal(h.submitted.length, 0);
             await handle.close();
         });
 

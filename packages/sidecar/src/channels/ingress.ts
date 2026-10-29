@@ -1,14 +1,13 @@
-import type { ImageInput, PromptParams, SteerResult } from "@taco-ai/protocol";
+import type { PromptParams, SteerResult } from "@taco-ai/protocol";
 import {
     ATTACHMENT_MAX_COUNT,
     asSessionId,
     asWorkspaceId,
     createRpcRequest,
     ErrorCodes,
-    IMAGE_INPUT_MAX_BASE64_LENGTH,
     RPC,
 } from "@taco-ai/protocol";
-import { isModelImageMime } from "../attachments/mimeType.ts";
+import { stageFromData } from "../attachments/attachmentStore.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -64,11 +63,11 @@ export class DefaultChannelContext implements ChannelContext {
                     workspace: asWorkspaceId(workspace),
                     sessionId: asSessionId(sessionId),
                     text: msg.text,
-                    images: msg.media
-                        ?.filter((m) => m.kind === "image")
-                        .map(toImageInput)
-                        .filter((i): i is ImageInput => i !== undefined)
-                        .slice(0, ATTACHMENT_MAX_COUNT),
+                    // Media travels as attachments only. The composer inlines
+                    // an image when the model can see one and names the file
+                    // in the hidden tag either way — inlining here as well
+                    // would send the model the same picture twice.
+                    attachments: await stageMedia(msg.media, workspace),
                 };
                 const res = await this.hook.dispatchRpc?.(
                     createRpcRequest(id, RPC.sessionPrompt, params, id),
@@ -132,16 +131,51 @@ export class DefaultChannelContext implements ChannelContext {
 }
 
 /**
- * ChannelMediaRef -> ImageInput. Only `{ kind: "base64" }` is handled;
- * url/fileId are deferred.
+ * Stage the message's media so the prompt can name it.
  *
- * An image the prompt schema would refuse (a format providers reject, or a
- * body over the frame bound) is dropped here, not forwarded: the schema
- * rejects the whole prompt, so one odd sticker would cost the sender's text.
+ * A channel cannot hand the sidecar a path: it holds the bytes, not a place
+ * on this filesystem. Staging turns them into the ids a prompt names, and the
+ * file lands in the session's attachment directory the same way a desktop
+ * attachment does — one pipeline, one cleanup path.
+ *
+ * The workspace id namespaces staging, so it must be the one the prompt will
+ * be composed under. A media file that cannot be staged is dropped: the
+ * sender's text still arrives.
  */
-function toImageInput(m: ChannelMediaRef): ImageInput | undefined {
-    if (m.source.kind !== "base64") return undefined;
-    if (!isModelImageMime(m.source.mimeType)) return undefined;
-    if (m.source.data.length > IMAGE_INPUT_MAX_BASE64_LENGTH) return undefined;
-    return { type: "image", data: m.source.data, mimeType: m.source.mimeType };
+async function stageMedia(
+    media: readonly ChannelMediaRef[] | undefined,
+    workspaceId: string,
+): Promise<string[] | undefined> {
+    if (!media || media.length === 0) return undefined;
+    const ids: string[] = [];
+    for (const m of media) {
+        if (m.source.kind !== "base64") continue;
+        try {
+            const staged = await stageFromData(
+                workspaceId,
+                m.name ?? mediaName(m),
+                m.source.data,
+                m.source.mimeType,
+            );
+            ids.push(staged.id);
+        } catch {
+            // A file the platform would not let us stage is dropped rather
+            // than failing the whole message.
+        }
+        if (ids.length >= ATTACHMENT_MAX_COUNT) break;
+    }
+    return ids.length > 0 ? ids : undefined;
+}
+
+/** The name a staged file carries, extension included — it decides the MIME. */
+function mediaName(m: ChannelMediaRef): string {
+    const ext = m.source.kind === "base64" ? m.source.mimeType : "";
+    const known: Record<string, string> = {
+        "image/jpeg": "image.jpg",
+        "image/png": "image.png",
+        "image/gif": "image.gif",
+        "image/webp": "image.webp",
+        "application/pdf": "file.pdf",
+    };
+    return known[ext] ?? "file";
 }
