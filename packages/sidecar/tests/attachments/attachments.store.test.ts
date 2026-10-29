@@ -190,6 +190,21 @@ describe("staging", () => {
         assert.equal(after, before);
     });
 
+    it("takes a body that exceeds the paste limit when the caller allows it", async () => {
+        // A channel download is a file, not a paste: it gets the file ceiling.
+        const bytes = ATTACHMENT_STAGE_INLINE_MAX_BYTES + 1;
+        const body = Buffer.alloc(bytes, "x").toString("base64");
+        const staged = await stageFromData(
+            WS,
+            "downloaded.txt",
+            body,
+            undefined,
+            ATTACHMENT_MAX_BYTES,
+        );
+        assert.equal(staged.size, bytes);
+        assert.equal(staged.name, "downloaded.txt");
+    });
+
     it("refuses an oversized file by its size on disk", async () => {
         const src = join(dir, "huge.bin");
         await writeFile(src, "");

@@ -7,7 +7,9 @@
  * description would otherwise cost tokens on every request.
  *
  * The specifier is dynamic so `pdf-lib` — imported by `pdfOps.ts` as soon as
- * `pdfTools.ts` evaluates — is reached on first load, not at startup. The IM
+ * `pdfTools.ts` evaluates — is not reached at startup. It is reached on the
+ * first `tools.list` (which loads every candidate to describe it) or `addTools`
+ * load, not on a plain session turn. ESM caches the module after that. The IM
  * file-tool policy is enforced inside the tools (see `refuseInIm`), not here:
  * a candidate is workspace-level, so it cannot know which session will load
  * it.

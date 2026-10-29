@@ -21,7 +21,18 @@ export function isModelImageMime(mimeType: string): mimeType is ModelImageMimeTy
     return MODEL_IMAGE_MIMES.has(mimeType);
 }
 
-const EXTENSION_MIMES: Readonly<Record<string, string>> = {
+/**
+ * Extension → MIME, the single table for every place that labels a file by
+ * its name: attachment classification, channel hints, and the suffix a staged
+ * file gets. The raster formats are listed for naming, not for classification
+ * — `detectMimeType` only trusts an extension the bytes did not contradict.
+ */
+const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
     ".pdf": "application/pdf",
     ".md": "text/markdown",
     ".txt": "text/plain",
@@ -34,12 +45,39 @@ const EXTENSION_MIMES: Readonly<Record<string, string>> = {
     ".svg": "image/svg+xml",
     ".bmp": "image/bmp",
     ".zip": "application/zip",
+    ".doc": "application/msword",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
 export const FALLBACK_MIME = "application/octet-stream";
+
+/**
+ * The MIME a file name implies.
+ *
+ * Only a hint: the bytes decide when the two disagree, because a renamed file
+ * is still the format its content says it is. The name matters anyway — it is
+ * what the model reads, and an extension is how a reader knows what it is
+ * holding.
+ */
+export function mimeTypeFromName(name: string): string {
+    return MIME_BY_EXTENSION[extname(name).toLowerCase()] ?? FALLBACK_MIME;
+}
+
+/** MIME → the extension a name is given, built once so the two cannot drift. */
+const EXTENSION_BY_MIME = new Map<string, string>();
+for (const [ext, mime] of Object.entries(MIME_BY_EXTENSION)) {
+    // First extension wins: `.jpg` names an image, `.jpeg` is the alias.
+    if (!EXTENSION_BY_MIME.has(mime)) EXTENSION_BY_MIME.set(mime, ext);
+}
+
+/** The extension a MIME type is normally given, when a name has none. */
+export function extensionForMime(mimeType: string): string | undefined {
+    return EXTENSION_BY_MIME.get(mimeType);
+}
 
 /** Bytes needed to tell every format below apart. */
 const SNIFF_BYTES = 16;
@@ -85,8 +123,10 @@ export async function detectMimeType(
 ): Promise<string> {
     const sniffed = sniffImageMime(await readHead(path));
     if (sniffed) return sniffed;
-    const byExtension = EXTENSION_MIMES[extname(name).toLowerCase()];
-    if (byExtension) return byExtension;
+    const byExtension = MIME_BY_EXTENSION[extname(name).toLowerCase()];
+    // A raster extension the bytes did not confirm is a mislabeled file, so
+    // the extension is not trusted for the formats a provider would inline.
+    if (byExtension && !isModelImageMime(byExtension)) return byExtension;
     const trimmed = declared?.trim().toLowerCase();
     // A declared image type that the bytes did not confirm is downgraded.
     if (trimmed && !trimmed.startsWith("image/")) return trimmed;

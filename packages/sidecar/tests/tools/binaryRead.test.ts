@@ -50,6 +50,20 @@ describe("binaryReadHint", () => {
         assert.ok(hint?.includes("PDF"));
     });
 
+    it("recognises a PDF whose header sits behind a binary preamble", () => {
+        // The spec allows bytes before "%PDF-"; a channel file may arrive
+        // without a .pdf name, so the magic is the only handle left.
+        const hint = binaryReadHint("junk\0\x01%PDF-1.7\nbinary", "download", missing);
+        assert.ok(hint?.includes("PDF"));
+        assert.ok(hint?.includes("could not be extracted"));
+    });
+
+    it("explains that extraction failed rather than claiming read never parses PDFs", () => {
+        const hint = binaryReadHint("%PDF-1.7\nbinary", "report.pdf", missing);
+        assert.equal(hint?.includes("does not extract PDF text"), false);
+        assert.ok(hint?.includes("could not be extracted"));
+    });
+
     it("names the Office format and the install steps when officecli is missing", () => {
         const hint = binaryReadHint("PK\u0003\u0004xxxx", "q.docx", missing);
         assert.ok(hint?.includes("Word document"));

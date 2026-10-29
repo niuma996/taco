@@ -302,6 +302,89 @@ describe("wechatChannel", () => {
             assert.equal(msg.media?.[0].source.kind, "base64");
         });
 
+        it("drops the media url the SDK puts in a media message's text", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = { data: Buffer.from("PNGBYTES"), type: "image" };
+            // The SDK derives the text of an image item from its CDN url, so
+            // an image-only message arrives carrying that url.
+            await h.bot.deliver({
+                userId: "u1",
+                text: "https://mmunion.qpic.cn/abc123/0",
+                images: [{}],
+                raw: { message_id: 12, create_time_ms: 1_700_000_000_012 },
+            });
+            // The url is not something the sender wrote; it is the media.
+            assert.equal(h.submitted[0]?.text, "");
+            assert.equal(h.submitted[0]?.media?.length, 1);
+        });
+
+        it("keeps the caption that sits beside the media url", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = { data: Buffer.from("PNGBYTES"), type: "image" };
+            // The SDK joins the message's items: caption, then the media url.
+            await h.bot.deliver({
+                userId: "u1",
+                text: "what does this chart say?\nhttps://mmunion.qpic.cn/abc123/0",
+                images: [{}],
+                raw: { message_id: 13, create_time_ms: 1_700_000_000_013 },
+            });
+            assert.equal(h.submitted[0]?.text, "what does this chart say?");
+            assert.equal(h.submitted[0]?.media?.length, 1);
+        });
+
+        it("drops the file name of a media item the downloader skipped", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = { data: Buffer.from("PNGBYTES"), type: "image" };
+            // One message can carry several items, but download() returns the
+            // first media only — the SDK's text still names the file it did
+            // not deliver, so that line must go too.
+            await h.bot.deliver({
+                userId: "u1",
+                text: "https://mmunion.qpic.cn/abc123/0\nreport.pdf",
+                images: [{}],
+                files: [{ fileName: "report.pdf" }],
+                raw: { message_id: 14, create_time_ms: 1_700_000_000_014 },
+            });
+            assert.equal(h.submitted[0]?.text, "");
+            assert.equal(h.submitted[0]?.media?.length, 1);
+        });
+
+        it("keeps a real caption on a media message", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = { data: Buffer.from("PNGBYTES"), type: "image" };
+            await h.bot.deliver({
+                userId: "u1",
+                text: "what does this chart say?",
+                images: [{}],
+                raw: { message_id: 10, create_time_ms: 1_700_000_000_010 },
+            });
+            // Words the sender wrote are content, not a placeholder.
+            assert.equal(h.submitted[0]?.text, "what does this chart say?");
+            assert.equal(h.submitted[0]?.media?.length, 1);
+        });
+
+        it("drops a caption that only repeats the file name", async () => {
+            const h = harness();
+            await h.channel.start(h.ctx);
+            h.bot.downloadResult = {
+                data: Buffer.from("%PDF-1.7"),
+                type: "file",
+                fileName: "report.pdf",
+            };
+            await h.bot.deliver({
+                userId: "u1",
+                text: "report.pdf",
+                files: [{}],
+                raw: { message_id: 11, create_time_ms: 1_700_000_000_011 },
+            });
+            assert.equal(h.submitted[0]?.text, "");
+            assert.equal(h.submitted[0]?.media?.[0].name, "report.pdf");
+        });
+
         it("keeps the platform file name when it submits a file", async () => {
             const h = harness();
             await h.channel.start(h.ctx);

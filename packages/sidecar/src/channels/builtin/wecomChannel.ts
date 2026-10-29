@@ -23,9 +23,9 @@
 import type { ChannelsBindCreds, ServerPush } from "@taco-ai/protocol";
 import type { Logger as SdkLogger } from "@wecom/aibot-node-sdk";
 import { WSClient } from "@wecom/aibot-node-sdk";
+import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
-import { guessMimeType } from "../mediaMime.ts";
 import type {
     Channel,
     ChannelContext,
@@ -330,7 +330,7 @@ export class WeComChannelHandle implements ChannelHandle {
                         name,
                         source: {
                             kind: "base64",
-                            mimeType: guessMimeType(name),
+                            mimeType: mimeTypeFromName(name),
                             data: downloaded.buffer.toString("base64"),
                         },
                     },

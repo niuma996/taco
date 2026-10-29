@@ -149,18 +149,25 @@ export async function stageFromPath(
     return { id, name, mimeType, size: info.size, kind };
 }
 
-/** Write an inline base64 body (the paste path) into staging. */
+/**
+ * Write an inline base64 body (the paste path) into staging.
+ *
+ * `maxBytes` defaults to the paste limit; a channel file passes the file
+ * limit instead, so a file that came over IM is held to the same ceiling as
+ * one the user picked in the desktop client.
+ */
 export async function stageFromData(
     workspaceId: string,
     rawName: string,
     base64: string,
     declaredMime: string | undefined,
+    maxBytes: number = ATTACHMENT_STAGE_INLINE_MAX_BYTES,
 ): Promise<AttachmentStageResult> {
     const bytes = Buffer.from(base64, "base64");
-    if (bytes.length > ATTACHMENT_STAGE_INLINE_MAX_BYTES) {
+    if (bytes.length > maxBytes) {
         throw new AttachmentError(
             "too_large",
-            `pasted data is ${bytes.length} bytes; the limit is ${ATTACHMENT_STAGE_INLINE_MAX_BYTES}`,
+            `data is ${bytes.length} bytes; the limit is ${maxBytes}`,
         );
     }
     const id = randomUUID();

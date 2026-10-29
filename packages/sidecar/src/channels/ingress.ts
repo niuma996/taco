@@ -1,6 +1,7 @@
 import { extname } from "node:path";
 import type { PromptParams, SteerResult } from "@taco-ai/protocol";
 import {
+    ATTACHMENT_MAX_BYTES,
     ATTACHMENT_MAX_COUNT,
     asSessionId,
     asWorkspaceId,
@@ -9,7 +10,7 @@ import {
     RPC,
 } from "@taco-ai/protocol";
 import { stageFromData } from "../attachments/attachmentStore.ts";
-import { sniffImageMime } from "../attachments/mimeType.ts";
+import { extensionForMime, isModelImageMime, sniffImageMime } from "../attachments/mimeType.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -61,15 +62,24 @@ export class DefaultChannelContext implements ChannelContext {
                 // platformMessageId doubles as both RPC id and commandId:
                 // id is used for frame-level response / tracing, commandId for sidecar command idempotency dedup.
                 const id = msg.platformMessageId;
+                const staged = await stageMedia(msg.media, workspace);
+                // A refusal is otherwise invisible: the prompt names only the
+                // attachments that arrived, and the sender is never told a
+                // file was lost. The note in the prompt and this log say so.
+                if (staged.refused > 0) {
+                    this.logger.warn(
+                        `media not staged (${msg.platformMessageId}): ${staged.refused} file(s)`,
+                    );
+                }
                 const params: PromptParams = {
                     workspace: asWorkspaceId(workspace),
                     sessionId: asSessionId(sessionId),
-                    text: msg.text,
+                    text: withUndeliveredNote(msg.text, staged),
                     // Media travels as attachments only. The composer inlines
                     // an image when the model can see one and names the file
                     // in the hidden tag either way — inlining here as well
                     // would send the model the same picture twice.
-                    attachments: await stageMedia(msg.media, workspace),
+                    attachments: staged.ids,
                 };
                 const res = await this.hook.dispatchRpc?.(
                     createRpcRequest(id, RPC.sessionPrompt, params, id),
@@ -132,6 +142,14 @@ export class DefaultChannelContext implements ChannelContext {
     }
 }
 
+/** What staging produced, and how much of the message it could not deliver. */
+interface StagedMedia {
+    /** Ids the prompt names; absent when nothing was staged. */
+    readonly ids: string[] | undefined;
+    /** Files the sidecar would not take, so the caller can say so. */
+    readonly refused: number;
+}
+
 /**
  * Stage the message's media so the prompt can name it.
  *
@@ -141,42 +159,55 @@ export class DefaultChannelContext implements ChannelContext {
  * attachment does — one pipeline, one cleanup path.
  *
  * The workspace id namespaces staging, so it must be the one the prompt will
- * be composed under. A media file that cannot be staged is dropped: the
- * sender's text still arrives.
+ * be composed under. A media file that cannot be staged is counted, not
+ * thrown: the sender's text still arrives, and the caller reports the loss.
  */
 async function stageMedia(
     media: readonly ChannelMediaRef[] | undefined,
     workspaceId: string,
-): Promise<string[] | undefined> {
-    if (!media || media.length === 0) return undefined;
+): Promise<StagedMedia> {
+    if (!media || media.length === 0) return { ids: undefined, refused: 0 };
     const ids: string[] = [];
+    let refused = 0;
     for (const m of media) {
-        if (m.source.kind !== "base64") continue;
+        // A URL or platform file id is not bytes: staging would have to fetch
+        // what the channel only referenced, which this layer cannot do.
+        if (m.source.kind !== "base64" || ids.length >= ATTACHMENT_MAX_COUNT) {
+            refused++;
+            continue;
+        }
         try {
             const staged = await stageFromData(
                 workspaceId,
                 stagedName(m),
                 m.source.data,
                 m.source.mimeType,
+                // A downloaded channel file is a file, not a paste: it gets
+                // the desktop file ceiling rather than the paste one.
+                ATTACHMENT_MAX_BYTES,
             );
             ids.push(staged.id);
         } catch {
-            // A file the platform would not let us stage is dropped rather
-            // than failing the whole message.
+            refused++;
         }
-        if (ids.length >= ATTACHMENT_MAX_COUNT) break;
     }
-    return ids.length > 0 ? ids : undefined;
+    return { ids: ids.length > 0 ? ids : undefined, refused };
 }
 
-/** Mime to extension, shared by the fallback name and the sniffed suffix. */
-const EXTENSION_BY_MIME: Record<string, string> = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "application/pdf": ".pdf",
-};
+/**
+ * The prompt text, with a note when some files did not arrive.
+ *
+ * A media-only message has no words of its own, so without the note the
+ * prompt is empty — nothing to answer, and no signal that a file was lost. A
+ * caption is the sender's words and stays. The note is appended either way,
+ * because a partial delivery is invisible from the caption: the attachment
+ * list names what arrived, never what did not.
+ */
+function withUndeliveredNote(text: string, staged: StagedMedia): string {
+    if (staged.refused === 0) return text;
+    const note = `[${staged.refused} attachment(s) could not be delivered — too large, an unsupported format, or too many.]`;
+    return text.trim() === "" ? note : `${text}\n\n${note}`;
+}
 
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d];
 
@@ -198,16 +229,14 @@ function stagedName(m: ChannelMediaRef): string {
 /** The name a staged file carries when the channel sent none. */
 function mediaName(m: ChannelMediaRef): string {
     const mime = m.source.kind === "base64" ? m.source.mimeType : "";
-    const ext = EXTENSION_BY_MIME[mime];
-    if (ext === ".pdf") return `file${ext}`;
-    if (ext) return `image${ext}`;
-    return "file";
+    const ext = extensionForMime(mime) ?? "";
+    return isModelImageMime(mime) ? `image${ext}` : `file${ext}`;
 }
 
 function sniffedExtension(m: ChannelMediaRef): string | undefined {
     if (m.source.kind !== "base64") return undefined;
     const fromBytes = extensionFromBytes(decodeBase64Prefix(m.source.data));
-    return fromBytes ?? EXTENSION_BY_MIME[m.source.mimeType];
+    return fromBytes ?? extensionForMime(m.source.mimeType);
 }
 
 /** A short prefix is enough to sniff; the whole file is not decoded here. */
@@ -220,7 +249,7 @@ function decodeBase64Prefix(data: string): Buffer | undefined {
 function extensionFromBytes(head: Buffer | undefined): string | undefined {
     if (!head) return undefined;
     const sniffed = sniffImageMime(head);
-    if (sniffed) return EXTENSION_BY_MIME[sniffed];
+    if (sniffed) return extensionForMime(sniffed);
     if (PDF_MAGIC.every((byte, index) => head[index] === byte)) return ".pdf";
     return undefined;
 }

@@ -16,6 +16,8 @@ import { BINARY_READ_MARKER } from "@taco-ai/protocol";
 import { OFFICECLI_MISSING_NOTE } from "../lib/officecliHint.ts";
 
 const PDF_MAGIC = "%PDF-";
+/** The header may sit inside the first 1024 bytes when a preamble precedes it. */
+const PDF_MAGIC_WINDOW = 1024;
 const ZIP_MAGICS = ["PK\u0003\u0004", "PK\u0001\u0002", "PK\u0005\u0006"];
 
 /** Enough ASCII structure to be useful, not a second copy of a binary dump. */
@@ -38,8 +40,11 @@ export function binaryReadHint(
 
     const ext = extname(filePath).toLowerCase();
     const head = text.slice(0, 8192);
+    const binary = looksBinary(text);
     // offset/limit drops the magic header; the extension still picks the hint.
-    if (head.startsWith(PDF_MAGIC) || (ext === ".pdf" && looksBinary(text))) {
+    // A preamble can push the header off offset 0, but only a binary file is
+    // taken as a PDF that way — prose mentioning "%PDF-" keeps its text.
+    if (head.startsWith(PDF_MAGIC) || (binary && hasPdfMagic(head)) || (ext === ".pdf" && binary)) {
         return marked(pdfHint(filePath));
     }
     if (isZip(head) || (OFFICE_KIND[ext] !== undefined && looksBinary(text))) {
@@ -58,6 +63,14 @@ function isZip(head: string): boolean {
 }
 
 /**
+ * A preamble may push the PDF header off offset 0 — the spec allows it — so
+ * the lead window is searched, the same rule the interceptor uses.
+ */
+function hasPdfMagic(head: string): boolean {
+    return head.slice(0, PDF_MAGIC_WINDOW).includes(PDF_MAGIC);
+}
+
+/**
  * NUL, or enough U+FFFD that the window is mostly replacement characters.
  * No bare count: four bad bytes in a UTF-8 file, or a short GBK sample,
  * must not throw the decode away.
@@ -71,11 +84,17 @@ function looksBinary(text: string): boolean {
     return bad / window.length > 0.02;
 }
 
+/**
+ * A PDF that reached the text decoder — the interceptor parses PDFs before
+ * this, so here the extraction itself failed (encrypted, corrupt, or a
+ * structure the parser does not handle). Say that, rather than claiming
+ * `read` never extracts PDFs, which is false for every other PDF.
+ */
 function pdfHint(filePath: string): string {
     const which = filePath ? ` (${JSON.stringify(filePath)})` : "";
     return (
-        `This file is a PDF${which}. ` +
-        "`read` does not extract PDF text, so the bytes were not returned. " +
+        `This file is a PDF${which}, but its text could not be extracted — ` +
+        "it may be encrypted, corrupt, or image-only. " +
         "Do not retry `read` on it or guess the contents from a raw dump."
     );
 }

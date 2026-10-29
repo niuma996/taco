@@ -11,10 +11,10 @@
 import type { ServerPush } from "@taco-ai/protocol";
 import { PushMethods } from "@taco-ai/protocol";
 import { WeChatBot } from "@wechatbot/wechatbot";
+import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
-import { guessMimeType } from "../mediaMime.ts";
 import type {
     Channel,
     ChannelContext,
@@ -53,12 +53,48 @@ function hasMedia(msg: IncomingLike): boolean {
 }
 
 /**
+ * The SDK's own text for a media item: a bracketed placeholder ("[image]"),
+ * the media's CDN url, or its file name.
+ *
+ * The SDK joins the items of one message into a single text, so a media line
+ * arrives beside the sender's caption — these lines are what the SDK derived
+ * from the media, not something the sender wrote.
+ */
+const MEDIA_PLACEHOLDER = /^(?:\[[^\]]*\]|https?:\/\/\S*)$/;
+
+/**
+ * The sender's words on a media message, with the SDK's media lines removed.
+ *
+ * A message may carry a real caption; that is text the sender wrote and the
+ * model should read. The placeholder, the media's url, or a file name says
+ * nothing the attachment does not already say. `mediaNames` covers every
+ * item in the message, not only the one the downloader picked: an item it
+ * skipped would otherwise leave its name behind as if the sender typed it.
+ */
+function captionFor(text: string, mediaNames: readonly (string | undefined)[]): string {
+    const names = new Set(mediaNames.filter((name): name is string => Boolean(name)));
+    const lines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "" && !MEDIA_PLACEHOLDER.test(line) && !names.has(line));
+    return lines.join("\n");
+}
+
+/** File names the SDK derived for the message's file items, downloaded or not. */
+function sdkFileNames(msg: IncomingLike): string[] {
+    return (msg.files ?? []).flatMap((file) => {
+        const name = (file as { fileName?: unknown }).fileName;
+        return typeof name === "string" && name !== "" ? [name] : [];
+    });
+}
+
+/**
  * Download the media an incoming message carried, if it carried any.
  *
- * The SDK's downloader picks the file and decrypts it; this only decides
- * whether to call it and names what came back. A message with no media
- * returns undefined, and so does a download that fails — the sender's text
- * still arrives either way.
+ * The SDK's downloader picks the file and decrypts it. It returns one file
+ * only, so a message carrying several images (or an album) delivers the one
+ * the platform selected. A message with no media returns undefined, and so
+ * does a download that fails — the sender's text still arrives either way.
  */
 async function downloadMessageMedia(
     bot: WeChatBotLike,
@@ -79,7 +115,7 @@ async function downloadMessageMedia(
             name,
             source: {
                 kind: "base64",
-                mimeType: guessMimeType(name),
+                mimeType: mimeTypeFromName(name),
                 data: downloaded.data.toString("base64"),
             },
         },
@@ -276,8 +312,9 @@ export class WeChatChannel implements Channel {
             );
             const media = await downloadMessageMedia(bot, msg);
             // A message that carried media but whose download failed is
-            // dropped: its text is a placeholder ("[image]"), and sending
-            // that would put a word where the sender meant a picture.
+            // dropped: its text comes from the media (a placeholder, its url),
+            // and sending that would put a word where the sender meant a
+            // picture.
             if (hasMedia(msg) && !media) {
                 log.warn(`media download failed, message dropped: ${platformMessageId}`);
                 return;
@@ -289,10 +326,13 @@ export class WeChatChannel implements Channel {
                     peerId,
                     chatId,
                     kind: media ? "media" : "text",
-                    // A media message's text is a placeholder ("[image]"),
-                    // so the file is the message; the text would only add
-                    // noise the model has to read past.
-                    text: media ? "" : msg.text,
+                    // The SDK's text for a media message is derived from the
+                    // media — a placeholder, the media's url, its file name.
+                    // A real caption is the sender's words and stays; the
+                    // rest would only be noise the model reads past.
+                    text: media
+                        ? captionFor(msg.text, [media[0]?.name, ...sdkFileNames(msg)])
+                        : msg.text,
                     media,
                 });
                 // peerId/chatId are platform user identifiers and logs persist

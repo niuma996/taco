@@ -108,7 +108,13 @@ describe("conversationRouter", () => {
                 ],
             } as never);
             assert.equal(prompts.length, 1);
-            assert.equal(prompts[0]?.text, "look");
+            // The caption is the sender's words and is kept; the url item
+            // could not be staged, so the note says one file did not arrive.
+            // The attachment list alone never shows what is missing.
+            assert.match(
+                String(prompts[0]?.text),
+                /^look\n\n\[1 attachment\(s\) could not be delivered/,
+            );
             // Images travel as attachments, not as inline image blocks: the
             // composer inlines them when the model can see one, so sending
             // them both ways would show the model the same picture twice.
@@ -117,6 +123,133 @@ describe("conversationRouter", () => {
             // cannot fetch what a channel only referenced.
             const ids = prompts[0]?.attachments as string[] | undefined;
             assert.equal(ids?.length, 2);
+        });
+
+        it("tells the model when a media-only message lost its file", async () => {
+            const home = useTempTacoHome("ingress-media-refused");
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            // No text and nothing stageable: without a note the prompt is
+            // empty, so the model has nothing to answer and the sender gets
+            // no signal that the file never arrived.
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-refused",
+                text: "",
+                media: [{ kind: "file", source: { kind: "url", value: "https://x/y.pdf" } }],
+            } as never);
+            assert.equal(prompts.length, 1);
+            assert.match(String(prompts[0]?.text), /could not be delivered/);
+            assert.equal(prompts[0]?.attachments, undefined);
+        });
+
+        it("keeps an empty prompt when a media-only message was fully staged", async () => {
+            const home = useTempTacoHome("ingress-media-staged");
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-staged",
+                text: "",
+                media: [
+                    {
+                        kind: "image",
+                        source: {
+                            kind: "base64",
+                            mimeType: "image/png",
+                            data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"),
+                        },
+                    },
+                ],
+            } as never);
+            assert.equal(prompts.length, 1);
+            // The attachment is the message; no note is owed when nothing was lost.
+            assert.equal(prompts[0]?.text, "");
+            assert.equal((prompts[0]?.attachments as string[] | undefined)?.length, 1);
+        });
+
+        it("keeps a caption untouched when every file arrived", async () => {
+            const home = useTempTacoHome("ingress-media-caption");
+            const hook = stubHook();
+            const prompts: Array<Record<string, unknown>> = [];
+            const recording = {
+                ...hook,
+                dispatchRpc: async (req: RpcRequest) => {
+                    if (req.method === "session.prompt") {
+                        prompts.push(req.params as Record<string, unknown>);
+                        return { ok: true, id: req.id, result: {} };
+                    }
+                    return hook.dispatchRpc?.(req);
+                },
+            } as unknown as ServerRpcSurface;
+            const router = await ConversationRouter.load(home);
+            const ctx = new DefaultChannelContext(
+                "ch1",
+                recording,
+                router,
+                {} as never,
+                createLogger("test"),
+            );
+            await ctx.ingress.submit({
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+                platformMessageId: "pm-caption",
+                text: "what does this chart say?",
+                media: [
+                    {
+                        kind: "image",
+                        source: {
+                            kind: "base64",
+                            mimeType: "image/png",
+                            data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"),
+                        },
+                    },
+                ],
+            } as never);
+            assert.equal(prompts.length, 1);
+            // Nothing was lost, so the sender's words are the whole prompt.
+            assert.equal(prompts[0]?.text, "what does this chart say?");
         });
     });
 
@@ -278,7 +411,11 @@ describe("conversationRouter", () => {
                 ],
             } as never);
             assert.equal(prompts.length, 1);
-            assert.equal(prompts[0]?.text, "hello");
+            // The sender's words survive; the note says the file did not.
+            assert.match(
+                String(prompts[0]?.text),
+                /^hello\n\n\[1 attachment\(s\) could not be delivered/,
+            );
             assert.equal(prompts[0]?.attachments, undefined);
         });
     });
