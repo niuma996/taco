@@ -93,6 +93,30 @@ describe("readPdf", () => {
             undefined,
         );
         assert.equal(result.extracted, false);
+        assert.equal(result.fallback, true);
         assert.match(result.text, /could not be parsed/);
+    });
+
+    it("caps an omitted limit at 2000 lines, even when a larger limit is asked for", async () => {
+        // One page only yields the lines that fit on it, so the document is
+        // spread across pages to give the cap more than 2000 lines to cut.
+        const lines = Array.from({ length: 2100 }, (_, i) => `n${i + 1}`);
+        const result = await readPdf(buildTextPdf(lines, 80), "long.pdf", undefined, 5000);
+        assert.match(result.text, /\bn1\b/);
+        assert.equal(result.text.includes("n2100"), false);
+        assert.match(result.text, /Showing lines 1-2000 of \d+/);
+        assert.match(result.text, /Use offset=2001 to continue/);
+    });
+
+    it("stops before the extracted text crosses 50KB", async () => {
+        const lines = Array.from(
+            { length: 1400 },
+            (_, i) => `L${String(i + 1).padStart(4, "0")}${"x".repeat(36)}`,
+        );
+        const result = await readPdf(buildTextPdf(lines, 50), "wide.pdf", undefined, undefined);
+        assert.match(result.text, /L0001/);
+        assert.equal(result.text.includes("L1400"), false);
+        assert.match(result.text, /\(50\.0KB limit\)/);
+        assert.match(result.text, /Use offset=\d+ to continue/);
     });
 });

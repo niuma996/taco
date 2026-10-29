@@ -86,11 +86,16 @@ regardless of whether the SDK is installed, but `channels.bind`
 returns the channel's `<channel>_sdk_missing` error so the desktop
 can offer a one-click install.
 
-`@napi-rs/canvas` is declared as an `optionalDependencies` too. The `read`
-tool uses it to rasterise the pages of a scanned PDF — a document with no text
-layer — so a model that can see images can read it. It is a native binary,
-30-40MB per platform, so it is not installed by default; without it a scan
-still reads, and the result says the pages could not be rendered.
+`@napi-rs/canvas` is an optional dependency. The `read` tool uses it to
+rasterise scanned PDF pages. It is a native binary, 30-40MB per platform, so
+it is not bundled, and a release install has no `node_modules` beside the
+bundle. Install it into `$TACO_HOME/vendor` when a scan needs rendering:
+
+```bash
+npm install --prefix ~/.taco/vendor @napi-rs/canvas@1.0.13
+```
+
+Without it a scan still reads, and the result names that command.
 
 Agents with `runtime: claude-code` run on the user's own Claude Code CLI
 (`claude` on PATH, signed in) through `@anthropic-ai/claude-agent-sdk`.

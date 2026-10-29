@@ -11,12 +11,19 @@
  * semantics as any other file.
  */
 
+import { open } from "node:fs/promises";
+
 import { normalizeBuiltinToolPath } from "../permissions/workspaceBoundary.ts";
 import type { FileError, Result } from "../runtime/pi/node.ts";
 import type { Context } from "../runtime/pi/types.ts";
 import { getOrThrow } from "../runtime/pi/values.ts";
-import { pdfPageCount, readPdfText } from "./pdfRead.ts";
-import { loadCanvas, type RenderedPage, renderPdfPages } from "./pdfRender.ts";
+import { openPdfDocument, readPdfText } from "./pdfRead.ts";
+import {
+    canvasInstallCommand,
+    loadCanvas,
+    type RenderedPage,
+    renderPdfPages,
+} from "./pdfRender.ts";
 
 /** The bytes every PDF starts with. */
 const PDF_MAGIC = "%PDF-";
@@ -32,6 +39,15 @@ const MAGIC_WINDOW = 1024;
  */
 const MAX_RENDERED_PAGES = 5;
 
+/**
+ * pi's read caps a file at 2000 lines / 50KB even when `limit` is omitted.
+ * The PDF path has to do the same, or an omitted limit returns the document.
+ */
+const PDF_MAX_LINES = 2000;
+const PDF_MAX_BYTES = 50 * 1024;
+/** `formatSize(50 * 1024)` in pi's truncation note. */
+const PDF_BYTE_LIMIT_LABEL = "50.0KB";
+
 /** The slice of pi's execution env a read needs. */
 interface ReadEnv {
     absolutePath(path: string, context: Context): Promise<Result<string, FileError>>;
@@ -42,12 +58,12 @@ interface ReadEnv {
  * Whether a file is a PDF.
  *
  * The magic decides, not the extension: a `.pdf` that is not a PDF is a
- * different file, and a PDF named `.bin` is still a PDF.
+ * different file, and a PDF named `.bin` is still a PDF. The header may sit
+ * inside the first 1024 bytes — the spec allows a preamble — so the magic is
+ * looked for in that window rather than only at offset 0.
  */
 export function isPdfBytes(bytes: Uint8Array): boolean {
     const head = bytes.subarray(0, MAGIC_WINDOW);
-    // A PDF header may be preceded by junk (some writers prepend bytes), so
-    // the magic is looked for inside the window rather than only at offset 0.
     const magic = new TextEncoder().encode(PDF_MAGIC);
     outer: for (let i = 0; i <= head.length - magic.length; i++) {
         for (let j = 0; j < magic.length; j++) {
@@ -66,15 +82,17 @@ export interface PdfReadResult {
     extracted: boolean;
     /** Pages rasterised for a document with no text layer. */
     images?: RenderedPage[];
+    /** Set when the caller should read the file as text instead of using `text`. */
+    fallback?: boolean;
 }
 
 /**
  * Read a PDF.
  *
- * `offset`/`limit` page the text the same way they page any other file, so a
- * long PDF is read in steps rather than flooding the context. A document with
- * no text layer is a scan: its pages are rendered as images instead, so a
- * model that can see images can read it.
+ * `offset`/`limit` page the extracted lines the same way they page any other
+ * file. An omitted or oversized `limit` is still capped, so a long document
+ * does not flood the context. Those parameters are line offsets, not page
+ * numbers: a scan renders its first pages and says how many were left out.
  */
 export async function readPdf(
     bytes: Uint8Array,
@@ -84,16 +102,30 @@ export async function readPdf(
 ): Promise<PdfReadResult> {
     const extracted = await readPdfText(bytes);
     if (!("text" in extracted)) {
-        // No text layer: the document is a scan, and its pages are the only
-        // way to read it.
         if (extracted.noTextLayer) return { ...(await renderScan(bytes, path)), extracted: false };
         return {
             text: `The PDF could not be parsed, so its text was not extracted: ${extracted.reason ?? "unknown error"}`,
             extracted: false,
+            // A mention of the header is not a document. Falling through keeps
+            // the original text; replacing it with this error destroys the file.
+            fallback: true,
         };
     }
 
     const lines = extracted.text.split("\n");
+    const paged = pagePdfText(lines, offset, limit);
+    if (!paged.extracted) return paged;
+    return {
+        text: `${paged.text}\n\n[PDF: ${extracted.totalPages} page(s), text extracted from ${path}.]`,
+        extracted: true,
+    };
+}
+
+function pagePdfText(
+    lines: string[],
+    offset: number | undefined,
+    limit: number | undefined,
+): PdfReadResult {
     const start = offset ? Math.max(0, offset - 1) : 0;
     if (start >= lines.length) {
         return {
@@ -101,17 +133,68 @@ export async function readPdf(
             extracted: false,
         };
     }
-    const end = limit === undefined ? lines.length : Math.min(start + limit, lines.length);
-    const body = lines.slice(start, end).join("\n");
 
-    let text = body;
-    if (end < lines.length) {
-        text += `\n\n[Showing lines ${start + 1}-${end} of ${lines.length}. Use offset=${end + 1} to continue.]`;
-    } else if (start > 0) {
-        text += `\n\n[Showing lines ${start + 1}-${end} of ${lines.length}.]`;
+    const userEnd = limit === undefined ? lines.length : Math.min(start + limit, lines.length);
+    const capEnd = Math.min(userEnd, start + PDF_MAX_LINES);
+    const selected: string[] = [];
+    let bytes = 0;
+    let stoppedForBytes = false;
+    let truncatedFirstLine = false;
+
+    for (let i = start; i < capEnd; i++) {
+        const line = lines[i] ?? "";
+        const lineBytes = Buffer.byteLength(line, "utf8");
+        const separator = selected.length > 0 ? 1 : 0;
+        if (bytes + separator + lineBytes > PDF_MAX_BYTES) {
+            if (selected.length === 0) {
+                selected.push(truncateUtf8(line, PDF_MAX_BYTES));
+                truncatedFirstLine = true;
+            }
+            stoppedForBytes = true;
+            break;
+        }
+        selected.push(line);
+        bytes += separator + lineBytes;
     }
-    text += `\n\n[PDF: ${extracted.totalPages} page(s), text extracted from ${path}.]`;
-    return { text, extracted: true };
+
+    const end = start + selected.length;
+    const body = selected.join("\n");
+    return {
+        text: body + continuationNote(lines, start, end, stoppedForBytes, truncatedFirstLine),
+        extracted: true,
+    };
+}
+
+function continuationNote(
+    lines: string[],
+    start: number,
+    end: number,
+    stoppedForBytes: boolean,
+    truncatedFirstLine: boolean,
+): string {
+    if (truncatedFirstLine) {
+        const more = end < lines.length ? ` Use offset=${end + 1} to continue.` : "";
+        return `\n\n[Line ${start + 1} exceeds the ${PDF_BYTE_LIMIT_LABEL} limit and was truncated.${more}]`;
+    }
+    if (stoppedForBytes) {
+        return `\n\n[Showing lines ${start + 1}-${end} of ${lines.length} (${PDF_BYTE_LIMIT_LABEL} limit). Use offset=${end + 1} to continue.]`;
+    }
+    if (end < lines.length) {
+        return `\n\n[Showing lines ${start + 1}-${end} of ${lines.length}. Use offset=${end + 1} to continue.]`;
+    }
+    if (start > 0) return `\n\n[Showing lines ${start + 1}-${end} of ${lines.length}.]`;
+    return "";
+}
+
+/** Cut to a byte budget without splitting a UTF-8 code point. */
+function truncateUtf8(text: string, maxBytes: number): string {
+    const buf = Buffer.from(text, "utf8");
+    if (buf.length <= maxBytes) return text;
+    // `maxBytes` may land inside a code point. Walk back to its lead byte and
+    // exclude it; a continuation byte is 10xxxxxx.
+    let end = maxBytes;
+    while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+    return buf.subarray(0, end).toString("utf8");
 }
 
 /**
@@ -124,26 +207,29 @@ export async function readPdf(
 export async function renderScan(
     bytes: Uint8Array,
     path: string,
+    load: () => Promise<Awaited<ReturnType<typeof loadCanvas>>> = loadCanvas,
 ): Promise<{ text: string; images: RenderedPage[] }> {
-    const canvas = await loadCanvas();
+    const canvas = await load();
     if (!canvas) {
         return {
             text:
                 "This PDF has no text layer — it is a scan, so its pages are pictures of text. " +
-                "Rendering pages to images needs the optional @napi-rs/canvas dependency " +
-                "(install it with `pnpm add @napi-rs/canvas@1.0.13`), " +
-                "or use `officecli view text` to extract the text.",
+                "Rendering those pages needs the optional @napi-rs/canvas package, which this install does not have. " +
+                `Install it with \`${canvasInstallCommand()}\`. ` +
+                "There is no text layer to extract.",
             images: [],
         };
     }
+    let proxy: Awaited<ReturnType<typeof openPdfDocument>> | undefined;
     try {
-        const totalPages = await pdfPageCount(bytes);
+        proxy = await openPdfDocument(bytes);
+        const totalPages = proxy.numPages;
         const pages = Array.from(
             { length: Math.min(totalPages, MAX_RENDERED_PAGES) },
             (_, i) => i + 1,
         );
-        const images = await renderPdfPages(bytes, pages, 2, canvas);
-        let text = `This PDF has no text layer — it is a scan. Its first ${images.length} page(s) were rendered as images so they can be read.`;
+        const images = await renderPdfPages(proxy, pages, 2, canvas);
+        let text = `This PDF has no text layer — it is a scan. Its first ${images.length} page(s) were rendered as images.`;
         if (totalPages > images.length) {
             text += ` The document has ${totalPages} pages; only the first ${images.length} were rendered.`;
         }
@@ -155,27 +241,52 @@ export async function renderScan(
             text: `This PDF has no text layer and its pages could not be rendered: ${reason}`,
             images: [],
         };
+    } finally {
+        await proxy?.loadingTask.destroy();
     }
 }
 
 /**
- * Read the bytes of a path through the tool's execution env.
+ * Read a PDF's bytes, or undefined when the path is not a PDF.
  *
  * Returns undefined when the path does not resolve or cannot be read — the
  * caller then lets pi produce its own error, which is the message the model
- * already knows how to act on.
+ * already knows how to act on. A non-PDF is not read here: the env has no
+ * ranged read, so the magic is checked with a probe of the path
+ * `absolutePath` already resolved. That probe is not a permission gate —
+ * `readBinaryFile` is a plain read of the same path — and it keeps a text
+ * file from being loaded twice.
  */
-export async function readPathBytes(
+export async function readPdfBytes(
     env: ReadEnv,
     path: string,
     context: Context,
 ): Promise<Uint8Array | undefined> {
+    let resolved: string;
     try {
-        const resolved = getOrThrow(
-            await env.absolutePath(normalizeBuiltinToolPath(path), context),
-        );
+        resolved = getOrThrow(await env.absolutePath(normalizeBuiltinToolPath(path), context));
+    } catch {
+        return undefined;
+    }
+    const head = await readHead(resolved);
+    if (!head || !isPdfBytes(head)) return undefined;
+    try {
         return getOrThrow(await env.readBinaryFile(resolved, context));
     } catch {
         return undefined;
+    }
+}
+
+async function readHead(path: string): Promise<Uint8Array | undefined> {
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+        handle = await open(path, "r");
+        const buf = Buffer.alloc(MAGIC_WINDOW);
+        const { bytesRead } = await handle.read(buf, 0, MAGIC_WINDOW, 0);
+        return buf.subarray(0, bytesRead);
+    } catch {
+        return undefined;
+    } finally {
+        await handle?.close();
     }
 }

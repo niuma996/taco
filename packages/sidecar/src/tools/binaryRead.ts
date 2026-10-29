@@ -85,7 +85,7 @@ function archiveHint(filePath: string, ext: string, officecliOnPath: () => boole
     if (office) {
         const which = filePath ? ` (${JSON.stringify(filePath)})` : "";
         const command = filePath
-            ? `\`officecli view text ${JSON.stringify(filePath)}\``
+            ? `\`officecli view ${JSON.stringify(filePath)} text\``
             : "the officecli skill";
         const install = officecliOnPath() ? "" : `\n\n${OFFICECLI_MISSING_NOTE}`;
         return `This is a ${office}${which}, not text. Use the officecli skill: ${command}.${install}`;

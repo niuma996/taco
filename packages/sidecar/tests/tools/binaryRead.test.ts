@@ -53,7 +53,7 @@ describe("binaryReadHint", () => {
     it("names the Office format and the install steps when officecli is missing", () => {
         const hint = binaryReadHint("PK\u0003\u0004xxxx", "q.docx", missing);
         assert.ok(hint?.includes("Word document"));
-        assert.ok(hint?.includes("officecli view text"));
+        assert.ok(hint?.includes('officecli view "q.docx" text'));
         assert.ok(hint?.includes("https://d.officecli.ai/install.sh"));
     });
 
@@ -121,6 +121,17 @@ describe("commandOnPath", () => {
     });
 });
 
+class CountingEnv extends NodeExecutionEnv {
+    reads = 0;
+    override async readBinaryFile(
+        path: string,
+        context: Parameters<NodeExecutionEnv["readBinaryFile"]>[1],
+    ) {
+        this.reads += 1;
+        return super.readBinaryFile(path, context);
+    }
+}
+
 describe("read tool binary guard", () => {
     const cwd = mkdtempSync(join(tmpdir(), "taco-read-"));
     after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -176,6 +187,25 @@ describe("read tool binary guard", () => {
         } else {
             assert.match(hint, /not on PATH/);
         }
+    });
+
+    it("returns the original text when a file only mentions the PDF header", async () => {
+        const body = "see the %PDF-1.7 header in the spec\n";
+        writeFileSync(join(cwd, "spec-notes.txt"), body);
+        assert.equal(textOf(await read("spec-notes.txt")), body);
+    });
+
+    it("reads a non-PDF once and a PDF once", async () => {
+        writeFileSync(join(cwd, "once.txt"), "hello\n");
+        writeFileSync(join(cwd, "once.pdf"), buildTextPdf(["hello"]));
+        const tool = defaultTools().find((t) => t.name === "read");
+        assert.ok(tool);
+        const textEnv = new CountingEnv({ cwd });
+        await invokeTool(tool, { path: "once.txt" }, { env: textEnv });
+        assert.equal(textEnv.reads, 1);
+        const pdfEnv = new CountingEnv({ cwd });
+        await invokeTool(tool, { path: "once.pdf" }, { env: pdfEnv });
+        assert.equal(pdfEnv.reads, 1);
     });
 
     it("keeps the routing summary inside the prompt budget", () => {

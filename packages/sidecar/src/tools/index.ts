@@ -28,7 +28,7 @@ import { createGlobTool } from "./glob.ts";
 import { createGrepTool } from "./grep.ts";
 import { createJobsTools } from "./jobs.ts";
 import { createMemoryTool } from "./memory.ts";
-import { isPdfBytes, readPathBytes, readPdf } from "./pdfIntercept.ts";
+import { readPdf, readPdfBytes } from "./pdfIntercept.ts";
 import { createPlanEnterTool } from "./planEnter.ts";
 import { createPlanExitTool } from "./planExit.ts";
 import { createShellTool } from "./shellTool.ts";
@@ -102,22 +102,24 @@ export function defaultTools(opts?: {
         invocation,
         context,
     ) => {
-        // A PDF is parsed, not decoded: pi would hand back mojibake. The bytes
-        // are read here so the text layer can be extracted before the decoder
-        // ever sees them. A scan has no text layer, so its pages are rendered
-        // as images instead.
-        const bytes = await readPathBytes(toolContext.env, params.path, context);
-        if (bytes && isPdfBytes(bytes)) {
+        // A PDF is parsed, not decoded: pi would hand back mojibake. Only a
+        // file whose head is the PDF magic is read here. A mention of the
+        // header that does not parse falls through, so the original text is
+        // not replaced by the parser error.
+        const bytes = await readPdfBytes(toolContext.env, params.path, context);
+        if (bytes) {
             const pdf = await readPdf(bytes, params.path, params.offset, params.limit);
-            const images = (pdf.images ?? []).map((page) => ({
-                type: "image" as const,
-                data: page.data,
-                mimeType: page.mimeType,
-            }));
-            return {
-                content: [{ type: "text", text: pdf.text }, ...images],
-                details: undefined,
-            };
+            if (!pdf.fallback) {
+                const images = (pdf.images ?? []).map((page) => ({
+                    type: "image" as const,
+                    data: page.data,
+                    mimeType: page.mimeType,
+                }));
+                return {
+                    content: [{ type: "text", text: pdf.text }, ...images],
+                    details: undefined,
+                };
+            }
         }
         const result = await readBase.execute(
             toolCallId,

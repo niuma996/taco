@@ -12,17 +12,15 @@
  *  - PDF.js takes ownership of the buffer it is given and detaches it, so the
  *    caller's bytes are never handed over directly — a second read of the
  *    same array would fail.
- *  - `pdfjs-dist` supplies the CMap and standard-font files. Without them a
- *    CJK or non-embedded-font document loses characters silently, so the
- *    resources are located next to the bundle and passed explicitly.
+ *  - CMap and standard-font files live next to the bundle. Without them a
+ *    CJK document loses characters silently, and a release has no
+ *    node_modules to resolve `pdfjs-dist` against.
  */
 
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-
-import { resourceRoot } from "../runtime/runtimeResources.ts";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Where PDF.js looks for its CMap / standard-font resources. */
 interface PdfJsResources {
@@ -32,21 +30,15 @@ interface PdfJsResources {
 }
 
 /**
- * Resources live beside the sidecar bundle, not in node_modules: the desktop
- * release ships `lib/` alone. The copy step puts them in `lib/pdfjs`.
- *
- * The source layout has no such copy, so `pdfjs-dist` is resolved from the
+ * CMap / standard-font directory. The copy is next to the bundle (`lib/pdfjs`),
+ * not under `resourceRoot()`: that root is a level above `lib/` in a release,
+ * and a miss there drops CJK characters silently. Source runs resolve the
  * installed package instead.
  */
-function pdfJsResources(): PdfJsResources | undefined {
-    const bundled = join(resourceRoot(), "pdfjs");
-    const base = existsSync(bundled) ? bundled : resolvePdfJsDist();
-    if (!base) return undefined;
-    return {
-        standardFontDataUrl: pathToFileURL(join(base, "standard_fonts") + "/").href,
-        cMapUrl: pathToFileURL(join(base, "cmaps") + "/").href,
-        cMapPacked: true,
-    };
+export function pdfJsAssetDir(): string | undefined {
+    const cmaps = fileURLToPath(new URL("./pdfjs/cmaps", import.meta.url));
+    if (existsSync(cmaps)) return dirname(cmaps);
+    return resolvePdfJsDist();
 }
 
 /** The installed `pdfjs-dist` package, when it can be found. */
@@ -59,6 +51,16 @@ function resolvePdfJsDist(): string | undefined {
     }
 }
 
+function pdfJsResources(): PdfJsResources | undefined {
+    const base = pdfJsAssetDir();
+    if (!base) return undefined;
+    return {
+        standardFontDataUrl: pathToFileURL(join(base, "standard_fonts") + "/").href,
+        cMapUrl: pathToFileURL(join(base, "cmaps") + "/").href,
+        cMapPacked: true,
+    };
+}
+
 /** The PDF.js options this module always applies. */
 function documentOptions(): Record<string, unknown> {
     const resources = pdfJsResources();
@@ -69,8 +71,13 @@ function documentOptions(): Record<string, unknown> {
     };
 }
 
-/** Open a document, copying the bytes so the caller's buffer survives. */
-async function openDocument(bytes: Uint8Array) {
+/**
+ * Open a document, copying the bytes so the caller's buffer survives.
+ *
+ * The copy has to happen before the call: PDF.js detaches the buffer it is
+ * handed, and a copy taken afterwards throws.
+ */
+export async function openPdfDocument(bytes: Uint8Array) {
     const { getDocumentProxy } = await import("unpdf");
     return getDocumentProxy(new Uint8Array(bytes), documentOptions());
 }
@@ -90,7 +97,7 @@ export interface PdfText {
  */
 export async function extractPdfText(bytes: Uint8Array): Promise<PdfText | undefined> {
     const { extractText } = await import("unpdf");
-    const proxy = await openDocument(bytes);
+    const proxy = await openPdfDocument(bytes);
     try {
         const { text, totalPages } = await extractText(proxy, { mergePages: true });
         if (text.trim().length === 0) return undefined;
@@ -98,16 +105,6 @@ export async function extractPdfText(bytes: Uint8Array): Promise<PdfText | undef
     } finally {
         // unpdf only destroys the documents it creates itself; this proxy is
         // ours, so the worker it holds has to be shut down here.
-        await proxy.loadingTask.destroy();
-    }
-}
-
-/** How many pages a document has. */
-export async function pdfPageCount(bytes: Uint8Array): Promise<number> {
-    const proxy = await openDocument(bytes);
-    try {
-        return proxy.numPages;
-    } finally {
         await proxy.loadingTask.destroy();
     }
 }

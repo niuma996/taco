@@ -67,21 +67,24 @@ test("bundled PDF reader finds its font resources without a node_modules directo
         for (const resource of ["cmaps", "standard_fonts"]) {
             assert.ok(readdirSync(join(dir, "lib", "pdfjs", resource)).length > 0);
         }
-        // A document with a text layer, so the run proves the fonts resolved:
-        // without the standard-font files the text comes back empty.
+        // Text extraction only proves the opener still reads the document.
+        // The asset-dir check below is what fails if lookup uses resourceRoot().
         const pdfPath = join(dir, "sample.pdf");
         writeFileSync(pdfPath, buildTextPdf(["bundled pdf text"]));
         // The runner resolves no node_modules: the resources must come from
         // the copy beside the bundle.
         const runner = join(dir, "smoke.mjs");
+        const assetDir = join(dir, "lib", "pdfjs");
         writeFileSync(
             runner,
-            `import { extractPdfText } from ${JSON.stringify(pathToFileURL(outfile).href)};\nimport { readFileSync } from "node:fs";\nconst bytes = new Uint8Array(readFileSync(${JSON.stringify(pdfPath)}));\nconst result = await extractPdfText(bytes);\nif (!result || !result.text.includes("bundled pdf text")) throw new Error("text not extracted: " + JSON.stringify(result));\nconsole.log("ok");`,
+            `import { extractPdfText, pdfJsAssetDir } from ${JSON.stringify(pathToFileURL(outfile).href)};\nimport { readFileSync, realpathSync } from "node:fs";\nconst got = pdfJsAssetDir();\nconst expected = ${JSON.stringify(assetDir)};\nconst norm = (p) => realpathSync(p);\nif (!got || norm(got) !== norm(expected)) throw new Error("asset dir " + got + " !== " + expected);\nconst bytes = new Uint8Array(readFileSync(${JSON.stringify(pdfPath)}));\nconst result = await extractPdfText(bytes);\nif (!result || !result.text.includes("bundled pdf text")) throw new Error("text not extracted: " + JSON.stringify(result));\nconsole.log("ok");`,
         );
+        // Release sets this to the parent of lib/ (the skills root). Pointing
+        // it at lib/ would hide a lookup that uses that root and misses pdfjs/.
         const child = spawnSync(process.execPath, [runner], {
             cwd: dir,
             encoding: "utf8",
-            env: { ...process.env, TACO_SIDECAR_RESOURCES: join(dir, "lib") },
+            env: { ...process.env, TACO_SIDECAR_RESOURCES: dir },
         });
         assert.equal(child.status, 0, child.stderr || child.stdout);
     } finally {
