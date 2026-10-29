@@ -60,6 +60,7 @@
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
     "ignore": "^7.0.14",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.4.299",
     "typebox": "^1.4.3",
     "unpdf": "1.9.1",

@@ -532,7 +532,18 @@ describe("virtualWorkspace", () => {
                 );
             }
             // Guard: non-fs tools must never be in the disabled list (would break IM sessions).
-            const fsTools = new Set(["read", "write", "edit", "grep", "glob"]);
+            // The PDF tools count as fs tools: they read and write files.
+            const fsTools = new Set([
+                "read",
+                "write",
+                "edit",
+                "grep",
+                "glob",
+                "pdfMerge",
+                "pdfSplit",
+                "pdfFill",
+                "pdfFields",
+            ]);
             for (const disabled of IM_FS_TOOL_NAMES) {
                 assert.ok(fsTools.has(disabled), `${disabled} is not an fs tool`);
             }
