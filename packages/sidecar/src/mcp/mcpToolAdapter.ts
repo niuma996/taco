@@ -12,12 +12,15 @@
  * abort (signal aborted), which re-throws so the harness can stop the batch.
  */
 
+import { IMAGE_INPUT_MAX_BASE64_LENGTH } from "@taco-ai/protocol";
 import type { TSchema } from "typebox";
+import { isModelImageMime, sniffImageMime } from "../attachments/mimeType.ts";
 import type {
     AgentHarnessTool,
     AgentToolResult,
     Context,
     ExecutionToolContext,
+    ImageContent,
     TextContent,
 } from "../runtime/pi/types.ts";
 import type { McpCallResult, McpClientHandle, McpToolInfo } from "./mcpClient.ts";
@@ -33,17 +36,51 @@ export interface McpToolAdapterOptions {
 
 const EMPTY_SCHEMA = { type: "object" as const, properties: {} };
 
-/** Map MCP result content to pi TextContent. Non-text blocks become placeholders. */
-export function mapMcpContent(content: readonly unknown[]): TextContent[] {
-    const out: TextContent[] = [];
+/** How many images one MCP result may carry into the conversation. */
+const MAX_MCP_IMAGES = 5;
+
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * An MCP image block as a pi image block, when its bytes are a raster format
+ * a model provider accepts.
+ *
+ * The bytes decide, not the declared mime type: a server that labels a
+ * non-image as `image/png` must not have its bytes sent to a provider as an
+ * image. A model without image input is handled by pi, which replaces the
+ * block with a placeholder before the request leaves.
+ */
+function toImageContent(data: unknown): ImageContent | undefined {
+    if (typeof data !== "string" || data.length === 0) return undefined;
+    if (data.length > IMAGE_INPUT_MAX_BASE64_LENGTH) return undefined;
+    if (!BASE64_PATTERN.test(data)) return undefined;
+    const bytes = Buffer.from(data, "base64");
+    const sniffed = sniffImageMime(bytes);
+    if (!sniffed || !isModelImageMime(sniffed)) return undefined;
+    return { type: "image", data, mimeType: sniffed };
+}
+
+/**
+ * Map MCP result content to pi content. Images become image blocks when they
+ * carry bytes a provider accepts; every other block becomes text.
+ */
+export function mapMcpContent(content: readonly unknown[]): (TextContent | ImageContent)[] {
+    const out: (TextContent | ImageContent)[] = [];
+    let images = 0;
     for (const block of content) {
         if (block && typeof block === "object") {
-            const b = block as { type?: unknown; text?: unknown };
+            const b = block as { type?: unknown; text?: unknown; data?: unknown };
             if (b.type === "text" && typeof b.text === "string") {
                 out.push({ type: "text", text: b.text });
                 continue;
             }
             if (b.type === "image") {
+                const image = toImageContent(b.data);
+                if (image && images < MAX_MCP_IMAGES) {
+                    out.push(image);
+                    images++;
+                    continue;
+                }
                 out.push({ type: "text", text: "[mcp image content — not forwarded]" });
                 continue;
             }
@@ -52,6 +89,13 @@ export function mapMcpContent(content: readonly unknown[]): TextContent[] {
                 continue;
             }
             if (b.type === "resource" || b.type === "resource_link") {
+                const blob = (block as { resource?: { blob?: unknown } }).resource?.blob;
+                const image = toImageContent(blob);
+                if (image && images < MAX_MCP_IMAGES) {
+                    out.push(image);
+                    images++;
+                    continue;
+                }
                 out.push({ type: "text", text: "[mcp resource content — not forwarded]" });
                 continue;
             }

@@ -60,6 +60,9 @@ describe("mcpToolName", () => {
     });
 });
 
+/** The PNG magic bytes, base64-encoded: enough for the MIME sniff. */
+const PNG_BASE64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
+
 describe("mcpToolAdapter", () => {
     const info = (overrides: Partial<McpToolInfo> = {}): McpToolInfo => ({
         name: "raw_tool",
@@ -116,7 +119,7 @@ describe("mcpToolAdapter", () => {
         it("degrades non-text blocks to placeholder text", async () => {
             const handle = new FakeMcpClient("svc", [], async () => ({
                 content: [
-                    { type: "image", data: "x", mimeType: "image/png" },
+                    { type: "image", data: "not-base64!", mimeType: "image/png" },
                     { type: "audio", data: "y", mimeType: "audio/wav" },
                     { type: "resource", resource: { uri: "r", text: "z" } },
                     { type: "weird", extra: true },
@@ -128,6 +131,66 @@ describe("mcpToolAdapter", () => {
             for (const c of result.content) assert.equal(c.type, "text");
             assert.ok(textOf(result.content[0]).includes("image"));
             assert.ok(textOf(result.content[3]).includes("omitted"));
+        });
+
+        it("forwards an MCP image as an image block", async () => {
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: [{ type: "image", data: PNG_BASE64, mimeType: "image/png" }],
+            }));
+            const tool = makeTool({ handle });
+            const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
+            assert.deepEqual(result.content, [
+                { type: "image", data: PNG_BASE64, mimeType: "image/png" },
+            ]);
+        });
+
+        it("forwards an image carried by an embedded resource", async () => {
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: [
+                    {
+                        type: "resource",
+                        resource: { uri: "u", mimeType: "image/png", blob: PNG_BASE64 },
+                    },
+                ],
+            }));
+            const tool = makeTool({ handle });
+            const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
+            assert.deepEqual(result.content, [
+                { type: "image", data: PNG_BASE64, mimeType: "image/png" },
+            ]);
+        });
+
+        it("refuses an image whose bytes are not a raster format", async () => {
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: [
+                    {
+                        type: "image",
+                        data: Buffer.from("%PDF-1.7 pretend").toString("base64"),
+                        mimeType: "image/png",
+                    },
+                ],
+            }));
+            const tool = makeTool({ handle });
+            const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
+            assert.equal(result.content.length, 1);
+            assert.equal(result.content[0].type, "text");
+            assert.ok(textOf(result.content[0]).includes("image"));
+        });
+
+        it("keeps the number of forwarded images bounded", async () => {
+            const handle = new FakeMcpClient("svc", [], async () => ({
+                content: Array.from({ length: 8 }, () => ({
+                    type: "image",
+                    data: PNG_BASE64,
+                    mimeType: "image/png",
+                })),
+            }));
+            const tool = makeTool({ handle });
+            const result = await invokeTool(tool, {}, {} as never, { toolCallId: "t1" });
+            const images = result.content.filter((c) => c.type === "image");
+            const texts = result.content.filter((c) => c.type === "text");
+            assert.equal(images.length, 5);
+            assert.equal(texts.length, 3);
         });
 
         it("propagates MCP isError as details.isError", async () => {
