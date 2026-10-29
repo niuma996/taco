@@ -1633,6 +1633,13 @@ pub fn run() {
                     if let Err(e) = app.fs_scope().allow_directory(&taco_home, true) {
                         eprintln!("taco-desktop: failed to grant fs scope for TACO_HOME: {e}");
                     }
+                    // Attachment thumbnails render through the asset protocol.
+                    // Its configured `**` scope never reaches a dotted path
+                    // like `~/.taco` on Unix, so grant that tree explicitly
+                    // instead of widening the config scope to every path.
+                    if let Err(e) = app.asset_protocol_scope().allow_directory(&taco_home, true) {
+                        eprintln!("taco-desktop: failed to grant asset scope for TACO_HOME: {e}");
+                    }
                 }
             }
             {
