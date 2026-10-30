@@ -445,6 +445,43 @@ describe("wechatChannel", () => {
             assert.equal(msg.media?.[0].kind, "image");
         });
 
+        it("keeps a caption that arrives during a slow download in the same batch", async () => {
+            // A large file takes a while to download, and the platform
+            // delivers the caption that belongs to it only after the download
+            // finishes. A batch that closed on a timer would leave that
+            // caption to start a second turn.
+            const h = harness();
+            await h.channel.start(h.ctx);
+            let release: () => void = () => {};
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            h.bot.download = async () => {
+                await gate;
+                return { data: Buffer.from("PNGBYTES"), type: "image" };
+            };
+            const image = h.bot.deliver({
+                userId: "u1",
+                text: "[image]",
+                images: [{}],
+                raw: { message_id: 30, create_time_ms: 1_700_000_000_030 },
+            });
+            // Let the batch's window lapse while the download is still
+            // running — that is when a timer-driven close would drop the
+            // batch and strand the caption in a second one.
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            const caption = h.bot.deliver({
+                userId: "u1",
+                text: "what is in the picture",
+                raw: { message_id: 31, create_time_ms: 1_700_000_000_031 },
+            });
+            release();
+            await Promise.all([image, caption]);
+            assert.equal(h.submitted.length, 1, "one prompt, not two turns");
+            assert.equal(h.submitted[0].text, "what is in the picture");
+            assert.equal(h.submitted[0].kind, "media");
+        });
+
         it("keeps different senders in one group as separate prompts", async () => {
             // The group shares a session, but two people writing are two turns;
             // merging them would make the agent answer both as one message.
@@ -966,10 +1003,9 @@ describe("wecomChannel", () => {
                 },
             });
             await Promise.all([image, text]);
-            assert.deepEqual(
-                h.submitted.map((m) => m.peerId),
-                ["u1", "u2"],
-            );
+            // Each sender has its own batch, so the two prompts are ordered by
+            // when each batch settles — not by arrival.
+            assert.deepEqual(h.submitted.map((m) => m.peerId).sort(), ["u1", "u2"]);
             await handle.close();
         });
 
