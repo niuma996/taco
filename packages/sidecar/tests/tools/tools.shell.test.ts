@@ -118,6 +118,17 @@ function textOf(result: ShellToolResult): string {
     return first.text ?? "";
 }
 
+describe("shellTool description", () => {
+    it("tells the model that here-documents always need approval", () => {
+        // The permission parser marks any heredoc as unanalyzable, so a
+        // heredoc command always blocks on an approval prompt. The tool
+        // description is the model's only cue to use a file or `-c` instead.
+        const description = createShellTool().description;
+        assert.match(description, /here-(documents|strings)/i);
+        assert.match(description, /approval/i);
+    });
+});
+
 describe("shellTool permission results", () => {
     it("returns an explicit failed result when the user denies approval", async () => {
         const broker = new PermissionBroker(() => ASK_CONFIG);
