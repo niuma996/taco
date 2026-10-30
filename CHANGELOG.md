@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.3] — 2026-10-30
+
+A release about the agent learning to see: you can hand it any file, it can read
+a PDF, look at a picture, and answer a question about the photo you sent it
+from a chat app.
+
+### Added
+
+**Attach any file.** The desktop attaches any file type now, up to 8 per
+message and 25 MB each.
+
+**PDFs the agent can read.** `read` extracts the text layer of a PDF, and
+renders the first 5 pages of a scan as images. Four on-demand tools —
+`pdfMerge`, `pdfSplit`, `pdfFill` and `pdfFields` — merge, split, fill and
+inspect PDF forms.
+
+**Images the model can see.** Pictures returned by MCP tools are forwarded to
+the model, and a model you added yourself can declare image input.
+
+**Photos sent from chat apps.** Pictures and files from WeChat and WeCom reach
+the model now. A photo and its caption arrive as one message, not two.
+
+### Changed
+
+- A command approval requested from a chat app is refused right away instead
+  of hanging, and the model tells you what it wanted to do.
+- RPC parameters are validated, and a rejected request reports which field was
+  wrong.
+- The desktop asks for confirmation before deleting an MCP server, a permission
+  rule or a scheduled task. Screen readers hear errors that were previously
+  silent.
+
+### Fixed
+
+- Changing the memory switch, the system prompt or the MCP server list no
+  longer interrupts the sessions that are running.
+- A stale config lock no longer makes every settings save time out.
+- The daemon error log is capped and rotates, and the push log no longer
+  stalls the app.
+- Restarting the sidecar from inside the desktop app lets it connect again on
+  its own, and attachment thumbnails render.
+- A tool installed after a session was created is available in that session.
+  The shell tool no longer reaches for here-documents, which always needed
+  approval.
+
+### Breaking changes
+
+- The wire protocol advances 2.4 → 2.6. Keep the desktop and the sidecar on
+  the same release line; a newer desktop refuses an older daemon at startup.
+
 ## [0.3.2] — 2026-10-26
 
 A release about memory that stops growing: a nightly job consolidates what the
