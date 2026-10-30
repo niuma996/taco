@@ -1647,11 +1647,14 @@ describe("AgentSpawner parent-toolset inheritance", () => {
         // turn calls refreshToolset() (here invoked directly, standing in for
         // the per-turn call AttachedSession.applyToolsetRefresh makes).
         policy = SHELL_ALLOW_POLICY;
-        const changed = ws.refreshToolset(
+        const refreshed = ws.refreshToolset(
             "parent-1" as never,
             { taskStore: undefined, tasksDir: cwd, planState: undefined } as never,
         );
-        assert.ok(changed, "policy flip must be detected as a toolset change");
+        assert.ok(
+            refreshed.some((t) => t.name === "shell"),
+            "policy flip must reach the assembly",
+        );
 
         const names = await spawnAndCaptureTools("tc-after-grant");
         assert.ok(

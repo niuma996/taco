@@ -187,14 +187,13 @@ export interface SessionRegistryOptions {
      * SessionRegistry.attach falls back to this.tools (workspace-static set).
      */
     readonly toolsBuilder?: (sessionId: SessionId, taskState: SessionTaskState) => TacoTool[];
-    /** Per-turn toolset convergence; returns undefined when nothing changed.
-     *  Supplied by WorkspaceRuntime (which owns the prompt it rebuilds).
-     *  `removed` lists the workspace-level names the change retired, so the
-     *  session can drop exactly those instead of replacing its whole toolset. */
+    /** Per-turn toolset re-assembly with the prompt built from it. Supplied
+     *  by WorkspaceRuntime (which owns the prompt it rebuilds); the session
+     *  decides whether anything changed. */
     readonly refreshToolset?: (
         sessionId: SessionId,
         taskState: SessionTaskState,
-    ) => { tools: TacoTool[]; removed: string[]; systemPrompt: string } | undefined;
+    ) => { tools: TacoTool[]; systemPrompt: string };
     /** Dynamic-tool candidate directory; forwarded to AttachedSession.create to wire AddTools and restore. */
     readonly toolRegistry?: DeferredToolRegistry;
     /**
@@ -378,7 +377,7 @@ export class SessionRegistry extends EventEmitter {
         | ((
               sessionId: SessionId,
               taskState: SessionTaskState,
-          ) => { tools: TacoTool[]; removed: string[]; systemPrompt: string } | undefined)
+          ) => { tools: TacoTool[]; systemPrompt: string })
         | undefined;
     /** NOT readonly: `updateSkills()` swaps this in on hot reload. */
     private skills: readonly TacoSkill[];
@@ -969,6 +968,7 @@ export class SessionRegistry extends EventEmitter {
                 const facts = await readSessionFacts(session);
                 const sessionKind: "main" | "subagent" =
                     facts.kind === "subagent" ? "subagent" : "main";
+                const refreshToolset = this.refreshToolset;
                 attached = await AttachedSession.create({
                     session,
                     models: this.models,
@@ -998,8 +998,8 @@ export class SessionRegistry extends EventEmitter {
                     // by its caller (depth-filtered, `agent` removed), so re-imposing
                     // the workspace set on it would widen it back.
                     refreshToolset:
-                        sessionKind === "main" && this.refreshToolset
-                            ? () => this.refreshToolset?.(sessionId, resolvedTaskState)
+                        sessionKind === "main" && refreshToolset
+                            ? () => refreshToolset(sessionId, resolvedTaskState)
                             : undefined,
                     getInstructionsConfig: this.getInstructionsConfig,
                     getImChannelContext: this.getImChannelContext,

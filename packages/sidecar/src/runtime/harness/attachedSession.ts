@@ -85,6 +85,7 @@ import {
     DefaultSessionToolController,
     type SessionToolController,
 } from "./sessionToolController.ts";
+import { SessionToolState } from "./sessionToolState.ts";
 import { alignActiveTools, createToolsetRefresher } from "./toolsetRefresh.ts";
 import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
 
@@ -199,19 +200,15 @@ export interface AttachedSessionOptions {
      */
     toolRegistry?: DeferredToolRegistry;
     /**
-     * Re-assemble the workspace toolset for this session, returning it only when
-     * it differs from what the workspace last handed out (undefined = unchanged,
-     * the steady state). Called at the start of each turn so a permission change
-     * reaches an existing conversation on its next message.
+     * Re-assemble the workspace toolset for this session. Called at the start of
+     * each turn so a permission change reaches an existing conversation on its
+     * next message; the session compares it with what it last installed.
      *
      * Returns the system prompt alongside the tools because the two must move
      * together: offering a tool the prompt says you lack — or the reverse —
-     * is worse than either being stale. `removed` names the workspace tools the
-     * change retired; the session layer keeps everything else it had installed.
+     * is worse than either being stale.
      */
-    refreshToolset?: () =>
-        | { tools: TacoTool[]; removed: string[]; systemPrompt: string }
-        | undefined;
+    refreshToolset?: () => { tools: TacoTool[]; systemPrompt: string };
     /**
      * Per-turn tool context provider. The harness invokes it once per
      * turn snapshot and threads the result into every tool's `execute`.
@@ -501,30 +498,32 @@ export class AttachedSession extends EventEmitter {
             }
         }
 
+        // Every runtime change to the session's tools goes through this one
+        // queue — dynamic loading, the per-turn refresh and the realignment
+        // below. Definitions live on the harness, the active set on the lane.
+        const toolState = new SessionToolState({
+            getTools: () => harness.getTools(harnessContext),
+            setTools: (tools) => harness.setTools([...tools], harnessContext),
+            getActiveToolNames: () => lane.getActiveTools(harnessContext),
+            setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
+        });
+
         // The lane's persisted allowlist predates this process's toolset;
         // converge it before the first turn rather than waiting on a refresh
         // that only fires when the workspace set changes mid-process.
         if (
-            await alignActiveTools({
-                harness,
-                lane,
-                workspaceToolNames: args.tools.map((t) => t.name),
-            })
+            await alignActiveTools(
+                toolState,
+                args.tools.map((t) => t.name),
+            )
         ) {
             log.info("realigned persisted active tools with the workspace toolset", {
                 sessionId: args.session.metadata.id,
             });
         }
 
-        // Bind the tool surface — controller constructed first, bound after:
-        // breaks the cycle. Tool definitions live on the harness, the active
-        // set on the lane, so the controller gets a facade over both.
-        toolController?.bindHarness({
-            getTools: () => harness.getTools(harnessContext),
-            setTools: (tools) => harness.setTools([...tools], harnessContext),
-            getActiveToolNames: () => lane.getActiveTools(harnessContext),
-            setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
-        });
+        // Controller constructed first, bound after: breaks the cycle.
+        toolController?.bindHarness(toolState);
 
         const branchEntries = await findBranchEntries(args.session);
         const pinOnceConsumer = new PinOnceConsumer(branchEntries);
@@ -583,8 +582,7 @@ export class AttachedSession extends EventEmitter {
         // the prompt cell so the two can only move together.
         if (args.refreshToolset) {
             attached.applyToolsetRefresh = createToolsetRefresher({
-                harness,
-                lane,
+                toolState,
                 refresh: args.refreshToolset,
                 setSystemPrompt: (prompt) => {
                     currentSystemPrompt = prompt;

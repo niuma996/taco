@@ -19,7 +19,7 @@ import { createAgentTool } from "../../src/tools/agent.ts";
 import { createAgentContinueTool } from "../../src/tools/agentContinue.ts";
 import type { TacoToolContext } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
-import { FakeToolCollection } from "../_helpers/fakeToolCollection.ts";
+import { fakeToolState } from "../_helpers/fakeToolCollection.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
 
 describe("agent tool", () => {
@@ -529,7 +529,7 @@ function makeRegistry(names: string[]): DefaultDeferredToolRegistry {
 function makeTool(names: string[]): { tool: TacoTool; controller: DefaultSessionToolController } {
     const registry = makeRegistry(names);
     const controller = new DefaultSessionToolController(registry);
-    controller.bindHarness(new FakeToolCollection([fakeTool("read")]));
+    controller.bindHarness(fakeToolState([fakeTool("read")]));
     return { tool: createAddToolsTool(controller), controller };
 }
 
@@ -565,7 +565,7 @@ describe("addTools description", () => {
     it("does not change after loading a deferred tool", async () => {
         const registry = makeRegistry(["git-status", "pg-query"]);
         const controller = new DefaultSessionToolController(registry);
-        controller.bindHarness(new FakeToolCollection([]));
+        controller.bindHarness(fakeToolState([]));
         const tool = createAddToolsTool(controller);
         const before = tool.description;
         await controller.addTools(["git-status"]);

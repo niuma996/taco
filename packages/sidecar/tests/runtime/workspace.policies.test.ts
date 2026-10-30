@@ -25,6 +25,7 @@ import type { TacoSkill } from "../../src/skills/tacoSkill.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
+import { stubModelFetch } from "../_helpers/stubModelFetch.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
@@ -669,5 +670,54 @@ describe("WorkspaceRuntime PermissionBroker im-policy wiring", () => {
             AUTO_ALLOW_LS_POLICY.commands,
             "broker must re-read resolveImPolicy() on every call, not capture it at construction",
         );
+    });
+});
+
+/**
+ * Every attached session converges on a policy change, not just the first to
+ * prompt. The change baseline used to be the workspace-level toolset, which the
+ * first session's refresh overwrote — so every other session compared equal and
+ * kept its pre-change tools and prompt until it was re-attached.
+ */
+describe("WorkspaceRuntime per-turn toolset refresh across sessions", () => {
+    useTempTacoHome();
+    stubModelFetch();
+
+    const DENY: ImWorkspacePolicy = {
+        tools: { fsTools: "deny", shell: "deny" },
+        commands: { mode: "ask" },
+        executionDir: { mode: "shared" },
+    };
+    const ALLOW: ImWorkspacePolicy = { ...DENY, tools: { fsTools: "deny", shell: "allow" } };
+
+    it("a policy grant reaches a second session after the first one refreshed", async () => {
+        let policy = DENY;
+        const { ws, cwd, cleanup } = createTestWorkspace({
+            prefix: "refresh-multi",
+            resolveImPolicy: () => policy,
+        });
+        try {
+            for (const id of ["s-a", "s-b"]) {
+                await (await ws.repo.create({ id, cwd }, harnessContext)).close(harnessContext);
+            }
+            ws.invalidateListCache();
+            const a = await ws.attach(asSessionId("s-a"));
+            const b = await ws.attach(asSessionId("s-b"));
+            const activeOf = async (s: typeof a) =>
+                (await s.toolController?.activeToolNames()) ?? [];
+            assert.ok(!(await activeOf(b)).includes("shell"), "precondition: shell denied");
+
+            policy = ALLOW;
+            await a.prompt("hi").catch(() => undefined);
+            await b.prompt("hi").catch(() => undefined);
+
+            assert.ok((await activeOf(a)).includes("shell"), "first session must converge");
+            assert.ok(
+                (await activeOf(b)).includes("shell"),
+                `second session must converge too, got: ${(await activeOf(b)).join(", ")}`,
+            );
+        } finally {
+            await cleanup();
+        }
     });
 });

@@ -1,19 +1,18 @@
 /** Minimal fake of the pi 0.85 harness+lane tool surface for unit tests. */
 
-import type { ToolCollection } from "../../src/runtime/harness/sessionToolController.ts";
+import {
+    SessionToolState,
+    type ToolCollection,
+} from "../../src/runtime/harness/sessionToolState.ts";
 import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 
 /**
- * In pi 0.85 tool definitions live on the harness while the active set lives on
- * the lane, so `setTools` and `setActiveToolNames` are separate calls. The
- * controller always writes definitions before widening the active set;
- * `setToolsCalls` records the pair so tests can assert on the combination the
- * way they did when it was one call.
+ * Tool definitions live on the harness while the active set lives on the lane,
+ * so `setTools` and `setActiveToolNames` are separate calls, as in pi.
  */
 export class FakeToolCollection implements ToolCollection {
     tools = new Map<string, AgentHarnessTool<ExecutionToolContext>>();
     active = new Set<string>();
-    setToolsCalls: Array<{ tools: string[]; active: string[] }> = [];
 
     constructor(initial: AgentHarnessTool<ExecutionToolContext>[]) {
         for (const t of initial) {
@@ -32,18 +31,14 @@ export class FakeToolCollection implements ToolCollection {
 
     async setTools(tools: readonly AgentHarnessTool<ExecutionToolContext>[]): Promise<void> {
         this.tools = new Map(tools.map((t) => [t.name, t]));
-        // Definitions land before the active set widens, so record the tool
-        // list against the active set as it stands right now; the following
-        // setActiveToolNames call rewrites the entry.
-        this.setToolsCalls.push({
-            tools: tools.map((t) => t.name),
-            active: [...this.active],
-        });
     }
 
     async setActiveToolNames(names: readonly string[]): Promise<void> {
         this.active = new Set(names);
-        const last = this.setToolsCalls[this.setToolsCalls.length - 1];
-        if (last) last.active = [...this.active];
     }
+}
+
+/** A `SessionToolState` over a fresh fake, for binding a controller in tests. */
+export function fakeToolState(initial: AgentHarnessTool<ExecutionToolContext>[]): SessionToolState {
+    return new SessionToolState(new FakeToolCollection(initial));
 }

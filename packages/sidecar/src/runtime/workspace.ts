@@ -683,10 +683,10 @@ export class WorkspaceRuntime extends EventEmitter {
             toolsBuilder,
             // Pair the refreshed toolset with the prompt rebuilt from it, so a
             // session can never install one without the other.
-            refreshToolset: (sessionId, taskState) => {
-                const next = this.refreshToolset(sessionId, taskState);
-                return next ? { ...next, systemPrompt: this.systemPrompt } : undefined;
-            },
+            refreshToolset: (sessionId, taskState) => ({
+                tools: this.refreshToolset(sessionId, taskState),
+                systemPrompt: this.systemPrompt,
+            }),
             // Thunk reads the current value of `instructionsConfig` — bound
             // to the workspace field, so `updateInstructionsConfig()` can
             // hot-reload without re-constructing the registry. `undefined`
@@ -1103,10 +1103,10 @@ export class WorkspaceRuntime extends EventEmitter {
     }
 
     /**
-     * Re-assemble the workspace toolset and rebuild the system prompt when
-     * the set changed; returns the fresh set plus the names it retired, or
-     * undefined when nothing changed. `removed` travels because the caller
-     * holds the session's full toolset, which is a superset of this one.
+     * Re-assemble the workspace toolset for a session and return it. Whether a
+     * session has to apply it is the session's call — it compares against what
+     * it last installed — since `this.tools` is shared: diffing against it
+     * would let the first session to refresh hide the change from the rest.
      *
      * Called at the start of every turn. Assembly is cheap (~0.075 ms
      * combined) against a model call 3-5 orders of magnitude larger, so
@@ -1114,29 +1114,22 @@ export class WorkspaceRuntime extends EventEmitter {
      * tool assembly reaches a live conversation on its next message, with
      * no per-source invalidation plumbing.
      *
-     * The name-comparison guard keeps the steady state byte-identical —
-     * only a real change pays one KV-cache miss.
+     * The workspace-level set and the prompt baked from it are rebuilt only
+     * when the names changed, so the steady state stays byte-identical.
      */
-    refreshToolset(
-        sessionId: SessionId,
-        taskState: SessionTaskState,
-    ): { tools: TacoTool[]; removed: string[] } | undefined {
-        const next = this.toolsBuilder(sessionId, taskState);
-        const before = toolNamesKey(this.tools);
-        const after = toolNamesKey(next);
-        if (before === after) return undefined;
-        this.tools = orderTools(next);
+    refreshToolset(sessionId: SessionId, taskState: SessionTaskState): TacoTool[] {
+        const next = orderTools(this.toolsBuilder(sessionId, taskState));
+        const before = this.tools.map((t) => t.name);
+        const after = next.map((t) => t.name);
+        if (toolNamesKey(this.tools) === toolNamesKey(next)) return next;
+        this.tools = next;
         this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
-        const added = after.split("\u0000").filter((n) => n && !before.split("\u0000").includes(n));
-        const removed = before
-            .split("\u0000")
-            .filter((n) => n && !after.split("\u0000").includes(n));
         log.info("workspace toolset changed; rebuilt system prompt", {
             workspace: this.workspaceKey,
-            added,
-            removed,
+            added: after.filter((n) => !before.includes(n)),
+            removed: before.filter((n) => !after.includes(n)),
         });
-        return { tools: this.tools, removed };
+        return next;
     }
 
     // ─────────── session list / history (delegates to SessionRegistry) ───────────

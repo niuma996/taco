@@ -805,10 +805,7 @@ describe("attachedSession.deferredTools", () => {
 
         it("a turn converges the toolset and the system prompt together", async () => {
             // Convergence happens per turn rather than only at attach, so a policy
-            // edited mid-conversation reaches the very next message. The refresher
-            // returns undefined while nothing changed (the steady state) so the
-            // system prompt — the model's cache prefix — is not rewritten every
-            // turn; only a real change pays a cache miss.
+            // edited mid-conversation reaches the very next message.
             const registry = new DefaultDeferredToolRegistry({ candidates: [] });
             const session = await repo.create({ cwd: tmpDir }, harnessContext);
 
@@ -817,15 +814,9 @@ describe("attachedSession.deferredTools", () => {
             const baseTools = [fakeTool("builtin-tool")];
             const refreshToolset = () => {
                 refreshCalls += 1;
-                // Mimic WorkspaceRuntime: report a change only when the assembled
-                // name list actually differs from what was last installed.
-                if (!granted) return undefined;
-                granted = false; // converged; subsequent turns see no further change
-                return {
-                    tools: [...baseTools, fakeTool("shell")],
-                    removed: [],
-                    systemPrompt: "test prompt with shell",
-                };
+                return granted
+                    ? { tools: [...baseTools, fakeTool("shell")], systemPrompt: "with shell" }
+                    : { tools: baseTools, systemPrompt: "test prompt" };
             };
 
             const attached = await AttachedSession.create({
@@ -902,15 +893,10 @@ describe("attachedSession.deferredTools", () => {
                 sessionCwd: tmpDir as never,
                 getToolContext: (): TacoToolContextBase => ({ env, workspace: tmpDir as never }),
                 sessionKind: "main",
-                refreshToolset: () => {
-                    if (!granted) return undefined;
-                    granted = false;
-                    return {
-                        tools: [...baseTools, fakeTool("shell")],
-                        removed: [],
-                        systemPrompt: "test prompt with shell",
-                    };
-                },
+                refreshToolset: () =>
+                    granted
+                        ? { tools: [...baseTools, fakeTool("shell")], systemPrompt: "with shell" }
+                        : { tools: baseTools, systemPrompt: "test prompt" },
             } as AttachedSessionOptions);
 
             const before = (await attached.toolController?.activeToolNames()) ?? [];
