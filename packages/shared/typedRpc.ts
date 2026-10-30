@@ -39,8 +39,8 @@ import type {
     CreateSessionParams,
     CreateSessionResult,
     ExtensionsStatusResult,
+    FollowUpParams,
     FollowUpResult,
-    ImageInput,
     ImPolicyClearChatOverrideParams,
     ImPolicyGetParams,
     ImPolicyGetResult,
@@ -64,6 +64,7 @@ import type {
     MemoryRestoreTopicResult,
     MemoryUpsertResult,
     MemoryWriteResult,
+    PromptParams,
     PromptResult,
     ProviderListModelsParams,
     ProviderListModelsResult,
@@ -95,9 +96,9 @@ import type {
     SettingsWriteResult,
     SkillContentResult,
     SkillsListResult,
+    SteerParams,
     SteerResult,
     SubagentAbortResult,
-    SupportedLocale,
     ThinkingLevel,
     ToolsListResult,
     WorkspaceAssociationKey,
@@ -188,42 +189,20 @@ export interface TypedRpc {
         workspace: WorkspaceId,
         sessionId: SessionId,
     ): Promise<SessionPlanStateGetResult>;
-    sessionPrompt(
-        workspace: WorkspaceId,
-        sessionId: SessionId,
-        text: string,
-        images?: ImageInput[],
-        uiLocale?: SupportedLocale,
-        model?: { provider: string; id: string },
-        attachments?: string[],
-    ): Promise<PromptResult>;
+    sessionPrompt(params: PromptParams): Promise<PromptResult>;
     /**
      * Enqueue a mid-run steering message, consumed at the next tool-batch
      * boundary — "interrupt and redirect". Resolves promptly with the enqueue
      * outcome: "queued" (plus the entryId to key an optimistic row on) or
      * "idle" (no active run; the client should fall back to sessionPrompt).
      */
-    sessionSteer(
-        workspace: WorkspaceId,
-        sessionId: SessionId,
-        text: string,
-        images?: ImageInput[],
-        uiLocale?: SupportedLocale,
-        attachments?: string[],
-    ): Promise<SteerResult>;
+    sessionSteer(params: SteerParams): Promise<SteerResult>;
     /**
      * Like sessionSteer, but consumed only once the run would otherwise finish —
      * "queue behind the current work" rather than "interrupt it". Same result
      * contract, including the idle fallback.
      */
-    sessionFollowUp(
-        workspace: WorkspaceId,
-        sessionId: SessionId,
-        text: string,
-        images?: ImageInput[],
-        uiLocale?: SupportedLocale,
-        attachments?: string[],
-    ): Promise<FollowUpResult>;
+    sessionFollowUp(params: FollowUpParams): Promise<FollowUpResult>;
     /** Remove one not-yet-consumed queue entry; "already_consumed" / "not_found" are normal outcomes. */
     sessionCancelQueued(
         workspace: WorkspaceId,
@@ -444,6 +423,23 @@ type TypedRpcKeysMatchContract = [keyof TypedRpc] extends [TypedRpcContractKey]
 
 export const typedRpcKeysMatchContract: TypedRpcKeysMatchContract = true;
 
+/**
+ * Drop empty optional turn fields so the wire carries only what the caller set;
+ * an empty `images` array would otherwise reach the server's image branch.
+ */
+function compactTurnParams<P extends SteerParams & { model?: PromptParams["model"] }>(
+    params: P,
+): P {
+    const { images, attachments, uiLocale, model, ...rest } = params;
+    return {
+        ...rest,
+        ...(images && images.length > 0 ? { images } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        ...(uiLocale ? { uiLocale } : {}),
+        ...(model ? { model } : {}),
+    } as P;
+}
+
 export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
     const contract = createContractDispatch(dispatch);
 
@@ -523,37 +519,12 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
         sessionPlanStateGet: (workspace, sessionId) =>
             contract.call(RPC.sessionPlanStateGet, workspace, { workspace, sessionId }),
 
-        // sessionPrompt: workspace + sessionId + text + optional images + optional uiLocale
-        sessionPrompt: (workspace, sessionId, text, images, uiLocale, model, attachments) =>
-            contract.call(RPC.sessionPrompt, workspace, {
-                workspace,
-                sessionId,
-                text,
-                ...(images && images.length > 0 ? { images } : {}),
-                ...(attachments && attachments.length > 0 ? { attachments } : {}),
-                ...(uiLocale ? { uiLocale } : {}),
-                ...(model ? { model } : {}),
-            }),
-
-        // sessionSteer / sessionFollowUp: workspace + sessionId + text + optional images + optional uiLocale
-        sessionSteer: (workspace, sessionId, text, images, uiLocale, attachments) =>
-            contract.call(RPC.sessionSteer, workspace, {
-                workspace,
-                sessionId,
-                text,
-                ...(images && images.length > 0 ? { images } : {}),
-                ...(attachments && attachments.length > 0 ? { attachments } : {}),
-                ...(uiLocale ? { uiLocale } : {}),
-            }),
-        sessionFollowUp: (workspace, sessionId, text, images, uiLocale, attachments) =>
-            contract.call(RPC.sessionFollowUp, workspace, {
-                workspace,
-                sessionId,
-                text,
-                ...(images && images.length > 0 ? { images } : {}),
-                ...(attachments && attachments.length > 0 ? { attachments } : {}),
-                ...(uiLocale ? { uiLocale } : {}),
-            }),
+        sessionPrompt: (params) =>
+            contract.call(RPC.sessionPrompt, params.workspace, compactTurnParams(params)),
+        sessionSteer: (params) =>
+            contract.call(RPC.sessionSteer, params.workspace, compactTurnParams(params)),
+        sessionFollowUp: (params) =>
+            contract.call(RPC.sessionFollowUp, params.workspace, compactTurnParams(params)),
         sessionCancelQueued: (workspace, sessionId, entryId) =>
             contract.call(RPC.sessionCancelQueued, workspace, {
                 workspace,

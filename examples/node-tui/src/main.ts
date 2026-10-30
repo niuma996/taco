@@ -72,7 +72,11 @@ async function main() {
 
         term.print(`[sending] ${text}`);
         try {
-            const result = await client.sessionPrompt(asWorkspaceId(cwd), sessionId, text);
+            const result = await client.sessionPrompt({
+                workspace: asWorkspaceId(cwd),
+                sessionId,
+                text,
+            });
             term.print(`[response] ${JSON.stringify(result).slice(0, 200)}`);
         } catch (err) {
             term.print(`[ERROR] ${err instanceof Error ? err.message : String(err)}`);

@@ -150,7 +150,7 @@ client.onPush((frame) => console.log("[push]", frame.method));
 
 await client.workspaceList();
 const { sessionId } = await client.sessionCreate({ workspace: cwd, initialPrompt: "hello" });
-await client.sessionPrompt(cwd, sessionId, "echo ping");
+await client.sessionPrompt({ workspace: cwd, sessionId, text: "echo ping" });
 ```
 
 ## License

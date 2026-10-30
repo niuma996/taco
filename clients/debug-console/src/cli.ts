@@ -161,7 +161,11 @@ async function cmdStart() {
             process.stderr.write(`[taco] new session=${currentSession}\n`);
             process.stderr.write(`${JSON.stringify(r.assistantMessage, null, 2)}\n`);
         } else {
-            const r = await client.sessionPrompt(currentCwd, currentSession, trimmed);
+            const r = await client.sessionPrompt({
+                workspace: currentCwd,
+                sessionId: currentSession,
+                text: trimmed,
+            });
             process.stderr.write(`${JSON.stringify(r.assistantMessage, null, 2)}\n`);
         }
     }

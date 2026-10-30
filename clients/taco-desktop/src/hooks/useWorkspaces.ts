@@ -651,15 +651,15 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         dispatchWs({ type: "SET_PENDING", cwd, sid: promptSid, pending: true });
         try {
             const reply = (
-                await client.sessionPrompt(
-                    asWorkspaceId(cwd),
-                    asSessionId(promptSid),
-                    trimmed,
+                await client.sessionPrompt({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(promptSid),
+                    text: trimmed,
                     images,
                     uiLocale,
                     model,
-                    attachments?.map((a) => a.id),
-                )
+                    attachments: attachments?.map((a) => a.id),
+                })
             ).assistantMessage;
             // Auto-title is persisted inside server-side session.prompt and invalidateListCache'd,
             // so refreshing this workspace's session list now must read the latest name. List-only
@@ -746,14 +746,14 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         };
         dispatchWs({ type: "APPEND_QUEUED", cwd, sid: steerSid, item: queuedItem });
         try {
-            const result = await client.sessionSteer(
-                asWorkspaceId(cwd),
-                asSessionId(steerSid),
-                trimmed,
+            const result = await client.sessionSteer({
+                workspace: asWorkspaceId(cwd),
+                sessionId: asSessionId(steerSid),
+                text: trimmed,
                 images,
                 uiLocale,
-                attachments?.map((a) => a.id),
-            );
+                attachments: attachments?.map((a) => a.id),
+            });
             if (result.mode !== "idle") return true;
             // The run ended between the composer's steer and the server's check,
             // so the entry would sit unconsumed until the next prompt. Hand back

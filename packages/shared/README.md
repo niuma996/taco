@@ -67,7 +67,7 @@ try {
         }
     });
     try {
-        await client.sessionPrompt(workspace, sessionId, "hello");
+        await client.sessionPrompt({ workspace, sessionId, text: "hello" });
     } finally {
         unsub();
     }

@@ -132,16 +132,23 @@ test("sessionAttach 不传 opts 时不包含 thinkingLevel", async () => {
 
 test("sessionPrompt 三个参数正确填进 params", async () => {
     const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionPrompt(asWorkspaceId("/w"), asSessionId("s1"), "hello");
+    await createTypedRpc(dispatch).sessionPrompt({
+        workspace: asWorkspaceId("/w"),
+        sessionId: asSessionId("s1"),
+        text: "hello",
+    });
     assert.equal(calls[0].method, RPC.sessionPrompt);
     assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1", text: "hello" });
 });
 
 test("sessionPrompt 透传 images,images 为空数组时不带该字段", async () => {
     const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionPrompt(asWorkspaceId("/w"), asSessionId("s1"), "hi", [
-        { type: "image", data: "AAA", mimeType: "image/png" },
-    ]);
+    await createTypedRpc(dispatch).sessionPrompt({
+        workspace: asWorkspaceId("/w"),
+        sessionId: asSessionId("s1"),
+        text: "hi",
+        images: [{ type: "image", data: "AAA", mimeType: "image/png" }],
+    });
     assert.deepEqual(calls[0].params, {
         workspace: "/w",
         sessionId: "s1",
@@ -151,8 +158,36 @@ test("sessionPrompt 透传 images,images 为空数组时不带该字段", async 
 
     // Empty array → omit images field (avoids triggering "has image but empty" branch in the protocol layer)
     const { dispatch: d2, calls: c2 } = mock();
-    await createTypedRpc(d2).sessionPrompt(asWorkspaceId("/w"), asSessionId("s1"), "hi", []);
+    await createTypedRpc(d2).sessionPrompt({
+        workspace: asWorkspaceId("/w"),
+        sessionId: asSessionId("s1"),
+        text: "hi",
+        images: [],
+        attachments: [],
+        uiLocale: undefined,
+    });
     assert.deepEqual(c2[0].params, { workspace: "/w", sessionId: "s1", text: "hi" });
+});
+
+test("sessionSteer / sessionFollowUp 省略空的可选字段", async () => {
+    const { dispatch, calls } = mock();
+    const rpc = createTypedRpc(dispatch);
+    const params = {
+        workspace: asWorkspaceId("/w"),
+        sessionId: asSessionId("s1"),
+        text: "go",
+        images: [],
+        attachments: ["a"],
+    };
+    await rpc.sessionSteer(params);
+    await rpc.sessionFollowUp(params);
+    assert.deepEqual(
+        calls.map((c) => [c.method, c.params]),
+        [RPC.sessionSteer, RPC.sessionFollowUp].map((m) => [
+            m,
+            { workspace: "/w", sessionId: "s1", text: "go", attachments: ["a"] },
+        ]),
+    );
 });
 
 test("sessionSetModel 透传 provider/modelId", async () => {

@@ -73,7 +73,11 @@ const { sessionId } = await client.sessionCreate({
     workspace: asWorkspaceId(process.cwd()),
     initialPrompt: "hello",
 });
-await client.sessionPrompt(asWorkspaceId(process.cwd()), sessionId, "echo ping");
+await client.sessionPrompt({
+    workspace: asWorkspaceId(process.cwd()),
+    sessionId,
+    text: "echo ping",
+});
 
 await client.dispose();
 ```

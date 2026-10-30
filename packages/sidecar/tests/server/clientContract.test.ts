@@ -79,14 +79,14 @@ test("session optional fields reach server validation without being lost or coer
     const id = asSessionId("s");
     await client.sessionCreate({ workspace });
     await client.sessionAttach(workspace, id, { thinkingLevel: "max" });
-    await client.sessionPrompt(
+    await client.sessionPrompt({
         workspace,
-        id,
-        "",
-        [{ type: "image", data: "AAA", mimeType: "image/png" }],
-        "zh",
-        { provider: "p", id: "m" },
-    );
+        sessionId: id,
+        text: "",
+        images: [{ type: "image", data: "AAA", mimeType: "image/png" }],
+        uiLocale: "zh",
+        model: { provider: "p", id: "m" },
+    });
     assert.equal(received[0].method, RPC.sessionCreate);
     assert.deepEqual(received[0].params, { workspace: "/w" });
     assert.deepEqual(received[1].params, { workspace: "/w", sessionId: "s", thinkingLevel: "max" });
@@ -156,9 +156,9 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.sessionTasksGet(workspace, id);
     await client.sessionTaskHistoryGet(workspace, id, "list");
     await client.sessionPlanStateGet(workspace, id);
-    await client.sessionPrompt(workspace, id, "hello");
-    await client.sessionSteer(workspace, id, "redirect");
-    await client.sessionFollowUp(workspace, id, "later");
+    await client.sessionPrompt({ workspace, sessionId: id, text: "hello" });
+    await client.sessionSteer({ workspace, sessionId: id, text: "redirect" });
+    await client.sessionFollowUp({ workspace, sessionId: id, text: "later" });
     await client.sessionCancelQueued(workspace, id, "entry");
     await client.sessionSubmitAnswers(workspace, id, "tool", { q: "answer" });
     await client.sessionAbort(workspace, id);
@@ -172,9 +172,20 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.sessionContextInfo(workspace, id);
     await client.attachmentStage(workspace, { path: "/tmp/a.pdf" });
     await client.attachmentStage(workspace, { name: "a.txt", data: "AA", mimeType: "text/plain" });
-    await client.sessionPrompt(workspace, id, "with files", undefined, "zh", undefined, ["a"]);
-    await client.sessionSteer(workspace, id, "with files", undefined, undefined, ["a"]);
-    await client.sessionFollowUp(workspace, id, "with files", undefined, undefined, ["a"]);
+    await client.sessionPrompt({
+        workspace,
+        sessionId: id,
+        text: "with files",
+        uiLocale: "zh",
+        attachments: ["a"],
+    });
+    await client.sessionSteer({ workspace, sessionId: id, text: "with files", attachments: ["a"] });
+    await client.sessionFollowUp({
+        workspace,
+        sessionId: id,
+        text: "with files",
+        attachments: ["a"],
+    });
     await client.commandPermissionResolve(workspace, {
         requestId: "request",
         approved: true,

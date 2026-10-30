@@ -189,7 +189,7 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
 
             assert.equal(client.sessionCreate.mock.calls.length, 1);
             assert.equal(client.sessionPrompt.mock.calls.length, 1);
-            const [workspace, sessionId, text] = client.sessionPrompt.mock.calls[0] ?? [];
+            const { workspace, sessionId, text } = client.sessionPrompt.mock.calls[0]?.[0] ?? {};
             assert.deepEqual([workspace, sessionId, text], [CWD, NEW_SID, "hello"]);
             assert.equal(result.current.workspaces[CWD]?.activeSession, NEW_SID);
         });
@@ -333,7 +333,11 @@ describe("useWorkspacesSteer.test.tsx", () => {
             });
             assert.equal(ok, true);
             assert.equal(client.sessionSteer.mock.calls.length, 1);
-            assert.deepEqual(client.sessionSteer.mock.calls[0]?.slice(0, 3), [CWD, SID, "hello"]);
+            const steer = client.sessionSteer.mock.calls[0]?.[0];
+            assert.deepEqual(
+                [steer?.workspace, steer?.sessionId, steer?.text],
+                [CWD, SID, "hello"],
+            );
             assert.deepEqual(result.current.notifications, []);
         });
 
