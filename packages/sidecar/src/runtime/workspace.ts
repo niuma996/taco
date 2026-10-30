@@ -595,6 +595,9 @@ export class WorkspaceRuntime extends EventEmitter {
                     allowedRoots: [this.executionCwd, ...this.resolveAssociatedRoots()],
                 }),
                 hasApprover: options.hasApprover,
+                // An IM conversation has no one to approve: refuse instead of
+                // waiting ten minutes on a desktop prompt nobody is watching.
+                refuseApprovals: isIm,
             },
         );
         const toolContext = this.buildToolContextThunk(options);

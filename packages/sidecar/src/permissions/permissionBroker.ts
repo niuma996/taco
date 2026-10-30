@@ -4,6 +4,7 @@ import type {
     CommandEvaluation,
     CommandPermissionConfig,
     CommandPermissionDecision,
+    CommandPermissionDenialReason,
     CommandPermissionRequest,
     CommandPermissionRule,
     CommandPermissionScope,
@@ -58,6 +59,13 @@ export interface PermissionBrokerOptions {
     /** False when no client can answer a prompt (IM with no desktop connected);
      *  an ask then denies at once instead of blocking the turn until timeout. */
     hasApprover?: () => boolean;
+    /**
+     * True for an IM conversation. Every ask is refused there with
+     * `im_channel` instead of waiting on the desktop: the person on the
+     * channel has no approval UI, and the desktop user is usually not
+     * watching, so a prompt only stalls the conversation until it times out.
+     */
+    refuseApprovals?: boolean;
 }
 
 export class PermissionBroker extends EventEmitter {
@@ -69,6 +77,7 @@ export class PermissionBroker extends EventEmitter {
     private readonly readOnly: boolean;
     private readonly commandContext: PermissionBrokerOptions["commandContext"];
     private readonly hasApprover: () => boolean;
+    private readonly refuseApprovals: boolean;
 
     constructor(
         private readonly globalConfig: () => CommandPermissionConfig,
@@ -81,6 +90,7 @@ export class PermissionBroker extends EventEmitter {
         this.readOnly = options?.readOnly ?? false;
         this.commandContext = options?.commandContext;
         this.hasApprover = options?.hasApprover ?? (() => true);
+        this.refuseApprovals = options?.refuseApprovals ?? false;
     }
 
     async evaluateAndRequest(args: {
@@ -144,8 +154,9 @@ export class PermissionBroker extends EventEmitter {
         if (evaluation.behavior !== "ask") {
             return { approved: evaluation.behavior === "allow", scope: "once", evaluation };
         }
-        if (!this.hasApprover()) {
-            return { approved: false, scope: "once", evaluation, denialReason: "no_approver" };
+        const unanswerable = this.unanswerableReason();
+        if (unanswerable) {
+            return { approved: false, scope: "once", evaluation, denialReason: unanswerable };
         }
 
         const request: CommandPermissionRequest = {
@@ -189,8 +200,9 @@ export class PermissionBroker extends EventEmitter {
             // Not persistable — see the method doc.
             persistentAllowed: false,
         };
-        if (!this.hasApprover()) {
-            return { approved: false, scope: "once", evaluation, denialReason: "no_approver" };
+        const unanswerable = this.unanswerableReason();
+        if (unanswerable) {
+            return { approved: false, scope: "once", evaluation, denialReason: unanswerable };
         }
 
         // Same display-context resolution as the command path, so a
@@ -216,6 +228,16 @@ export class PermissionBroker extends EventEmitter {
                 displayToolCallId === undefined ? undefined : asToolCallId(displayToolCallId),
         };
         return await this.awaitDecision(request, args.signal);
+    }
+
+    /**
+     * Why an ask cannot be put to anyone, or undefined when it can. An IM
+     * conversation refuses first: it holds even while a desktop is connected.
+     */
+    private unanswerableReason(): CommandPermissionDenialReason | undefined {
+        if (this.refuseApprovals) return "im_channel";
+        if (!this.hasApprover()) return "no_approver";
+        return undefined;
     }
 
     /**

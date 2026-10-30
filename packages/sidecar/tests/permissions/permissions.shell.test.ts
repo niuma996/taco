@@ -1008,6 +1008,16 @@ describe("denialGuidance", () => {
             assert.match(text, /askUser/);
         });
 
+        it("an IM refusal says it was automatic and routes the question to a reply", () => {
+            const text = denialGuidance("im_channel", subject);
+            assert.match(text, /refused automatically/);
+            assert.match(text, /Do not retry/);
+            assert.match(text, /another route/);
+            // askUser has no UI on a chat channel; the reply is the only way to ask.
+            assert.match(text, /reply in this chat/);
+            assert.doesNotMatch(text, /askUser/);
+        });
+
         it("an abort says the turn was cancelled, not that the action was refused", () => {
             const text = denialGuidance("aborted", subject);
             assert.match(text, /cancelled/);

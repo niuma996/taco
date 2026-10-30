@@ -247,6 +247,55 @@ describe("permissionBrokerImPolicy", () => {
             });
             assert.equal(decision.approved, true);
         });
+
+        describe("PermissionBroker in an IM conversation", () => {
+            // The person on the channel has no approval UI and the desktop user is
+            // usually not watching, so an ask would only stall the chat until the
+            // ten-minute timeout. It is refused at once, even with a desktop
+            // connected, and the reason tells the model it was automatic.
+            it("refuses an ask at once even when a desktop could answer", async () => {
+                const broker = new PermissionBroker(() => GLOBAL, {
+                    imCommandPolicy: () => ({ mode: "ask" }),
+                    hasApprover: () => true,
+                    refuseApprovals: true,
+                    requestTimeoutMs: 60_000,
+                });
+                let requested = 0;
+                broker.on("requested", () => requested++);
+                const decision = await broker.evaluateAndRequest({
+                    sessionId: "s1",
+                    toolCallId: "t1",
+                    command: "pnpm build",
+                });
+                assert.equal(decision.approved, false);
+                assert.equal(decision.denialReason, "im_channel");
+                assert.equal(requested, 0, "no prompt reaches the desktop");
+            });
+
+            it("refuses a config change the same way", async () => {
+                const broker = new PermissionBroker(() => GLOBAL, { refuseApprovals: true });
+                const decision = await broker.requestConfigApproval({
+                    sessionId: "s1",
+                    toolCallId: "t1",
+                    fields: ["defaultModel"],
+                });
+                assert.equal(decision.approved, false);
+                assert.equal(decision.denialReason, "im_channel");
+            });
+
+            it("still runs commands the policy allows", async () => {
+                const broker = new PermissionBroker(() => GLOBAL, {
+                    imCommandPolicy: () => ({ mode: "ask", allow: ["pnpm build"] }),
+                    refuseApprovals: true,
+                });
+                const decision = await broker.evaluateAndRequest({
+                    sessionId: "s1",
+                    toolCallId: "t1",
+                    command: "pnpm build",
+                });
+                assert.equal(decision.approved, true);
+            });
+        });
     });
 });
 

@@ -6,6 +6,7 @@
  * returned, not thrown, so the model can decide how to respond.
  */
 
+import type { CommandPermissionDenialReason } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { denialGuidance } from "../permissions/denialGuidance.ts";
@@ -42,7 +43,8 @@ type ShellToolResult = {
             | "permission_denied"
             | "permission_timeout"
             | "permission_aborted"
-            | "permission_no_approver";
+            | "permission_no_approver"
+            | "permission_im_channel";
     };
     isError: boolean;
 };
@@ -61,9 +63,7 @@ type ShellToolResult = {
  * by policy before any UI (deny rule, read-only broker, IM channel), where
  * there is no user to ask — so that path explains and stops instead.
  */
-function deniedResult(
-    reason: "user_denied" | "timeout" | "aborted" | "no_approver" | undefined,
-): ShellToolResult {
+function deniedResult(reason: CommandPermissionDenialReason | undefined): ShellToolResult {
     const text = denialGuidance(reason, {
         action: "this command",
         alternativeRoutes:
@@ -78,11 +78,12 @@ function deniedResult(
 
 /** The machine-readable denial code carried in the tool result's details. */
 function denialReasonCode(
-    reason: "user_denied" | "timeout" | "aborted" | "no_approver" | undefined,
+    reason: CommandPermissionDenialReason | undefined,
 ): ShellToolResult["details"]["reason"] {
     if (reason === "timeout") return "permission_timeout";
     if (reason === "aborted") return "permission_aborted";
     if (reason === "no_approver") return "permission_no_approver";
+    if (reason === "im_channel") return "permission_im_channel";
     return "permission_denied";
 }
 

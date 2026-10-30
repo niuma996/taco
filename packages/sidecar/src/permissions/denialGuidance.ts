@@ -18,6 +18,8 @@
  *   - `aborted` — the turn was cancelled. Not a judgement on the action.
  *   - `no_approver` — no desktop app is connected, so there is no UI to
  *     ask on.
+ *   - `im_channel` — an IM conversation, where approvals are refused
+ *     outright. The person on the channel can still be asked in a reply.
  *   - `undefined` — blocked by policy before any UI (a deny rule, a
  *     read-only broker, an IM channel policy). Nobody was asked, so there
  *     is no user to route a question to.
@@ -57,6 +59,17 @@ export function denialGuidance(
             "[denied] This needs approval in the Taco desktop app, and no desktop app is " +
             "connected right now. Do not retry it or work around it. Tell the user it needs " +
             "approval in the Taco desktop app, then continue without it or stop."
+        );
+    }
+    if (reason === "im_channel") {
+        return (
+            `[denied] ${action} needs approval, and approvals are not available in this chat ` +
+            "channel, so it was refused automatically and did not run. Do not retry it, and do " +
+            `not attempt the same outcome by another route — ${alternativeRoutes} — is still the ` +
+            "refused action. Stop, tell the user what you were trying to do and that it needs " +
+            "approval, and ask how they want to proceed. A reply in this chat is the only way to " +
+            "ask; the user can run it from the Taco desktop app or adjust the channel's " +
+            "permission settings."
         );
     }
     if (reason === "timeout") {

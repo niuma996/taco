@@ -175,8 +175,20 @@ export interface CommandPermissionRequest {
     /** Root agent toolCallId — == toolCallId for main-session requests. */
     displayToolCallId?: ToolCallId;
 }
-/** `no_approver`: an IM request with no desktop client connected to answer it. */
-export type CommandPermissionDenialReason = "user_denied" | "timeout" | "aborted" | "no_approver";
+/**
+ * Why an approval was not granted.
+ *
+ * - `no_approver`: an IM request with no desktop client connected to answer it.
+ * - `im_channel`: an IM conversation; approvals are refused outright there,
+ *   because the person on the channel has no approval UI and the desktop
+ *   user is usually not watching.
+ */
+export type CommandPermissionDenialReason =
+    | "user_denied"
+    | "timeout"
+    | "aborted"
+    | "no_approver"
+    | "im_channel";
 export interface CommandPermissionDecision {
     approved: boolean;
     scope: CommandPermissionScope;
