@@ -5,7 +5,8 @@
  * free to ignore prose:
  *   1. Plan mode is read-only. Only the plan document may be written.
  *   2. Built-in write targets stay inside the workspace root, an associated
- *      directory, or an `extraWriteRoots` entry. PDF tools write `output` /
+ *      directory, or an `extraWriteRoots` entry. Which argument names the
+ *      target comes from `tools/fileAccess.ts` — PDF tools write `output` /
  *      `outputDir`, which the unknown-tool path fence does not see.
  *   3. Absolute path arguments of unknown tools (MCP servers, extensions) stay
  *      inside the workspace root — the tool may do anything with them, but a
@@ -21,6 +22,7 @@
 import { isAbsolute, resolve } from "node:path";
 import type { PlanModeState } from "../plan/planModeState.ts";
 import { getPlansDir } from "../plan/planPersistence.ts";
+import { fileAccessOf, readPathsOf } from "../tools/fileAccess.ts";
 import { evaluateReadOnlyCommand } from "./commandPolicy.ts";
 import {
     expandHomeAndFileUrl,
@@ -39,21 +41,6 @@ export interface ToolCallGateResult {
     readonly reason?: string;
 }
 
-/**
- * Built-in tools that write a file, and the argument that names the target.
- *
- * The PDF tools write through `output` / `outputDir`, not `path`. Those
- * names are not in PATH_LIKE_KEYS, and a relative value is not fenced
- * there anyway, so `../` and `~/.taco/taco.json` would both be allowed.
- * They take the same containment check as `write` / `edit`.
- */
-const WRITE_ARG: Readonly<Record<string, string>> = {
-    write: "path",
-    edit: "path",
-    pdfMerge: "output",
-    pdfFill: "output",
-    pdfSplit: "outputDir",
-};
 const SHELL_TOOL = "shell";
 
 /**
@@ -146,45 +133,6 @@ export interface MutationGateOptions {
 }
 
 /**
- * The read-only tools whose `path` argument names a file or a search root.
- * `read` takes a file; `grep` and `glob` take a directory to search in.
- * PDF tools name their reads `input` / `inputs`; see `knownReadPaths`.
- */
-const READ_PATH_TOOLS = new Set(["read", "grep", "glob"]);
-
-/**
- * Paths a known tool reads, when this gate knows them.
- *
- * Undefined means the tool is not one of these. An empty list means it
- * takes a path but this call did not name one (`grep` / `glob` default to
- * the cwd, which is inside the primary root).
- */
-function knownReadPaths(event: ToolCallGateEvent): readonly string[] | undefined {
-    if (READ_PATH_TOOLS.has(event.toolName)) {
-        const raw = event.input.path;
-        if (typeof raw !== "string" || raw.trim() === "") return [];
-        return [raw];
-    }
-    if (
-        event.toolName === "pdfFields" ||
-        event.toolName === "pdfSplit" ||
-        event.toolName === "pdfFill"
-    ) {
-        const raw = event.input.input;
-        if (typeof raw !== "string" || raw.trim() === "") return [];
-        return [raw];
-    }
-    if (event.toolName === "pdfMerge") {
-        const inputs = event.input.inputs;
-        if (!Array.isArray(inputs)) return [];
-        return inputs.filter(
-            (value): value is string => typeof value === "string" && value.trim() !== "",
-        );
-    }
-    return undefined;
-}
-
-/**
  * Refuse a read that lands outside the allowed roots.
  *
  * The allowed set is the workspace's execution directory plus the
@@ -204,7 +152,9 @@ async function fenceReadPath(
         extra?: readonly string[];
     },
 ): Promise<ToolCallGateResult | undefined> {
-    const paths = knownReadPaths(event);
+    // An empty list means the call named no path; `grep` / `glob` then
+    // search the cwd, which is inside the primary root.
+    const paths = readPathsOf(event.toolName, event.input);
     if (!paths) return undefined;
     const associated = [...(roots.getAssociated?.() ?? []), ...(roots.extra ?? [])];
     for (const raw of paths) {
@@ -296,7 +246,7 @@ export function createMutationGateHook(
             };
         }
 
-        const writeKey = WRITE_ARG[event.toolName];
+        const writeKey = fileAccessOf(event.toolName)?.write;
         if (writeKey) {
             const raw = event.input[writeKey];
             if (typeof raw !== "string") {

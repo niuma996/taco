@@ -29,6 +29,8 @@ const IM_REFUSAL =
     "The PDF tools are not available in this session. IM conversations deny file access, " +
     "and these tools read and write files.";
 
+// The deny list hides these from an IM session, but `addTools` can still load
+// one by name; this is the execution-time stop for that case.
 function refuseInIm(ctx: TacoToolContext): void {
     if (ctx.fsToolsDenied) throw new Error(IM_REFUSAL);
 }

@@ -1,22 +1,13 @@
 import * as path from "node:path";
+import { FILE_ACCESS_TOOL_NAMES } from "../tools/fileAccess.ts";
 
-/** IM workspace disabled fs/proc tool names (must match the names registered by create*Tool, all lowercase).
- *  Split into two groups so ImWorkspacePolicy can independently control file tools vs. shell.
+/** IM workspace disabled fs/proc tool names. Split into two groups so
+ *  ImWorkspacePolicy can independently control file tools vs. shell.
  *
- *  The PDF tools are here because they read and write files: leaving them
- *  available would let an IM session reach the filesystem the file tools are
- *  denied. */
-export const IM_FS_TOOL_NAMES: readonly string[] = [
-    "read",
-    "write",
-    "edit",
-    "grep",
-    "glob",
-    "pdfMerge",
-    "pdfSplit",
-    "pdfFill",
-    "pdfFields",
-];
+ *  The file group is every built-in that reads or writes files (see
+ *  `tools/fileAccess.ts`), so a new file tool is denied without being listed
+ *  here. */
+export const IM_FS_TOOL_NAMES: readonly string[] = FILE_ACCESS_TOOL_NAMES;
 export const IM_SHELL_TOOL_NAME = "shell";
 export function makeImSessionsRoot(tacoHome: string, channelId: string): string {
     return path.join(tacoHome, "sessions", "im", channelId);
