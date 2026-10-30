@@ -13,6 +13,12 @@ import type { SessionToolState } from "./sessionToolState.ts";
 
 export interface ToolsetRefreshArgs {
     readonly toolState: SessionToolState;
+    /**
+     * What attach actually installed: the workspace-owned subset of the tools
+     * and the prompt. The first baseline — a fresh assembly here would hide a
+     * change landing between attach-time assembly and the first turn.
+     */
+    readonly installed: { readonly tools: readonly TacoTool[]; readonly systemPrompt: string };
     /** Workspace-supplied re-assembly for this session, with the prompt built from it. */
     readonly refresh: () => { tools: TacoTool[]; systemPrompt: string };
     /** Write the rebuilt prompt into the cell the harness's systemPrompt thunk reads. */
@@ -24,44 +30,59 @@ export interface ToolsetRefreshArgs {
  * harness reads the prompt through a thunk, so a rebuild has to reach both or
  * the turn offers a tool the prompt denies.
  *
- * The change baseline is this session's own: the workspace-level set is shared
- * by every session, so whichever refreshed first would leave the rest seeing no
- * change. It is seeded by one assembly at construction — the attach-time tools
- * also carry session-bound ones (agent, skill) the refresh never returns — and
- * advances only once a commit lands, so a failed one is retried next turn.
+ * The baseline is this session's own: the workspace-level set is shared by
+ * every session, so whichever refreshed first would leave the rest seeing no
+ * change. Assembly, comparison, retirement and the baseline advance all run in
+ * one queue slot: computed outside it, two overlapping refreshes would retire
+ * against the same stale baseline and leave the first one's additions behind.
+ * The baseline advances only once a commit lands, so a failed one is retried.
  */
 export function createToolsetRefresher(args: ToolsetRefreshArgs): () => Promise<void> {
     const { toolState, refresh, setSystemPrompt } = args;
-    let baseline: readonly TacoTool[] = refresh().tools;
+    let baseline: readonly TacoTool[] = args.installed.tools;
+    let prompt = args.installed.systemPrompt;
     return async () => {
-        const next = refresh();
-        if (toolNamesKey(next.tools) === toolNamesKey(baseline)) {
-            return; // steady state — no writes, the prompt (cache prefix) untouched
-        }
-        const nextNames = new Set(next.tools.map((t) => t.name));
-        const retired = new Set(baseline.map((t) => t.name).filter((name) => !nextNames.has(name)));
-        await toolState.update((current) => {
-            // `next.tools` is only the workspace-level set. Taking it as the
-            // new collection would delete the tools this layer installed
-            // (agent / skill / addTools / restored / always candidates) while
-            // the allowlist still named them — which pi rejects as
-            // `configured_tools_unavailable`; taking it as the new allowlist
-            // would hide those same tools instead. So drop only what the
-            // workspace retired and leave the rest alone.
-            const kept = current.tools.filter(
-                (t) => !retired.has(t.name) && !nextNames.has(t.name),
-            );
-            const tools = orderTools([...next.tools, ...kept]);
-            const activeNames = current.activeNames.filter((name) => !retired.has(name));
-            // pi gates visibility on the lane allowlist, so a tool that is
-            // merely defined stays invisible; realign it to the new set.
-            for (const { name } of tools) {
-                if (!activeNames.includes(name)) activeNames.push(name);
-            }
-            return { tools, activeNames };
-        });
-        setSystemPrompt(next.systemPrompt);
-        baseline = next.tools;
+        let next: { tools: TacoTool[]; systemPrompt: string } | undefined;
+        await toolState.update(
+            (current) => {
+                next = refresh();
+                // Steady state: no writes, so no lane config entry.
+                if (toolNamesKey(next.tools) === toolNamesKey(baseline)) return undefined;
+                const nextNames = new Set(next.tools.map((t) => t.name));
+                const retired = new Set(
+                    baseline.map((t) => t.name).filter((name) => !nextNames.has(name)),
+                );
+                // `next.tools` is only the workspace-level set. Taking it as the
+                // new collection would delete the tools this layer installed
+                // (agent / skill / addTools / restored / always candidates) while
+                // the allowlist still named them — which pi rejects as
+                // `configured_tools_unavailable`; taking it as the new allowlist
+                // would hide those same tools instead. So drop only what the
+                // workspace retired and leave the rest alone.
+                const kept = current.tools.filter(
+                    (t) => !retired.has(t.name) && !nextNames.has(t.name),
+                );
+                const tools = orderTools([...next.tools, ...kept]);
+                const activeNames = current.activeNames.filter((name) => !retired.has(name));
+                // pi gates visibility on the lane allowlist, so a tool that is
+                // merely defined stays invisible; realign it to the new set.
+                for (const { name } of tools) {
+                    if (!activeNames.includes(name)) activeNames.push(name);
+                }
+                return { tools, activeNames };
+            },
+            () => {
+                if (!next) return;
+                baseline = next.tools;
+                // Compared on its own: a skill reload rebuilds the prompt with
+                // the tool names unchanged. Equal means untouched — the prompt
+                // is the model's cache prefix.
+                if (next.systemPrompt !== prompt) {
+                    prompt = next.systemPrompt;
+                    setSystemPrompt(prompt);
+                }
+            },
+        );
     };
 }
 
@@ -71,8 +92,8 @@ export function createToolsetRefresher(args: ToolsetRefreshArgs): () => Promise<
  * The allowlist is written when the session first runs and survives restarts,
  * while the workspace set is rebuilt from current config on every start. Once
  * the two drift (an IM policy flipped from deny to allow), the per-turn
- * refresher cannot see it: its baseline is seeded from the current config, so
- * it already matches — the prompt then offers `read` while pi rejects the call as
+ * refresher cannot see it: its baseline is the attach-time set, which already
+ * matches — the prompt then offers `read` while pi rejects the call as
  * unavailable.
  *
  * Add-only on purpose: a persisted name with no definition may be a tool whose

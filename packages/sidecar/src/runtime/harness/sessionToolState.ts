@@ -54,19 +54,24 @@ export class SessionToolState {
 
     /**
      * Queue `plan` behind every earlier update, hand it the current state and
-     * commit what it returns (undefined = no change). Resolves to whether
-     * anything was written; a rejection reaches this caller only and the next
-     * update still runs.
+     * commit what it returns (undefined = no change). `committed` runs in the
+     * same slot once the commit landed, so caller bookkeeping derived from it
+     * is in place before the next plan reads. Resolves to whether anything was
+     * written; a rejection reaches this caller only and the next update still
+     * runs.
      */
     update(
         plan: (
             current: ToolState,
         ) => Promise<ToolStateChange | undefined> | ToolStateChange | undefined,
+        committed?: () => void,
     ): Promise<boolean> {
         const run = this.pending.then(async () => {
             const current = await this.read();
             const change = await plan(current);
-            return change ? await this.commit(current, change) : false;
+            const wrote = change ? await this.commit(current, change) : false;
+            committed?.();
+            return wrote;
         });
         this.pending = run.then(
             () => undefined,

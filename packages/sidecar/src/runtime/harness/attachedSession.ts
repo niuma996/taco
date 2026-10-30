@@ -210,6 +210,11 @@ export interface AttachedSessionOptions {
      */
     refreshToolset?: () => { tools: TacoTool[]; systemPrompt: string };
     /**
+     * The workspace-owned subset of `tools` — what `refreshToolset` replaces,
+     * as opposed to the session-bound agent / skill tools. Defaults to `tools`.
+     */
+    workspaceTools?: readonly TacoTool[];
+    /**
      * Per-turn tool context provider. The harness invokes it once per
      * turn snapshot and threads the result into every tool's `execute`.
      * Workspace-supplied; lazy so future hot-reload flows (imRouting /
@@ -583,6 +588,10 @@ export class AttachedSession extends EventEmitter {
         if (args.refreshToolset) {
             attached.applyToolsetRefresh = createToolsetRefresher({
                 toolState,
+                installed: {
+                    tools: args.workspaceTools ?? args.tools,
+                    systemPrompt: args.systemPrompt,
+                },
                 refresh: args.refreshToolset,
                 setSystemPrompt: (prompt) => {
                     currentSystemPrompt = prompt;

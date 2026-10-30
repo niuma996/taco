@@ -690,6 +690,39 @@ describe("WorkspaceRuntime per-turn toolset refresh across sessions", () => {
     };
     const ALLOW: ImWorkspacePolicy = { ...DENY, tools: { fsTools: "deny", shell: "allow" } };
 
+    it("a revocation landing during attach is applied on the first turn", async () => {
+        // attach assembles the session's tools first and awaits more setup
+        // afterwards; a revocation in that window must not be mistaken for
+        // the installed state.
+        let policy = ALLOW;
+        let revokeAfterNextAssembly = false;
+        const { ws, cwd, cleanup } = createTestWorkspace({
+            prefix: "refresh-attach",
+            resolveImPolicy: () => {
+                const current = policy;
+                if (revokeAfterNextAssembly) {
+                    revokeAfterNextAssembly = false;
+                    policy = DENY;
+                }
+                return current;
+            },
+        });
+        try {
+            await (await ws.repo.create({ id: "s-a", cwd }, harnessContext)).close(harnessContext);
+            ws.invalidateListCache();
+            revokeAfterNextAssembly = true;
+            const a = await ws.attach(asSessionId("s-a"));
+            await a.prompt("hi").catch(() => undefined);
+            const active = (await a.toolController?.activeToolNames()) ?? [];
+            assert.ok(
+                !active.includes("shell"),
+                `shell must be revoked, got: ${active.join(", ")}`,
+            );
+        } finally {
+            await cleanup();
+        }
+    });
+
     it("a policy grant reaches a second session after the first one refreshed", async () => {
         let policy = DENY;
         const { ws, cwd, cleanup } = createTestWorkspace({

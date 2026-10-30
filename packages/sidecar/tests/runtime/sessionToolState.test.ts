@@ -78,6 +78,7 @@ describe("SessionToolState", () => {
         let workspace = [fakeTool("read")];
         const refresh = createToolsetRefresher({
             toolState: state,
+            installed: { tools: workspace, systemPrompt: "p" },
             refresh: () => ({ tools: workspace, systemPrompt: "p" }),
             setSystemPrompt: () => {},
         });
@@ -99,6 +100,7 @@ describe("SessionToolState", () => {
         let workspace = [fakeTool("read"), fakeTool("shell")];
         const refresh = createToolsetRefresher({
             toolState: state,
+            installed: { tools: workspace, systemPrompt: "p" },
             refresh: () => ({ tools: workspace, systemPrompt: "p" }),
             setSystemPrompt: () => {},
         });
@@ -118,6 +120,7 @@ describe("SessionToolState", () => {
         let prompts = 0;
         const refresh = createToolsetRefresher({
             toolState: state,
+            installed: { tools: workspace, systemPrompt: "p" },
             refresh: () => ({ tools: workspace, systemPrompt: "p" }),
             setSystemPrompt: () => {
                 prompts += 1;
@@ -152,6 +155,7 @@ describe("SessionToolState", () => {
         let prompt = "old";
         const refresh = createToolsetRefresher({
             toolState: state,
+            installed: { tools: workspace, systemPrompt: "old" },
             refresh: () => ({ tools: workspace, systemPrompt: "new" }),
             setSystemPrompt: (p) => {
                 prompt = p;
@@ -168,5 +172,74 @@ describe("SessionToolState", () => {
         await refresh();
         assert.ok(target.active.has("shell"), "the next turn retries and converges");
         assert.equal(prompt, "new");
+    });
+});
+
+describe("toolset refresher baseline", () => {
+    const refresherOver = (
+        state: SessionToolState,
+        installed: TacoTool[],
+        workspace: { tools: TacoTool[]; prompt: string },
+        prompt: { value: string },
+    ) =>
+        createToolsetRefresher({
+            toolState: state,
+            installed: { tools: installed, systemPrompt: prompt.value },
+            refresh: () => ({ tools: workspace.tools, systemPrompt: workspace.prompt }),
+            setSystemPrompt: (p) => {
+                prompt.value = p;
+            },
+        });
+
+    it("a change between assembly and the first turn is applied, tools and prompt", async () => {
+        // attach installed [read, shell] and the old prompt; the policy then
+        // revoked shell before the first turn.
+        const installed = [fakeTool("read"), fakeTool("shell")];
+        const target = new RecordingCollection(installed);
+        const state = new SessionToolState(target);
+        const workspace = { tools: [fakeTool("read")], prompt: "without shell" };
+        const prompt = { value: "with shell" };
+        const refresh = refresherOver(state, installed, workspace, prompt);
+
+        await refresh();
+        assert.deepEqual([...target.active], ["read"]);
+        assert.deepEqual([...target.tools.keys()], ["read"]);
+        assert.equal(prompt.value, "without shell");
+    });
+
+    it("a prompt rebuilt with the same tool names still reaches the session", async () => {
+        const installed = [fakeTool("read")];
+        const target = new RecordingCollection(installed);
+        const state = new SessionToolState(target);
+        const workspace = { tools: installed, prompt: "rebuilt" };
+        const prompt = { value: "stale" };
+        await refresherOver(state, installed, workspace, prompt)();
+        assert.equal(prompt.value, "rebuilt");
+        assert.deepEqual(target.writes, [], "a prompt-only change writes no tool state");
+    });
+
+    it("overlapping refreshes retire against the state the previous one committed", async () => {
+        const installed = [fakeTool("read")];
+        const target = new RecordingCollection(installed);
+        const state = new SessionToolState(target);
+        const workspace = { tools: installed, prompt: "p" };
+        const prompt = { value: "p" };
+        const refresh = refresherOver(state, installed, workspace, prompt);
+
+        let release!: () => void;
+        target.gate = new Promise((r) => {
+            release = r;
+        });
+        workspace.tools = [fakeTool("read"), fakeTool("shell")];
+        const first = refresh();
+        // Let the first plan read state and reach the gated write.
+        await new Promise((r) => setImmediate(r));
+        workspace.tools = [fakeTool("read"), fakeTool("write")];
+        const second = refresh();
+        release();
+        await Promise.all([first, second]);
+
+        assert.deepEqual([...target.tools.keys()].sort(), ["read", "write"]);
+        assert.deepEqual([...target.active].sort(), ["read", "write"]);
     });
 });

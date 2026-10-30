@@ -897,7 +897,14 @@ export class SessionRegistry extends EventEmitter {
                 skillAuthoringGuidance: this.skillAuthoringGuidance,
             }),
         ];
-        const attached = await this.attachChild(sessionId, opts, sessionTools, taskState);
+        const attached = await this.attachChild(
+            sessionId,
+            opts,
+            sessionTools,
+            taskState,
+            undefined,
+            baseTools,
+        );
         reinjectorCell.current = attached.skillReinjector;
         return attached;
     }
@@ -942,6 +949,8 @@ export class SessionRegistry extends EventEmitter {
         tools: TacoTool[],
         taskState?: SessionTaskState,
         systemPrompt?: string,
+        /** The workspace-owned subset of `tools` — the per-turn refresh's first baseline. */
+        workspaceTools?: TacoTool[],
     ): Promise<AttachedSession> {
         const existing = this.attached.get(sessionId);
         if (existing) return existing;
@@ -997,10 +1006,13 @@ export class SessionRegistry extends EventEmitter {
                     // Main sessions only: a subagent's toolset is deliberately narrowed
                     // by its caller (depth-filtered, `agent` removed), so re-imposing
                     // the workspace set on it would widen it back.
+                    // Also needs the workspace subset as its baseline: taking
+                    // the full set would retire the session-bound tools.
                     refreshToolset:
-                        sessionKind === "main" && refreshToolset
+                        sessionKind === "main" && refreshToolset && workspaceTools
                             ? () => refreshToolset(sessionId, resolvedTaskState)
                             : undefined,
+                    workspaceTools,
                     getInstructionsConfig: this.getInstructionsConfig,
                     getImChannelContext: this.getImChannelContext,
                     getAssociatedRoots: this.getAssociatedRoots,
