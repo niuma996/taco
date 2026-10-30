@@ -174,7 +174,10 @@ describe("buildSystemPrompt", () => {
     it("routes user-owned decisions per role: askUser for main, the parent for a subagent", () => {
         const main = buildSystemPrompt({ tools: [stubTool("read"), stubTool("askUser")] });
         assert.match(main, /call the `askUser` tool and block for the answer/);
-        assert.match(main, /Stop and call `askUser` \(or wait for a new instruction\)/);
+        assert.match(
+            main,
+            /Stop and ask the user how to proceed instead of adjusting: call `askUser`/,
+        );
 
         // Regression: a subagent has no askUser (filterToolsForAgent strips it at
         // depth>=1), so telling it to call one contradicts its own tool list.
@@ -216,7 +219,9 @@ describe("buildSystemPrompt", () => {
         const out = buildSystemPrompt({ tools: [stubTool("read")] });
         assert.match(out, /A permission denial is a decision, not a mechanical failure/);
         assert.match(out, /Do not route around it/);
-        assert.match(out, /Stop and call `askUser`/);
+        assert.match(out, /Stop and ask the user how to proceed/);
+        // An automatic refusal (policy, IM channel) is as binding as a person's.
+        assert.match(out, /refused automatically/);
 
         // The no-route-around framing is shared; only the escalation target differs.
         const sub = buildSystemPrompt({
