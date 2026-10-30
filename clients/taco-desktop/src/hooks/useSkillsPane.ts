@@ -63,7 +63,7 @@ export function useSkillsPane(
         clearSkillContentError();
         clearSkillsError();
         void client
-            .skillsList(asWorkspaceId(activeCwd))
+            .skillsList({ workspace: asWorkspaceId(activeCwd) })
             .then((r) => {
                 setAllSkills(r.skills);
                 setDiagnostics(r.diagnostics ?? []);
@@ -91,7 +91,7 @@ export function useSkillsPane(
         if (!known) return;
         setSkillContentLoading(true);
         void client
-            .skillContent(asWorkspaceId(activeCwd), known.filePath)
+            .skillContent({ workspace: asWorkspaceId(activeCwd), filePath: known.filePath })
             .then((r) => {
                 if (cancelled) return;
                 setSkillContent(r.content);

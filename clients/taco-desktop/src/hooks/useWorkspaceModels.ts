@@ -38,7 +38,7 @@ export function useWorkspaceModels(
         let cancelled = false;
         setLoading(true);
         client
-            .sessionListModels(workspace)
+            .sessionListModels({ workspace })
             .then((res) => {
                 if (cancelled) return;
                 setOptions(res.models);

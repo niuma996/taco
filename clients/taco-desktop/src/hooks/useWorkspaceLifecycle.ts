@@ -144,7 +144,11 @@ export function useWorkspaceLifecycle({
             await client.start(asWorkspaceId(cwd));
             // Default page size (no full:true) — pagination must actually page on
             // initial load, not fetch every session up front.
-            dispatchListResult(cwd, await client.sessionList(asWorkspaceId(cwd)), false);
+            dispatchListResult(
+                cwd,
+                await client.sessionList({ workspace: asWorkspaceId(cwd) }),
+                false,
+            );
         },
         [client, dispatchListResult],
     );
@@ -160,10 +164,10 @@ export function useWorkspaceLifecycle({
                 // in, so a refresh after a turn keeps an expanded list expanded
                 // instead of collapsing it back to the first page.
                 const loaded = workspacesRef.current[cwd]?.sessions.length ?? 0;
-                const list = await client.sessionList(
-                    asWorkspaceId(cwd),
-                    loaded > SESSION_LIST_DEFAULT_LIMIT ? { limit: loaded } : undefined,
-                );
+                const list = await client.sessionList({
+                    workspace: asWorkspaceId(cwd),
+                    ...(loaded > SESSION_LIST_DEFAULT_LIMIT ? { limit: loaded } : undefined),
+                });
                 dispatchListResult(cwd, list, false);
             } catch (err) {
                 console.error("[taco] refreshSessionList failed", cwd, err);
@@ -181,10 +185,10 @@ export function useWorkspaceLifecycle({
             // if the click did nothing.
             dispatchWs({ type: "ATTACH_START", cwd, sid: sessionId });
             try {
-                const attachResult = await client.sessionAttach(
-                    asWorkspaceId(cwd),
-                    asSessionId(sessionId),
-                );
+                const attachResult = await client.sessionAttach({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                });
                 inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
                 settledBackgroundSubSessionIds = attachResult?.settledBackgroundSubSessionIds;
             } catch (err) {
@@ -211,7 +215,10 @@ export function useWorkspaceLifecycle({
             }
             let hist: Awaited<ReturnType<typeof client.sessionHistory>>;
             try {
-                hist = await client.sessionHistory(asWorkspaceId(cwd), asSessionId(sessionId));
+                hist = await client.sessionHistory({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                });
             } catch (err) {
                 // sessionAttach succeeded — the session is valid on the sidecar.
                 // Only the history pull failed; dispatch an empty ATTACH so the
@@ -253,7 +260,10 @@ export function useWorkspaceLifecycle({
             // cursor would discard those pushes as duplicates. Keep the split until push-recovery
             // semantics change deliberately.
             try {
-                const r = await client.sessionTasksGet(asWorkspaceId(cwd), asSessionId(sessionId));
+                const r = await client.sessionTasksGet({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                });
                 dispatchWs({
                     type: "TASKS_UPDATED",
                     cwd,
@@ -265,10 +275,10 @@ export function useWorkspaceLifecycle({
                 /* Older sidecar may lack this RPC — rely on push. */
             }
             try {
-                const p = await client.sessionPlanStateGet(
-                    asWorkspaceId(cwd),
-                    asSessionId(sessionId),
-                );
+                const p = await client.sessionPlanStateGet({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                });
                 dispatchWs({
                     type: "PLAN_STATE_UPDATED",
                     cwd,
@@ -476,7 +486,7 @@ export function useWorkspaceLifecycle({
                         // with no error to catch — the mark is how we tell that
                         // apart from a slow-but-answering daemon.
                         const list = await bootPhase(`ui.percwd.sessionList[${cwd}]`, () =>
-                            client.sessionList(asWorkspaceId(cwd)),
+                            client.sessionList({ workspace: asWorkspaceId(cwd) }),
                         );
                         dispatchListResult(cwd, list, false);
                         lastErr = undefined;
@@ -542,7 +552,7 @@ export function useWorkspaceLifecycle({
                 for (const delay of [0, 2000]) {
                     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
                     try {
-                        const list = await client.sessionList(asWorkspaceId(cwd));
+                        const list = await client.sessionList({ workspace: asWorkspaceId(cwd) });
                         dispatchListResult(cwd, list, false);
                         return;
                     } catch (err) {
@@ -706,10 +716,10 @@ export function useWorkspaceLifecycle({
             _sessionKind: "main" | "subagent",
         ): Promise<SnapshotRecovery> => {
             try {
-                const snapshot = await client.sessionSnapshotGet(
-                    asWorkspaceId(cwd),
-                    asSessionId(sessionId),
-                );
+                const snapshot = await client.sessionSnapshotGet({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                });
                 const messages = historyToUiMessages(
                     snapshot.history.entries as Parameters<typeof historyToUiMessages>[0],
                 );
@@ -758,7 +768,10 @@ export function useWorkspaceLifecycle({
     const deleteSession = useCallback(
         async (cwd: string, sessionId: string): Promise<void> => {
             try {
-                await client.sessionDelete(asWorkspaceId(cwd), asSessionId(sessionId));
+                await client.sessionDelete({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                });
             } catch (err) {
                 const msg = `Failed to delete session: ${(err as Error).message}`;
                 console.error("[taco] deleteSession failed", cwd, sessionId, err);
@@ -788,7 +801,8 @@ export function useWorkspaceLifecycle({
             try {
                 dispatchListResult(
                     cwd,
-                    await client.sessionList(asWorkspaceId(cwd), {
+                    await client.sessionList({
+                        workspace: asWorkspaceId(cwd),
                         cursor: {
                             updatedAt: cursor.updatedAt,
                             id: asSessionId(cursor.id),
@@ -806,7 +820,11 @@ export function useWorkspaceLifecycle({
     const renameSession = useCallback(
         async (cwd: string, sessionId: string, name: string): Promise<void> => {
             try {
-                await client.sessionRename(asWorkspaceId(cwd), asSessionId(sessionId), name);
+                await client.sessionRename({
+                    workspace: asWorkspaceId(cwd),
+                    sessionId: asSessionId(sessionId),
+                    name,
+                });
             } catch (err) {
                 const msg = `Failed to rename session: ${(err as Error).message}`;
                 console.error("[taco] renameSession failed", cwd, sessionId, err);

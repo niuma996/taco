@@ -606,7 +606,7 @@ describe("useWorkspacesAttach.test.tsx", () => {
 
         it("prunes the session row when attach fails with not_found", async () => {
             const client = makeClient({
-                sessionAttach: vi.fn(async (_cwd: string, sid: string) => {
+                sessionAttach: vi.fn(async ({ sessionId: sid }: { sessionId: string }) => {
                     if (sid === GONE_SID) {
                         throw rpcError("session not found", ErrorCodes.NotFound);
                     }
@@ -638,7 +638,7 @@ describe("useWorkspacesAttach.test.tsx", () => {
                 resolveImList = resolve;
             });
             const client = makeClient({
-                sessionList: vi.fn(async (cwd: string) =>
+                sessionList: vi.fn(async ({ workspace: cwd }: { workspace: string }) =>
                     cwd === IM_CWD ? imList : { sessions: [], total: 0 },
                 ),
             });

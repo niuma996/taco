@@ -117,10 +117,13 @@ export class TacoClient extends TacoClientBase {
      * of on a specific RPC at runtime.
      */
     async handshake(clientCapabilities?: ClientCapabilities): Promise<InitializeResult> {
-        const result = await this.initialize(
-            { major: SIDECAR_PROTOCOL_VERSION.major, minor: SIDECAR_PROTOCOL_VERSION.minor },
-            clientCapabilities,
-        );
+        const result = await this.initialize({
+            protocolVersion: {
+                major: SIDECAR_PROTOCOL_VERSION.major,
+                minor: SIDECAR_PROTOCOL_VERSION.minor,
+            },
+            clientCapabilities: clientCapabilities ?? {},
+        });
         const protocol = result.protocolVersion as { major?: unknown; minor?: unknown };
         if (
             typeof protocol?.major !== "number" ||

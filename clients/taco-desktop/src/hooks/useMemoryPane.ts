@@ -88,7 +88,7 @@ export function useMemoryPane(
         setMemoryLoading(true);
         setMemoryError(null);
         void client
-            .memoryList(asWorkspaceId(cwd))
+            .memoryList({ workspace: asWorkspaceId(cwd) })
             .then((r) => {
                 if (seq !== listSeq.current || cwdRef.current !== cwd) return;
                 setMemoryData(r);
@@ -133,7 +133,7 @@ export function useMemoryPane(
             const cwd = activeCwd;
             setMemorySaving(true);
             try {
-                await client.memoryWrite(asWorkspaceId(cwd), content, baseHash);
+                await client.memoryWrite({ workspace: asWorkspaceId(cwd), content, baseHash });
                 // No success toast: the editor closes on `ok` and the refreshed
                 // content renders in its place.
                 reloadIfCurrent(cwd);
@@ -162,7 +162,11 @@ export function useMemoryPane(
             // extractor rewrote since is refused rather than deleted unseen.
             const shown = memoryData?.topics.find((topic) => topic.id === id)?.content;
             try {
-                await client.memoryDeleteTopic(asWorkspaceId(cwd), id, shown);
+                await client.memoryDeleteTopic({
+                    workspace: asWorkspaceId(cwd),
+                    id,
+                    expectedContent: shown,
+                });
                 // No success toast: the topic drops out of the refreshed list.
                 reloadIfCurrent(cwd);
                 return true;
@@ -207,7 +211,7 @@ export function useMemoryPane(
     const handleDreamRun = useCallback(
         () =>
             runDreamAction("run", async (ws) => {
-                const result = await client.memoryDreamRun(ws);
+                const result = await client.memoryDreamRun({ workspace: ws });
                 if (result.status === "failed") {
                     notify(`${t("memory.dream.error.run")}: ${result.reason}`);
                 } else if (result.status === "skipped") {
@@ -219,17 +223,17 @@ export function useMemoryPane(
     );
     const handleDreamApply = useCallback(
         (previewId: string) =>
-            runDreamAction("apply", (ws) => client.memoryDreamApply(ws, previewId)),
+            runDreamAction("apply", (ws) => client.memoryDreamApply({ workspace: ws, previewId })),
         [client, runDreamAction],
     );
     const handleDreamDiscard = useCallback(
-        () => runDreamAction("discard", (ws) => client.memoryDreamDiscard(ws)),
+        () => runDreamAction("discard", (ws) => client.memoryDreamDiscard({ workspace: ws })),
         [client, runDreamAction],
     );
     const handleDreamUndo = useCallback(
         (reportId: string) =>
             runDreamAction("undo", async (ws) => {
-                const { conflicts } = await client.memoryDreamUndo(ws, reportId);
+                const { conflicts } = await client.memoryDreamUndo({ workspace: ws, reportId });
                 if (conflicts.length > 0) {
                     notify(`${t("memory.dream.undoConflicts")}: ${conflicts.join(", ")}`);
                 }
@@ -237,7 +241,8 @@ export function useMemoryPane(
         [client, notify, runDreamAction, t],
     );
     const handleRestoreTopic = useCallback(
-        (id: string) => runDreamAction("restore", (ws) => client.memoryRestoreTopic(ws, id)),
+        (id: string) =>
+            runDreamAction("restore", (ws) => client.memoryRestoreTopic({ workspace: ws, id })),
         [client, runDreamAction],
     );
     // The switch edits the built-in job itself, so the Schedules tab and the

@@ -13,7 +13,13 @@ import type {
     SupportedLocale,
     ThinkingLevel,
 } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asToolCallId,
+    asWorkspaceId,
+    ErrorCodes,
+    IM_CWD_PREFIX,
+} from "@taco-ai/protocol";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import { useT } from "../i18n/useI18n";
@@ -327,13 +333,13 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                 if (payload && Object.keys(payload.answers).length > 0) {
                     const toolName = payload.toolName ?? "askUser";
                     client
-                        .sessionSubmitAnswers(
-                            asWorkspaceId(activeCwd),
-                            asSessionId(ws.activeSession),
-                            toolCallId,
-                            payload.answers,
+                        .sessionSubmitAnswers({
+                            workspace: asWorkspaceId(activeCwd),
+                            sessionId: asSessionId(ws.activeSession),
+                            toolCallId: asToolCallId(toolCallId),
+                            answers: payload.answers,
                             toolName,
-                        )
+                        })
                         .catch((err) => {
                             // The answers are gone once we leave pending state, so a
                             // silent failure loses the user's input with no signal at
@@ -787,7 +793,11 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         const item = (ws.queuedBySessionId[sid] ?? []).find((q) => q.id === entryId);
         dispatchWs({ type: "REMOVE_QUEUED", cwd, sid, id: entryId });
         try {
-            await client.sessionCancelQueued(asWorkspaceId(cwd), asSessionId(sid), entryId);
+            await client.sessionCancelQueued({
+                workspace: asWorkspaceId(cwd),
+                sessionId: asSessionId(sid),
+                entryId,
+            });
         } catch (err) {
             console.error("[taco] sessionCancelQueued failed", err);
             pushNotification(`Cancel failed: ${(err as Error).message}`);
@@ -804,10 +814,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         // this abort was user-initiated.
         abortRequestedRef.current.add(ws.activeSession);
         try {
-            const result = await client.sessionAbort(
-                asWorkspaceId(cwd),
-                asSessionId(ws.activeSession),
-            );
+            const result = await client.sessionAbort({
+                workspace: asWorkspaceId(cwd),
+                sessionId: asSessionId(ws.activeSession),
+            });
             // Discard order isn't preserved across the two queues server-side;
             // steer went in first and reads more naturally restored first.
             return [...(result.discardedSteer ?? []), ...(result.discardedFollowUp ?? [])];
@@ -827,7 +837,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     async function loadSubagentHistory(subSessionId: string): Promise<void> {
         const cwd = activeCwd;
         try {
-            const hist = await client.sessionHistory(asWorkspaceId(cwd), asSessionId(subSessionId));
+            const hist = await client.sessionHistory({
+                workspace: asWorkspaceId(cwd),
+                sessionId: asSessionId(subSessionId),
+            });
             const msgs = historyToUiMessages(
                 hist.entries as Parameters<typeof historyToUiMessages>[0],
             );
@@ -842,7 +855,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         try {
             // "not_running" needs no surface: the child already settled, and
             // its terminal state renders through the normal paths.
-            await client.subagentAbort(asWorkspaceId(activeCwd), asSessionId(subSessionId));
+            await client.subagentAbort({
+                workspace: asWorkspaceId(activeCwd),
+                subSessionId: asSessionId(subSessionId),
+            });
         } catch (err) {
             console.error("[taco] subagentAbort failed", subSessionId, err);
             pushNotification(`Stop subagent failed: ${(err as Error).message}`);
@@ -851,7 +867,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
 
     /** Stage a file against the active workspace; the id goes back with the prompt. */
     async function stageAttachment(source: StageInput) {
-        return client.attachmentStage(asWorkspaceId(activeCwd), source);
+        return client.attachmentStage({ workspace: asWorkspaceId(activeCwd), ...source });
     }
 
     return {

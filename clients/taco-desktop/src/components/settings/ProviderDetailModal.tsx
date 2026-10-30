@@ -239,7 +239,10 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
         }
         setRevealing(true);
         try {
-            const res = await props.client.providersRevealKey(props.workspace, provider.id);
+            const res = await props.client.providersRevealKey({
+                workspace: props.workspace,
+                providerId: provider.id,
+            });
             // null = store lost the key since the view was fetched; stay masked.
             if (res.key) setRevealedKey(res.key);
         } catch {

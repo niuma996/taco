@@ -33,10 +33,7 @@ afterEach(() => {
     cleanup();
 });
 
-type McpUpdateConfigMock = (
-    id: string,
-    patch: Partial<McpServerConfig>,
-) => Promise<{
+type McpUpdateConfigMock = (params: { id: string; patch: Partial<McpServerConfig> }) => Promise<{
     server: McpServerConfigView;
     requiresRestart: true;
 }>;
@@ -60,7 +57,7 @@ function makeClient(...overrides: Partial<TacoClient>[]): TacoClient {
                     server: { id: "echo", transport: "stdio" },
                     requiresRestart: true,
                 }),
-            mcpUpdateConfig: (id, patch) =>
+            mcpUpdateConfig: ({ id, patch }) =>
                 Promise.resolve({
                     server: { id, transport: patch.transport ?? "stdio", ...patch },
                     requiresRestart: true,
@@ -110,13 +107,13 @@ describe("McpSection", () => {
 
         // The full single config is fetched first, then the update patch is sent.
         await waitFor(() => {
-            expect(mcpGetConfig).toHaveBeenCalledWith("echo");
+            expect(mcpGetConfig).toHaveBeenCalledWith({ id: "echo" });
         });
         await waitFor(() => {
-            expect(mcpUpdateConfig).toHaveBeenCalledWith(
-                "echo",
-                expect.objectContaining({ command: "node2" }),
-            );
+            expect(mcpUpdateConfig).toHaveBeenCalledWith({
+                id: "echo",
+                patch: expect.objectContaining({ command: "node2" }),
+            });
         });
         // settingsWrite is never invoked on the edit path.
         expect(settingsWrite).not.toHaveBeenCalled();
@@ -143,7 +140,7 @@ describe("McpSection", () => {
         await user.click(toggle);
 
         await waitFor(() => {
-            expect(mcpUpdateConfig).toHaveBeenCalledWith("echo", { enabled: false });
+            expect(mcpUpdateConfig).toHaveBeenCalledWith({ id: "echo", patch: { enabled: false } });
         });
     });
 
@@ -169,7 +166,7 @@ describe("McpSection", () => {
         );
 
         await waitFor(() => {
-            expect(mcpDeleteConfig).toHaveBeenCalledWith("echo");
+            expect(mcpDeleteConfig).toHaveBeenCalledWith({ id: "echo" });
         });
         // Card is gone from the list.
         await waitFor(() => {
@@ -260,12 +257,12 @@ describe("McpSection", () => {
         // in the form, so it must not appear in the patch (the server merges,
         // keeping the disabled flag on disk).
         await waitFor(() => {
-            expect(mcpUpdateConfig).toHaveBeenCalledWith(
-                "echo",
-                expect.objectContaining({ command: "node2" }),
-            );
+            expect(mcpUpdateConfig).toHaveBeenCalledWith({
+                id: "echo",
+                patch: expect.objectContaining({ command: "node2" }),
+            });
         });
-        const patch = mcpUpdateConfig.mock.calls[0]?.[1] ?? {};
+        const patch = mcpUpdateConfig.mock.calls[0]?.[0].patch ?? {};
         expect(patch.enabled).toBeUndefined();
         // The mock echoes the merged server (server-side merge semantics), so
         // the list still shows enabled:false after the save — the disabled

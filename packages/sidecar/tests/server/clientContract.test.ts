@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
     asSessionId,
+    asToolCallId,
     asWorkspaceId,
     ErrorCodes,
     RPC,
@@ -42,10 +43,15 @@ test("session facade round-trips through JSON, server schemas, and the rename ha
     const client = createTypedRpc(dispatch);
     const workspace = asWorkspaceId("/w");
     const sessionId = asSessionId("s");
-    assert.deepEqual(await client.sessionRename(workspace, sessionId, ""), { renamed: true });
+    assert.deepEqual(await client.sessionRename({ workspace, sessionId, name: "" }), {
+        renamed: true,
+    });
     assert.deepEqual(renames, [["s", ""]]);
     // Exercise malformed JavaScript input, which bypasses TypeScript.
-    await assert.rejects(client.sessionRename(workspace, sessionId, 42 as never), /invalid_params/);
+    await assert.rejects(
+        client.sessionRename({ workspace, sessionId, name: 42 as never }),
+        /invalid_params/,
+    );
     assert.equal(resolutions, 1, "schema rejection must precede workspace/handler access");
 });
 
@@ -78,7 +84,7 @@ test("session optional fields reach server validation without being lost or coer
     const workspace = asWorkspaceId("/w");
     const id = asSessionId("s");
     await client.sessionCreate({ workspace });
-    await client.sessionAttach(workspace, id, { thinkingLevel: "max" });
+    await client.sessionAttach({ workspace, sessionId: id, thinkingLevel: "max" });
     await client.sessionPrompt({
         workspace,
         sessionId: id,
@@ -142,36 +148,46 @@ test("every facade method serializes a payload accepted by its registered schema
     });
     const workspace = asWorkspaceId("/w");
     const id = asSessionId("s");
-    await client.initialize(SIDECAR_PROTOCOL_VERSION);
+    await client.initialize({ protocolVersion: SIDECAR_PROTOCOL_VERSION, clientCapabilities: {} });
     await client.workspaceList();
-    await client.sessionList(workspace);
+    await client.sessionList({ workspace });
     await client.sessionCreate({ workspace });
-    await client.sessionAttach(workspace, id);
-    await client.sessionDetach(workspace, id);
-    await client.sessionDelete(workspace, id);
-    await client.sessionRename(workspace, id, "renamed");
-    await client.sessionHistory(workspace, id);
-    await client.sessionEventsGet(workspace, id, 0);
-    await client.sessionSnapshotGet(workspace, id);
-    await client.sessionTasksGet(workspace, id);
-    await client.sessionTaskHistoryGet(workspace, id, "list");
-    await client.sessionPlanStateGet(workspace, id);
+    await client.sessionAttach({ workspace, sessionId: id });
+    await client.sessionDetach({ workspace, sessionId: id });
+    await client.sessionDelete({ workspace, sessionId: id });
+    await client.sessionRename({ workspace, sessionId: id, name: "renamed" });
+    await client.sessionHistory({ workspace, sessionId: id });
+    await client.sessionEventsGet({ workspace, sessionId: id, afterSeq: 0 });
+    await client.sessionSnapshotGet({ workspace, sessionId: id });
+    await client.sessionTasksGet({ workspace, sessionId: id });
+    await client.sessionTaskHistoryGet({ workspace, sessionId: id, listId: "list" });
+    await client.sessionPlanStateGet({ workspace, sessionId: id });
     await client.sessionPrompt({ workspace, sessionId: id, text: "hello" });
     await client.sessionSteer({ workspace, sessionId: id, text: "redirect" });
     await client.sessionFollowUp({ workspace, sessionId: id, text: "later" });
-    await client.sessionCancelQueued(workspace, id, "entry");
-    await client.sessionSubmitAnswers(workspace, id, "tool", { q: "answer" });
-    await client.sessionAbort(workspace, id);
-    await client.subagentAbort(workspace, id);
-    await client.sessionSetModel(workspace, id, "provider", "model");
-    await client.sessionListModels(workspace);
-    await client.providersList(workspace);
-    await client.providersRevealKey(workspace, "provider");
-    await client.sessionSetThinkingLevel(workspace, id, "max");
-    await client.sessionCompact(workspace, id, "brief");
-    await client.sessionContextInfo(workspace, id);
-    await client.attachmentStage(workspace, { path: "/tmp/a.pdf" });
-    await client.attachmentStage(workspace, { name: "a.txt", data: "AA", mimeType: "text/plain" });
+    await client.sessionCancelQueued({ workspace, sessionId: id, entryId: "entry" });
+    await client.sessionSubmitAnswers({
+        workspace,
+        sessionId: id,
+        toolCallId: asToolCallId("tool"),
+        answers: { q: "answer" },
+    });
+    await client.sessionAbort({ workspace, sessionId: id });
+    await client.subagentAbort({ workspace, subSessionId: id });
+    await client.sessionSetModel({
+        workspace,
+        sessionId: id,
+        provider: "provider",
+        modelId: "model",
+    });
+    await client.sessionListModels({ workspace });
+    await client.providersList({ workspace });
+    await client.providersRevealKey({ workspace, providerId: "provider" });
+    await client.sessionSetThinkingLevel({ workspace, sessionId: id, level: "max" });
+    await client.sessionCompact({ workspace, sessionId: id, customInstructions: "brief" });
+    await client.sessionContextInfo({ workspace, sessionId: id });
+    await client.attachmentStage({ workspace, path: "/tmp/a.pdf" });
+    await client.attachmentStage({ workspace, name: "a.txt", data: "AA", mimeType: "text/plain" });
     await client.sessionPrompt({
         workspace,
         sessionId: id,
@@ -186,21 +202,25 @@ test("every facade method serializes a payload accepted by its registered schema
         text: "with files",
         attachments: ["a"],
     });
-    await client.commandPermissionResolve(workspace, {
+    await client.commandPermissionResolve({
+        workspace,
         requestId: "request",
         approved: true,
         scope: "once",
     });
-    await client.workspaceEnsure(workspace);
-    await client.workspaceDispose(workspace);
-    await client.workspaceAssociationsGet({ scope: "workspace", id: workspace });
-    await client.workspaceAssociationsSet({ scope: "workspace", id: workspace }, ["/other"]);
-    await client.workspaceAssociationsResolve(workspace);
+    await client.workspaceEnsure({ cwd: workspace });
+    await client.workspaceDispose({ cwd: workspace });
+    await client.workspaceAssociationsGet({ key: { scope: "workspace", id: workspace } });
+    await client.workspaceAssociationsSet({
+        key: { scope: "workspace", id: workspace },
+        roots: ["/other"],
+    });
+    await client.workspaceAssociationsResolve({ workspace });
     await client.settingsGet();
     await client.settingsWrite({ global: { defaultModel: "m" } });
     await client.extensionsStatus();
     await client.channelsList();
-    await client.channelsListConversations();
+    await client.channelsListConversations({});
     await client.channelsCreate({ name: "wechat" });
     await client.channelsBind({ channelId: "c", creds: { botId: "b", secret: "s" } });
     await client.channelsSubmitVerifyCode({ requestId: "r", code: "123" });
@@ -217,39 +237,42 @@ test("every facade method serializes a payload accepted by its registered schema
         apiKey: "",
         modelId: "m",
     });
-    await client.toolsList(workspace);
-    await client.agentsList(workspace);
-    await client.agentsContent(workspace, "reviewer");
-    await client.agentsWrite(workspace, {
+    await client.toolsList({ workspace });
+    await client.agentsList({ workspace });
+    await client.agentsContent({ workspace, agentType: "reviewer" });
+    await client.agentsWrite({
+        workspace,
         agentType: "reviewer",
         description: "Review",
         maxTurns: 10,
         systemPrompt: "",
     });
-    await client.agentsDelete(workspace, "reviewer");
-    await client.skillsList(workspace);
-    await client.skillContent(workspace, "/w/SKILL.md");
-    await client.checkpointsList(workspace);
-    await client.checkpointsRestore(workspace, "cp", id);
-    await client.memoryList(workspace);
-    await client.memoryWrite(workspace, "", "hash");
-    await client.memoryDeleteTopic(workspace, "topic", "");
-    await client.memoryRestoreTopic(workspace, "topic");
-    await client.memoryDreamRun(workspace);
-    await client.memoryDreamApply(workspace, "preview");
-    await client.memoryDreamDiscard(workspace);
-    await client.memoryDreamUndo(workspace, "report");
-    await client.memoryUpsert(workspace, "add", {
+    await client.agentsDelete({ workspace, agentType: "reviewer" });
+    await client.skillsList({ workspace });
+    await client.skillContent({ workspace, filePath: "/w/SKILL.md" });
+    await client.checkpointsList({ workspace });
+    await client.checkpointsRestore({ workspace, checkpointId: "cp", sessionId: id });
+    await client.memoryList({ workspace });
+    await client.memoryWrite({ workspace, content: "", baseHash: "hash" });
+    await client.memoryDeleteTopic({ workspace, id: "topic", expectedContent: "" });
+    await client.memoryRestoreTopic({ workspace, id: "topic" });
+    await client.memoryDreamRun({ workspace });
+    await client.memoryDreamApply({ workspace, previewId: "preview" });
+    await client.memoryDreamDiscard({ workspace });
+    await client.memoryDreamUndo({ workspace, reportId: "report" });
+    await client.memoryUpsert({
+        workspace,
+        action: "add",
         id: "topic",
         name: "Topic",
         type: "project",
         content: "x",
     });
-    await client.mcpListServers();
-    await client.mcpGetConfig("srv");
-    await client.mcpCreateConfig({ id: "srv", transport: "stdio", command: "run" });
-    await client.mcpUpdateConfig("srv", { enabled: false });
-    await client.mcpDeleteConfig("srv");
+    await client.mcpListServers({});
+    await client.mcpGetConfig({ id: "srv" });
+    await client.mcpCreateConfig({ config: { id: "srv", transport: "stdio", command: "run" } });
+    await client.mcpUpdateConfig({ id: "srv", patch: { enabled: false } });
+    await client.mcpDeleteConfig({ id: "srv" });
     const expected = keys
         .filter((key) => !key.startsWith("jobs") && key !== "configPatch")
         .map((key) => RPC[key])

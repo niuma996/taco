@@ -68,10 +68,10 @@ async function main(): Promise<number> {
         const workspaces = await client.workspaceList();
         console.log(`[typed_smoke] workspace.list: ${JSON.stringify(workspaces)}`);
 
-        await client.workspaceEnsure(asWorkspaceId(cwd));
+        await client.workspaceEnsure({ cwd: asWorkspaceId(cwd) });
         console.log(`[typed_smoke] workspace.ensure: cwd=${cwd}`);
 
-        const sessions = await client.sessionList(asWorkspaceId(cwd));
+        const sessions = await client.sessionList({ workspace: asWorkspaceId(cwd) });
         const list = sessions?.sessions ?? [];
         console.log(`[typed_smoke] session.list: ${list.length} session(s)`);
 

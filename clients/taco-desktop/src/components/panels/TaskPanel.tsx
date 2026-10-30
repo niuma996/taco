@@ -185,7 +185,7 @@ function HistoryRow({
             setLoading(true);
             setError(null);
             client
-                .sessionTaskHistoryGet(cwd, asSessionId(sid), listId)
+                .sessionTaskHistoryGet({ workspace: cwd, sessionId: asSessionId(sid), listId })
                 .then((tasks) => {
                     dispatchWs({
                         type: "HISTORY_DETAIL_LOADED",

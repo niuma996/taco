@@ -123,10 +123,10 @@ export function useSessionContextInfo(
         pendingSessionRef.current = sessionId;
         setLoading(true);
         try {
-            const result = await client.sessionContextInfo(
-                asWorkspaceId(activeCwd),
-                asSessionId(sessionId),
-            );
+            const result = await client.sessionContextInfo({
+                workspace: asWorkspaceId(activeCwd),
+                sessionId: asSessionId(sessionId),
+            });
             // A newer refresh for another session started while this one was
             // in flight — its snapshot is the current one; this one is stale.
             if (pendingSessionRef.current !== sessionId) return;

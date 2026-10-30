@@ -28,7 +28,7 @@ function makeClient() {
     const pending = new Map<string, (result: SessionContextInfoResult) => void>();
     const client = {
         sessionContextInfo: vi.fn(
-            (_workspace: string, sessionId: string) =>
+            ({ sessionId }: { sessionId: string }) =>
                 new Promise<SessionContextInfoResult>((resolve) => {
                     pending.set(sessionId, resolve);
                 }),

@@ -251,7 +251,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         await user.click(screen.getByRole("button", { name: "settings.providerDetailReveal" }));
 
         await waitFor(() => expect(screen.getByText("sk-plain-text")).toBeTruthy());
-        expect(revealKey).toHaveBeenCalledWith("/tmp/ws", "minimax");
+        expect(revealKey).toHaveBeenCalledWith({ workspace: "/tmp/ws", providerId: "minimax" });
         // Toggle back to the mask.
         await user.click(screen.getByRole("button", { name: "settings.providerDetailHide" }));
         await waitFor(() => expect(screen.getByText("sk-ant-…AbCd")).toBeTruthy());

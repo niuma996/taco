@@ -1,13 +1,12 @@
 /**
- * typedRpc factory unit tests — verifies every typed method forwards the
- * (method, workspace, params) triple correctly. In the client-side typecheck
- * blind spot (no tsc on Node), this is the earliest place to catch adapter
- * reordering bugs.
+ * typedRpc factory unit tests — the generated surface covers every contract
+ * row, routes by scope, and passes params through untouched; the turn
+ * overrides drop empty optional fields.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, type RpcContractKey, rpcContract } from "@taco-ai/protocol";
 import type { RpcDispatch } from "../contractDispatch.js";
 import { RPC } from "../rpcMethods.js";
 import { createTypedRpc } from "../typedRpc.js";
@@ -34,100 +33,41 @@ function mock(): { dispatch: RpcDispatch; calls: Call[] } {
     return { dispatch, calls };
 }
 
-test("sessionCreate 用统一 object 形状,workspace 从 args 取", async () => {
+const TYPED_KEYS = (Object.keys(rpcContract) as RpcContractKey[]).filter(
+    (key) => !key.startsWith("jobs") && key !== "configPatch",
+);
+
+test("每个 contract 方法都生成,按 scope 路由并原样透传 params", async () => {
     const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionCreate({
-        workspace: asWorkspaceId("/w"),
-        initialPrompt: "hi",
-    });
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, RPC.sessionCreate);
-    assert.equal(calls[0].workspace, "/w");
-    assert.equal(calls[0].process, false);
-    assert.deepEqual(calls[0].params, { workspace: "/w", initialPrompt: "hi" });
+    const rpc = createTypedRpc(dispatch) as unknown as Record<
+        string,
+        (p: unknown) => Promise<unknown>
+    >;
+    assert.deepEqual(Object.keys(rpc).sort(), [...TYPED_KEYS].sort());
+    const turnKeys = new Set(["sessionPrompt", "sessionSteer", "sessionFollowUp"]);
+    for (const key of TYPED_KEYS) {
+        if (turnKeys.has(key)) continue;
+        const params = { workspace: "/w", cwd: "/c", marker: key };
+        calls.length = 0;
+        await rpc[key](params);
+        assert.equal(calls.length, 1, key);
+        assert.equal(calls[0].method, RPC[key], key);
+        assert.equal(calls[0].params, params, key);
+        const isProcess = rpcContract[key].scope === "process";
+        assert.equal(calls[0].process, isProcess, key);
+        const expectedRoute = isProcess
+            ? undefined
+            : key === "workspaceEnsure" || key === "workspaceDispose"
+              ? "/c"
+              : "/w";
+        assert.equal(calls[0].workspace, expectedRoute, key);
+    }
 });
 
-test("sessionCreate 透传 thinkingLevel", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionCreate({
-        workspace: asWorkspaceId("/w"),
-        sessionId: asSessionId("s1"),
-        initialPrompt: "hi",
-        thinkingLevel: "low",
-    });
-    assert.deepEqual(calls[0].params, {
-        workspace: "/w",
-        sessionId: "s1",
-        initialPrompt: "hi",
-        thinkingLevel: "low",
-    });
-});
-
-test("settingsGet 走 callProcess,无 workspace", async () => {
+test("无参方法不传参数时帧内 params 为 undefined", async () => {
     const { dispatch, calls } = mock();
     await createTypedRpc(dispatch).settingsGet();
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, RPC.settingsGet);
-    assert.equal(calls[0].process, true);
-    assert.equal(calls[0].workspace, undefined);
-});
-
-test("extensionsStatus 走 callProcess,无 workspace", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).extensionsStatus();
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, RPC.extensionsStatus);
-    assert.equal(calls[0].process, true);
-    assert.equal(calls[0].workspace, undefined);
-});
-
-test("settingsWrite 走 callProcess,params 包装成 { global }", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).settingsWrite({ global: { defaultModel: "x" } });
-    assert.equal(calls[0].method, RPC.settingsWrite);
-    assert.equal(calls[0].process, true);
-    assert.deepEqual(calls[0].params, { global: { defaultModel: "x" } });
-});
-
-test("workspaceEnsure 走 call,workspace 到位", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).workspaceEnsure(asWorkspaceId("/w"));
-    assert.equal(calls[0].method, RPC.workspaceEnsure);
-    assert.equal(calls[0].process, false);
-    assert.equal(calls[0].workspace, "/w");
-    assert.deepEqual(calls[0].params, { cwd: "/w" });
-});
-
-test("workspaceDispose 走 call", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).workspaceDispose(asWorkspaceId("/w"));
-    assert.equal(calls[0].method, RPC.workspaceDispose);
-    assert.equal(calls[0].workspace, "/w");
-    assert.deepEqual(calls[0].params, { cwd: "/w" });
-});
-
-test("sessionList 把 workspace 放进 params", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionList(asWorkspaceId("/w"));
-    assert.equal(calls[0].method, RPC.sessionList);
-    assert.equal(calls[0].workspace, "/w");
-    assert.deepEqual(calls[0].params, { workspace: "/w" });
-});
-
-test("sessionAttach 透传 thinkingLevel opts", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionAttach(asWorkspaceId("/w"), asSessionId("s1"), {
-        thinkingLevel: "high",
-    });
-    assert.equal(calls[0].method, RPC.sessionAttach);
-    assert.equal(calls[0].workspace, "/w");
-    assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1", thinkingLevel: "high" });
-});
-
-test("sessionAttach 不传 opts 时不包含 thinkingLevel", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionAttach(asWorkspaceId("/w"), asSessionId("s1"));
-    assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1" });
+    assert.deepEqual(calls[0], { method: RPC.settingsGet, params: undefined, process: true });
 });
 
 test("sessionPrompt 三个参数正确填进 params", async () => {
@@ -188,84 +128,4 @@ test("sessionSteer / sessionFollowUp 省略空的可选字段", async () => {
             { workspace: "/w", sessionId: "s1", text: "go", attachments: ["a"] },
         ]),
     );
-});
-
-test("sessionSetModel 透传 provider/modelId", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionSetModel(
-        asWorkspaceId("/w"),
-        asSessionId("s1"),
-        "anthropic",
-        "claude-x",
-    );
-    assert.deepEqual(calls[0].params, {
-        workspace: "/w",
-        sessionId: "s1",
-        provider: "anthropic",
-        modelId: "claude-x",
-    });
-});
-
-test("sessionListModels provider 可选,undefined 也透传", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionListModels(asWorkspaceId("/w"));
-    assert.equal(calls[0].method, RPC.sessionListModels);
-    assert.deepEqual(calls[0].params, { workspace: "/w", provider: undefined });
-});
-
-test("sessionDelete workspace + sessionId", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionDelete(asWorkspaceId("/w"), asSessionId("s1"));
-    assert.equal(calls[0].method, RPC.sessionDelete);
-    assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1" });
-});
-
-test("sessionSetThinkingLevel 透传 level", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionSetThinkingLevel(
-        asWorkspaceId("/w"),
-        asSessionId("s1"),
-        "max",
-    );
-    assert.equal(calls[0].method, RPC.sessionSetThinkingLevel);
-    assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1", level: "max" });
-});
-
-test("sessionAbort workspace + sessionId", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionAbort(asWorkspaceId("/w"), asSessionId("s1"));
-    assert.equal(calls[0].method, RPC.sessionAbort);
-    assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1" });
-});
-
-test("sessionCompact 携带 customInstructions 时写入 RPC 帧", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionCompact(
-        asWorkspaceId("/w"),
-        asSessionId("s1"),
-        "be terse",
-    );
-    assert.equal(calls[0].method, RPC.sessionCompact);
-    assert.deepEqual(calls[0].params, {
-        workspace: "/w",
-        sessionId: "s1",
-        customInstructions: "be terse",
-    });
-});
-
-test("sessionCompact 省略 customInstructions 时帧内不出现该字段", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionCompact(asWorkspaceId("/w"), asSessionId("s1"));
-    assert.equal(calls[0].method, RPC.sessionCompact);
-    const params = calls[0].params as Record<string, unknown>;
-    assert.equal(params.workspace, "/w");
-    assert.equal(params.sessionId, "s1");
-    assert.equal("customInstructions" in params, false);
-});
-
-test("sessionContextInfo 透传 workspace + sessionId", async () => {
-    const { dispatch, calls } = mock();
-    await createTypedRpc(dispatch).sessionContextInfo(asWorkspaceId("/w"), asSessionId("s1"));
-    assert.equal(calls[0].method, RPC.sessionContextInfo);
-    assert.deepEqual(calls[0].params, { workspace: "/w", sessionId: "s1" });
 });

@@ -34,8 +34,8 @@ class ThinClient extends TacoClient {
 
 test("Node adapter: workspace param is ignored; call receives only (method, params)", async () => {
     const client = new ThinClient({ spawn: { command: "true", args: [] } });
-    await client.sessionList(asWorkspaceId("/ws/A"));
-    await client.sessionList(asWorkspaceId("/ws/B/different/path"));
+    await client.sessionList({ workspace: asWorkspaceId("/ws/A") });
+    await client.sessionList({ workspace: asWorkspaceId("/ws/B/different/path") });
     assert.equal(client.recorded.length, 2);
     assert.equal(client.recorded[0].method, RPC.sessionList);
     assert.deepEqual(client.recorded[0].params, { workspace: "/ws/A" });
@@ -49,7 +49,7 @@ test("Node adapter: workspace param is ignored; call receives only (method, para
 test("Node adapter: call and callProcess share a call() — process-level and workspace-level RPC converge in the Node single-instance model", async () => {
     const client = new ThinClient({ spawn: { command: "true", args: [] } });
     await client.settingsGet();
-    await client.workspaceEnsure(asWorkspaceId("/ws/X"));
+    await client.workspaceEnsure({ cwd: asWorkspaceId("/ws/X") });
     assert.equal(client.recorded.length, 2);
     assert.equal(client.recorded[0].method, RPC.settingsGet);
     assert.equal(client.recorded[0].params, undefined);

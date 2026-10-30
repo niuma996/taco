@@ -45,7 +45,7 @@ export function useWorkspaceAssociations(client: TacoClient): UseWorkspaceAssoci
         async (key: WorkspaceAssociationKey) => {
             setLoading(true);
             try {
-                const result = await client.workspaceAssociationsGet(key);
+                const result = await client.workspaceAssociationsGet({ key });
                 return [...result.roots];
             } catch (e) {
                 failWith(e);
@@ -61,7 +61,7 @@ export function useWorkspaceAssociations(client: TacoClient): UseWorkspaceAssoci
         async (key: WorkspaceAssociationKey, next: string[]) => {
             setSaving(true);
             try {
-                await client.workspaceAssociationsSet(key, next);
+                await client.workspaceAssociationsSet({ key, roots: next });
                 return true;
             } catch (e) {
                 failWith(e);

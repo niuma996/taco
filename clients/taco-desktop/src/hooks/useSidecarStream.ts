@@ -362,7 +362,11 @@ export function useSidecarStream(
     if (!processorRef.current) {
         processorRef.current = new SessionPushProcessor({
             getEvents: (workspace, session, afterSeq) =>
-                client.sessionEventsGet(asWorkspaceId(workspace), asSessionId(session), afterSeq),
+                client.sessionEventsGet({
+                    workspace: asWorkspaceId(workspace),
+                    sessionId: asSessionId(session),
+                    afterSeq,
+                }),
             deliver: (push) => normalizePushFrame(push, onActionRef),
             recoverSnapshot: (workspace, session, sessionKind) =>
                 onSnapshotRequiredRef(workspace, session, sessionKind),

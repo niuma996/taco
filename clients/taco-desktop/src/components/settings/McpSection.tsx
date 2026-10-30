@@ -106,7 +106,7 @@ export function McpSection(props: McpSectionProps) {
         setRestarted(false);
         setMutating(true);
         try {
-            const { server } = await props.client.mcpUpdateConfig(id, { enabled });
+            const { server } = await props.client.mcpUpdateConfig({ id, patch: { enabled } });
             commitServers(servers.map((s) => (s.id === id ? server : s)));
         } catch (err) {
             // Toggle/delete don't open a form, so a failed save leaves no retry
@@ -122,7 +122,7 @@ export function McpSection(props: McpSectionProps) {
         setRestarted(false);
         setMutating(true);
         try {
-            await props.client.mcpDeleteConfig(id);
+            await props.client.mcpDeleteConfig({ id });
             commitServers(servers.filter((s) => s.id !== id));
         } catch (err) {
             failMutation(err);
@@ -137,7 +137,7 @@ export function McpSection(props: McpSectionProps) {
         // fields on save.
         clearMutationError();
         try {
-            const { config } = await props.client.mcpGetConfig(view.id);
+            const { config } = await props.client.mcpGetConfig({ id: view.id });
             setPanel({ kind: "edit", server: config });
         } catch (err) {
             failMutation(err);
@@ -152,10 +152,10 @@ export function McpSection(props: McpSectionProps) {
                 // The form output doubles as the update patch — the server
                 // merges field-wise, so fields the form does not surface
                 // (e.g. enabled:false) survive.
-                const { server } = await props.client.mcpUpdateConfig(cfg.id, cfg);
+                const { server } = await props.client.mcpUpdateConfig({ id: cfg.id, patch: cfg });
                 commitServers(servers.map((s) => (s.id === cfg.id ? server : s)));
             } else {
-                const { server } = await props.client.mcpCreateConfig(cfg);
+                const { server } = await props.client.mcpCreateConfig({ config: cfg });
                 commitServers([...servers, server]);
             }
         } catch (err) {

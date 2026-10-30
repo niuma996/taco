@@ -23,10 +23,11 @@ Depends on `@taco-ai/protocol` and requires Node ≥ 22.
   pending-promise registry / typed RPC injection. Subclassed by
   the Tauri-flavored client inside `@taco-ai/desktop`.
 - **`createTypedRpc(dispatch)`** — the typed method facade
-  (`workspaceEnsure`, `sessionPrompt`, `agentsList`, …). Each method's
-  payload and result type come from the protocol contract table, so the
-  wire shape cannot drift from the sidecar's. Shared between the Node
-  and Tauri transports.
+  (`workspaceEnsure`, `sessionPrompt`, `agentsList`, …), generated from
+  the protocol contract table: one method per row, taking that row's wire
+  params object (`client.sessionDelete({ workspace, sessionId })`). The
+  wire shape cannot drift from the sidecar's, and a new RPC needs no
+  client change. Shared between the Node and Tauri transports.
 - **`createContractDispatch(dispatch)`** — the contract-bound send path
   behind that facade: the method name determines the payload and result
   types, and the routing (workspace vs process) is checked at compile time.
@@ -56,9 +57,9 @@ await client.start();
 try {
     await client.handshake();
     const workspace = asWorkspaceId("/tmp/myproject"); // use an existing project
-    await client.workspaceEnsure(workspace);
+    await client.workspaceEnsure({ cwd: workspace });
     const { sessionId } = await client.sessionCreate({ workspace });
-    await client.sessionAttach(workspace, sessionId);
+    await client.sessionAttach({ workspace, sessionId });
 
     const unsub = client.onPush((push) => {
         if (push.method === "session.event") {

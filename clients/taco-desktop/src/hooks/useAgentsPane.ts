@@ -64,7 +64,7 @@ export function useAgentsPane(
 
     const reload = useCallback(async () => {
         if (!activeCwd) return;
-        const r = await client.agentsList(asWorkspaceId(activeCwd));
+        const r = await client.agentsList({ workspace: asWorkspaceId(activeCwd) });
         setAgents(r.agents);
         // Absent from a sidecar older than the field; the form then saves no
         // directory and the agent runs in the workspace, as before.
@@ -100,7 +100,7 @@ export function useAgentsPane(
         if (!selectedAgentType || !activeCwd) return;
         setAgentContentLoading(true);
         void client
-            .agentsContent(asWorkspaceId(activeCwd), selectedAgentType)
+            .agentsContent({ workspace: asWorkspaceId(activeCwd), agentType: selectedAgentType })
             .then((r) => {
                 if (cancelled) return;
                 setAgentContent(r);
@@ -124,7 +124,8 @@ export function useAgentsPane(
             if (!activeCwd) return;
             setAgentSaving(true);
             try {
-                await client.agentsWrite(asWorkspaceId(activeCwd), {
+                await client.agentsWrite({
+                    workspace: asWorkspaceId(activeCwd),
                     ...input,
                     ...(previousAgentType !== undefined ? { previousAgentType } : {}),
                 });
@@ -142,7 +143,7 @@ export function useAgentsPane(
             if (!activeCwd) return;
             setAgentSaving(true);
             try {
-                await client.agentsDelete(asWorkspaceId(activeCwd), agentType);
+                await client.agentsDelete({ workspace: asWorkspaceId(activeCwd), agentType });
                 await reload();
             } finally {
                 setAgentSaving(false);

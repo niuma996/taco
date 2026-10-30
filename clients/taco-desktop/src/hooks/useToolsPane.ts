@@ -22,7 +22,7 @@ export function useToolsPane(
         if (!active || !activeCwd) return;
         clearError();
         void client
-            .toolsList(asWorkspaceId(activeCwd))
+            .toolsList({ workspace: asWorkspaceId(activeCwd) })
             .then((r) => setTools(r.tools))
             .catch((e: unknown) => {
                 // Surface it: a swallowed failure renders an empty catalog that

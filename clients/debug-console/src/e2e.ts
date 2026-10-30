@@ -109,7 +109,7 @@ async function main(): Promise<number> {
         await client.handshake();
         process.stderr.write("[e2e] sidecar ready (initialize handshake complete)\n");
 
-        await client.workspaceEnsure(cwd);
+        await client.workspaceEnsure({ cwd });
         process.stderr.write(`[e2e] workspace ensured (${cwd})\n`);
 
         // Force the model to reply "PONG" so the assertion stays stable.

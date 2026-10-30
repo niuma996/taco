@@ -1,6 +1,6 @@
 /**
  * SubagentContext — provides agentView (subagent tool card) with:
- *   - cwd: for `client.sessionHistory(cwd, subSessionId)`
+ *   - cwd: for `client.sessionHistory({ workspace: cwd, sessionId: subSessionId })`
  *   - loadSubagentHistory: reducer wrapper that writes back the history path
  *   - liveMessagesFor: reads the live UiMessage stream for a child session
  *

@@ -110,11 +110,11 @@ export function useSessionSettings({
                 activeSession,
                 next,
                 async () => {
-                    await client.sessionSetThinkingLevel(
-                        asWorkspaceId(activeCwd),
-                        asSessionId(activeSession),
-                        next,
-                    );
+                    await client.sessionSetThinkingLevel({
+                        workspace: asWorkspaceId(activeCwd),
+                        sessionId: asSessionId(activeSession),
+                        level: next,
+                    });
                 },
                 "sessionSetThinkingLevel",
             );
@@ -136,12 +136,12 @@ export function useSessionSettings({
                 activeSession,
                 next,
                 async () => {
-                    await client.sessionSetModel(
-                        asWorkspaceId(activeCwd),
-                        asSessionId(activeSession),
-                        next.provider,
-                        next.id,
-                    );
+                    await client.sessionSetModel({
+                        workspace: asWorkspaceId(activeCwd),
+                        sessionId: asSessionId(activeSession),
+                        provider: next.provider,
+                        modelId: next.id,
+                    });
                 },
                 "sessionSetModel",
             );

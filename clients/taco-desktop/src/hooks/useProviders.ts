@@ -36,7 +36,7 @@ export function useProviders(
         let cancelled = false;
         setLoading(true);
         client
-            .providersList(workspace)
+            .providersList({ workspace })
             .then((res) => {
                 if (cancelled) return;
                 setProviders(res.providers);

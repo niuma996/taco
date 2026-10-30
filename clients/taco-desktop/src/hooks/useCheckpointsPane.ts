@@ -50,10 +50,10 @@ export function useCheckpointsPane(
         setLoading(true);
         setError(null);
         void client
-            .checkpointsList(
-                asWorkspaceId(activeCwd),
-                activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
-            )
+            .checkpointsList({
+                workspace: asWorkspaceId(activeCwd),
+                sessionId: activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
+            })
             .then((result) => {
                 if (seq !== refreshSeq.current) return;
                 setData(result);
@@ -79,11 +79,12 @@ export function useCheckpointsPane(
             if (!activeCwd) return { ok: false, reason: "no active workspace" };
             setRestoringId(checkpointId);
             try {
-                const result: CheckpointsRestoreResult = await client.checkpointsRestore(
-                    asWorkspaceId(activeCwd),
+                const result: CheckpointsRestoreResult = await client.checkpointsRestore({
+                    workspace: asWorkspaceId(activeCwd),
                     checkpointId,
-                    activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
-                );
+                    sessionId:
+                        activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
+                });
                 if (result.failed.length > 0) {
                     // The pane does not list per-file failures, so name them
                     // here — a bare count would leave nothing to act on.

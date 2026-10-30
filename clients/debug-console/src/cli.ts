@@ -78,13 +78,13 @@ async function cmdStart() {
         if (trimmed === "/quit" || trimmed === "/exit") break;
 
         if (trimmed === "/list") {
-            const list = await client.sessionList(currentCwd);
+            const list = await client.sessionList({ workspace: currentCwd });
             process.stderr.write(`${JSON.stringify(list, null, 2)}\n`);
             continue;
         }
 
         if (trimmed === "/checkpoints") {
-            const r = await client.checkpointsList(currentCwd);
+            const r = await client.checkpointsList({ workspace: currentCwd });
             if (!r.enabled) {
                 process.stderr.write("[taco] checkpoints are disabled for this workspace\n");
                 continue;
@@ -104,7 +104,7 @@ async function cmdStart() {
 
         if (trimmed.startsWith("/restore ")) {
             const id = trimmed.slice(9).trim();
-            const list = await client.checkpointsList(currentCwd);
+            const list = await client.checkpointsList({ workspace: currentCwd });
             const cp = list.enabled ? list.checkpoints.find((c) => c.id === id) : undefined;
             if (!cp) {
                 process.stderr.write(`[taco] checkpoint not found: ${id}\n`);
@@ -121,7 +121,11 @@ async function cmdStart() {
                 if (yes === null) break;
                 continue;
             }
-            const r = await client.checkpointsRestore(currentCwd, id, currentSession ?? undefined);
+            const r = await client.checkpointsRestore({
+                workspace: currentCwd,
+                checkpointId: id,
+                sessionId: currentSession ?? undefined,
+            });
             for (const p of r.restored) process.stderr.write(`  restored ${p}\n`);
             for (const p of r.deleted) process.stderr.write(`  deleted  ${p}\n`);
             for (const f of r.failed) process.stderr.write(`  FAILED   ${f.path}: ${f.reason}\n`);
@@ -187,7 +191,10 @@ async function cmdSend(cwd: string, text: string) {
 async function cmdHistory(cwd: string, sessionId: string) {
     const client = await createClient();
     await client.handshake();
-    const r = await client.sessionHistory(asWorkspaceId(resolvePath(cwd)), asSessionId(sessionId));
+    const r = await client.sessionHistory({
+        workspace: asWorkspaceId(resolvePath(cwd)),
+        sessionId: asSessionId(sessionId),
+    });
     console.log(JSON.stringify(r, null, 2));
     await client.dispose();
 }
@@ -196,7 +203,7 @@ async function cmdWatch(cwd: string) {
     const client = await createClient();
     await client.handshake();
     // Ensure the workspace on the server.
-    await client.workspaceEnsure(asWorkspaceId(resolvePath(cwd)));
+    await client.workspaceEnsure({ cwd: asWorkspaceId(resolvePath(cwd)) });
     process.stderr.write(`[taco] watching ${cwd} (ctrl-c to exit)\n`);
     await new Promise(() => {});
 }

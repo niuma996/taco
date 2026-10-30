@@ -161,7 +161,8 @@ export default function App() {
             approved: boolean,
             scope: CommandPermissionScope,
         ) => {
-            await client.commandPermissionResolve(asWorkspaceId(cwd), {
+            await client.commandPermissionResolve({
+                workspace: asWorkspaceId(cwd),
                 requestId,
                 approved,
                 scope,
@@ -191,7 +192,10 @@ export default function App() {
     const compactSession = useCallback(() => {
         if (!activeCwd || !activeSid) return;
         void client
-            .sessionCompact(asWorkspaceId(activeCwd), asSessionId(activeSid))
+            .sessionCompact({
+                workspace: asWorkspaceId(activeCwd),
+                sessionId: asSessionId(activeSid),
+            })
             .catch((e: unknown) => {
                 if ((e as { code?: string } | null)?.code === ErrorCodes.InvalidState) {
                     pushNotification(t("context.compactFailedNotAttached"));

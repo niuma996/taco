@@ -65,7 +65,7 @@ describe("useMemoryPane dream actions", () => {
             await result.current.handleDreamRun();
         });
 
-        expect(fake.memoryDreamRun).toHaveBeenCalledWith("/ws");
+        expect(fake.memoryDreamRun).toHaveBeenCalledWith({ workspace: "/ws" });
         expect(fake.memoryList).toHaveBeenCalledTimes(2);
         expect(result.current.dreamBusy).toBeNull();
     });
@@ -78,7 +78,10 @@ describe("useMemoryPane dream actions", () => {
         await act(async () => {
             await result.current.handleDreamApply("preview-1");
         });
-        expect(fake.memoryDreamApply).toHaveBeenCalledWith("/ws", "preview-1");
+        expect(fake.memoryDreamApply).toHaveBeenCalledWith({
+            workspace: "/ws",
+            previewId: "preview-1",
+        });
     });
 
     it("toggles the built-in job without sending its history", async () => {
@@ -120,7 +123,10 @@ describe("useMemoryPane dream actions", () => {
         await act(async () => {
             await result.current.handleDreamUndo("report-1");
         });
-        expect(fake.memoryDreamUndo).toHaveBeenCalledWith("/ws", "report-1");
+        expect(fake.memoryDreamUndo).toHaveBeenCalledWith({
+            workspace: "/ws",
+            reportId: "report-1",
+        });
         expect(notify).toHaveBeenCalledWith(expect.stringContaining("edited-topic"));
         expect(fake.memoryList).toHaveBeenCalledTimes(2);
     });
