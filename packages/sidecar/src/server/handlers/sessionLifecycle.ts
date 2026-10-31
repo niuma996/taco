@@ -67,30 +67,34 @@ export function registerSessionLifecycleHandlers(): void {
         );
         // Sort by updatedAt desc with createdAt fallback, id desc tiebreaker.
         const sorted = sortSessionsDesc(all);
+        // The query filter runs before pagination, so the cursor and the
+        // total both describe the filtered set — "load more" pages through
+        // the matches, not through the workspace's whole list.
+        const matched = filterSessionsByQuery(sorted, params.query);
         const limit = normalizeLimit(params.limit);
         if (params.full) {
             return {
                 workspace: cwd,
-                sessions: sorted,
-                total: sorted.length,
+                sessions: matched,
+                total: matched.length,
             };
         }
-        const startIdx = findCursorIndex(sorted, params.cursor);
+        const startIdx = findCursorIndex(matched, params.cursor);
         const pageEnd = startIdx + limit;
-        const page = sorted.slice(startIdx, pageEnd);
+        const page = matched.slice(startIdx, pageEnd);
         const last = page[page.length - 1];
         const nextCursor: SessionListCursor | undefined =
-            pageEnd < sorted.length && last
+            pageEnd < matched.length && last
                 ? { updatedAt: last.updatedAt ?? last.createdAt, id: last.id }
                 : undefined;
         return {
             workspace: cwd,
             sessions: page,
             nextCursor,
-            // Always the true workspace total (already computed in-memory
-            // above), not just this page's size — the sidebar header shows
+            // Always the true count of what was listed (already computed
+            // in-memory above), not just this page's size — the sidebar shows
             // "N sessions" for the whole workspace, not the loaded count.
-            total: sorted.length,
+            total: matched.length,
         };
     });
 
@@ -449,4 +453,22 @@ export function findCursorIndex(
 export function normalizeLimit(limit: number | undefined): number {
     if (!limit || limit <= 0) return SESSION_LIST_DEFAULT_LIMIT;
     return Math.min(limit, SESSION_LIST_MAX_LIMIT);
+}
+
+/**
+ * Keep the sessions whose title or id contains the query, case-insensitively.
+ *
+ * Title first, id second: the sidebar shows `name ?? id.slice(0, 8)`, so an
+ * untitled session is searchable by the id prefix it displays. An empty or
+ * whitespace-only query is no filter at all.
+ */
+export function filterSessionsByQuery(
+    sessions: SessionListEntry[],
+    query: string | undefined,
+): SessionListEntry[] {
+    const needle = query?.trim().toLowerCase();
+    if (!needle) return sessions;
+    return sessions.filter(
+        (s) => (s.name ?? "").toLowerCase().includes(needle) || s.id.toLowerCase().includes(needle),
+    );
 }

@@ -18,6 +18,10 @@
   },
   "session": {
     "newInWorkspace": "New chat in this workspace",
+    "newChat": "New chat",
+    "searching": "Searching…",
+    "noSearchResults": "No matching chats",
+    "searchFailed": "Search failed",
     "deleteSession": "Delete chat",
     "rename": "Rename chat",
     "renameTitle": "Rename chat",

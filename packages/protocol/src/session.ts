@@ -76,7 +76,8 @@ export interface SessionListResult {
     /** Total session count in the workspace, always returned (paged or full).
      *  Cheap because the server already sorted the full set in memory to slice
      *  the page. Lets the sidebar show the workspace total rather than the
-     *  number of rows currently loaded. */
+     *  number of rows currently loaded. With a `query` filter this counts the
+     *  matches only, not the workspace. */
     total?: number;
 }
 

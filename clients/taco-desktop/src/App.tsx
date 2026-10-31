@@ -57,6 +57,7 @@ import { useProviders } from "./hooks/useProviders";
 import { useRightPanel } from "./hooks/useRightPanel";
 import { useRightPanelAutoOpen } from "./hooks/useRightPanelAutoOpen";
 import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
+import { useSessionSearch } from "./hooks/useSessionSearch";
 import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
@@ -179,6 +180,9 @@ export default function App() {
     const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
     const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
     const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
+    // Sidebar session search. Server-side, so it covers the whole workspace
+    // and not just the page the sidebar has loaded.
+    const sessionSearch = useSessionSearch(client, activeCwd);
 
     // Manual compact from the context-usage popover. The outcome comes from the
     // compaction_finished push; this only covers the RPC not starting (session
@@ -843,7 +847,12 @@ export default function App() {
                                     setPendingDeleteSession({ cwd: activeCwd, sessionId: sid })
                                 }
                                 onRename={(sid) => {
-                                    const current = ws?.sessions.find((s) => s.id === sid);
+                                    // Search matches include sessions that are
+                                    // not in the loaded page, so fall back to
+                                    // the result set for their current name.
+                                    const current =
+                                        ws?.sessions.find((s) => s.id === sid) ??
+                                        sessionSearch.sessions.find((s) => s.id === sid);
                                     setPendingRenameSession({
                                         cwd: activeCwd,
                                         sessionId: sid,
@@ -853,6 +862,11 @@ export default function App() {
                                 onLoadMore={() => {
                                     void loadMoreSessions(activeCwd);
                                 }}
+                                onNewSession={handleNewSession}
+                                newSessionDisabled={
+                                    !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
+                                }
+                                search={sessionSearch}
                             />
                             {/* Owns the one file-preview popup the chat's `read`
                                 cards open; the file tree has its own inside
@@ -1212,7 +1226,14 @@ export default function App() {
                 onConfirm={() => {
                     const target = pendingDeleteSession;
                     setPendingDeleteSession(null);
-                    if (target) void deleteSession(target.cwd, target.sessionId);
+                    if (!target) return;
+                    // The sidebar search results are a separate list from the
+                    // reducer's page; re-run the query so a deleted row does
+                    // not linger as an unopenable ghost.
+                    void (async () => {
+                        await deleteSession(target.cwd, target.sessionId);
+                        sessionSearch.refresh();
+                    })();
                 }}
                 onCancel={() => setPendingDeleteSession(null)}
             />
@@ -1226,7 +1247,12 @@ export default function App() {
                 onSubmit={(name) => {
                     const target = pendingRenameSession;
                     setPendingRenameSession(null);
-                    if (target) void renameSession(target.cwd, target.sessionId, name);
+                    if (!target) return;
+                    // Same as delete: the search list is its own copy.
+                    void (async () => {
+                        await renameSession(target.cwd, target.sessionId, name);
+                        sessionSearch.refresh();
+                    })();
                 }}
                 onCancel={() => setPendingRenameSession(null)}
             />

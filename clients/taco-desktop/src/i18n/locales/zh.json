@@ -17,6 +17,10 @@
   },
   "session": {
     "newInWorkspace": "新建此工作区的聊天",
+    "newChat": "新聊天",
+    "searching": "搜索中…",
+    "noSearchResults": "没有匹配的聊天",
+    "searchFailed": "搜索失败",
     "deleteSession": "删除聊天",
     "rename": "重命名聊天",
     "renameTitle": "重命名聊天",

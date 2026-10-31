@@ -737,6 +737,108 @@ describe("session.list", () => {
             assert.ok(res.nextCursor);
         });
     });
+
+    describe("session.list query filter", () => {
+        /** Sessions with titles; "s002" stays untitled to cover the id path. */
+        function makeCtx(params: Record<string, unknown>) {
+            const titles: Record<string, string | undefined> = {
+                s000: "深圳天气",
+                s001: "广州天气",
+                s002: undefined,
+                s003: "深圳出差",
+                s004: "Alpha Launch",
+            };
+            const fakeList = Object.keys(titles).map((id, i) => ({
+                id,
+                cwd: "/tmp/ws",
+                path: `/tmp/ws/${id}.jsonl`,
+                createdAt: new Date(Date.UTC(2026, 0, 1) - i * 86_400_000).toISOString(),
+            }));
+            const workspace = {
+                async listSessions() {
+                    return fakeList;
+                },
+                async getSessionName(id: string) {
+                    return titles[id];
+                },
+                async getSessionFacts() {
+                    return { kind: "main" };
+                },
+                async getSessionActivityAt() {
+                    return undefined;
+                },
+            };
+            return {
+                id: "test-id",
+                workspace,
+                cwd: "/tmp/ws",
+                server: {},
+                params,
+            } as unknown as Parameters<
+                NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
+            >[0];
+        }
+
+        async function callList(params: Record<string, unknown>) {
+            const handler = getRegisteredMethod("session.list");
+            assert.ok(handler);
+            return (await handler.handler(makeCtx(params))) as {
+                sessions: SessionListEntry[];
+                nextCursor?: { updatedAt: string; id: string };
+                total?: number;
+            };
+        }
+
+        it("keeps only the sessions whose title matches", async () => {
+            const res = await callList({ query: "深圳" });
+            assert.deepEqual(
+                res.sessions.map((s) => s.id),
+                ["s000", "s003"],
+            );
+            assert.equal(res.total, 2, "total counts the matches, not the workspace");
+        });
+
+        it("matches an untitled session by its id", async () => {
+            const res = await callList({ query: "s002" });
+            assert.deepEqual(
+                res.sessions.map((s) => s.id),
+                ["s002"],
+            );
+        });
+
+        it("ignores case in Latin titles", async () => {
+            const res = await callList({ query: "alpha" });
+            assert.deepEqual(
+                res.sessions.map((s) => s.id),
+                ["s004"],
+            );
+        });
+
+        it("pages within the matches, not through the workspace", async () => {
+            const first = await callList({ query: "深圳", limit: 1 });
+            assert.equal(first.sessions.length, 1);
+            assert.equal(first.sessions[0]?.id, "s000");
+            assert.equal(first.total, 2);
+            assert.ok(first.nextCursor);
+
+            const second = await callList({
+                query: "深圳",
+                limit: 1,
+                cursor: first.nextCursor,
+            });
+            assert.deepEqual(
+                second.sessions.map((s) => s.id),
+                ["s003"],
+            );
+            assert.equal(second.nextCursor, undefined, "every match has been listed");
+        });
+
+        it("an empty query is no filter at all", async () => {
+            const res = await callList({ query: "  " });
+            assert.equal(res.sessions.length, 5);
+            assert.equal(res.total, 5);
+        });
+    });
 });
 
 describe("session.taskHistoryGet", () => {

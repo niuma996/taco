@@ -43,6 +43,9 @@ export const sessionListSchema = Type.Object({
     limit: Type.Optional(Type.Number()),
     cursor: Type.Optional(Type.Object({ updatedAt: Type.String(), id: sessionIdSchema })),
     full: Type.Optional(Type.Boolean()),
+    // Case-insensitive substring filter over the session title and id. Applied
+    // before pagination, so the cursor and `total` describe the filtered set.
+    query: Type.Optional(Type.String()),
 });
 
 export const sessionCreateSchema = Type.Object({
