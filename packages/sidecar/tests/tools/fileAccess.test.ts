@@ -3,7 +3,12 @@ import { describe, it } from "node:test";
 import { NoopPlanPushAdapter } from "../../src/plan/planPushAdapter.ts";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { builtinToolCandidates } from "../../src/tools/builtinCandidates.ts";
-import { FILE_ACCESS_TOOL_NAMES, fileAccessOf, readPathsOf } from "../../src/tools/fileAccess.ts";
+import {
+    FILE_ACCESS_TOOL_NAMES,
+    fileAccessOf,
+    isFsToolDenied,
+    readPathsOf,
+} from "../../src/tools/fileAccess.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../../src/tools/index.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
 
@@ -107,5 +112,24 @@ describe("built-in file access declarations", () => {
         // Prototype keys are not tool names.
         assert.equal(fileAccessOf("constructor"), undefined);
         assert.equal(readPathsOf("toString", { path: "x" }), undefined);
+    });
+});
+
+describe("isFsToolDenied", () => {
+    it("denies exactly built-in file tools under a deny verdict", () => {
+        // A deny verdict denies only names the table knows.
+        assert.equal(isFsToolDenied("read", true), true);
+        assert.equal(isFsToolDenied("pdfMerge", true), true);
+        // Non-fs built-ins are never denied by the fs verdict.
+        assert.equal(isFsToolDenied("configGet", true), false);
+        assert.equal(isFsToolDenied("addTools", true), false);
+        // Names outside the table (MCP / extension tools) are not this
+        // judgment's to deny — matching filterToolsForImPolicy's boundary.
+        assert.equal(isFsToolDenied("mcp__srv__read_file", true), false);
+        // Any other verdict denies nothing (non-IM sessions pass undefined).
+        assert.equal(isFsToolDenied("read", false), false);
+        assert.equal(isFsToolDenied("read", undefined), false);
+        // Prototype keys are not tool names.
+        assert.equal(isFsToolDenied("constructor", true), false);
     });
 });

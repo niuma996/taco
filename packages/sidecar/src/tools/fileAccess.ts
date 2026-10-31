@@ -2,9 +2,10 @@
  * Which built-in tools touch the filesystem, and through which arguments.
  *
  * The single source for the mutation gate's write/read fences, the IM
- * file-tool deny list and the deferred-tool catalog filter. A built-in tool
- * that reads or writes files and is missing here fails open: its write target
- * skips containment and an IM session can reach it. The consistency test in
+ * file-tool deny list, the deferred-tool catalog filter and the deferred
+ * load-time deny gate. A built-in tool that reads or writes files and is
+ * missing here fails open: its write target skips containment and an IM
+ * session can reach it. The consistency test in
  * `tests/tools/fileAccess.test.ts` checks every built-in against this table.
  *
  * Keyed by name and kept free of imports, so the gate and the deferred
@@ -42,6 +43,18 @@ export const FILE_ACCESS_TOOL_NAMES: readonly string[] = Object.keys(BUILTIN_FIL
 
 export function fileAccessOf(toolName: string): FileAccess | undefined {
     return Object.hasOwn(BUILTIN_FILE_ACCESS, toolName) ? BUILTIN_FILE_ACCESS[toolName] : undefined;
+}
+
+/**
+ * Whether a tool name is a built-in file tool the session's policy denies.
+ * The same table that feeds the mutation gate and the resident-set IM
+ * filter decides here, so the deferred catalog, `restoreTools`, `addTools`
+ * and the attach-time allowlist prune all agree on what "denied" means. A
+ * name outside the table (an MCP or extension tool) is never denied by this
+ * judgment, and anything but a deny verdict denies nothing.
+ */
+export function isFsToolDenied(toolName: string, fsToolsDenied: boolean | undefined): boolean {
+    return fsToolsDenied === true && fileAccessOf(toolName) !== undefined;
 }
 
 /**
