@@ -104,8 +104,7 @@ main {
 }
 /* Session-bar icon buttons share tight negative side margins: they cancel most
    of the row-level 0.6rem gap so adjacent icons read as a group rather than
-   spread-out buttons. The leading toggle keeps its left inset (no left margin)
-   and the details trigger keeps margin-left:auto. */
+   spread-out buttons. The details trigger keeps margin-left:auto. */
 .session-info-new,
 .session-info-tasks,
 .session-info-subagents,
@@ -116,6 +115,13 @@ main {
 .session-info-toggle,
 .session-info-details {
     margin-right: -0.25rem;
+}
+/* The leading toggle sits against the bar's 1rem inset while its right side
+   only clears the divider by the row gap (0.6rem) minus the button's -0.25rem
+   margin. Pull the button left so the icon reads the same distance from the
+   bar edge as from the divider — roughly 10px on both sides. */
+.session-info-toggle {
+    margin-left: -0.55rem;
 }
 /* Session-bar icon buttons (session-list / new-chat / tasks / file-tree /
    subagents): 22x22 around a 16px icon, transparent with a hover bg. Only the
@@ -203,7 +209,7 @@ main {
 }
 
 /* Session-details popover — full id + copy, created-at, open log, consolidated
-   from the old inline metadata. Same chrome as .notification-popover. */
+   from the old inline metadata. Same chrome as .ui-popover-panel. */
 .session-info-popover {
     min-width: 200px;
     max-width: calc(100vw - 16px);
