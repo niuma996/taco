@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.4] — 2026-10-31
+
+A release about finding things again: the sidebar can now search every session
+in a workspace, and the file-tool policy is decided in one place.
+
+### Added
+
+**Search your sessions.** The sidebar searches the whole workspace, not just the
+page you have loaded. It also gained its own new-chat button.
+
+### Changed
+
+- Pending command approvals open next to the notification bell instead of
+  covering the chat, and resolving one keeps the panel open while the rest are
+  queued.
+
+### Fixed
+
+- A toolset change reaches every open session: an MCP server or a skill added
+  mid-conversation now shows up in all of them.
+- Tools no longer disappear mid-turn: a tool the model loaded on demand stays
+  available.
+- Chat sessions respect the file-tool policy: a session that denies file tools
+  no longer loads them, and the model is told which tools are unavailable.
+
+### Breaking changes
+
+- The wire protocol advances 2.6 → 2.7. `session.list` takes an optional
+  `query`. Keep the desktop and the sidecar on the same release line; a newer
+  desktop refuses an older daemon at startup.
+- `@taco-ai/shared` breaks: every typed client method takes a single params
+  object now. `client.sessionPrompt(workspace, sessionId, text)` becomes
+  `client.sessionPrompt({ workspace, sessionId, text })`.
+
 ## [0.3.3] — 2026-10-30
 
 A release about the agent learning to see: you can hand it any file, it can read

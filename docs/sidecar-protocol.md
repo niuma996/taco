@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.3.3
+> **版本**: 0.3.4
 > **传输**: NDJSON over stdio 或 daemon data socket
 > **来源**: 源码为唯一权威来源——`packages/protocol/src/rpcContract/`（RPC method 名、参数、返回值与 schema）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -103,6 +103,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.4 | `memory.dreamRun` / `.dreamApply` / `.dreamDiscard` / `.dreamUndo`; `memory.restoreTopic`; `MemoryListResult.dream` / `.dreamScheduled`; `Job.builtin` and `JobHistoryEntry.summary` on `jobs.*` |
 | 2.5 | `attachment.stage`; `attachments` on `session.prompt` / `.steer` / `.followUp` and `initialAttachments` on `session.create`; user `message` pushes and history carry `attachments` |
 | 2.6 | optional `input` (`"text"` / `"image"`) on `ProviderView.models[]` and on `customProviders[].models` / `providerExtraModels` entries written by `settings.write`; image blocks on session prompts are mime- and size-bounded |
+| 2.7 | optional `query` on `session.list` — a case-insensitive substring filter over the session title and id, applied before pagination so the cursor and `total` describe the filtered set |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
