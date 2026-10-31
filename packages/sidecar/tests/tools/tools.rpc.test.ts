@@ -96,7 +96,7 @@ describe("jobs tools — execute dispatches + closes actor", () => {
 
     it("jobsCreate overwrites a caller-supplied args.workspace with ctx.workspace", async () => {
         // Defense against the LLM-fills-args.workspace-by-guess failure mode
-        // (the model saw the wire error and supplied "/Users/lewis"). The
+        // (the model saw the wire error and supplied "/Users/someone"). The
         // tool layer is the trusted boundary — anything the model passes
         // for args.workspace is discarded.
         const records: CallRecord[] = [];
