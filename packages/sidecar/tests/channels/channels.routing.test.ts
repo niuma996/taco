@@ -25,6 +25,7 @@ import {
     makeImSessionsRoot,
 } from "../../src/channels/virtualWorkspace.ts";
 import { createLogger } from "../../src/lib/logger.ts";
+import { DefaultDeferredToolRegistry } from "../../src/runtime/harness/deferredToolRegistry.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import type { ServerRpcSurface } from "../../src/runtime/serverRpcSurface.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
@@ -769,6 +770,24 @@ describe("virtualWorkspace", () => {
             for (const fs of disabled) {
                 assert.ok(!names.includes(fs), `expected ${fs} to be disabled`);
             }
+        });
+
+        it("the deferred catalog hides fs candidates the IM policy denies", () => {
+            const scratch = mkdtempSync(path.join(tmpdir(), "im-scratch-"));
+            const sessionsRoot = mkdtempSync(path.join(tmpdir(), "im-sessions-"));
+            const ws = new WorkspaceRuntime({
+                providerKeyStore: new ProviderKeyStore({}),
+                scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), scratch),
+                sessionsRoot,
+                toolRegistry: new DefaultDeferredToolRegistry({
+                    candidates: pdfToolCandidates(),
+                }),
+            });
+            // The default IM policy denies fs tools and every deferred builtin
+            // candidate is an fs tool, so the catalog section is absent rather
+            // than offering a name the load gates would refuse.
+            assert.ok(!ws.systemPrompt.includes("pdfMerge"));
+            assert.ok(!ws.systemPrompt.includes("<deferred_tools>"));
         });
     });
 });

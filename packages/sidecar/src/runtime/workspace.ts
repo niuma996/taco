@@ -32,7 +32,6 @@ import {
     DEFAULT_IM_WORKSPACE_POLICY,
     type ImWorkspacePolicy,
 } from "../channels/imWorkspacePolicy.ts";
-import { IM_FS_TOOL_NAMES } from "../channels/virtualWorkspace.ts";
 import { CheckpointManager } from "../checkpoints/manager.ts";
 import type { CheckpointMeta, RestoreOutcome } from "../checkpoints/store.ts";
 import { CheckpointStore } from "../checkpoints/store.ts";
@@ -85,6 +84,7 @@ import {
     type TaskSnapshotPublisher,
 } from "../tasks/taskPushAdapter.ts";
 import type { SelfRpcCall, TacoToolContextBase } from "../tools/context.ts";
+import { isFsToolDenied } from "../tools/fileAccess.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
@@ -1038,16 +1038,16 @@ export class WorkspaceRuntime extends EventEmitter {
             includeLocation: toolNames.has("read") || toolNames.has("shell"),
         });
         if (skillsPrompt) contributors.push({ append: skillsPrompt, requires: ["skills"] });
-        const deniedDeferredToolNames = new Set(
-            this.resolveImPolicy()?.tools.fsTools === "deny" ? IM_FS_TOOL_NAMES : [],
-        );
+        const fsToolsDenied = this.resolveImPolicy()?.tools.fsTools === "deny";
         const deferredPrompt = formatDeferredToolsForSystemPrompt(
             // A deferred fs tool bypasses `filterToolsForImPolicy` (it is not
             // in the resident set), so hide it from the catalog under the same
-            // policy that would have removed it.
+            // policy that would have removed it. `isFsToolDenied` is the one
+            // judgment shared with restoreTools/addTools and the attach-time
+            // allowlist prune, so the catalog and the load gates cannot drift.
             this.toolRegistry
                 .listDeferred()
-                .filter((c) => !deniedDeferredToolNames.has(c.name))
+                .filter((c) => !isFsToolDenied(c.name, fsToolsDenied))
                 .map((c) => ({ name: c.name, summary: c.summary })),
         );
         if (deferredPrompt) contributors.push({ append: deferredPrompt });
