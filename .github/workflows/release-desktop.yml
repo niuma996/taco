@@ -176,8 +176,10 @@ jobs:
 
   # ── Build macOS installers ────────────────────────────────────────────
   # Two .dmg artifacts per release: arm64 (Apple Silicon) + x64 (Intel).
-  # Both run on the same macos-13/14 runners so they share no sidecar
+  # Both run on the same macos-15 runners so they share no sidecar
   # rebuild cost across the matrix — each variant compiles from scratch.
+  # macos-14 images are retired on 2026-11-02; macos-15 is arm64 here
+  # (public repo), so the label moves without changing the target arch.
   # Without code signing + notarization, the .dmg will mount but Gatekeeper
   # will block the first launch with an unidentified-developer warning.
   # Users can right-click → Open to bypass, but it is poor UX.
@@ -189,7 +191,7 @@ jobs:
       matrix:
         include:
           - variant: dmg-aarch64
-            os: macos-14
+            os: macos-15
             arch: arm64
             artifact_name: taco-desktop-dmg-aarch64
           # dmg-x64 (Intel Mac) omitted from v0.1.0: macos-13 runners are
@@ -208,7 +210,7 @@ jobs:
           node-version-file: ${{ env.NODE_VERSION_FILE }}
           architecture: ${{ matrix.arch }}
 
-      # macos-13/14 runners ship a default Rust toolchain; pin to stable
+      # macos-15 runners ship a default Rust toolchain; pin to stable
       # for reproducibility and add the matching target.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

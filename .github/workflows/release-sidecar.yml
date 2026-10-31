@@ -75,7 +75,7 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             arch: arm64
           # x86_64-apple-darwin (Intel Mac) omitted from v0.1.0: macos-13
           # runners are capacity-constrained right now (Aug 2026). Re-add
