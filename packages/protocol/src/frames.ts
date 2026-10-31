@@ -92,8 +92,11 @@ export type CompactionFailureReason =
  *  2.6 added optional `input` on provider model entries (`providers.list`,
  *  and the config fields `settings.write` replaces). A 2.5 daemon drops
  *  `input` on write while still answering ok, so a saved image switch
- *  would not stick. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 6 } as const;
+ *  would not stick.
+ *  2.7 added the optional `query` filter on `session.list`. A 2.6 daemon
+ *  answers ok but ignores it, so a search would silently list every
+ *  session instead of the matches. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 7 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

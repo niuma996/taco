@@ -144,7 +144,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 6 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 7 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -193,15 +193,15 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.6 client refuses a 2.5 daemon (it drops model input on write)", () => {
-            // Client-side gate: a 2.5 daemon answers ok to settings.write while
-            // dropping `input`, so a saved image switch would not stick. The
-            // handshake must fail before that silent drop.
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 4 }), false);
+        it("a 2.7 client refuses a 2.6 daemon (it ignores the session search query)", () => {
+            // Client-side gate: a 2.6 daemon answers ok to session.list while
+            // ignoring `query`, so a search would silently list every session.
+            // The handshake must fail before that silent drop.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), true);
-            // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), true);
+            // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), true);
         });
 
         it("accepts an older compatible client minor", async () => {
