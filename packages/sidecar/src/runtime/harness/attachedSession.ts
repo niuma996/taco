@@ -86,7 +86,7 @@ import {
     type SessionToolController,
 } from "./sessionToolController.ts";
 import { SessionToolState } from "./sessionToolState.ts";
-import { alignActiveTools, createToolsetRefresher } from "./toolsetRefresh.ts";
+import { alignActiveTools, createToolsetRefresher, pruneDeniedFsTools } from "./toolsetRefresh.ts";
 import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
 
 const log = createLogger("attachedSession");
@@ -375,7 +375,12 @@ export class AttachedSession extends EventEmitter {
         let toolController: SessionToolController | undefined;
         let initialTools = args.tools;
         if (args.toolRegistry) {
-            const controller = new DefaultSessionToolController(args.toolRegistry);
+            const controller = new DefaultSessionToolController(args.toolRegistry, {
+                // The load-time gate reads the same tool-context signal the
+                // execution-time refusals (`refuseInIm`) see, so the two
+                // verdicts cannot disagree.
+                fsToolsDenied: () => args.getToolContext().fsToolsDenied === true,
+            });
             // The active-tool list lives in the lane's persisted configuration.
             // Read it straight off the session: the lane itself does not exist
             // until the harness is built, and the harness needs these tools in
@@ -512,6 +517,17 @@ export class AttachedSession extends EventEmitter {
             getActiveToolNames: () => lane.getActiveTools(harnessContext),
             setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
         });
+
+        // A denied fs tool is not restored (see restoreTools), so the
+        // allowlist would name a tool with no definition — pi fails the
+        // generation with `configured_tools_unavailable`. Prune before the
+        // alignment below adds anything back.
+        const fsToolsDenied = args.getToolContext().fsToolsDenied === true;
+        if (await pruneDeniedFsTools(toolState, fsToolsDenied)) {
+            log.info("pruned policy-denied fs tools from the persisted allowlist", {
+                sessionId: args.session.metadata.id,
+            });
+        }
 
         // The lane's persisted allowlist predates this process's toolset;
         // converge it before the first turn rather than waiting on a refresh

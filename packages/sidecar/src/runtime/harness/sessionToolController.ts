@@ -15,6 +15,7 @@
  * the per-turn refresh also writes through, so no merge reads a stale snapshot.
  */
 
+import { isFsToolDenied } from "../../tools/fileAccess.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import type { SessionToolState, ToolState, ToolStateChange } from "./sessionToolState.ts";
@@ -28,6 +29,17 @@ export interface AddToolsResult {
     unknown: string[];
     /** Candidates that failed to load and the reason. */
     failed: Array<{ name: string; error: string }>;
+}
+
+export interface SessionToolControllerOptions {
+    /**
+     * True when the session's policy denies filesystem tools. Re-resolved
+     * on each use (a thunk, not a value) so a policy edit between turns
+     * reaches the load-time gate on the next call. Reads the same
+     * tool-context signal the execution-time refusals (`refuseInIm`) see,
+     * so the load-time and call-time verdicts cannot drift apart.
+     */
+    readonly fsToolsDenied: () => boolean | Promise<boolean>;
 }
 
 /** Minimal interface exposed to AddTools. */
@@ -62,9 +74,13 @@ export class DefaultSessionToolController implements SessionToolController {
     private toolState?: SessionToolState;
     /** Loaded dynamic tool names, in stable insertion order. */
     private loadedNames: string[] = [];
+    private readonly fsToolsDenied: () => boolean | Promise<boolean>;
 
-    constructor(registry: DeferredToolRegistry) {
+    constructor(registry: DeferredToolRegistry, options?: SessionToolControllerOptions) {
         this.registry = registry;
+        // Default deny-nothing: direct constructions in tests and any
+        // future call site without a policy hook keep today's behaviour.
+        this.fsToolsDenied = options?.fsToolsDenied ?? (() => false);
     }
 
     bindHarness(toolState: SessionToolState): void {
@@ -90,6 +106,11 @@ export class DefaultSessionToolController implements SessionToolController {
      * still in the registry are restored; vanished or failed candidates are
      * skipped silently (the name was already persisted so re-attaching the
      * same session will attempt to restore it again — this is intentional).
+     * A file tool the session's policy denies is skipped too: loading it
+     * would install a tool whose every call refuses, so the attach-time
+     * prune (`pruneDeniedFsTools` in toolsetRefresh.ts) also drops its name —
+     * a name on the allowlist with no definition makes pi fail the
+     * generation (`configured_tools_unavailable`).
      *
      * Always-loaded candidates are owned by AttachedSession.create's always
      * block; restoreTools must skip them or the constructor would see two
@@ -101,12 +122,20 @@ export class DefaultSessionToolController implements SessionToolController {
     async restoreTools(activeToolNames: readonly string[]): Promise<TacoTool[]> {
         const persistedNames = activeToolNames;
         const alwaysNames = new Set(this.registry.listAlways().map((c) => c.name));
+        // Resolved once per restore: the verdict must hold for the whole
+        // batch, and the thunk stays per-use for the addTools path.
+        const fsDenied = await this.fsToolsDenied();
         const loaded = new Map<string, TacoTool>();
         for (const name of persistedNames) {
             if (alwaysNames.has(name)) {
                 // The always block in AttachedSession.create is the single
                 // owner; loading it here would double-load and trip the harness
                 // name-uniqueness check.
+                continue;
+            }
+            if (isFsToolDenied(name, fsDenied)) {
+                // Policy, not a load failure: the name is not loaded, and the
+                // attach-time prune removes it from the allowlist.
                 continue;
             }
             try {

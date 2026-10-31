@@ -754,6 +754,73 @@ describe("attachedSession.deferredTools", () => {
             await reloaded.abort();
         });
 
+        it("a policy-denied fs tool is not restored and the session still generates", async () => {
+            // Written under an allow policy, the allowlist carries `pdfMerge`
+            // across a restart into a process whose IM policy denies fs tools.
+            // restoreTools must not load it (a loaded tool whose every call
+            // refuses), and the attach-time prune must drop the name — pi fails
+            // the whole generation with `configured_tools_unavailable` when an
+            // active name has no definition, so the prompt below is the proof
+            // that the session was not traded for a dead tool.
+            const registry = new DefaultDeferredToolRegistry({
+                candidates: [makeToolCandidate("pdfMerge", "deferred")],
+            });
+            const session = await repo.create({ cwd: tmpDir }, harnessContext);
+
+            // The deferredTools fixtures have no registered provider; prompt()
+            // needs one, so this test brings its own faux model.
+            const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+            faux.setResponses([fauxAssistantMessage([fauxText("ok")])] as never);
+            const fauxModels = createModels();
+            fauxModels.setProvider(faux.provider);
+
+            let fsToolsDenied = false;
+            const opts: AttachedSessionOptions = {
+                session,
+                models: fauxModels,
+                model: faux.getModel(),
+                env,
+                systemPrompt: "test prompt",
+                tools: [...stubTools],
+                resources: {},
+                streamOptions: {},
+                taskStore: {
+                    getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                    setTaskState: () => {},
+                } as unknown as TaskStore,
+                planState: createPlanModeState(),
+                tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
+                toolRegistry: registry,
+                sessionCwd: tmpDir as never,
+                getToolContext: (): TacoToolContextBase => ({
+                    env,
+                    workspace: tmpDir as never,
+                    fsToolsDenied,
+                }),
+                sessionKind: "main",
+            };
+
+            // Under allow: the tool loads and its name is persisted.
+            const first = await AttachedSession.create(opts);
+            const added = await first.toolController?.addTools(["pdfMerge"]);
+            assert.deepEqual(added?.added, ["pdfMerge"]);
+            await first.abort();
+
+            // The policy flips to deny between daemon runs.
+            fsToolsDenied = true;
+            const reloaded = await AttachedSession.create(opts);
+            const installed = await reloaded.toolController?.installedToolNames();
+            assert.ok(!installed?.includes("pdfMerge"), "a denied fs tool must not be restored");
+            const activeNames = (await reloaded.toolController?.activeToolNames()) ?? [];
+            assert.ok(
+                !activeNames.includes("pdfMerge"),
+                `the denied name must leave the allowlist, got: ${activeNames.join(", ")}`,
+            );
+            await reloaded.prompt("hi", undefined, undefined);
+            await reloaded.abort();
+        });
+
         it("re-attach activates a workspace tool the persisted allowlist predates", async () => {
             // An IM policy flipped from deny to allow between two daemon runs: the
             // lane's allowlist was written under the old policy and survives the

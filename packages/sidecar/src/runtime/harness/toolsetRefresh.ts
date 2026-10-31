@@ -8,6 +8,7 @@
  */
 
 import type { TacoTool } from "../../tools/index.ts";
+import { isFsToolDenied } from "../../tools/fileAccess.ts";
 import { orderTools, toolNamesKey } from "../../tools/toolOrder.ts";
 import type { SessionToolState } from "./sessionToolState.ts";
 
@@ -111,5 +112,35 @@ export function alignActiveTools(
             (name) => defined.has(name) && !activeNames.includes(name),
         );
         return missing.length === 0 ? undefined : { activeNames: [...activeNames, ...missing] };
+    });
+}
+
+/**
+ * Remove policy-denied file-tool names from the persisted allowlist at attach.
+ *
+ * `restoreTools` refuses to load exactly these names, so without this prune
+ * the allowlist would name a tool with no definition behind it — which pi
+ * rejects as `configured_tools_unavailable`, failing every turn of the
+ * session until the policy flips back. Dropping the name is safe: a later
+ * allow flip re-offers the tool in the `<deferred_tools>` catalog and
+ * `addTools` re-loads it, so the tool is one model call away, not lost.
+ *
+ * Only names with no definition behind them are removed: a denied name that
+ * is nonetheless defined (an always-loaded candidate; a tool loaded before a
+ * mid-process flip) keeps its entry, and execution-time refusal owns it.
+ */
+export async function pruneDeniedFsTools(
+    toolState: SessionToolState,
+    fsToolsDenied: boolean,
+): Promise<boolean> {
+    if (!fsToolsDenied) return false;
+    return toolState.update(({ tools, activeNames }) => {
+        const defined = new Set(tools.map((t) => t.name));
+        const revoked = activeNames.filter(
+            (name) => !defined.has(name) && isFsToolDenied(name, fsToolsDenied),
+        );
+        if (revoked.length === 0) return undefined;
+        const removed = new Set(revoked);
+        return { activeNames: activeNames.filter((name) => !removed.has(name)) };
     });
 }
