@@ -57,18 +57,25 @@ describe("pdf tools", () => {
         }
     });
 
-    it("refuses when the IM policy denies filesystem tools", async () => {
-        await assert.rejects(
-            invokeTool(
-                tool("pdfFields") as never,
-                { input: "form.pdf" } as never,
-                {
-                    env: new NodeExecutionEnv({ cwd }),
-                    fsToolsDenied: true,
-                } as never,
-            ),
-            /not available in this session/,
-        );
+    it("refuses every PDF tool when the IM policy denies filesystem tools", async () => {
+        // The load gates and the catalog are name-driven, so a tool whose
+        // execute forgot the refusal would sail through all of them (a tool
+        // loaded before a mid-process flip stays installed — kept
+        // semantics). Pin all four; `refuseInIm` is the first statement of
+        // each execute, so empty params are fine.
+        for (const name of PDF_TOOL_NAMES) {
+            await assert.rejects(
+                invokeTool(
+                    tool(name) as never,
+                    {} as never,
+                    {
+                        env: new NodeExecutionEnv({ cwd }),
+                        fsToolsDenied: true,
+                    } as never,
+                ),
+                /not available in this session/,
+            );
+        }
     });
 
     it("merges two files into one", async () => {
