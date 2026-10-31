@@ -106,8 +106,8 @@ importers:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.2.18)(react@19.2.8)
       pele:
-        specifier: 1.10.0
-        version: 1.10.0
+        specifier: 1.13.0
+        version: 1.13.0
       qrcode.react:
         specifier: 4.2.0
         version: 4.2.0(react@19.2.8)
@@ -3470,8 +3470,8 @@ packages:
     resolution: {integrity: sha512-AVl138zALtfaAPvADulE0PZThbYzCBS79nL4pOSL/6Sm/4AH5A21BD9VHt97OlCuzJuCpmeZtAtkinisF4Vb1g==}
     engines: {node: '>=22.13.0 || >=24'}
 
-  pele@1.10.0:
-    resolution: {integrity: sha512-hDMEM+GQ01pZin8tst3PRXGeB/xFATvXBreHHtjx2glSNAQ7nHFq7EbMuNJGTbqkYgueWPboLjyUBsAudsb1qQ==}
+  pele@1.13.0:
+    resolution: {integrity: sha512-Ie8UKY9x00MsuR3jO6AzUwzK2Z6MIV3Tf4EDdITiuk8Uaz8K7g0R082WqsqNaSU8DdgkrRvZThzhit83mi/uiw==}
     engines: {node: '>=20'}
 
   picocolors@1.1.1:
@@ -7443,7 +7443,7 @@ snapshots:
     optionalDependencies:
       '@napi-rs/canvas': 1.0.13
 
-  pele@1.10.0: {}
+  pele@1.13.0: {}
 
   picocolors@1.1.1: {}
 

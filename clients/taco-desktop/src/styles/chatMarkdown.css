@@ -312,6 +312,11 @@
     --pele-surface-alt: var(--terminal-bg);
     --pele-border: var(--fg-dim);
     --pele-accent: var(--accent);
+    /* Label colors on fills a diagram sets itself (classDef, style, rect);
+       Pele picks whichever contrasts more. Both stay fixed across themes
+       because the surface does. */
+    --pele-fg-on-light: var(--terminal-bg);
+    --pele-fg-on-dark: var(--terminal-fg);
     padding: 0.7em 0.9em;
     overflow-x: auto;
     display: flex;
