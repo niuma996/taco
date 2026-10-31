@@ -155,8 +155,9 @@ header.topbar select {
     border-radius: var(--radius-sm);
 }
 
-/* Holds only WorkspacePicker; width capped to the sidebar list width so its
-   right edge aligns with the sidebar list row inner-right edge below. */
+/* WorkspaceModeTabs + WorkspacePicker. The pane-width cap lives on the select,
+   not here: capping the group made the tabs spend the same budget, truncating
+   short workspace names at the default window width. */
 header.topbar .topbar-picker-group {
     display: flex;
     align-items: center;
@@ -165,7 +166,6 @@ header.topbar .topbar-picker-group {
        hugs the label, so there is no right edge that has to align with the card below. */
     flex: 0 1 auto;
     min-width: 0;
-    max-width: calc(var(--pane-width) - 0.5rem - 4px);
 }
 
 /* Directory / IM switch in front of the picker: a pill track whose active
@@ -240,7 +240,9 @@ header.topbar .topbar-picker-group {
     align-items: center;
     gap: 0.2rem;
     min-width: 0;
-    max-width: 100%;
+    /* Capped to the sidebar list width; the mode tabs beside it size to their
+       own labels and stay outside this budget. */
+    max-width: calc(var(--pane-width) - 0.5rem - 4px);
 }
 
 .topbar-workspace-select-label {
@@ -294,7 +296,7 @@ header.topbar .topbar-picker-group {
     z-index: 100;
     overflow: hidden;
     /* DropdownMenu has no trigger-width variable like Select; anchors to picker trigger width,
-       long workspace names truncate. Capped to the same width as .topbar-picker-group /
+       long workspace names truncate. Capped to the same width as the picker trigger /
        aside.sidebar so the menu's right edge lines up with the sidebar list below it. */
     min-width: 180px;
     max-width: calc(var(--pane-width) - 0.5rem - 4px);
