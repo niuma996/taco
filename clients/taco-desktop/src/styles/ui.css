@@ -626,3 +626,66 @@
     pointer-events: none;
     z-index: 200;
 }
+
+/* PopoverPanel — the anchored panel the topbar's menus hang off. The title
+   row and the scrolling body are the same for every panel, so the surface
+   chrome lives here once. */
+.ui-popover-panel {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 6px 18px var(--shadow-color);
+    z-index: 100;
+    width: 340px;
+    max-width: calc(100vw - 16px);
+    padding: 4px 0;
+}
+
+.ui-popover-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--divider-section);
+}
+
+.ui-popover-panel__title {
+    color: var(--fg);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* Trailing header control ("clear all") and the inline row action. */
+.ui-popover-panel__action {
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-xs);
+    padding: 2px 4px;
+    color: var(--fg-dim);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.ui-popover-panel__action:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+
+.ui-popover-panel__action:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.ui-popover-panel__empty {
+    padding: 14px 10px;
+    color: var(--fg-dim);
+    font-size: 0.8rem;
+    text-align: center;
+}
+
+/* The body scrolls, so a long list never pushes the panel past the viewport.
+   Its own max-height caps how much of the screen the panel may cover. */
+.ui-popover-panel__body {
+    max-height: 60vh;
+    overflow-y: auto;
+}

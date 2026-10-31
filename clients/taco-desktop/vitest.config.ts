@@ -48,7 +48,7 @@ export default defineConfig({
             "tests/components/WorkspaceModeTabs.test.tsx",
             "tests/components/WorkspacePicker.test.tsx",
             "tests/components/NotificationBell.test.tsx",
-            "tests/components/PendingPermissionsModal.test.tsx",
+            "tests/components/PendingApprovalsPanel.test.tsx",
             "tests/components/CommandPermissionActions.test.tsx",
             "tests/components/CommandPermissionModeSelector.test.tsx",
             "tests/components/LlmDumpPanel.test.tsx",

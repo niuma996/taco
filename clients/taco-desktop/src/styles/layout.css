@@ -478,64 +478,10 @@ header.topbar .topbar-picker-group {
     pointer-events: none;
 }
 
-.notification-popover {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 6px 18px var(--shadow-color);
-    z-index: 100;
-    width: 340px;
-    max-width: calc(100vw - 16px);
-    padding: 4px 0;
-}
-
-.notification-popover__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--divider-section);
-}
-
-.notification-popover__title {
-    color: var(--fg);
-    font-size: 0.8rem;
-    font-weight: 600;
-}
-
-.notification-popover__clear {
-    background: transparent;
-    border: 0;
-    border-radius: var(--radius-xs);
-    padding: 2px 4px;
-    color: var(--fg-dim);
-    font-size: 0.75rem;
-    cursor: pointer;
-}
-
-.notification-popover__clear:hover {
-    color: var(--fg);
-    background: var(--accent-bg-hover);
-}
-
-.notification-popover__clear:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-}
-
-.notification-popover__empty {
-    padding: 14px 10px;
-    color: var(--fg-dim);
-    font-size: 0.8rem;
-    text-align: center;
-}
-
 .notification-popover__list {
     list-style: none;
     margin: 0;
     padding: 0;
-    max-height: 320px;
-    overflow-y: auto;
 }
 
 /* Red left rule keeps the list reading as an error log now that nothing tints

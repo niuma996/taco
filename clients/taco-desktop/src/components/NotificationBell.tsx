@@ -17,7 +17,6 @@
  * screen-reader user hears every arrival exactly once.
  */
 
-import * as Popover from "@radix-ui/react-popover";
 import { Bell, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNow } from "../hooks/useNow.ts";
@@ -30,6 +29,7 @@ import {
 import { formatRelativeTime } from "../lib/relativeTime.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 import { BAR_ICON } from "./ui/iconSize.ts";
+import { PopoverPanel } from "./ui/PopoverPanel.tsx";
 
 export interface NotificationBellProps {
     notifications: AppNotification[];
@@ -91,26 +91,86 @@ export function NotificationBell({
     const unreadLabel = unread > 0 ? t("app.notificationsUnread", { count: unread }) : "";
 
     return (
-        <Popover.Root open={open} onOpenChange={setOpen}>
-            <Popover.Trigger asChild>
-                <IconButton
-                    size="lg"
-                    aria-label={
-                        unreadLabel
-                            ? `${t("app.notifications")} — ${unreadLabel}`
-                            : t("app.notifications")
-                    }
-                >
-                    <span className="notification-bell__icon">
-                        <Bell {...BAR_ICON} />
-                        {unread > 0 && (
-                            <span className="notification-bell__badge" aria-hidden="true">
-                                {unread > 99 ? "99+" : unread}
-                            </span>
-                        )}
-                    </span>
-                </IconButton>
-            </Popover.Trigger>
+        <>
+            <PopoverPanel
+                open={open}
+                onOpenChange={setOpen}
+                title={t("app.notifications")}
+                action={
+                    notifications.length > 0 && (
+                        <button
+                            type="button"
+                            className="ui-popover-panel__action"
+                            onClick={onClearAll}
+                        >
+                            {t("app.notificationsClearAll")}
+                        </button>
+                    )
+                }
+                trigger={
+                    <IconButton
+                        size="lg"
+                        aria-label={
+                            unreadLabel
+                                ? `${t("app.notifications")} — ${unreadLabel}`
+                                : t("app.notifications")
+                        }
+                    >
+                        <span className="notification-bell__icon">
+                            <Bell {...BAR_ICON} />
+                            {unread > 0 && (
+                                <span className="notification-bell__badge" aria-hidden="true">
+                                    {unread > 99 ? "99+" : unread}
+                                </span>
+                            )}
+                        </span>
+                    </IconButton>
+                }
+            >
+                {notifications.length === 0 ? (
+                    <div className="ui-popover-panel__empty">{t("app.notificationsEmpty")}</div>
+                ) : (
+                    <ul className="notification-popover__list">
+                        {notifications.map((n) => (
+                            <li key={n.id} className="notification-row" data-level={n.level}>
+                                <span className="notification-row__time">
+                                    {formatRelativeTime(n.at, lng, nowMs)}
+                                </span>
+                                <span className="notification-row__text">{n.text}</span>
+                                {n.approval && onOpenApproval && (
+                                    <button
+                                        type="button"
+                                        className="ui-popover-panel__action"
+                                        onClick={() => {
+                                            if (n.approval) onOpenApproval(n.approval);
+                                            setOpen(false);
+                                        }}
+                                    >
+                                        {t("session.openApproval")}
+                                    </button>
+                                )}
+                                {n.count > 1 && (
+                                    <span
+                                        className="notification-row__count"
+                                        title={t("app.notificationsRepeated", {
+                                            count: n.count,
+                                        })}
+                                    >
+                                        ×{n.count}
+                                    </span>
+                                )}
+                                <IconButton
+                                    size="sm"
+                                    aria-label={t("app.dismiss")}
+                                    onClick={() => onDismiss(n.id)}
+                                >
+                                    <X size={12} aria-hidden="true" />
+                                </IconButton>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </PopoverPanel>
             {/* The badge is aria-hidden decoration, and Radix unmounts the
                 popover content while it is closed — so the live region has to
                 live here, always mounted, or a failure arriving at a closed
@@ -118,78 +178,6 @@ export function NotificationBell({
             <span className="sr-only" role="status" aria-live="polite">
                 {announcement}
             </span>
-            <Popover.Portal>
-                {/* The trigger sits on the window's top edge, so "bottom" is the
-                    only side with room; Radix still flips if the list ever grows
-                    past the window. */}
-                <Popover.Content
-                    className="notification-popover"
-                    side="bottom"
-                    sideOffset={6}
-                    align="end"
-                    collisionPadding={8}
-                >
-                    <div className="notification-popover__header">
-                        <span className="notification-popover__title">
-                            {t("app.notifications")}
-                        </span>
-                        {notifications.length > 0 && (
-                            <button
-                                type="button"
-                                className="notification-popover__clear"
-                                onClick={onClearAll}
-                            >
-                                {t("app.notificationsClearAll")}
-                            </button>
-                        )}
-                    </div>
-                    {notifications.length === 0 ? (
-                        <div className="notification-popover__empty">
-                            {t("app.notificationsEmpty")}
-                        </div>
-                    ) : (
-                        <ul className="notification-popover__list">
-                            {notifications.map((n) => (
-                                <li key={n.id} className="notification-row" data-level={n.level}>
-                                    <span className="notification-row__time">
-                                        {formatRelativeTime(n.at, lng, nowMs)}
-                                    </span>
-                                    <span className="notification-row__text">{n.text}</span>
-                                    {n.approval && onOpenApproval && (
-                                        <button
-                                            type="button"
-                                            className="notification-popover__clear"
-                                            onClick={() => {
-                                                if (n.approval) onOpenApproval(n.approval);
-                                                setOpen(false);
-                                            }}
-                                        >
-                                            {t("session.openApproval")}
-                                        </button>
-                                    )}
-                                    {n.count > 1 && (
-                                        <span
-                                            className="notification-row__count"
-                                            title={t("app.notificationsRepeated", {
-                                                count: n.count,
-                                            })}
-                                        >
-                                            ×{n.count}
-                                        </span>
-                                    )}
-                                    <IconButton
-                                        size="sm"
-                                        aria-label={t("app.dismiss")}
-                                        onClick={() => onDismiss(n.id)}
-                                    >
-                                        <X size={12} aria-hidden="true" />
-                                    </IconButton>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </Popover.Content>
-            </Popover.Portal>
-        </Popover.Root>
+        </>
     );
 }

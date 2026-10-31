@@ -1,12 +1,12 @@
 /**
- * TopbarQuickActions — workspace approvals, notification bell, and language /
- * theme shortcuts in the title bar.
+ * TopbarQuickActions — notification bell, language / theme shortcuts, and an
+ * optional `pendingApprovals` slot in the title bar.
  *
- * The approvals button sits left of the bell and is always shown, so there is
- * one fixed place to check for commands blocked in any workspace.
- * Language and theme each open a Radix dropdown (same pattern as
- * WorkspacePicker) and write through `writeClientSettings`, so AppearanceTab,
- * useTheme, and i18n subscribers update in place — no sidecar RPC.
+ * The approvals surface is passed in from App as a ReactNode; this component
+ * only positions it left of the bell. Language and theme each open a Radix
+ * dropdown (same pattern as WorkspacePicker) and write through
+ * `writeClientSettings`, so AppearanceTab, useTheme, and i18n subscribers
+ * update in place — no sidecar RPC.
  *
  * The bell forwards each newly arrived notification to `onNewNotification` so
  * App can decide whether it is worth a toast; the bell itself stays a passive
@@ -18,7 +18,7 @@
  */
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Check, Languages, Monitor, Moon, ShieldQuestionMark, Sun } from "lucide-react";
+import { Check, Languages, Monitor, Moon, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useGlobalConfig } from "../hooks/primitives/useGlobalConfig.ts";
@@ -91,8 +91,8 @@ function QuickMenu({
 
 export interface TopbarQuickActionsProps {
     notifications: AppNotification[];
-    pendingApprovalCount?: number;
-    onOpenPendingApprovals?: () => void;
+    /** The pending-approvals surface, rendered left of the bell. */
+    pendingApprovals?: ReactNode;
     onOpenApproval?: (target: ApprovalNotificationTarget) => void;
     onDismissNotification: (id: number) => void;
     onClearNotifications: () => void;
@@ -105,8 +105,7 @@ export interface TopbarQuickActionsProps {
 
 export function TopbarQuickActions({
     notifications,
-    pendingApprovalCount = 0,
-    onOpenPendingApprovals,
+    pendingApprovals,
     onDismissNotification,
     onClearNotifications,
     onNewNotification,
@@ -118,28 +117,7 @@ export function TopbarQuickActions({
 
     return (
         <div className="topbar-quick-actions">
-            {onOpenPendingApprovals && (
-                <IconButton
-                    size="lg"
-                    className={
-                        pendingApprovalCount > 0
-                            ? "workspace-approval-button workspace-approval-button--pending"
-                            : "workspace-approval-button"
-                    }
-                    aria-label={t("session.pendingPermissions")}
-                    title={t("session.pendingPermissions")}
-                    onClick={onOpenPendingApprovals}
-                >
-                    <span className="workspace-approval-button__icon">
-                        <ShieldQuestionMark {...BAR_ICON} />
-                        {pendingApprovalCount > 0 && (
-                            <span className="workspace-approval-button__count" aria-hidden="true">
-                                {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
-                            </span>
-                        )}
-                    </span>
-                </IconButton>
-            )}
+            {pendingApprovals}
             <NotificationBell
                 notifications={notifications}
                 onDismiss={onDismissNotification}

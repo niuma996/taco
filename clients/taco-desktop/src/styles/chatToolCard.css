@@ -106,7 +106,7 @@
     margin: 0.4rem 0 0 1.4rem;
     color: var(--fg);
 }
-/* Shared by the tool card and the pending-approvals modal (CommandPermissionPrompt). */
+/* Shared by the tool card and the pending-approvals panel (CommandPermissionPrompt). */
 .permission-prompt-command {
     font-family: var(--mono);
     font-size: 0.85em;
@@ -175,33 +175,31 @@
     width: 100%;
 }
 
-/* Workspace-level pending-approval list; button styling comes from .permission-prompt-*. */
-.pending-permissions-modal {
-    width: min(640px, 92vw);
-}
-.pending-permissions-list {
+/* Workspace-level pending-approval list; button styling comes from .permission-prompt-*.
+   The panel chrome (title row, scroll region) comes from .ui-popover-panel. */
+.pending-approvals-list {
     list-style: none;
-    margin: 0.6rem 0 0;
-    padding: 0;
+    margin: 0;
+    padding: 6px 10px;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    max-height: 60vh;
-    overflow-y: auto;
 }
-.pending-permissions-empty {
-    margin: 0.6rem 0 0;
-    color: var(--fg-dim);
-}
-.pending-permission {
+.pending-approval {
     padding: 0.5rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg-secondary);
     color: var(--fg);
 }
-.pending-permission-source {
+.pending-approval-source {
     margin-top: 0.3rem;
     color: var(--fg-muted);
     font-size: var(--text-sm);
+}
+
+/* Approval rows are wider than a notification row: each carries a command
+   and its own allow/deny buttons. */
+.ui-popover-panel--approvals {
+    width: 420px;
 }

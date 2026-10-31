@@ -26,10 +26,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { FilesDrawer } from "./components/FilesDrawer";
 import { LlmDumpDock } from "./components/LlmDumpPanel";
 import { OnboardingModal } from "./components/onboarding/OnboardingModal.js";
-import {
-    collectPendingPermissions,
-    PendingPermissionsModal,
-} from "./components/PendingPermissionsModal";
+import { PendingApprovalsPanel } from "./components/PendingApprovalsPanel";
 import { PlanModeIndicator } from "./components/panels/PlanModeIndicator";
 import { SubagentPanel } from "./components/panels/SubagentPanel";
 import { TaskPanel } from "./components/panels/TaskPanel";
@@ -103,7 +100,6 @@ export default function App() {
         () => readPersistedSidebarCollapsed() ?? false,
     );
     const rightPanel = useRightPanel(sidebarCollapsed);
-    const [pendingPermissionsOpen, setPendingPermissionsOpen] = useState(false);
     // Selected child session for SubagentPanel; pushed in via the SubagentProvider's
     // openInPanel callback when an agent card is opened. SubagentPanel below reads it.
     const [selectedSubSessionId, setSelectedSubSessionId] = useState<string | null>(null);
@@ -153,7 +149,6 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
-    const pendingPermissionCount = collectPendingPermissions(workspaces).length;
     const resolveCommandPermissionIn = useCallback(
         async (
             cwd: string,
@@ -806,8 +801,12 @@ export default function App() {
                     <div className="drag-spacer" data-tauri-drag-region />
                     <TopbarQuickActions
                         notifications={notifications}
-                        pendingApprovalCount={pendingPermissionCount}
-                        onOpenPendingApprovals={() => setPendingPermissionsOpen(true)}
+                        pendingApprovals={
+                            <PendingApprovalsPanel
+                                workspaces={workspaces}
+                                onResolve={resolveCommandPermissionIn}
+                            />
+                        }
                         onDismissNotification={dismissNotification}
                         onClearNotifications={clearNotifications}
                         onNewNotification={toastNewNotification}
@@ -1230,12 +1229,6 @@ export default function App() {
                     if (target) void renameSession(target.cwd, target.sessionId, name);
                 }}
                 onCancel={() => setPendingRenameSession(null)}
-            />
-            <PendingPermissionsModal
-                open={pendingPermissionsOpen}
-                onClose={() => setPendingPermissionsOpen(false)}
-                workspaces={workspaces}
-                onResolve={resolveCommandPermissionIn}
             />
             <ChannelBindDialog
                 open={bindingChannelId !== null}
