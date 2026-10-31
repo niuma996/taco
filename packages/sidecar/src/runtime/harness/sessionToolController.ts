@@ -160,7 +160,13 @@ export class DefaultSessionToolController implements SessionToolController {
         if (!toolState) {
             throw new Error("session tool controller not bound to a harness yet");
         }
-        let result: AddToolsResult = { added: [], skipped: [], unknown: [], failed: [], blocked: [] };
+        let result: AddToolsResult = {
+            added: [],
+            skipped: [],
+            unknown: [],
+            failed: [],
+            blocked: [],
+        };
         await toolState.update(async (current) => {
             const plan = await this.plan(names, current);
             result = plan.result;

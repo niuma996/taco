@@ -628,7 +628,10 @@ describe("addTools execute", () => {
         const result = await invokeTool(tool, { toolNames: "pdfMerge" }, ctx, {
             toolCallId: "tc1",
         });
-        assert.deepEqual(details(result).blocked.map((b) => b.name), ["pdfMerge"]);
+        assert.deepEqual(
+            details(result).blocked.map((b) => b.name),
+            ["pdfMerge"],
+        );
         assert.deepEqual(details(result).added, []);
         assert.deepEqual(controller.loadedToolNames(), []);
         // The model must be told to stop, not left to retry a silent no-op.

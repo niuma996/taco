@@ -609,8 +609,9 @@ describe("attachedSession.deferredTools", () => {
                 result?.blocked.map((b) => b.name),
                 ["pdfMerge"],
             );
+            const activeNames = (await attached.toolController?.activeToolNames()) ?? [];
             assert.ok(
-                !(await attached.toolController?.activeToolNames()).includes("pdfMerge"),
+                !activeNames.includes("pdfMerge"),
                 "a blocked name must not reach the active set",
             );
             await attached.abort();

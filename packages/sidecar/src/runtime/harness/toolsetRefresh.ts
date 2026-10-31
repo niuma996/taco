@@ -7,8 +7,8 @@
  * allowlist would hide them.
  */
 
-import type { TacoTool } from "../../tools/index.ts";
 import { isFsToolDenied } from "../../tools/fileAccess.ts";
+import type { TacoTool } from "../../tools/index.ts";
 import { orderTools, toolNamesKey } from "../../tools/toolOrder.ts";
 import type { SessionToolState } from "./sessionToolState.ts";
 
