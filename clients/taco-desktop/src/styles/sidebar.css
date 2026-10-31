@@ -10,6 +10,32 @@ aside.sidebar {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    /* Clips the fixed-width list while the collapse width transition runs. */
+    overflow: hidden;
+    /* Collapse wipe: width pushes the chat column sideways. visibility is
+       discrete — delayed until the shrink ends so the hidden panel leaves the
+       tab order; on expand it flips back immediately. */
+    transition:
+        width 0.18s ease,
+        border-right-color 0.18s ease,
+        visibility 0s 0s;
+}
+
+.layout[data-sidebar-collapsed="true"] aside.sidebar {
+    width: 0;
+    border-right-color: transparent;
+    visibility: hidden;
+    transition:
+        width 0.18s ease,
+        border-right-color 0.18s ease,
+        visibility 0s 0.18s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    aside.sidebar,
+    .layout[data-sidebar-collapsed="true"] aside.sidebar {
+        transition: none;
+    }
 }
 
 aside.sidebar .workspace-item {
@@ -24,10 +50,13 @@ aside.sidebar .workspace-item.active {
 }
 
 /* Session list scroll container. min-height: 0 is required for flex children to shrink
-   below content height and trigger overflow. */
+   below content height and trigger overflow. Width stays at the expanded pane width:
+   during the collapse transition the aside clips this box instead of reflowing
+   every row. */
 .sidebar-list {
     flex: 1 1 auto;
     min-height: 0;
+    width: var(--pane-width);
     overflow-y: auto;
     overflow-x: hidden;
     /* Top/bottom padding give breathing room to the first and last session-item;

@@ -21,49 +21,6 @@ button svg {
     vertical-align: middle;
 }
 
-/* Sidebar toggle + new-chat button: the row's two "primary" actions get a
-   solid accent-family chip (no border — same minimal language as the user
-   message bubble) so navigation / creation stand out from metadata actions
-   (copy / log / tasks / files). Both carry icon + text, so they size to
-   content rather than the fixed 26px square. */
-.session-info-toggle,
-.session-info-new {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0 0.5rem;
-    height: 26px;
-    background: var(--session-chip-bg);
-    border: none;
-    border-radius: var(--radius-sm);
-    /* Fixed equal width for both chips. 92px = widest label (聊天列表, 4 CJK ×
-       0.78rem ≈ 50px; "New chat" ≈ 48px) + icon 14px + gap + 0.5rem padding,
-       rounded up. Centered so shorter labels ("新聊天" / "Chats") sit balanced. */
-    width: 92px;
-    justify-content: center;
-    color: var(--accent);
-    cursor: pointer;
-    flex-shrink: 0;
-    font-size: 0.78rem;
-    transition:
-        color 0.12s ease,
-        background 0.12s ease;
-}
-.session-info-toggle:hover,
-.session-info-new:hover:not(:disabled) {
-    color: var(--fg);
-    background: var(--session-chip-bg-hover);
-}
-.session-info-new:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-.session-info-toggle:focus-visible,
-.session-info-new:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-}
-
 main {
     flex: 1;
     overflow-y: auto;
@@ -145,19 +102,29 @@ main {
     border: none;
     padding: 0;
 }
-/* The right-cluster icon buttons (tasks / subagents / files) share tight
-   negative side margins: they cancel most of the row-level 0.6rem gap so the
-   icons read as a group rather than three spread-out buttons. */
+/* Session-bar icon buttons share tight negative side margins: they cancel most
+   of the row-level 0.6rem gap so adjacent icons read as a group rather than
+   spread-out buttons. The leading toggle keeps its left inset (no left margin)
+   and the details trigger keeps margin-left:auto. */
+.session-info-new,
 .session-info-tasks,
 .session-info-subagents,
 .session-info-files {
     margin-left: -0.25rem;
     margin-right: -0.25rem;
 }
-/* Session-bar action buttons (tasks / file-tree / subagents): 26x26, transparent
-   with a hover bg. aria-pressed marks the active toggle. The file-tree toggle
-   moved here from the topbar to clear the overlap with the custom window
-   controls on the frameless Windows build. */
+.session-info-toggle,
+.session-info-details {
+    margin-right: -0.25rem;
+}
+/* Session-bar icon buttons (session-list / new-chat / tasks / file-tree /
+   subagents): 22x22 around a 16px icon, transparent with a hover bg. Only the
+   right-cluster panel toggles read accent while pressed; the session-list
+   toggle and new-chat keep the plain color. The file-tree toggle moved here
+   from the topbar to clear the overlap with the custom window controls on the
+   frameless Windows build. */
+.session-info-toggle,
+.session-info-new,
 .session-info-tasks,
 .session-info-subagents,
 .session-info-files {
@@ -165,8 +132,8 @@ main {
     align-items: center;
     justify-content: center;
     padding: 0;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     min-width: auto;
     background: transparent;
     color: var(--fg-dim);
@@ -178,17 +145,25 @@ main {
         color 0.12s ease,
         background 0.12s ease;
 }
+.session-info-toggle:hover,
+.session-info-new:hover:not(:disabled),
 .session-info-tasks:hover,
 .session-info-subagents:hover,
 .session-info-files:hover {
     color: var(--fg);
     background: var(--accent-bg-hover);
 }
+.session-info-new:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
 .session-info-tasks[aria-pressed="true"],
 .session-info-subagents[aria-pressed="true"],
 .session-info-files[aria-pressed="true"] {
     color: var(--accent);
 }
+.session-info-toggle:focus-visible,
+.session-info-new:focus-visible,
 .session-info-tasks:focus-visible,
 .session-info-subagents:focus-visible,
 .session-info-files:focus-visible {
@@ -196,7 +171,7 @@ main {
     outline-offset: 1px;
 }
 
-/* Session-details trigger: same 26x26 chrome as the right-cluster buttons but
+/* Session-details trigger: same 22x22 chrome as the right-cluster buttons but
    standalone. margin-left:auto fills the slot the created-time text held, so
    metadata stays left and the right cluster keeps hugging the bar's edge. */
 .session-info-details {
@@ -205,8 +180,8 @@ main {
     justify-content: center;
     margin-left: auto;
     padding: 0;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     min-width: auto;
     background: transparent;
     color: var(--fg-dim);

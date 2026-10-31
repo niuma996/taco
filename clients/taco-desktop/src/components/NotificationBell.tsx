@@ -29,6 +29,7 @@ import {
 } from "../lib/notifications.ts";
 import { formatRelativeTime } from "../lib/relativeTime.ts";
 import { IconButton } from "./ui/IconButton.tsx";
+import { BAR_ICON } from "./ui/iconSize.ts";
 
 export interface NotificationBellProps {
     notifications: AppNotification[];
@@ -101,7 +102,7 @@ export function NotificationBell({
                     }
                 >
                     <span className="notification-bell__icon">
-                        <Bell size={14} aria-hidden="true" />
+                        <Bell {...BAR_ICON} />
                         {unread > 0 && (
                             <span className="notification-bell__badge" aria-hidden="true">
                                 {unread > 99 ? "99+" : unread}

@@ -29,6 +29,7 @@ import { writeClientSettings } from "../lib/globalConfig.ts";
 import type { AppNotification, ApprovalNotificationTarget } from "../lib/notifications.ts";
 import { NotificationBell } from "./NotificationBell.tsx";
 import { IconButton } from "./ui/IconButton.tsx";
+import { BAR_ICON } from "./ui/iconSize.ts";
 
 const THEME_OPTIONS: ReadonlyArray<{
     value: ThemePreference;
@@ -43,9 +44,9 @@ const THEME_OPTIONS: ReadonlyArray<{
 ];
 
 function ThemeIcon({ pref }: { pref: ThemePreference }) {
-    if (pref === "light") return <Sun size={14} aria-hidden="true" />;
-    if (pref === "dark") return <Moon size={14} aria-hidden="true" />;
-    return <Monitor size={14} aria-hidden="true" />;
+    if (pref === "light") return <Sun {...BAR_ICON} />;
+    if (pref === "dark") return <Moon {...BAR_ICON} />;
+    return <Monitor {...BAR_ICON} />;
 }
 
 function QuickMenu({
@@ -130,7 +131,7 @@ export function TopbarQuickActions({
                     onClick={onOpenPendingApprovals}
                 >
                     <span className="workspace-approval-button__icon">
-                        <ShieldQuestionMark size={14} aria-hidden="true" />
+                        <ShieldQuestionMark {...BAR_ICON} />
                         {pendingApprovalCount > 0 && (
                             <span className="workspace-approval-button__count" aria-hidden="true">
                                 {pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}
@@ -148,7 +149,7 @@ export function TopbarQuickActions({
             />
             <QuickMenu
                 label={t("app.language")}
-                icon={<Languages size={14} aria-hidden="true" />}
+                icon={<Languages {...BAR_ICON} />}
                 value={uiLanguage}
                 items={SUPPORTED_UI_LANGUAGES.map((lng) => ({
                     value: lng,

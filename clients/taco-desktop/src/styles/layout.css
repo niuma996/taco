@@ -396,6 +396,13 @@ header.topbar .topbar-picker-group {
     -webkit-app-region: no-drag;
 }
 
+/* Same 22x22 box as the session-bar icons, so the two bars' button chrome
+   matches (the shared .ui-icon-btn--lg is 26px for the settings cards). */
+.topbar-quick-actions .ui-icon-btn {
+    width: 22px;
+    height: 22px;
+}
+
 /* Same chrome as .topbar-workspace-menu, but without the pane-width cap —
    these menus are short labels (English / 中文 / Light / Dark / System). */
 .topbar-quick-menu {
@@ -443,8 +450,8 @@ header.topbar .topbar-picker-group {
 
 .workspace-approval-button__count {
     position: absolute;
-    top: -7px;
-    right: -9px;
+    top: -6px;
+    right: -8px;
     min-width: 14px;
     padding: 0 3px;
     border-radius: var(--radius-pill);
@@ -458,8 +465,8 @@ header.topbar .topbar-picker-group {
 
 .notification-bell__badge {
     position: absolute;
-    top: -7px;
-    right: -9px;
+    top: -6px;
+    right: -8px;
     min-width: 14px;
     padding: 0 3px;
     border-radius: var(--radius-pill);

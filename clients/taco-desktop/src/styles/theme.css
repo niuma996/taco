@@ -102,10 +102,6 @@
 
     /* User message background — solid deep-blue, same family as --accent. */
     --user-msg-bg: #1a2a3a;
-    /* Session-info chips (聊天列表 toggle / 新会话) — solid accent-family fill, no
-       border. Lighter than the surrounding bar in dark, deeper in light (see light theme). */
-    --session-chip-bg: #22344a;
-    --session-chip-bg-hover: #2b415c;
     /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
     --assistant-msg-bg: #1a1d23;
 
@@ -317,10 +313,6 @@
 
     /* User message background — solid light blue, same family as --accent. Mirror of dark theme #1a2a3a. */
     --user-msg-bg: #dbe5ee;
-    /* Mirror of dark theme — one shade deeper than the user bubble so the chip
-       reads as actionable against the lighter bar it sits on. */
-    --session-chip-bg: #d4dfe9;
-    --session-chip-bg-hover: #c8d6e3;
     /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
     --assistant-msg-bg: var(--warm-gray-1);
 

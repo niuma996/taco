@@ -2,8 +2,9 @@
  * Sidebar — workspace session list with rename/delete actions.
  *
  * Pure view: takes WorkspaceState and callbacks; holds no business state.
- * Rendered only when expanded — the parent omits it entirely when collapsed,
- * and the expand affordance lives in the topbar next to the workspace picker.
+ * Always mounted in the chat view — collapse is a CSS width transition driven
+ * by .layout[data-sidebar-collapsed], so the list wipes in/out and keeps its
+ * scroll position across toggles.
  */
 
 import { Pencil, Trash } from "lucide-react";

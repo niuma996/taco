@@ -825,34 +825,36 @@ export default function App() {
                 >
                     {mainView === "chat" ? (
                         <>
-                            {!sidebarCollapsed && (
-                                <Sidebar
-                                    ws={ws}
-                                    onAttach={async (sid) => {
-                                        try {
-                                            await attachSession(activeCwd, sid);
-                                        } catch (err) {
-                                            pushNotification(
-                                                `Cannot open session: ${(err as Error).message}`,
-                                            );
-                                        }
-                                    }}
-                                    onDelete={(sid) =>
-                                        setPendingDeleteSession({ cwd: activeCwd, sessionId: sid })
+                            {/* Always mounted — collapse is a CSS width
+                                transition driven by data-sidebar-collapsed on
+                                .layout, so the list wipes in/out instead of
+                                popping and keeps its scroll position. */}
+                            <Sidebar
+                                ws={ws}
+                                onAttach={async (sid) => {
+                                    try {
+                                        await attachSession(activeCwd, sid);
+                                    } catch (err) {
+                                        pushNotification(
+                                            `Cannot open session: ${(err as Error).message}`,
+                                        );
                                     }
-                                    onRename={(sid) => {
-                                        const current = ws?.sessions.find((s) => s.id === sid);
-                                        setPendingRenameSession({
-                                            cwd: activeCwd,
-                                            sessionId: sid,
-                                            currentName: current?.name ?? "",
-                                        });
-                                    }}
-                                    onLoadMore={() => {
-                                        void loadMoreSessions(activeCwd);
-                                    }}
-                                />
-                            )}
+                                }}
+                                onDelete={(sid) =>
+                                    setPendingDeleteSession({ cwd: activeCwd, sessionId: sid })
+                                }
+                                onRename={(sid) => {
+                                    const current = ws?.sessions.find((s) => s.id === sid);
+                                    setPendingRenameSession({
+                                        cwd: activeCwd,
+                                        sessionId: sid,
+                                        currentName: current?.name ?? "",
+                                    });
+                                }}
+                                onLoadMore={() => {
+                                    void loadMoreSessions(activeCwd);
+                                }}
+                            />
                             {/* Owns the one file-preview popup the chat's `read`
                                 cards open; the file tree has its own inside
                                 FilesDrawer. */}

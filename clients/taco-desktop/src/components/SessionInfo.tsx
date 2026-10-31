@@ -4,11 +4,10 @@
  * the session details icon (full id + copy / created-at / open log) and the
  * task panel and file-tree toggles pinned right.
  *
- * The toggle and new-chat button are the row's two primary actions and share
- * an accent-chip style (.session-info-toggle / .session-info-new); copy, log,
- * tasks and files are plain icon buttons clustered with negative margins.
- * Copy / log / created-at are consolidated behind one details icon so the bar
- * never carries more than one metadata line.
+ * The session-list toggle and the new-chat button are plain icon buttons
+ * styled like the right-side cluster (tasks / subagents / files); copy, log
+ * and created-at are consolidated behind one details icon so the bar never
+ * carries more than one metadata line.
  *
  * "Open folder…" (the workspace picker entry that switches the active
  * workspace to a directory the user chooses) deliberately stays inside the
@@ -21,14 +20,14 @@ import * as Popover from "@radix-ui/react-popover";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
     Check,
-    ChevronLeft,
-    ChevronRight,
     Copy,
     FileText,
     FolderTree,
     Info,
     ListTodo,
-    Plus,
+    MessageSquarePlus,
+    PanelLeftClose,
+    PanelLeftOpen,
     UsersRoundCollaboration,
 } from "lucide-react";
 import { useNow } from "../hooks/useNow";
@@ -37,6 +36,8 @@ import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
 import { Divider } from "./ui/Divider";
 import { IconButton } from "./ui/IconButton";
+import { BAR_ICON } from "./ui/iconSize";
+import { Tooltip } from "./ui/Tooltip";
 
 export function SessionInfo({
     ws,
@@ -96,26 +97,26 @@ export function SessionInfo({
     const hasAnyTasks = Boolean(
         taskSnapshot && (taskSnapshot.active || taskSnapshot.history.length),
     );
-    // Fixed label "聊天列表" with a direction chevron on its left — a bare
-    // icon here was too easy to misread ("is this a pager?"), and a label
-    // that flips between 展开/收起 changed width on every toggle. Fixed text
-    // + stateful icon keeps the button stable and self-explanatory.
+    // Icon-only panel toggle: PanelLeftClose while the list is open (click
+    // collapses), PanelLeftOpen while collapsed. Styled like the other bar
+    // icons, with no state color of its own.
+    const toggleLabel = sidebarCollapsed ? t("session.sidebarShow") : t("session.sidebarHide");
     const toggle = (
-        <button
-            type="button"
-            className="session-info-toggle"
-            onClick={onToggleSidebar}
-            title={sidebarCollapsed ? t("session.sidebarShow") : t("session.sidebarHide")}
-            aria-label={sidebarCollapsed ? t("session.sidebarShow") : t("session.sidebarHide")}
-            aria-expanded={!sidebarCollapsed}
-        >
-            {sidebarCollapsed ? (
-                <ChevronRight size={14} aria-hidden="true" />
-            ) : (
-                <ChevronLeft size={14} aria-hidden="true" />
-            )}
-            <span>{t("session.sidebarLabel")}</span>
-        </button>
+        <Tooltip label={toggleLabel} side="bottom">
+            <button
+                type="button"
+                className="session-info-toggle"
+                onClick={onToggleSidebar}
+                aria-label={toggleLabel}
+                aria-expanded={!sidebarCollapsed}
+            >
+                {sidebarCollapsed ? (
+                    <PanelLeftOpen {...BAR_ICON} />
+                ) : (
+                    <PanelLeftClose {...BAR_ICON} />
+                )}
+            </button>
+        </Tooltip>
     );
     // File-tree drawer toggle. Suppressed for IM conversations (no filesystem
     // to browse). Independent of session state — it browses the workspace, so
@@ -130,7 +131,7 @@ export function SessionInfo({
             aria-pressed={filesOpen ?? false}
             onClick={() => onToggleFiles()}
         >
-            <FolderTree size={14} aria-hidden="true" />
+            <FolderTree {...BAR_ICON} />
         </button>
     );
     if (!activeId) {
@@ -159,21 +160,6 @@ export function SessionInfo({
     return (
         <div className="session-info">
             {toggle}
-            {onNewSession && (
-                // Same action as the topbar "new chat" chip, duplicated here so
-                // it's reachable without moving the cursor to the topbar.
-                <button
-                    type="button"
-                    className="session-info-new"
-                    onClick={onNewSession}
-                    disabled={newSessionDisabled}
-                    title={t("session.newInWorkspace")}
-                    aria-label={t("session.newInWorkspace")}
-                >
-                    <Plus size={14} aria-hidden="true" />
-                    <span>{t("session.new")}</span>
-                </button>
-            )}
             <Divider orientation="vertical" />
             {/* Status leads the metadata block: the dot reads as the session's
                 live signal before its name. Never shrinks — the title
@@ -205,7 +191,7 @@ export function SessionInfo({
                         title={t("session.details")}
                         aria-label={t("session.details")}
                     >
-                        <Info size={14} aria-hidden="true" />
+                        <Info {...BAR_ICON} />
                     </button>
                 </Popover.Trigger>
                 <Popover.Portal>
@@ -270,6 +256,22 @@ export function SessionInfo({
                     </Popover.Content>
                 </Popover.Portal>
             </Popover.Root>
+            {onNewSession && (
+                // Same action as the topbar "new chat" chip, duplicated here so
+                // it's reachable without moving the cursor to the topbar. Sits
+                // right of the session-info icon, inside the right-hand cluster.
+                <Tooltip label={t("session.newInWorkspace")} side="bottom">
+                    <button
+                        type="button"
+                        className="session-info-new"
+                        onClick={onNewSession}
+                        disabled={newSessionDisabled}
+                        aria-label={t("session.newInWorkspace")}
+                    >
+                        <MessageSquarePlus {...BAR_ICON} />
+                    </button>
+                </Tooltip>
+            )}
             {(onToggleSubagents || onToggleTasks || filesButton) && (
                 <Divider orientation="vertical" />
             )}
@@ -282,7 +284,7 @@ export function SessionInfo({
                     aria-pressed={subagentsOpen ?? false}
                     onClick={onToggleSubagents}
                 >
-                    <UsersRoundCollaboration size={14} aria-hidden="true" />
+                    <UsersRoundCollaboration {...BAR_ICON} />
                     {subagentDot !== undefined && subagentDot !== "none" && !subagentsOpen && (
                         <span
                             className={`session-info-tasks-dot${subagentDot === "active" ? " session-info-tasks-dot--active" : ""}`}
@@ -300,7 +302,7 @@ export function SessionInfo({
                     aria-pressed={tasksOpen ?? false}
                     onClick={onToggleTasks}
                 >
-                    <ListTodo size={14} aria-hidden="true" />
+                    <ListTodo {...BAR_ICON} />
                     {hasAnyTasks && !tasksOpen && (
                         <span
                             className={`session-info-tasks-dot${hasUnfinishedTasks ? " session-info-tasks-dot--active" : ""}`}

@@ -610,3 +610,19 @@
     height: 16px;
     align-self: center;
 }
+
+/* Label for icon-only controls (ui/Tooltip). Same surface as the activity
+   rail's label; pointer-events off so it never steals the hover that keeps it
+   open. */
+.ui-tooltip {
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--tooltip-bg);
+    color: var(--tooltip-fg);
+    font-size: var(--text-xs);
+    line-height: 1.4;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px var(--shadow-color);
+    pointer-events: none;
+    z-index: 200;
+}

@@ -17,7 +17,6 @@
     "reset": "Reset"
   },
   "session": {
-    "new": "New chat",
     "newInWorkspace": "New chat in this workspace",
     "deleteSession": "Delete chat",
     "rename": "Rename chat",
@@ -44,7 +43,6 @@
     "openLog": "Open log file",
     "sidebarShow": "Show chat list",
     "sidebarHide": "Hide chat list",
-    "sidebarLabel": "Chats",
     "taskPanel": "Task panel",
     "subagentPanel": "Subagent panel",
     "imApprovalRequired": "An IM conversation has a command waiting for approval.",
