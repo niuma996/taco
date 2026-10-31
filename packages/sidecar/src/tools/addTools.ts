@@ -51,6 +51,12 @@ function formatResult(result: AddToolsResult): string {
                 "Retry with a name from the system prompt's <deferred_tools> list.",
         );
     }
+    if (result.blocked.length > 0) {
+        lines.push(
+            `Not available in this session: ${result.blocked.map((b) => b.name).join(", ")}. ` +
+                "The session's policy denies file tools; do not retry these names here.",
+        );
+    }
     if (result.failed.length > 0) {
         lines.push(
             `Failed to load: ${result.failed.map((f) => `${f.name} (${f.error})`).join(", ")}.`,

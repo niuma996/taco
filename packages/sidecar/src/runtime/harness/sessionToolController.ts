@@ -29,6 +29,8 @@ export interface AddToolsResult {
     unknown: string[];
     /** Candidates that failed to load and the reason. */
     failed: Array<{ name: string; error: string }>;
+    /** Names the session's policy refuses to load, with the reason. */
+    blocked: Array<{ name: string; reason: string }>;
 }
 
 export interface SessionToolControllerOptions {
@@ -68,6 +70,9 @@ export interface SessionToolController {
     /** The registry for this session — used by AddTools.description to list candidates. */
     readonly registry: DeferredToolRegistry;
 }
+
+const FS_DENY_REASON =
+    "the session's policy denies file tools, so it is not available in this session";
 
 export class DefaultSessionToolController implements SessionToolController {
     readonly registry: DeferredToolRegistry;
@@ -155,7 +160,7 @@ export class DefaultSessionToolController implements SessionToolController {
         if (!toolState) {
             throw new Error("session tool controller not bound to a harness yet");
         }
-        let result: AddToolsResult = { added: [], skipped: [], unknown: [], failed: [] };
+        let result: AddToolsResult = { added: [], skipped: [], unknown: [], failed: [], blocked: [] };
         await toolState.update(async (current) => {
             const plan = await this.plan(names, current);
             result = plan.result;
@@ -178,11 +183,18 @@ export class DefaultSessionToolController implements SessionToolController {
         const skipped: string[] = [];
         const unknown: string[] = [];
         const failed: Array<{ name: string; error: string }> = [];
+        const blocked: Array<{ name: string; reason: string }> = [];
+        const fsDenied = await this.fsToolsDenied();
 
         for (const name of names) {
             if (activeNames.has(name) || currentTools.has(name)) {
                 // Already active or defined: idempotent skip.
                 skipped.push(name);
+                continue;
+            }
+            if (isFsToolDenied(name, fsDenied)) {
+                // Policy answer, not a load failure: report it and change nothing.
+                blocked.push({ name, reason: FS_DENY_REASON });
                 continue;
             }
             let tool: TacoTool | undefined;
@@ -206,9 +218,11 @@ export class DefaultSessionToolController implements SessionToolController {
         }
 
         // Atomic commit: if any factory failed, leave the tool state unchanged.
-        if (failed.length > 0) return { result: { added: [], skipped, unknown, failed } };
+        if (failed.length > 0) {
+            return { result: { added: [], skipped, unknown, failed, blocked } };
+        }
 
-        const result = { added, skipped, unknown, failed };
+        const result = { added, skipped, unknown, failed, blocked };
         if (added.length === 0) return { result };
         return {
             result,

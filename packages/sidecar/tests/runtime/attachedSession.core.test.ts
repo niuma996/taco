@@ -498,6 +498,7 @@ describe("attachedSession.deferredTools", () => {
 
     async function makeAttachedSession(
         toolRegistry: DefaultDeferredToolRegistry,
+        fsToolsDenied = false,
     ): Promise<AttachedSession> {
         const session = await repo.create({ cwd: tmpDir }, harnessContext);
         const opts: AttachedSessionOptions = {
@@ -520,7 +521,11 @@ describe("attachedSession.deferredTools", () => {
             sessionCwd: tmpDir as never,
             // Dynamic-tool tests don't exercise the tool context path; tools that
             // need `call`/`actor` are tested in their own files.
-            getToolContext: () => ({ env, workspace: tmpDir as never }) as TacoToolContextBase,
+            getToolContext: (): TacoToolContextBase => ({
+                env,
+                workspace: tmpDir as never,
+                fsToolsDenied,
+            }),
             sessionKind: "main",
         };
         return AttachedSession.create(opts);
@@ -589,6 +594,24 @@ describe("attachedSession.deferredTools", () => {
                 activeNames.filter((n) => n === "git-status").length,
                 1,
                 "git-status must appear exactly once in active set",
+            );
+            await attached.abort();
+        });
+
+        it("addTools reports a policy-denied fs tool as blocked instead of loading it", async () => {
+            const registry = new DefaultDeferredToolRegistry({
+                candidates: [makeToolCandidate("pdfMerge", "deferred")],
+            });
+            const attached = await makeAttachedSession(registry, true);
+            const result = await attached.toolController?.addTools(["pdfMerge"]);
+            assert.deepEqual(result?.added, []);
+            assert.deepEqual(
+                result?.blocked.map((b) => b.name),
+                ["pdfMerge"],
+            );
+            assert.ok(
+                !(await attached.toolController?.activeToolNames()).includes("pdfMerge"),
+                "a blocked name must not reach the active set",
             );
             await attached.abort();
         });

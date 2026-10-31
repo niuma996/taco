@@ -617,4 +617,24 @@ describe("addTools execute", () => {
         assert.deepEqual(details(result).skipped, ["git-status"]);
         assert.equal(controller.loadedToolNames().filter((n) => n === "git-status").length, 1);
     });
+
+    it("reports policy-blocked fs tools as unavailable in the result text", async () => {
+        const registry = makeRegistry(["pdfMerge"]);
+        const controller = new DefaultSessionToolController(registry, {
+            fsToolsDenied: () => true,
+        });
+        controller.bindHarness(fakeToolState([fakeTool("read")]));
+        const tool = createAddToolsTool(controller);
+        const result = await invokeTool(tool, { toolNames: "pdfMerge" }, ctx, {
+            toolCallId: "tc1",
+        });
+        assert.deepEqual(details(result).blocked.map((b) => b.name), ["pdfMerge"]);
+        assert.deepEqual(details(result).added, []);
+        assert.deepEqual(controller.loadedToolNames(), []);
+        // The model must be told to stop, not left to retry a silent no-op.
+        const text = (result.content as { type: string; text?: string }[])
+            .map((c) => c.text ?? "")
+            .join("");
+        assert.match(text, /Not available in this session: pdfMerge/);
+    });
 });
