@@ -45,7 +45,7 @@ const trigger = () => screen.getByRole("button", { name: /app\.notifications/ })
 
 describe("NotificationBell", () => {
     it("shows the unread count and clears it once the list is opened", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(
             <NotificationBell
                 notifications={[
@@ -66,7 +66,7 @@ describe("NotificationBell", () => {
     });
 
     it("shows the empty state when nothing has been pushed", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<NotificationBell notifications={[]} onDismiss={() => {}} onClearAll={() => {}} />);
 
         await user.click(trigger());
@@ -75,7 +75,7 @@ describe("NotificationBell", () => {
     });
 
     it("dismisses one row and clears the rest", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onDismiss = vi.fn();
         const onClearAll = vi.fn();
         render(
@@ -95,7 +95,7 @@ describe("NotificationBell", () => {
     });
 
     it("renders the repeat count on a coalesced row", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(
             <NotificationBell
                 notifications={[entry(1, "disk is full", Date.now(), 7)]}
@@ -111,7 +111,7 @@ describe("NotificationBell", () => {
     });
 
     it("does not badge rows that arrive while the list is already open", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onNewArrival = vi.fn();
         // Pushed through state, not a click: clicking anywhere outside the
         // popover would close it, which is the *other* test's scenario.
@@ -143,7 +143,7 @@ describe("NotificationBell", () => {
     });
 
     it("reports rows that arrive while the bell is closed", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onNewArrival = vi.fn();
         function Harness() {
             const [rows, setRows] = useState<AppNotification[]>([]);
@@ -173,7 +173,7 @@ describe("NotificationBell", () => {
     });
 
     it("keeps a row read after the popover closes again", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         function Harness() {
             const [rows, setRows] = useState<AppNotification[]>([]);
             return (
@@ -319,7 +319,7 @@ it("opens the originating conversation from an approval notification", async () 
             onOpenApproval={onOpenApproval}
         />,
     );
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(trigger());
     await user.click(screen.getByRole("button", { name: "session.openApproval" }));
     expect(onOpenApproval).toHaveBeenCalledWith(approval);

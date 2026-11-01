@@ -156,7 +156,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             create: () => Promise.reject(new Error("invalid schedule")),
             list: () => Promise.resolve({ jobs: [] }),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -188,7 +188,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             list: () => Promise.resolve({ jobs: [sampleJob("row-1")] }),
             update: () => Promise.reject(new Error("boom")),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -219,7 +219,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             list: () => Promise.reject(new Error("no daemon")),
             create: () => Promise.reject(new Error("bad schedule")),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         // listError surfaces immediately on mount.
@@ -249,7 +249,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             update: ({ job }: Record<string, unknown>) => Promise.resolve({ job }),
             list: () => Promise.resolve({ jobs: [sampleJob("row-x")] }),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -324,7 +324,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             create: createSpy,
             list: () => Promise.resolve({ jobs: [] }),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -383,7 +383,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             create: createSpy,
             list: () => Promise.resolve({ jobs: [] }),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
         await waitFor(() => {
             expect(screen.getByText("schedules.empty")).toBeTruthy();
@@ -410,7 +410,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             list: () => Promise.resolve({ jobs: [sampleJob("row-x")] }),
             update: updateSpy,
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -452,7 +452,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             create: createSpy,
             list: () => Promise.resolve({ jobs: [] }),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await openAddDialog(user);
@@ -478,7 +478,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             create: createSpy,
             list: () => Promise.resolve({ jobs: [] }),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await openAddDialog(user);
@@ -521,7 +521,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             list: () => Promise.resolve({ jobs: [sampleJob("row-1")] }),
             runNow: () => Promise.reject(new Error("daemon crash")),
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -545,7 +545,7 @@ describe("SchedulesTab — delete confirmation", () => {
             list: () => Promise.resolve({ jobs: [sampleJob("row-1")] }),
             delete: deleteSpy,
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -572,7 +572,7 @@ describe("SchedulesTab — delete confirmation", () => {
             list: () => Promise.resolve({ jobs: [sampleJob("row-1")] }),
             delete: deleteSpy,
         });
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<SchedulesTab client={client} />);
 
         await waitFor(() => {
@@ -625,7 +625,7 @@ describe("SchedulesTab — built-in jobs", () => {
     });
 
     it("edits structured dream args and preserves the builtin marker on save", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const updates: Array<Record<string, unknown>> = [];
         const client = makeClient({
             list: () => Promise.resolve({ jobs: [builtinJob()] }),
@@ -663,7 +663,7 @@ describe("SchedulesTab — built-in jobs", () => {
     });
 
     it("rejects an out-of-range dream threshold before sending the update", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         let updates = 0;
         const client = makeClient({
             list: () => Promise.resolve({ jobs: [builtinJob()] }),

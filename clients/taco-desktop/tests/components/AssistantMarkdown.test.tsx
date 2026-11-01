@@ -43,7 +43,7 @@ describe("AssistantMarkdown first paint", () => {
     it(
         "keeps the code block mounted when highlighting lands",
         async () => {
-            const user = userEvent.setup();
+            const user = userEvent.setup({ delay: null });
             const { container } = render(
                 <AssistantMarkdown text={"```mermaid\ngraph TD\n  A-->B\n```\n"} />,
             );
@@ -94,7 +94,7 @@ describe("AssistantMarkdown code blocks", () => {
     it(
         "offers a view toggle for mermaid blocks and flips it on click",
         async () => {
-            const user = userEvent.setup();
+            const user = userEvent.setup({ delay: null });
             const { container } = render(
                 <AssistantMarkdown text={"```mermaid\ngraph TD\n  A-->B\n```\n"} />,
             );

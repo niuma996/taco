@@ -92,7 +92,7 @@ describe("useStableUserMessageGuide", () => {
 
 describe("UserMessageGuide — 渲染次数", () => {
     it("流式输出不重渲染导轨", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onNavigate = vi.fn();
         function StreamHarness() {
             const [messages, setMessages] = useState<UiMessage[]>([
@@ -128,7 +128,7 @@ describe("UserMessageGuide — 渲染次数", () => {
     });
 
     it("整条链路下流式输出不重渲染导轨", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         // The chat's own wiring: the message window, the navigation and the
         // guide. Every prop of the rail has to stay stable across a token.
         const unpin = () => {};

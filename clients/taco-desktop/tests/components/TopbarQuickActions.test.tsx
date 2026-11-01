@@ -40,7 +40,7 @@ const noNotifications = {
 
 describe("TopbarQuickActions", () => {
     it("writes uiLanguage when a language option is picked", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<TopbarQuickActions {...noNotifications} />);
 
         await user.click(screen.getByRole("button", { name: "app.language" }));
@@ -52,7 +52,7 @@ describe("TopbarQuickActions", () => {
     });
 
     it("writes theme when a theme option is picked", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<TopbarQuickActions {...noNotifications} />);
 
         await user.click(screen.getByRole("button", { name: "app.theme" }));
@@ -62,7 +62,7 @@ describe("TopbarQuickActions", () => {
     });
 
     it("marks the current language and theme in their menus", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<TopbarQuickActions {...noNotifications} />);
 
         await user.click(screen.getByRole("button", { name: "app.language" }));
@@ -83,7 +83,7 @@ describe("TopbarQuickActions", () => {
         expect(darkItem.querySelector("svg")).toBeNull();
     });
     it("badges a pending notification and forwards it while the bell is closed", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onNewNotification = vi.fn();
         function Harness() {
             const [rows, setRows] = useState<AppNotification[]>([]);

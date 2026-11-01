@@ -71,7 +71,7 @@ describe("PendingApprovalsPanel", () => {
     });
 
     it("names the workspace and session of each request", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<PendingApprovalsPanel workspaces={workspaces} onResolve={() => {}} />);
         await user.click(screen.getByRole("button", { name: "session.pendingPermissions" }));
 
@@ -81,7 +81,7 @@ describe("PendingApprovalsPanel", () => {
     });
 
     it("resolves a request against the workspace it came from", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onResolve = vi.fn();
         render(<PendingApprovalsPanel workspaces={workspaces} onResolve={onResolve} />);
         await user.click(screen.getByRole("button", { name: "session.pendingPermissions" }));
@@ -95,7 +95,7 @@ describe("PendingApprovalsPanel", () => {
         // The row that had focus is removed from the DOM once it resolves.
         // Focus falls back to the body, which Radix reads as focus leaving the
         // panel — it would close, hiding the requests still waiting.
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         function Harness() {
             const [pending, setPending] = useState([
                 request("r1", "s-alpha", "git push"),
@@ -124,7 +124,7 @@ describe("PendingApprovalsPanel", () => {
     });
 
     it("shows the empty state when nothing is pending", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(
             <PendingApprovalsPanel
                 workspaces={{ "/repos/idle": workspaces["/repos/idle"] }}

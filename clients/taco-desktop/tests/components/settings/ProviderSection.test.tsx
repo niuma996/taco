@@ -60,7 +60,7 @@ async function openRelay(client: TacoClient, global: Record<string, unknown>) {
     // there, and the save path refreshes it via applyGlobalConfig on success.
     applyGlobalConfig(global as never);
     render(<ProviderSection client={client} workspace={WS} />);
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(await screen.findByLabelText("Relay — settings.providerConfigured"));
     return user;
 }

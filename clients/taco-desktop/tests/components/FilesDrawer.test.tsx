@@ -67,7 +67,7 @@ describe("FilesDrawer integration", () => {
             assert.ok(screen.getByText("src"));
         });
 
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
 
         // 2. expand src directory
         await user.click(screen.getByText("src"));

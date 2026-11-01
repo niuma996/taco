@@ -74,7 +74,7 @@ describe("read tool card", () => {
     it("opens the preview popup with the file content", async () => {
         renderCard(readTool());
 
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         await user.click(screen.getByRole("button", { name: "activity.readOpenFile" }));
 
         await waitFor(() => {

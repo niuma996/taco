@@ -22,16 +22,16 @@ const mcpUrl = new URL("../../src/server/handlers/mcp.ts", import.meta.url).href
 const callUrl = new URL("../_helpers/handlerCall.ts", import.meta.url).href;
 const channelUrl = new URL("../../src/server/channelControl.ts", import.meta.url).href;
 const configUrl = new URL("../../src/config/config.ts", import.meta.url).href;
+const resolveHooksUrl = new URL("../_helpers/tsResolveHooks.ts", import.meta.url).href;
+// Native type stripping instead of tsx: these workers spawn eight times and
+// tsx's startup dominated the whole test file.
+const tsFlags = ["--experimental-transform-types", "--import", resolveHooksUrl];
 
 function worker(home: string, source: string) {
-    const child = spawn(
-        process.execPath,
-        ["--import", "tsx", "--input-type=module", "-e", source],
-        {
-            env: { ...process.env, TACO_HOME: home },
-            stdio: ["pipe", "pipe", "pipe"],
-        },
-    );
+    const child = spawn(process.execPath, [...tsFlags, "--input-type=module", "-e", source], {
+        env: { ...process.env, TACO_HOME: home },
+        stdio: ["pipe", "pipe", "pipe"],
+    });
     let errors = "";
     child.stderr.setEncoding("utf8").on("data", (data: string) => {
         errors += data;
@@ -351,8 +351,7 @@ describe("global config transactions", () => {
         const child = spawn(
             process.execPath,
             [
-                "--import",
-                "tsx",
+                ...tsFlags,
                 "--input-type=module",
                 "-e",
                 `

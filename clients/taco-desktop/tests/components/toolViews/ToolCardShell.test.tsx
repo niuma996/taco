@@ -117,7 +117,7 @@ describe("ToolCardShell raw args", () => {
         assert.ok(toggle, "every card with args gets a toggle");
         assert.equal(toggle?.getAttribute("aria-expanded"), "false");
 
-        await userEvent.setup().click(toggle as Element);
+        await userEvent.setup({ delay: null }).click(toggle as Element);
 
         assert.equal(toggle?.getAttribute("aria-expanded"), "true");
         // Pretty-printed, so both keys survive the round trip.
@@ -129,7 +129,7 @@ describe("ToolCardShell raw args", () => {
     it("collapses again on a second click", async () => {
         const { container } = render(<ToolCardShell tool={call({ args: { a: 1 } })} />);
         const toggle = container.querySelector(".tool-card-raw-toggle") as Element;
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
 
         await user.click(toggle);
         assert.ok(container.querySelector(".tool-card-raw"));
@@ -147,7 +147,9 @@ describe("ToolCardShell raw args", () => {
         );
 
         assert.equal(container.querySelector(".tool-card-summary"), null);
-        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+        await userEvent
+            .setup({ delay: null })
+            .click(container.querySelector(".tool-card-raw-toggle") as Element);
         assert.ok(
             container.querySelector(".tool-card-raw")?.textContent?.includes('"timeout": 5000'),
         );
@@ -157,7 +159,9 @@ describe("ToolCardShell raw args", () => {
         const { container } = render(
             <ToolCardShell tool={call({ args: { a: 1 }, resultText: "output" })} />,
         );
-        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+        await userEvent
+            .setup({ delay: null })
+            .click(container.querySelector(".tool-card-raw-toggle") as Element);
 
         const children = Array.from(container.querySelector(".tool-card")?.children ?? []);
         const rawIndex = children.findIndex((c) => c.classList.contains("tool-card-raw"));
@@ -178,7 +182,9 @@ describe("ToolCardShell raw args", () => {
         cyclic.self = cyclic;
 
         const { container } = render(<ToolCardShell tool={call({ args: cyclic })} />);
-        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+        await userEvent
+            .setup({ delay: null })
+            .click(container.querySelector(".tool-card-raw-toggle") as Element);
 
         // JSON.stringify throws on the cycle; the card must still show something.
         assert.ok((container.querySelector(".tool-card-raw")?.textContent ?? "").length > 0);
@@ -187,7 +193,9 @@ describe("ToolCardShell raw args", () => {
     it("highlights object args as JSON", async () => {
         highlightCalls.length = 0;
         const { container } = render(<ToolCardShell tool={call({ args: { path: "a.ts" } })} />);
-        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+        await userEvent
+            .setup({ delay: null })
+            .click(container.querySelector(".tool-card-raw-toggle") as Element);
 
         await waitFor(() => {
             assert.ok(container.querySelector(".tool-card-raw .shiki"), "expected shiki output");
@@ -202,7 +210,9 @@ describe("ToolCardShell raw args", () => {
         highlightCalls.length = 0;
         // A string arg is shown verbatim and is not valid JSON.
         const { container } = render(<ToolCardShell tool={call({ args: "raw string" })} />);
-        await userEvent.setup().click(container.querySelector(".tool-card-raw-toggle") as Element);
+        await userEvent
+            .setup({ delay: null })
+            .click(container.querySelector(".tool-card-raw-toggle") as Element);
 
         assert.equal(container.querySelector(".tool-card-raw")?.textContent, "raw string");
         assert.deepEqual(highlightCalls, [], "text lang must skip the highlighter");

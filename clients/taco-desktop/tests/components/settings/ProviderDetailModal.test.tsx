@@ -66,7 +66,7 @@ function candidateList() {
 
 describe("ProviderDetailModal — create-custom model discovery", () => {
     it("disables the fetch button until baseUrl and apiKey are filled", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         renderCreate(vi.fn());
         expect(fetchButton().disabled).toBe(true);
 
@@ -82,7 +82,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("lists fetched ids row-by-row and moves one into the model list on add", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi
             .fn()
             .mockResolvedValue({ ok: true, models: ["gpt-4o", "gpt-4o-mini"] });
@@ -109,7 +109,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("skips fetched ids the user already added manually", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: ["mine", "fetched"] });
         renderCreate(listModels as unknown as ListModels);
         await fillPrerequisites(user);
@@ -124,7 +124,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("re-filters the candidate list when a model is added after the fetch", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: ["alpha", "beta"] });
         renderCreate(listModels as unknown as ListModels);
         await fillPrerequisites(user);
@@ -142,7 +142,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("collapses duplicate ids returned by the endpoint into one candidate", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: ["dup", "dup", "other"] });
         renderCreate(listModels as unknown as ListModels);
         await fillPrerequisites(user);
@@ -153,7 +153,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("surfaces the message when the RPC reports a failure", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({
             ok: false,
             reason: "http-error",
@@ -167,7 +167,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("reports an empty catalog as its own message", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: [] });
         renderCreate(listModels as unknown as ListModels);
         await fillPrerequisites(user);
@@ -179,7 +179,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("surfaces a thrown transport error instead of crashing", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockRejectedValue(new Error("sidecar is down"));
         renderCreate(listModels as unknown as ListModels);
         await fillPrerequisites(user);
@@ -189,7 +189,7 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
     });
 
     it("keeps the fetch button available for the response protocol", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: ["gpt-5"] });
         renderCreate(listModels as unknown as ListModels);
         // The Responses API differs only in its inference endpoint — the model
@@ -243,7 +243,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     }
 
     it("shows the masked key and reveals plaintext via providers.revealKey", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const revealKey = vi.fn().mockResolvedValue({ key: "sk-plain-text" });
         renderBuiltin(revealKey);
 
@@ -278,7 +278,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("saves extras and hidden without touching the key when it stays in view mode", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSaveBuiltin } = renderBuiltin();
         await user.click(screen.getByRole("button", { name: "settings.providerModelRemove" }));
         await user.click(screen.getByRole("button", { name: "settings.providerModelHide" }));
@@ -290,7 +290,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("moves a hidden model out of the visible list instead of showing it twice", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         renderBuiltin();
         expect(within(modelList()).getAllByText("MiniMax-M2").length).toBe(1);
         await user.click(screen.getByRole("button", { name: "settings.providerModelHide" }));
@@ -329,7 +329,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("hiding then restoring a builtin leaves an empty hidden list", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSaveBuiltin } = renderBuiltin();
         await user.click(screen.getByRole("button", { name: "settings.providerModelHide" }));
         // The row moves to the removed section, tagged and struck through.
@@ -363,7 +363,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     }
 
     it("keeps a declared context window when the provider panel is saved", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSaveBuiltin } = renderBuiltin();
         const windowInput = await openCustomWindowInput(user, "MiniMax-M3.1");
         await user.type(windowInput, "999999");
@@ -379,7 +379,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("expands k/m shorthand in the context window field", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSaveBuiltin } = renderBuiltin();
         const windowInput = await openCustomWindowInput(user, "MiniMax-M3.1");
         await user.type(windowInput, "1024k");
@@ -427,7 +427,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("a preset choice declares that window on save", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSaveBuiltin } = renderBuiltin();
         const row = within(modelList())
             .getByText("MiniMax-M3.1")
@@ -450,7 +450,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("switching back to the default option clears the declared window", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const withWindow: ProviderView = {
             ...provider,
             models: [
@@ -496,7 +496,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("keeps a declared display name when the provider panel is saved", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const withName: ProviderView = {
             ...provider,
             models: [
@@ -570,7 +570,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("fetches through the saved branch ({ providerId }) when configured", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: ["brand-new"] });
         const client = {
             providersRevealKey: vi.fn(),
@@ -595,7 +595,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("saves image input when the switch is turned on", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSaveBuiltin } = renderBuiltin();
         const row = within(modelList())
             .getByText("MiniMax-M3.1")
@@ -622,7 +622,7 @@ describe("ProviderDetailModal — built-in provider", () => {
     });
 
     it("drops image input when the switch is turned off", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const withImages: ProviderView = {
             ...provider,
             models: [
@@ -703,7 +703,7 @@ describe("ProviderDetailModal — test connection", () => {
         screen.getByRole("button", { name: "settings.providerTestButton" }) as HTMLButtonElement;
 
     it("tests the first model with the stored key and shows latency + reply", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const testConnection = vi.fn().mockResolvedValue({
             ok: true,
             latencyMs: 321,
@@ -723,7 +723,7 @@ describe("ProviderDetailModal — test connection", () => {
     });
 
     it("sends a typed-but-unsaved key along with the probe", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const testConnection = vi
             .fn()
             .mockResolvedValue({ ok: true, latencyMs: 1, model: "MiniMax-M2", reply: "" });
@@ -740,7 +740,7 @@ describe("ProviderDetailModal — test connection", () => {
     });
 
     it("shows the reason headline and the raw upstream message on failure", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const testConnection = vi.fn().mockResolvedValue({
             ok: false,
             reason: "auth",
@@ -757,7 +757,7 @@ describe("ProviderDetailModal — test connection", () => {
     });
 
     it("reports a thrown RPC in the same result slot", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const testConnection = vi
             .fn()
             .mockRejectedValue(new Error("unknown method: provider.testConnection"));
@@ -771,7 +771,7 @@ describe("ProviderDetailModal — test connection", () => {
     });
 
     it("tests the unsaved create form with its literal endpoint and key", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const testConnection = vi
             .fn()
             .mockResolvedValue({ ok: true, latencyMs: 5, model: "m-1", reply: "pong" });

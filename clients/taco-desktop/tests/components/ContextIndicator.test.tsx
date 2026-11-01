@@ -38,7 +38,7 @@ async function openPopover(user: ReturnType<typeof userEvent.setup>): Promise<vo
 
 describe("ContextIndicator — manual compact", () => {
     it("fires onCompact from the popover and closes it", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onCompact = vi.fn();
         renderIndicator({ onCompact });
         await openPopover(user);
@@ -48,7 +48,7 @@ describe("ContextIndicator — manual compact", () => {
     });
 
     it("disables Compact while compacting", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onCompact = vi.fn();
         renderIndicator({ onCompact, compacting: true });
         await openPopover(user);
@@ -59,7 +59,7 @@ describe("ContextIndicator — manual compact", () => {
     });
 
     it("disables Compact while the session is busy", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onCompact = vi.fn();
         renderIndicator({ onCompact, sessionBusy: true });
         await openPopover(user);
@@ -70,14 +70,14 @@ describe("ContextIndicator — manual compact", () => {
     });
 
     it("omits Compact when onCompact is not provided", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         renderIndicator();
         await openPopover(user);
         expect(screen.queryByRole("button", { name: "context.compactNow" })).toBeNull();
     });
 
     it("formats a millisecond epoch lastCompactionAt instead of dumping the raw number", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         renderIndicator({
             info: { ...INFO, lastCompactionAt: "1789719368952" },
         });

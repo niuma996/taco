@@ -103,7 +103,7 @@ describe("MemoryPane dream controls", () => {
     afterEach(cleanup);
 
     it("runs a manual consolidation and toggles the shared schedule", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { dream } = renderPane();
 
         await user.click(screen.getByRole("button", { name: "memory.dream.run" }));
@@ -114,7 +114,7 @@ describe("MemoryPane dream controls", () => {
     });
 
     it("applies the reviewed preview and can discard it", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { dream } = renderPane();
 
         expect(screen.getByText("memory.dream.pendingTitle")).toBeTruthy();
@@ -126,7 +126,7 @@ describe("MemoryPane dream controls", () => {
     });
 
     it("opens run history and undoes the selected report", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { dream } = renderPane();
         const history = document.querySelector(".memory-dream-history");
         expect(history).toBeTruthy();
@@ -137,7 +137,7 @@ describe("MemoryPane dream controls", () => {
     });
 
     it("selects an archived topic separately from live topics and restores it", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const { onSelect, dream } = renderPane(actions(), `${MEMORY_ARCHIVE_PREFIX}old`);
 
         expect(screen.getAllByText("Old archived fact").length).toBeGreaterThan(0);
@@ -148,7 +148,7 @@ describe("MemoryPane dream controls", () => {
     });
 
     it("stays on the archived topic when the restore fails", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const failing = { ...actions(), onRestoreTopic: vi.fn(async () => false) };
         const { onSelect } = renderPane(failing, `${MEMORY_ARCHIVE_PREFIX}old`);
         await user.click(screen.getByRole("button", { name: "memory.dream.restore" }));
@@ -157,7 +157,7 @@ describe("MemoryPane dream controls", () => {
     });
 
     it("opens consolidation from the header when nothing is pending", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const current = dreamData.dream;
         if (!current) throw new Error("fixture is missing dream state");
         const noPending: MemoryListResult = {

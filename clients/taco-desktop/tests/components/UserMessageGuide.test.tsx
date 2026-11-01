@@ -140,7 +140,7 @@ describe("UserMessageGuide — 键盘交互", () => {
 
 describe("UserMessageGuide — 悬停预览", () => {
     it("预览保留原始多行文本", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const entries: UserMessageGuideEntry[] = [
             { id: "u1", messageIndex: 0, text: "line one\nline two", images: [], attachments: [] },
         ];
@@ -155,7 +155,7 @@ describe("UserMessageGuide — 悬停预览", () => {
     });
 
     it("图片消息显示图片占位和图片数量", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<UserMessageGuide entries={ENTRIES} onNavigate={vi.fn()} />);
 
         await user.hover(marker(2));
@@ -169,7 +169,7 @@ describe("UserMessageGuide — 悬停预览", () => {
     });
 
     it("空消息显示空占位", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const entries: UserMessageGuideEntry[] = [
             { id: "u1", messageIndex: 0, text: "", images: [], attachments: [] },
         ];
@@ -183,7 +183,7 @@ describe("UserMessageGuide — 悬停预览", () => {
     });
 
     it("超长文本被截断并给出提示", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const entries: UserMessageGuideEntry[] = [
             { id: "u1", messageIndex: 0, text: "x".repeat(900), images: [], attachments: [] },
         ];

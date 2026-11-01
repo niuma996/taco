@@ -17,12 +17,6 @@ async function buildFormPdf(): Promise<Uint8Array> {
     return doc.save();
 }
 
-/** The text of every page, so a test can tell the pages apart. */
-async function pageTexts(bytes: Uint8Array): Promise<string[]> {
-    const doc = await PDFDocument.load(bytes);
-    return doc.getPages().map((_, index) => `page ${index + 1}`);
-}
-
 /** A document whose page widths are the only way to tell the pages apart. */
 async function pdfWithWidths(widths: number[]): Promise<Uint8Array> {
     const doc = await PDFDocument.create();
@@ -174,11 +168,5 @@ describe("fillPdf", () => {
         const filled = await fillPdf(await buildFormPdf(), { name: true });
         assert.ok(!filled.ok);
         assert.equal(filled.failure.kind, "field_not_fillable");
-    });
-});
-
-describe("pageTexts", () => {
-    it("counts the pages of a document", async () => {
-        assert.deepEqual(await pageTexts(buildTextPdf(["x"], 3)), ["page 1", "page 2", "page 3"]);
     });
 });

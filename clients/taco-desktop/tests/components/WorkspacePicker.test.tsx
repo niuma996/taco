@@ -47,7 +47,7 @@ describe("WorkspacePicker", () => {
     });
 
     it("offers an empty state instead of a row when there is no conversation", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         renderPicker();
 
         await user.click(screen.getByRole("button", { name: "activity.switchWorkspace" }));
@@ -58,7 +58,7 @@ describe("WorkspacePicker", () => {
     });
 
     it("switches to the conversation the user picked", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onChange = vi.fn();
         renderPicker({
             workspaces: [{ cwd: IM_CWD, label: "peer-1", channel: "wechat" }],
@@ -72,7 +72,7 @@ describe("WorkspacePicker", () => {
     });
 
     it("keeps the active directory as the only row when the directory list is empty", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         renderPicker({ mode: "workspace", activeCwd: "/repo/my-project" });
 
         expect(screen.getByText("my-project")).toBeTruthy();

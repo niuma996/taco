@@ -11,7 +11,7 @@ vi.mock("../../src/i18n/useI18n", () => ({
 describe("WorkspaceModeTabs", () => {
     it("notifies when the selected tab is clicked so a pending switch can be cancelled", async () => {
         const onModeChange = vi.fn();
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<WorkspaceModeTabs mode="workspace" onModeChange={onModeChange} />);
 
         await user.click(screen.getByRole("radio", { name: "workspaceMode.workspace" }));

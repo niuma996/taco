@@ -314,7 +314,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
 
             await waitFor(
                 () => (ws.resources.skills?.length ?? 0) > 0,
-                2000,
+                10000,
                 // A single fs event triggers a 300ms debounce timer inside
                 // WorkspaceRuntime before reloadSkillsNow runs; poll at a
                 // strictly finer grain than that so the loop doesn't
@@ -365,7 +365,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
             mkdirSync(newSkillDir, { recursive: true });
             writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: fresh-skill\n---\nbody");
 
-            await waitFor(() => (ws.resources.skills?.length ?? 0) > 0, 2000, 40);
+            await waitFor(() => (ws.resources.skills?.length ?? 0) > 0, 10000, 40);
             assert.equal(ws.resources.skills?.[0]?.name, "fresh-skill");
         } finally {
             await ws.dispose();

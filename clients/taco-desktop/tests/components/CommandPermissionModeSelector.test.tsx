@@ -39,7 +39,7 @@ describe("CommandPermissionModeSelector", () => {
         const trigger = screen.getByRole("combobox", { name: "settings.permissionsMode" });
         expect(trigger.textContent).toContain("settings.permissionsAsk");
         expect(screen.getByTitle("input.commandPermissionModeHint")).toBeTruthy();
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         await user.click(trigger);
         await user.click(await screen.findByRole("option", { name: "settings.permissionsAuto" }));
         await waitFor(() =>
@@ -63,7 +63,7 @@ describe("CommandPermissionModeSelector", () => {
         } as unknown as TacoClient;
         await loadGlobalConfig(client);
         render(<CommandPermissionModeSelector client={client} />);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         await user.click(screen.getByRole("combobox"));
         await user.click(await screen.findByRole("option", { name: "settings.permissionsAuto" }));
         expect(await screen.findByRole("alert")).toHaveProperty(
@@ -92,7 +92,7 @@ it("only sends the mode so concurrent global approvals cannot be overwritten", a
     await loadGlobalConfig(client);
     render(<CommandPermissionModeSelector client={client} />);
     current = { ...current, allow: ["pnpm test"] };
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(screen.getByRole("combobox"));
     await user.click(await screen.findByRole("option", { name: "settings.permissionsAuto" }));
     await waitFor(() =>

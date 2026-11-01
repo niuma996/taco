@@ -23,7 +23,7 @@ const base = {
 };
 
 async function fillRequired(name: string) {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const inputs = screen.getAllByRole("textbox");
     // Order: name, description, whenToUse, [tools], maxTurns, systemPrompt.
     await user.type(inputs[0] as HTMLElement, name);
@@ -179,7 +179,7 @@ describe("AgentForm", () => {
         it("refuses to save an empty prompt while the switch is off", async () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
             render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
-            const user = userEvent.setup();
+            const user = userEvent.setup({ delay: null });
             const inputs = screen.getAllByRole("textbox");
             await user.type(inputs[0] as HTMLElement, "plain");
             await user.type(inputs[1] as HTMLElement, "does things");
@@ -198,7 +198,7 @@ describe("AgentForm", () => {
         it("saves an empty system prompt once the switch is on", async () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
             render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
-            const user = userEvent.setup();
+            const user = userEvent.setup({ delay: null });
             const inputs = screen.getAllByRole("textbox");
             await user.type(inputs[0] as HTMLElement, "plain");
             await user.type(inputs[1] as HTMLElement, "does things");
@@ -214,7 +214,7 @@ describe("AgentForm", () => {
             render(
                 <AgentForm {...base} runtime="standard" onSave={() => {}} onCancel={() => {}} />,
             );
-            const user = userEvent.setup();
+            const user = userEvent.setup({ delay: null });
             const inputs = screen.getAllByRole("textbox");
             await user.type(inputs[0] as HTMLElement, "plain");
             await user.type(inputs[1] as HTMLElement, "does things");
@@ -295,7 +295,7 @@ describe("AgentForm", () => {
                     onCancel={() => {}}
                 />,
             );
-            const user = userEvent.setup();
+            const user = userEvent.setup({ delay: null });
             await user.type(screen.getAllByRole("textbox")[0] as HTMLElement, "reviewer");
             assert.equal(screen.queryByText("agents.form.shadowsGlobal"), null);
 
@@ -353,7 +353,7 @@ describe("AgentForm", () => {
                 />,
             );
             assert.match(cwdTrigger().textContent ?? "", /\/work\/repo/);
-            await userEvent.setup().click(screen.getByText("agents.form.save"));
+            await userEvent.setup({ delay: null }).click(screen.getByText("agents.form.save"));
             assert.equal(onSave.mock.calls[0]?.[0].cwd, "/work/repo");
         });
 
@@ -381,7 +381,7 @@ describe("AgentForm", () => {
                 />,
             );
             assert.match(cwdTrigger().textContent ?? "", /\/elsewhere\/repo/);
-            await userEvent.setup().click(screen.getByText("agents.form.save"));
+            await userEvent.setup({ delay: null }).click(screen.getByText("agents.form.save"));
             assert.equal(onSave.mock.calls[0]?.[0].cwd, "/elsewhere/repo");
         });
 

@@ -57,7 +57,7 @@ describe("LlmDumpDock — visibility gating", () => {
 
 describe("LlmDumpDock — open / collapse", () => {
     it("opens the panel from the fab and collapses back", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         dock();
         await user.click(screen.getByRole("button", { name: FAB_WITH_ENTRIES }));
         expect(screen.getByRole("complementary")).toBeTruthy();
@@ -73,7 +73,7 @@ describe("LlmDumpDock — open / collapse", () => {
      * click. Repeated cycles must keep working.
      */
     it("keeps the fab working across repeated open/collapse cycles", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         dock();
         for (let i = 0; i < 5; i++) {
             await user.click(screen.getByRole("button", { name: FAB_WITH_ENTRIES }));
@@ -83,7 +83,7 @@ describe("LlmDumpDock — open / collapse", () => {
     });
 
     it("shows the empty-state copy when there are no entries", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         dock({ entries: [] });
         await user.click(screen.getByRole("button", { name: FAB_EMPTY }));
         expect(screen.getByText("debug.empty")).toBeTruthy();
@@ -97,7 +97,7 @@ describe("LlmDumpDock — drag does not swallow the click", () => {
      * must still open it.
      */
     it("suppresses the click that ends a drag, then accepts the next click", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         dock();
         const fab = screen.getByRole("button", { name: FAB_WITH_ENTRIES });
 

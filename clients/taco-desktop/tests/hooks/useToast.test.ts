@@ -2,35 +2,41 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createToastManager } from "../../src/hooks/primitives/useToast.ts";
 
+// Every manager gets a short auto-dismiss timer: the default 5s timer keeps
+// node:test's event loop alive after the assertions finish.
+function createTestToastManager() {
+    return createToastManager({ defaultDurationMs: 10 });
+}
+
 test("show displays a toast", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     m.show("hello");
     assert.equal(m.state()?.message, "hello");
     assert.equal(m.state()?.level, "info");
 });
 
 test("show with warn level", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     m.show("careful", "warn");
     assert.equal(m.state()?.level, "warn");
 });
 
 test("latter show overrides earlier", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     m.show("first");
     m.show("second");
     assert.equal(m.state()?.message, "second");
 });
 
 test("dismiss clears immediately", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     m.show("hi");
     m.dismiss();
     assert.equal(m.state(), null);
 });
 
 test("dismiss is a no-op when no toast active", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     m.dismiss();
     assert.equal(m.state(), null);
 });
@@ -48,7 +54,7 @@ test("auto-dismiss after timeout", async () => {
 });
 
 test("subscribe receives notifications", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     let count = 0;
     const unsub = m.subscribe(() => {
         count++;
@@ -62,7 +68,7 @@ test("subscribe receives notifications", () => {
 });
 
 test("subscribe cleanup stops notifications", () => {
-    const m = createToastManager();
+    const m = createTestToastManager();
     let count = 0;
     const unsub = m.subscribe(() => {
         count++;

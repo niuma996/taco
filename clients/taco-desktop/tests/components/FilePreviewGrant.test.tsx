@@ -87,7 +87,7 @@ afterEach(cleanup);
 
 describe("file preview — temporary FS scope grant", () => {
     it("offers a grant instead of a blank body when the path is out of scope", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<Harness path={OUT_OF_SCOPE} />);
         await user.click(screen.getByText("open"));
 
@@ -100,7 +100,7 @@ describe("file preview — temporary FS scope grant", () => {
     });
 
     it("grants that one file, then renders the content on retry", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<Harness path={OUT_OF_SCOPE} />);
         await user.click(screen.getByText("open"));
         await waitFor(() => {
@@ -131,7 +131,7 @@ describe("file preview — temporary FS scope grant", () => {
             throw new Error("ENOENT: no such file");
         });
 
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<Harness path="/proj/gone.md" />);
         await user.click(screen.getByText("open"));
 

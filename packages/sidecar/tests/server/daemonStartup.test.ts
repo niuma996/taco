@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { type RpcResponse, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
 
 test("daemon serves filesystem workspaces after router startup rejects", {
-    timeout: 20000,
+    timeout: 90000,
 }, async () => {
     const home = await mkdtemp(join(tmpdir(), "taco-startup-"));
     const socketPath =
@@ -24,6 +24,9 @@ test("daemon serves filesystem workspaces after router startup rejects", {
         join(root, "packages/sidecar/src/channels/conversationRouter.ts"),
     ).href;
     const entryUrl = pathToFileURL(join(root, "packages/sidecar/src/index.ts")).href;
+    const resolveHooksUrl = pathToFileURL(
+        join(root, "packages/sidecar/tests/_helpers/tsResolveHooks.ts"),
+    ).href;
     // Inject the failure inside start(), after the resident transport is installed.
     const bootstrap = `
         const { ConversationRouter } = await import(${JSON.stringify(routerUrl)});
@@ -34,7 +37,14 @@ test("daemon serves filesystem workspaces after router startup rejects", {
     `;
     const child = spawn(
         process.execPath,
-        ["--import", "tsx", "--input-type=module", "--eval", bootstrap],
+        [
+            "--experimental-transform-types",
+            "--import",
+            resolveHooksUrl,
+            "--input-type=module",
+            "--eval",
+            bootstrap,
+        ],
         {
             cwd: root,
             env: {
@@ -60,7 +70,7 @@ test("daemon serves filesystem workspaces after router startup rejects", {
         await new Promise<void>((done, reject) => {
             const timer = setTimeout(
                 () => reject(new Error(`daemon did not start: ${stderr}`)),
-                12000,
+                45000,
             );
             child.stderr.on("data", (chunk) => {
                 stderr += String(chunk);

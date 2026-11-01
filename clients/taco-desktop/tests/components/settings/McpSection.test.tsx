@@ -94,7 +94,7 @@ describe("McpSection", () => {
             settingsGet: () => Promise.resolve({ global: { mcpServers: [ECHO_VIEW] } }),
         });
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<McpSection client={client} onRestart={onRestart} />);
 
         // Open Edit on the "echo" card, change the command, save.
@@ -133,7 +133,7 @@ describe("McpSection", () => {
             settingsGet: () => Promise.resolve({ global: { mcpServers: [ECHO_VIEW] } }),
         });
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<McpSection client={client} onRestart={vi.fn().mockResolvedValue(undefined)} />);
 
         const toggle = await screen.findByLabelText(/mcpServerToggleEnabled/);
@@ -153,7 +153,7 @@ describe("McpSection", () => {
             settingsGet: () => Promise.resolve({ global: { mcpServers: [ECHO_VIEW] } }),
         });
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<McpSection client={client} onRestart={vi.fn().mockResolvedValue(undefined)} />);
 
         const deleteBtn = await screen.findByLabelText("settings.mcpServerDelete");
@@ -177,18 +177,19 @@ describe("McpSection", () => {
     it("keeps the form open and does not restart when the config save fails", async () => {
         const settingsWrite = vi.fn().mockResolvedValue({ global: {} });
         const onRestart = vi.fn().mockResolvedValue(undefined);
+        let rejectCreate: (error: Error) => void = () => {};
         const mcpCreateConfig = vi.fn().mockImplementation(
             () =>
                 new Promise<{ server: McpServerConfigView; requiresRestart: true }>(
                     (_resolve, reject) => {
-                        setTimeout(() => reject(new Error("disk full")), 30);
+                        rejectCreate = reject;
                     },
                 ),
         );
 
         const client = makeClient({ settingsWrite, mcpCreateConfig });
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<McpSection client={client} onRestart={onRestart} />);
 
         await user.click(await screen.findByText("settings.mcpServerAddBtn"));
@@ -206,8 +207,10 @@ describe("McpSection", () => {
         });
         expect((savingBtn as unknown as HTMLButtonElement).disabled).toBe(true);
 
-        // Let the rejection settle.
-        await new Promise((r) => setTimeout(r, 60));
+        // Let the rejection settle. The deferred is resolved by the test, not a
+        // wall-clock timer, so the pending-state assertion above cannot race.
+        rejectCreate(new Error("disk full"));
+        await screen.findByText(/disk full/);
 
         expect(onRestart).not.toHaveBeenCalled();
         // Form must still be visible — the user can retry.
@@ -240,7 +243,7 @@ describe("McpSection", () => {
                 }),
         });
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<McpSection client={client} onRestart={onRestart} />);
 
         // Open the Edit form for the disabled server via its aria-label.

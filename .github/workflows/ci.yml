@@ -75,6 +75,9 @@ jobs:
       # exports, which point at dist/ — build them before running.
       - run: pnpm protocol:build && pnpm shared:build
       - run: pnpm test
+      # The vitest component suite is separate from `pnpm test` (node:test)
+      # because it needs happy-dom and React.
+      - run: pnpm --filter @taco-ai/desktop test:components
 
   # ── Build gates ──────────────────────────────────────────────
   build-libs:

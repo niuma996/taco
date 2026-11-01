@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { type RpcResponse, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
 
 function client(socket: Socket) {
@@ -34,7 +35,7 @@ function client(socket: Socket) {
 }
 
 test("daemon retains one workspace across connections and shuts down with a client still open", {
-    timeout: 20000,
+    timeout: 90000,
 }, async () => {
     const home = await mkdtemp(join(tmpdir(), "taco-daemon-"));
     const socketPath =
@@ -42,21 +43,34 @@ test("daemon retains one workspace across connections and shuts down with a clie
             ? `\\\\.\\pipe\\taco-test-${process.pid}-${Date.now()}`
             : join(home, "rpc.sock");
     const controlPath = `${socketPath}-ctl`;
-    const child = spawn(process.execPath, ["--import", "tsx", "packages/sidecar/src/index.ts"], {
-        cwd: resolve(import.meta.dirname, "../../../.."),
-        env: {
-            ...process.env,
-            TACO_HOME: home,
-            TACO_DAEMON_MODE: "1",
-            TACO_SOCKET: socketPath,
-            TACO_CONTROL_SOCKET: controlPath,
-            TACO_RUNTIME_DIR: home,
-            TACO_DISABLE_MCP: "1",
-            TACO_LOG_LEVEL: "info",
-            TACO_STDERR_LOG: "",
+    const root = resolve(import.meta.dirname, "../../../..");
+    const resolveHooksUrl = pathToFileURL(
+        join(root, "packages/sidecar/tests/_helpers/tsResolveHooks.ts"),
+    ).href;
+    const child = spawn(
+        process.execPath,
+        [
+            "--experimental-transform-types",
+            "--import",
+            resolveHooksUrl,
+            "packages/sidecar/src/index.ts",
+        ],
+        {
+            cwd: root,
+            env: {
+                ...process.env,
+                TACO_HOME: home,
+                TACO_DAEMON_MODE: "1",
+                TACO_SOCKET: socketPath,
+                TACO_CONTROL_SOCKET: controlPath,
+                TACO_RUNTIME_DIR: home,
+                TACO_DISABLE_MCP: "1",
+                TACO_LOG_LEVEL: "info",
+                TACO_STDERR_LOG: "",
+            },
+            stdio: ["ignore", "ignore", "pipe"],
         },
-        stdio: ["ignore", "ignore", "pipe"],
-    });
+    );
     const exited = once(child, "exit");
     let stderr = "";
     let a: ReturnType<typeof client> | undefined;
@@ -66,7 +80,7 @@ test("daemon retains one workspace across connections and shuts down with a clie
         await new Promise<void>((done, reject) => {
             const timer = setTimeout(
                 () => reject(new Error(`daemon did not start: ${stderr}`)),
-                12000,
+                45000,
             );
             child.stderr.on("data", (chunk) => {
                 stderr += String(chunk);

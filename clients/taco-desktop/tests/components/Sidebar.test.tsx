@@ -53,7 +53,7 @@ describe("Sidebar session actions", () => {
         const rename = screen.getByRole("button", { name: "session.rename" });
         const remove = screen.getByRole("button", { name: "session.deleteSession" });
 
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         await user.tab();
         expect(document.activeElement).toBe(search);
         await user.tab();
@@ -94,7 +94,9 @@ describe("Sidebar session actions", () => {
             />,
         );
 
-        await userEvent.setup().click(screen.getByRole("button", { name: "session.newChat" }));
+        await userEvent
+            .setup({ delay: null })
+            .click(screen.getByRole("button", { name: "session.newChat" }));
         expect(onNewSession).toHaveBeenCalledOnce();
     });
 
@@ -215,7 +217,7 @@ describe("Sidebar session actions", () => {
         const button = screen.getByRole("button", { name: /session.loadMore/ });
         // The count describes the result set, not the workspace.
         expect(button.textContent).toContain("(1/3)");
-        await userEvent.setup().click(button);
+        await userEvent.setup({ delay: null }).click(button);
         expect(loadMore).toHaveBeenCalledOnce();
     });
 });

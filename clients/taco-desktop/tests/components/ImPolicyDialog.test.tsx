@@ -117,7 +117,7 @@ describe("ImPolicyDialog — one dropdown per field", () => {
     it("tags the parent's option with the layer it comes from", async () => {
         renderDialog(makeClient(makeResult({ rules: GLOBAL_RULES })));
         await screen.findByText("imPolicy.sourceGlobal");
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
         const card = screen.getByRole("group", { name: "imPolicy.commandMode" });
         await user.click(within(card).getByRole("combobox"));
 
@@ -157,7 +157,7 @@ describe("ImPolicyDialog — saving overrides", () => {
     it("sends the chosen value when a non-parent option is picked", async () => {
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         // The global rule group only renders once the policy has loaded.
         await screen.findByText("imPolicy.sourceGlobal");
@@ -188,7 +188,7 @@ describe("ImPolicyDialog — saving overrides", () => {
             }),
         );
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         await screen.findByText("imPolicy.sourceGlobal");
         await choose(user, "imPolicy.commandMode", /imPolicy\.ask/);
@@ -231,7 +231,7 @@ describe("ImPolicyDialog — working directory", () => {
     it("sends the chosen working directory", async () => {
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         await screen.findByText("imPolicy.sourceGlobal");
         await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirPerChat/);
@@ -253,7 +253,7 @@ describe("ImPolicyDialog — working directory", () => {
         );
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         await screen.findByText("imPolicy.sourceGlobal");
         await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirCustom/);
@@ -281,7 +281,7 @@ describe("ImPolicyDialog — working directory", () => {
         );
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         await screen.findByText("imPolicy.sourceGlobal");
         await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirCustom/);
@@ -299,7 +299,7 @@ describe("ImPolicyDialog — working directory", () => {
     it("refuses a relative path for a custom working directory", async () => {
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         await screen.findByText("imPolicy.sourceGlobal");
         await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirCustom/);
@@ -330,7 +330,7 @@ describe("ImPolicyDialog — working directory", () => {
             }),
         );
         renderDialog(client);
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         await screen.findByText("imPolicy.sourceGlobal");
         await choose(user, "imPolicy.executionCwd", /imPolicy\.executionDirShared/);
@@ -382,7 +382,7 @@ describe("ImPolicyDialog — sidecar without inherited sources", () => {
             ),
         );
         await screen.findByText("imPolicy.sourceGlobal");
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
         const card = screen.getByRole("group", { name: "imPolicy.shell" });
         await user.click(within(card).getByRole("combobox"));
 
@@ -402,7 +402,7 @@ describe("ImPolicyDialog — local rule removal", () => {
             expect(screen.getByText("Mmx")).toBeDefined();
         });
 
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
         await user.click(screen.getAllByLabelText("imPolicy.removeRule")[0] as HTMLElement);
 
         await waitFor(() => {
@@ -436,7 +436,7 @@ describe("ImPolicyDialog — local rule removal", () => {
 
     it("a freshly added rule is removed by × before save (local-only)", async () => {
         renderDialog(makeClient(makeResult()));
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
 
         const input = (await screen.findAllByPlaceholderText("imPolicy.rulePlaceholder"))[0];
         if (!input) throw new Error("expected an allow-rule input");
@@ -461,7 +461,7 @@ describe("ImPolicyDialog — local rule removal", () => {
         });
         expect((client.imPolicyGet as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
 
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
         await user.click(screen.getAllByLabelText("imPolicy.removeRule")[0] as HTMLElement);
         await waitFor(() => {
             expect(screen.queryByText("Mmx")).toBeNull();
@@ -481,7 +481,7 @@ describe("ImPolicyDialog — blacklist wrapper rules", () => {
     it("accepts a shell wrapper in the blacklist", async () => {
         renderDialog(makeClient(makeResult({ channelDefault: { commands: { deny: [] } } })));
         const inputs = await screen.findAllByPlaceholderText("imPolicy.rulePlaceholder");
-        const user = userEvent.setup({ pointerEventsCheck: 0 });
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
         await user.type(inputs[1] as HTMLElement, "bash *");
         await user.click(screen.getAllByText("imPolicy.addRule")[1] as HTMLElement);
         expect(screen.getByText("bash *")).toBeTruthy();

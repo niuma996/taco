@@ -43,7 +43,7 @@ describe("PermissionsTab — removeRule", () => {
             settingsWrite,
         } as unknown as TacoClient;
 
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<PermissionsTab client={client} />);
 
         // Three rules initially.
@@ -116,7 +116,7 @@ describe("PermissionsTab — blacklist editing", () => {
         } as unknown as TacoClient;
         const { loadGlobalConfig } = await import("../../../src/lib/globalConfig");
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<PermissionsTab client={client} />);
         await user.click(screen.getByRole("combobox", { name: "settings.permissionsRuleType" }));
         await user.click(
@@ -163,7 +163,7 @@ describe("PermissionsTab — failed save", () => {
         } as unknown as TacoClient;
         const { loadGlobalConfig } = await import("../../../src/lib/globalConfig");
         await loadGlobalConfig(client);
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         render(<PermissionsTab client={client} />);
         const input = screen.getByRole("textbox") as HTMLInputElement;
         await user.type(input, "pnpm test");

@@ -38,7 +38,7 @@ function renderModal(props: Partial<ModalProps> = {}) {
 
 describe("Modal", () => {
     it("calls onClose on Escape", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onClose = vi.fn();
         renderModal({ onClose });
         await screen.findByRole("dialog");
@@ -47,7 +47,7 @@ describe("Modal", () => {
     });
 
     it("calls onClose when the scrim is clicked", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onClose = vi.fn();
         renderModal({ onClose });
         await screen.findByRole("dialog");
@@ -59,7 +59,7 @@ describe("Modal", () => {
     });
 
     it("ignores Escape and scrim clicks when dismissible is false", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onClose = vi.fn();
         renderModal({ onClose, dismissible: false });
         await screen.findByRole("dialog");
@@ -96,7 +96,7 @@ describe("Modal", () => {
     });
 
     it("restores focus to the previously focused element on close", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         function Harness() {
             const [open, setOpen] = useState(false);
             return (
@@ -147,7 +147,7 @@ describe("Select", () => {
     });
 
     it("opens the listbox and reports the selected option", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onValueChange = vi.fn();
         render(
             <Select
@@ -176,7 +176,7 @@ describe("Slider", () => {
     });
 
     it("steps by the step amount on ArrowRight and reports via onValueChange", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onValueChange = vi.fn();
         render(
             <Slider
@@ -195,7 +195,7 @@ describe("Slider", () => {
     });
 
     it("commits the final value via onValueCommit on keyboard release", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onValueCommit = vi.fn();
         render(
             <Slider
@@ -256,7 +256,7 @@ describe("Switch", () => {
     });
 
     it("reports the opposite state via onChange when clicked", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onChange = vi.fn();
         render(<Switch checked={false} label="Enabled" onChange={onChange} />);
         await user.click(screen.getByRole("switch", { name: "Enabled" }));
@@ -264,7 +264,7 @@ describe("Switch", () => {
     });
 
     it("does not fire onChange while disabled", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onChange = vi.fn();
         render(<Switch checked label="Enabled" disabled onChange={onChange} />);
         await user.click(screen.getByRole("switch", { name: "Enabled" }));
@@ -335,7 +335,7 @@ describe("TextInput", () => {
     });
 
     it("fires onChange with the typed value", async () => {
-        const user = userEvent.setup();
+        const user = userEvent.setup({ delay: null });
         const onChange = vi.fn();
         render(<TextInput onChange={onChange} />);
         await user.type(screen.getByRole("textbox"), "abc");
