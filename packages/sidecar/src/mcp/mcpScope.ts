@@ -14,7 +14,7 @@ import {
 
 interface ScopeEntry {
     refs: number;
-    provider: Promise<McpToolProvider>;
+    provider: McpToolProvider;
     released: Set<symbol>;
 }
 
@@ -23,37 +23,48 @@ export interface McpProviderLease {
     release(): Promise<void>;
 }
 
+/**
+ * A lease on a provider no other workspace can see. IM workspaces use this:
+ * stateful MCP servers (browser sessions, DB transactions) must not carry one
+ * conversation's state into another, so their transports are never shared.
+ */
+export function createPrivateMcpLease(args: DiscoverMcpToolsArgs): McpProviderLease {
+    const provider = createMcpToolProvider(args);
+    let released = false;
+    return {
+        provider,
+        release: async () => {
+            if (released) return;
+            released = true;
+            await provider.dispose();
+        },
+    };
+}
+
 export class McpScope {
     private readonly entries = new Map<string, ScopeEntry>();
 
-    async acquire(args: DiscoverMcpToolsArgs): Promise<McpProviderLease> {
+    /** The provider keeps the first leaseholder's logger; later leases share its output. */
+    acquire(args: DiscoverMcpToolsArgs): McpProviderLease {
         const key = stableJson(args.servers);
         let entry = this.entries.get(key);
         if (!entry) {
-            entry = {
-                refs: 0,
-                provider: Promise.resolve(createMcpToolProvider(args)),
-                released: new Set(),
-            };
+            entry = { refs: 0, provider: createMcpToolProvider(args), released: new Set() };
             this.entries.set(key, entry);
-            entry.provider.catch(() => {
-                if (this.entries.get(key) === entry) this.entries.delete(key);
-            });
         }
         entry.refs++;
         const token = Symbol("mcp-provider-lease");
         const current = entry;
-        const provider = await current.provider;
 
         return {
-            provider,
+            provider: current.provider,
             release: async () => {
                 if (current.released.has(token)) return;
                 current.released.add(token);
                 current.refs--;
                 if (current.refs !== 0 || this.entries.get(key) !== current) return;
                 this.entries.delete(key);
-                await provider.dispose();
+                await current.provider.dispose();
             },
         };
     }
@@ -61,14 +72,7 @@ export class McpScope {
     async dispose(): Promise<void> {
         const entries = [...this.entries.values()];
         this.entries.clear();
-        const providers = await Promise.allSettled(entries.map((entry) => entry.provider));
-        await Promise.all(
-            providers.flatMap((result) =>
-                result.status === "fulfilled"
-                    ? [result.value.dispose().catch(() => undefined)]
-                    : [],
-            ),
-        );
+        await Promise.all(entries.map((entry) => entry.provider.dispose().catch(() => undefined)));
     }
 }
 

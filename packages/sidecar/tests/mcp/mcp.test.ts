@@ -9,7 +9,7 @@ import { Value } from "typebox/value";
 import type { Logger } from "../../src/lib/logger.ts";
 import type { McpClientFactory, McpClientHandle, McpToolInfo } from "../../src/mcp/mcpClient.ts";
 import { createMcpClient } from "../../src/mcp/mcpClient.ts";
-import { McpScope } from "../../src/mcp/mcpScope.ts";
+import { createPrivateMcpLease, McpScope } from "../../src/mcp/mcpScope.ts";
 import { createMcpToolAdapter } from "../../src/mcp/mcpToolAdapter.ts";
 import { dedupeName, MAX_TOOL_NAME_LENGTH, mcpToolName } from "../../src/mcp/mcpToolName.ts";
 import { discoverMcpTools } from "../../src/mcp/mcpToolProvider.ts";
@@ -610,6 +610,35 @@ describe("mcpToolProvider", () => {
             await second.release();
             assert.equal(handles.get("one")?.closed, true);
             assert.equal(handles.get("two")?.closed, true);
+        });
+
+        it("keeps private leases out of the shared scope", async () => {
+            const handles: FakeMcpClient[] = [];
+            const clientFactory: McpClientFactory = async (cfg) => {
+                const handle = new FakeMcpClient(cfg.id, []);
+                handles.push(handle);
+                return handle;
+            };
+            const args = {
+                servers: [server("stateful")],
+                clientFactory,
+                log: silentLogger as unknown as Logger,
+            } satisfies Parameters<typeof discoverMcpTools>[0];
+            const scope = new McpScope();
+
+            const shared = scope.acquire(args);
+            const privateLease = createPrivateMcpLease(args);
+            await shared.provider.ready();
+            await privateLease.provider.ready();
+
+            assert.notEqual(shared.provider, privateLease.provider);
+            assert.equal(handles.length, 2);
+            await privateLease.release();
+            await privateLease.release();
+            assert.equal(handles[1]?.closed, true);
+            assert.equal(handles[0]?.closed, false);
+            await shared.release();
+            assert.equal(handles[0]?.closed, true);
         });
 
         it("shares one in-flight discovery between concurrent leases", async () => {

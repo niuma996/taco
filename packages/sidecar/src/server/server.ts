@@ -83,7 +83,7 @@ import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
-import { McpScope } from "../mcp/mcpScope.ts";
+import { createPrivateMcpLease, McpScope } from "../mcp/mcpScope.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
@@ -998,8 +998,8 @@ export class SidecarServer implements ServerRpcSurface {
         const { skills, skillDiagnostics, agents, extensions } =
             await this.loadWorkspaceAssets(scope);
 
-        // Lease process-scoped MCP providers (stdio cwd defaults to the workspace
-        // dir) and build a registry whose MCP candidates are prepared lazily.
+        // Lease MCP providers (stdio cwd defaults to the workspace dir; local
+        // workspaces share them process-wide, IM workspaces get private ones) and build a registry whose MCP candidates are prepared lazily.
         // Discovery failure is isolated per server and never blocks workspace
         // startup.
         //
@@ -1015,7 +1015,7 @@ export class SidecarServer implements ServerRpcSurface {
                 `workspace dir missing (${scope.executionCwd}); stdio MCP servers without an explicit cwd will inherit the sidecar's`,
             );
         }
-        const mcpLease = await this.mcpScope.acquire({
+        const mcpArgs = {
             servers: this.mcpServers.map((s) => ({
                 ...s,
                 ...(s.cwd !== undefined
@@ -1025,7 +1025,10 @@ export class SidecarServer implements ServerRpcSurface {
                       : {}),
             })),
             log,
-        });
+        };
+        // IM workspaces never share transports: see createPrivateMcpLease.
+        const mcpLease =
+            scope.kind === "im" ? createPrivateMcpLease(mcpArgs) : this.mcpScope.acquire(mcpArgs);
         const mcpProvider = mcpLease.provider;
         const toolRegistry = new DefaultDeferredToolRegistry({
             candidates: builtinToolCandidates(scope.kind),

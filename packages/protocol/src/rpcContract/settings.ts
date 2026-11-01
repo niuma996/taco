@@ -87,7 +87,7 @@ export type McpCreateConfigParams = ParamsOf<typeof mcpCreateConfigSchema>;
 /** Shared result for create / update — safe summary + live-reload status. */
 export interface McpMutateConfigResult {
     server: McpServerConfigView;
-    /** MCP configuration is reloaded for future workspace builds without a process restart. */
+    /** Applies to workspaces built after this call; already-built workspaces keep their toolset. */
     requiresRestart: boolean;
 }
 
@@ -97,7 +97,7 @@ export type McpDeleteConfigParams = ParamsOf<typeof mcpDeleteConfigSchema>;
 
 export interface McpDeleteConfigResult {
     deleted: string;
-    /** MCP configuration is reloaded for future workspace builds without a process restart. */
+    /** Applies to workspaces built after this call; already-built workspaces keep their toolset. */
     requiresRestart: boolean;
 }
 
