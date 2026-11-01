@@ -17,7 +17,6 @@ import {
     toolCallIdSchema,
     workspaceIdSchema,
 } from "./fields.js";
-import { vocabularySchema } from "./vocabulary.js";
 
 const workspace = workspaceIdSchema;
 
@@ -28,7 +27,7 @@ const attachmentIds = Type.Optional(
     Type.Array(attachmentIdSchema, { maxItems: ATTACHMENT_MAX_COUNT }),
 );
 
-const thinkingLevel = vocabularySchema(THINKING_LEVELS);
+const thinkingLevel = Type.Enum(THINKING_LEVELS);
 const locale = Type.Union([Type.Literal("zh"), Type.Literal("en")]);
 
 export const sessionListSchema = Type.Object({

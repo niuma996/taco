@@ -15,5 +15,4 @@ export * from "./memory.js";
 export * from "./session.js";
 export * from "./settings.js";
 export * from "./tools.js";
-export { vocabularySchema } from "./vocabulary.js";
 export * from "./workspace.js";

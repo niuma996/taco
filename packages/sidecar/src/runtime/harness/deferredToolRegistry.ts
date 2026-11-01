@@ -101,15 +101,27 @@ export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
 
     async prepare(): Promise<void> {
         this.preparePromise ??= this.prepareDynamicCandidates();
-        await this.preparePromise;
+        try {
+            await this.preparePromise;
+        } catch (err) {
+            // A failed prepare must not poison every later attach.
+            this.preparePromise = undefined;
+            throw err;
+        }
     }
 
     private async prepareDynamicCandidates(): Promise<void> {
         if (!this.prepareFn) return;
-        for (const candidate of await this.prepareFn()) {
-            if (this.byName.has(candidate.name)) {
+        const candidates = await this.prepareFn();
+        // Validate the whole batch before installing any of it.
+        const seen = new Set<string>();
+        for (const candidate of candidates) {
+            if (this.byName.has(candidate.name) || seen.has(candidate.name)) {
                 throw new Error(`duplicate dynamic tool candidate name: ${candidate.name}`);
             }
+            seen.add(candidate.name);
+        }
+        for (const candidate of candidates) {
             this.byName.set(candidate.name, candidate);
             if (candidate.loading === "deferred") this.deferredNames.push(candidate.name);
             else this.alwaysNames.push(candidate.name);

@@ -22,9 +22,6 @@ import type { TacoClientSettingsShape } from "./clientSettings.ts";
 import { readClientSettings, saveClientSettings } from "./clientSettings.ts";
 import type { TacoClient } from "./clients/tacoClient.ts";
 
-export { THINKING_LEVELS } from "@taco-ai/protocol";
-
-/** thinkingLevel value domain (synced with sidecar config.ts) */
 /** Merged state — sidecar config (masked view) + client-side local settings */
 export interface GlobalConfigState {
     /**

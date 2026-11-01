@@ -7,7 +7,6 @@
  * server with it (mcp.createConfig) or sends it as a field-wise update patch
  * (mcp.updateConfig; the server merges, so untouched fields survive).
  */
-
 import type { McpServerConfig, McpTransportKind } from "@taco-ai/protocol";
 import { MCP_TRANSPORT_KINDS } from "@taco-ai/protocol";
 import { useState } from "react";
@@ -19,11 +18,15 @@ import { Select } from "../ui/Select.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
-const TRANSPORT_OPTIONS: ReadonlyArray<{ value: McpTransportKind; labelKey: string }> =
-    MCP_TRANSPORT_KINDS.map((value) => ({
-        value,
-        labelKey: `settings.mcpServerTransport${value === "stdio" ? "Stdio" : "Http"}`,
-    }));
+const TRANSPORT_LABEL_KEYS = {
+    stdio: "settings.mcpServerTransportStdio",
+    http: "settings.mcpServerTransportHttp",
+} satisfies Record<McpTransportKind, string>;
+
+const TRANSPORT_OPTIONS = MCP_TRANSPORT_KINDS.map((value) => ({
+    value,
+    labelKey: TRANSPORT_LABEL_KEYS[value],
+}));
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 

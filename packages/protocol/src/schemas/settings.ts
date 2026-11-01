@@ -10,13 +10,12 @@ import { Type } from "typebox";
 import { CUSTOM_PROVIDER_APIS, MCP_TRANSPORT_KINDS } from "../config.js";
 import type { ConfigPatchParams, SettingsWriteParams } from "../configPatch.js";
 import { sessionIdSchema, toolCallIdSchema, workspaceIdSchema } from "./fields.js";
-import { vocabularySchema } from "./vocabulary.js";
 import { noParamsSchema } from "./workspace.js";
 
 const workspace = workspaceIdSchema;
 
 /** The provider protocols a custom endpoint can speak. */
-const providerApi = vocabularySchema(CUSTOM_PROVIDER_APIS);
+const providerApi = Type.Enum(CUSTOM_PROVIDER_APIS);
 
 export const settingsGetSchema = noParamsSchema;
 
@@ -91,7 +90,7 @@ export const extensionsStatusSchema = noParamsSchema;
  */
 const serverId = Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" });
 
-const transport = vocabularySchema(MCP_TRANSPORT_KINDS);
+const transport = Type.Enum(MCP_TRANSPORT_KINDS);
 
 /** The MCP server fields a create or an update patch can carry. */
 const serverFields = {

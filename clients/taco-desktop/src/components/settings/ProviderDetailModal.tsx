@@ -69,11 +69,16 @@ export interface ProviderDetailModalProps {
     onClose: () => void;
 }
 
-const PROTOCOL_OPTIONS: ReadonlyArray<{ value: CustomProviderApi; labelKey: string }> =
-    CUSTOM_PROVIDER_APIS.map((value) => ({
-        value,
-        labelKey: `settings.customProviderApi${value[0].toUpperCase()}${value.slice(1)}`,
-    }));
+const PROTOCOL_LABEL_KEYS = {
+    chatcomplete: "settings.customProviderApiChatcomplete",
+    response: "settings.customProviderApiResponse",
+    anthropic: "settings.customProviderApiAnthropic",
+} satisfies Record<CustomProviderApi, string>;
+
+const PROTOCOL_OPTIONS = CUSTOM_PROVIDER_APIS.map((value) => ({
+    value,
+    labelKey: PROTOCOL_LABEL_KEYS[value],
+}));
 
 /** Common context-window presets offered in the model rows. The "k" = 1000
  *  convention matches parseModelWindow, so a preset round-trips through the

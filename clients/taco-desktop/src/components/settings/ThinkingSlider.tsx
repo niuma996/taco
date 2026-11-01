@@ -7,8 +7,8 @@
  */
 
 import type { ThinkingLevel } from "@taco-ai/protocol";
+import { THINKING_LEVELS } from "@taco-ai/protocol";
 import { useT } from "../../i18n/useI18n.ts";
-import { THINKING_LEVELS } from "../../lib/globalConfig";
 import { Slider } from "../ui/Slider.tsx";
 
 interface ThinkingSliderProps {

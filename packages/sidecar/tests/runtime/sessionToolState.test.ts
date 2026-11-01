@@ -243,3 +243,34 @@ describe("toolset refresher baseline", () => {
         assert.deepEqual([...target.active].sort(), ["read", "write"]);
     });
 });
+
+describe("DefaultDeferredToolRegistry.prepare", () => {
+    const dynamic = (name: string) => ({
+        name,
+        summary: name,
+        loading: "deferred" as const,
+        source: "mcp" as const,
+        load: async () => fakeTool(name),
+    });
+
+    it("installs nothing and stays retryable when a dynamic candidate collides", async () => {
+        let attempt = 0;
+        const registry = new DefaultDeferredToolRegistry({
+            candidates: [dynamic("taken")],
+            prepare: async () =>
+                attempt++ === 0 ? [dynamic("fresh"), dynamic("taken")] : [dynamic("fresh")],
+        });
+
+        await assert.rejects(registry.prepare(), /duplicate dynamic tool candidate name: taken/);
+        assert.deepEqual(
+            registry.listDeferred().map((c) => c.name),
+            ["taken"],
+        );
+
+        await registry.prepare();
+        assert.deepEqual(
+            registry.listDeferred().map((c) => c.name),
+            ["taken", "fresh"],
+        );
+    });
+});
