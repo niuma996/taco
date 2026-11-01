@@ -612,6 +612,26 @@ describe("mcpToolProvider", () => {
             assert.equal(handles.get("two")?.closed, true);
         });
 
+        it("shares HTTP servers across workspace cwds but keeps stdio cwds apart", async () => {
+            const scope = new McpScope();
+            const base = {
+                clientFactory: factoryFrom(new Map()),
+                log: silentLogger as unknown as Logger,
+            };
+            const http = (cwd: string) =>
+                server("remote", { transport: "http", url: "http://127.0.0.1/mcp", cwd });
+            const stdio = (cwd: string) => server("local", { cwd });
+
+            const httpA = scope.acquire({ ...base, servers: [http("/work/a")] });
+            const httpB = scope.acquire({ ...base, servers: [http("/work/b")] });
+            const stdioA = scope.acquire({ ...base, servers: [stdio("/work/a")] });
+            const stdioB = scope.acquire({ ...base, servers: [stdio("/work/b")] });
+
+            assert.equal(httpA.provider, httpB.provider);
+            assert.notEqual(stdioA.provider, stdioB.provider);
+            await Promise.all([httpA, httpB, stdioA, stdioB].map((lease) => lease.release()));
+        });
+
         it("keeps private leases out of the shared scope", async () => {
             const handles: FakeMcpClient[] = [];
             const clientFactory: McpClientFactory = async (cfg) => {

@@ -22,27 +22,20 @@ export const DEFAULT_CUSTOM_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_CUSTOM_MAX_TOKENS = 8_192;
 
 /** Maps `CustomProviderApi` to the pi api string. */
-function toPiApi(api: CustomProviderApi): Api {
-    switch (api) {
-        case "chatcomplete":
-            return "openai-completions";
-        case "response":
-            return "openai-responses";
-        case "anthropic":
-            return "anthropic-messages";
-    }
-}
+export const PI_API_BY_CUSTOM_API = {
+    chatcomplete: "openai-completions",
+    response: "openai-responses",
+    anthropic: "anthropic-messages",
+} as const satisfies Record<CustomProviderApi, Api>;
 
 /** Maps `CustomProviderApi` to the pi `ProviderStreams` constructor. */
 function toApiStreams(api: CustomProviderApi) {
-    switch (api) {
-        case "chatcomplete":
-            return openAICompletionsApi();
-        case "response":
-            return openAIResponsesApi();
-        case "anthropic":
-            return anthropicMessagesApi();
-    }
+    const streams = {
+        chatcomplete: openAICompletionsApi,
+        response: openAIResponsesApi,
+        anthropic: anthropicMessagesApi,
+    } satisfies Record<CustomProviderApi, () => unknown>;
+    return streams[api]();
 }
 
 /**
@@ -63,7 +56,7 @@ export function toModel(entry: CustomModelEntry, cfg: CustomProviderConfig): Mod
     return {
         id: entry.id,
         name: entry.name ?? entry.id,
-        api: toPiApi(cfg.api),
+        api: PI_API_BY_CUSTOM_API[cfg.api],
         provider: cfg.id,
         baseUrl: cfg.baseUrl,
         reasoning: entry.reasoning ?? false,

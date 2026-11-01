@@ -394,17 +394,21 @@ is the authoritative source.
 
 ## Known Quirks
 
-### `mcp.*` config changes require a sidecar restart for new tool exposure
+### `mcp.*` config changes apply to newly built workspaces
 
 `mcp.listServers` reads `mcpServers` from `taco.json` on every call (so
-its output reflects the latest on-disk state), but the actual runtime
-tool set is built once per workspace at attach time by `discoverMcpTools`.
-Adding a server, toggling `enabled`, or editing `alwaysLoaded` only
-takes effect for newly-attached workspaces; an already-running workspace
-will not see the new tool until the sidecar restarts. The desktop MCP
-settings UI exposes an "Apply & restart" button to make this explicit —
-the button aborts every open workspace and any in-flight turn inside them;
-the user sees this in the button's tooltip.
+its output reflects the latest on-disk state). The `mcp.createConfig` /
+`mcp.updateConfig` / `mcp.deleteConfig` writes reload the server set in
+place and report `requiresRestart: false`, but the reload reaches only
+workspaces built after the write; an already-built workspace keeps the
+toolset it leased at build time. MCP servers connect lazily, on the
+workspace's first attach or `tools.list`, not when the workspace is built.
+
+The desktop MCP settings UI still restarts the sidecar after a save so
+the edit reaches every open workspace at once. Its "Apply & restart"
+button does the same for batched edits; either way, every open workspace
+and any in-flight turn inside them is aborted, which the button's tooltip
+tells the user.
 
 `mcp.listServers` skips servers with `enabled === false` and returns
 `status: "skipped"` for them (without spawning the stdio child / opening

@@ -6,6 +6,7 @@
  * transports stay alive across workspace runtimes.
  */
 
+import type { McpServerConfig } from "@taco-ai/protocol";
 import {
     createMcpToolProvider,
     type DiscoverMcpToolsArgs,
@@ -46,7 +47,7 @@ export class McpScope {
 
     /** The provider keeps the first leaseholder's logger; later leases share its output. */
     acquire(args: DiscoverMcpToolsArgs): McpProviderLease {
-        const key = stableJson(args.servers);
+        const key = stableJson(args.servers.map(transportIdentity));
         let entry = this.entries.get(key);
         if (!entry) {
             entry = { refs: 0, provider: createMcpToolProvider(args), released: new Set() };
@@ -74,6 +75,13 @@ export class McpScope {
         this.entries.clear();
         await Promise.all(entries.map((entry) => entry.provider.dispose().catch(() => undefined)));
     }
+}
+
+/** Only stdio spawns into `cwd`; letting it split the key would stop HTTP servers from sharing. */
+function transportIdentity(server: McpServerConfig): McpServerConfig {
+    if (server.transport === "stdio" || server.cwd === undefined) return server;
+    const { cwd: _cwd, ...rest } = server;
+    return rest;
 }
 
 function stableJson(value: unknown): string {

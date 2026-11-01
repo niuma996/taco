@@ -30,6 +30,7 @@ import type {
     ModelInputKind,
     SessionId,
 } from "@taco-ai/protocol";
+import { CUSTOM_PROVIDER_APIS } from "@taco-ai/protocol";
 import type { Api, Model } from "../pi/types.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import {
@@ -37,6 +38,7 @@ import {
     DEFAULT_CUSTOM_CONTEXT_WINDOW,
     DEFAULT_CUSTOM_MAX_TOKENS,
     modelInput,
+    PI_API_BY_CUSTOM_API,
 } from "./customProvider.ts";
 import type { ProviderKeyStore } from "./providerKeyStore.ts";
 
@@ -257,18 +259,9 @@ export function findModelById(models: MutableModels, id: string): Model<Api> | u
     return undefined;
 }
 
-/** Maps a pi api string back to the taco protocol family (inverse of customProvider.toPiApi). */
+/** Maps a pi api string back to the taco protocol family (inverse of PI_API_BY_CUSTOM_API). */
 function fromPiApi(api: Api): CustomProviderApi | undefined {
-    switch (api) {
-        case "openai-completions":
-            return "chatcomplete";
-        case "openai-responses":
-            return "response";
-        case "anthropic-messages":
-            return "anthropic";
-        default:
-            return undefined;
-    }
+    return CUSTOM_PROVIDER_APIS.find((family) => PI_API_BY_CUSTOM_API[family] === api);
 }
 
 /**
