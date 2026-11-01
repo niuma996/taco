@@ -21,7 +21,7 @@ import type {
     ProviderListModelsParams,
     ProviderListModelsResult,
 } from "@taco-ai/protocol";
-import { ErrorCodes } from "@taco-ai/protocol";
+import { CUSTOM_PROVIDER_APIS, ErrorCodes } from "@taco-ai/protocol";
 import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -158,7 +158,7 @@ export class TimeoutError extends Error {
 }
 
 function isApi(value: unknown): value is CustomProviderApi {
-    return value === "chatcomplete" || value === "response" || value === "anthropic";
+    return typeof value === "string" && CUSTOM_PROVIDER_APIS.includes(value as CustomProviderApi);
 }
 
 /**

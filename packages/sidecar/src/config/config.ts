@@ -17,6 +17,7 @@ import {
     type CommandPermissionMode,
     type CommandPermissionRule,
     type CompactionConfig,
+    CUSTOM_PROVIDER_APIS,
     CUSTOM_PROVIDER_PREFIX,
     type CustomModelEntry,
     type CustomProviderApi,
@@ -25,8 +26,10 @@ import {
     DEFAULT_COMPACTION_THRESHOLD,
     type GlobalConfigPatch,
     type InstructionsConfig,
+    MCP_TRANSPORT_KINDS,
     type McpServerConfig,
     type McpTransportKind,
+    THINKING_LEVELS as PROTOCOL_THINKING_LEVELS,
     type TacoGlobalConfigShape,
 } from "@taco-ai/protocol";
 import type { ChannelConfig } from "../channels/registry.ts";
@@ -79,15 +82,7 @@ export interface ResolvedTacoConfig {
 }
 
 /** pi thinkingLevel value domain whitelist — superset (including `max`) reserved for future-compat. */
-export const THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set<ThinkingLevel>([
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-]);
+export const THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set(PROTOCOL_THINKING_LEVELS);
 
 function isThinkingLevel(v: unknown): v is ThinkingLevel {
     return typeof v === "string" && (THINKING_LEVELS as Set<string>).has(v);
@@ -417,12 +412,6 @@ export function resolveConfig(
     };
 }
 
-const CUSTOM_PROVIDER_APIS: ReadonlyArray<CustomProviderApi> = [
-    "chatcomplete",
-    "response",
-    "anthropic",
-];
-
 /**
  * Validate customProviders. Any invalid entry throws — the caller (settings.write
  * handler) turns the error into an invalid_value RPC response. Returns the
@@ -612,7 +601,6 @@ export function validateProviderHiddenModels(
     return out;
 }
 
-const MCP_TRANSPORT_KINDS: ReadonlySet<McpTransportKind> = new Set(["stdio", "http"]);
 const MCP_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
@@ -643,7 +631,7 @@ export function validateMcpServers(value: unknown, source: string): McpServerCon
         seen.add(e.id);
         if (
             typeof e.transport !== "string" ||
-            !MCP_TRANSPORT_KINDS.has(e.transport as McpTransportKind)
+            !MCP_TRANSPORT_KINDS.includes(e.transport as McpTransportKind)
         ) {
             throw new Error(
                 `invalid mcpServers from ${source}: transport must be "stdio" or "http" (${e.id})`,

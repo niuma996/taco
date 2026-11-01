@@ -182,7 +182,7 @@ describe("mcp.config", () => {
      *   - mcp.getConfig is the only path that returns the full raw config for one server.
      *   - updateConfig merges field-wise, preserving sensitive fields on disk.
      *   - createConfig rejects duplicate ids; deleteConfig removes only the target.
-     *   - every write RPC reports requiresRestart: true.
+     *   - every write RPC reports that no process restart is required after hot reload.
      *   - malformed input surfaces as `invalid_params` through the real dispatch
      *     path (normalizeError), not `internal`.
      *
@@ -253,13 +253,13 @@ describe("mcp.config", () => {
             saveGlobalConfig({ mcpServers: [fullServer()] });
             const result = await callMethod<{
                 server: McpServerConfigView;
-                requiresRestart: true;
+                requiresRestart: false;
             }>("mcp.updateConfig", {
                 params: { id: "dbx", patch: { enabled: false, alwaysLoaded: ["query", "sync"] } },
             });
             assert.equal(result.server.enabled, false);
             assert.deepEqual(result.server.alwaysLoaded, ["query", "sync"]);
-            assert.equal(result.requiresRestart, true);
+            assert.equal(result.requiresRestart, false);
 
             const onDisk = readGlobalConfig().mcpServers?.[0];
             assert.ok(onDisk, "server should still exist after update");
@@ -283,15 +283,15 @@ describe("mcp.config", () => {
             assert.equal(onDisk?.id, "dbx");
         });
 
-        it("mcp.createConfig adds the entry and reports requiresRestart", async () => {
+        it("mcp.createConfig adds the entry without requiring a restart", async () => {
             saveGlobalConfig({ mcpServers: [fullServer("existing")] });
             const created = fullServer("new-srv");
             const result = await callMethod<{
                 server: McpServerConfigView;
-                requiresRestart: true;
+                requiresRestart: false;
             }>("mcp.createConfig", { params: { config: created } });
             assert.equal(result.server.id, "new-srv");
-            assert.equal(result.requiresRestart, true);
+            assert.equal(result.requiresRestart, false);
             const ids = (readGlobalConfig().mcpServers ?? []).map((s) => s.id);
             assert.deepEqual(ids, ["existing", "new-srv"]);
         });
@@ -307,14 +307,14 @@ describe("mcp.config", () => {
             assert.deepEqual(ids, ["dbx"]);
         });
 
-        it("mcp.deleteConfig removes only the target and reports requiresRestart", async () => {
+        it("mcp.deleteConfig removes only the target without requiring a restart", async () => {
             saveGlobalConfig({ mcpServers: [fullServer("keep"), fullServer("drop")] });
             const result = await callMethod<{
                 deleted: string;
-                requiresRestart: true;
+                requiresRestart: false;
             }>("mcp.deleteConfig", { params: { id: "drop" } });
             assert.equal(result.deleted, "drop");
-            assert.equal(result.requiresRestart, true);
+            assert.equal(result.requiresRestart, false);
             const ids = (readGlobalConfig().mcpServers ?? []).map((s) => s.id);
             assert.deepEqual(ids, ["keep"]);
         });

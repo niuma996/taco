@@ -39,6 +39,8 @@ export interface DeferredToolRegistry {
     listAlways(): readonly ToolCandidate[];
     /** Load a candidate by name; returns undefined for unknown names. */
     load(name: string): Promise<TacoTool | undefined>;
+    /** Prepare dynamic candidates once before a surface needs their definitions. */
+    prepare?(): Promise<void>;
     /** Release external resources (MCP connections); optional. */
     dispose?(): Promise<void>;
 }
@@ -49,6 +51,8 @@ export interface DeferredToolRegistryOptions {
     candidates: readonly ToolCandidate[];
     /** Optional external-resource cleanup (e.g. MCP connections) forwarded by dispose(). */
     dispose?: () => Promise<void>;
+    /** Lazy source for candidates whose definitions require I/O, such as MCP. */
+    prepare?: () => Promise<readonly ToolCandidate[]>;
 }
 
 export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
@@ -56,6 +60,8 @@ export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
     private readonly deferredNames: string[];
     private readonly alwaysNames: string[];
     private readonly disposeFn: (() => Promise<void>) | undefined;
+    private readonly prepareFn: (() => Promise<readonly ToolCandidate[]>) | undefined;
+    private preparePromise?: Promise<void>;
 
     constructor(options: DeferredToolRegistryOptions) {
         for (const candidate of options.candidates) {
@@ -71,6 +77,7 @@ export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
             .filter((c) => c.loading === "always")
             .map((c) => c.name);
         this.disposeFn = options.dispose;
+        this.prepareFn = options.prepare;
     }
 
     listCandidates(): readonly ToolCandidate[] {
@@ -90,6 +97,23 @@ export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
         const candidate = this.byName.get(name);
         if (!candidate) return undefined;
         return candidate.load();
+    }
+
+    async prepare(): Promise<void> {
+        this.preparePromise ??= this.prepareDynamicCandidates();
+        await this.preparePromise;
+    }
+
+    private async prepareDynamicCandidates(): Promise<void> {
+        if (!this.prepareFn) return;
+        for (const candidate of await this.prepareFn()) {
+            if (this.byName.has(candidate.name)) {
+                throw new Error(`duplicate dynamic tool candidate name: ${candidate.name}`);
+            }
+            this.byName.set(candidate.name, candidate);
+            if (candidate.loading === "deferred") this.deferredNames.push(candidate.name);
+            else this.alwaysNames.push(candidate.name);
+        }
     }
 
     async dispose(): Promise<void> {

@@ -9,6 +9,7 @@
 import { Type } from "typebox";
 import { ATTACHMENT_MAX_COUNT } from "../attachmentLimits.js";
 import type { InitializeParams } from "../frames.js";
+import { THINKING_LEVELS } from "../messages.js";
 import { attachmentIdSchema } from "./attachment.js";
 import {
     imageInputsSchema,
@@ -16,6 +17,7 @@ import {
     toolCallIdSchema,
     workspaceIdSchema,
 } from "./fields.js";
+import { vocabularySchema } from "./vocabulary.js";
 
 const workspace = workspaceIdSchema;
 
@@ -26,15 +28,7 @@ const attachmentIds = Type.Optional(
     Type.Array(attachmentIdSchema, { maxItems: ATTACHMENT_MAX_COUNT }),
 );
 
-const thinkingLevel = Type.Union([
-    Type.Literal("off"),
-    Type.Literal("minimal"),
-    Type.Literal("low"),
-    Type.Literal("medium"),
-    Type.Literal("high"),
-    Type.Literal("xhigh"),
-    Type.Literal("max"),
-]);
+const thinkingLevel = vocabularySchema(THINKING_LEVELS);
 const locale = Type.Union([Type.Literal("zh"), Type.Literal("en")]);
 
 export const sessionListSchema = Type.Object({

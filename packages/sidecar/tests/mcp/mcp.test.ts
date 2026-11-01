@@ -9,6 +9,7 @@ import { Value } from "typebox/value";
 import type { Logger } from "../../src/lib/logger.ts";
 import type { McpClientFactory, McpClientHandle, McpToolInfo } from "../../src/mcp/mcpClient.ts";
 import { createMcpClient } from "../../src/mcp/mcpClient.ts";
+import { McpScope } from "../../src/mcp/mcpScope.ts";
 import { createMcpToolAdapter } from "../../src/mcp/mcpToolAdapter.ts";
 import { dedupeName, MAX_TOOL_NAME_LENGTH, mcpToolName } from "../../src/mcp/mcpToolName.ts";
 import { discoverMcpTools } from "../../src/mcp/mcpToolProvider.ts";
@@ -551,6 +552,95 @@ describe("mcpToolProvider", () => {
                 handle.calls.map((c) => c.name),
                 ["list_issues"],
             );
+        });
+    });
+
+    describe("McpScope", () => {
+        it("shares one discovered provider between leases for the same configuration", async () => {
+            const handle = new FakeMcpClient("shared", [
+                { name: "echo", inputSchema: { type: "object", properties: {} } },
+            ]);
+            let factoryCalls = 0;
+            const scope = new McpScope();
+            const args = {
+                servers: [server("shared")],
+                clientFactory: async () => {
+                    factoryCalls++;
+                    return handle;
+                },
+                log: silentLogger as unknown as Logger,
+            } satisfies Parameters<typeof discoverMcpTools>[0];
+
+            const first = await scope.acquire(args);
+            const second = await scope.acquire(args);
+
+            assert.equal(factoryCalls, 0);
+            await first.provider.ready();
+            assert.equal(factoryCalls, 1);
+            assert.equal(first.provider, second.provider);
+            await first.release();
+            assert.equal(handle.closed, false);
+            await second.release();
+            assert.equal(handle.closed, true);
+        });
+
+        it("does not share providers across different configurations", async () => {
+            const handles = new Map<string, FakeMcpClient>();
+            let factoryCalls = 0;
+            const scope = new McpScope();
+            const factory: McpClientFactory = async (cfg) => {
+                factoryCalls++;
+                const handle = new FakeMcpClient(cfg.id, []);
+                handles.set(cfg.id, handle);
+                return handle;
+            };
+            const base = {
+                clientFactory: factory,
+                log: silentLogger as unknown as Logger,
+            } satisfies Omit<Parameters<typeof discoverMcpTools>[0], "servers">;
+
+            const first = await scope.acquire({ ...base, servers: [server("one")] });
+            const second = await scope.acquire({ ...base, servers: [server("two")] });
+
+            await first.provider.ready();
+            await second.provider.ready();
+            assert.equal(factoryCalls, 2);
+            assert.notEqual(first.provider, second.provider);
+            await first.release();
+            await second.release();
+            assert.equal(handles.get("one")?.closed, true);
+            assert.equal(handles.get("two")?.closed, true);
+        });
+
+        it("shares one in-flight discovery between concurrent leases", async () => {
+            let factoryCalls = 0;
+            let resolveFactory: ((handle: McpClientHandle) => void) | undefined;
+            const factoryPromise = new Promise<McpClientHandle>((resolve) => {
+                resolveFactory = resolve;
+            });
+            const scope = new McpScope();
+            const args = {
+                servers: [server("concurrent")],
+                clientFactory: async () => {
+                    factoryCalls++;
+                    return factoryPromise;
+                },
+                log: silentLogger as unknown as Logger,
+            } satisfies Parameters<typeof discoverMcpTools>[0];
+
+            const firstPromise = scope.acquire(args);
+            const secondPromise = scope.acquire(args);
+            const first = await firstPromise;
+            const second = await secondPromise;
+            assert.equal(factoryCalls, 0);
+            const ready = first.provider.ready();
+            resolveFactory?.(new FakeMcpClient("concurrent", []));
+            await ready;
+
+            assert.equal(factoryCalls, 1);
+            assert.equal(first.provider, second.provider);
+            await first.release();
+            await second.release();
         });
     });
 });

@@ -126,6 +126,15 @@ createInterface({input:process.stdin}).on("line", line => {
     try {
         await server.setImChannelDefault("scope-mcp", { executionDir: { mode: "per-chat" } });
         const workspace = await server.ensureWorkspace(asWorkspaceId("im://scope-mcp/peer/chat"));
+        assert.equal(
+            await import("node:fs/promises").then(({ access }) =>
+                access(defaultMarker)
+                    .then(() => true)
+                    .catch(() => false),
+            ),
+            false,
+        );
+        await workspace.toolRegistry.prepare?.();
         const { readFile, realpath } = await import("node:fs/promises");
         assert.equal(await readFile(defaultMarker, "utf8"), await realpath(workspace.executionCwd));
         assert.equal(await readFile(explicitMarker, "utf8"), await realpath(explicit));

@@ -1211,7 +1211,14 @@ export class WorkspaceRuntime extends EventEmitter {
     // ─────────── attach / detach (delegates to SessionRegistry) ───────────
 
     async attach(sessionId: SessionId, opts: AttachOptions = {}): Promise<AttachedSession> {
+        await this.toolRegistry.prepare?.();
+        this.refreshSystemPromptIfNeeded();
         return await this.sessionRegistry.attach(sessionId, opts);
+    }
+
+    private refreshSystemPromptIfNeeded(): void {
+        const next = this.rebuildSystemPrompt(this.resources.skills ?? []);
+        if (next !== this.systemPrompt) this.systemPrompt = next;
     }
 
     /**

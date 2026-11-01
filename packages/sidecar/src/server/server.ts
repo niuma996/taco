@@ -83,7 +83,7 @@ import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
-import { discoverMcpTools } from "../mcp/mcpToolProvider.ts";
+import { McpScope } from "../mcp/mcpScope.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
@@ -208,6 +208,8 @@ export interface SidecarServerOptions {
     providerHiddenModels?: Record<string, string[]>;
     /** MCP servers whose tools become dynamic-tool candidates (parsed at startup from taco.json). */
     mcpServers?: readonly McpServerConfig[];
+    /** Process-level MCP transport ownership shared by workspace runtimes. */
+    mcpScope?: McpScope;
     /** Maximum number of settled command outcomes retained; values below 1 clamp to 1. */
     commandRecordLimit?: number;
     /**
@@ -348,6 +350,7 @@ export class SidecarServer implements ServerRpcSurface {
     private instructionsConfig?: InstructionsConfig;
     /** Currently active MCP server set — see customProviders for lifecycle notes. */
     private mcpServers: readonly McpServerConfig[] = [];
+    private readonly mcpScope: McpScope;
     readonly providerKeyStore: ProviderKeyStore;
     /** Scheduler controller — exposed to `jobs.*` handlers via ServerRpcSurface.
      *  Mutable via `setJobsControl()` so the daemon can mount the controller
@@ -495,6 +498,7 @@ export class SidecarServer implements ServerRpcSurface {
         // unchanged — it updates already-built workspaces.
         this.instructionsConfig = options.instructionsConfig ?? config.instructions;
         this.mcpServers = options.mcpServers ?? config.mcpServers ?? [];
+        this.mcpScope = options.mcpScope ?? new McpScope();
         this.imPolicyStore = new ImWorkspacePolicyStore();
         this.associationStore = new WorkspaceAssociationStore();
         this.sessionEvents = new SessionEventLog(512, options.pushLog);
@@ -612,6 +616,7 @@ export class SidecarServer implements ServerRpcSurface {
             },
             () => this.channelRegistry.stopAll(),
             () => this.workspaces.stop(),
+            () => this.mcpScope.dispose(),
         ]);
         // Finish resetting connection state even if a resource rejects during teardown.
         let failure: unknown;
@@ -993,9 +998,10 @@ export class SidecarServer implements ServerRpcSurface {
         const { skills, skillDiagnostics, agents, extensions } =
             await this.loadWorkspaceAssets(scope);
 
-        // Discover MCP tools (stdio cwd defaults to the workspace dir) and build
-        // the dynamic-tool registry from them. Discovery failure is isolated per
-        // server and never blocks workspace startup.
+        // Lease process-scoped MCP providers (stdio cwd defaults to the workspace
+        // dir) and build a registry whose MCP candidates are prepared lazily.
+        // Discovery failure is isolated per server and never blocks workspace
+        // startup.
         //
         // The workspace dir is only usable as a default cwd when it still
         // exists. It may not: the desktop's default workspace lives under /tmp,
@@ -1009,7 +1015,7 @@ export class SidecarServer implements ServerRpcSurface {
                 `workspace dir missing (${scope.executionCwd}); stdio MCP servers without an explicit cwd will inherit the sidecar's`,
             );
         }
-        const mcpProvider = await discoverMcpTools({
+        const mcpLease = await this.mcpScope.acquire({
             servers: this.mcpServers.map((s) => ({
                 ...s,
                 ...(s.cwd !== undefined
@@ -1020,12 +1026,17 @@ export class SidecarServer implements ServerRpcSurface {
             })),
             log,
         });
+        const mcpProvider = mcpLease.provider;
         const toolRegistry = new DefaultDeferredToolRegistry({
-            candidates: [...mcpProvider.candidates(), ...builtinToolCandidates(scope.kind)],
-            dispose: () => mcpProvider.dispose(),
+            candidates: builtinToolCandidates(scope.kind),
+            prepare: async () => {
+                await mcpProvider.ready();
+                return mcpProvider.candidates();
+            },
+            dispose: () => mcpLease.release(),
         });
 
-        // From here on, any failure must dispose mcpProvider — its stdio
+        // From here on, any failure must release the MCP lease — its stdio
         // children / HTTP sockets outlive this scope otherwise. wireWorkspacePush
         // can throw on broken channel registries; WorkspaceRuntime's ctor can
         // throw on bad config; we don't get a second chance to release the
@@ -1104,7 +1115,7 @@ export class SidecarServer implements ServerRpcSurface {
             // released. Single failure here is preferable to a leaked
             // process: every caller of ensureWorkspace sees the same error
             // and can retry.
-            await (ws ? ws.dispose() : mcpProvider.dispose()).catch(() => undefined);
+            await (ws ? ws.dispose() : mcpLease.release()).catch(() => undefined);
             throw err;
         }
 

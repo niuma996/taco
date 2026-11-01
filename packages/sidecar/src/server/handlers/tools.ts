@@ -90,6 +90,7 @@ export function registerToolsHandlers(): void {
         // surfaces both here so users can see what is reachable, alongside
         // the static toolset.
         const registry = workspace.toolRegistry;
+        await registry?.prepare?.();
         const deferredEntries: ToolEntry[] = registry
             ? await Promise.all(
                   registry.listCandidates().map(async (candidate) => {

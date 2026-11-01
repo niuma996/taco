@@ -29,7 +29,7 @@ import type {
     GlobalConfigPatch,
     TacoGlobalConfigView,
 } from "@taco-ai/protocol";
-import { asToolCallId, RPC } from "@taco-ai/protocol";
+import { asToolCallId, RPC, THINKING_LEVELS, vocabularySchema } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { denialGuidance } from "../permissions/denialGuidance.ts";
@@ -43,16 +43,7 @@ const configPatchSchema = Type.Object({
         {
             defaultModel: Type.Optional(Type.String()),
             defaultProvider: Type.Optional(Type.String()),
-            thinkingLevel: Type.Optional(
-                Type.Union([
-                    Type.Literal("off"),
-                    Type.Literal("minimal"),
-                    Type.Literal("low"),
-                    Type.Literal("medium"),
-                    Type.Literal("high"),
-                    Type.Literal("xhigh"),
-                ]),
-            ),
+            thinkingLevel: Type.Optional(vocabularySchema(THINKING_LEVELS)),
             systemPrompt: Type.Optional(Type.String()),
             compaction: Type.Optional(
                 Type.Object({

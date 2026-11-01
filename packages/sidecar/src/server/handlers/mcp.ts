@@ -151,7 +151,7 @@ export function registerMcpHandlers(): void {
                 }));
                 // New workspace builds use the saved config; existing toolsets stay live.
                 await server?.reloadMcpServers?.();
-                return { server: mcpServerToView(params.config), requiresRestart: true };
+                return { server: mcpServerToView(params.config), requiresRestart: false };
             } catch (e) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,
@@ -189,7 +189,7 @@ export function registerMcpHandlers(): void {
                 await server?.reloadMcpServers?.();
                 return {
                     server: mcpServerToView(requireServerConfig(next.mcpServers ?? [], params.id)),
-                    requiresRestart: true,
+                    requiresRestart: false,
                 };
             } catch (e) {
                 if (e instanceof RpcHandlerError) throw e;
@@ -214,7 +214,7 @@ export function registerMcpHandlers(): void {
                 return { mcpServers: servers.filter((s) => s.id !== params.id) };
             });
             await server?.reloadMcpServers?.();
-            return { deleted: params.id, requiresRestart: true };
+            return { deleted: params.id, requiresRestart: false };
         },
     );
 }

@@ -84,10 +84,11 @@ export interface McpGetConfigResult {
 
 export type McpCreateConfigParams = ParamsOf<typeof mcpCreateConfigSchema>;
 
-/** Shared result for create / update — safe summary + restart requirement. */
+/** Shared result for create / update — safe summary + live-reload status. */
 export interface McpMutateConfigResult {
     server: McpServerConfigView;
-    requiresRestart: true;
+    /** MCP configuration is reloaded for future workspace builds without a process restart. */
+    requiresRestart: boolean;
 }
 
 export type McpUpdateConfigParams = ParamsOf<typeof mcpUpdateConfigSchema>;
@@ -96,7 +97,8 @@ export type McpDeleteConfigParams = ParamsOf<typeof mcpDeleteConfigSchema>;
 
 export interface McpDeleteConfigResult {
     deleted: string;
-    requiresRestart: true;
+    /** MCP configuration is reloaded for future workspace builds without a process restart. */
+    requiresRestart: boolean;
 }
 
 /** `settings.get` RPC params (currently no required input; reserved for future). */

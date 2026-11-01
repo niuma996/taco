@@ -202,7 +202,8 @@ export interface CommandPermissionDecision {
  *  - "response"     → openai-responses  (OpenAI /responses)
  *  - "anthropic"    → anthropic-messages (Anthropic /messages)
  */
-export type CustomProviderApi = "chatcomplete" | "response" | "anthropic";
+export const CUSTOM_PROVIDER_APIS = ["chatcomplete", "response", "anthropic"] as const;
+export type CustomProviderApi = (typeof CUSTOM_PROVIDER_APIS)[number];
 
 /** Custom provider ids must start with this prefix, isolating them from built-in ids. */
 export const CUSTOM_PROVIDER_PREFIX = "custom:";
@@ -258,7 +259,8 @@ export interface CustomProviderConfig {
  * Transport kinds for MCP servers. "stdio" spawns a child process;
  * "http" connects to a Streamable HTTP endpoint.
  */
-export type McpTransportKind = "stdio" | "http";
+export const MCP_TRANSPORT_KINDS = ["stdio", "http"] as const;
+export type McpTransportKind = (typeof MCP_TRANSPORT_KINDS)[number];
 
 /**
  * One MCP server, persisted as an entry of `mcpServers` in `taco.json`.

@@ -24,11 +24,12 @@
 import type { Api, AssistantMessage, Model, Provider } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai";
 import type {
+    CustomProviderApi,
     ProviderTestConnectionFailureReason,
     ProviderTestConnectionParams,
     ProviderTestConnectionResult,
 } from "@taco-ai/protocol";
-import { ErrorCodes } from "@taco-ai/protocol";
+import { CUSTOM_PROVIDER_APIS, ErrorCodes } from "@taco-ai/protocol";
 import { buildCustomProvider } from "../../runtime/models/customProvider.ts";
 import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
@@ -122,7 +123,7 @@ function resolveTarget(
     const { baseUrl, api, apiKey } = params;
     if (typeof baseUrl !== "string" || baseUrl.trim() === "")
         return { error: "baseUrl is required" };
-    if (api !== "chatcomplete" && api !== "response" && api !== "anthropic") {
+    if (!CUSTOM_PROVIDER_APIS.includes(api as CustomProviderApi)) {
         return { error: `unsupported api: ${String(api)}` };
     }
     if (typeof apiKey !== "string" || apiKey.trim() === "") return { error: "apiKey is required" };

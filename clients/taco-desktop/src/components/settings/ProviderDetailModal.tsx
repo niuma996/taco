@@ -17,7 +17,7 @@ import type {
     ProviderView,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import { CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
+import { CUSTOM_PROVIDER_APIS, CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
 import { CircleCheck, CircleX, Eye, EyeOff, Pencil, Plus, Trash, Undo2 } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
@@ -69,11 +69,11 @@ export interface ProviderDetailModalProps {
     onClose: () => void;
 }
 
-const PROTOCOL_OPTIONS: ReadonlyArray<{ value: CustomProviderApi; labelKey: string }> = [
-    { value: "chatcomplete", labelKey: "settings.customProviderApiChatcomplete" },
-    { value: "response", labelKey: "settings.customProviderApiResponse" },
-    { value: "anthropic", labelKey: "settings.customProviderApiAnthropic" },
-];
+const PROTOCOL_OPTIONS: ReadonlyArray<{ value: CustomProviderApi; labelKey: string }> =
+    CUSTOM_PROVIDER_APIS.map((value) => ({
+        value,
+        labelKey: `settings.customProviderApi${value[0].toUpperCase()}${value.slice(1)}`,
+    }));
 
 /** Common context-window presets offered in the model rows. The "k" = 1000
  *  convention matches parseModelWindow, so a preset round-trips through the

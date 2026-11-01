@@ -106,9 +106,11 @@ export {
     COMMAND_PERMISSION_MODES,
     COMPACTION_THRESHOLD_MAX,
     COMPACTION_THRESHOLD_MIN,
+    CUSTOM_PROVIDER_APIS,
     CUSTOM_PROVIDER_PREFIX,
     DEFAULT_COMPACTION_ENABLED,
     DEFAULT_COMPACTION_THRESHOLD,
+    MCP_TRANSPORT_KINDS,
 } from "./config.js";
 export type {
     ConfigPatchParams,
@@ -216,6 +218,7 @@ export type {
     Usage,
     UserMessage,
 } from "./messages.js";
+export { THINKING_LEVELS } from "./messages.js";
 // Push methods + payload types.
 export type {
     AttachedParams,
