@@ -20,7 +20,7 @@
  * on an existing instance re-sends the credentials it was born with.
  */
 
-import type { ChannelsBindCreds, ServerPush } from "@taco-ai/protocol";
+import type { ChannelsBindCreds, ImRoute, ServerPush } from "@taco-ai/protocol";
 import type { Logger as SdkLogger } from "@wecom/aibot-node-sdk";
 import { WSClient } from "@wecom/aibot-node-sdk";
 import { mimeTypeFromName } from "../../attachments/mimeType.ts";
@@ -39,8 +39,10 @@ import type {
     ChannelHandle,
     ChannelRouteResolver,
     Logger,
+    SendOutboundResult,
 } from "../types.ts";
 import { chunkText, extractReplyText } from "./channelReply.ts";
+import { classifySendError } from "./sendErrors.ts";
 import { wecomChannelManifest } from "./wecomManifest.ts";
 
 const WECOM_MAX_MESSAGE_LENGTH = wecomChannelManifest.capabilities.maxMessageLength;
@@ -186,6 +188,27 @@ export class WeComChannelHandle implements ChannelHandle {
                 msgtype: "markdown",
                 markdown: { content: chunk },
             });
+        }
+    }
+
+    async sendText(route: ImRoute, text: string): Promise<SendOutboundResult> {
+        const client = this.client;
+        // No client means no credentials were ever bound, or the channel was
+        // logged out. Sending anyway would go over an unauthenticated socket.
+        if (!client) return { kind: "unavailable", code: "not_connected" };
+        if (this.broker.status(this.ctx.channelId).state !== "connected") {
+            return { kind: "unavailable", code: "not_connected" };
+        }
+        try {
+            // sendMessage, not reply: a background result lands long after the
+            // inbound frame, past any reply window.
+            await client.sendMessage(route.chatId, {
+                msgtype: "markdown",
+                markdown: { content: text },
+            });
+            return { kind: "confirmed" };
+        } catch (e) {
+            return classifySendError(e);
         }
     }
 

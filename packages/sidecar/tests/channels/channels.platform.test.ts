@@ -87,7 +87,10 @@ describe("wechatChannel", () => {
             this.stopCalls += 1;
             this.isRunning = false;
         }
+        /** When set, the next sends reject with it instead of recording. */
+        sendError?: unknown;
         async send(userId: string, text: string): Promise<void> {
+            if (this.sendError !== undefined) throw this.sendError;
             this.sent.push({ userId, text });
         }
         onMessage(handler: (msg: IncomingLike) => void | Promise<void>): unknown {
@@ -704,6 +707,43 @@ describe("wechatChannel", () => {
             assert.deepEqual(h.bot.sent, []);
         });
 
+        describe("sendText", () => {
+            const route = { channelId: "wechat", peerId: "u1", chatId: "u1" };
+
+            it("confirms a send through the running bot", async () => {
+                const h = harness();
+                const handle = await h.channel.start(h.ctx);
+                h.bot.isRunning = true;
+
+                const result = await handle.sendText?.(route, "done");
+
+                assert.deepEqual(result, { kind: "confirmed" });
+                assert.deepEqual(h.bot.sent, [{ userId: "u1", text: "done" }]);
+            });
+
+            it("reports unavailable, without sending, while the bot is not running", async () => {
+                const h = harness();
+                const handle = await h.channel.start(h.ctx);
+                h.bot.isRunning = false;
+
+                const result = await handle.sendText?.(route, "done");
+
+                assert.deepEqual(result, { kind: "unavailable", code: "not_connected" });
+                assert.deepEqual(h.bot.sent, []);
+            });
+
+            it("classifies a send error instead of throwing", async () => {
+                const h = harness();
+                const handle = await h.channel.start(h.ctx);
+                h.bot.isRunning = true;
+                h.bot.sendError = Object.assign(new Error("boom"), { httpStatus: 503 });
+
+                const result = await handle.sendText?.(route, "done");
+
+                assert.equal(result?.kind, "retryable");
+            });
+        });
+
         it("close stops the bot and cancels pending binds", async () => {
             const h = harness();
             const handle = await h.channel.start(h.ctx);
@@ -750,10 +790,13 @@ describe("wecomChannel", () => {
         disconnect(): void {
             this.disconnectCalls += 1;
         }
+        /** When set, sendMessage rejects with it instead of recording. */
+        sendError?: unknown;
         async sendMessage(
             chatid: string,
             body: { msgtype: string; markdown?: { content: string } },
         ): Promise<unknown> {
+            if (this.sendError !== undefined) throw this.sendError;
             this.sent.push({ chatid, body });
             return {};
         }
@@ -1112,6 +1155,56 @@ describe("wecomChannel", () => {
             assert.equal(h.client.sent[0].body.msgtype, "markdown");
             assert.equal(h.client.sent[0].body.markdown?.content, "the answer");
             await handle.close();
+        });
+
+        describe("sendText", () => {
+            const route = { channelId: "wecom", peerId: "u2", chatId: "g-77" };
+
+            it("confirms a markdown send to the route chatId once connected", async () => {
+                const h = harness({ credentials: { botId: "b", secret: "s" } });
+                const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+                h.client.markAuthenticated();
+
+                const result = await handle.sendText(route, "done");
+
+                assert.deepEqual(result, { kind: "confirmed" });
+                assert.equal(h.client.sent[0]?.chatid, "g-77");
+                assert.equal(h.client.sent[0]?.body.markdown?.content, "done");
+                await handle.close();
+            });
+
+            it("reports unavailable before the client has authenticated", async () => {
+                const h = harness({ credentials: { botId: "b", secret: "s" } });
+                const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+
+                const result = await handle.sendText(route, "done");
+
+                assert.deepEqual(result, { kind: "unavailable", code: "not_connected" });
+                assert.equal(h.client.sent.length, 0);
+                await handle.close();
+            });
+
+            it("reports unavailable when no client was ever built", async () => {
+                const h = harness();
+                const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+
+                const result = await handle.sendText(route, "done");
+
+                assert.deepEqual(result, { kind: "unavailable", code: "not_connected" });
+                await handle.close();
+            });
+
+            it("classifies a send error instead of throwing", async () => {
+                const h = harness({ credentials: { botId: "b", secret: "s" } });
+                const handle = (await h.channel.start(h.ctx)) as WeComChannelHandle;
+                h.client.markAuthenticated();
+                h.client.sendError = Object.assign(new Error("bad"), { httpStatus: 400 });
+
+                const result = await handle.sendText(route, "done");
+
+                assert.equal(result.kind, "permanentFailure");
+                await handle.close();
+            });
         });
 
         it("drops push frames when the session cannot be resolved to a route", async () => {

@@ -1,6 +1,12 @@
-import type { ServerPush } from "@taco-ai/protocol";
+import type { ImRoute, ServerPush } from "@taco-ai/protocol";
 import { CHANNEL_NAME_MOCK } from "../channelNames.ts";
-import type { Channel, ChannelContext, ChannelHandle, ChannelManifest } from "../types.ts";
+import type {
+    Channel,
+    ChannelContext,
+    ChannelHandle,
+    ChannelManifest,
+    SendOutboundResult,
+} from "../types.ts";
 
 export const mockChannelManifest: ChannelManifest = {
     name: CHANNEL_NAME_MOCK,
@@ -35,6 +41,19 @@ export class MockChannelHandle implements ChannelHandle {
             }
             return true;
         });
+    }
+
+    /** Every `sendText` the channel was asked to make, accepted or not. */
+    readonly sent: { route: ImRoute; text: string }[] = [];
+    /**
+     * What the next `sendText` calls return, front first. Empty means
+     * "confirmed", so a test only scripts the failures it cares about.
+     */
+    readonly scriptedResults: SendOutboundResult[] = [];
+
+    async sendText(route: ImRoute, text: string): Promise<SendOutboundResult> {
+        this.sent.push({ route, text });
+        return this.scriptedResults.shift() ?? { kind: "confirmed" };
     }
 
     async close(): Promise<void> {}

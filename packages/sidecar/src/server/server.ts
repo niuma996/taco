@@ -115,6 +115,7 @@ import {
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { builtinToolCandidates } from "../tools/builtinCandidates.ts";
+import { WorkService } from "../work/workService.ts";
 import {
     associationAffectsWorkspace,
     WorkspaceAssociationStore,
@@ -133,6 +134,7 @@ import {
     makePushFrame,
     normalizeMessageUpdate,
     redactCommandPermissionRequest,
+    SIDECAR_INSTANCE_ID,
     toToolCallPush,
 } from "./push.ts";
 import {
@@ -364,6 +366,8 @@ export class SidecarServer implements ServerRpcSurface {
         this._jobs = next;
     }
     readonly channelRegistry: ChannelRegistry;
+    /** Process-level Work ledger and its delivery. */
+    readonly work: WorkService;
     readonly channelBindBroker: ChannelBindBroker;
     /** Resolved by the ctor after the broker + router exist. */
     private readonly channelFactory: ChannelFactory;
@@ -506,6 +510,12 @@ export class SidecarServer implements ServerRpcSurface {
         this.channelRegistry = new ChannelRegistry();
         this.channelBindBroker = new ChannelBindBroker();
         this.conversationRouter = options.conversationRouter;
+        this.work = new WorkService({
+            root: join(tacoHome(), "work"),
+            instanceId: SIDECAR_INSTANCE_ID,
+            channels: this.channelRegistry,
+            resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
+        });
         this.channelFactory = new ChannelFactory({
             broker: this.channelBindBroker,
             // Resolved at push time: the router only knows a route once the
@@ -590,12 +600,19 @@ export class SidecarServer implements ServerRpcSurface {
         }
         this.startedChannelIds = startedChannelIds;
 
+        // After channels, so a delivery resumed here finds its channel loaded
+        // when it is already connected. One that is not yet connected waits for
+        // the status transition below instead of burning attempts.
+        await this.work.start();
+
         this.idempotency.startSweeper();
     }
 
     /** Named refs for stop() to off() — see start() for why this matters. */
     private readonly onRouterConversation = () => this.broadcastConversationsChanged();
     private readonly onBrokerStatus = (s: ChannelBindStatus) => {
+        // A channel coming up is the signal that held-back Work notices can go.
+        if (s.state === "connected") this.work.onChannelConnected();
         // Broker frames are the raw transition; the wire entry adds the
         // config-derived name and the on-disk configured flag. Building it
         // here keeps the push payload identical to `channels.list` output —
@@ -614,6 +631,7 @@ export class SidecarServer implements ServerRpcSurface {
             () => {
                 this.channelBindBroker.cancelAll();
             },
+            () => this.work.stop(),
             () => this.channelRegistry.stopAll(),
             () => this.workspaces.stop(),
             () => this.mcpScope.dispose(),
@@ -1097,6 +1115,7 @@ export class SidecarServer implements ServerRpcSurface {
                 // workspace only calls this for IM workspaces, passing the
                 // route's channelId; peer/chat ids never reach it.
                 resolveImChannel: (channelId) => this.channelControl.resolveImChannel(channelId),
+                workHooks: this.work,
                 // In-process self-RPC entry — used by the memory tool (and future
                 // self-RPC tools).
                 dispatchRpc: (req) => this.handleRpcRequest(req),
@@ -1751,7 +1770,17 @@ export class SidecarServer implements ServerRpcSurface {
         // im:// workspaces additionally fan-out channel pushes (additive sink; no return; stdio always sends)
         if (workspace.startsWith(IM_CWD_PREFIX)) {
             const parsed = parseImCwd(workspace);
-            if (parsed) this.channelRegistry.push(parsed.channelId, frame);
+            // A session whose reply is being captured as a Work notice does not
+            // also speak live: the same words would reach the peer twice, once
+            // from here and once from the Work deliverer.
+            // Only the model's own output is held: approval requests and other
+            // server notices still reach the peer, or a run waiting on the
+            // peer's approval would stall until its timeout.
+            const held =
+                session !== undefined &&
+                method === PushMethods.Event &&
+                this.work.controller.isHoldingReplies(session);
+            if (parsed && !held) this.channelRegistry.push(parsed.channelId, frame);
         }
     }
 }

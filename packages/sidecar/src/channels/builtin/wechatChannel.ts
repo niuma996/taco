@@ -8,7 +8,7 @@
  * idles in `unbound` until channels.bind arrives.
  */
 
-import type { ServerPush } from "@taco-ai/protocol";
+import type { ImRoute, ServerPush } from "@taco-ai/protocol";
 import { PushMethods } from "@taco-ai/protocol";
 import { WeChatBot } from "@wechatbot/wechatbot";
 import { mimeTypeFromName } from "../../attachments/mimeType.ts";
@@ -29,8 +29,10 @@ import type {
     ChannelMediaRef,
     ChannelRouteResolver,
     Logger,
+    SendOutboundResult,
 } from "../types.ts";
 import { chunkText, extractReplyText, interruptNoticeText } from "./channelReply.ts";
+import { classifySendError } from "./sendErrors.ts";
 import { wechatChannelManifest } from "./wechatManifest.ts";
 
 /** iLink caps a text message well below this; chunking keeps a safety margin. */
@@ -440,6 +442,18 @@ class WeChatChannelHandle implements ChannelHandle {
         const userId = route.peerId;
         for (const chunk of chunkText(text, WECHAT_MAX_MESSAGE_LENGTH)) {
             await this.bot.send(userId, chunk);
+        }
+    }
+
+    async sendText(route: ImRoute, text: string): Promise<SendOutboundResult> {
+        // `isRunning` is the SDK's own signal that the long-poll loop is up.
+        // Before login or after a stop there is nothing to send through.
+        if (!this.bot.isRunning) return { kind: "unavailable", code: "not_connected" };
+        try {
+            await this.bot.send(route.peerId, text);
+            return { kind: "confirmed" };
+        } catch (e) {
+            return classifySendError(e);
         }
     }
 

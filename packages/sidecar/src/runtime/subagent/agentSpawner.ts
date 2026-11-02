@@ -28,6 +28,7 @@ import { interpolateArgs } from "../../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
 import { tagWrap } from "../../tags/builder.ts";
 import type { TacoTool } from "../../tools/index.ts";
+import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelRegistry.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
@@ -44,7 +45,7 @@ import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
 import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
-import { deliverSubagentResult } from "./subagentDelivery.ts";
+import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
     clearPendingSubagentResult,
@@ -140,6 +141,12 @@ export interface AgentSpawnerOptions {
      * `SessionRegistry` takes `getInstructionsConfig`.
      */
     readonly getParentInstructionsBlock?: () => string;
+    /**
+     * Work-layer hooks for background spawns. Absent in tests and in any
+     * assembly that does not track Work; every call site is optional-chained so
+     * the spawner behaves exactly as before without it.
+     */
+    readonly workHooks?: BackgroundWorkHooks;
 }
 
 /** Arguments for one subagent run. Shared by `executeSubagentSession` and its body. */
@@ -260,6 +267,7 @@ export class AgentSpawner extends EventEmitter {
         this.environmentContext = options.environmentContext;
         this.hideWorkspacePath = options.hideWorkspacePath;
         this.getParentInstructionsBlock = options.getParentInstructionsBlock ?? (() => "");
+        this.workHooks = options.workHooks;
         // In-flight resume promises keyed by subSessionId. Concurrent calls
         // share one promise instead of racing to re-attach the same session —
         // a second caller would otherwise see `attachChild` return the existing
@@ -298,6 +306,7 @@ export class AgentSpawner extends EventEmitter {
      * Called per spawn/resume so a `settings.write` reaches the next child.
      */
     private readonly getParentInstructionsBlock: () => string;
+    private readonly workHooks: BackgroundWorkHooks | undefined;
 
     /** In-flight resume promises, keyed by subSessionId. */
     private readonly resumeInFlight: Map<
@@ -543,6 +552,7 @@ export class AgentSpawner extends EventEmitter {
         resultText: string;
         isError: boolean;
         aborted?: boolean;
+        partial?: boolean;
     }> {
         return this.trackInFlight(args.parentSessionId, args.parentToolCallId, async () => {
             try {
@@ -568,6 +578,7 @@ export class AgentSpawner extends EventEmitter {
         resultText: string;
         isError: boolean;
         aborted?: boolean;
+        partial?: boolean;
     }> {
         // Caller must supply `childDepth` — used by tool filtering to gate Skill/agent
         // recursion, and computing it here would require a second openSession() call.
@@ -1052,6 +1063,16 @@ export class AgentSpawner extends EventEmitter {
         // that arrives during setup still reaches the run: the runner's
         // pre-aborted check turns it into an immediate interruption.
         this.subagentControllers.set(childSessionId, { controller, parentSessionId });
+        // Recorded before the run starts: the Work must exist for the whole of
+        // its run, or a crash mid-flight leaves nothing for the next start to
+        // mark interrupted. Never throws; a failed record means no tracking.
+        const workId = await this.workHooks?.onLaunch({
+            parentSessionId,
+            parentToolCallId,
+            childSessionId,
+            agentType: sessionArgs.agentType,
+            ...(description !== undefined ? { description } : {}),
+        });
 
         // executeSubagentSession never throws (errors are `{ isError: true }`),
         // so `.then` always fires with a result. `.catch` covers
@@ -1073,6 +1094,18 @@ export class AgentSpawner extends EventEmitter {
                     : result.isError
                       ? ("error" as const)
                       : ("completed" as const);
+                const path = await this.writeBackgroundResult(resultPath, result.resultText);
+                // Result and delivery intent land in one Work snapshot before
+                // anything else observes the settle. A crash after this line
+                // still leaves a record that someone must be told.
+                if (workId !== undefined) {
+                    await this.workHooks?.onSettle(workId, parentSessionId, {
+                        outcome,
+                        resultText: result.resultText,
+                        partial: result.partial === true,
+                        ...(path !== undefined ? { path } : {}),
+                    });
+                }
                 // Emitted before delivery, not after: delivery starts a fresh
                 // parent run, and a consumer that keyed "this background child
                 // is still running" off the launch receipt must be able to
@@ -1083,7 +1116,6 @@ export class AgentSpawner extends EventEmitter {
                     subSessionId: childSessionId,
                     outcome,
                 });
-                const path = await this.writeBackgroundResult(resultPath, result.resultText);
                 const notification = this.formatBackgroundNotification(sessionArgs.agentType, {
                     ...result,
                     outcome,
@@ -1119,10 +1151,10 @@ export class AgentSpawner extends EventEmitter {
                 // strictly worse than the record already made, which flush
                 // will retry delivery from.
                 try {
-                    const delivered = await deliverSubagentResult(
-                        this.sessionRegistry,
+                    const delivered = await this.deliverNotice(
                         parentSessionId,
                         notification,
+                        workId,
                     );
                     if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
                 } catch (e) {
@@ -1148,6 +1180,15 @@ export class AgentSpawner extends EventEmitter {
                 // path to report here, only that the task did not complete
                 // normally. `emitSettled` is idempotent per parentToolCallId,
                 // so this is safe even if it already fired for this spawn.
+                if (workId !== undefined) {
+                    // No-op when `.then` already settled it: the first terminal
+                    // state wins, so this cannot rewrite a finished Work.
+                    await this.workHooks?.onSettle(workId, parentSessionId, {
+                        outcome: "error",
+                        resultText: e instanceof Error ? e.message : String(e),
+                        partial: false,
+                    });
+                }
                 this.emitSettled(sessionArgs.agentType, {
                     parentSessionId,
                     parentToolCallId,
@@ -1173,11 +1214,7 @@ export class AgentSpawner extends EventEmitter {
                     description,
                 });
                 try {
-                    const delivered = await deliverSubagentResult(
-                        this.sessionRegistry,
-                        parentSessionId,
-                        fallback,
-                    );
+                    const delivered = await this.deliverNotice(parentSessionId, fallback, workId);
                     if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
                 } catch (e2) {
                     log.error("background subagent fallback delivery failed", {
@@ -1279,10 +1316,10 @@ export class AgentSpawner extends EventEmitter {
                 });
                 let delivered: boolean;
                 try {
-                    delivered = await deliverSubagentResult(
-                        this.sessionRegistry,
+                    delivered = await this.deliverNotice(
                         parentSessionId,
                         notification,
+                        this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId),
                     );
                 } catch (e) {
                     // Still unreachable. Keep the entry and stop: the remaining
@@ -1487,6 +1524,79 @@ export class AgentSpawner extends EventEmitter {
             });
             return undefined;
         }
+    }
+
+    /**
+     * Hand a settled notice to the parent and report whether it landed.
+     *
+     * With a Work attached, the notice run's reply is held back from the
+     * channel and captured as the message to send. That is what makes the
+     * outcome reliable: the reply is stored with the Work and delivered by
+     * the Work deliverer, instead of leaving through a push that only logs a
+     * failure.
+     */
+    private async deliverNotice(
+        parentSessionId: SessionId,
+        notification: string,
+        workId: string | undefined,
+    ): Promise<boolean> {
+        const hooks = this.workHooks;
+        // No Work, or one whose message is already frozen (a late flush after
+        // the template went out): the parent still has to learn the result, but
+        // its reply is an ordinary turn and reaches the channel live.
+        if (!hooks || workId === undefined || !(await hooks.wantsNoticeReply(workId))) {
+            return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
+        }
+        // One flag, one release: `onNoticeRunRelease` runs exactly once per
+        // `onNoticeRunStart`, so a second notice run for the same parent keeps
+        // its own hold when this one ends.
+        let held = false;
+        let captured: string | undefined;
+        const release = (): void => {
+            if (!held) return;
+            held = false;
+            hooks.onNoticeRunRelease(workId, parentSessionId);
+        };
+        let outcome: Awaited<ReturnType<typeof deliverSubagentResultDetailed>>;
+        let ran = false;
+        try {
+            outcome = await deliverSubagentResultDetailed(
+                this.sessionRegistry,
+                parentSessionId,
+                notification,
+                {
+                    beforePrompt: () => {
+                        if (held) return;
+                        held = true;
+                        hooks.onNoticeRunStart(workId, parentSessionId);
+                    },
+                    // A busy lane rejects the prompt before any run starts, so
+                    // there is nothing to capture. Release now: if the delivery
+                    // then queues the notice, the parent's own reply carries it.
+                    afterPrompt: (reply, didRun) => {
+                        if (!didRun) {
+                            release();
+                            return;
+                        }
+                        ran = true;
+                        captured = reply;
+                    },
+                },
+            );
+        } catch (e) {
+            release();
+            // A throw from inside a started run is a failed notice run, not an
+            // unreached one: the template is the right fallback.
+            if (ran) await hooks.onNoticeRunEnd(workId, undefined);
+            throw e;
+        }
+        release();
+        if (outcome === "replied") {
+            await hooks.onNoticeRunEnd(workId, captured);
+        } else {
+            await hooks.onNoticeNotRun(workId, outcome === "queued" ? "queued" : "unreachable");
+        }
+        return outcome !== "unreachable";
     }
 
     /**

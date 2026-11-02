@@ -87,6 +87,7 @@ import type { SelfRpcCall, TacoToolContextBase } from "../tools/context.ts";
 import { isFsToolDenied } from "../tools/fileAccess.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
+import type { BackgroundWorkHooks } from "../work/workHooks.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
@@ -193,6 +194,12 @@ interface WorkspaceRuntimeConfig {
      * never reach the resolver — the boundary is enforced here.
      */
     resolveImChannel?: (channelId: string) => ImChannelContext | undefined;
+    /**
+     * Work-layer hooks handed to the subagent spawner. Supplied by the server,
+     * which owns the Work store; absent when the workspace is built without one
+     * (tests, embedders), in which case background subagents behave as before.
+     */
+    workHooks?: BackgroundWorkHooks;
     /** Custom toolset. */
     tools?: TacoTool[];
     /** Custom resources (skill / prompt template). */
@@ -729,6 +736,7 @@ export class WorkspaceRuntime extends EventEmitter {
             // block on settings.write, and a captured string would pin every
             // subagent to the startup config while the parent moved on.
             getParentInstructionsBlock: () => this.parentInstructionsBlock,
+            workHooks: options.workHooks,
         });
 
         this.modelRegistry = new ModelRegistry({

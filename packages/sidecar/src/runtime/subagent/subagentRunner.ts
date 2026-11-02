@@ -66,9 +66,14 @@ export interface RunAttachedSubagentArgs {
  * Never throws — every failure is reported as `{ isError: true }`, and a run
  * that hit the turn cap degrades to a partial answer rather than an error.
  */
-export async function runAttachedSubagent(
-    args: RunAttachedSubagentArgs,
-): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean; aborted?: boolean }> {
+export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promise<{
+    subSessionId: SessionId;
+    resultText: string;
+    isError: boolean;
+    aborted?: boolean;
+    /** The run ended on its turn cap; `resultText` is what it had so far. */
+    partial?: boolean;
+}> {
     const { subSessionId, attached, agentType, readLastAssistantText } = args;
     const onUpdate = args.onUpdate;
     // Single point where this runner asserts its payload shape onto the sink:
@@ -155,6 +160,7 @@ export async function runAttachedSubagent(
                 subSessionId,
                 resultText: partialResult(text, cap ?? turnsUsed),
                 isError: false,
+                partial: true,
             };
         }
         if (args.signal?.aborted) {

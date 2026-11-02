@@ -43,8 +43,33 @@ export interface ChannelConfigStore {
     clear(): Promise<void>;
 }
 
+/**
+ * What a platform said about one outbound message.
+ *
+ * `push` returns nothing, so a failed send is only a log line. The Work
+ * deliverer needs to know which of these happened, because each one calls for
+ * a different next step: retry later, wait for the channel, or give up.
+ */
+export type SendOutboundResult =
+    /** The platform accepted the message. */
+    | { readonly kind: "confirmed" }
+    /** A failure retrying could fix: network, rate limit, timeout. */
+    | { readonly kind: "retryable"; readonly code: string; readonly retryAfterMs?: number }
+    /** Nothing is connected right now (not bound, reconnecting, stopped). */
+    | { readonly kind: "unavailable"; readonly code: string }
+    /** The platform refused for a reason that will not change: bad target, no permission. */
+    | { readonly kind: "permanentFailure"; readonly code: string };
+
 export interface ChannelHandle {
     push(frame: ServerPush): Promise<void>;
+    /**
+     * Send one already-chunked text to a peer and report what happened.
+     *
+     * Unlike `push`, this never swallows a failure and never reads a session:
+     * the caller names the recipient. Optional so channels with no outbound
+     * path (or older ones) simply cannot be used for reliable delivery.
+     */
+    sendText?(route: ImRoute, text: string): Promise<SendOutboundResult>;
     close(): Promise<void>;
     /**
      * Runs the platform's interactive bind flow (QR scan for wechat) or — for

@@ -1,7 +1,13 @@
-import type { ChannelsBindCreds, ServerPush } from "@taco-ai/protocol";
+import type { ChannelsBindCreds, ImRoute, ServerPush } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
 import { isValidChannelId } from "./configValidator.ts";
-import type { Channel, ChannelContext, ChannelHandle, ChannelManifest } from "./types.ts";
+import type {
+    Channel,
+    ChannelContext,
+    ChannelHandle,
+    ChannelManifest,
+    SendOutboundResult,
+} from "./types.ts";
 
 const log = createLogger("channel");
 
@@ -149,6 +155,42 @@ export class ChannelRegistry {
      *  WorkspaceRuntimes after an admin policy change. */
     workspacesForChannel(channelId: string): string[] {
         return [...(this.channelWorkspaces.get(channelId) ?? [])];
+    }
+
+    /**
+     * Send one text to a peer and report what the platform said.
+     *
+     * A channel that is not loaded, or has no outbound path, is `unavailable`:
+     * both clear themselves (the channel starts, or is replaced), so the
+     * caller should wait rather than count an attempt. Goes through the same
+     * per-channel chain as `push`, so a Work notice never interleaves with a
+     * streaming reply mid-sentence.
+     */
+    async sendText(channelId: string, route: ImRoute, text: string): Promise<SendOutboundResult> {
+        const entry = this.loaded.get(channelId);
+        if (!entry?.handle.sendText) return { kind: "unavailable", code: "channel_unavailable" };
+        const send = entry.handle.sendText.bind(entry.handle);
+        const result = entry.chain.then(async (): Promise<SendOutboundResult> => {
+            try {
+                return await send(route, text);
+            } catch (e) {
+                // A handle that throws instead of returning has told us nothing
+                // about whether the platform saw the message. Retryable is the
+                // safe reading; the cost is a possible duplicate, never a loss.
+                log.child({ channel: channelId }).error(`sendText threw: ${e}`);
+                return { kind: "retryable", code: "send_threw" };
+            }
+        });
+        entry.chain = result.then(
+            () => undefined,
+            () => undefined,
+        );
+        return result;
+    }
+
+    /** The channel's per-message cap, or undefined when it is not loaded. */
+    maxMessageLength(channelId: string): number | undefined {
+        return this.loaded.get(channelId)?.channel.manifest.capabilities.maxMessageLength;
     }
 
     /** Push a frame to a channel. Fire-and-forget — failures are logged to
