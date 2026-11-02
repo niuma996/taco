@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { filterToolsForAgent, isToolVisibleForAnySubagent } from "../../src/agents/filterTools.ts";
+import {
+    agentCanWriteFiles,
+    filterToolsForAgent,
+    isToolVisibleForAnySubagent,
+} from "../../src/agents/filterTools.ts";
 import {
     buildForkedContext,
     estimateTokens,
@@ -106,6 +110,27 @@ describe("filterTools", () => {
             assert.equal(isToolVisibleForAnySubagent("read", [undefined]), true);
             assert.equal(isToolVisibleForAnySubagent("read", [["read"]]), true);
             assert.equal(isToolVisibleForAnySubagent("write", [["read"]]), false);
+        });
+    });
+
+    describe("agentCanWriteFiles", () => {
+        it("is false for a whitelist without a file-writing tool", () => {
+            assert.equal(agentCanWriteFiles(["read", "grep", "glob", "shell"]), false);
+        });
+
+        it("is true when the whitelist names write or edit", () => {
+            assert.equal(agentCanWriteFiles(["read", "write"]), true);
+            assert.equal(agentCanWriteFiles(["read", "edit"]), true);
+        });
+
+        it("is true when the profile declares no whitelist (it inherits)", () => {
+            assert.equal(agentCanWriteFiles(undefined), true);
+        });
+
+        it("matches Claude Code's own spelling of the write tools", () => {
+            assert.equal(agentCanWriteFiles(["Read", "Write"]), true);
+            assert.equal(agentCanWriteFiles(["Read", "Edit"]), true);
+            assert.equal(agentCanWriteFiles(["Read", "Bash"]), false);
         });
     });
 });

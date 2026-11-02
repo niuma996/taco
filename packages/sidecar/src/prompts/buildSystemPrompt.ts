@@ -116,6 +116,12 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
         lines.push(
             "- When a task matches an agent type in <available_agents>, delegate it via the `agent` tool.",
         );
+        // A read-only agent has no file-writing tool. Naming an output path to
+        // one sends it off to prepare a file it cannot write, and it burns its
+        // whole budget there instead of returning the finding.
+        lines.push(
+            "- An agent marked <read_only> cannot write files. Ask it for the content and write it yourself — do not name an output path for it.",
+        );
     }
     if (tools.has("planEnter") || tools.has("planExit")) {
         lines.push(

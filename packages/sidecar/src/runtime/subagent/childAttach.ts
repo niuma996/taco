@@ -118,6 +118,11 @@ export async function prepareChildAttach(
     // profile expects (citation shape, stop condition) before it takes over.
     const fewShotsBlock = formatFewShots(args.fewShots);
     if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
+    // Capability statement before the role body, so the profile's own prose
+    // still wins on conflict — but the model knows what it can do before it
+    // reads the role's instructions.
+    const capabilitiesBlock = formatCapabilities(tools, args.agentType);
+    if (capabilitiesBlock) profileContributors.push({ append: capabilitiesBlock });
     // Role body after the generic guidance so it wins on conflict — a
     // read-only explorer must not inherit the main agent's "act, then
     // verify" framing.
@@ -144,6 +149,49 @@ export async function prepareChildAttach(
     });
 
     return { tools, taskState, systemPrompt };
+}
+
+/**
+ * Render a child agent's write capability into a prompt block.
+ *
+ * The general `<session_role>` guidance already says "if your task requires a
+ * tool that is not available, explain it in your final response" — but it is
+ * one line among many, and a task that names a concrete output path ("write
+ * the report to X") reads as doable. A read-only reviewer asked to do exactly
+ * that spends its whole budget preparing to write a file it has no tool to
+ * write, and never delivers the report.
+ *
+ * So the statement is derived from the toolset the child actually got, not
+ * from what its profile body claims.
+ *
+ * Two flavors, because "no `write` tool" and "cannot write a file" are not
+ * the same claim. A profile whose shell is also read-only genuinely cannot
+ * create a file by any route, so it gets the directive. A profile with a
+ * working shell — `verification` runs builds and writes throwaway scripts —
+ * only lacks the `write` / `edit` tools, and telling it it cannot write a
+ * file would be false.
+ *
+ * Returns "" when the child can write — there is nothing to warn about.
+ */
+function formatCapabilities(tools: readonly TacoTool[], agentType: string | undefined): string {
+    const names = new Set(tools.map((t) => t.name));
+    if (names.has("write") || names.has("edit")) return "";
+    const readOnlyShell = agentType !== undefined && READ_ONLY_SHELL_AGENT_TYPES.has(agentType);
+    if (!readOnlyShell) {
+        return [
+            "<capabilities>",
+            "You have no file-writing tools (`write` / `edit`).",
+            "</capabilities>",
+        ].join("\n");
+    }
+    return [
+        "<capabilities>",
+        "You have no file-writing tools, and your shell is read-only.",
+        "If your task asks you to create or modify a file, you cannot do it. Do not retry, and do not",
+        "look for another route to the same outcome — another tool, a shell pipeline, a redirect. Write",
+        "the complete content in your final reply instead, and state plainly that no file was written.",
+        "</capabilities>",
+    ].join("\n");
 }
 
 /**

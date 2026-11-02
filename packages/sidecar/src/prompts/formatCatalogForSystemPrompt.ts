@@ -19,6 +19,12 @@ export interface AgentTypeCatalogEntry {
     readonly description?: string;
     readonly whenToUse?: string;
     readonly context?: "independent" | "fork";
+    /**
+     * The agent has no file-writing tool. Rendered so the caller does not
+     * hand it a task that names an output path — it would spend its whole
+     * budget preparing to write a file it has no tool to write.
+     */
+    readonly readOnly?: boolean;
 }
 
 function escapeXml(value: string): string {
@@ -77,6 +83,13 @@ export function formatAgentsForSystemPrompt(types: ReadonlyArray<AgentTypeCatalo
             );
         } else if (forkNote) {
             lines.push(`    <when_to_use>${escapeXml(forkNote.trim())}</when_to_use>`);
+        }
+        if (t.readOnly) {
+            lines.push(
+                "    <read_only>This agent has no file-writing tools. It returns its findings as " +
+                    "text, so do not ask it to write a report or an output file — ask it for the " +
+                    "content and write it yourself.</read_only>",
+            );
         }
         lines.push("  </agent>");
     }

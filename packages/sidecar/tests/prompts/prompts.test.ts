@@ -632,6 +632,22 @@ describe("formatAgentsForSystemPrompt", () => {
         assert.match(out, /<when_to_use>line one line two line three<\/when_to_use>/);
         assert.ok(!out.includes("line one\n"));
     });
+
+    it("marks a read-only type and tells the caller to write the file itself", () => {
+        const out = formatAgentsForSystemPrompt([
+            { agentType: "reviewer", description: "reviews", readOnly: true },
+        ]);
+        assert.match(out, /<read_only>/);
+        assert.match(out, /no file-writing tools/);
+        assert.match(out, /write it yourself/);
+    });
+
+    it("omits the read-only marker for a type that can write", () => {
+        const out = formatAgentsForSystemPrompt([
+            { agentType: "builder", description: "writes", readOnly: false },
+        ]);
+        assert.ok(!out.includes("<read_only>"));
+    });
 });
 
 describe("formatSkillsForSystemPrompt", () => {

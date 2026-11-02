@@ -27,6 +27,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import { agentCanWriteFiles } from "../agents/filterTools.ts";
 import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -1065,6 +1066,7 @@ export class WorkspaceRuntime extends EventEmitter {
                 description: a.description,
                 whenToUse: a.whenToUse,
                 context: a.context,
+                readOnly: isReadOnlyProfile(a),
             })),
         );
         if (agentsPrompt) contributors.push({ append: agentsPrompt });
@@ -1498,6 +1500,21 @@ function renderParentInstructionsBlock(
     }
     if (resolution.blocks.length === 0) return "";
     return resolution.blocks.map(renderInstructionBlock).join("\n");
+}
+
+/**
+ * Whether an agent profile has no file-writing tool.
+ *
+ * Used to label the profile in `<available_agents>`, so a caller does not hand
+ * a read-only agent a task that names an output path.
+ *
+ * `claude-code` profiles are excluded: their whitelist names Claude Code's own
+ * tools, where `Bash` writes a file regardless of what the list says, so the
+ * label would over-promise.
+ */
+function isReadOnlyProfile(def: AgentDefinition): boolean {
+    if (def.runtime === "claude-code") return false;
+    return !agentCanWriteFiles(def.tools);
 }
 
 /**
