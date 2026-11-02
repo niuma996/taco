@@ -207,6 +207,13 @@ export function AgentsPane({
                                             {t("agents.form.maxTurns")} {content.maxTurns}
                                         </span>
                                     )}
+                                {content?.agentType === selectedAgent.agentType &&
+                                    content.timeoutMinutes !== undefined && (
+                                        <span className="agents-detail-tag">
+                                            {t("agents.form.timeoutMinutes")}{" "}
+                                            {content.timeoutMinutes}
+                                        </span>
+                                    )}
                             </div>
                             <p className="agents-detail-description">{selectedAgent.description}</p>
                             {selectedAgent.whenToUse && (
@@ -256,9 +263,8 @@ export function AgentsPane({
                                   description: selectedAgent.description,
                                   whenToUse: selectedAgent.whenToUse,
                                   runtime: selectedAgent.runtime ?? "standard",
-                                  maxTurns:
-                                      content.maxTurns ??
-                                      defaultMaxTurns(selectedAgent.runtime ?? "standard"),
+                                  maxTurns: content.maxTurns ?? defaultMaxTurns(),
+                                  timeoutMinutes: content.timeoutMinutes,
                                   systemPrompt: content.systemPrompt,
                                   tools: content.tools,
                                   permissionMode: content.permissionMode,

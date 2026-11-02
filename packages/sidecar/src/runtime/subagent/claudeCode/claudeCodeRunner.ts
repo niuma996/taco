@@ -37,9 +37,11 @@ import { scrubbedProcessEnv } from "../../models/providerKeyStore.ts";
 import type { AgentMessage, AgentToolResult } from "../../pi/types.ts";
 import {
     failedResult,
+    isSubagentTimeoutReason,
     partialResult,
     SUBAGENT_STOPPED_TEXT,
     subagentStartedResult,
+    subagentTimeoutText,
     subagentTurnResult,
 } from "../subagentProgress.ts";
 import {
@@ -69,7 +71,7 @@ export const CLAUDE_CODE_BLOCKED_TOOLS = ["AskUserQuestion"] as const;
 export const DEFAULT_CLAUDE_CODE_PERMISSION_MODE: ClaudeCodePermissionMode = "auto";
 
 /** Turn cap when the agent definition sets none. */
-export const DEFAULT_CLAUDE_CODE_MAX_TURNS = 50;
+export const DEFAULT_CLAUDE_CODE_MAX_TURNS = 100;
 
 export interface RunClaudeCodeSubagentArgs {
     readonly subSessionId: SessionId;
@@ -123,7 +125,18 @@ export async function runClaudeCodeSubagent(
     if (executable === undefined) return fail(new ClaudeCodeCliMissingError().message);
 
     const signal = args.abortController.signal;
-    if (signal.aborted) return fail(SUBAGENT_STOPPED_TEXT, true);
+    if (signal.aborted) {
+        const reason = signal.reason;
+        return fail(
+            isSubagentTimeoutReason(reason)
+                ? subagentTimeoutText({
+                      timeoutMinutes: reason.timeoutMinutes,
+                      turnsUsed: 0,
+                  })
+                : SUBAGENT_STOPPED_TEXT,
+            true,
+        );
+    }
 
     const maxTurns =
         args.maxTurns !== undefined && args.maxTurns > 0
@@ -207,7 +220,18 @@ export async function runClaudeCodeSubagent(
         });
     }
 
-    if (signal.aborted) return fail(SUBAGENT_STOPPED_TEXT, true);
+    if (signal.aborted) {
+        const reason = signal.reason;
+        return fail(
+            isSubagentTimeoutReason(reason)
+                ? subagentTimeoutText({
+                      timeoutMinutes: reason.timeoutMinutes,
+                      turnsUsed: turns,
+                  })
+                : SUBAGENT_STOPPED_TEXT,
+            true,
+        );
+    }
     const lastText = transcript.lastAssistantText;
     if (result?.subtype === "error_max_turns") {
         return { subSessionId, resultText: partialResult(lastText, maxTurns), isError: false };

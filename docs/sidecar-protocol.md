@@ -105,6 +105,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.6 | optional `input` (`"text"` / `"image"`) on `ProviderView.models[]` and on `customProviders[].models` / `providerExtraModels` entries written by `settings.write`; image blocks on session prompts are mime- and size-bounded |
 | 2.7 | optional `query` on `session.list` — a case-insensitive substring filter over the session title and id, applied before pagination so the cursor and `total` describe the filtered set |
 | 2.8 | `work.list` / `work.get` / `work.retryDelivery` and the process-level `work.changed` push (the read-only overview of background Work) |
+| 2.9 | optional `timeoutMinutes` on `agents.write` / `agents.content` — the wall-clock budget for a background spawn of that agent type; `maxTurns` and `timeoutMinutes` ceilings raised to 500 and 600 minutes |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)

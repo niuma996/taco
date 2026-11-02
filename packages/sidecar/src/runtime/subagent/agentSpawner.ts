@@ -12,6 +12,7 @@ import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { filterToolsForAgent } from "../../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
+import { MAX_AGENT_TURNS } from "../../agents/loadAgents.ts";
 import type {
     AgentDefinition,
     AgentFewShot,
@@ -66,13 +67,48 @@ const log = createLogger("sidecar.agentSpawner");
 const MAX_CONCURRENT_BACKGROUND_SUBAGENTS = 8;
 
 /**
- * Wall-clock budget for a `background: true` spawn when the agent
- * definition's `timeoutMinutes` is absent. A background run has no parent
- * turn to bound it — `maxTurns` alone is not enough, since a turn with a
- * long-running tool call (e.g. a slow shell command) can still blow past any
- * reasonable wait.
+ * Wall-clock allowance per turn, used to derive a background run's time budget
+ * from its turn budget.
+ *
+ * The two limits have to agree, or one of them silently governs: a run with a
+ * 100-turn budget that is cut off after 10 minutes never reaches the turns it
+ * was allowed, and the work it did is thrown away with the timeout. A turn
+ * that legitimately needs more than this is rare — a model round trip plus a
+ * tool call is seconds — and a turn stuck on a slow command is exactly what
+ * the timeout exists to catch.
  */
-const DEFAULT_BACKGROUND_TIMEOUT_MS = 10 * 60_000;
+const BACKGROUND_TURN_ALLOWANCE_MS = 30_000;
+
+/** Shortest budget a background run gets, whatever its turn budget says. */
+const MIN_BACKGROUND_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Longest budget a background run gets, derived from the largest allowed turn
+ * budget so that no permitted turn budget is cut short by the wall clock. A
+ * run that reaches it is stuck, not slow.
+ */
+const MAX_BACKGROUND_TIMEOUT_MS = MAX_AGENT_TURNS * BACKGROUND_TURN_ALLOWANCE_MS;
+
+/**
+ * Turn budget assumed when a profile sets none. The pi runtime leaves such a
+ * run unbounded in turns, so the wall clock is its only bound and this decides
+ * how long that bound is.
+ */
+const ASSUMED_TURNS_WITHOUT_CAP = 100;
+
+/**
+ * The wall-clock budget for a `background: true` spawn whose profile sets no
+ * `timeoutMinutes`.
+ *
+ * Derived from the turn budget so the turn cap is the limit the person who
+ * wrote the profile actually chose, and the timeout only catches a run that
+ * is stuck rather than one that is still working.
+ */
+export function backgroundTimeoutMs(maxTurns: number | undefined): number {
+    const turns = maxTurns !== undefined && maxTurns > 0 ? maxTurns : ASSUMED_TURNS_WITHOUT_CAP;
+    const derived = turns * BACKGROUND_TURN_ALLOWANCE_MS;
+    return Math.min(MAX_BACKGROUND_TIMEOUT_MS, Math.max(MIN_BACKGROUND_TIMEOUT_MS, derived));
+}
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
@@ -1038,9 +1074,18 @@ export class AgentSpawner extends EventEmitter {
         const timeoutMs =
             def.timeoutMinutes !== undefined && def.timeoutMinutes > 0
                 ? def.timeoutMinutes * 60_000
-                : DEFAULT_BACKGROUND_TIMEOUT_MS;
+                : backgroundTimeoutMs(def.maxTurns);
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        // The reason tells the runner this was the run's own budget running out,
+        // not a user stop: the two need different words and different advice.
+        const timer = setTimeout(
+            () =>
+                controller.abort({
+                    kind: "subagent-timeout",
+                    timeoutMinutes: Math.round(timeoutMs / 60_000),
+                }),
+            timeoutMs,
+        );
         const { parentSessionId, parentToolCallId } = sessionArgs;
         // Generated here, not inside runSubagentSession, so the receipt below
         // can report it without waiting for the child session to actually be

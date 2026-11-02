@@ -18,11 +18,13 @@ import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
 import {
     assistantText,
     failedResult,
+    isSubagentTimeoutReason,
     neutralizeControlTags,
     partialResult,
     SUBAGENT_STOPPED_TEXT,
     type SubagentResumability,
     subagentStartedResult,
+    subagentTimeoutText,
     subagentTurnResult,
 } from "./subagentProgress.ts";
 
@@ -164,9 +166,15 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
             };
         }
         if (args.signal?.aborted) {
+            const reason = args.signal.reason;
             return {
                 subSessionId,
-                resultText: SUBAGENT_STOPPED_TEXT,
+                resultText: isSubagentTimeoutReason(reason)
+                    ? subagentTimeoutText({
+                          timeoutMinutes: reason.timeoutMinutes,
+                          turnsUsed,
+                      })
+                    : SUBAGENT_STOPPED_TEXT,
                 isError: true,
                 aborted: true,
             };

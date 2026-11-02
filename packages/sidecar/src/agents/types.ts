@@ -89,8 +89,8 @@ export interface AgentDefinition {
     /**
      * Wall-clock budget for a `background: true` spawn of this agent type, in
      * minutes. Ignored for synchronous spawns — those are already bounded by
-     * the parent turn. Defaults to `DEFAULT_BACKGROUND_TIMEOUT_MS` (see
-     * `agentSpawner.ts`) when omitted.
+     * the parent turn. Defaults to the turn budget scaled by a per-turn
+     * allowance (see `backgroundTimeoutMs` in `agentSpawner.ts`) when omitted.
      */
     timeoutMinutes?: number;
     /**

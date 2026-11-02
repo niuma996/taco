@@ -83,22 +83,11 @@ export type CompactionFailureReason =
  *  A minor bump means an older daemon would fail or, worse, answer ok while
  *  dropping the new fields, so the newer client must refuse it up front. The
  *  per-minor history lives in docs/sidecar-protocol.md.
- *  2.1 gave `session.steer` a result body; a 2.0 daemon answers `null`, which a
- *  2.1 client would misread as a successful enqueue.
- *  2.2 added the `providerExtraModels` / `providerHiddenModels` config fields;
- *  a 2.1 daemon drops them on `settings.write` while still answering ok.
- *  2.5 added `attachment.stage` and the `attachments` params on session
- *  prompts; a 2.4 daemon would ignore the ids and send the files nowhere.
- *  2.6 added optional `input` on provider model entries (`providers.list`,
- *  and the config fields `settings.write` replaces). A 2.5 daemon drops
- *  `input` on write while still answering ok, so a saved image switch
- *  would not stick.
- *  2.7 added the optional `query` filter on `session.list`. A 2.6 daemon
- *  answers ok but ignores it, so a search would silently list every
- *  session instead of the matches.
  *  2.8 added `work.*` and the `work.changed` push; a 2.7 daemon would answer
- *  `unknown_method` instead of showing the background work. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 8 } as const;
+ *  `unknown_method` instead of showing the background work.
+ *  2.9 added `timeoutMinutes` on `agents.write` / `agents.content`; a 2.8
+ *  daemon drops it, so a saved timeout would not take effect. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 9 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

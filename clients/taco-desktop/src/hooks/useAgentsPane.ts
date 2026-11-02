@@ -17,6 +17,8 @@ export interface AgentSaveInput {
     whenToUse?: string;
     runtime: AgentRuntime;
     maxTurns: number;
+    /** Wall-clock budget for a background spawn, in minutes; omitted = derived. */
+    timeoutMinutes?: number;
     systemPrompt: string;
     /** `claude-code` only; omitted = Claude Code's full preset. */
     tools?: string[];

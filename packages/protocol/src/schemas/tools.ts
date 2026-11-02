@@ -39,7 +39,10 @@ export const agentsWriteSchema = Type.Object({
     description: Type.String({ minLength: 1, maxLength: 1024 }),
     whenToUse: Type.Optional(Type.String({ maxLength: 2048 })),
     runtime: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("claude-code")])),
-    maxTurns: Type.Integer({ minimum: 1, maximum: 200 }),
+    maxTurns: Type.Integer({ minimum: 1, maximum: 500 }),
+    // Wall-clock budget for a background spawn of this agent, in minutes.
+    // Omitted = derived from the turn budget (see backgroundTimeoutMs).
+    timeoutMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 600 })),
     tools: Type.Optional(
         Type.Array(
             Type.String({

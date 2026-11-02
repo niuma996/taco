@@ -71,6 +71,45 @@ describe("agents.write", () => {
             rmSync(home, { recursive: true, force: true });
         });
 
+        it("keeps a hand-written timeoutMinutes, and omits it when unset", async () => {
+            await writeUserAgent(params({ timeoutMinutes: 45 }), []);
+            const text = readFileSync(join(userAgentsDir(), "my-cc.md"), "utf-8");
+            assert.match(text, /timeoutMinutes: 45/);
+            // Round-trip through the real loader's parser.
+            assert.equal(parseAgentMarkdown(text, "x", "user")?.timeoutMinutes, 45);
+
+            await writeUserAgent(
+                params({ timeoutMinutes: undefined, previousAgentType: "my-cc" }),
+                [
+                    {
+                        agentType: "my-cc",
+                        description: "reads things",
+                        systemPrompt: "You read files.",
+                        runtime: "claude-code",
+                        source: "user",
+                        filePath: join(userAgentsDir(), "my-cc.md"),
+                    },
+                ],
+            );
+            const plain = readFileSync(join(userAgentsDir(), "my-cc.md"), "utf-8");
+            assert.equal(
+                plain.includes("timeoutMinutes"),
+                false,
+                "unset means the daemon derives it, so the file stays free of a stale number",
+            );
+        });
+
+        it("rejects a timeoutMinutes outside the allowed range", async () => {
+            await assert.rejects(
+                () => writeUserAgent(params({ timeoutMinutes: 0 }), []),
+                /timeoutMinutes/,
+            );
+            await assert.rejects(
+                () => writeUserAgent(params({ timeoutMinutes: 601 }), []),
+                /timeoutMinutes/,
+            );
+        });
+
         it("creates <agentType>.md under $TACO_HOME/agents with parseable frontmatter", async () => {
             await writeUserAgent(
                 params({ description: "reads: things", whenToUse: "for reads" }),

@@ -37,8 +37,12 @@ const TOOL_NAME_PATTERN = AGENT_TOOL_NAME_PATTERN;
 const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
 
 /** Turn cap a new definition starts with; Claude Code matches the sidecar's runner default. */
-export function defaultMaxTurns(runtime: AgentRuntime): number {
-    return runtime === "claude-code" ? 50 : 30;
+/**
+ * Turn budget a new definition starts with. The same for both runtimes: the
+ * budget is about how much work the task needs, not about which engine runs it.
+ */
+export function defaultMaxTurns(): number {
+    return 100;
 }
 
 const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
@@ -61,6 +65,8 @@ export interface AgentFormValue {
     whenToUse?: string;
     runtime: AgentRuntime;
     maxTurns: number;
+    /** Wall-clock budget for a background spawn, in minutes. Unset = derived. */
+    timeoutMinutes?: number;
     systemPrompt: string;
     tools?: string[];
     permissionMode?: ClaudeCodePermissionMode;
@@ -109,8 +115,11 @@ export function AgentForm(props: AgentFormProps) {
     const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
     const [description, setDescription] = useState(props.existing?.description ?? "");
     const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
-    const [maxTurns, setMaxTurns] = useState(
-        String(props.existing?.maxTurns ?? defaultMaxTurns(props.runtime)),
+    const [maxTurns, setMaxTurns] = useState(String(props.existing?.maxTurns ?? defaultMaxTurns()));
+    // Empty = the daemon derives the budget from the turn budget, which is the
+    // right default; a number here overrides it.
+    const [timeoutMinutes, setTimeoutMinutes] = useState(
+        props.existing?.timeoutMinutes === undefined ? "" : String(props.existing.timeoutMinutes),
     );
     const [systemPrompt, setSystemPrompt] = useState(props.existing?.systemPrompt ?? "");
     // Off by default and only reachable by flipping it: an empty md body is a
@@ -146,7 +155,16 @@ export function AgentForm(props: AgentFormProps) {
         props.shadowedTypes.includes(trimmedType);
     const turns = Number.parseInt(maxTurns.trim(), 10);
     const turnsValid =
-        Number.isInteger(turns) && turns >= 1 && turns <= 200 && String(turns) === maxTurns.trim();
+        Number.isInteger(turns) && turns >= 1 && turns <= 500 && String(turns) === maxTurns.trim();
+    const timeoutText = timeoutMinutes.trim();
+    const timeoutParsed = Number.parseInt(timeoutText, 10);
+    const timeoutValue = timeoutText === "" ? undefined : timeoutParsed;
+    const timeoutValid =
+        timeoutText === "" ||
+        (Number.isInteger(timeoutParsed) &&
+            timeoutParsed >= 1 &&
+            timeoutParsed <= 600 &&
+            String(timeoutParsed) === timeoutText);
     const toolList = parseTools(tools);
     const blockedTool = toolList?.find((n) => BLOCKED_CC_TOOLS.has(n));
     const toolsError =
@@ -164,6 +182,7 @@ export function AgentForm(props: AgentFormProps) {
         description.trim().length <= 1024 &&
         whenToUse.trim().length <= 2048 &&
         turnsValid &&
+        timeoutValid &&
         (noRolePrompt || systemPrompt.trim() !== "") &&
         systemPrompt.trim().length <= 65536 &&
         (!isCc || toolsError === undefined);
@@ -177,6 +196,7 @@ export function AgentForm(props: AgentFormProps) {
             whenToUse: whenToUse.trim() === "" ? undefined : whenToUse.trim(),
             runtime: props.runtime,
             maxTurns: turns,
+            ...(timeoutValue !== undefined ? { timeoutMinutes: timeoutValue } : {}),
             systemPrompt: noRolePrompt ? "" : systemPrompt,
             ...(isCc ? { tools: toolList, permissionMode, ...(cwd !== "" ? { cwd } : {}) } : {}),
         });
@@ -330,6 +350,18 @@ export function AgentForm(props: AgentFormProps) {
                     value={maxTurns}
                     onChange={(e) => setMaxTurns(e.target.value)}
                     inputMode="numeric"
+                />
+            </FormField>
+            <FormField
+                label={t("agents.form.timeoutMinutes")}
+                hint={t("agents.form.timeoutMinutesHint")}
+                error={!timeoutValid ? t("agents.form.timeoutMinutesInvalid") : undefined}
+            >
+                <TextInput
+                    value={timeoutMinutes}
+                    onChange={(e) => setTimeoutMinutes(e.target.value)}
+                    inputMode="numeric"
+                    placeholder={t("agents.form.timeoutMinutesAuto")}
                 />
             </FormField>
             <FormField

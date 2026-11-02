@@ -231,6 +231,11 @@ export interface AgentsContentResult {
     context?: "independent" | "fork";
     runtime?: AgentRuntime;
     maxTurns?: number;
+    /**
+     * Wall-clock budget for a background spawn, in minutes. Absent = derived
+     * from the turn budget rather than fixed.
+     */
+    timeoutMinutes?: number;
     /** Tool names from frontmatter; absent = default toolset (Claude Code's preset for `claude-code`). */
     tools?: string[];
     /** `claude-code` only. */

@@ -84,6 +84,7 @@ export function registerAgentsHandlers(): void {
                 context: def.context,
                 runtime: def.runtime,
                 maxTurns: def.maxTurns,
+                timeoutMinutes: def.timeoutMinutes,
                 ...(def.tools !== undefined ? { tools: def.tools } : {}),
                 ...(def.permissionMode !== undefined ? { permissionMode: def.permissionMode } : {}),
                 ...(def.runtime === "claude-code" && def.cwd !== undefined ? { cwd: def.cwd } : {}),

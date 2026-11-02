@@ -381,6 +381,32 @@ describe("subagentRunner", () => {
             assert.match(result.resultText, /deliberate\s+interruption, not a failure/);
         });
 
+        it("says a timeout was a time limit, not a user stop", async () => {
+            const attached = new FakeAttached();
+            const controller = new AbortController();
+            const run = runAttachedSubagent({
+                subSessionId: asSessionId("sub-timeout"),
+                attached: attached.asSession(),
+                prompt: "go",
+                agentType: "reviewer",
+                resumability: "resumable",
+                signal: controller.signal,
+                readLastAssistantText: finalText,
+            });
+
+            controller.abort({ kind: "subagent-timeout", timeoutMinutes: 50 });
+            const result = await run;
+
+            assert.equal(result.aborted, true);
+            assert.match(result.resultText, /50-minute/);
+            assert.match(result.resultText, /time limit, not a failure/);
+            assert.equal(
+                result.resultText.includes("the user aborted the parent session"),
+                false,
+                "a timeout must not read as a user action",
+            );
+        });
+
         it("reports how far a failed child got and how to resume it", async () => {
             const attached = new FakeAttached();
             attached.prompt = async () => {

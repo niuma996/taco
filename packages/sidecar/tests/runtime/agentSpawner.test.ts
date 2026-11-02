@@ -39,6 +39,7 @@ import type {
     SdkQueryOptions,
 } from "../../src/runtime/subagent/claudeCode/claudeCodeSdk.ts";
 import { readPendingSubagentResults } from "../../src/runtime/subagent/subagentPending.ts";
+import { isSubagentTimeoutReason } from "../../src/runtime/subagent/subagentProgress.ts";
 import { subagentResultPath } from "../../src/runtime/subagent/subagentResultsDir.ts";
 import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { createAgentTool } from "../../src/tools/agent.ts";
@@ -507,6 +508,17 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             assert.ok(fireTimeout, "background spawn must arm a timeout");
             fireTimeout();
             assert.equal(capturedSignal?.aborted, true, "timeout must abort the background signal");
+            // The reason is the only thing that tells a timeout apart from a
+            // user stop: both abort the same controller.
+            assert.equal(
+                isSubagentTimeoutReason(capturedSignal?.reason),
+                true,
+                "the timeout must say so on the signal",
+            );
+            assert.equal(
+                (capturedSignal?.reason as { timeoutMinutes?: number }).timeoutMinutes,
+                10,
+            );
         } finally {
             globalThis.setTimeout = originalSetTimeout;
             // The abort resolves the stubbed run, so the settle sequence still

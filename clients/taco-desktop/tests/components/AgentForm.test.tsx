@@ -106,7 +106,7 @@ describe("AgentForm", () => {
     const limitCases: Array<[string, (inputs: HTMLElement[]) => [HTMLElement, string]]> = [
         ["description", (inputs) => [inputs[1] as HTMLElement, "x".repeat(1025)]],
         ["whenToUse", (inputs) => [inputs[2] as HTMLElement, "x".repeat(2049)]],
-        ["maxTurns", () => [screen.getByDisplayValue("30"), "201"]],
+        ["maxTurns", () => [screen.getByDisplayValue("100"), "501"]],
         ["systemPrompt", (inputs) => [inputs[inputs.length - 1] as HTMLElement, "x".repeat(65537)]],
     ];
     for (const [field, pick] of limitCases) {
@@ -131,12 +131,44 @@ describe("AgentForm", () => {
         });
     }
 
-    it("starts a new definition at the runtime's default turn cap", () => {
+    it("starts a new definition at the default turn cap", () => {
         render(<AgentForm {...base} runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
-        assert.ok(screen.getByDisplayValue("50"));
+        assert.ok(screen.getByDisplayValue("100"));
         cleanup();
         render(<AgentForm {...base} runtime="standard" onSave={() => {}} onCancel={() => {}} />);
-        assert.ok(screen.getByDisplayValue("30"));
+        assert.ok(screen.getByDisplayValue("100"));
+    });
+
+    it("leaves the timeout empty so the daemon derives it, and saves an explicit one", async () => {
+        const onSave = vi.fn<(v: AgentFormValue) => void>();
+        render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
+        assert.ok(screen.getByPlaceholderText("agents.form.timeoutMinutesAuto"));
+
+        const user = await fillRequired("plain");
+        await user.click(screen.getByText("agents.form.save"));
+        const saved = onSave.mock.calls[0]?.[0];
+        assert.ok(saved);
+        assert.equal(
+            "timeoutMinutes" in saved,
+            false,
+            "an empty field means the daemon derives the budget",
+        );
+
+        const timeoutInput = screen.getByPlaceholderText("agents.form.timeoutMinutesAuto");
+        await user.clear(timeoutInput);
+        await user.type(timeoutInput, "45");
+        await user.click(screen.getByText("agents.form.save"));
+        assert.equal(onSave.mock.calls[1]?.[0]?.timeoutMinutes, 45);
+    });
+
+    it("refuses to save a timeout that is not a whole number of minutes", async () => {
+        const onSave = vi.fn<(v: AgentFormValue) => void>();
+        render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
+        const user = await fillRequired("plain");
+        const timeoutInput = screen.getByPlaceholderText("agents.form.timeoutMinutesAuto");
+        await user.type(timeoutInput, "0");
+        await user.click(screen.getByText("agents.form.save"));
+        assert.equal(onSave.mock.calls.length, 0);
     });
 
     it("shows the no-user-questions rule in the Claude Code dialog", () => {

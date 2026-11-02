@@ -126,7 +126,13 @@ function renderAgentMarkdown(p: AgentsWriteParams): string {
             lines.push(`cwd: ${JSON.stringify(p.cwd)}`);
         }
     }
-    lines.push(`maxTurns: ${p.maxTurns}`, "---", "");
+    lines.push(`maxTurns: ${p.maxTurns}`);
+    // Only written when set: the derived default follows the turn budget, so
+    // a file without it stays correct if that derivation changes.
+    if (p.timeoutMinutes !== undefined) {
+        lines.push(`timeoutMinutes: ${p.timeoutMinutes}`);
+    }
+    lines.push("---", "");
     return `${lines.join("\n")}${p.systemPrompt.trimEnd()}\n`;
 }
 
@@ -185,6 +191,14 @@ export async function writeUserAgent(
     }
     if (!Number.isInteger(params.maxTurns) || params.maxTurns < 1) {
         throw new AgentWriteError("maxTurns must be a positive integer");
+    }
+    if (
+        params.timeoutMinutes !== undefined &&
+        (!Number.isInteger(params.timeoutMinutes) ||
+            params.timeoutMinutes < 1 ||
+            params.timeoutMinutes > 600)
+    ) {
+        throw new AgentWriteError("timeoutMinutes must be a whole number of minutes (1-600)");
     }
     if (params.tools?.some((t) => !TOOL_NAME_PATTERN.test(t))) {
         throw new AgentWriteError("tool names may contain only letters, digits, _ and -");

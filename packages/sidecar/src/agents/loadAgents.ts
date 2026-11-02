@@ -31,6 +31,14 @@ interface AgentFrontmatter {
     [key: string]: unknown;
 }
 
+/**
+ * Largest values a definition may declare. The protocol schema, the desktop
+ * form and this parser share them, so the same agent means the same thing
+ * however it was written.
+ */
+export const MAX_AGENT_TURNS = 500;
+export const MAX_AGENT_TIMEOUT_MINUTES = 600;
+
 /** Split frontmatter; when missing, returns frontmatter={} body=full text. */
 function splitFrontmatter(content: string): { frontmatter: AgentFrontmatter; body: string } {
     const parsed = matter(content);
@@ -68,10 +76,15 @@ export function parseAgentMarkdown(
         whenToUse: typeof frontmatter.whenToUse === "string" ? frontmatter.whenToUse : undefined,
         systemPrompt: body,
         tools,
-        maxTurns: Number.isFinite(maxTurns) ? maxTurns : undefined,
+        // Capped like the RPC path: a hand-written file must not be able to
+        // declare a budget the editor could not write.
+        maxTurns:
+            maxTurns !== undefined && Number.isFinite(maxTurns) && maxTurns > 0
+                ? Math.min(Math.trunc(maxTurns), MAX_AGENT_TURNS)
+                : undefined,
         timeoutMinutes:
             timeoutMinutes !== undefined && Number.isFinite(timeoutMinutes) && timeoutMinutes > 0
-                ? timeoutMinutes
+                ? Math.min(Math.trunc(timeoutMinutes), MAX_AGENT_TIMEOUT_MINUTES)
                 : undefined,
         fewShots: parseFewShots(frontmatter.fewShots),
         context: parseContext(frontmatter.context),

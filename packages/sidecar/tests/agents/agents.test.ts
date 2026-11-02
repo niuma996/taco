@@ -9,7 +9,12 @@ import {
     estimateTokens,
     resolveContextMode,
 } from "../../src/agents/forkedHistory.ts";
-import { loadAgents, parseAgentMarkdown } from "../../src/agents/loadAgents.ts";
+import {
+    loadAgents,
+    MAX_AGENT_TIMEOUT_MINUTES,
+    MAX_AGENT_TURNS,
+    parseAgentMarkdown,
+} from "../../src/agents/loadAgents.ts";
 import { isStrictReadOnly } from "../../src/permissions/commandPolicy.ts";
 import type { AgentHarnessTool, Entry, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/subagent/childAttach.ts";
@@ -225,6 +230,14 @@ describe("loadAgents", () => {
             assert.equal(def.maxTurns, 30);
             assert.equal(def.systemPrompt, "You are an explorer.");
             assert.equal(def.timeoutMinutes, undefined);
+        });
+
+        it("caps the limits at the same ceilings the RPC path enforces", () => {
+            const md = "---\nname: a\nmaxTurns: 9999\ntimeoutMinutes: 9999\n---\nbody";
+            const def = parseAgentMarkdown(md, "/x/a.md", "user");
+            assert.ok(def);
+            assert.equal(def.maxTurns, MAX_AGENT_TURNS);
+            assert.equal(def.timeoutMinutes, MAX_AGENT_TIMEOUT_MINUTES);
         });
 
         it("parses timeoutMinutes from frontmatter", () => {

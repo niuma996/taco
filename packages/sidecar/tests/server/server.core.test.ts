@@ -144,7 +144,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 8 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 9 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -193,17 +193,18 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.8 client refuses a 2.7 daemon (it has no work.* methods)", () => {
-            // Client-side gate: a 2.7 daemon answers unknown_method to work.list,
-            // so the overview would show an error instead of the background work.
-            // 2.6 is refused for the older reason: it ignores the session search
-            // query and would silently list every session.
+        it("a 2.9 client refuses a 2.8 daemon (it drops the agent timeout)", () => {
+            // Client-side gate: a 2.8 daemon drops `timeoutMinutes` on write, so
+            // a saved budget would silently not apply.
+            // 2.7 is refused for the same reason one step back: it has no
+            // work.* methods, and 2.6 ignores the session search query.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), true);
-            // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 9 }), true);
+            // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), true);
         });
 
         it("accepts an older compatible client minor", async () => {

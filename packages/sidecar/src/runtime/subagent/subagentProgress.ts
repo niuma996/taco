@@ -101,11 +101,52 @@ function tailOf(text: string): string {
  */
 export type SubagentResumability = "resumable" | "not_resumable";
 
-/** Result text for a run stopped by the user, the parent's abort, or its own timeout. */
+/**
+ * Abort reason carried when a run hit its own wall-clock budget.
+ *
+ * The timeout and a user's stop abort the same controller, so the reason is
+ * the only thing that tells them apart. It travels on the AbortSignal, which
+ * every runner already receives.
+ */
+export interface SubagentTimeoutReason {
+    readonly kind: "subagent-timeout";
+    readonly timeoutMinutes: number;
+}
+
+export function isSubagentTimeoutReason(reason: unknown): reason is SubagentTimeoutReason {
+    return (
+        typeof reason === "object" &&
+        reason !== null &&
+        (reason as { kind?: unknown }).kind === "subagent-timeout"
+    );
+}
+
+/** Result text for a run the user (or the parent's abort) stopped. */
 export const SUBAGENT_STOPPED_TEXT =
     "Subagent was stopped before it finished: the user aborted the parent " +
-    "session (or the run's own timeout fired). This is a deliberate " +
-    "interruption, not a failure — do not retry or respawn unless the user asks.";
+    "session. This is a deliberate interruption, not a failure — do not retry " +
+    "or respawn unless the user asks.";
+
+/**
+ * Result text for a run that hit its own wall-clock budget.
+ *
+ * Says how long the run was allowed and how far it got, so the reader can tell
+ * a timeout apart from a stop and judge whether a longer budget would have
+ * helped. The findings it had are not thrown away: the session keeps them and
+ * `agentContinue` can pick the run up from where it stopped.
+ */
+export function subagentTimeoutText(args: {
+    readonly timeoutMinutes: number;
+    readonly turnsUsed: number;
+}): string {
+    return (
+        "Subagent was stopped before it finished: it ran out of its own " +
+        `${args.timeoutMinutes}-minute time budget after ${args.turnsUsed} turn(s). ` +
+        "This is a time limit, not a failure — its findings so far are kept in " +
+        "its session, so continuing that session can finish the work. Do not " +
+        "respawn it from scratch unless the user asks."
+    );
+}
 
 /**
  * Label a turn-capped run so the caller can tell a finished answer from a
