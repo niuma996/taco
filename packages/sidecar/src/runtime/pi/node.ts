@@ -10,5 +10,5 @@
  * inline `type` markers keep working) without touching the upstream subpath.
  */
 
-export type { FileError, FileInfo, Result } from "@taco-ai/pi-harness/node";
-export { NodeExecutionEnv } from "@taco-ai/pi-harness/node";
+export type { FileInfo, Result } from "@taco-ai/pi-harness/node";
+export { FileError, NodeExecutionEnv } from "@taco-ai/pi-harness/node";

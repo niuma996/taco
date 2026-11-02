@@ -146,6 +146,34 @@ describe("agent tool", () => {
         assert.ok(!text.includes("done"), "receipt must not contain the child's eventual output");
     });
 
+    it("keeps the child session id in details when a synchronous run fails", async () => {
+        const ctx: SubagentSpawnContext = {
+            async spawn() {
+                return {
+                    subSessionId: asSessionId("sub-failed"),
+                    resultText: "provider terminated",
+                    isError: true,
+                };
+            },
+            async continue() {
+                return { subSessionId: asSessionId("stub"), resultText: "", isError: true };
+            },
+            abortSubagent: () => ({ stopped: false }),
+        };
+        const tool = createAgentTool(ctx, [{ agentType: "reviewer" }]);
+        const res = await invokeTool(
+            tool,
+            { subagent_type: "reviewer", description: "review", prompt: "review" },
+            { env: mockEnv },
+            { toolCallId: "tc-parent" },
+        );
+        assert.deepEqual(res.details, {
+            status: "error",
+            subSessionId: "sub-failed",
+            agentType: "reviewer",
+        });
+    });
+
     it("reports a background launch failure without a session id", async () => {
         const ctx: SubagentSpawnContext = {
             async spawn() {
@@ -245,7 +273,11 @@ describe("agent tool", () => {
         // Same contract as the background branch: a failure is an error, not a
         // completed card. `isError` is what pi persists and the desktop colours.
         assert.equal(res.isError, true);
-        assert.deepEqual(res.details, { status: "error", agentType: "bogus" });
+        assert.deepEqual(res.details, {
+            status: "error",
+            agentType: "bogus",
+            subSessionId: "sub-x",
+        });
     });
 
     it("retains aborted state and child session id for a synchronous stop", async () => {

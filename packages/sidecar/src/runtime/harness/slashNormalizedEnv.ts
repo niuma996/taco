@@ -17,8 +17,10 @@
  * inside loadSkillsFromDirInternal.
  */
 
+import { lstat, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { FileError, FileInfo, Result } from "../pi/node.ts";
-import { NodeExecutionEnv } from "../pi/node.ts";
+import { NodeExecutionEnv, FileError as NodeFileError } from "../pi/node.ts";
 import type { Context } from "../pi/types.ts";
 
 /** Normalize one FileInfo's `path` + `name` to forward slashes. */
@@ -36,9 +38,73 @@ function normalizeFileInfo(info: FileInfo): FileInfo {
 
 export class SlashNormalizedExecutionEnv extends NodeExecutionEnv {
     override async listDir(path: string, context: Context): Promise<Result<FileInfo[], FileError>> {
-        const result = await super.listDir(path, context);
-        if (!result.ok) return result;
-        return { ok: true, value: result.value.map(normalizeFileInfo) };
+        const resolved = await this.absolutePath(path, context);
+        if (!resolved.ok) return resolved;
+        const directory = resolved.value;
+        if (context.abortSignal?.aborted) {
+            return { ok: false, error: new NodeFileError("aborted", "aborted", directory) };
+        }
+        try {
+            const entries = await readdir(directory, { withFileTypes: true });
+            const infos: FileInfo[] = [];
+            for (const entry of entries) {
+                if (context.abortSignal?.aborted) {
+                    return { ok: false, error: new NodeFileError("aborted", "aborted", directory) };
+                }
+                const entryPath = join(directory, entry.name);
+                try {
+                    const stats = await lstat(entryPath);
+                    const kind = stats.isFile()
+                        ? "file"
+                        : stats.isDirectory()
+                          ? "directory"
+                          : stats.isSymbolicLink()
+                            ? "symlink"
+                            : undefined;
+                    if (!kind) {
+                        return {
+                            ok: false,
+                            error: new NodeFileError("invalid", "Unsupported file type", entryPath),
+                        };
+                    }
+                    infos.push(
+                        normalizeFileInfo({
+                            name: entry.name,
+                            path: entryPath,
+                            kind,
+                            size: stats.size,
+                            mtimeMs: stats.mtimeMs,
+                        }),
+                    );
+                } catch (error) {
+                    // A session fork's .jsonl.tmp can be renamed away after
+                    // readdir. That entry no longer exists; failing the whole
+                    // listing would abort unrelated, concurrently spawning agents.
+                    if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+                    throw error;
+                }
+            }
+            return { ok: true, value: infos };
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            const kind =
+                code === "ENOENT"
+                    ? "not_found"
+                    : code === "ENOTDIR"
+                      ? "not_directory"
+                      : code === "EACCES" || code === "EPERM"
+                        ? "permission_denied"
+                        : "unknown";
+            return {
+                ok: false,
+                error: new NodeFileError(
+                    kind,
+                    error instanceof Error ? error.message : String(error),
+                    directory,
+                    error instanceof Error ? error : undefined,
+                ),
+            };
+        }
     }
 
     override async fileInfo(path: string, context: Context): Promise<Result<FileInfo, FileError>> {

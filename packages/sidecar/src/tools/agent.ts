@@ -178,7 +178,13 @@ export function createAgentTool(
                     details: subSessionId
                         ? { status: "launched", subSessionId, agentType: params.subagent_type }
                         : isError
-                          ? { status: "error", agentType: params.subagent_type }
+                          ? {
+                                status: "error",
+                                agentType: params.subagent_type,
+                                // The child exists even when its run failed; the
+                                // panel needs the id to open the kept history.
+                                ...(subSessionId ? { subSessionId } : {}),
+                            }
                           : { status: "completed", agentType: params.subagent_type },
                 };
             }
@@ -198,7 +204,11 @@ export function createAgentTool(
                     aborted && subSessionId
                         ? { status: "aborted", subSessionId, agentType: params.subagent_type }
                         : isError
-                          ? { status: "error", agentType: params.subagent_type }
+                          ? {
+                                status: "error",
+                                agentType: params.subagent_type,
+                                ...(subSessionId ? { subSessionId } : {}),
+                            }
                           : {
                                 status: "completed",
                                 agentType: params.subagent_type,
