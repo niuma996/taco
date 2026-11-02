@@ -75,6 +75,24 @@ describe("prepareChildAttach — capability statement", () => {
         assert.match(prompt, /no file was written/);
     });
 
+    it("keeps the read-only shell's tool description and routing guide consistent", async () => {
+        const tools = ["read", "grep", "glob", "shell"].map(fakeTool);
+        const attached = await prepareChildAttach(depsFor(tools), {
+            sessionId: asSessionId("s1"),
+            agentType: "reviewer",
+            childDepth: 1,
+            allowedTools: tools,
+            modelIdentity: "test/model",
+        });
+        const shell = attached.tools.find((tool) => tool.name === "shell");
+        assert.ok(shell);
+        assert.match(shell.description, /read-only/);
+        assert.match(shell.description, /builds, tests, and writes are denied/);
+        assert.ok(!shell.description.includes("prompt for approval"));
+        assert.match(attached.systemPrompt, /shell \[read-only\]/);
+        assert.ok(!attached.systemPrompt.includes("commands prompt for approval"));
+    });
+
     it("does not claim the shell is read-only for a non-gated profile", async () => {
         const prompt = await attach("verification", ["read", "grep", "glob", "shell"]);
         assert.match(prompt, /no `write` \/ `edit` tools/);

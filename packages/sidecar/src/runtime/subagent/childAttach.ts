@@ -114,10 +114,25 @@ export async function prepareChildAttach(
             { readOnly: true },
         );
         // Replace in place so the toolset keeps its original ordering.
-        tools[shellIdx] = createShellTool({
+        const shell = createShellTool({
             permissionBroker: readonlyBroker,
             sessionId: args.sessionId,
         });
+        // The tool schema and routing guide must describe the isolated broker,
+        // not advertise commands or approval routes it will always refuse.
+        tools[shellIdx] = {
+            ...shell,
+            description:
+                "Run a read-only command in the host shell. Output is truncated at 1MB, timeout defaults to 120s. " +
+                "Only commands the read-only policy recognizes will run; builds, tests, and writes are denied. Approval is never requested. " +
+                "Prefer read/grep/glob for file access; use shell mainly for read-only git history.",
+            taco: {
+                ...shell.taco,
+                promptSummary:
+                    "Run recognized read-only host shell commands. Builds, tests, and writes are denied. Approval is never requested. Prefer read/grep/glob for files; use shell mainly for git history.",
+                mutates: false,
+            },
+        };
     }
 
     // Rebuild the system prompt from the child's actual toolset so read-only
@@ -175,6 +190,8 @@ export async function prepareChildAttach(
         projectContext: deps.projectContext,
         environmentContext: deps.environmentContext,
         hideWorkspacePath: deps.hideWorkspacePath,
+        readOnlyShell:
+            args.agentType !== undefined && READ_ONLY_SHELL_AGENT_TYPES.has(args.agentType),
         contributors:
             profileContributors.length > 0
                 ? [...filteredContributors, ...profileContributors]

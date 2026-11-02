@@ -4,7 +4,7 @@ description: Use when reviewing a change too large or too interconnected for one
 runAs: inline
 inlineOnly: true
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Deep Review
@@ -85,7 +85,7 @@ Every reviewer needs four things. The lens is the only variable; keep the rest p
 1. **Its lens, stated as the question it should be asking** — not just a label
 2. **The explicit file list** it owns (and, for module splits, the boundary)
 3. **A cap on output** — "at most 6 findings, most severe first". Five uncapped reports will flood your context and bury the real findings
-4. **The report shape** — severity, `file:line`, one-sentence defect, concrete failure scenario
+4. **The report shape** — id, priority (P0–P3), `file:line`, one-sentence defect, concrete failure scenario (or `n/a — <why>`), and basis (`read` or `inferred`)
 
 State what is out of scope too. A reviewer told only "review the auth change" will also tell you about naming and formatting.
 
@@ -110,16 +110,16 @@ agent(subagent_type=reviewer, context=fork,        description="UX lens",       
 
 The reports arrive as independent opinions of varying quality. Your job is synthesis, not concatenation.
 
-1. **Merge by `file:line`.** The same defect will arrive from several lenses in different words.
+1. **Merge by `file:line`.** The same defect will arrive from several lenses in different words. Each report numbers its own findings from `F1`, so an id identifies a finding only within its report — key the merge on the location, not the id.
 2. **Treat corroboration as confidence, not as a vote.** Two lenses independently reaching the same line is strong signal. But do **not** discard single-lens findings — a privilege-escalation bug is *supposed* to be visible only to the lens looking for it. Unanimity is not the bar; being right is. Judge a lone finding on its stated failure scenario.
 3. **Verify anything you intend to act on.** Reviewers reason about code without running it, so they produce confident-sounding findings that do not reproduce. Open the file and confirm the defect exists before you fix or report it.
 4. **Discard what does not survive.** A finding you could not confirm is not a finding; say you could not confirm it rather than passing it along hedged.
-5. **Rank by severity across all lenses,** not per-lens — the user wants one ordered list.
+5. **Rank by priority across all lenses,** not per-lens — the user wants one ordered list.
 6. **Account for coverage.** If a lens returned nothing, or hit its turn cap, or came back obviously thin, say so. A silent gap reads as "this area is clean" when it actually means "nobody looked".
 
 ### 7. Optionally pair with `verification`
 
-Reviewers claim; `verification` proves. Where a HIGH finding asserts something testable — "this crashes on empty input", "this races under concurrent calls" — dispatch `verification` in a **following** turn to actually run it:
+Reviewers claim; `verification` proves. Where a P0 or P1 finding asserts something testable — "this crashes on empty input", "this races under concurrent calls" — dispatch `verification` in a **following** turn to actually run it:
 
 ```text
 agent(subagent_type=verification, description="probe empty-input crash", prompt="...reproduce, report PASS/FAIL...")
@@ -138,7 +138,7 @@ Your final message is the review. It replaces the subagent reports — the user 
 Report, in this order:
 
 1. **One-line verdict** — the headline: is this safe to land, and if not, what is the single worst problem.
-2. **Confirmed findings, ranked by severity across all lenses.** For each: severity · `file:line` · the defect in one sentence · the concrete failure scenario. Note which lenses raised it only when corroboration is what makes it credible.
+2. **Confirmed findings, ranked by priority across all lenses.** For each: priority (P0–P3) · `file:line` · the defect in one sentence · the concrete failure scenario (or `n/a — <why>`). Note which lenses raised it only when corroboration is what makes it credible.
 3. **What was checked and found clean** — one line per lens. This is what makes the review auditable rather than a list of complaints.
 4. **Coverage gaps** — lenses that returned thin, capped out, or were not run; claims you could not confirm either way; anything a follow-up pass should pick up.
 
@@ -165,7 +165,7 @@ Explicitly out of scope: naming, formatting, test coverage, architectural taste.
 Other reviewers are covering architecture and correctness — do not duplicate them.
 
 Return at most 6 findings, most severe first. For each:
-  severity (HIGH/MEDIUM/LOW) · file:line · one-sentence defect · concrete failure scenario
+  id (F1, F2, …) · priority (P0–P3) · file:line · one-sentence defect · concrete failure scenario (or `n/a — <why>`) · basis (read | inferred)
 If a question above is clean, say so in one line. Do not pad the list.
 ```
 
@@ -179,7 +179,7 @@ If a question above is clean, say so in one line. Do not pad the list.
 
 **❌ Concatenating reports as your answer** — the user asked for a review, not five reviews. Dedupe, verify, rank.
 
-**❌ Reporting per-lens sections** — "Architecture lens found… Correctness lens found…" pushes your dedup work onto the reader and hides that two lenses flagged the same line. Rank by severity across all lenses instead.
+**❌ Reporting per-lens sections** — "Architecture lens found… Correctness lens found…" pushes your dedup work onto the reader and hides that two lenses flagged the same line. Rank by priority across all lenses instead.
 
 **❌ Staying silent about a lens that returned nothing** — indistinguishable from that area being clean. Say which lenses came back empty.
 

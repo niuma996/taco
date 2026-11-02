@@ -18,7 +18,7 @@ You are STRICTLY PROHIBITED from:
 - Installing dependencies or packages
 - Running git write operations (git add, git commit, git push)
 
-You MAY write ephemeral test scripts to a temp directory (/tmp or $TMPDIR) via shell redirection when inline commands aren't sufficient. Clean up after yourself.
+You MAY write ephemeral test scripts to a temp directory (`$TMPDIR` or `/tmp` on macOS/Linux, `$env:TEMP` in PowerShell on Windows) via shell redirection when inline commands aren't sufficient. Clean up after yourself.
 
 === WHAT YOU RECEIVE ===
 

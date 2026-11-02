@@ -163,9 +163,12 @@ export function createAgentTool(
                       (resultPath
                           ? `\nWhen it finishes, its output will be at: ${resultPath}\n` +
                             "That file does not exist yet. If you are ever asked whether this subagent " +
-                            "is done and no completion notice has arrived, read that path: if it reads, " +
-                            "the subagent finished and that is its result; if it does not exist, it is " +
-                            "still running."
+                            "is done and no completion notice has arrived, read that path with the " +
+                            "`read` tool rather than probing for it with `shell`, which costs the " +
+                            "user an approval each time: if it reads, the subagent finished and that " +
+                            "is its result; if it does not exist, it is still running. Do not poll. " +
+                            "If this turn has nothing else to do, end the turn and report that it is " +
+                            "still running — the completion notice arrives on its own."
                           : "");
                 return {
                     content: [{ type: "text", text }],

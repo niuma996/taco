@@ -114,7 +114,7 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
     }
     if (tools.has("agent")) {
         lines.push(
-            "- When a task matches an agent type in <available_agents>, delegate it via the `agent` tool.",
+            "- When a task matches an agent type in <available_agents> and the work is large enough to justify its own context, delegate it via the `agent` tool.",
         );
         // A read-only agent has no file-writing tool. Naming an output path to
         // one sends it off to prepare a file it cannot write, and it burns its
@@ -187,6 +187,12 @@ export interface BuildSystemPromptOptions {
      * IM/third-party channels where replies leave the local machine.
      */
     hideWorkspacePath?: boolean;
+    /**
+     * The session's `shell` tool is the read-only broker (explorer/reviewer).
+     * Selects platform guidance that does not name PowerShell cmdlets or tell
+     * the session to run builds and tests, both of which that broker denies.
+     */
+    readOnlyShell?: boolean;
 }
 
 const SECTION_SEPARATOR = "\n\n---\n\n";
@@ -213,7 +219,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         DEPTH_LINE: sessionKind.depth > 0 ? ` Depth: ${sessionKind.depth}.` : "",
         PATH_SEMANTICS: options.hideWorkspacePath ? PATH_SEMANTICS_HIDDEN : PATH_SEMANTICS_DEFAULT,
     });
-    const platform = buildPlatformPrompt(options.platform, toolNames);
+    const platform = buildPlatformPrompt(options.platform, toolNames, options.readOnlyShell);
     const toolSummary = toolSummaryForPrompt(options.tools);
     const sessionGuidance = buildSessionGuidanceSection(toolNames);
     const projectContext = options.projectContext ?? "";

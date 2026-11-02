@@ -588,7 +588,6 @@ describe("readOnlyShellGate", () => {
                     "git status",
                     "ls",
                     "pwd",
-                    "which",
                 ],
                 "reviewer.md's promised shell commands drifted from the read-only allowlist",
             );

@@ -107,6 +107,27 @@ describe("buildPlatformPrompt", () => {
         const fromPowerShell = buildPlatformPrompt("win32", ["powershell"]);
         assert.ok(!fromPowerShell.includes("Shell tool"));
     });
+
+    it("uses read-only guidance when the session shell is the read-only broker", () => {
+        // The broker checks the Unix-style read-only command set, never
+        // prompts, and denies builds/tests. Platform prose that names cmdlets
+        // or suggests builds sends the session at denied commands.
+        const mac = buildPlatformPrompt("darwin", ["read", "shell"], true);
+        assert.ok(mac.includes("Shell tool (macOS)"));
+        assert.ok(mac.includes("read-only"));
+        assert.ok(!mac.includes("use `shell` for builds"));
+
+        const win = buildPlatformPrompt("win32", ["read", "shell"], true);
+        assert.ok(win.includes("Shell tool (Windows)"));
+        assert.ok(win.includes("powershell.exe"));
+        assert.ok(win.includes("read-only"));
+        assert.ok(!win.includes("Get-ChildItem"));
+
+        // Without the shell tool there is nothing to describe, even when the
+        // role would have used a read-only one.
+        const noShell = buildPlatformPrompt("win32", ["read"], true);
+        assert.ok(!noShell.includes("Shell tool"));
+    });
 });
 
 describe("buildSystemPrompt", () => {
@@ -248,6 +269,16 @@ describe("buildSystemPrompt", () => {
         });
         assert.ok(out.includes("macOS"));
         assert.ok(!out.includes("Shell tool"));
+    });
+
+    it("passes readOnlyShell through to the platform section", () => {
+        const out = buildSystemPrompt({
+            tools: [stubTool("read"), stubTool("shell")],
+            platform: "win32",
+            readOnlyShell: true,
+        });
+        assert.ok(out.includes("read-only"));
+        assert.ok(!out.includes("Get-ChildItem"));
     });
 
     it("includes the data-protection section instructing the model not to reveal secrets", () => {
