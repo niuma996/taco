@@ -15,6 +15,7 @@
  * counts as a run with status=err; the error message lands in history.
  */
 
+import { randomUUID } from "node:crypto";
 import { readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../lib/logger.ts";
@@ -104,9 +105,22 @@ export function applyRunOutcome(latest: Job, ok: boolean): RunOutcomeUpdate {
 /** What a fire may report back. `summary` lands on the history entry. */
 export interface InvokeResult {
     summary?: string;
+    /** The Work tracking this fire's turn. */
+    workId?: string;
 }
 
-export type CommandInvoker = (job: Job) => Promise<InvokeResult | undefined>;
+/** Per-fire context handed to the invoker. */
+export interface FireContext {
+    /** Unique per fire, so two fires of one job are two Works. */
+    readonly fireId: string;
+    /**
+     * Called once the fire's Work exists, before its turn runs. The entry must
+     * know its Work even when the fire times out and the result never returns.
+     */
+    readonly onWork: (workId: string) => void;
+}
+
+export type CommandInvoker = (job: Job, fire?: FireContext) => Promise<InvokeResult | undefined>;
 
 export interface SchedulerOptions {
     store: {
@@ -311,14 +325,40 @@ export class Scheduler {
                 log.error(`failed to record running history for ${job.id}: ${String(err)}`);
             });
 
+        const fire: FireContext = {
+            fireId: randomUUID(),
+            onWork: (workId) => {
+                entry.workId = workId;
+                // Tag this fire's entry in place, whatever its status: if the
+                // Work arrived after the fire timed out, the entry is already
+                // final, and an overlay would add a second row for one fire.
+                void this.opts.store
+                    .mutate(job.id, (latest) => {
+                        if (!latest || latest.generation !== job.generation) return latest;
+                        return {
+                            ...latest,
+                            history: (latest.history ?? []).map((candidate) =>
+                                candidate.started_at === entry.started_at
+                                    ? { ...candidate, workId }
+                                    : candidate,
+                            ),
+                        };
+                    })
+                    .catch((err) => {
+                        log.error(`failed to record work id for ${job.id}: ${String(err)}`);
+                    });
+            },
+        };
+
         let releaseLockAfterInvocation = true;
         let completion: Promise<unknown> | undefined;
         try {
-            const invocation = this.invokeWithTimeout(job);
+            const invocation = this.invokeWithTimeout(job, fire);
             completion = invocation.completion;
             const outcome = await invocation.result;
             entry.status = "ok";
             if (outcome && typeof outcome.summary === "string") entry.summary = outcome.summary;
+            if (outcome?.workId !== undefined) entry.workId = outcome.workId;
         } catch (err) {
             entry.status = "err";
             entry.error = err instanceof Error ? err.message : String(err);
@@ -393,7 +433,10 @@ export class Scheduler {
                 });
             }
         }
-        return entry.status === "ok" ? { status: "ok" } : { status: "failed", error: entry.error };
+        const work = entry.workId !== undefined ? { workId: entry.workId } : {};
+        return entry.status === "ok"
+            ? { status: "ok", ...work }
+            : { status: "failed", error: entry.error, ...work };
     }
 
     private nowString(): string {
@@ -405,30 +448,11 @@ export class Scheduler {
     }
 
     /**
-     * Decide whether a `run_on_startup` job should fire at boot: either it
-     * has never run at all, or the schedule would have fired at least once
-     * between `last_run_at` and now (a missed window during downtime).
-     *
-     * Earlier we treated "last ran more than 5s ago" as a miss. That was
-     * wrong on two fronts:
-     *   - For interval jobs: a 24h schedule on a job that ran 1m ago is
-     *     not "missed" — the next fire is still 23h59m in the future.
-     *   - For cron jobs: a "every day at 09:00" schedule that last ran
-     *     yesterday at 09:00 and the daemon restarted at 10:00 should
-     *     replay (missed today's 09:00), but the same schedule on a
-     *     job that ran an hour ago should not.
-     *
-     * `nextFireAfter(spec, lastRunAt)` gives us the next scheduled
-     * fire strictly after `lastRunAt`. If that time has already
-     * passed at startup time, we missed it. A job that has never run
-     * (`last_run_at` unset) replays unconditionally: the user armed
-     * `run_on_startup` precisely to get a run on the next boot, and
-     * without this a fresh 24h-interval job would sit idle for a full
-     * interval after the restart that created it.
-     *
-     * The 5-second skew window still applies at the comparison edge:
-     * without it, a clock-jump or a "fire just landed as we shut down"
-     * race could double-fire an honest just-completed run.
+     * Whether a `run_on_startup` job missed a fire during downtime: the next
+     * scheduled fire after `last_run_at` has already passed. A job that never
+     * ran replays unconditionally — arming the flag asks for a run at boot.
+     * The 5s skew grace keeps a clock jump from double-firing a run that just
+     * completed as the process shut down.
      */
     private shouldReplayMissedRun(job: Job): boolean {
         if (!job.last_run_at) return true;
@@ -450,12 +474,15 @@ export class Scheduler {
      *  background — we can't cancel it from this layer, but we don't need
      *  to: when it finally settles, its then/catch is detached and the
      *  process holds no more state for the job than its own promise. */
-    private invokeWithTimeout(job: Job): {
+    private invokeWithTimeout(
+        job: Job,
+        context: FireContext,
+    ): {
         result: Promise<InvokeResult | undefined>;
         completion: Promise<unknown>;
     } {
         const timeoutMs = this.opts.fireTimeoutMs ?? DEFAULT_FIRE_TIMEOUT_MS;
-        const fire = Promise.resolve().then(() => this.opts.invoke(job));
+        const fire = Promise.resolve().then(() => this.opts.invoke(job, context));
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new FireTimeoutError(timeoutMs)), timeoutMs);

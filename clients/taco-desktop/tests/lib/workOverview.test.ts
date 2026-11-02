@@ -22,6 +22,7 @@ function work(over: Partial<WorkSummary> = {}): WorkSummary {
         status: "completed",
         createdAt: n,
         updatedAt: n,
+        sessionId: "p",
         parentSessionId: "p",
         childSessionId: `c${n}`,
         needsAttention: false,

@@ -1,9 +1,9 @@
 /**
  * `work.*` wire contract: the read-only overview of managed background work.
  *
- * A Work is one tracked unit of work, today a background subagent launch.
- * Three axes are reported separately on purpose: what the execution did
- * (`status`), how much of the answer survived (`completeness`), and whether
+ * A Work is one tracked unit of work: a background subagent launch, or one
+ * fire of a scheduled job. Three axes are reported separately on purpose: what
+ * the execution did (`status`), how much of the answer survived (`completeness`), and whether
  * the user was told (`delivery`). A failed notification never turns a
  * completed Work into a failed one.
  *
@@ -22,6 +22,16 @@ export const WORK_STATUSES = [
     "interrupted",
 ] as const;
 export type WorkStatus = (typeof WORK_STATUSES)[number];
+
+export const WORK_KINDS = ["subagent", "scheduled"] as const;
+export type WorkKind = (typeof WORK_KINDS)[number];
+
+/**
+ * `reason` of a scheduled Work whose prompt was queued behind a turn already
+ * running in its session. That turn's reply answers both, so this Work has no
+ * reply of its own; clients show it as merged rather than as a missing result.
+ */
+export const WORK_REASON_MERGED = "merged";
 
 /** How much of the answer a terminal Work carries. */
 export const WORK_COMPLETENESS = ["full", "partial", "unavailable"] as const;
@@ -87,9 +97,12 @@ export interface WorkSummary {
     workId: string;
     /** Bumped on every write; lets a reader tell two snapshots apart. */
     revision: number;
-    kind: "subagent";
+    kind: WorkKind;
     title: string;
-    agentType: string;
+    /** The subagent profile; absent for a scheduled fire. */
+    agentType?: string;
+    /** The job that fired, for a scheduled Work. */
+    jobId?: string;
     status: WorkStatus;
     /** Why a failed, cancelled or interrupted Work ended. */
     reason?: string;
@@ -97,16 +110,22 @@ export interface WorkSummary {
     updatedAt: number;
     endedAt?: number;
     /**
-     * Workspace and session that started it; the overview opens the session
-     * from these. Unlike the delivery summary this is the full key — for an IM
-     * conversation that means `im://channel/peer/chat`, because the key is the
-     * only way back to the session. The delivery summary omits peer/chat
-     * because it names only which channel was used, and the pane never opens a
-     * peer from it.
+     * Workspace and session the overview opens: the conversation that spawned a
+     * subagent, or the session a scheduled fire ran in. Unlike the delivery
+     * summary this is the full key — for an IM conversation that means
+     * `im://channel/peer/chat`, because the key is the only way back to the
+     * session. The delivery summary omits peer/chat because it names only which
+     * channel was used, and the pane never opens a peer from it.
      */
     workspace?: string;
+    sessionId: string;
+    /**
+     * Deprecated alias of `sessionId`, kept so a 2.9 desktop can still open a
+     * Work's session against a 2.10 daemon. New clients read `sessionId`.
+     */
     parentSessionId: string;
-    childSessionId: string;
+    /** The subagent's own session; absent for a scheduled fire. */
+    childSessionId?: string;
     completeness?: WorkCompleteness;
     /** First lines of the answer, for lists. */
     summary?: string;

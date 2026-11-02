@@ -278,7 +278,11 @@ export function createJobsRunNowTool(): AgentHarnessTool<TacoToolContext> {
         rpcMethod: RPC.jobsRunNow,
         buildParams: (input) => ({ id: input.id }),
         render: (input, result, _ctx) => {
-            if (result.status === "ok") return `fired ${input.id}`;
+            if (result.status === "ok") {
+                return result.workId
+                    ? `fired ${input.id} (work ${result.workId})`
+                    : `fired ${input.id}`;
+            }
             if (result.status === "skipped") {
                 return `not fired ${input.id}: another fire holds the lock`;
             }

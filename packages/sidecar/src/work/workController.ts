@@ -41,8 +41,15 @@ const TEMPLATE_EXCERPT_CHARS = 600;
 /** Records older than this are removed at startup, unless a delivery is open. */
 export const WORK_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
-/** Beyond this many finished Works the oldest are removed, unless a delivery is open. */
+/** Beyond this many finished subagent Works the oldest are removed, unless a delivery is open. */
 export const WORK_RETENTION_COUNT = 500;
+
+/**
+ * Finished Works kept per scheduled job, matching the job's own history ring.
+ * Counted per job and apart from subagents: a job that fires every minute
+ * would otherwise push every subagent result out of a shared budget in a day.
+ */
+export const SCHEDULED_WORK_RETENTION_PER_JOB = 20;
 
 export interface StartWorkArgs {
     readonly sourceEventId: string;
@@ -54,6 +61,15 @@ export interface StartWorkArgs {
     readonly childSessionId: string;
     readonly agentType: string;
     readonly title: string;
+}
+
+export interface StartScheduledWorkArgs {
+    readonly sourceEventId: string;
+    readonly jobId: string;
+    readonly title: string;
+    readonly workspace: string;
+    /** The session the fire's turn runs in. */
+    readonly sessionId: string;
 }
 
 export interface SettleWorkArgs {
@@ -111,6 +127,44 @@ export class WorkController {
      * Begin tracking a background launch. A repeat of the same source event
      * returns the existing Work instead of creating a second one.
      */
+    /**
+     * Begin tracking one fire of a scheduled job. Carries no delivery target:
+     * the turn's own reply reaches an IM peer through the session's channel,
+     * so a notice from here would say it twice.
+     */
+    async startScheduled(args: StartScheduledWorkArgs): Promise<WorkRecord> {
+        const now = this.now();
+        const workId = workIdForSource(args.sourceEventId);
+        const record: WorkRecord = {
+            schemaVersion: WORK_SCHEMA_VERSION,
+            workId,
+            revision: 0,
+            kind: "scheduled",
+            title: args.title,
+            sourceEventId: args.sourceEventId,
+            workspace: args.workspace,
+            parentSessionId: args.sessionId,
+            jobId: args.jobId,
+            status: "running",
+            ownerInstanceId: this.instanceId,
+            createdAt: now,
+            updatedAt: now,
+            attempt: { attemptId: uuidv7(), startedAt: now },
+        };
+        const { record: stored, created } = await this.store.createIfAbsent(record);
+        if (created) {
+            this.onChange(workId);
+            // Pruned on start rather than only at boot: a frequent job would
+            // otherwise grow without bound between restarts.
+            if (stored.jobId !== undefined) {
+                await this.pruneJob(stored.jobId).catch((e: unknown) => {
+                    log.warn("scheduled work prune failed", { workId, error: String(e) });
+                });
+            }
+        }
+        return stored;
+    }
+
     async start(args: StartWorkArgs): Promise<WorkRecord> {
         const now = this.now();
         const workId = workIdForSource(args.sourceEventId);
@@ -197,7 +251,7 @@ export class WorkController {
                   now,
                   parentWillReply: args.parentWillReply,
                   template: templateNotice({
-                      agentType: current.agentType,
+                      agentType: current.agentType ?? "",
                       title: current.title,
                       outcome: args.outcome,
                       completeness,
@@ -392,8 +446,11 @@ export class WorkController {
             const next = await this.store.mutate(work.workId, (current) => {
                 const stopped = interrupt(current, {
                     reason:
-                        "the process that was running this stopped before it finished; " +
-                        "continue the subagent to finish it",
+                        current.kind === "scheduled"
+                            ? "the process that was running this stopped before it finished; " +
+                              "the job runs again at its next scheduled time"
+                            : "the process that was running this stopped before it finished; " +
+                              "continue the subagent to finish it",
                     now,
                 });
                 if (!stopped) return undefined;
@@ -413,19 +470,49 @@ export class WorkController {
     }
 
     private async prune(all: readonly WorkRecord[]): Promise<number> {
-        const now = this.now();
-        const removable = all
-            .filter((w) => isTerminal(w.status) && w.delivery?.status !== "pending")
-            .sort((a, b) => b.createdAt - a.createdAt);
-        const doomed = new Set<string>();
-        for (const w of removable) {
-            if (now - w.createdAt > WORK_RETENTION_MS) doomed.add(w.workId);
-        }
-        for (const w of removable.slice(WORK_RETENTION_COUNT)) doomed.add(w.workId);
+        const doomed = pruneTargets(all, this.now());
         for (const workId of doomed) await this.store.delete(workId);
         if (doomed.size > 0) log.info("pruned finished work", { count: doomed.size });
         return doomed.size;
     }
+
+    /** Keep one job's finished fires within its own budget. */
+    private async pruneJob(jobId: string): Promise<void> {
+        const fires = (await this.store.list()).filter((w) => w.jobId === jobId);
+        const doomed = pruneTargets(fires, this.now());
+        for (const workId of doomed) {
+            await this.store.delete(workId);
+            this.onChange(workId);
+        }
+    }
+}
+
+/**
+ * Finished Works past their retention, by kind: subagents share one budget,
+ * each scheduled job has its own. A Work with a notice still pending stays,
+ * whatever its age — removing it would lose a message someone is owed.
+ */
+export function pruneTargets(all: readonly WorkRecord[], now: number): Set<string> {
+    const removable = all
+        .filter((w) => isTerminal(w.status) && w.delivery?.status !== "pending")
+        .sort((a, b) => b.createdAt - a.createdAt);
+    const doomed = new Set<string>();
+    for (const w of removable) {
+        if (now - w.createdAt > WORK_RETENTION_MS) doomed.add(w.workId);
+    }
+    const subagents = removable.filter((w) => w.kind !== "scheduled");
+    for (const w of subagents.slice(WORK_RETENTION_COUNT)) doomed.add(w.workId);
+    const byJob = new Map<string, WorkRecord[]>();
+    for (const w of removable) {
+        if (w.kind !== "scheduled" || w.jobId === undefined) continue;
+        const fires = byJob.get(w.jobId) ?? [];
+        fires.push(w);
+        byJob.set(w.jobId, fires);
+    }
+    for (const fires of byJob.values()) {
+        for (const w of fires.slice(SCHEDULED_WORK_RETENTION_PER_JOB)) doomed.add(w.workId);
+    }
+    return doomed;
 }
 
 function summarize(text: string): string {
@@ -474,8 +561,8 @@ export function templateNotice(args: TemplateArgs): string {
 }
 
 /** The notice sent when the process driving a Work died before it settled. */
-export function interruptionNotice(args: { title: string; agentType: string }): string {
-    const label = args.title.trim() === "" ? args.agentType : args.title.trim();
+export function interruptionNotice(args: { title: string; agentType?: string }): string {
+    const label = args.title.trim() === "" ? (args.agentType ?? "") : args.title.trim();
     return [
         `Background task was interrupted: ${label}`,
         "",

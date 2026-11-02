@@ -14,10 +14,12 @@
  * also gives the form room for hint / error text without breaking
  * the 720px content cap.
  *
- * Scope kept narrow for PR4: the panel does not yet visualize history
- * (the plan defers that), support per-job timezone pickers, or fold
- * the command editor into a structured form. The `args` field is
- * edited as raw JSON; tightening that is a follow-up.
+ * Each row's History button opens `ScheduleHistoryDialog` with the job's
+ * recent runs and, for agent jobs, what each run answered.
+ *
+ * Not yet covered: per-job timezone pickers, and a structured command
+ * editor. The `args` field is edited as raw JSON; tightening that is a
+ * follow-up.
  */
 
 import type { Job } from "@taco-ai/protocol";
@@ -30,9 +32,12 @@ import { Button } from "../ui/Button.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { Tag } from "../ui/Tag.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
+import { ScheduleHistoryDialog } from "./ScheduleHistoryDialog.tsx";
 
 export interface SchedulesTabProps {
     client: TacoClient;
+    /** Open the session a run happened in, from the history dialog. */
+    onOpenSession: (workspace: string, sessionId: string) => void;
 }
 
 /** Dialog mode — distinguishes between creating a new job (no `existing`
@@ -99,7 +104,7 @@ function useJobsClient(client: TacoClient) {
     };
 }
 
-export function SchedulesTab({ client }: SchedulesTabProps) {
+export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
     const jobs = useJobsClient(client);
     const { t } = useT();
     /** Dialog mode drives the modal's open state, title, and which
@@ -115,6 +120,8 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
     const [runningId, setRunningId] = useState<string | null>(null);
     /** Job awaiting the shared confirm dialog — deletion discards its run history. */
     const [pendingDelete, setPendingDelete] = useState<Job | null>(null);
+    /** Job whose run history dialog is open. */
+    const [historyJob, setHistoryJob] = useState<Job | null>(null);
 
     const sorted = useMemo(
         () => [...jobs.list].sort((a, b) => a.name.localeCompare(b.name)),
@@ -297,6 +304,7 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                             }}
                             onDelete={() => setPendingDelete(job)}
                             onEdit={() => openEdit(job)}
+                            onHistory={() => setHistoryJob(job)}
                         />
                     ))}
                 </tbody>
@@ -330,6 +338,16 @@ export function SchedulesTab({ client }: SchedulesTabProps) {
                 }}
                 onCancel={() => setPendingDelete(null)}
             />
+
+            <ScheduleHistoryDialog
+                client={client}
+                job={historyJob}
+                onClose={() => setHistoryJob(null)}
+                onOpenSession={(workspace, sessionId) => {
+                    setHistoryJob(null);
+                    onOpenSession(workspace, sessionId);
+                }}
+            />
         </div>
     );
 }
@@ -344,9 +362,18 @@ interface ScheduleRowProps {
     onRunNow: () => void;
     onDelete: () => void;
     onEdit: () => void;
+    onHistory: () => void;
 }
 
-function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: ScheduleRowProps) {
+function ScheduleRow({
+    job,
+    isRunning,
+    onToggle,
+    onRunNow,
+    onDelete,
+    onEdit,
+    onHistory,
+}: ScheduleRowProps) {
     const { t } = useT();
     const scheduleLabel =
         job.schedule.kind === "cron"
@@ -384,6 +411,9 @@ function ScheduleRow({ job, isRunning, onToggle, onRunNow, onDelete, onEdit }: S
                         {isRunning
                             ? t("schedules.runningNow", "Running…")
                             : t("schedules.actionRunNow", "Run now")}
+                    </Button>
+                    <Button size="sm" variant="default" onClick={onHistory}>
+                        {t("schedules.actionHistory", "History")}
                     </Button>
                     <Button size="sm" variant="default" onClick={onEdit}>
                         {t("schedules.actionEdit", "Edit")}

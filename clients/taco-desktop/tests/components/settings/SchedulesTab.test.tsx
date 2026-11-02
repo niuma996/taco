@@ -38,6 +38,8 @@ vi.mock("react-i18next", () => ({
 
 afterEach(cleanup);
 
+const noop = (): void => undefined;
+
 interface ScriptedJobsClient {
     list: () => Promise<unknown>;
     create: (params: Record<string, unknown>) => Promise<unknown>;
@@ -124,7 +126,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             return Promise.resolve({ jobs: [sampleJob("seeded")] });
         };
         const client = makeClient({ list: listJobs });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
         // First effect run fails; the banner shows the daemon error.
         await waitFor(() => {
             expect(screen.getByText("daemon unreachable")).toBeTruthy();
@@ -139,7 +141,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
         // the React refresh by re-rendering with the same client and
         // waiting for the effect to fire again.
         cleanup();
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
         await waitFor(() => {
             expect(screen.queryByText("daemon unreachable")).toBeNull();
         });
@@ -157,7 +159,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             list: () => Promise.resolve({ jobs: [] }),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("schedules.empty")).toBeTruthy();
@@ -189,7 +191,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             update: () => Promise.reject(new Error("boom")),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-1")).toBeTruthy();
@@ -220,7 +222,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             create: () => Promise.reject(new Error("bad schedule")),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         // listError surfaces immediately on mount.
         await waitFor(() => {
@@ -250,7 +252,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
             list: () => Promise.resolve({ jobs: [sampleJob("row-x")] }),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-x")).toBeTruthy();
@@ -288,7 +290,7 @@ describe("SchedulesTab — table layout smoke", () => {
         const client = makeClient({
             list: () => Promise.resolve({ jobs: [sampleJob("row-a"), sampleJob("row-b")] }),
         });
-        const { container } = render(<SchedulesTab client={client} />);
+        const { container } = render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-a")).toBeTruthy();
@@ -309,7 +311,7 @@ describe("SchedulesTab — table layout smoke", () => {
 describe("SchedulesTab — modal add / edit flow", () => {
     it("renders the + New schedule header button on mount", () => {
         const client = makeClient();
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
         // The button is the only entry-point into the add flow now
         // (no more inline form). Asserting on its accessible name
         // doubles as a smoke test that the i18n key survives.
@@ -325,7 +327,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             list: () => Promise.resolve({ jobs: [] }),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("schedules.empty")).toBeTruthy();
@@ -384,7 +386,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             list: () => Promise.resolve({ jobs: [] }),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
         await waitFor(() => {
             expect(screen.getByText("schedules.empty")).toBeTruthy();
         });
@@ -411,7 +413,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             update: updateSpy,
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-x")).toBeTruthy();
@@ -453,7 +455,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             list: () => Promise.resolve({ jobs: [] }),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await openAddDialog(user);
         // Fill a valid draft so cancel still preserves the form's
@@ -479,7 +481,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             list: () => Promise.resolve({ jobs: [] }),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await openAddDialog(user);
         await user.type(screen.getByLabelText("schedules.fieldName"), "scratch");
@@ -522,7 +524,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
             runNow: () => Promise.reject(new Error("daemon crash")),
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-1")).toBeTruthy();
@@ -546,7 +548,7 @@ describe("SchedulesTab — delete confirmation", () => {
             delete: deleteSpy,
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-1")).toBeTruthy();
@@ -573,7 +575,7 @@ describe("SchedulesTab — delete confirmation", () => {
             delete: deleteSpy,
         });
         const user = userEvent.setup({ delay: null });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => {
             expect(screen.getByText("row-1")).toBeTruthy();
@@ -617,7 +619,7 @@ describe("SchedulesTab — built-in jobs", () => {
 
     it("shows the built-in badge and summary, but no delete action", async () => {
         const client = makeClient({ list: () => Promise.resolve({ jobs: [builtinJob()] }) });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => expect(screen.getByText("schedules.builtin")).toBeTruthy());
         expect(screen.getByText(/1 consolidated/)).toBeTruthy();
@@ -634,7 +636,7 @@ describe("SchedulesTab — built-in jobs", () => {
                 return Promise.resolve(params);
             },
         });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => expect(screen.getByText("Memory consolidation")).toBeTruthy());
         await user.click(screen.getByRole("button", { name: "schedules.actionEdit" }));
@@ -672,7 +674,7 @@ describe("SchedulesTab — built-in jobs", () => {
                 return Promise.resolve({});
             },
         });
-        render(<SchedulesTab client={client} />);
+        render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => expect(screen.getByText("Memory consolidation")).toBeTruthy());
         await user.click(screen.getByRole("button", { name: "schedules.actionEdit" }));

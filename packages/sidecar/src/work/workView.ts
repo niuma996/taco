@@ -49,15 +49,17 @@ export function toSummary(work: WorkRecord): WorkSummary {
         revision: work.revision,
         kind: work.kind,
         title: work.title,
-        agentType: work.agentType,
+        ...(work.agentType !== undefined ? { agentType: work.agentType } : {}),
+        ...(work.jobId !== undefined ? { jobId: work.jobId } : {}),
         status: work.status,
         ...(work.reason !== undefined ? { reason: work.reason } : {}),
         createdAt: work.createdAt,
         updatedAt: work.updatedAt,
         ...(work.endedAt !== undefined ? { endedAt: work.endedAt } : {}),
         ...(work.workspace !== undefined ? { workspace: work.workspace } : {}),
+        sessionId: work.parentSessionId,
         parentSessionId: work.parentSessionId,
-        childSessionId: work.childSessionId,
+        ...(work.childSessionId !== undefined ? { childSessionId: work.childSessionId } : {}),
         ...(work.result ? { completeness: work.result.completeness } : {}),
         ...(work.result?.summary !== undefined ? { summary: work.result.summary } : {}),
         ...(work.delivery ? { delivery: summarizeDelivery(work) } : {}),
@@ -94,6 +96,7 @@ function parseCursor(raw: string): { at: number; workId: string } | undefined {
 export interface WorkListArgs {
     readonly limit?: number;
     readonly before?: string;
+    readonly jobId?: string;
 }
 
 /**
@@ -112,6 +115,7 @@ export function buildList(
     const active: WorkRecord[] = [];
     const finished: WorkRecord[] = [];
     for (const record of records) {
+        if (args.jobId !== undefined && record.jobId !== args.jobId) continue;
         if (!isTerminal(record.status) || needsAttention(record)) active.push(record);
         else finished.push(record);
     }

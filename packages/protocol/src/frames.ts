@@ -86,8 +86,10 @@ export type CompactionFailureReason =
  *  2.8 added `work.*` and the `work.changed` push; a 2.7 daemon would answer
  *  `unknown_method` instead of showing the background work.
  *  2.9 added `timeoutMinutes` on `agents.write` / `agents.content`; a 2.8
- *  daemon drops it, so a saved timeout would not take effect. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 9 } as const;
+ *  daemon drops it, so a saved timeout would not take effect.
+ *  2.10 tracks scheduled fires as Work; a 2.9 daemon sends no `workId` in job
+ *  history and still names the summary's session `parentSessionId`. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 10 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

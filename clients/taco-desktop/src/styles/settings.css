@@ -945,3 +945,15 @@
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
 }
+
+/* Schedule run history dialog. Rows reuse the work pane's item styles
+   (`.work-item`, `.work-status--*`) so a run reads the same in both places;
+   only the dialog width and the disabled toggle of a run with no Work are
+   set here. */
+.schedule-history-modal {
+    width: min(640px, 92vw);
+}
+
+.schedule-history-item .work-item-toggle:disabled {
+    cursor: default;
+}

@@ -521,6 +521,9 @@
       "expired": "已过期",
       "handedOff": "已在对话中",
       "cancelled": "已取消"
+    },
+    "kind": {
+      "scheduled": "定时任务"
     }
   },
   "plugins": {
@@ -872,7 +875,24 @@
     "dreamStaleDays": "项目/引用条目候选淘汰天数",
     "dreamStaleDaysDurable": "用户/反馈条目候选淘汰天数",
     "dreamModel": "整理模型（可选）",
-    "dreamModelHint": "留空使用当前默认模型；格式为 provider/modelId 或 modelId。"
+    "dreamModelHint": "留空使用当前默认模型；格式为 provider/modelId 或 modelId。",
+    "actionHistory": "历史",
+    "history": {
+      "title": "{{name}} 的运行记录",
+      "loading": "正在加载运行记录…",
+      "empty": "这个定时任务还没有运行过。",
+      "timedOutRunning": "调度器已不再等待，但这次运行仍在进行，结果出来后会显示在这里。",
+      "mergedHint": "会话正忙，这次的提示并入了正在进行的那一轮，由那一轮的回复一起作答。",
+      "state": {
+        "running": "运行中",
+        "completed": "已完成",
+        "merged": "已并入",
+        "failed": "失败",
+        "interrupted": "已中断",
+        "cancelled": "已停止",
+        "timedOutRunning": "仍在运行"
+      }
+    }
   },
   "tasks": {
     "empty": "暂无任务",

@@ -1,6 +1,6 @@
 /**
- * Work: one trackable unit of managed work — today, a background subagent
- * launch.
+ * Work: one trackable unit of managed work — a background subagent launch, or
+ * one fire of a scheduled `agent.invoke` job.
  *
  * A Work record is the process-level ledger entry that outlives the session
  * that started it. Three axes are kept apart on purpose:
@@ -15,6 +15,7 @@
  */
 
 import type {
+    WorkKind as WireWorkKind,
     WorkStatus as WireWorkStatus,
     WorkCompleteness,
     WorkDeliveryStatus,
@@ -31,7 +32,7 @@ export type WorkStatus = WireWorkStatus;
 export type ResultCompleteness = WorkCompleteness;
 export type DeliveryStatus = WorkDeliveryStatus;
 
-export type WorkKind = "subagent";
+export type WorkKind = WireWorkKind;
 
 /** Where the user is told. Frozen when the Work settles. */
 export interface DeliveryTarget {
@@ -103,9 +104,18 @@ export interface WorkRecord {
      * Absent on records written before it was captured.
      */
     readonly workspace?: string;
+    /**
+     * The session the overview opens: the conversation that spawned a subagent,
+     * or the session a scheduled fire ran in. The name predates scheduled Work;
+     * it stays so records already on disk keep reading.
+     */
     readonly parentSessionId: string;
-    readonly childSessionId: string;
-    readonly agentType: string;
+    /** The subagent's own session. Absent for a scheduled fire. */
+    readonly childSessionId?: string;
+    /** The subagent profile. Absent for a scheduled fire. */
+    readonly agentType?: string;
+    /** The job that fired, for a scheduled Work. */
+    readonly jobId?: string;
     readonly status: WorkStatus;
     /** The process that is driving this Work. A different id means it died. */
     readonly ownerInstanceId: string;

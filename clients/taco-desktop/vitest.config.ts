@@ -63,6 +63,7 @@ export default defineConfig({
             "tests/components/settings/McpSection.test.tsx",
             "tests/components/settings/PermissionsTab.test.tsx",
             "tests/components/settings/SchedulesTab.test.tsx",
+            "tests/components/settings/ScheduleHistoryDialog.test.tsx",
         ],
     },
 });

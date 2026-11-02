@@ -1,7 +1,8 @@
 /**
  * WorkPane — the read-only overview of managed background work.
  *
- * Every row is one Work the daemon tracks: a background subagent launch today.
+ * Every row is one Work the daemon tracks: a background subagent launch, or one
+ * fire of a scheduled job.
  * Rows are grouped into what is running, what needs the user (a notice that
  * could not be delivered, a run a crash cut short) and what is finished. The
  * answer text is fetched only when a row is opened.
@@ -154,7 +155,9 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                             <ChevronRight size={14} aria-hidden="true" />
                         )}
                         <span className="work-item-title">{work.title || work.agentType}</span>
-                        <span className="work-item-agent">{work.agentType}</span>
+                        <span className="work-item-agent">
+                            {work.kind === "scheduled" ? t("work.kind.scheduled") : work.agentType}
+                        </span>
                     </button>
                     <div className="work-item-badges">
                         {work.completeness === "partial" && (
@@ -194,7 +197,7 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                         }
                         onClick={() => {
                             if (work.workspace !== undefined) {
-                                onOpenSession(work.workspace, work.parentSessionId);
+                                onOpenSession(work.workspace, work.sessionId);
                             }
                         }}
                     >

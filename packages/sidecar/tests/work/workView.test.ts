@@ -208,5 +208,35 @@ describe("work.view", () => {
             assert.equal(list.active.length, 0);
             assert.equal(list.terminal.length, 3);
         });
+
+        it("narrows to one job's fires when asked", () => {
+            const fireA = record({ kind: "scheduled", jobId: "a", agentType: undefined });
+            const fireB = record({ kind: "scheduled", jobId: "b", agentType: undefined });
+            const running = record({ kind: "scheduled", jobId: "a", status: "running" });
+            const list = buildList([fireA, fireB, running, record()], { jobId: "a" }, "inst-1");
+            assert.deepEqual(
+                [...list.active, ...list.terminal].map((w) => w.workId).sort(),
+                [fireA.workId, running.workId].sort(),
+            );
+        });
+    });
+
+    describe("scheduled summary", () => {
+        it("names the session it ran in and the job, with no subagent fields", () => {
+            const summary = toSummary(
+                record({
+                    kind: "scheduled",
+                    jobId: "daily",
+                    parentSessionId: "sched-pin-daily",
+                    childSessionId: undefined,
+                    agentType: undefined,
+                }),
+            );
+            assert.equal(summary.kind, "scheduled");
+            assert.equal(summary.jobId, "daily");
+            assert.equal(summary.sessionId, "sched-pin-daily");
+            assert.equal("childSessionId" in summary, false);
+            assert.equal("agentType" in summary, false);
+        });
     });
 });

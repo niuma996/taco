@@ -1,12 +1,12 @@
 /**
- * The seam between `AgentSpawner` and the Work layer.
+ * The seams between the Work layer and the code that produces Work: the
+ * subagent spawner and the job dispatcher.
  *
- * The spawner knows about subagents; Work knows about stores, channels and
- * delivery. Neither should import the other's internals, so the spawner is
- * handed this narrow interface and calls it at three moments: launch, settle,
- * and notice-run outcome. Every method must be safe to call and must not
- * throw into the spawner's settle chain — a Work failure cannot be allowed to
- * stop the parent from learning its child finished.
+ * Producers know about subagents or jobs; Work knows about stores, channels
+ * and delivery. Neither should import the other's internals, so each producer
+ * is handed a narrow interface. Every method must be safe to call and must not
+ * throw into the producer — a Work failure cannot be allowed to stop a parent
+ * from learning its child finished, or fail the fire it describes.
  */
 
 import type { SessionId } from "@taco-ai/protocol";
@@ -79,4 +79,32 @@ export interface BackgroundWorkHooks {
      * not prompt the parent again in those cases — that reports it twice.
      */
     noticeSettled(workId: string): Promise<boolean>;
+}
+
+export interface ScheduledFire {
+    readonly jobId: string;
+    /** Unique per fire, so two fires of one job are two Works. */
+    readonly fireId: string;
+    readonly title: string;
+    readonly workspace: string;
+    /** The session the fire's turn runs in. */
+    readonly sessionId: string;
+}
+
+export type ScheduledFireSettle =
+    | { readonly outcome: "completed"; readonly replyText: string }
+    /**
+     * Queued behind a turn already running, which then answered it. The reply
+     * belongs to that turn, so it is recorded but marked as shared.
+     */
+    | { readonly outcome: "merged"; readonly replyText?: string }
+    /** Queued, then stopped with its run or cleared before it ran. */
+    | { readonly outcome: "cancelled"; readonly reason: string }
+    | { readonly outcome: "error"; readonly message: string };
+
+export interface ScheduledWorkHooks {
+    /** Record the fire before its turn starts. Resolves to the Work id, or undefined. */
+    onFire(fire: ScheduledFire): Promise<string | undefined>;
+    /** The fire's turn ended. */
+    onFireSettle(workId: string, settle: ScheduledFireSettle): Promise<void>;
 }

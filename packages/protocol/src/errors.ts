@@ -43,6 +43,12 @@ export const ErrorCodes = {
     SessionBusy: "session_busy",
     /** commandId reuse with mismatched params. */
     CommandIdConflict: "command_id_conflict",
+    /**
+     * The turn was stopped before it finished (`session.abort`, or a stop from
+     * another client). A normal outcome, not a fault: callers that track the
+     * turn record it as cancelled.
+     */
+    Aborted: "aborted",
     /** Catch-all internal server error. */
     Internal: "internal",
 } as const;

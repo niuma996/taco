@@ -73,7 +73,18 @@ export function toTerminalError(operation: string, outcome: TerminalOutcome): Er
     if (code !== undefined) {
         Object.defineProperty(error, "code", { value: code, enumerable: false });
     }
+    Object.defineProperty(error, "terminalStatus", { value: outcome.status, enumerable: false });
     return error;
+}
+
+/**
+ * Whether an error is a turn that was stopped rather than one that failed.
+ * An abort is a normal outcome; RPC layers map it to its own wire code so a
+ * caller that only sees the response can still tell the two apart.
+ */
+export function isAbortedTurn(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) return false;
+    return (error as { terminalStatus?: unknown }).terminalStatus === "aborted";
 }
 
 /**

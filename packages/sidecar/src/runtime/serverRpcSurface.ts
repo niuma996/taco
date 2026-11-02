@@ -31,6 +31,7 @@ import type {
 import type { ExtensionRegistry } from "../extensions/index.ts";
 import type { Actor, Job, JobHistoryEntry, JobRunResult } from "../scheduler/types.ts";
 import type { WorkControl } from "../work/workService.ts";
+import type { QueuedWatch } from "./harness/queuedWatch.ts";
 import type { ProviderKeyStore } from "./models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "./workspace.ts";
 
@@ -221,6 +222,13 @@ export interface ServerRpcSurface {
      * `SidecarServer` always provides this; other implementations may omit it.
      */
     dispatchRpc?(req: RpcRequest): Promise<RpcResponse>;
+
+    /**
+     * Buffer a session's queue events before sending a prompt, so a prompt
+     * that ends up queued behind a running turn can be followed to its
+     * outcome. The scheduler records such a fire as a Work and needs that.
+     */
+    queueWatch?(workspace: string, sessionId: string): QueuedWatch | undefined;
     /**
      * Authoritative server capability advertisement, returned by `initialize`.
      */

@@ -66,6 +66,8 @@ export type Job = ParamsOf<typeof jobSchema>;
 export interface JobRunResult {
     status: "ok" | "skipped" | "failed";
     error?: string;
+    /** The Work tracking this fire, when it ran an agent turn. */
+    workId?: string;
 }
 
 /**

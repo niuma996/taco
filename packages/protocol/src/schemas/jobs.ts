@@ -109,6 +109,12 @@ export const jobHistoryEntrySchema = Type.Object({
     error: Type.Optional(Type.String()),
     /** One-line outcome a built-in handler reports (e.g. "merged 12→4"). */
     summary: Type.Optional(Type.String()),
+    /**
+     * The Work tracking this fire's turn, for `agent.invoke` jobs. `status`
+     * says whether the fire was accepted in time; the Work says how the turn
+     * ended, which may be later than a timed-out fire.
+     */
+    workId: Type.Optional(Type.String()),
 });
 
 /**

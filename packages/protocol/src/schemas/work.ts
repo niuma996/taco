@@ -20,6 +20,10 @@ export const workListSchema = Type.Object({
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: WORK_LIST_MAX_LIMIT })),
     /** Cursor from a previous result's `nextCursor`. */
     before: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    /** Only the fires of this scheduled job; a job's run history reads its Works this way. */
+    jobId: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" }),
+    ),
 });
 
 export const workGetSchema = Type.Object({

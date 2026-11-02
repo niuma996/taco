@@ -14,6 +14,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Provider } from "@earendil-works/pi-ai";
 import {
+    asSessionId,
     asWorkspaceId,
     type ChannelStatusEntry,
     type ClientCapabilities,
@@ -86,6 +87,7 @@ import { createLogger } from "../lib/logger.ts";
 import { createPrivateMcpLease, McpScope } from "../mcp/mcpScope.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
+import { createQueuedWatch, type QueuedWatch } from "../runtime/harness/queuedWatch.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
 import { resolveProvider, resolveProviderEndpoint } from "../runtime/models/modelRegistry.ts";
 import type { ProviderKeyStore } from "../runtime/models/providerKeyStore.ts";
@@ -443,6 +445,18 @@ export class SidecarServer implements ServerRpcSurface {
 
     lookupRoute(workspace: string): { sessionId: string } | undefined {
         return this.conversationRouter?.lookupByWorkspace(workspace);
+    }
+
+    /**
+     * Start buffering a session's queue events so a prompt queued later can be
+     * followed to its outcome. Call before sending the prompt: the watcher must
+     * exist before the entry can be consumed.
+     */
+    queueWatch(workspace: string, sessionId: string): QueuedWatch | undefined {
+        const runtime = this.workspaces.get(asWorkspaceId(workspace));
+        const attached = runtime?.getAttached(asSessionId(sessionId));
+        if (!runtime || !attached) return undefined;
+        return createQueuedWatch(runtime, attached, sessionId);
     }
 
     /** Authoritative capability advertisement returned by `initialize`. */

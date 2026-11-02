@@ -144,7 +144,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 9 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 10 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -193,18 +193,21 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.9 client refuses a 2.8 daemon (it drops the agent timeout)", () => {
-            // Client-side gate: a 2.8 daemon drops `timeoutMinutes` on write, so
-            // a saved budget would silently not apply.
-            // 2.7 is refused for the same reason one step back: it has no
-            // work.* methods, and 2.6 ignores the session search query.
+        it("a 2.10 client refuses a 2.9 daemon (it has no scheduled Work)", () => {
+            // Client-side gate: a 2.9 daemon knows no scheduled Works, so the
+            // overview would show only subagents and its job history carries no
+            // `workId` to open a run's answer. A 2.9 *client* against this daemon
+            // still works: WorkSummary keeps the `parentSessionId` alias.
+            // 2.8 drops the agent timeout, 2.7 has no work.* methods, and 2.6
+            // ignores the session search query.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 9 }), true);
-            // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 9 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), true);
+            // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), true);
         });
 
         it("accepts an older compatible client minor", async () => {
@@ -905,6 +908,14 @@ describe("normalizeError.redaction", () => {
             const r = callWith(e);
             assert.equal(r.code, "invalid_params");
             assert.equal(r.message, "settings.write: baseUrl is required");
+        });
+
+        it("a stopped turn keeps its own code and text", async () => {
+            const { toTerminalError } = await import("../../src/runtime/harness/harnessErrors.ts");
+            const e = toTerminalError("session.prompt", { status: "aborted" });
+            const r = callWith(e);
+            assert.equal(r.code, "aborted", "a stop is an outcome, not a fault");
+            assert.equal(r.message, "session.prompt aborted", "our own text, not redacted");
         });
 
         it("upstream Error.message gets a [upstream] prefix and internal code", () => {

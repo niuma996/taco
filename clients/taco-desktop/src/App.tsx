@@ -1184,7 +1184,7 @@ export default function App() {
                                 (see .settings-pane-content-inner--wide). */}
                             <div className="settings-pane-content">
                                 <div className="settings-pane-content-inner settings-pane-content-inner--wide">
-                                    <SchedulesTab client={client} />
+                                    <SchedulesTab client={client} onOpenSession={openWorkSession} />
                                 </div>
                             </div>
                         </div>

@@ -16,7 +16,11 @@ export function registerWorkHandlers(): void {
         if (!server.work) {
             return { instanceId: SIDECAR_INSTANCE_ID, active: [], terminal: [] };
         }
-        return server.work.list({ limit: params.limit, before: params.before });
+        return server.work.list({
+            limit: params.limit,
+            before: params.before,
+            ...(params.jobId !== undefined ? { jobId: params.jobId } : {}),
+        });
     });
 
     registerMethod("workGet", false, async ({ server, params }): Promise<WorkGetResult> => {

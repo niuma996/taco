@@ -39,8 +39,12 @@ import {
 } from "@taco-ai/protocol";
 
 import { createLogger } from "../lib/logger.ts";
+import { textFromAgentMessage } from "../runtime/harness/messageText.ts";
+import type { QueuedOutcome, QueuedWatch } from "../runtime/harness/queuedWatch.ts";
+import type { AgentMessage } from "../runtime/pi/types.ts";
+import type { ScheduledFireSettle, ScheduledWorkHooks } from "../work/workHooks.ts";
 import { isBuiltinJob } from "./builtinJobs.ts";
-import type { InvokeResult } from "./runner.ts";
+import type { FireContext, InvokeResult } from "./runner.ts";
 import type { Job, SessionStrategy } from "./types.ts";
 
 const log = createLogger("sidecar.scheduler.dispatcher");
@@ -50,6 +54,8 @@ const log = createLogger("sidecar.scheduler.dispatcher");
 interface DispatchSurface {
     dispatchRpc(req: RpcRequest): Promise<RpcResponse>;
     lookupRoute?(workspace: string): { sessionId: string } | undefined;
+    /** Buffer queue events before prompting; absent on test stubs. */
+    queueWatch?(workspace: string, sessionId: string): QueuedWatch | undefined;
 }
 
 /** Resolve the runtime server a job's invoke should dispatch to, based on
@@ -86,7 +92,7 @@ export class InvalidSessionStrategy extends Error {
     }
 }
 
-export type JobCommandInvoker = (job: Job) => Promise<InvokeResult | undefined>;
+export type JobCommandInvoker = (job: Job, fire?: FireContext) => Promise<InvokeResult | undefined>;
 
 /** Native handler for a built-in job command (see builtinJobs.ts). */
 export type BuiltinJobHandler = (job: Job) => Promise<InvokeResult>;
@@ -108,13 +114,20 @@ export interface DispatcherOptions {
      *  `builtin: true` may reach one — a user job naming the same command is
      *  rejected, never routed. */
     builtinHandlers?: ReadonlyMap<string, BuiltinJobHandler>;
+    /** Tracks each agent turn as a Work. Absent in tests that only check routing. */
+    work?: ScheduledWorkHooks;
+}
+
+/** What one agent fire reports back to the runner. */
+export interface AgentInvokeResult extends InvokeResult {
+    workId?: string;
 }
 
 export function createJobDispatcher(
     resolveServer: ServerResolver,
     options: DispatcherOptions = {},
 ): JobCommandInvoker {
-    return async (job) => {
+    return async (job, fire) => {
         // Built-ins run in-process and target no workspace; checked first so a
         // built-in never reaches the agent path.
         if (isBuiltinJob(job)) {
@@ -126,38 +139,44 @@ export function createJobDispatcher(
         const server = resolveServer(workspace);
         switch (job.command) {
             case "agent.invoke":
-                await invokeAgent(server, job, workspace, options.onPinnedSessionCreated);
-                return undefined;
+                return invokeAgent(server, job, workspace, options, fire);
             default:
                 throw new UnsupportedScheduledCommand(job.command);
         }
     };
 }
 
+/** How a fire's turn ended, as far as the dispatcher can see. */
+type TurnOutcome =
+    | { kind: "reply"; message: AgentMessage | null }
+    /**
+     * Queued behind a running turn. Enqueuing is not answering: only the lane
+     * can say whether the entry ran, was stopped with the run, or was cleared.
+     */
+    | { kind: "queued"; entryId: string };
+
 async function invokeAgent(
     server: DispatchSurface,
     job: Job,
     workspace: string,
-    onPinnedSessionCreated?: OnPinnedSessionCreated,
-): Promise<void> {
+    options: DispatcherOptions,
+    fire: FireContext | undefined,
+): Promise<AgentInvokeResult> {
     const prompt = String(job.args.prompt ?? "");
     if (!prompt) {
         throw new Error("agent.invoke requires args.prompt");
     }
     const strategy = resolveStrategy(job.sessionStrategy, workspace);
+    const { onPinnedSessionCreated } = options;
+    // The session id is known before the turn starts on every strategy, so the
+    // Work exists, and the history can point at it, while the turn runs.
+    const run = (sessionId: string, turn: (watch?: QueuedWatch) => Promise<TurnOutcome>) =>
+        trackTurn(server, options.work, job, workspace, sessionId, fire, turn);
 
     switch (strategy) {
         case "new": {
             const id = `sched-${randomUUID()}`;
-            const res = await server.dispatchRpc(
-                createRpcRequest(id, RPC.sessionCreate, {
-                    workspace: asWorkspaceId(workspace),
-                    sessionId: asSessionId(id),
-                    initialPrompt: prompt,
-                }),
-            );
-            if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
-            return;
+            return run(id, () => createWithPrompt(server, workspace, id, prompt));
         }
         case "reuse": {
             const existing = await lookupSession(server, workspace);
@@ -166,8 +185,7 @@ async function invokeAgent(
                     `reuse strategy: no session bound to ${workspace}`,
                 );
             }
-            await attachAndPrompt(server, workspace, existing, prompt);
-            return;
+            return run(existing, () => attachAndPrompt(server, workspace, existing, prompt));
         }
         case "pin": {
             const id = `sched-pin-${job.id}`;
@@ -188,31 +206,142 @@ async function invokeAgent(
             // session exists — creating it again would fail on the taken id.
             for (const candidate of new Set(pinned ? [pinned, id] : [id])) {
                 if (!(await sessionExists(server, workspace, candidate))) continue;
-                await attachAndPrompt(server, workspace, candidate, prompt);
+                const result = await run(candidate, () =>
+                    attachAndPrompt(server, workspace, candidate, prompt),
+                );
                 if (candidate !== pinned && onPinnedSessionCreated) {
                     await onPinnedSessionCreated(job.id, candidate, job.generation);
                 }
-                return;
+                return result;
             }
             if (pinned) {
                 log.warn(
                     `pinned session ${pinned} for job ${job.id} no longer exists; re-creating`,
                 );
             }
-            const res = await server.dispatchRpc(
-                createRpcRequest(id, RPC.sessionCreate, {
-                    workspace: asWorkspaceId(workspace),
-                    sessionId: asSessionId(id),
-                    initialPrompt: prompt,
-                }),
-            );
-            if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
+            const result = await run(id, () => createWithPrompt(server, workspace, id, prompt));
             if (onPinnedSessionCreated) {
                 await onPinnedSessionCreated(job.id, id, job.generation);
             }
-            return;
+            return result;
         }
     }
+}
+
+/**
+ * Run one fire's turn under a Work: record it first, settle it with whatever
+ * the turn produced. The fire's own outcome is unchanged — a failed turn still
+ * rejects, so history and the failure breaker see what they always saw.
+ */
+async function trackTurn(
+    server: DispatchSurface,
+    work: ScheduledWorkHooks | undefined,
+    job: Job,
+    workspace: string,
+    sessionId: string,
+    fire: FireContext | undefined,
+    turn: (watch: QueuedWatch | undefined) => Promise<TurnOutcome>,
+): Promise<AgentInvokeResult> {
+    const workId = await work?.onFire({
+        jobId: job.id,
+        fireId: fire?.fireId ?? randomUUID(),
+        title: job.name,
+        workspace,
+        sessionId,
+    });
+    // Reported before the turn runs: a fire that outlives its timeout still
+    // has to point its history entry at the Work that will hold the answer.
+    if (workId !== undefined) fire?.onWork(workId);
+    // Started before the prompt: an entry consumed the instant it is enqueued
+    // must still be seen.
+    const watch = server.queueWatch?.(workspace, sessionId);
+    let outcome: TurnOutcome;
+    try {
+        outcome = await turn(watch);
+    } catch (err) {
+        watch?.stop();
+        if (workId !== undefined) {
+            // A stop is not a failure: the turn was cancelled, and saying so
+            // keeps the Work's cancelled state reachable.
+            const aborted =
+                err instanceof ScheduledCommandFailed && err.code === ErrorCodes.Aborted;
+            await work?.onFireSettle(
+                workId,
+                aborted
+                    ? { outcome: "cancelled", reason: "stopped by the user" }
+                    : {
+                          outcome: "error",
+                          message: err instanceof Error ? err.message : String(err),
+                      },
+            );
+        }
+        throw err;
+    }
+    if (work !== undefined && workId !== undefined) {
+        if (outcome.kind === "queued") {
+            // Whether the entry ever ran decides this Work's ending, so the
+            // settle moves to the watcher. Without one (a test stub), fall back
+            // to the old "accepted" reading rather than leaving it running.
+            if (watch) {
+                void watch.wait(outcome.entryId).then(
+                    (result) => {
+                        watch.stop();
+                        return work.onFireSettle(workId, settleForQueued(result));
+                    },
+                    () => work.onFireSettle(workId, { outcome: "cancelled", reason: "queue lost" }),
+                );
+                return { workId };
+            }
+            await work.onFireSettle(workId, { outcome: "merged" });
+            return { workId };
+        }
+        watch?.stop();
+        await work.onFireSettle(workId, {
+            outcome: "completed",
+            replyText: outcome.message ? textFromAgentMessage(outcome.message) : "",
+        });
+    }
+    return workId !== undefined ? { workId } : {};
+}
+
+/** Translate the lane's verdict on a queued entry into what the Work records. */
+function settleForQueued(outcome: QueuedOutcome): ScheduledFireSettle {
+    switch (outcome.kind) {
+        case "answered":
+            return {
+                outcome: "merged",
+                replyText: outcome.message ? textFromAgentMessage(outcome.message) : "",
+            };
+        case "aborted":
+            return { outcome: "cancelled", reason: "stopped with the run it joined" };
+        case "failed":
+            return { outcome: "error", message: outcome.message };
+        case "dropped":
+            return { outcome: "cancelled", reason: "removed from the queue before it ran" };
+    }
+}
+
+async function createWithPrompt(
+    server: DispatchSurface,
+    workspace: string,
+    sessionId: string,
+    prompt: string,
+): Promise<TurnOutcome> {
+    const res = await server.dispatchRpc(
+        createRpcRequest(sessionId, RPC.sessionCreate, {
+            workspace: asWorkspaceId(workspace),
+            sessionId: asSessionId(sessionId),
+            initialPrompt: prompt,
+        }),
+    );
+    if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
+    return { kind: "reply", message: replyOf(res.result) };
+}
+
+/** The turn's final message from a `session.create` / `session.prompt` result. */
+function replyOf(result: unknown): AgentMessage | null {
+    const message = (result as { assistantMessage?: unknown } | undefined)?.assistantMessage;
+    return message && typeof message === "object" ? (message as AgentMessage) : null;
 }
 
 /** Resolve the strategy the dispatcher will actually apply.
@@ -301,7 +430,7 @@ async function attachAndPrompt(
     workspace: string,
     sessionId: string,
     prompt: string,
-): Promise<void> {
+): Promise<TurnOutcome> {
     const attach = await server.dispatchRpc(
         createRpcRequest(randomUUID(), RPC.sessionAttach, {
             workspace: asWorkspaceId(workspace),
@@ -309,7 +438,7 @@ async function attachAndPrompt(
         }),
     );
     if (!attach.ok) throw new ScheduledCommandFailed(attach.error.code, attach.error.message);
-    await promptWithBusyFallback(server, workspace, sessionId, prompt);
+    return promptWithBusyFallback(server, workspace, sessionId, prompt);
 }
 
 /** Deliver a job's prompt, degrading to a queued follow-up when the target
@@ -332,14 +461,14 @@ async function promptWithBusyFallback(
     workspace: string,
     sessionId: string,
     prompt: string,
-): Promise<void> {
+): Promise<TurnOutcome> {
     const params = {
         workspace: asWorkspaceId(workspace),
         sessionId: asSessionId(sessionId),
         text: prompt,
     };
     const res = await server.dispatchRpc(createRpcRequest(randomUUID(), RPC.sessionPrompt, params));
-    if (res.ok) return;
+    if (res.ok) return { kind: "reply", message: replyOf(res.result) };
     if (res.error.code !== ErrorCodes.SessionBusy) {
         throw new ScheduledCommandFailed(res.error.code, res.error.message);
     }
@@ -347,9 +476,16 @@ async function promptWithBusyFallback(
         createRpcRequest(randomUUID(), RPC.sessionFollowUp, params),
     );
     if (!queued.ok) throw new ScheduledCommandFailed(queued.error.code, queued.error.message);
-    if ((queued.result as { mode?: string } | undefined)?.mode !== "idle") return;
+    const queuedResult = queued.result as { mode?: string; entryId?: string } | undefined;
+    if (queuedResult?.mode !== "idle") {
+        if (typeof queuedResult?.entryId !== "string") {
+            throw new Error("session.followUp queued without an entryId");
+        }
+        return { kind: "queued", entryId: queuedResult.entryId };
+    }
     const retry = await server.dispatchRpc(
         createRpcRequest(randomUUID(), RPC.sessionPrompt, params),
     );
     if (!retry.ok) throw new ScheduledCommandFailed(retry.error.code, retry.error.message);
+    return { kind: "reply", message: replyOf(retry.result) };
 }

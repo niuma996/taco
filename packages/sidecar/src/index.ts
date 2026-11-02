@@ -384,6 +384,7 @@ async function runDaemon(
                     builtinHandlers: new Map([
                         [MEMORY_DREAM_COMMAND, createMemoryDreamHandler(deps.providerKeyStore)],
                     ]),
+                    work: runtime.work,
                 },
             ),
         });

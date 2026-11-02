@@ -9,6 +9,7 @@
 import {
     type ImRoute,
     type SessionId,
+    WORK_REASON_MERGED,
     WORK_RESULT_TEXT_LIMIT,
     type WorkGetResult,
     type WorkListResult,
@@ -16,9 +17,16 @@ import {
 } from "@taco-ai/protocol";
 import type { ChannelRegistry } from "../channels/registry.ts";
 import { createLogger } from "../lib/logger.ts";
-import { WorkController } from "./workController.ts";
+import { type SettleWorkArgs, WorkController } from "./workController.ts";
 import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.ts";
-import type { BackgroundWorkHooks, WorkLaunch, WorkSettle } from "./workHooks.ts";
+import type {
+    BackgroundWorkHooks,
+    ScheduledFire,
+    ScheduledFireSettle,
+    ScheduledWorkHooks,
+    WorkLaunch,
+    WorkSettle,
+} from "./workHooks.ts";
 import { isSafeWorkId, WorkStore, workIdForSource } from "./workStore.ts";
 import { buildList, toSummary, type WorkListArgs } from "./workView.ts";
 
@@ -41,7 +49,7 @@ export interface WorkControl {
     retryDelivery(workId: string): Promise<WorkRetryDeliveryResult>;
 }
 
-export class WorkService implements BackgroundWorkHooks, WorkControl {
+export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, WorkControl {
     readonly store: WorkStore;
     readonly controller: WorkController;
     readonly deliverer: WorkDeliverer;
@@ -204,6 +212,39 @@ export class WorkService implements BackgroundWorkHooks, WorkControl {
         }
     }
 
+    // ── ScheduledWorkHooks ──
+
+    async onFire(fire: ScheduledFire): Promise<string | undefined> {
+        try {
+            const work = await this.controller.startScheduled({
+                sourceEventId: scheduledSourceEventId(fire.jobId, fire.fireId),
+                jobId: fire.jobId,
+                title: fire.title,
+                workspace: fire.workspace,
+                sessionId: fire.sessionId,
+            });
+            return work.workId;
+        } catch (e) {
+            log.error("scheduled work record failed", { jobId: fire.jobId, error: String(e) });
+            return undefined;
+        }
+    }
+
+    async onFireSettle(workId: string, settle: ScheduledFireSettle): Promise<void> {
+        try {
+            await this.controller.settle({
+                workId,
+                ...settleArgs(settle),
+                // The turn's reply reaches an IM peer through the session's own
+                // channel; a notice from here would repeat it.
+                deliver: false,
+                parentWillReply: false,
+            });
+        } catch (e) {
+            log.error("scheduled work settle failed", { workId, error: String(e) });
+        }
+    }
+
     async noticeSettled(workId: string): Promise<boolean> {
         try {
             return await this.controller.isNoticeSettled(workId);
@@ -251,4 +292,27 @@ export class WorkService implements BackgroundWorkHooks, WorkControl {
 
 export function sourceEventIdFor(parentSessionId: string, parentToolCallId: string): string {
     return `subagent:${parentSessionId}:${parentToolCallId}`;
+}
+
+function settleArgs(
+    settle: ScheduledFireSettle,
+): Pick<SettleWorkArgs, "outcome" | "resultText" | "reason"> {
+    switch (settle.outcome) {
+        case "completed":
+            return { outcome: "completed", resultText: settle.replyText };
+        case "merged":
+            return {
+                outcome: "completed",
+                resultText: settle.replyText ?? "",
+                reason: WORK_REASON_MERGED,
+            };
+        case "cancelled":
+            return { outcome: "aborted", resultText: "", reason: settle.reason };
+        case "error":
+            return { outcome: "error", resultText: "", reason: settle.message };
+    }
+}
+
+export function scheduledSourceEventId(jobId: string, fireId: string): string {
+    return `job:${jobId}:${fireId}`;
 }

@@ -22,6 +22,7 @@ const runningWork: WorkSummary = {
     agentType: "reviewer",
     status: "running",
     workspace: "/w",
+    sessionId: "parent",
     parentSessionId: "parent",
     childSessionId: "child",
     createdAt: Date.now(),

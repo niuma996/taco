@@ -523,6 +523,9 @@
       "expired": "Expired",
       "handedOff": "In the chat",
       "cancelled": "Cancelled"
+    },
+    "kind": {
+      "scheduled": "Scheduled"
     }
   },
   "plugins": {
@@ -877,7 +880,24 @@
     "dreamStaleDays": "Candidate age for project/reference topics (days)",
     "dreamStaleDaysDurable": "Candidate age for user/feedback topics (days)",
     "dreamModel": "Consolidation model (optional)",
-    "dreamModelHint": "Leave empty for the default model. Use provider/modelId or modelId."
+    "dreamModelHint": "Leave empty for the default model. Use provider/modelId or modelId.",
+    "actionHistory": "History",
+    "history": {
+      "title": "Runs of {{name}}",
+      "loading": "Loading runs…",
+      "empty": "This schedule has not run yet.",
+      "timedOutRunning": "The schedule stopped waiting, but the run is still going. Its answer will appear here.",
+      "mergedHint": "The session was busy, so this prompt joined the turn already running. That turn's reply answers it.",
+      "state": {
+        "running": "Running",
+        "completed": "Completed",
+        "merged": "Merged",
+        "failed": "Failed",
+        "interrupted": "Interrupted",
+        "cancelled": "Stopped",
+        "timedOutRunning": "Still running"
+      }
+    }
   },
   "tasks": {
     "empty": "No tasks yet",

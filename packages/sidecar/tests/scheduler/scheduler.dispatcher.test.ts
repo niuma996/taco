@@ -252,7 +252,11 @@ describe("dispatcher", () => {
                     const p = req.params as { sessionId?: string; text?: string };
                     assert.equal(p.sessionId, existingId);
                     assert.equal(p.text, "ping");
-                    return { id: req.id, ok: true as const, result: { mode: "queued" } };
+                    return {
+                        id: req.id,
+                        ok: true as const,
+                        result: { mode: "queued", entryId: "e-1" },
+                    };
                 }
                 throw new Error(`unexpected method ${req.method}`);
             });

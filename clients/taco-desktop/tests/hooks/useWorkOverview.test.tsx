@@ -16,6 +16,7 @@ function summary(id: string, status: WorkSummary["status"] = "completed"): WorkS
         status,
         createdAt: 1,
         updatedAt: 1,
+        sessionId: "p",
         parentSessionId: "p",
         childSessionId: `c-${id}`,
         needsAttention: false,

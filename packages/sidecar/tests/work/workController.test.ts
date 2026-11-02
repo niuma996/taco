@@ -11,6 +11,7 @@ import { after, before, describe, it } from "node:test";
 import type { ImRoute } from "@taco-ai/protocol";
 import type { SendOutboundResult } from "../../src/channels/types.ts";
 import {
+    SCHEDULED_WORK_RETENTION_PER_JOB,
     templateNotice,
     WORK_RETENTION_COUNT,
     WORK_RETENTION_MS,
@@ -504,6 +505,103 @@ describe("work.controller", () => {
                 assert.equal(result.pruned, 3);
                 assert.equal((await store.list()).length, WORK_RETENTION_COUNT);
             });
+        });
+    });
+
+    describe("scheduled fires", () => {
+        const fire = (jobId: string, n: number) => ({
+            sourceEventId: `job:${jobId}:${n}`,
+            jobId,
+            title: "Daily digest",
+            workspace: "/w",
+            sessionId: `sched-pin-${jobId}`,
+        });
+
+        it("records the fire against its session with no delivery", async () => {
+            const { controller, sender } = rig();
+            const work = await controller.startScheduled(fire("daily", 1));
+            assert.equal(work.kind, "scheduled");
+            assert.equal(work.jobId, "daily");
+            assert.equal(work.parentSessionId, "sched-pin-daily");
+            assert.equal(work.childSessionId, undefined);
+            const settled = await controller.settle({
+                workId: work.workId,
+                outcome: "completed",
+                resultText: "all quiet",
+                deliver: false,
+                parentWillReply: false,
+            });
+            assert.equal(settled?.result?.summary, "all quiet");
+            assert.equal(settled?.delivery, undefined);
+            assert.deepEqual(sender.texts, []);
+        });
+
+        it("keeps each job's last fires on their own, apart from subagents", async () => {
+            const { controller, store } = rig();
+            const { workId: subagent } = await controller.start(launch(1));
+            await controller.settle({
+                workId: subagent,
+                outcome: "completed",
+                resultText: "x",
+                parentWillReply: false,
+            });
+            const extra = 4;
+            for (let i = 0; i < SCHEDULED_WORK_RETENTION_PER_JOB + extra; i++) {
+                time += 1;
+                for (const jobId of ["busy", "quiet"]) {
+                    if (jobId === "quiet" && i > 0) continue;
+                    const { workId } = await controller.startScheduled(fire(jobId, i));
+                    await controller.settle({
+                        workId,
+                        outcome: "completed",
+                        resultText: `run ${i}`,
+                        deliver: false,
+                        parentWillReply: false,
+                    });
+                }
+            }
+            // Each start trims the finished fires to the budget while the new
+            // one is still running, so the job never holds more than budget + 1.
+            const busy = (await store.list()).filter((w) => w.jobId === "busy");
+            assert.equal(busy.length, SCHEDULED_WORK_RETENTION_PER_JOB + 1);
+            await controller.reconcile();
+            const afterBoot = await store.list();
+            assert.equal(
+                afterBoot.filter((w) => w.jobId === "busy").length,
+                SCHEDULED_WORK_RETENTION_PER_JOB,
+            );
+            assert.equal(afterBoot.filter((w) => w.jobId === "quiet").length, 1);
+            assert.ok(
+                afterBoot.some((w) => w.workId === subagent),
+                "subagent Work survives",
+            );
+            const newest = afterBoot
+                .filter((w) => w.jobId === "busy")
+                .map((w) => w.result?.summary);
+            assert.ok(newest.includes(`run ${SCHEDULED_WORK_RETENTION_PER_JOB + extra - 1}`));
+            assert.ok(!newest.includes("run 0"));
+        });
+
+        it("tells an interrupted fire that the job runs again, not to continue a subagent", async () => {
+            const { store } = rig("old-process");
+            const old = new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, new RecordingSender(), testClock),
+                instanceId: "old-process",
+                now: () => time,
+            });
+            const { workId } = await old.startScheduled(fire("daily", 1));
+            const next = new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, new RecordingSender(), testClock),
+                instanceId: "new-process",
+                now: () => time,
+            });
+            await next.reconcile();
+            const record = await store.get(workId);
+            assert.equal(record?.status, "interrupted");
+            assert.match(record?.reason ?? "", /next scheduled time/);
+            assert.equal(record?.delivery, undefined, "no target was frozen, so nothing is sent");
         });
     });
 

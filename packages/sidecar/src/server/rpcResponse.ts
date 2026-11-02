@@ -8,6 +8,7 @@
  */
 
 import { ErrorCodes, type RpcResponse } from "@taco-ai/protocol";
+import { isAbortedTurn } from "../runtime/harness/harnessErrors.ts";
 import { SessionNotFoundError } from "../runtime/session/sessionLookup.ts";
 import { RpcHandlerError } from "./methodRegistry.ts";
 
@@ -75,6 +76,11 @@ export function normalizeError(id: string, e: unknown): RpcResponse {
     }
     if (e instanceof SessionNotFoundError) {
         return err(id, ErrorCodes.NotFound, e.message);
+    }
+    // A stopped turn is an outcome, not a fault, and its message is our own
+    // ("session.prompt aborted"), so it passes through unredacted.
+    if (isAbortedTurn(e)) {
+        return err(id, ErrorCodes.Aborted, (e as Error).message);
     }
     // Non-contract error — redact the upstream message.
     const raw = e instanceof Error ? e.message : String(e);
