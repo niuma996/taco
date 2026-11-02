@@ -39,6 +39,7 @@ import {
     isEmptyAssistant,
     stringifyResult,
     textFromMessage,
+    toolResultIsError,
     toolResultLine,
 } from "./chatUtils.ts";
 
@@ -368,7 +369,7 @@ function handleToolEnd(
     const cloned = cloneAssistant(assistant);
     const clonedTool = cloned.tools.find((x) => x.id === toolCallId);
     if (!clonedTool) return { messages };
-    clonedTool.status = ev.isError ? "error" : "ok";
+    clonedTool.status = toolResultIsError(name, ev.isError, ev.result?.details) ? "error" : "ok";
     // For tool cards embedded in assistant: store the raw result text (matches
     // the history path) and let the renderer handle truncation. We
     // don't prepend "✓ name:" — that prefix is for fallback rows.

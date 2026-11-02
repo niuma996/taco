@@ -1337,3 +1337,44 @@ describe("historyToUiMessages — failed assistant turns", () => {
         assert.equal(ui.length, 0);
     });
 });
+
+describe("historyToUiMessages — subagent failure status", () => {
+    it("agent 的领域错误状态不会被一个 false 的通用 isError 覆盖成成功", () => {
+        const entries: HistoryEntryLike[] = [
+            {
+                id: "agent-call",
+                type: "message",
+                timestamp: "2026-01-01T00:00:00Z",
+                payload: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "toolCall",
+                            id: "tc-agent",
+                            name: "agent",
+                            arguments: { subagent_type: "reviewer", prompt: "review" },
+                        },
+                    ],
+                    timestamp: 1,
+                },
+            },
+            {
+                id: "agent-result",
+                type: "message",
+                timestamp: "2026-01-01T00:00:01Z",
+                payload: {
+                    role: "toolResult",
+                    toolCallId: "tc-agent",
+                    toolName: "agent",
+                    content: [{ type: "text", text: "subagent error: terminated" }],
+                    details: { status: "error", agentType: "reviewer" },
+                    isError: false,
+                    timestamp: 2,
+                },
+            },
+        ];
+        const ui = historyToUiMessages(entries);
+        if (ui[0]?.kind !== "assistant") throw new Error("narrow");
+        assert.equal(ui[0].tools[0]?.status, "error");
+    });
+});

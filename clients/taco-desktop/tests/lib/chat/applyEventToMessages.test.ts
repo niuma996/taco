@@ -711,3 +711,34 @@ describe("applyEventToMessages — replayed claude-code child stream", () => {
         assert.equal(messages.filter((m) => m.kind === "tool").length, 2);
     });
 });
+
+describe("applyEventToMessages — subagent failure status", () => {
+    it("agent 的 details.status=error 会让卡片进入 error，即使通用 isError 为 false", () => {
+        const started = applyEventToMessages(
+            [],
+            asEv({ type: "message_start", message: { timestamp: "t1", role: "assistant" } }),
+            baseOpts,
+        ).messages;
+        const withTool = applyEventToMessages(
+            started,
+            asEv({ type: "tool_start", toolCallId: "tc-agent", toolName: "agent" }),
+            baseOpts,
+        ).messages;
+        const { messages } = applyEventToMessages(
+            withTool,
+            asEv({
+                type: "tool_end",
+                toolCallId: "tc-agent",
+                toolName: "agent",
+                isError: false,
+                result: {
+                    content: [{ type: "text", text: "subagent error: terminated" }],
+                    details: { status: "error", agentType: "reviewer" },
+                },
+            }),
+            baseOpts,
+        );
+        const asst = messages[0] as Extract<UiMessage, { kind: "assistant" }>;
+        assert.equal(asst.tools[0]?.status, "error");
+    });
+});

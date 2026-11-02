@@ -78,7 +78,10 @@ function entryFromTool(
     if (typeof tool.id !== "string") throw new Error("agent tool call missing id");
     if (!TOOL_CALL_STATUSES.has(tool.status)) throw new Error("agent tool call missing status");
 
-    const subSessionId = readString(tool.details, "subSessionId") || null;
+    // Older failed runs wrote the id only into the result text. Recover it so
+    // reopening the parent does not turn an inspectable child into "detached".
+    const legacyId = tool.resultText?.match(/\[subagent session: ([0-9a-f-]{36})\]/i)?.[1];
+    const subSessionId = readString(tool.details, "subSessionId") || legacyId || null;
     const detailStatus = readString(tool.details, "status");
     const agentType =
         readString(tool.details, "agentType") || readString(tool.args, "subagent_type") || "agent";

@@ -122,6 +122,22 @@ describe("deriveSubagents — 状态映射", () => {
         assert.equal(out[0]?.subSessionId, null);
     });
 
+    it("旧错误结果缺 details.subSessionId 时，从结果正文恢复子会话引用", () => {
+        const entries = deriveSubagents([
+            asst("history", [
+                agentTool({
+                    id: "a1",
+                    status: "error",
+                    details: { status: "error", agentType: "reviewer" },
+                    resultText:
+                        "subagent error: failed\n\n[subagent session: 01a19a58-63ef-7560-a35c-d5f268b567c6]",
+                }),
+            ]),
+        ]);
+        assert.equal(entries[0]?.subSessionId, "01a19a58-63ef-7560-a35c-d5f268b567c6");
+        assert.equal(entries[0]?.status, "error");
+    });
+
     it("details 存在但 subSessionId 非字符串 → detached", () => {
         const out = deriveSubagents([asst("m1", [agentTool({ details: { subSessionId: 42 } })])]);
         assert.equal(out[0]?.status, "detached");

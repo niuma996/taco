@@ -232,6 +232,21 @@ export interface UiToolCall {
 /** Tool names that spawn (or continue) a subagent child session. */
 export const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(["agent", "agentContinue"]);
 
+/** The subagent outcome is authoritative when the generic harness flag is stale. */
+export function toolResultIsError(
+    toolName: string,
+    isError: boolean | undefined,
+    details: unknown,
+): boolean {
+    if (isError === true) return true;
+    return (
+        AGENT_TOOL_NAMES.has(toolName) &&
+        typeof details === "object" &&
+        details !== null &&
+        (details as { status?: unknown }).status === "error"
+    );
+}
+
 /**
  * True when an agent tool call's details mark a background launch receipt
  * (`AgentToolDetails.status === "launched"`) rather than a finished run.
@@ -542,7 +557,9 @@ export function historyToUiMessages(
             if (assistant) {
                 const t = assistant.tools.find((x) => x.id === tm.toolCallId);
                 if (t) {
-                    t.status = tm.isError ? "error" : "ok";
+                    t.status = toolResultIsError(tm.toolName ?? "tool", tm.isError, tm.details)
+                        ? "error"
+                        : "ok";
                     t.resultText = resultText;
                     // Structured `details` aligns with the live path (applyEventToMessages) —
                     // askUser's questions / edit's lines etc. are parsed by tool.name.
@@ -566,7 +583,11 @@ export function historyToUiMessages(
                 out.push({
                     id: entryId || `tool-result-${ts}`,
                     kind: "tool",
-                    text: toolResultLine(tm.toolName ?? "tool", tm.isError ?? false, resultText),
+                    text: toolResultLine(
+                        tm.toolName ?? "tool",
+                        toolResultIsError(tm.toolName ?? "tool", tm.isError, tm.details),
+                        resultText,
+                    ),
                     ts,
                 });
             }
