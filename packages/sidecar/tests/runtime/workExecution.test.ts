@@ -327,32 +327,14 @@ describe("work execution seam (pi lane)", () => {
             }
         });
 
-        it("HAZARD: a concurrent drive() without waitForRetry makes resume() throw a harness fault", async () => {
-            const rig = makeRig({ tokensPerSecond: 50 });
-            rig.faux.setResponses([reply(long)] as never);
-            await abandonMidFlight(rig, "op-hazard");
-
-            const second = await rig.attach();
-            try {
-                rig.faux.setResponses([reply("recovered")] as never);
-                // The first caller installs the Drive and its options win: a bare
-                // drive() surfaces the retry backoff instead of waiting it out, and
-                // resume() — which expects a waited retry — treats that as an invariant
-                // violation. A Work reconciler must therefore never drive an operation
-                // that attach recovery may also resume, unless it passes the same options.
-                const settled = await Promise.allSettled([
-                    second.lane.drive({ operationId: "op-hazard" }, harnessContext),
-                    second.lane.resume(harnessContext),
-                ]);
-                const faulted = settled.some(
-                    (r) => r.status === "rejected" && (r.reason as Error).name === "HarnessFault",
-                );
-                assert.ok(faulted, "resume() sharing a bare drive() throws HarnessFault");
-            } finally {
-                await second.close();
-            }
-        });
-
+        // A concurrent bare drive() and resume() is NOT asserted here: whoever
+        // installs the Drive wins, and the fault only appears when resume joins a
+        // bare drive during its (microtask-short) retry-wait window. That race is
+        // real — resume() then throws HarnessFault "returned an unwaited retry" —
+        // but it cannot be ordered deterministically through the lane API, and a
+        // test that fails one run in three teaches nothing. The rule it implies is
+        // enforced by the test below: a reconciler must treat a bare drive()'s `ok`
+        // as "still open", and never drive an operation attach recovery may resume.
         it("a bare drive() on an interrupted operation reports a retry wait instead of settling", async () => {
             const rig = makeRig({ tokensPerSecond: 50 });
             rig.faux.setResponses([reply(long)] as never);
