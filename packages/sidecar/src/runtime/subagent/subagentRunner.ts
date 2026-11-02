@@ -15,6 +15,7 @@ import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
 import type { SubagentProgressSink } from "../../agents/types.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
+import type { SubagentBudgetState } from "./subagentBudget.ts";
 import {
     assistantText,
     failedResult,
@@ -47,6 +48,12 @@ export interface RunAttachedSubagentArgs {
      * aborting, because `AgentHarnessOptions` exposes no turn limit.
      */
     readonly maxTurns?: number;
+    /**
+     * The run's budget, shared with the reminder hook that warns the model as
+     * the run nears a limit. The runner writes `turnsUsed` into it on every
+     * completed turn; the hook reads it live.
+     */
+    readonly budget?: SubagentBudgetState;
     readonly signal?: AbortSignal;
     /**
      * Streaming-update sink. The started update is checkpointed so an
@@ -113,6 +120,9 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
     const onTurnEnd = (event: HarnessEvent): void => {
         if (event.type !== "turn_end") return;
         turnsUsed++;
+        // The budget object is the same one the reminder hook reads, so the
+        // model sees the count as it grows.
+        if (args.budget) args.budget.turnsUsed = turnsUsed;
         // The failing turn is usually an empty error message; keep the last
         // turn that actually said something.
         const turnText = assistantText(event.message);

@@ -71,6 +71,7 @@ import { AgentHarness, laneConfig, NoActiveOperation } from "../pi/values.ts";
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
 import { TitleSummarizer } from "../session/titleSummarizer.ts";
+import type { SubagentBudgetState } from "../subagent/subagentBudget.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
@@ -213,6 +214,11 @@ export interface AttachedSessionOptions {
      * session, which may load anything the registry offers.
      */
     toolLoadPolicy?: AgentToolPolicy;
+    /**
+     * Thunk over this session's subagent run budget. Set only on a subagent
+     * session; the budget reminder hook reads it on every context build.
+     */
+    getSubagentBudget?: () => SubagentBudgetState | undefined;
     /**
      * Re-assemble the workspace toolset for this session. Called at the start of
      * each turn so a permission change reaches an existing conversation on its
@@ -693,6 +699,11 @@ export class AttachedSession extends EventEmitter {
                     planActive: attached.planState.active,
                     planState: attached.planState,
                 }),
+                // A subagent session's run budget. The reminder hook reads it
+                // live so the model is warned as the run nears its limit.
+                ...(args.getSubagentBudget !== undefined
+                    ? { getSubagentBudget: args.getSubagentBudget }
+                    : {}),
                 // Same root the tools resolve against — write/edit targets must stay
                 // inside it, and plan mode refuses mutations at dispatch.
                 mutationGateRoot: args.env.cwd,

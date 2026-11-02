@@ -1675,3 +1675,98 @@ describe("AgentSpawner parent-toolset inheritance", () => {
         );
     });
 });
+
+const defsBudgeted: AgentDefinition[] = [
+    {
+        agentType: "reviewer",
+        description: "read-only review",
+        systemPrompt: "you review",
+        tools: ["read", "grep", "glob", "shell"],
+        maxTurns: 200,
+        source: "builtin",
+        filePath: "/x/reviewer.md",
+    },
+];
+
+describe("AgentSpawner — subagent budget and load policy", () => {
+    let cwd: string;
+    let ws: WorkspaceRuntime;
+    /** The AttachOptions each attachChild call received. */
+    let captured: import("../../src/runtime/session/sessionRegistry.ts").AttachOptions[];
+    let cleanup: () => Promise<void>;
+
+    before(async () => {
+        ({ ws, cwd, cleanup } = createTestWorkspace({
+            prefix: "budget",
+            agents: defsBudgeted,
+        }));
+        captured = [];
+        // Stub the attach: everything under test is decided before the child
+        // harness exists, and the rejection surfaces as an isError result.
+        ws.sessionRegistry.attachChild = (
+            _sessionId: never,
+            opts: never,
+            _tools: never,
+            _taskState: never,
+            _systemPrompt?: string,
+        ) => {
+            captured.push(opts);
+            return Promise.reject(new Error("attach stubbed"));
+        };
+        await ws.repo
+            .create({ id: "parent-1", cwd }, harnessContext)
+            .then((s) => s.close(harnessContext));
+    });
+
+    after(() => cleanup());
+
+    it("restricts the child's on-demand loads to the tools its profile declared", async () => {
+        await ws.spawnSubagent({
+            parentSessionId: asSessionId("parent-1"),
+            parentToolCallId: "tc-policy",
+            agentType: "reviewer",
+            prompt: "go",
+        });
+        const policy = captured.at(-1)?.toolLoadPolicy;
+        assert.ok(policy, "the child must carry a load policy");
+        assert.equal(policy.allowed?.has("read"), true);
+        assert.equal(policy.allowed?.has("configPatch"), false);
+        assert.equal(policy.allowed?.has("write"), false);
+        assert.equal(policy.denied.has("agent"), true);
+    });
+
+    it("hands the child a budget seeded from the profile's turn cap", async () => {
+        await ws.spawnSubagent({
+            parentSessionId: asSessionId("parent-1"),
+            parentToolCallId: "tc-budget",
+            agentType: "reviewer",
+            prompt: "go",
+        });
+        const budget = captured.at(-1)?.getSubagentBudget?.();
+        assert.ok(budget, "the child must carry a budget");
+        assert.equal(budget.maxTurns, 200);
+        assert.equal(budget.turnsUsed, 0);
+        assert.equal(budget.timeoutMs, undefined, "a synchronous run has no wall-clock budget");
+    });
+
+    it("gives a background run its wall-clock allowance too", async () => {
+        const res = await ws.agentSpawner.spawnSubagent({
+            parentSessionId: asSessionId("parent-1"),
+            parentToolCallId: "tc-bg-budget",
+            agentType: "reviewer",
+            prompt: "go",
+            background: true,
+        });
+        assert.equal(res.isError, false);
+        // A background run attaches after the receipt returns, so the capture
+        // is only complete once the run has settled.
+        await ws.agentSpawner.whenBackgroundRunsSettle();
+        const budget = captured.at(-1)?.getSubagentBudget?.();
+        assert.ok(budget, "the child must carry a budget");
+        assert.equal(budget.maxTurns, 200);
+        assert.ok(
+            budget.timeoutMs !== undefined && budget.timeoutMs > 0,
+            "a background run must carry a wall-clock budget",
+        );
+    });
+});

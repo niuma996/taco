@@ -57,6 +57,10 @@ import type {
     Skill,
     ThinkingLevel,
 } from "../pi/types.ts";
+import {
+    buildSubagentBudgetContextHook,
+    type SubagentBudgetState,
+} from "../subagent/subagentBudget.ts";
 import { recordPromptCacheFingerprint } from "./promptCacheFingerprint.ts";
 import { capToolResult } from "./toolResultCap.ts";
 
@@ -148,6 +152,13 @@ export interface HookWiringOptions {
     memoryStore?: MemoryStore;
     /** Thunk returning the current session's task / plan state, used by the active_tasks hook. */
     getActiveTasksState?: () => ActiveTasksState;
+    /**
+     * Thunk over this session's subagent budget, set only on a subagent
+     * session. The budget reminder hook reads it on every context build and
+     * injects a `<subagent_budget>` tag once the run nears a limit, so the
+     * model can deliver its findings instead of being cut off mid-turn.
+     */
+    getSubagentBudget?: () => SubagentBudgetState | undefined;
     /**
      * Workspace root for the mutation gate. When set, `write` / `edit` targets
      * must resolve inside it, and plan mode blocks mutating calls at dispatch
@@ -477,6 +488,12 @@ export async function wireHarnessHooks(
         const getState = opts.getActiveTasksState;
         disposers.push(onContext(buildActiveTasksContextHook(getState)));
         disposers.push(onContext(buildTodoWriteReminderContextHook(() => getState().store)));
+    }
+
+    // ── subagent budget hook — injects <subagent_budget> near a limit.
+    //    A subagent session only; a main session has no run budget.
+    if (opts.getSubagentBudget) {
+        disposers.push(onContext(buildSubagentBudgetContextHook(opts.getSubagentBudget)));
     }
 
     // ── extension context hooks (wrapped, errors → undefined) ──

@@ -56,6 +56,7 @@ import type {
     Session,
     ThinkingLevel,
 } from "../pi/types.ts";
+import type { SubagentBudgetState } from "../subagent/subagentBudget.ts";
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFactsIfAbsent } from "./sessionFacts.ts";
 import { resolveSessionByPrefix, SessionNotFoundError } from "./sessionLookup.ts";
@@ -76,6 +77,12 @@ export interface AttachOptions {
      * session, which may load anything the registry offers.
      */
     toolLoadPolicy?: AgentToolPolicy;
+    /**
+     * Thunk over this session's subagent run budget. Set only on the
+     * subagent path; the budget reminder hook reads it on every context
+     * build so the model can be warned as the run nears its limit.
+     */
+    getSubagentBudget?: () => SubagentBudgetState | undefined;
 }
 
 export interface SessionRegistryOptions {
@@ -1015,6 +1022,9 @@ export class SessionRegistry extends EventEmitter {
                     // A subagent may only load the tools its profile declared.
                     ...(opts.toolLoadPolicy !== undefined
                         ? { toolLoadPolicy: opts.toolLoadPolicy }
+                        : {}),
+                    ...(opts.getSubagentBudget !== undefined
+                        ? { getSubagentBudget: opts.getSubagentBudget }
                         : {}),
                     // Main sessions only: a subagent's toolset is deliberately narrowed
                     // by its caller (depth-filtered, `agent` removed), so re-imposing

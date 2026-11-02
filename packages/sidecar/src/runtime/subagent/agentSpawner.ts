@@ -50,6 +50,7 @@ import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
 import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
+import type { SubagentBudgetState } from "./subagentBudget.ts";
 import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
@@ -250,6 +251,12 @@ export interface SubagentSessionArgs {
      * asked for.
      */
     toolPolicy?: AgentToolPolicy;
+    /**
+     * The run's budget. Read live by the budget reminder hook, so the model
+     * is warned as the run nears a limit instead of being cut off mid-turn.
+     * The runner updates `turnsUsed` on every completed turn.
+     */
+    budget?: SubagentBudgetState;
     /**
      * Pre-rendered `<forked_context>` block, or undefined when this child runs
      * independent. Computed by `spawnSubagent` from the parent branch before
@@ -706,6 +713,7 @@ export class AgentSpawner extends EventEmitter {
                     thinkingLevel: "off",
                     model: args.model,
                     ...(args.toolPolicy !== undefined ? { toolLoadPolicy: args.toolPolicy } : {}),
+                    ...(args.budget !== undefined ? { getSubagentBudget: () => args.budget } : {}),
                 } satisfies AttachOptions,
                 childTools,
                 childTaskState,
@@ -735,6 +743,7 @@ export class AgentSpawner extends EventEmitter {
                 prompt: args.prompt,
                 agentType: args.agentType,
                 maxTurns: args.maxTurns,
+                ...(args.budget !== undefined ? { budget: args.budget } : {}),
                 signal: args.signal,
                 onUpdate: args.onUpdate,
                 resumability: args.resumability,
@@ -1034,6 +1043,13 @@ export class AgentSpawner extends EventEmitter {
             // The profile's declared tools bound what the child may also load
             // on demand — same list the initial toolset was filtered by.
             toolPolicy: agentToolPolicy(def.tools, childDepth),
+            // The run's budget, read live by the budget reminder hook. The
+            // background path adds its wall-clock allowance to it.
+            budget: {
+                turnsUsed: 0,
+                startedAt: Date.now(),
+                ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
+            },
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             maxTurns: def.maxTurns,
@@ -1093,6 +1109,10 @@ export class AgentSpawner extends EventEmitter {
             def.timeoutMinutes !== undefined && def.timeoutMinutes > 0
                 ? def.timeoutMinutes * 60_000
                 : backgroundTimeoutMs(def.maxTurns);
+        // The budget object is shared with the run (the reminder hook reads it
+        // live), so the wall-clock allowance lands on the same state the turn
+        // counter writes to.
+        if (sessionArgs.budget) sessionArgs.budget.timeoutMs = timeoutMs;
         const controller = new AbortController();
         // The reason tells the runner this was the run's own budget running out,
         // not a user stop: the two need different words and different advice.
@@ -1965,6 +1985,15 @@ export class AgentSpawner extends EventEmitter {
             modelIdentity: this.defaultModelIdentity,
         });
 
+        // A resume gets its own budget object: the remaining turn count is
+        // what this run may still take, and the counter starts fresh from
+        // here. One object, shared with the runner that updates it.
+        const resumeBudget: SubagentBudgetState = {
+            turnsUsed: 0,
+            startedAt: Date.now(),
+            ...(maxTurns !== undefined ? { maxTurns } : {}),
+        };
+
         // 4. Attach (returns the existing AttachedSession if still attached).
         let attached: AttachedSession;
         try {
@@ -1973,6 +2002,7 @@ export class AgentSpawner extends EventEmitter {
                 {
                     thinkingLevel: "off",
                     toolLoadPolicy: agentToolPolicy(def.tools, childDepth),
+                    getSubagentBudget: () => resumeBudget,
                 },
                 attachedChildTools,
                 childTaskState,
@@ -2007,6 +2037,7 @@ export class AgentSpawner extends EventEmitter {
                 prompt: args.prompt,
                 agentType,
                 maxTurns,
+                budget: resumeBudget,
                 signal: controller.signal,
                 onUpdate: args.onUpdate,
                 // Reached here only after the profile resolved, so it can be resumed again.
