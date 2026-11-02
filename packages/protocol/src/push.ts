@@ -8,6 +8,7 @@ import type { ChannelStatusChangedParams } from "./channels.js";
 import type { CommandPermissionDenialReason } from "./config.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
 import type { SubagentSettledPayload } from "./tools.js";
+import type { WorkChangedParams } from "./work.js";
 import type { WorkspaceAssociationKey } from "./workspace.js";
 
 // Push event payloads
@@ -165,6 +166,14 @@ export const PushMethods = {
      * show the current permissions need to learn about it without a poll.
      */
     WorkspaceAssociationsChanged: "workspace.associations_changed",
+    /**
+     * Emitted when a Work is created or changes state. Process-level (no
+     * workspace, no session): a Work outlives the session that started it, and
+     * the overview lists them all. Invalidate-not-delta: the payload names the
+     * Works that moved and the daemon instance, never an answer. Sent to desktop
+     * clients only; it is not forwarded to IM channels.
+     */
+    WorkChanged: "work.changed",
 } as const;
 
 /**
@@ -475,6 +484,7 @@ export interface PushParamsByMethod {
     [PushMethods.ImPolicyChanged]: ImPolicyChangedParams;
     [PushMethods.ImWorkspacesInvalidated]: ImWorkspacesInvalidatedParams;
     [PushMethods.WorkspaceAssociationsChanged]: WorkspaceAssociationsChangedParams;
+    [PushMethods.WorkChanged]: WorkChangedParams;
 }
 
 export type PushMethodName = (typeof PushMethods)[keyof typeof PushMethods];

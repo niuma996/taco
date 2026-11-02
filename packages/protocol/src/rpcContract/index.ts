@@ -39,6 +39,7 @@ import { sessionContract, sessionMethods, sessionSchemas } from "./session.js";
 import { settingsContract, settingsMethods, settingsSchemas } from "./settings.js";
 import { toolsContract, toolsMethods, toolsSchemas } from "./tools.js";
 import type { ParamsLacksShape, RpcContractRow } from "./types.js";
+import { workContract, workMethods, workSchemas } from "./work.js";
 import { workspaceContract, workspaceMethods, workspaceSchemas } from "./workspace.js";
 
 export type { RpcContractRow, RpcScope } from "./types.js";
@@ -53,6 +54,7 @@ export const RPC = {
     ...memoryMethods,
     ...jobsMethods,
     ...toolsMethods,
+    ...workMethods,
 } as const;
 
 /** Params/result types and routing scope for every method. */
@@ -65,6 +67,7 @@ export const rpcContract = {
     ...memoryContract,
     ...jobsContract,
     ...toolsContract,
+    ...workContract,
 };
 
 /** Params schemas for every method. */
@@ -77,6 +80,7 @@ export const rpcSchemas = {
     ...memorySchemas,
     ...jobsSchemas,
     ...toolsSchemas,
+    ...workSchemas,
 };
 
 /** Every camelCase contract key. */

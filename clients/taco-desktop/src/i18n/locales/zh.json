@@ -166,6 +166,7 @@
     "agents": "智能体",
     "plugins": "插件",
     "channels": "渠道",
+    "work": "后台工作",
     "more": "更多",
     "schedules": "定时任务",
     "mcp": "MCP",
@@ -483,6 +484,44 @@
     "confirmMessage": "将把 {{count}} 个文件恢复到「{{label}}」时的内容。系统会先生成当前状态的保护快照,本次操作可以撤销。",
     "confirmRestore": "回滚",
     "confirmCancel": "取消"
+  },
+  "work": {
+    "title": "后台工作",
+    "refresh": "刷新",
+    "loading": "正在加载后台工作…",
+    "empty": "还没有后台工作。",
+    "emptyHint": "后台子代理和定时任务运行时会出现在这里，结束后仍会保留。",
+    "loadMore": "加载更多",
+    "loadingMore": "加载中…",
+    "partial": "部分结果",
+    "openSession": "打开会话",
+    "openSessionUnavailable": "这条记录早于工作区记录，无法定位会话。",
+    "retryDelivery": "重新发送",
+    "resultLoading": "正在加载结果…",
+    "resultPending": "任务完成后可在这里查看结果。",
+    "resultGone": "结果已不可用。",
+    "resultTruncated": "结果过长，这里只显示前一部分。",
+    "group": {
+      "running": "进行中",
+      "attention": "需处理",
+      "finished": "已结束"
+    },
+    "status": {
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已停止",
+      "interrupted": "已中断"
+    },
+    "delivery": {
+      "pending": "发送中",
+      "confirmed": "已送达",
+      "retryExhausted": "未送达",
+      "permanentFailure": "被拒绝",
+      "expired": "已过期",
+      "handedOff": "已在对话中",
+      "cancelled": "已取消"
+    }
   },
   "plugins": {
     "title": "插件",

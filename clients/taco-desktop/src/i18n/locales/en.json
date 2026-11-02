@@ -167,6 +167,7 @@
     "agents": "Agents",
     "plugins": "Plugins",
     "channels": "Channels",
+    "work": "Work",
     "more": "More",
     "schedules": "Schedules",
     "mcp": "MCP",
@@ -485,6 +486,44 @@
     "confirmMessage": "Roll back {{count}} file(s) from \"{{label}}\". A pre-restore snapshot is taken first, so this can be undone.",
     "confirmRestore": "Restore",
     "confirmCancel": "Cancel"
+  },
+  "work": {
+    "title": "Background work",
+    "refresh": "Refresh",
+    "loading": "Loading background work…",
+    "empty": "No background work yet.",
+    "emptyHint": "Background subagents and scheduled tasks appear here while they run, and stay after they finish.",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…",
+    "partial": "Partial",
+    "openSession": "Open session",
+    "openSessionUnavailable": "This record predates workspace tracking.",
+    "retryDelivery": "Send again",
+    "resultLoading": "Loading the answer…",
+    "resultPending": "The answer will appear here when the work finishes.",
+    "resultGone": "The answer is no longer available.",
+    "resultTruncated": "The answer was shortened. It is longer than this pane shows.",
+    "group": {
+      "running": "Running",
+      "attention": "Needs attention",
+      "finished": "Finished"
+    },
+    "status": {
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Stopped",
+      "interrupted": "Interrupted"
+    },
+    "delivery": {
+      "pending": "Sending",
+      "confirmed": "Delivered",
+      "retryExhausted": "Not delivered",
+      "permanentFailure": "Rejected",
+      "expired": "Expired",
+      "handedOff": "In the chat",
+      "cancelled": "Cancelled"
+    }
   },
   "plugins": {
     "title": "Plugins",

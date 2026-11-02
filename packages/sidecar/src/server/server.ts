@@ -149,6 +149,7 @@ import { SessionEventLog } from "./sessionEventLog.ts";
 import { StdioTransport } from "./stdioTransport.ts";
 import type { Transport } from "./transport.ts";
 import { parseJsonPointer } from "./validation.ts";
+import { WorkPushAdapter } from "./workPushAdapter.ts";
 import { WorkspaceRegistry } from "./workspaceRegistry.ts";
 
 const log = createLogger("sidecar");
@@ -368,6 +369,7 @@ export class SidecarServer implements ServerRpcSurface {
     readonly channelRegistry: ChannelRegistry;
     /** Process-level Work ledger and its delivery. */
     readonly work: WorkService;
+    private readonly workPush: WorkPushAdapter;
     readonly channelBindBroker: ChannelBindBroker;
     /** Resolved by the ctor after the broker + router exist. */
     private readonly channelFactory: ChannelFactory;
@@ -510,11 +512,18 @@ export class SidecarServer implements ServerRpcSurface {
         this.channelRegistry = new ChannelRegistry();
         this.channelBindBroker = new ChannelBindBroker();
         this.conversationRouter = options.conversationRouter;
+        // Process-level frames: no workspace, no session, no replay log, no IM
+        // forwarding. Straight to the desktop transport and any extra sinks.
+        this.workPush = new WorkPushAdapter(SIDECAR_INSTANCE_ID, (frame) => {
+            void this.getTransport().send(frame);
+            this.clientSinkRegistry.fanout(frame, this.transport);
+        });
         this.work = new WorkService({
             root: join(tacoHome(), "work"),
             instanceId: SIDECAR_INSTANCE_ID,
             channels: this.channelRegistry,
             resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
+            onChange: (workId) => this.workPush.changed(workId),
         });
         this.channelFactory = new ChannelFactory({
             broker: this.channelBindBroker,
@@ -631,7 +640,10 @@ export class SidecarServer implements ServerRpcSurface {
             () => {
                 this.channelBindBroker.cancelAll();
             },
-            () => this.work.stop(),
+            () => {
+                this.workPush.close();
+                this.work.stop();
+            },
             () => this.channelRegistry.stopAll(),
             () => this.workspaces.stop(),
             () => this.mcpScope.dispose(),

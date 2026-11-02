@@ -405,6 +405,31 @@ export type {
     ToolsListResult,
 } from "./tools.js";
 export { BINARY_READ_MARKER } from "./tools.js";
+// work.* RPC types and vocabularies: the read-only overview of managed work.
+export type {
+    WorkChangedParams,
+    WorkCompleteness,
+    WorkDeliveryStatus,
+    WorkDeliverySummary,
+    WorkGetParams,
+    WorkGetResult,
+    WorkListParams,
+    WorkListResult,
+    WorkRetryDeliveryOutcome,
+    WorkRetryDeliveryParams,
+    WorkRetryDeliveryResult,
+    WorkStatus,
+    WorkSummary,
+} from "./work.js";
+export {
+    WORK_COMPLETENESS,
+    WORK_DELIVERY_STATUSES,
+    WORK_LIST_DEFAULT_LIMIT,
+    WORK_LIST_MAX_LIMIT,
+    WORK_RESULT_TEXT_LIMIT,
+    WORK_RETRYABLE_DELIVERY_STATUSES,
+    WORK_STATUSES,
+} from "./work.js";
 // Workspace association types — directories a workspace may reach beyond its root.
 export type {
     WorkspaceAssociationKey,

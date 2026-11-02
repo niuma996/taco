@@ -95,8 +95,10 @@ export type CompactionFailureReason =
  *  would not stick.
  *  2.7 added the optional `query` filter on `session.list`. A 2.6 daemon
  *  answers ok but ignores it, so a search would silently list every
- *  session instead of the matches. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 7 } as const;
+ *  session instead of the matches.
+ *  2.8 added `work.*` and the `work.changed` push; a 2.7 daemon would answer
+ *  `unknown_method` instead of showing the background work. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 8 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

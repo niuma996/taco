@@ -166,6 +166,7 @@ export class TacoClient extends TacoClientBase {
     private disposed = false;
     private readonly epochs = new SidecarEpochs();
     private readonly epochChangeHandlers = new Set<(workspace: WorkspaceId) => void>();
+    private readonly connectionReadyHandlers = new Set<(instanceId: string | undefined) => void>();
     /** Most recent instanceId observed on the initialize response; the tag
      *  SessionEpochs stamps every Attached push with so a daemon restart can
      *  fire synthetic "replaced" transitions for every tracked session. */
@@ -272,6 +273,19 @@ export class TacoClient extends TacoClientBase {
         this.epochs.clearAll();
         // disposeAll SIGTERMs on the Rust side, with SIGKILL after 1s as fallback.
         await this.sidecar.disposeAll();
+    }
+
+    /**
+     * Fires after every successful `initialize` handshake, including a reconnect
+     * to the same daemon. `onWorkspaceEpochChanged` cannot stand in for it: that
+     * only fires when the daemon was replaced, and a client that missed pushes
+     * while disconnected must look again even when it was not.
+     */
+    onConnectionReady(handler: (instanceId: string | undefined) => void): () => void {
+        this.connectionReadyHandlers.add(handler);
+        return () => {
+            this.connectionReadyHandlers.delete(handler);
+        };
     }
 
     /** Fires before pushes from a replacement sidecar instance enter the dispatcher. */
@@ -807,6 +821,14 @@ export class TacoClient extends TacoClientBase {
             this.handshake = null;
             this.initializeAttempt = undefined;
             handshake.resolve();
+            // After resolve, so a handler that issues RPCs finds the handshake done.
+            for (const handler of this.connectionReadyHandlers) {
+                try {
+                    handler(this.currentInstanceId);
+                } catch (err) {
+                    console.error("[taco] connection-ready handler threw", err);
+                }
+            }
         } catch (error) {
             // Only settle the handshake if it is still current. A newer
             // generation's handshake is the reconnect's responsibility.

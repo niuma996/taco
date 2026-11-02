@@ -14,32 +14,24 @@
  * run closed normally and its result is on disk.
  */
 
+import type {
+    WorkStatus as WireWorkStatus,
+    WorkCompleteness,
+    WorkDeliveryStatus,
+} from "@taco-ai/protocol";
+
 export const WORK_SCHEMA_VERSION = 1;
 
-export type WorkStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted";
+/*
+ * The vocabularies are the wire's: the overview groups by these strings, so a
+ * second copy here would be a copy that drifts. See `@taco-ai/protocol` work.ts
+ * for what each value means.
+ */
+export type WorkStatus = WireWorkStatus;
+export type ResultCompleteness = WorkCompleteness;
+export type DeliveryStatus = WorkDeliveryStatus;
 
 export type WorkKind = "subagent";
-
-/** How much of the answer a terminal Work carries. */
-export type ResultCompleteness = "full" | "partial" | "unavailable";
-
-export type DeliveryStatus =
-    /** Intent recorded; not yet confirmed by the platform. */
-    | "pending"
-    /** Every frozen chunk was accepted by the platform. */
-    | "confirmed"
-    /** Gave up after the retry budget. Manual retry only. */
-    | "retryExhausted"
-    /** The platform refused for a reason retrying cannot fix. */
-    | "permanentFailure"
-    /** Too old to be worth sending any more. */
-    | "expired"
-    /**
-     * The parent session was mid-turn, so the notice went into its follow-up
-     * queue and the model's own reply carries it. There is no second copy.
-     */
-    | "handedOff"
-    | "cancelled";
 
 /** Where the user is told. Frozen when the Work settles. */
 export interface DeliveryTarget {
@@ -72,6 +64,12 @@ export interface WorkDelivery {
     readonly attempts: number;
     readonly nextAttemptAt?: number;
     readonly lastError?: string;
+    /**
+     * When a person last asked to send this again. Expiry counts from here
+     * instead of from the end of the run, or a retry of an old notice would
+     * be dropped as stale the moment it started.
+     */
+    readonly retriedAt?: number;
     readonly createdAt: number;
 }
 
@@ -100,6 +98,11 @@ export interface WorkRecord {
     readonly title: string;
     /** Dedup key: the same source event never creates a second Work. */
     readonly sourceEventId: string;
+    /**
+     * The workspace the parent session lives in, so the overview can open it.
+     * Absent on records written before it was captured.
+     */
+    readonly workspace?: string;
     readonly parentSessionId: string;
     readonly childSessionId: string;
     readonly agentType: string;

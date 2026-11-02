@@ -19,6 +19,7 @@ import type {
     ToolCallEndParams,
     ToolCallStartParams,
     ToolCallUpdateParams,
+    WorkChangedParams,
     WorkspaceAssociationKey,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
@@ -124,6 +125,12 @@ export interface UseSidecarStreamOpts {
     onConversationsChanged?: () => void;
     /** Invalidate: an IM workspace policy was written. Carries `{channelId}`. */
     onImPolicyChanged?: (channelId: string) => void;
+    /**
+     * Invalidate: background Works were created or changed. Process-level, so
+     * it arrives with no workspace and no session; the payload names the daemon
+     * and the Works that moved and carries no answer text.
+     */
+    onWorkChanged?: (params: WorkChangedParams) => void;
     /**
      * Pre-dispose notice: a policy change is about to interrupt live
      * conversations on `channelId`. Reserved for a future desktop warning —
@@ -337,6 +344,9 @@ export function useSidecarStream(
         opts.onChannelStatusChanged?.(channel),
     );
     const onConversationsChangedRef = useStableCallback(() => opts.onConversationsChanged?.());
+    const onWorkChangedRef = useStableCallback((params: WorkChangedParams) =>
+        opts.onWorkChanged?.(params),
+    );
     const onImPolicyChangedRef = useStableCallback((channelId: string) =>
         opts.onImPolicyChanged?.(channelId),
     );
@@ -400,6 +410,20 @@ export function useSidecarStream(
                 // Same workspace-fanned-out shape as the other invalidate
                 // pushes; the handler re-pulls channels.listConversations.
                 onConversationsChangedRef();
+                return;
+            }
+            if (push.method === PushMethods.WorkChanged) {
+                // Process-level: no session dimension, so it must be handled
+                // before anything that routes by session. Shape-checked because
+                // it crosses the wire; a malformed frame is dropped, not guessed at.
+                const params = push.params as Partial<WorkChangedParams> | undefined;
+                if (
+                    typeof params?.instanceId === "string" &&
+                    Array.isArray(params.workIds) &&
+                    params.workIds.every((id) => typeof id === "string")
+                ) {
+                    onWorkChangedRef({ instanceId: params.instanceId, workIds: params.workIds });
+                }
                 return;
             }
             if (push.method === PushMethods.ImPolicyChanged) {
@@ -481,6 +505,7 @@ export function useSidecarStream(
         onChannelStatusChangedRef,
         onConversationsChangedRef,
         onImPolicyChangedRef,
+        onWorkChangedRef,
         onImWorkspacesInvalidatedRef,
         onWorkspaceAssociationsChangedRef,
         onLlmDumpLineRef,

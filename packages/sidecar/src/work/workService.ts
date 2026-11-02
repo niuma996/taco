@@ -6,13 +6,21 @@
  * routing lives here so the controller stays testable with plain fakes.
  */
 
-import type { ImRoute, SessionId } from "@taco-ai/protocol";
+import {
+    type ImRoute,
+    type SessionId,
+    WORK_RESULT_TEXT_LIMIT,
+    type WorkGetResult,
+    type WorkListResult,
+    type WorkRetryDeliveryResult,
+} from "@taco-ai/protocol";
 import type { ChannelRegistry } from "../channels/registry.ts";
 import { createLogger } from "../lib/logger.ts";
 import { WorkController } from "./workController.ts";
 import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.ts";
 import type { BackgroundWorkHooks, WorkLaunch, WorkSettle } from "./workHooks.ts";
-import { WorkStore, workIdForSource } from "./workStore.ts";
+import { isSafeWorkId, WorkStore, workIdForSource } from "./workStore.ts";
+import { buildList, toSummary, type WorkListArgs } from "./workView.ts";
 
 const log = createLogger("sidecar.work.service");
 
@@ -26,7 +34,14 @@ export interface WorkServiceOptions {
     readonly onChange?: (workId: string) => void;
 }
 
-export class WorkService implements BackgroundWorkHooks {
+/** What the `work.*` handlers need from the Work layer; nothing about stores or timers. */
+export interface WorkControl {
+    list(args: WorkListArgs): Promise<WorkListResult>;
+    get(workId: string): Promise<WorkGetResult>;
+    retryDelivery(workId: string): Promise<WorkRetryDeliveryResult>;
+}
+
+export class WorkService implements BackgroundWorkHooks, WorkControl {
     readonly store: WorkStore;
     readonly controller: WorkController;
     readonly deliverer: WorkDeliverer;
@@ -73,6 +88,37 @@ export class WorkService implements BackgroundWorkHooks {
         this.deliverer.stop();
     }
 
+    // ── WorkControl (read side) ──
+
+    async list(args: WorkListArgs): Promise<WorkListResult> {
+        return buildList(await this.store.list(), args, this.options.instanceId);
+    }
+
+    async get(workId: string): Promise<WorkGetResult> {
+        if (!isSafeWorkId(workId)) return { work: null };
+        const record = await this.store.get(workId);
+        if (!record) return { work: null };
+        const work = toSummary(record);
+        if (!record.result) return { work };
+        const stored = await this.store.readResult(
+            workId,
+            record.result.resultId,
+            record.result.checksum,
+        );
+        if (!stored) return { work };
+        const truncated = stored.text.length > WORK_RESULT_TEXT_LIMIT;
+        return {
+            work,
+            resultText: truncated ? stored.text.slice(0, WORK_RESULT_TEXT_LIMIT) : stored.text,
+            ...(truncated ? { resultTruncated: true } : {}),
+        };
+    }
+
+    async retryDelivery(workId: string): Promise<WorkRetryDeliveryResult> {
+        if (!isSafeWorkId(workId)) return { outcome: "not_found" };
+        return { outcome: await this.deliverer.retry(workId) };
+    }
+
     // ── BackgroundWorkHooks ──
 
     workIdFor(parentSessionId: SessionId, parentToolCallId: string): string {
@@ -83,6 +129,7 @@ export class WorkService implements BackgroundWorkHooks {
         try {
             const work = await this.controller.start({
                 sourceEventId: sourceEventIdFor(launch.parentSessionId, launch.parentToolCallId),
+                ...(launch.workspace !== undefined ? { workspace: launch.workspace } : {}),
                 parentSessionId: launch.parentSessionId,
                 childSessionId: launch.childSessionId,
                 agentType: launch.agentType,

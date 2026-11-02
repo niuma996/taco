@@ -408,6 +408,91 @@ describe("work.delivery", () => {
         });
     });
 
+    describe("manual retry", () => {
+        it("re-sends a notice that gave up, resuming at the next unconfirmed chunk", async () => {
+            const { clock, sender, store, deliverer } = rig();
+            const id = await seed(store, clock, {
+                chunks: ["a", "b", "c"],
+                status: "retryExhausted",
+                confirmedChunks: 1,
+                attempts: MAX_DELIVERY_ATTEMPTS,
+                lastError: "net",
+            });
+            assert.equal(await deliverer.retry(id), "accepted");
+            await until(
+                async () => (await deliveryOf(store, id))?.status === "confirmed",
+                "the retried delivery to finish",
+            );
+            assert.deepEqual(
+                sender.calls.map((c) => c.text),
+                ["b", "c"],
+                "chunk a was already accepted and is not sent again",
+            );
+            const d = await deliveryOf(store, id);
+            assert.equal(d?.attempts, 0);
+            assert.equal(d?.lastError, undefined);
+        });
+
+        it("lets an expired notice be sent: the six hours restart at the retry", async () => {
+            const { clock, sender, store, deliverer } = rig();
+            const id = await seed(store, clock, {
+                status: "expired",
+                lastError: "notice too old to send",
+            });
+            clock.advance(DELIVERY_EXPIRY_MS * 3);
+            assert.equal(await deliverer.retry(id), "accepted");
+            await until(
+                async () => (await deliveryOf(store, id))?.status === "confirmed",
+                "the old notice to be sent rather than expired again",
+            );
+            assert.equal(sender.calls.length, 1);
+        });
+
+        it("a permanent failure can be retried too, and fails again if nothing changed", async () => {
+            const { clock, sender, store, deliverer } = rig();
+            const id = await seed(store, clock, {
+                status: "permanentFailure",
+                lastError: "no_context",
+            });
+            sender.script.push({ kind: "permanentFailure", code: "no_context" });
+            assert.equal(await deliverer.retry(id), "accepted");
+            await until(
+                async () => (await deliveryOf(store, id))?.status === "permanentFailure",
+                "the second refusal to be recorded",
+            );
+            assert.equal(sender.calls.length, 1);
+        });
+
+        it("refuses anything that is still going or already done, so nothing is sent twice", async () => {
+            for (const status of ["pending", "confirmed", "handedOff", "cancelled"] as const) {
+                const { clock, sender, store, deliverer } = rig();
+                const id = await seed(store, clock, { status });
+                assert.equal(await deliverer.retry(id), "not_retryable", status);
+                assert.equal(sender.calls.length, 0, status);
+                assert.equal((await deliveryOf(store, id))?.status, status, status);
+            }
+        });
+
+        it("two simultaneous retries send once", async () => {
+            const { clock, sender, store, deliverer } = rig();
+            const id = await seed(store, clock, { status: "retryExhausted" });
+            const [a, b] = await Promise.all([deliverer.retry(id), deliverer.retry(id)]);
+            assert.deepEqual([a, b].sort(), ["accepted", "not_retryable"]);
+            await until(
+                async () => (await deliveryOf(store, id))?.status === "confirmed",
+                "delivery to finish",
+            );
+            assert.equal(sender.calls.length, 1);
+        });
+
+        it("reports not_found for an unknown Work and for one with nothing to deliver", async () => {
+            const { clock, store, deliverer } = rig();
+            assert.equal(await deliverer.retry("w-missing"), "not_found");
+            const id = await seed(store, clock, {}, { delivery: undefined });
+            assert.equal(await deliverer.retry(id), "not_found");
+        });
+    });
+
     describe("single sender", () => {
         it("two simultaneous triggers produce one send, not two", async () => {
             const { clock, sender, store, deliverer } = rig();

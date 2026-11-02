@@ -12,6 +12,7 @@
 import type { SessionId } from "@taco-ai/protocol";
 
 export interface WorkLaunch {
+    readonly workspace?: string;
     readonly parentSessionId: SessionId;
     readonly parentToolCallId: string;
     readonly childSessionId: SessionId;

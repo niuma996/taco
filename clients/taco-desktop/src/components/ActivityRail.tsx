@@ -15,6 +15,7 @@ import {
     Bot,
     CalendarClock,
     Check,
+    ClipboardList,
     Ellipsis,
     MessageSquare,
     MessagesCircle,
@@ -37,6 +38,7 @@ type ActivityView =
     | "agents"
     | "plugins"
     | "channels"
+    | "work"
     | "memory"
     | "checkpoints"
     | "schedules"
@@ -50,7 +52,7 @@ type ItemDef = {
 };
 
 /** Views behind the "more" button — they have no rail slot of their own. */
-const OVERFLOW_VIEWS: ReadonlyArray<ActivityView> = ["memory", "checkpoints", "schedules"];
+const OVERFLOW_VIEWS: ReadonlyArray<ActivityView> = ["memory", "checkpoints", "schedules", "work"];
 
 const CHAT_ITEM: ItemDef = { type: "chat", icon: MessageSquare, labelKey: "activity.chat" };
 
@@ -67,6 +69,7 @@ const OVERFLOW_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "memory", icon: NotebookDot, labelKey: "activity.memory" },
     { type: "checkpoints", icon: RotateCcwClock, labelKey: "activity.checkpoints" },
     { type: "schedules", icon: CalendarClock, labelKey: "activity.schedules" },
+    { type: "work", icon: ClipboardList, labelKey: "activity.work" },
 ];
 
 const SETTINGS_ITEM: ItemDef = { type: "settings", icon: Settings, labelKey: "activity.settings" };

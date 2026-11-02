@@ -29,6 +29,7 @@ import { registerSettingsHandlers } from "./handlers/settings.ts";
 import { registerSkillsHandlers } from "./handlers/skills.ts";
 import { registerSubagentHandlers } from "./handlers/subagent.ts";
 import { registerToolsHandlers } from "./handlers/tools.ts";
+import { registerWorkHandlers } from "./handlers/work.ts";
 import { registerWorkspaceHandlers } from "./handlers/workspace.ts";
 
 /** Builtin method registration entry — called once by SidecarServer before startup */
@@ -65,4 +66,5 @@ export function registerBuiltinMethods(): void {
     // about init order (jobs is process-scoped, never workspace-scoped).
     registerJobsHandlers();
     registerMcpHandlers();
+    registerWorkHandlers();
 }

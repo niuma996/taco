@@ -30,6 +30,7 @@ import type {
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
 import type { Actor, Job, JobHistoryEntry, JobRunResult } from "../scheduler/types.ts";
+import type { WorkControl } from "../work/workService.ts";
 import type { ProviderKeyStore } from "./models/providerKeyStore.ts";
 import type { WorkspaceRuntime } from "./workspace.ts";
 
@@ -167,6 +168,12 @@ export interface ServerRpcSurface {
      * handlers reject with `invalid_state` when absent.
      */
     readonly channels?: ChannelControl;
+    /**
+     * Read-only overview of managed background work, consumed by the `work.*`
+     * handlers. Optional so test hooks need not implement it; handlers answer
+     * with an empty overview when absent.
+     */
+    readonly work?: WorkControl;
     /**
      * Scheduler API exposed to the `jobs.*` RPC handlers. Same optionality
      * as `channels` — tests / non-daemon hosts can omit it.

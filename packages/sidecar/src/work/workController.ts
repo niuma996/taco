@@ -46,6 +46,7 @@ export const WORK_RETENTION_COUNT = 500;
 
 export interface StartWorkArgs {
     readonly sourceEventId: string;
+    readonly workspace?: string;
     readonly parentSessionId: string;
     readonly childSessionId: string;
     readonly agentType: string;
@@ -112,6 +113,7 @@ export class WorkController {
             kind: "subagent",
             title: args.title,
             sourceEventId: args.sourceEventId,
+            ...(args.workspace !== undefined ? { workspace: args.workspace } : {}),
             parentSessionId: args.parentSessionId,
             childSessionId: args.childSessionId,
             agentType: args.agentType,

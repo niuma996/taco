@@ -62,6 +62,7 @@ import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStr
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
 import { useToolsPane } from "./hooks/useToolsPane";
+import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
@@ -77,6 +78,7 @@ import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig"
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { createLatestRequestGuard } from "./lib/latestRequest";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
+import { onWorkChangedEvent } from "./lib/workEvents.ts";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
@@ -89,6 +91,7 @@ import { SettingsPane } from "./views/SettingsPane";
 import { Sidebar } from "./views/Sidebar";
 import { SkillsPane } from "./views/SkillsPane";
 import { ToolsPane } from "./views/ToolsPane";
+import { WorkPane } from "./views/WorkPane";
 
 export default function App() {
     const [client] = useState(() => new TacoClient());
@@ -372,6 +375,7 @@ export default function App() {
         | "agents"
         | "plugins"
         | "channels"
+        | "work"
         | "memory"
         | "checkpoints"
         | "schedules"
@@ -438,6 +442,9 @@ export default function App() {
         onChannelStatusChanged: (channel) => applyChannelStatusRef.current?.(channel),
         onConversationsChanged: () => onConversationsChangedRef.current?.(),
         onImPolicyChanged: (channelId) => onImPolicyChangedEvent(channelId),
+        // Process-level invalidate: the Work pane may not be mounted yet, so
+        // the event goes through its module emitter (see lib/workEvents.ts).
+        onWorkChanged: (params) => onWorkChangedEvent(params),
         // The ImPolicyDialog confirms before saving, so no active warning is
         // needed here; reserved for a future desktop notice.
         onImWorkspacesInvalidated: (_channelId) => {},
@@ -567,6 +574,7 @@ export default function App() {
         refreshConversations,
     } = useConversationsPane(client, mainView === "channels", activeCwd);
     onConversationsChangedRef.current = onConversationsChanged;
+    const workOverview = useWorkOverview(client, mainView === "work", activeCwd);
     // The picker's mode follows the active workspace instead of being stored,
     // so the tab always names what is on screen. Cold start never restores an
     // im:// workspace, so the app opens on the directory tab.
@@ -578,6 +586,29 @@ export default function App() {
             void openImConversation(cwd, sid, isCurrent);
         },
         [openImConversation],
+    );
+    /**
+     * Open the conversation that started a Work. IM conversations already have
+     * a full path; a filesystem session needs its workspace switched to first
+     * (which loads its session list) before the attach is meaningful.
+     */
+    const openWorkSession = useCallback(
+        (workspace: string, sessionId: string): void => {
+            if (workspace.startsWith(IM_CWD_PREFIX)) {
+                openImConversationFromUi(workspace, sessionId);
+            } else {
+                void (async () => {
+                    try {
+                        await switchWorkspace(workspace);
+                        await attachSession(workspace, sessionId);
+                    } catch (err) {
+                        pushNotification(`Cannot open session: ${(err as Error).message}`);
+                    }
+                })();
+            }
+            setMainView("chat");
+        },
+        [attachSession, openImConversationFromUi, pushNotification, switchWorkspace],
     );
     const switchWorkspaceFromUi = useCallback(
         (cwd: string): void => {
@@ -1106,6 +1137,12 @@ export default function App() {
                                 setMainView("chat");
                             }}
                             activeCwd={activeCwd}
+                        />
+                    ) : mainView === "work" ? (
+                        <WorkPane
+                            client={client}
+                            overview={workOverview}
+                            onOpenSession={openWorkSession}
                         />
                     ) : mainView === "memory" ? (
                         <MemoryPane

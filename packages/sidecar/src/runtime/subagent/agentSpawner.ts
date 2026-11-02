@@ -1067,6 +1067,7 @@ export class AgentSpawner extends EventEmitter {
         // its run, or a crash mid-flight leaves nothing for the next start to
         // mark interrupted. Never throws; a failed record means no tracking.
         const workId = await this.workHooks?.onLaunch({
+            workspace: this.sessionCwd,
             parentSessionId,
             parentToolCallId,
             childSessionId,

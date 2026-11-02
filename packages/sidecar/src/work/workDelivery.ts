@@ -11,7 +11,7 @@
  * That is the price of not losing the message, and it is bounded to one chunk.
  */
 
-import type { ImRoute } from "@taco-ai/protocol";
+import { type ImRoute, WORK_RETRYABLE_DELIVERY_STATUSES } from "@taco-ai/protocol";
 import type { SendOutboundResult } from "../channels/types.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { WorkStore } from "./workStore.ts";
@@ -89,6 +89,14 @@ export function isOpen(delivery: WorkDelivery | undefined): delivery is WorkDeli
     return delivery !== undefined && delivery.status === "pending";
 }
 
+/** The moment a notice's six hours start: the last manual retry, else the end of the run. */
+function expiryBase(work: WorkRecord, delivery: WorkDelivery): number | undefined {
+    return delivery.retriedAt ?? work.endedAt;
+}
+
+/** Delivery states a person can send again. */
+const RETRYABLE: ReadonlySet<DeliveryStatus> = new Set(WORK_RETRYABLE_DELIVERY_STATUSES);
+
 export class WorkDeliverer {
     private readonly running = new Set<string>();
     private readonly timers = new Map<string, () => void>();
@@ -116,6 +124,51 @@ export class WorkDeliverer {
         } finally {
             this.running.delete(workId);
         }
+    }
+
+    /**
+     * Send a notice again on a person's request. Only a delivery that gave up
+     * can be retried; anything else is either still going or already done, and
+     * a second send would only duplicate it. The frozen message is kept, and so
+     * is the count of chunks the platform already accepted, so a long answer
+     * resumes instead of starting over.
+     */
+    async retry(workId: string): Promise<"accepted" | "not_found" | "not_retryable"> {
+        const now = this.clock.now();
+        // The verdict is decided inside the serialized mutation, from the state
+        // that mutation saw. Two simultaneous callers queue behind each other:
+        // the first flips the delivery to pending and the second finds it no
+        // longer retryable. Inferring the winner afterwards from the stored
+        // record cannot tell them apart.
+        const seen: { verdict: "accepted" | "not_found" | "not_retryable" } = {
+            verdict: "not_found",
+        };
+        await this.store.mutate(workId, (current) => {
+            const d = current.delivery;
+            if (!d) return undefined;
+            if (!RETRYABLE.has(d.status)) {
+                seen.verdict = "not_retryable";
+                return undefined;
+            }
+            seen.verdict = "accepted";
+            return {
+                ...current,
+                updatedAt: now,
+                delivery: {
+                    ...d,
+                    status: "pending",
+                    attempts: 0,
+                    nextAttemptAt: undefined,
+                    lastError: undefined,
+                    retriedAt: now,
+                },
+            };
+        });
+        if (seen.verdict === "accepted") {
+            this.onChange(workId);
+            void this.deliver(workId);
+        }
+        return seen.verdict;
     }
 
     /** Pick up every Work with a pending delivery. Called at startup and when a channel starts. */
@@ -165,7 +218,8 @@ export class WorkDeliverer {
                 this.arm(workId, delivery.nextAttemptAt - now);
                 return;
             }
-            if (work.endedAt !== undefined && now - work.endedAt > DELIVERY_EXPIRY_MS) {
+            const startedAt = expiryBase(work, delivery);
+            if (startedAt !== undefined && now - startedAt > DELIVERY_EXPIRY_MS) {
                 await this.finish(workId, "expired", "notice too old to send");
                 return;
             }
@@ -189,11 +243,12 @@ export class WorkDeliverer {
             const after = (await this.store.get(workId))?.delivery;
             if (isOpen(after) && after.nextAttemptAt !== undefined) {
                 this.arm(workId, after.nextAttemptAt - this.clock.now());
-            } else if (isOpen(after) && work.endedAt !== undefined) {
+            } else if (isOpen(after) && expiryBase(work, after) !== undefined) {
                 // Unavailable: reconnect is what resends, but if it never comes
                 // the notice must still expire, or it stays pending — and
                 // unprunable — forever. One timer at the deadline, no attempt.
-                this.arm(workId, work.endedAt + DELIVERY_EXPIRY_MS + 1 - this.clock.now());
+                const base = expiryBase(work, after) ?? 0;
+                this.arm(workId, base + DELIVERY_EXPIRY_MS + 1 - this.clock.now());
             }
             return;
         }

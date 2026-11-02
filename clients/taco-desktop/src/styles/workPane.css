@@ -1,0 +1,241 @@
+/* workPane.css — read-only overview of background Works, grouped by state. */
+
+.work-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.work-pane .pane-header-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.work-groups {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.work-group-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+}
+
+.work-group-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: var(--radius-pill);
+    background: var(--input-bg);
+    color: var(--fg-dim);
+}
+
+.work-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.work-item {
+    padding: 8px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.work-item[data-attention="true"] {
+    border-color: var(--warning);
+}
+
+.work-item-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.work-item-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    padding: 2px;
+    background: none;
+    border: 0;
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.work-item-toggle:focus-visible,
+.work-action:focus-visible {
+    outline: 2px solid var(--accent, var(--fg));
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.work-item-title {
+    font-size: 13px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.work-item-agent {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    flex: 0 0 auto;
+}
+
+.work-item-badges {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.work-status--ok {
+    color: var(--success);
+}
+
+.work-status--bad {
+    color: var(--error);
+}
+
+.work-status--warn {
+    color: var(--warning);
+}
+
+.work-status--muted {
+    color: var(--fg-dim);
+}
+
+.work-item-meta {
+    display: flex;
+    gap: 10px;
+    margin: 4px 0 0 20px;
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    min-width: 0;
+}
+
+.work-item-reason {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.work-item-actions {
+    display: flex;
+    gap: 6px;
+    margin: 6px 0 0 20px;
+}
+
+.work-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    cursor: pointer;
+}
+
+.work-action:hover:not(:disabled) {
+    color: var(--fg);
+    border-color: var(--fg-dim);
+}
+
+.work-action:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.work-action--accent {
+    color: var(--warning);
+}
+
+.work-item-detail {
+    margin: 8px 0 0 20px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+
+.work-item-summary {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.work-result-text {
+    margin: 0;
+    max-height: 320px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--pane-list-bg, var(--input-bg));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--fg);
+}
+
+.work-detail-hint {
+    margin: 0;
+    font-size: 11px;
+    color: var(--fg-dim);
+}
+
+.work-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--fg-dim);
+    font-size: 13px;
+}
+
+.work-empty .hint {
+    font-size: 11px;
+}
+
+.work-more {
+    display: flex;
+    justify-content: center;
+    padding: 4px 0;
+}

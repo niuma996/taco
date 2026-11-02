@@ -216,6 +216,9 @@ fields of `settings.get` or `settings.write`.
 | `skills.list` | skills.* |
 | `subagent.abort` | subagent.* |
 | `tools.list` | tools.* |
+| `work.get` | work.* |
+| `work.list` | work.* |
+| `work.retryDelivery` | work.* |
 | `workspace.associations.get` | workspace.* |
 | `workspace.associations.resolve` | workspace.* |
 | `workspace.associations.set` | workspace.* |
@@ -298,6 +301,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `im.policy_changed` | ImPolicyChanged |
 | `im.workspaces_invalidated` | ImWorkspacesInvalidated |
 | `workspace.associations_changed` | WorkspaceAssociationsChanged |
+| `work.changed` | WorkChanged |
 <!-- PUSH_TABLE_END -->
 
 **Push routing note**: `session.tool_call_*` frames carry a deduplication `id` equal to the `toolCallId`.  Clients may use this to merge incremental updates.  All other push frames should be accumulated by `workspace` + `session`.
