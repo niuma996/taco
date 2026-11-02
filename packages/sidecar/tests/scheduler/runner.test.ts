@@ -419,7 +419,9 @@ test("detachAll clears every timer (no leaks after stop)", async () => {
             });
             await scheduler.start();
             mock.timers.tick(20);
-            await waitFor(() => invocations === 2 && store.writeCount === 2, 1_000);
+            // Each fire now writes twice (a "running" entry, then the
+            // terminal one); wait for both fires to have finished writing.
+            await waitFor(() => invocations === 2 && store.writeCount >= 4, 1_000);
             scheduler.detachAll();
             mock.timers.tick(1_000);
             await new Promise((r) => setTimeout(r, 50));

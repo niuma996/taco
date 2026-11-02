@@ -142,6 +142,28 @@ export interface SchedulerOptions {
 
 const DEFAULT_FIRE_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_STALE_LOCK_MS = 60 * 60_000;
+/** Grace on top of the fire timeout before a lock lease is considered dead. */
+const LOCK_LEASE_GRACE_MS = 60_000;
+/** How often abandoned lock leases are swept while the daemon is running. */
+const LOCK_SWEEP_MS = 5 * 60_000;
+
+/**
+ * Put this fire's entry back where its "running" record is, or at the head when
+ * the start write never landed. Working from the latest history keeps anything
+ * another writer added while the invoke ran.
+ */
+function overlayHistoryEntry(
+    history: readonly JobHistoryEntry[],
+    entry: JobHistoryEntry,
+): JobHistoryEntry[] {
+    const index = history.findIndex(
+        (candidate) => candidate.started_at === entry.started_at && candidate.status === "running",
+    );
+    if (index < 0) return [entry, ...history].slice(0, HISTORY_LIMIT);
+    const next = [...history];
+    next[index] = entry;
+    return next;
+}
 
 class FireTimeoutError extends Error {
     constructor(timeoutMs: number) {
@@ -154,6 +176,7 @@ export class Scheduler {
     private readonly handles = new Map<string, ScheduledHandle>();
     private running = false;
     private bootReplayed = false;
+    private sweepTimer: ReturnType<typeof setInterval> | undefined;
 
     constructor(private readonly opts: SchedulerOptions) {}
 
@@ -165,6 +188,12 @@ export class Scheduler {
         if (this.running) return;
         this.running = true;
         await this.cleanStaleLocks();
+        // A fire whose invoke hangs never releases its lock; the sweep is what
+        // brings the job back without waiting for a restart.
+        this.sweepTimer = setInterval(() => {
+            void this.cleanStaleLocks();
+        }, LOCK_SWEEP_MS);
+        this.sweepTimer.unref?.();
         const jobs = await this.opts.store.list();
         if (!this.bootReplayed) {
             this.bootReplayed = true;
@@ -190,6 +219,8 @@ export class Scheduler {
     stop(): void {
         for (const handle of this.handles.values()) handle.stop();
         this.handles.clear();
+        if (this.sweepTimer !== undefined) clearInterval(this.sweepTimer);
+        this.sweepTimer = undefined;
         this.running = false;
     }
 
@@ -238,9 +269,18 @@ export class Scheduler {
         const lockPath = join(this.opts.lockDir ?? ".", `${job.id}.lock`);
         try {
             // `wx` → create-only; EEXIST means another invocation holds the lock.
+            // The lease is the fallback for an invoke that never returns: the
+            // lock becomes removable at fire timeout + grace even though this
+            // process is still alive and still holding the old invocation.
+            const leaseMs =
+                (this.opts.fireTimeoutMs ?? DEFAULT_FIRE_TIMEOUT_MS) + LOCK_LEASE_GRACE_MS;
             await writeFile(
                 lockPath,
-                JSON.stringify({ pid: process.pid, started_at: this.nowString() }),
+                JSON.stringify({
+                    pid: process.pid,
+                    started_at: this.nowString(),
+                    expires_at: new Date(this.nowMs() + leaseMs).toISOString(),
+                }),
                 { flag: "wx" },
             );
         } catch (err) {
@@ -255,11 +295,21 @@ export class Scheduler {
             started_at: this.nowString(),
             status: "running",
         };
-        // Defensive: callers may hand us a job object that bypassed the
-        // store (e.g. a future direct-API path). The store already
-        // normalizes `history` to [] on read, but a missing field would
-        // crash the spread above and lose the entire run.
-        job.history = [entry, ...(job.history ?? [])].slice(0, HISTORY_LIMIT);
+        // Persist "running" before invoking. Without this the disk only ever
+        // sees the terminal entry (the finally block rewrites it), so
+        // `markRunningAsErr` had nothing to repair after a crash and the UI
+        // could not show an in-flight run.
+        await this.opts.store
+            .mutate(job.id, (latest) => {
+                if (!latest || latest.generation !== job.generation) return latest;
+                return {
+                    ...latest,
+                    history: [entry, ...(latest.history ?? [])].slice(0, HISTORY_LIMIT),
+                };
+            })
+            .catch((err) => {
+                log.error(`failed to record running history for ${job.id}: ${String(err)}`);
+            });
 
         let releaseLockAfterInvocation = true;
         let completion: Promise<unknown> | undefined;
@@ -312,7 +362,11 @@ export class Scheduler {
                     retired = counters.disabled_reason;
                     return {
                         ...latest,
-                        history: job.history,
+                        // Overlay this fire's entry onto the LATEST history, not
+                        // the snapshot taken at fire time: a concurrent write
+                        // (markRunningAsErr, or another repair) must not be
+                        // dropped by this fire finishing.
+                        history: overlayHistoryEntry(latest.history ?? [], entry),
                         last_run_at: entry.ended_at,
                         run_count: counters.run_count,
                         consecutive_failures: counters.consecutive_failures,
@@ -439,23 +493,34 @@ export class Scheduler {
             const path = join(lockDir, entry);
             try {
                 const raw = await readFile(path, "utf-8").catch(() => null);
-                let owner: { pid?: number; started_at?: string } | null = null;
+                let owner: { pid?: number; started_at?: string; expires_at?: string } | null = null;
                 if (raw) {
                     try {
-                        owner = JSON.parse(raw) as { pid?: number; started_at?: string };
+                        owner = JSON.parse(raw) as {
+                            pid?: number;
+                            started_at?: string;
+                            expires_at?: string;
+                        };
                     } catch {
                         owner = null;
                     }
                 }
                 const startedMs = owner?.started_at ? Date.parse(owner.started_at) : NaN;
                 const ageExpired = Number.isFinite(startedMs) && startedMs < cutoff;
+                const expiresMs = owner?.expires_at ? Date.parse(owner.expires_at) : NaN;
+                // A lease past its deadline means the invoke it guards hung.
+                // Removing it lets the schedule resume; the hung invocation may
+                // still finish later and overwrite history, which is the price
+                // of not wedging the job forever.
+                const leaseExpired = Number.isFinite(expiresMs) && expiresMs < this.nowMs();
                 const pidDead = owner?.pid !== undefined && !isPidAlive(owner.pid);
-                if (ageExpired || pidDead || !owner) {
+                if (leaseExpired || ageExpired || pidDead || !owner) {
                     await unlink(path).catch(() => {
                         /* raced with another process — fine */
                     });
                     log.warn(
-                        `removed stale lock ${path} (pidDead=${pidDead} ageExpired=${ageExpired})`,
+                        `removed stale lock ${path} ` +
+                            `(pidDead=${pidDead} ageExpired=${ageExpired} leaseExpired=${leaseExpired})`,
                     );
                 }
             } catch (err) {

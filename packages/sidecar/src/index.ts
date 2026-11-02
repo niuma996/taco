@@ -32,7 +32,7 @@ import { defaultMemoryDreamJob, MEMORY_DREAM_COMMAND } from "./scheduler/builtin
 import { createJobDispatcher } from "./scheduler/dispatcher.ts";
 import { JobsController } from "./scheduler/jobsController.ts";
 import { Scheduler } from "./scheduler/runner.ts";
-import { JobStore } from "./scheduler/store.ts";
+import { JobStore, pinSession } from "./scheduler/store.ts";
 import { ClientSinkRegistry } from "./server/clientSinkRegistry.ts";
 import { ConnectionServer } from "./server/connectionServer.ts";
 import { handleControlChannel } from "./server/controlChannel.ts";
@@ -378,10 +378,8 @@ async function runDaemon(
                 // update), but the dispatcher triggers that write rather
                 // than leaving it implicit.
                 {
-                    onPinnedSessionCreated: async (jobId, sessionId) => {
-                        await jobStore.mutate(jobId, (job) =>
-                            job ? { ...job, pinnedSessionId: sessionId } : null,
-                        );
+                    onPinnedSessionCreated: async (jobId, sessionId, generation) => {
+                        await pinSession(jobStore, jobId, sessionId, generation);
                     },
                     builtinHandlers: new Map([
                         [MEMORY_DREAM_COMMAND, createMemoryDreamHandler(deps.providerKeyStore)],

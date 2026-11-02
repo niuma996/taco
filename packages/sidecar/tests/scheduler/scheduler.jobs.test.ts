@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -8,7 +8,7 @@ import { JobsScopeError } from "../../src/lib/jobsErrors.ts";
 import { assertSafeJobId, isSafeJobId } from "../../src/scheduler/jobId.ts";
 import { JobsController } from "../../src/scheduler/jobsController.ts";
 import { Scheduler } from "../../src/scheduler/runner.ts";
-import { JobStore } from "../../src/scheduler/store.ts";
+import { JobStore, pinSession } from "../../src/scheduler/store.ts";
 import type { Actor, Job } from "../../src/scheduler/types.ts";
 
 describe("jobsController", () => {
@@ -574,5 +574,136 @@ describe("jobId", () => {
 
     test("assertSafeJobId throws with reason on invalid input", () => {
         throws(() => assertSafeJobId("../escape"), /job id must match/);
+    });
+});
+
+describe("scheduler fire lifecycle", () => {
+    async function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+        const dir = await mkdtemp(join(tmpdir(), "taco-sched-fire-"));
+        try {
+            return await fn(dir);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    }
+
+    function job(id: string, over: Partial<Job> = {}): Job {
+        return {
+            id,
+            name: id,
+            schedule: { kind: "interval", ms: 3_600_000 },
+            command: "agent.invoke",
+            args: {},
+            enabled: true,
+            run_on_startup: false,
+            history: [],
+            ...over,
+        };
+    }
+
+    test("records a running entry before the invoke finishes", async () => {
+        await withTmp(async (dir) => {
+            const store = new JobStore(dir);
+            await store.save(job("a"));
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const scheduler = new Scheduler({
+                store,
+                lockDir: dir,
+                invoke: async () => {
+                    await gate;
+                },
+            });
+
+            const run = scheduler.runNow("a");
+            const deadline = Date.now() + 2000;
+            let history = (await store.get("a"))?.history ?? [];
+            while (!history.some((e) => e.status === "running") && Date.now() < deadline) {
+                await new Promise((r) => setTimeout(r, 10));
+                history = (await store.get("a"))?.history ?? [];
+            }
+            ok(
+                history.some((e) => e.status === "running"),
+                "the in-flight entry is on disk, so a crash repair can find it",
+            );
+
+            release();
+            strictEqual((await run).status, "ok");
+            const finalHistory = (await store.get("a"))?.history ?? [];
+            strictEqual(finalHistory[0]?.status, "ok");
+            strictEqual(finalHistory.filter((e) => e.status === "running").length, 0);
+            scheduler.stop();
+        });
+    });
+
+    test("the final write keeps history changed while the fire ran", async () => {
+        await withTmp(async (dir) => {
+            const store = new JobStore(dir);
+            await store.save(job("a"));
+            const scheduler = new Scheduler({
+                store,
+                lockDir: dir,
+                invoke: async () => {
+                    // Another writer lands mid-fire (a crash repair or a UI edit
+                    // that touches history).
+                    await store.mutate("a", (current) =>
+                        current
+                            ? {
+                                  ...current,
+                                  history: [
+                                      { started_at: "injected", status: "err", error: "boom" },
+                                      ...(current.history ?? []),
+                                  ],
+                              }
+                            : current,
+                    );
+                },
+            });
+            await scheduler.runNow("a");
+            const history = (await store.get("a"))?.history ?? [];
+            ok(
+                history.some((e) => e.started_at === "injected"),
+                "a concurrent history write was not dropped",
+            );
+            strictEqual(
+                history.filter((e) => e.status === "ok" && e.started_at !== "injected").length,
+                1,
+                "this fire's entry was updated in place",
+            );
+            scheduler.stop();
+        });
+    });
+
+    test("start() removes a lock whose lease expired, even with the pid alive", async () => {
+        await withTmp(async (dir) => {
+            const store = new JobStore(dir);
+            await store.save(job("a", { enabled: false }));
+            await writeFile(
+                join(dir, "a.lock"),
+                JSON.stringify({
+                    pid: process.pid,
+                    started_at: new Date().toISOString(),
+                    expires_at: new Date(Date.now() - 1_000).toISOString(),
+                }),
+            );
+            const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
+            await scheduler.start();
+            await rejects(stat(join(dir, "a.lock")), /ENOENT/);
+            scheduler.stop();
+        });
+    });
+
+    test("a stale fire cannot pin its session onto a recreated job", async () => {
+        await withTmp(async (dir) => {
+            const store = new JobStore(dir);
+            await store.save(job("a", { generation: "gen-new" }));
+            await pinSession(store, "a", "sched-pin-old", "gen-old");
+            strictEqual((await store.get("a"))?.pinnedSessionId, undefined);
+
+            await pinSession(store, "a", "sched-pin-new", "gen-new");
+            strictEqual((await store.get("a"))?.pinnedSessionId, "sched-pin-new");
+        });
     });
 });

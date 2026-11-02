@@ -94,7 +94,12 @@ export type BuiltinJobHandler = (job: Job) => Promise<InvokeResult>;
 /** Callback the dispatcher invokes after creating the pinned session on a
  *  `pin` strategy's first fire, so the scheduler can persist `pinnedSessionId`
  *  back to the job. */
-export type OnPinnedSessionCreated = (jobId: string, sessionId: string) => Promise<void>;
+export type OnPinnedSessionCreated = (
+    jobId: string,
+    sessionId: string,
+    /** The generation the fire was scheduled under; a stale write is ignored. */
+    generation: string | undefined,
+) => Promise<void>;
 
 export interface DispatcherOptions {
     /** Persist `pinnedSessionId` after the first fire of a `pin` job. */
@@ -185,7 +190,7 @@ async function invokeAgent(
                 if (!(await sessionExists(server, workspace, candidate))) continue;
                 await attachAndPrompt(server, workspace, candidate, prompt);
                 if (candidate !== pinned && onPinnedSessionCreated) {
-                    await onPinnedSessionCreated(job.id, candidate);
+                    await onPinnedSessionCreated(job.id, candidate, job.generation);
                 }
                 return;
             }
@@ -203,7 +208,7 @@ async function invokeAgent(
             );
             if (!res.ok) throw new ScheduledCommandFailed(res.error.code, res.error.message);
             if (onPinnedSessionCreated) {
-                await onPinnedSessionCreated(job.id, id);
+                await onPinnedSessionCreated(job.id, id, job.generation);
             }
             return;
         }

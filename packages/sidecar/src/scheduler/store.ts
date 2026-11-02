@@ -250,6 +250,25 @@ export class JobStore {
     }
 }
 
+/**
+ * Persist the session a `pin`-strategy fire created, unless the job it belongs
+ * to was deleted and recreated while the fire was running. The fire carries the
+ * generation it was scheduled under; a different generation on disk means a
+ * different job, and pinning onto it would hand the new job the old session.
+ */
+export async function pinSession(
+    store: JobStore,
+    jobId: string,
+    sessionId: string,
+    generation: string | undefined,
+): Promise<void> {
+    await store.mutate(jobId, (job) => {
+        if (!job) return null;
+        if (generation !== undefined && job.generation !== generation) return job;
+        return { ...job, pinnedSessionId: sessionId };
+    });
+}
+
 /** Render a flat args bag as a short space-separated prompt tail. Skips
  *  noise keys (`output`, `quiet`, anything that isn't a primitive) so the
  *  migrated prompt stays focused on intent. */

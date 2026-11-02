@@ -2,9 +2,10 @@
  * Scheduler types — persisted job definitions + their in-flight history.
  *
  * Jobs live as one JSON file per id under $TACO_HOME/jobs/<id>.json. The
- * file is the durable contract between the UI (which creates / edits /
- * deletes them) and the daemon (which reads them on startup and watches
- * for fs changes to pick up edits without restart).
+ * file is the durable contract between the UI and the daemon. The UI writes
+ * through `jobs.*` RPCs, and that path reloads the schedule immediately; the
+ * daemon reads the files on startup. There is no filesystem watcher, so a file
+ * edited by hand takes effect only after a restart.
  *
  * History is a 20-entry ring stored inside the same JSON; it's truncated
  * on every run rather than maintained separately so a single file write
