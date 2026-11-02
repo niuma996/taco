@@ -10,7 +10,11 @@ import { EventEmitter } from "node:events";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
-import { filterToolsForAgent } from "../../agents/filterTools.ts";
+import {
+    type AgentToolPolicy,
+    agentToolPolicy,
+    filterToolsForAgent,
+} from "../../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
 import { MAX_AGENT_TURNS } from "../../agents/loadAgents.ts";
 import type {
@@ -239,6 +243,13 @@ export interface SubagentSessionArgs {
      * If omitted, we compute it from the parent session's metadata.
      */
     childDepth?: number;
+    /**
+     * What the child may load on demand. The profile's declared tool list
+     * plus the main-session-only names the depth guard strips — without it a
+     * subagent could load `configPatch` or a PDF writer its profile never
+     * asked for.
+     */
+    toolPolicy?: AgentToolPolicy;
     /**
      * Pre-rendered `<forked_context>` block, or undefined when this child runs
      * independent. Computed by `spawnSubagent` from the parent branch before
@@ -691,7 +702,11 @@ export class AgentSpawner extends EventEmitter {
         try {
             attached = await this.sessionRegistry.attachChild(
                 asSessionId(childSessionId),
-                { thinkingLevel: "off", model: args.model } satisfies AttachOptions,
+                {
+                    thinkingLevel: "off",
+                    model: args.model,
+                    ...(args.toolPolicy !== undefined ? { toolLoadPolicy: args.toolPolicy } : {}),
+                } satisfies AttachOptions,
                 childTools,
                 childTaskState,
                 childSystemPrompt,
@@ -1016,6 +1031,9 @@ export class AgentSpawner extends EventEmitter {
             resumability: def.runtime === "claude-code" ? "not_resumable" : "resumable",
             runtime: def.runtime,
             childDepth,
+            // The profile's declared tools bound what the child may also load
+            // on demand — same list the initial toolset was filtered by.
+            toolPolicy: agentToolPolicy(def.tools, childDepth),
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             maxTurns: def.maxTurns,
@@ -1952,7 +1970,10 @@ export class AgentSpawner extends EventEmitter {
         try {
             attached = await this.sessionRegistry.attachChild(
                 args.subSessionId,
-                { thinkingLevel: "off" },
+                {
+                    thinkingLevel: "off",
+                    toolLoadPolicy: agentToolPolicy(def.tools, childDepth),
+                },
                 attachedChildTools,
                 childTaskState,
                 childSystemPrompt,
@@ -2137,6 +2158,9 @@ export class AgentSpawner extends EventEmitter {
             // cannot resume this child — say so rather than defaulting silently.
             resumability: "not_resumable",
             childDepth,
+            // A skill's allowedTools list bounds what it may load on demand,
+            // the same way a profile's `tools:` list does.
+            toolPolicy: agentToolPolicy(allowedSet ? [...allowedSet] : undefined, childDepth),
         });
     }
 }

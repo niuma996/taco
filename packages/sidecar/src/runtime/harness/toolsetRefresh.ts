@@ -116,6 +116,30 @@ export function alignActiveTools(
 }
 
 /**
+ * Remove load-refused tool names from the persisted allowlist at attach.
+ *
+ * Same reasoning as `pruneDeniedFsTools`: `restoreTools` refuses to load a
+ * name the session's load policy rejects, so without this prune the
+ * allowlist would name a tool with no definition behind it and pi would
+ * reject every turn with `configured_tools_unavailable`.
+ *
+ * Only names with no definition behind them are removed — a name that is
+ * defined but refused keeps its entry, and the load-time refusal owns it.
+ */
+export async function pruneLoadRefusedTools(
+    toolState: SessionToolState,
+    isRefused: (name: string) => boolean,
+): Promise<boolean> {
+    return toolState.update(({ tools, activeNames }) => {
+        const defined = new Set(tools.map((t) => t.name));
+        const revoked = activeNames.filter((name) => !defined.has(name) && isRefused(name));
+        if (revoked.length === 0) return undefined;
+        const removed = new Set(revoked);
+        return { activeNames: activeNames.filter((name) => !removed.has(name)) };
+    });
+}
+
+/**
  * Remove policy-denied file-tool names from the persisted allowlist at attach.
  *
  * `restoreTools` refuses to load exactly these names, so without this prune

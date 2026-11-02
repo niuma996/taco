@@ -52,10 +52,13 @@ function formatResult(result: AddToolsResult): string {
         );
     }
     if (result.blocked.length > 0) {
-        lines.push(
-            `Not available in this session: ${result.blocked.map((b) => b.name).join(", ")}. ` +
-                "The session's policy denies file tools; do not retry these names here.",
-        );
+        // Each blocked name carries its own reason: the session's file-tool
+        // policy and the agent's declared tool list are different refusals,
+        // and the model is told which one it hit.
+        for (const b of result.blocked) {
+            lines.push(`Not available in this session: ${b.name} — ${b.reason}.`);
+        }
+        lines.push("Do not retry these names here.");
     }
     if (result.failed.length > 0) {
         lines.push(

@@ -15,6 +15,7 @@
  * the per-turn refresh also writes through, so no merge reads a stale snapshot.
  */
 
+import type { AgentToolPolicy } from "../../agents/filterTools.ts";
 import { isFsToolDenied } from "../../tools/fileAccess.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
@@ -41,7 +42,14 @@ export interface SessionToolControllerOptions {
      * tool-context signal the execution-time refusals (`refuseInIm`) see,
      * so the load-time and call-time verdicts cannot drift apart.
      */
-    readonly fsToolsDenied: () => boolean | Promise<boolean>;
+    readonly fsToolsDenied?: () => boolean | Promise<boolean>;
+    /**
+     * Extra load-time restrictions for a subagent session: the tools its
+     * profile declared, and the main-session-only names it was stripped at
+     * spawn time. Undefined (the default) loads anything the registry
+     * offers, which is the main-session behaviour.
+     */
+    readonly loadPolicy?: AgentToolPolicy;
 }
 
 /** Minimal interface exposed to AddTools. */
@@ -57,6 +65,14 @@ export interface SessionToolController {
     restoreTools(activeToolNames: readonly string[]): Promise<TacoTool[]>;
     /** Merges tools into the harness and persists the active-name list. */
     addTools(names: readonly string[]): Promise<AddToolsResult>;
+    /**
+     * Why this session may not load `name`, or undefined when it may.
+     *
+     * Exposed so the attach-time prune can drop a refused name from the
+     * persisted allowlist: `restoreTools` skips it, and a name on the
+     * allowlist with no definition behind it fails the generation.
+     */
+    loadRefusal(name: string): string | undefined;
     /** Names of dynamic tools loaded in this session (excludes built-ins). */
     loadedToolNames(): readonly string[];
     /** Current active tool names (built-ins + dynamic, mirrors lane state). */
@@ -80,12 +96,34 @@ export class DefaultSessionToolController implements SessionToolController {
     /** Loaded dynamic tool names, in stable insertion order. */
     private loadedNames: string[] = [];
     private readonly fsToolsDenied: () => boolean | Promise<boolean>;
+    private readonly loadPolicy?: AgentToolPolicy;
 
     constructor(registry: DeferredToolRegistry, options?: SessionToolControllerOptions) {
         this.registry = registry;
         // Default deny-nothing: direct constructions in tests and any
         // future call site without a policy hook keep today's behaviour.
         this.fsToolsDenied = options?.fsToolsDenied ?? (() => false);
+        this.loadPolicy = options?.loadPolicy;
+    }
+
+    /**
+     * Why this session may not load `name`, or undefined when it may.
+     *
+     * Two independent refusals: the profile never declared the tool, or the
+     * tool is main-session-only and this session is a subagent. The profile
+     * refusal comes first — it is the broader one and the message the model
+     * needs to understand why its request was refused.
+     */
+    loadRefusal(name: string): string | undefined {
+        const policy = this.loadPolicy;
+        if (!policy) return undefined;
+        if (policy.denied.has(name)) {
+            return `this session cannot load ${name}: it is a main-session-only tool and this is a subagent session`;
+        }
+        if (policy.allowed && !policy.allowed.has(name)) {
+            return `this session cannot load ${name}: it is not in the tool list this agent declared`;
+        }
+        return undefined;
     }
 
     bindHarness(toolState: SessionToolState): void {
@@ -141,6 +179,12 @@ export class DefaultSessionToolController implements SessionToolController {
             if (isFsToolDenied(name, fsDenied)) {
                 // Policy, not a load failure: the name is not loaded, and the
                 // attach-time prune removes it from the allowlist.
+                continue;
+            }
+            if (this.loadRefusal(name) !== undefined) {
+                // Same shape as the fs refusal above: the profile did not
+                // declare the tool, so it is not loaded and the attach-time
+                // prune drops it from the allowlist.
                 continue;
             }
             try {
@@ -201,6 +245,11 @@ export class DefaultSessionToolController implements SessionToolController {
             if (isFsToolDenied(name, fsDenied)) {
                 // Policy answer, not a load failure: report it and change nothing.
                 blocked.push({ name, reason: FS_DENY_REASON });
+                continue;
+            }
+            const refusal = this.loadRefusal(name);
+            if (refusal !== undefined) {
+                blocked.push({ name, reason: refusal });
                 continue;
             }
             let tool: TacoTool | undefined;

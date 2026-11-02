@@ -22,6 +22,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { asSessionId } from "@taco-ai/protocol";
+import type { AgentToolPolicy } from "../../agents/filterTools.ts";
 import { CheckpointManager } from "../../checkpoints/manager.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
@@ -86,7 +87,12 @@ import {
     type SessionToolController,
 } from "./sessionToolController.ts";
 import { SessionToolState } from "./sessionToolState.ts";
-import { alignActiveTools, createToolsetRefresher, pruneDeniedFsTools } from "./toolsetRefresh.ts";
+import {
+    alignActiveTools,
+    createToolsetRefresher,
+    pruneDeniedFsTools,
+    pruneLoadRefusedTools,
+} from "./toolsetRefresh.ts";
 import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
 
 const log = createLogger("attachedSession");
@@ -199,6 +205,14 @@ export interface AttachedSessionOptions {
      * Absent = no dynamic-tool capability.
      */
     toolRegistry?: DeferredToolRegistry;
+    /**
+     * Restrictions on the tools this session may load on demand.
+     *
+     * Set for a subagent session: the tools its profile declared, and the
+     * main-session-only names the depth guard stripped. Undefined for a main
+     * session, which may load anything the registry offers.
+     */
+    toolLoadPolicy?: AgentToolPolicy;
     /**
      * Re-assemble the workspace toolset for this session. Called at the start of
      * each turn so a permission change reaches an existing conversation on its
@@ -380,6 +394,8 @@ export class AttachedSession extends EventEmitter {
                 // execution-time refusals (`refuseInIm`) see, so the two
                 // verdicts cannot disagree.
                 fsToolsDenied: () => args.getToolContext().fsToolsDenied === true,
+                // A subagent may only load what its profile declared.
+                ...(args.toolLoadPolicy !== undefined ? { loadPolicy: args.toolLoadPolicy } : {}),
             });
             // The active-tool list lives in the lane's persisted configuration.
             // Read it straight off the session: the lane itself does not exist
@@ -525,6 +541,23 @@ export class AttachedSession extends EventEmitter {
         const fsToolsDenied = args.getToolContext().fsToolsDenied === true;
         if (await pruneDeniedFsTools(toolState, fsToolsDenied)) {
             log.info("pruned policy-denied fs tools from the persisted allowlist", {
+                sessionId: args.session.metadata.id,
+            });
+        }
+
+        // A tool this session may not load is not restored (see restoreTools),
+        // so the allowlist would name it with no definition behind it — the
+        // same failure the fs prune above prevents. Only a session with a
+        // load policy can refuse anything, so a main session skips the walk.
+        if (
+            toolController &&
+            args.toolLoadPolicy !== undefined &&
+            (await pruneLoadRefusedTools(
+                toolState,
+                (name) => toolController.loadRefusal(name) !== undefined,
+            ))
+        ) {
+            log.info("pruned load-refused tools from the persisted allowlist", {
                 sessionId: args.session.metadata.id,
             });
         }

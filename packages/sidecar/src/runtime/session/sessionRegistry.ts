@@ -18,6 +18,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
+import type { AgentToolPolicy } from "../../agents/filterTools.ts";
 import type {
     SubagentContextMode,
     SubagentProgressSink,
@@ -67,6 +68,14 @@ export interface AttachOptions {
     thinkingLevel?: ThinkingLevel;
     /** Optional model override (subagent path lets frontmatter.model take effect) */
     model?: Model<Api>;
+    /**
+     * Restrictions on the tools this session may load on demand.
+     *
+     * Set on the subagent path: the tools its profile declared, plus the
+     * main-session-only names the depth guard stripped. Absent for a main
+     * session, which may load anything the registry offers.
+     */
+    toolLoadPolicy?: AgentToolPolicy;
 }
 
 export interface SessionRegistryOptions {
@@ -1003,6 +1012,10 @@ export class SessionRegistry extends EventEmitter {
                     attachmentsDir: sessionAttachmentsDir(this.sessionsRoot, sessionId),
                     checkpointStore: this.checkpointStore,
                     toolRegistry: this.toolRegistry,
+                    // A subagent may only load the tools its profile declared.
+                    ...(opts.toolLoadPolicy !== undefined
+                        ? { toolLoadPolicy: opts.toolLoadPolicy }
+                        : {}),
                     // Main sessions only: a subagent's toolset is deliberately narrowed
                     // by its caller (depth-filtered, `agent` removed), so re-imposing
                     // the workspace set on it would widen it back.
