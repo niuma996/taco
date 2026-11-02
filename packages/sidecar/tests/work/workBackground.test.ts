@@ -18,7 +18,12 @@ import type { AgentDefinition } from "../../src/agents/types.ts";
 import { ChannelRegistry } from "../../src/channels/registry.ts";
 import type { Channel, ChannelHandle, SendOutboundResult } from "../../src/channels/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
+import {
+    addPendingSubagentResult,
+    readPendingSubagentResults,
+} from "../../src/runtime/subagent/subagentPending.ts";
 import { WorkService } from "../../src/work/workService.ts";
+import { interrupt } from "../../src/work/workState.ts";
 import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const agents: AgentDefinition[] = [
@@ -350,6 +355,55 @@ describe("work × background subagent", () => {
             }
         });
 
+        it("does not prompt the parent again when the notice already landed", async () => {
+            const restoreRun = stubRun("answer");
+            let workId = "";
+            let toolCallId = "";
+            const restoreAbsent = stubParent({ absent: true });
+            try {
+                ({ workId, toolCallId } = await launch("p-flushed", route));
+                await until(
+                    async () => (await service.store.get(workId))?.delivery?.status === "confirmed",
+                    "template delivery",
+                );
+            } finally {
+                restoreAbsent();
+            }
+            // A pending record that survived the crash, as the flush path sees it.
+            await ws.sessionRegistry.withSession(asSessionId("p-flushed"), (session) =>
+                addPendingSubagentResult(session, {
+                    parentToolCallId: toolCallId,
+                    subSessionId: asSessionId("child-flushed"),
+                    agentType: "explorer",
+                    outcome: "completed",
+                    settledAt: Date.now(),
+                }),
+            );
+
+            let prompts = 0;
+            const restoreParent = stubParent({
+                prompt: async () => {
+                    prompts++;
+                    return { role: "assistant", content: [{ type: "text", text: "again" }] };
+                },
+            });
+            try {
+                const spawner = ws.agentSpawner as unknown as {
+                    flushPendingSubagentResults(p: SessionId): Promise<void>;
+                };
+                await spawner.flushPendingSubagentResults(asSessionId("p-flushed"));
+                assert.equal(prompts, 0, "the user was already told through the deliverer");
+                const pending = await ws.sessionRegistry.withSession(
+                    asSessionId("p-flushed"),
+                    (session) => readPendingSubagentResults(session),
+                );
+                assert.equal(toolCallId in pending, false, "nothing left to redeliver");
+            } finally {
+                restoreRun();
+                restoreParent();
+            }
+        });
+
         it("falls back to the template when the parent model says nothing", async () => {
             const restoreRun = stubRun("the answer text");
             const restoreParent = stubParent({
@@ -408,6 +462,47 @@ describe("work × background subagent", () => {
                 restoreRun();
                 restoreParent();
             }
+        });
+    });
+
+    describe("resume", () => {
+        it("freezes the delivery target at launch, before any settle", async () => {
+            const restoreRun = stubRun("answer");
+            const restoreParent = stubParent({ absent: true });
+            try {
+                const { workId } = await launch("p-target", route);
+                const work = await service.store.get(workId);
+                assert.deepEqual(work?.deliveryTarget, route);
+            } finally {
+                restoreRun();
+                restoreParent();
+            }
+        });
+
+        it("a resumed run reopens an interrupted Work and closes it without a channel copy", async () => {
+            const { workId } = await service.controller.start({
+                sourceEventId: "subagent:p-resume:tc-resume",
+                parentSessionId: "p-resume",
+                childSessionId: "c-resume",
+                agentType: "explorer",
+                title: "resume me",
+            });
+            await service.store.mutate(workId, (w) =>
+                interrupt(w, { reason: "driver died", now: Date.now() }),
+            );
+
+            await service.onResumeStart(asSessionId("c-resume"));
+            assert.equal((await service.store.get(workId))?.status, "running");
+
+            await service.onResumeSettle(asSessionId("c-resume"), {
+                outcome: "completed",
+                resultText: "finished after resume",
+                partial: false,
+            });
+            const after = await service.store.get(workId);
+            assert.equal(after?.status, "completed");
+            assert.equal(after?.result?.summary, "finished after resume");
+            assert.equal(after?.delivery, undefined, "the conversation carries it");
         });
     });
 

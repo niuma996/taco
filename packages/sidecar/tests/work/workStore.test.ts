@@ -86,12 +86,18 @@ describe("work.store", () => {
         const done = await store.mutate(rec.workId, (w) =>
             settle(w, { outcome: "completed", now: 5 }),
         );
-        assert.equal(done?.status, "completed");
+        assert.equal(done?.record.status, "completed");
+        assert.equal(done?.changed, true);
         const again = await store.mutate(rec.workId, (w) =>
             settle(w, { outcome: "error", now: 9 }),
         );
-        assert.equal(again?.status, "completed");
-        assert.equal(again?.revision, done?.revision, "a declined update writes nothing");
+        assert.equal(again?.record.status, "completed");
+        assert.equal(again?.changed, false, "the decline is reported, not implied");
+        assert.equal(
+            again?.record.revision,
+            done?.record.revision,
+            "a declined update writes nothing",
+        );
     });
 
     it("leaves no temp files behind after writes", async () => {

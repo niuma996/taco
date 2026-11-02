@@ -1307,6 +1307,18 @@ export class AgentSpawner extends EventEmitter {
                 count: entries.length,
             });
             for (const entry of entries) {
+                const workId = this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId);
+                // The deliverer may have caught up while this session was
+                // detached (it retries at startup and on reconnect). Prompting
+                // the parent now would report the same outcome a second time.
+                if (workId !== undefined && (await this.workHooks?.noticeSettled(workId))) {
+                    log.info("pending subagent notice already delivered", {
+                        parentSessionId,
+                        parentToolCallId: entry.parentToolCallId,
+                    });
+                    await this.dropPending(parentSessionId, entry.parentToolCallId);
+                    continue;
+                }
                 const notification = this.formatBackgroundNotification(entry.agentType, {
                     subSessionId: entry.subSessionId,
                     resultText: "",
@@ -1317,11 +1329,7 @@ export class AgentSpawner extends EventEmitter {
                 });
                 let delivered: boolean;
                 try {
-                    delivered = await this.deliverNotice(
-                        parentSessionId,
-                        notification,
-                        this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId),
-                    );
+                    delivered = await this.deliverNotice(parentSessionId, notification, workId);
                 } catch (e) {
                     // Still unreachable. Keep the entry and stop: the remaining
                     // ones would fail the same way, and a tight retry loop
@@ -1754,6 +1762,41 @@ export class AgentSpawner extends EventEmitter {
         return promise;
     }
 
+    /**
+     * Tell the Work layer a resumed run is beginning. Never throws: Work
+     * tracking is additive, and a store failure must not stop the resume.
+     */
+    private async reportResumeStart(subSessionId: SessionId): Promise<void> {
+        try {
+            await this.workHooks?.onResumeStart(subSessionId);
+        } catch (e) {
+            log.warn("work resume start record failed", {
+                subSessionId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        }
+    }
+
+    /** Close the reopened Work with the resumed run's outcome. Never throws. */
+    private async reportResumeSettle(
+        subSessionId: SessionId,
+        result: { resultText: string; isError: boolean; aborted?: boolean; partial?: boolean },
+    ): Promise<void> {
+        if (!this.workHooks) return;
+        try {
+            await this.workHooks.onResumeSettle(subSessionId, {
+                outcome: result.isError ? (result.aborted ? "aborted" : "error") : "completed",
+                resultText: result.resultText,
+                partial: result.partial === true,
+            });
+        } catch (e) {
+            log.warn("work resume settle record failed", {
+                subSessionId,
+                error: e instanceof Error ? e.message : String(e),
+            });
+        }
+    }
+
     private async runResume(args: {
         parentSessionId: SessionId;
         parentToolCallId: string;
@@ -1889,7 +1932,10 @@ export class AgentSpawner extends EventEmitter {
             parentSessionId: args.parentSessionId,
         });
         try {
-            return await runAttachedSubagent({
+            // Reopen an interrupted Work before the run so the overview stops
+            // showing it as stopped while it is working again.
+            await this.reportResumeStart(args.subSessionId);
+            const result = await runAttachedSubagent({
                 subSessionId: args.subSessionId,
                 attached,
                 prompt: args.prompt,
@@ -1901,6 +1947,8 @@ export class AgentSpawner extends EventEmitter {
                 resumability: "resumable",
                 readLastAssistantText: (id) => this.extractLastAssistantText(id),
             });
+            await this.reportResumeSettle(args.subSessionId, result);
+            return result;
         } finally {
             args.signal?.removeEventListener("abort", link);
             this.releaseController(args.subSessionId);

@@ -112,6 +112,14 @@ export interface WorkRecord {
     readonly createdAt: number;
     readonly updatedAt: number;
     readonly endedAt?: number;
+    /**
+     * Where the notice goes, frozen at launch. Settling normally re-resolves the
+     * route (a rebind may have moved it), but a Work whose driver died never
+     * settles, and without this the user would never learn it stopped.
+     */
+    readonly deliveryTarget?: DeliveryTarget;
+    /** The channel's message cap at launch, for the interruption notice. */
+    readonly maxMessageLength?: number;
     readonly attempt: WorkAttempt;
     readonly result?: WorkResultRef;
     /** Why a failed/cancelled/interrupted Work ended, for display. */

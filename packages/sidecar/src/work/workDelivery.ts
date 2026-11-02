@@ -38,6 +38,14 @@ export const DELIVERY_EXPIRY_MS = 6 * 60 * 60_000;
 export const PARENT_REPLY_GRACE_MS = 3 * 60_000;
 
 /**
+ * How often an unavailable channel is probed again. Reconnect is still the
+ * event that matters, but an auth refusal or an expired bot session does not
+ * produce a connection transition, so waiting for one would strand the notice
+ * until expiry.
+ */
+export const UNAVAILABLE_RETRY_MS = 5 * 60_000;
+
+/**
  * How long a notice run that is still going may hold the template back. Longer
  * than the permission broker's 10-minute timeout, so a run waiting on the
  * peer's approval gets to finish instead of being cut off by its own notice.
@@ -51,6 +59,9 @@ export interface NoticeCapture {
     /** The template is being frozen: stop holding that run's text from the channel. */
     stopCapturing(workId: string): void;
 }
+
+/** How many deliveries `resume()` sends at once. */
+const RESUME_CONCURRENCY = 8;
 
 /** Jitter keeps a burst of Works that failed together from retrying together. */
 const JITTER_RATIO = 0.2;
@@ -159,7 +170,13 @@ export class WorkDeliverer {
         };
         await this.store.mutate(workId, (current) => {
             const d = current.delivery;
-            if (!d) return undefined;
+            if (!d) {
+                // The Work exists but never queued a notice (its driver died
+                // before settling, or it had no IM target). That is "nothing to
+                // resend", not a missing Work.
+                seen.verdict = "not_retryable";
+                return undefined;
+            }
             if (!RETRYABLE.has(d.status)) {
                 seen.verdict = "not_retryable";
                 return undefined;
@@ -185,10 +202,18 @@ export class WorkDeliverer {
         return seen.verdict;
     }
 
-    /** Pick up every Work with a pending delivery. Called at startup and when a channel starts. */
+    /**
+     * Pick up every Work with a pending delivery. Called at startup and when a
+     * channel starts. Batched: a ledger with hundreds of owed notices must not
+     * open hundreds of concurrent sends against one channel.
+     */
     async resume(): Promise<void> {
-        const all = await this.store.list();
-        await Promise.all(all.filter((w) => isOpen(w.delivery)).map((w) => this.deliver(w.workId)));
+        const pending = (await this.store.list()).filter((w) => isOpen(w.delivery));
+        for (let i = 0; i < pending.length; i += RESUME_CONCURRENCY) {
+            await Promise.all(
+                pending.slice(i, i + RESUME_CONCURRENCY).map((w) => this.deliver(w.workId)),
+            );
+        }
     }
 
     stop(): void {
@@ -258,12 +283,17 @@ export class WorkDeliverer {
             const after = (await this.store.get(workId))?.delivery;
             if (isOpen(after) && after.nextAttemptAt !== undefined) {
                 this.arm(workId, after.nextAttemptAt - this.clock.now());
-            } else if (isOpen(after) && expiryBase(work, after) !== undefined) {
-                // Unavailable: reconnect is what resends, but if it never comes
-                // the notice must still expire, or it stays pending — and
-                // unprunable — forever. One timer at the deadline, no attempt.
-                const base = expiryBase(work, after) ?? 0;
-                this.arm(workId, base + DELIVERY_EXPIRY_MS + 1 - this.clock.now());
+            } else if (isOpen(after)) {
+                // Unavailable: probe again on a slow timer. Reconnect is the
+                // better trigger when it comes, but a platform refusal does not
+                // move the connection state, and waiting only for the expiry
+                // deadline would leave the user silent for six hours.
+                const base = expiryBase(work, after);
+                const untilExpiry =
+                    base === undefined
+                        ? UNAVAILABLE_RETRY_MS
+                        : base + DELIVERY_EXPIRY_MS + 1 - this.clock.now();
+                this.arm(workId, Math.min(UNAVAILABLE_RETRY_MS, untilExpiry));
             }
             return;
         }
@@ -282,12 +312,16 @@ export class WorkDeliverer {
                 }));
                 return true;
             case "unavailable":
-                // Not counted and not timed: the channel being down is not this
-                // message's fault, and burning attempts on it would exhaust the
-                // budget during an outage that ends by itself. The controller
-                // calls `resume()` when the channel reports connected, which is
-                // the signal that actually matters. Expiry still bounds the wait.
-                await this.mutateDelivery(workId, (d) => ({ ...d, lastError: result.code }));
+                // Not counted: the channel being down is not this message's
+                // fault, and burning attempts on it would exhaust the budget
+                // during an outage that ends by itself. It is probed on a slow
+                // timer, and `resume()` on reconnect retries immediately; expiry
+                // still bounds the total wait.
+                await this.mutateDelivery(workId, (d) =>
+                    // An outage that repeats the same code changes nothing; a
+                    // write and a push every retry tick would be noise.
+                    d.lastError === result.code ? d : { ...d, lastError: result.code },
+                );
                 return false;
             case "retryable": {
                 const updated = await this.mutateDelivery(workId, (d) => {
@@ -344,14 +378,15 @@ export class WorkDeliverer {
         workId: string,
         update: (delivery: WorkDelivery) => WorkDelivery,
     ): Promise<WorkDelivery | undefined> {
-        const next = await this.store.mutate(workId, (work) => {
+        const res = await this.store.mutate(workId, (work) => {
             if (!work.delivery) return undefined;
             const updated = update(work.delivery);
             if (updated === work.delivery) return undefined;
             return { ...work, updatedAt: this.clock.now(), delivery: updated };
         });
+        if (!res?.changed) return undefined;
         this.onChange(workId);
-        return next?.delivery;
+        return res.record.delivery;
     }
 
     private arm(workId: string, ms: number): void {

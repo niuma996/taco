@@ -47,6 +47,9 @@ export const WORK_RETENTION_COUNT = 500;
 export interface StartWorkArgs {
     readonly sourceEventId: string;
     readonly workspace?: string;
+    /** Where an interruption notice would go if the driver dies. */
+    readonly deliverTo?: ImRoute;
+    readonly maxMessageLength?: number;
     readonly parentSessionId: string;
     readonly childSessionId: string;
     readonly agentType: string;
@@ -65,6 +68,11 @@ export interface SettleWorkArgs {
     readonly deliverTo?: ImRoute;
     /** Per-channel message cap, used to split the template notice. */
     readonly maxMessageLength?: number;
+    /**
+     * False when the result is already reaching the user another way (a resumed
+     * run reports through the conversation), so no notice should be queued.
+     */
+    readonly deliver?: boolean;
     /** True when the parent model will be woken and expected to write the notice. */
     readonly parentWillReply: boolean;
 }
@@ -114,6 +122,18 @@ export class WorkController {
             title: args.title,
             sourceEventId: args.sourceEventId,
             ...(args.workspace !== undefined ? { workspace: args.workspace } : {}),
+            ...(args.deliverTo
+                ? {
+                      deliveryTarget: {
+                          channelId: args.deliverTo.channelId,
+                          peerId: args.deliverTo.peerId,
+                          chatId: args.deliverTo.chatId,
+                      },
+                  }
+                : {}),
+            ...(args.maxMessageLength !== undefined
+                ? { maxMessageLength: args.maxMessageLength }
+                : {}),
             parentSessionId: args.parentSessionId,
             childSessionId: args.childSessionId,
             agentType: args.agentType,
@@ -168,9 +188,12 @@ export class WorkController {
             };
         }
 
-        const delivery = args.deliverTo
+        const target =
+            args.deliver === false ? undefined : (args.deliverTo ?? current.deliveryTarget);
+        const maxMessageLength = args.maxMessageLength ?? current.maxMessageLength;
+        const delivery = target
             ? buildDelivery({
-                  route: args.deliverTo,
+                  route: target,
                   now,
                   parentWillReply: args.parentWillReply,
                   template: templateNotice({
@@ -181,22 +204,64 @@ export class WorkController {
                       excerpt: excerpt(args.resultText),
                       path: args.path,
                   }),
-                  maxMessageLength: args.maxMessageLength,
+                  maxMessageLength,
               })
             : undefined;
 
-        const settled = await this.store.mutate(args.workId, (work) => {
+        const res = await this.store.mutate(args.workId, (work) => {
             const next = settle(work, { outcome: args.outcome, result, reason: args.reason, now });
             if (!next) return undefined;
             return delivery ? { ...next, delivery } : next;
         });
-        if (!settled) return undefined;
+        if (!res) return undefined;
+        // A Work that already ended keeps its outcome, and this call must not
+        // push or deliver on its behalf: the delivery computed above describes
+        // an outcome the record did not take.
+        if (!res.changed) return res.record;
         this.onChange(args.workId);
+        if (delivery) void this.deliverer.deliver(args.workId);
+        return res.record;
+    }
 
-        if (delivery) {
-            void this.deliverer.deliver(settled.workId);
-        }
-        return settled;
+    /**
+     * Reopen an interrupted Work for a resumed run. Only `interrupted` may be
+     * reopened: a completed Work stays completed, and a failed one did not fail
+     * for a reason a resume changes.
+     */
+    async resumeAttempt(workId: string): Promise<WorkRecord | undefined> {
+        const now = this.now();
+        const res = await this.store.mutate(workId, (current) => {
+            if (current.status !== "interrupted") return undefined;
+            // The resume is happening because the user is in the conversation.
+            // An interruption notice still waiting to go out is now stale and
+            // would land after the result they are about to see.
+            const delivery =
+                current.delivery?.status === "pending"
+                    ? {
+                          ...current.delivery,
+                          status: "cancelled" as const,
+                          nextAttemptAt: undefined,
+                      }
+                    : current.delivery;
+            return {
+                ...current,
+                status: "running" as const,
+                updatedAt: now,
+                endedAt: undefined,
+                reason: undefined,
+                ...(delivery ? { delivery } : {}),
+                attempt: { attemptId: uuidv7(), startedAt: now },
+            };
+        });
+        if (!res?.changed) return res?.record;
+        this.onChange(workId);
+        return res.record;
+    }
+
+    /** Whether this Work's outcome already reached the user another way. */
+    async isNoticeSettled(workId: string): Promise<boolean> {
+        const status = (await this.store.get(workId))?.delivery?.status;
+        return status === "confirmed" || status === "handedOff" || status === "cancelled";
     }
 
     /** A notice run for `workId` started: capture the session's text instead of sending it live. */
@@ -269,7 +334,7 @@ export class WorkController {
      * a second copy from here would only repeat it.
      */
     async handOff(workId: string): Promise<void> {
-        const updated = await this.store.mutate(workId, (work) => {
+        const res = await this.store.mutate(workId, (work) => {
             const d = work.delivery;
             if (d?.status !== "pending" || d.chunks) return undefined;
             return {
@@ -278,7 +343,7 @@ export class WorkController {
                 delivery: { ...d, status: "handedOff", awaitingParentReplyUntil: undefined },
             };
         });
-        if (updated) this.onChange(workId);
+        if (res?.changed) this.onChange(workId);
     }
 
     private async freeze(
@@ -288,7 +353,7 @@ export class WorkController {
             source: "parentReply" | "template";
         },
     ): Promise<void> {
-        const updated = await this.store.mutate(workId, (work) => {
+        const res = await this.store.mutate(workId, (work) => {
             const d = work.delivery;
             if (d?.status !== "pending" || d.chunks) return undefined;
             return {
@@ -297,7 +362,7 @@ export class WorkController {
                 delivery: { ...d, ...pick(d), awaitingParentReplyUntil: undefined },
             };
         });
-        if (updated) {
+        if (res?.changed) {
             this.onChange(workId);
             void this.deliverer.deliver(workId);
         }
@@ -309,28 +374,38 @@ export class WorkController {
     }
 
     /**
-     * Startup pass: settle what pi already knows, and mark what was lost.
+     * Startup pass: mark Works whose driver process is gone, then prune.
      *
-     * Read-only toward pi on purpose. A Work whose operation is still open is
-     * not touched here — the session's own attach recovery will finish it, and
-     * the child's settle path then reaches `settle()` like any other. What this
-     * pass handles is the Work whose driver process is gone: its in-memory
-     * background run died with that process, so nothing will ever settle it.
+     * Read-only toward pi on purpose: deciding whether a stored operation is
+     * still resumable would mean attaching every child session at startup, which
+     * is exactly the cost this pass exists to avoid. So "interrupted" here means
+     * "the driver died", not "the run is unrecoverable": a later `agentContinue`
+     * reopens the Work through `resumeAttempt`, and a settle from that run
+     * closes it normally. The reason text says so.
      */
     async reconcile(): Promise<{ interrupted: number; pruned: number }> {
         const all = await this.store.list();
         let interrupted = 0;
         for (const work of all) {
             if (work.status !== "running" || work.ownerInstanceId === this.instanceId) continue;
-            const next = await this.store.mutate(work.workId, (current) =>
-                interrupt(current, {
-                    reason: "the process that was running this stopped before it finished",
-                    now: this.now(),
-                }),
-            );
-            if (next?.status === "interrupted") {
+            const now = this.now();
+            const next = await this.store.mutate(work.workId, (current) => {
+                const stopped = interrupt(current, {
+                    reason:
+                        "the process that was running this stopped before it finished; " +
+                        "continue the subagent to finish it",
+                    now,
+                });
+                if (!stopped) return undefined;
+                // The user who launched this is on the other end of a channel and
+                // has no other way to learn it stopped. Queue the notice now: the
+                // target was frozen at launch precisely for this case.
+                return withInterruptionNotice(stopped, now);
+            });
+            if (next?.changed) {
                 interrupted++;
                 this.onChange(work.workId);
+                if (next.record.delivery) void this.deliverer.deliver(work.workId);
             }
         }
         const pruned = await this.prune(await this.store.list());
@@ -396,6 +471,40 @@ export function templateNotice(args: TemplateArgs): string {
         lines.push("", "No output was produced.");
     }
     return lines.join("\n");
+}
+
+/** The notice sent when the process driving a Work died before it settled. */
+export function interruptionNotice(args: { title: string; agentType: string }): string {
+    const label = args.title.trim() === "" ? args.agentType : args.title.trim();
+    return [
+        `Background task was interrupted: ${label}`,
+        "",
+        "The process running it stopped before it finished. If its conversation is still " +
+            "available, continuing the subagent can finish the task.",
+    ].join("\n");
+}
+
+/**
+ * Attach a ready-to-send interruption notice. Frozen here rather than at send
+ * time so a restart with the channel down still has something to retry with.
+ */
+function withInterruptionNotice(record: WorkRecord, now: number): WorkRecord {
+    if (record.delivery || !record.deliveryTarget) return record;
+    const cap = record.maxMessageLength ?? 2000;
+    return {
+        ...record,
+        delivery: {
+            deliveryId: uuidv7(),
+            target: record.deliveryTarget,
+            status: "pending",
+            chunks: chunkText(interruptionNotice(record), cap),
+            source: "template",
+            maxMessageLength: cap,
+            confirmedChunks: 0,
+            attempts: 0,
+            createdAt: now,
+        },
+    };
 }
 
 function buildDelivery(args: {

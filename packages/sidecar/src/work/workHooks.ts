@@ -62,4 +62,21 @@ export interface BackgroundWorkHooks {
     onNoticeRunEnd(workId: string, reply: string | undefined): Promise<void>;
     /** The notice never produced a run: queued behind a busy parent, or no parent attached. */
     onNoticeNotRun(workId: string, reason: "queued" | "unreachable"): Promise<void>;
+    /**
+     * A resumed run is about to start for a child session. Reopens an
+     * interrupted Work so its result can be recorded when the run ends.
+     */
+    onResumeStart(childSessionId: SessionId): Promise<void>;
+    /**
+     * A resumed run ended. Closes the reopened Work; `agentContinue` reports
+     * through the conversation, so this queues no notice of its own.
+     */
+    onResumeSettle(childSessionId: SessionId, settle: WorkSettle): Promise<void>;
+    /**
+     * Whether this Work's outcome already reached the user another way: the
+     * deliverer confirmed it, the parent's own reply carried it, or a resume
+     * made the queued notice stale. A pending record from before a restart must
+     * not prompt the parent again in those cases — that reports it twice.
+     */
+    noticeSettled(workId: string): Promise<boolean>;
 }

@@ -78,24 +78,41 @@ export class WorkStore {
     }
 
     /**
-     * Serialized read-modify-write. Returning `undefined` leaves the record as
-     * it is; the update sees the freshest snapshot, so it cannot overwrite a
-     * delivery confirmation that landed a moment earlier.
+     * Serialized read-modify-write. Returning `undefined` from the update leaves
+     * the record as it is.
+     *
+     * `changed` says whether a write happened. Callers must use it rather than
+     * truthiness of `record`: a declined update still resolves with the current
+     * snapshot (so a caller can read what blocked it), and acting on that
+     * snapshot as if this call succeeded is how a no-op settle used to fire a
+     * push and drop its delivery intent.
      */
     async mutate(
         workId: string,
         update: (current: WorkRecord) => WorkRecord | undefined,
-    ): Promise<WorkRecord | undefined> {
+    ): Promise<{ record: WorkRecord; changed: boolean } | undefined> {
         return this.withQueue(workId, async () => {
             const current = await this.readSnapshot(workId);
             if (!current) return undefined;
             const next = update(current);
-            if (!next) return current;
+            if (!next) return { record: current, changed: false };
             if (next.workId !== workId) throw new Error("work mutation cannot change workId");
             const stamped: WorkRecord = { ...next, revision: current.revision + 1 };
             await this.write(stamped);
-            return stamped;
+            return { record: stamped, changed: true };
         });
+    }
+
+    /**
+     * The Work a child session belongs to, if any. Used to close the loop when a
+     * resumed subagent finishes: `agentContinue` has no launch tool call, so the
+     * child session id is the only key back to the record.
+     */
+    async findByChildSessionId(childSessionId: string): Promise<WorkRecord | undefined> {
+        for (const record of await this.list()) {
+            if (record.childSessionId === childSessionId) return record;
+        }
+        return undefined;
     }
 
     async list(): Promise<WorkRecord[]> {

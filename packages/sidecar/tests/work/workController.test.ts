@@ -507,6 +507,148 @@ describe("work.controller", () => {
         });
     });
 
+    describe("resume and interruption", () => {
+        function reborn(store: WorkStore, sender: RecordingSender): WorkController {
+            return new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, sender, testClock),
+                instanceId: "new-process",
+                now: () => time,
+            });
+        }
+
+        it("reopens an interrupted Work and settles it from the resumed run", async () => {
+            const { store } = rig("old-process");
+            const old = new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, new RecordingSender(), testClock),
+                instanceId: "old-process",
+                now: () => time,
+            });
+            const { workId } = await old.start(launch(1));
+            const next = reborn(store, new RecordingSender());
+            await next.reconcile();
+            assert.equal((await store.get(workId))?.status, "interrupted");
+
+            const reopened = await next.resumeAttempt(workId);
+            assert.equal(reopened?.status, "running");
+            const settled = await next.settle({
+                workId,
+                outcome: "completed",
+                resultText: "finished after resume",
+                parentWillReply: false,
+            });
+            assert.equal(settled?.status, "completed");
+            assert.equal(settled?.result?.completeness, "full");
+            assert.equal(settled?.result?.summary, "finished after resume");
+        });
+
+        it("cancels an interruption notice that has not gone out yet", async () => {
+            const { store } = rig("old-process");
+            const old = new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, new RecordingSender(), testClock),
+                instanceId: "old-process",
+                now: () => time,
+            });
+            const { workId } = await old.start({
+                ...launch(5),
+                deliverTo: route,
+                maxMessageLength: 2000,
+            });
+            const sender = new RecordingSender();
+            sender.result = { kind: "unavailable", code: "not_connected" };
+            const next = reborn(store, sender);
+            await next.reconcile();
+            await until(() => sender.texts.length === 1, "the failed first attempt");
+            assert.equal((await store.get(workId))?.delivery?.status, "pending");
+
+            const reopened = await next.resumeAttempt(workId);
+            assert.equal(reopened?.status, "running");
+            assert.equal(
+                reopened?.delivery?.status,
+                "cancelled",
+                "a resume makes the interruption notice stale",
+            );
+        });
+
+        it("does not reopen a Work that already ended", async () => {
+            const { controller } = rig();
+            const { workId } = await controller.start(launch(2));
+            await controller.settle({
+                workId,
+                outcome: "completed",
+                resultText: "ok",
+                parentWillReply: false,
+            });
+            const reopened = await controller.resumeAttempt(workId);
+            assert.equal(reopened?.status, "completed");
+        });
+
+        it("queues an interruption notice to the target frozen at launch", async () => {
+            const { store } = rig("old-process");
+            const old = new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, new RecordingSender(), testClock),
+                instanceId: "old-process",
+                now: () => time,
+            });
+            const { workId } = await old.start({
+                ...launch(3),
+                deliverTo: route,
+                maxMessageLength: 2000,
+            });
+
+            const sender = new RecordingSender();
+            await reborn(store, sender).reconcile();
+            await until(() => sender.texts.length === 1, "the interruption notice");
+            assert.match(sender.texts[0] ?? "", /interrupted/i);
+            assert.match(sender.texts[0] ?? "", /Find the leak/);
+            await until(
+                async () => (await store.get(workId))?.delivery?.status === "confirmed",
+                "the notice to be confirmed",
+            );
+            const after = await store.get(workId);
+            assert.equal(after?.delivery?.status, "confirmed");
+            assert.equal(after?.delivery?.source, "template");
+        });
+
+        it("a declined settle neither pushes nor delivers", async () => {
+            const store = new WorkStore(join(root, `c${seq++}`));
+            const sender = new RecordingSender();
+            const changes: string[] = [];
+            const controller = new WorkController({
+                store,
+                deliverer: new WorkDeliverer(store, sender, testClock),
+                instanceId: "inst-1",
+                now: () => time,
+                onChange: (id) => changes.push(id),
+            });
+            const { workId } = await controller.start(launch(4));
+            await controller.settle({
+                workId,
+                outcome: "completed",
+                resultText: "ok",
+                deliverTo: route,
+                parentWillReply: false,
+            });
+            await until(() => sender.texts.length === 1, "the first notice");
+            const changesBefore = changes.length;
+            const textsBefore = sender.texts.length;
+
+            const again = await controller.settle({
+                workId,
+                outcome: "error",
+                resultText: "late failure",
+                deliverTo: route,
+                parentWillReply: false,
+            });
+            assert.equal(again?.status, "completed");
+            assert.equal(changes.length, changesBefore, "no redundant change push");
+            assert.equal(sender.texts.length, textsBefore, "no second delivery");
+        });
+    });
+
     describe("templateNotice", () => {
         const base = {
             agentType: "explorer",

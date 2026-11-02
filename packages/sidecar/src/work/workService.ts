@@ -127,9 +127,18 @@ export class WorkService implements BackgroundWorkHooks, WorkControl {
 
     async onLaunch(launch: WorkLaunch): Promise<string | undefined> {
         try {
+            // Frozen here, not at settle: a Work whose driver dies never settles,
+            // and the user on the channel still has to be told it stopped.
+            const route = this.options.resolveRoute(launch.parentSessionId);
             const work = await this.controller.start({
                 sourceEventId: sourceEventIdFor(launch.parentSessionId, launch.parentToolCallId),
                 ...(launch.workspace !== undefined ? { workspace: launch.workspace } : {}),
+                ...(route
+                    ? {
+                          deliverTo: route,
+                          maxMessageLength: this.options.channels.maxMessageLength(route.channelId),
+                      }
+                    : {}),
                 parentSessionId: launch.parentSessionId,
                 childSessionId: launch.childSessionId,
                 agentType: launch.agentType,
@@ -163,6 +172,44 @@ export class WorkService implements BackgroundWorkHooks, WorkControl {
             });
         } catch (e) {
             log.error("work settle failed", { workId, error: String(e) });
+        }
+    }
+
+    async onResumeStart(childSessionId: SessionId): Promise<void> {
+        try {
+            const work = await this.store.findByChildSessionId(childSessionId);
+            if (work) await this.controller.resumeAttempt(work.workId);
+        } catch (e) {
+            log.error("work resume start failed", { childSessionId, error: String(e) });
+        }
+    }
+
+    async onResumeSettle(childSessionId: SessionId, settle: WorkSettle): Promise<void> {
+        try {
+            const work = await this.store.findByChildSessionId(childSessionId);
+            if (!work) return;
+            await this.controller.settle({
+                workId: work.workId,
+                outcome: settle.outcome,
+                resultText: settle.resultText,
+                partial: settle.partial,
+                path: settle.path,
+                // The resumed run reports through the parent conversation the
+                // user just used; a second copy over the channel would repeat it.
+                deliver: false,
+                parentWillReply: false,
+            });
+        } catch (e) {
+            log.error("work resume settle failed", { childSessionId, error: String(e) });
+        }
+    }
+
+    async noticeSettled(workId: string): Promise<boolean> {
+        try {
+            return await this.controller.isNoticeSettled(workId);
+        } catch (e) {
+            log.error("work notice check failed", { workId, error: String(e) });
+            return false;
         }
     }
 

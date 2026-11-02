@@ -19,6 +19,7 @@ import {
     MAX_DELIVERY_ATTEMPTS,
     PARENT_REPLY_GRACE_MS,
     PARENT_REPLY_MAX_WAIT_MS,
+    UNAVAILABLE_RETRY_MS,
     WorkDeliverer,
 } from "../../src/work/workDelivery.ts";
 import { WorkStore, workIdForSource } from "../../src/work/workStore.ts";
@@ -273,6 +274,22 @@ describe("work.delivery", () => {
             assert.equal(sender.calls.length, MAX_DELIVERY_ATTEMPTS + 3, "no timer-driven resend");
         });
 
+        it("probes an unavailable channel again on a slow timer", async () => {
+            const { clock, sender, store, deliverer } = rig();
+            const id = await seed(store, clock);
+            sender.script.push({ kind: "unavailable", code: "auth" });
+            sender.script.push({ kind: "unavailable", code: "auth" });
+            await deliverer.deliver(id);
+            assert.equal(sender.calls.length, 1);
+            clock.advance(UNAVAILABLE_RETRY_MS + 1);
+            await until(
+                async () => sender.calls.length === 2,
+                "the next probe without a reconnect",
+            );
+            assert.equal((await deliveryOf(store, id))?.status, "pending");
+            assert.equal(clock.pending, 1, "the next probe is armed");
+        });
+
         it("a channel that never comes back still lets the notice expire", async () => {
             const { clock, sender, store, deliverer } = rig();
             const id = await seed(store, clock);
@@ -481,11 +498,11 @@ describe("work.delivery", () => {
             assert.equal(sender.calls.length, 1);
         });
 
-        it("reports not_found for an unknown Work and for one with nothing to deliver", async () => {
+        it("reports not_found only for an unknown Work; one with no notice is not_retryable", async () => {
             const { clock, store, deliverer } = rig();
             assert.equal(await deliverer.retry("w-missing"), "not_found");
             const id = await seed(store, clock, {}, { delivery: undefined });
-            assert.equal(await deliverer.retry(id), "not_found");
+            assert.equal(await deliverer.retry(id), "not_retryable");
         });
     });
 
@@ -540,6 +557,27 @@ describe("work.delivery", () => {
     });
 
     describe("restart", () => {
+        it("resume() caps how many deliveries run at once", async () => {
+            const { clock, store } = rig();
+            const ids = await Promise.all(Array.from({ length: 20 }, () => seed(store, clock)));
+            const sender = new FakeSender();
+            const original = sender.sendText.bind(sender);
+            let inFlight = 0;
+            let maxInFlight = 0;
+            sender.sendText = async (channelId, route, text) => {
+                inFlight++;
+                maxInFlight = Math.max(maxInFlight, inFlight);
+                await new Promise((r) => setTimeout(r, 1));
+                const out = await original(channelId, route, text);
+                inFlight--;
+                return out;
+            };
+            const deliverer = new WorkDeliverer(store, sender, clock);
+            await deliverer.resume();
+            assert.ok(maxInFlight <= 8, `at most 8 at once, saw ${maxInFlight}`);
+            assert.equal(sender.calls.length, ids.length);
+        });
+
         it("a new deliverer over the same store resumes at the next unconfirmed chunk", async () => {
             const { clock, sender, store, deliverer } = rig();
             const id = await seed(store, clock, { chunks: ["a", "b", "c"] });
