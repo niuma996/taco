@@ -757,6 +757,44 @@ describe("SessionRegistry", () => {
         }
     });
 
+    it("a re-attach pushes the rebuilt system prompt onto the mounted handle", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const prompts: string[] = [];
+        const originalCreate = AttachedSession.create;
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) =>
+            ({
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+                setSystemPrompt: (prompt: string) => {
+                    prompts.push(prompt);
+                },
+            }) as unknown as AttachedSession) as typeof AttachedSession.create;
+
+        try {
+            await sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [fakeTool("t")]);
+            // The resume rebuilt the prompt from the current profile; without
+            // the push, an edited profile would keep instructing the child
+            // with the old prompt while the load policy already changed.
+            const again = await sr.attachChild(
+                asSessionId(id),
+                { thinkingLevel: "off" },
+                [fakeTool("t")],
+                undefined,
+                "rebuilt prompt",
+            );
+            assert.deepEqual(prompts, ["rebuilt prompt"]);
+            assert.ok(again);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
     it("attach waits for an in-flight detached read instead of failing on the open", async () => {
         const sr = makeRegistry();
         const id = uuidv7();

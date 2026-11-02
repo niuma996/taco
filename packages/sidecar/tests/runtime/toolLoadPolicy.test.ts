@@ -35,6 +35,17 @@ function candidate(name: string): ToolCandidate {
     };
 }
 
+/** A bare tool object, for names the state must already define. */
+function tool(name: string): TacoTool {
+    return {
+        name,
+        label: name,
+        description: name,
+        parameters: {} as never,
+        execute: (async () => ({ content: [] })) as never,
+    };
+}
+
 /** A tool collection backed by plain arrays. */
 function fakeCollection() {
     const state = { tools: [] as TacoTool[], active: [] as string[] };
@@ -168,6 +179,61 @@ describe("setLoadPolicy", () => {
         assert.equal(changed, false);
         assert.deepEqual(state.active, ["pdfMerge"]);
     });
+
+    it("keeps the loader active when the new policy still leaves something loadable", async () => {
+        // The shape a resume re-attaches to: the loader was installed at
+        // create time because the profile declared a deferred tool. The
+        // profile never lists its own loader, so judging it by the whitelist
+        // removed it and the session lost its only way to load anything.
+        const { controller, state } = makeController(
+            agentToolPolicy(["read", "grep", "pdfMerge"], 1),
+        );
+        state.tools = [tool("addTools")];
+        state.active = ["read", "grep", "addTools"];
+
+        const changed = await controller.setLoadPolicy(
+            agentToolPolicy(["read", "grep", "pdfMerge"], 1),
+        );
+
+        assert.equal(changed, false);
+        assert.deepEqual(state.active, ["read", "grep", "addTools"]);
+    });
+
+    it("removes the loader when the new policy leaves nothing loadable", async () => {
+        const { controller, state } = makeController(agentToolPolicy(["read", "pdfMerge"], 1));
+        state.tools = [tool("addTools")];
+        state.active = ["read", "addTools"];
+
+        const changed = await controller.setLoadPolicy(agentToolPolicy(["read"], 1));
+
+        assert.equal(changed, true);
+        assert.deepEqual(state.active, ["read"]);
+    });
+
+    it("re-activates the loader a nothing-loadable policy had idled", async () => {
+        const { controller, state } = makeController(agentToolPolicy(["read"], 1));
+        state.tools = [tool("addTools")];
+        state.active = ["read", "addTools"];
+        await controller.setLoadPolicy(agentToolPolicy(["read"], 1));
+        assert.deepEqual(state.active, ["read"]);
+
+        const changed = await controller.setLoadPolicy(agentToolPolicy(["read", "pdfMerge"], 1));
+
+        assert.equal(changed, true);
+        assert.deepEqual(state.active, ["read", "addTools"]);
+    });
+
+    it("re-activates a dynamic tool an earlier tightening had hidden", async () => {
+        const { controller, state } = makeController();
+        await controller.addTools(["configPatch"]);
+        await controller.setLoadPolicy(agentToolPolicy(["read"], 1));
+        assert.deepEqual(state.active, []);
+
+        const changed = await controller.setLoadPolicy(agentToolPolicy(["read", "configPatch"], 1));
+
+        assert.equal(changed, true);
+        assert.deepEqual(state.active, ["configPatch"]);
+    });
 });
 
 describe("loadableCandidates", () => {
@@ -188,16 +254,6 @@ describe("loadableCandidates", () => {
 });
 
 describe("pruneLoadRefusedTools", () => {
-    function tool(name: string): TacoTool {
-        return {
-            name,
-            label: name,
-            description: name,
-            parameters: {} as never,
-            execute: (async () => ({ content: [] })) as never,
-        };
-    }
-
     it("removes refused names with no definition and keeps defined ones", async () => {
         const { collection, state } = fakeCollection();
         state.tools = [tool("read"), tool("pdfMerge")];

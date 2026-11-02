@@ -973,6 +973,9 @@ export class SessionRegistry extends EventEmitter {
             // A resume re-attaches to the mounted session. The harness hooks
             // were wired at create time, so any run-scoped control the caller
             // brought must be pushed onto the live handle or it is ignored.
+            if (systemPrompt !== undefined) {
+                existing.setSystemPrompt(systemPrompt);
+            }
             if (opts.toolLoadPolicy !== undefined) {
                 await existing.setToolLoadPolicy(opts.toolLoadPolicy);
             }

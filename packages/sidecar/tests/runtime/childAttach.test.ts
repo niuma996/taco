@@ -121,4 +121,43 @@ describe("prepareChildAttach — capability statement", () => {
             "a tool outside the profile's declaration must not be advertised",
         );
     });
+
+    it("counts a loadable deferred writer, so the child is not told it cannot write", async () => {
+        const tools = ["read", "grep"].map(fakeTool);
+        const deps: ChildAttachDeps = {
+            ...depsFor(tools),
+            getDeferredToolCatalog: () => [{ name: "pdfMerge", summary: "merge PDFs" }],
+        };
+        const { systemPrompt } = await prepareChildAttach(deps, {
+            sessionId: asSessionId("s1"),
+            agentType: "builder",
+            childDepth: 1,
+            allowedTools: tools,
+            toolPolicy: agentToolPolicy(["read", "grep", "pdfMerge"], 1),
+            modelIdentity: "test/model",
+        });
+        // The same prompt lists pdfMerge as loadable; a "you cannot write a
+        // file" directive next to that listing would be two instructions
+        // that disagree.
+        assert.match(systemPrompt, /no `write` \/ `edit` tools/);
+        assert.match(systemPrompt, /file-producing tools/);
+        assert.ok(!systemPrompt.includes("you cannot do it"));
+    });
+
+    it("keeps the read-only directive when the deferred writer is not loadable", async () => {
+        const tools = ["read", "grep"].map(fakeTool);
+        const deps: ChildAttachDeps = {
+            ...depsFor(tools),
+            getDeferredToolCatalog: () => [{ name: "pdfMerge", summary: "merge PDFs" }],
+        };
+        const { systemPrompt } = await prepareChildAttach(deps, {
+            sessionId: asSessionId("s1"),
+            agentType: "reviewer",
+            childDepth: 1,
+            allowedTools: tools,
+            toolPolicy: agentToolPolicy(["read", "grep"], 1),
+            modelIdentity: "test/model",
+        });
+        assert.match(systemPrompt, /you cannot do it/);
+    });
 });

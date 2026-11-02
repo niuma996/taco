@@ -75,9 +75,12 @@ export interface SessionToolController {
     loadRefusal(name: string): string | undefined;
     /**
      * Replace the load policy after construction, e.g. when a resume attaches
-     * to a session that is still mounted. Refused names are dropped from the
-     * active set so a tightened profile takes effect without a detach.
-     * Returns whether the active set changed.
+     * to a session that is still mounted. A tightened policy drops what it now
+     * refuses from the active set; a loosened one re-activates what an earlier
+     * tightening hid (the definition stayed behind, so no reload is needed).
+     * The `addTools` loader follows the create-time install criterion instead
+     * of the whitelist — it keeps its seat exactly while something remains
+     * loadable. Returns whether the active set changed.
      */
     setLoadPolicy(policy: AgentToolPolicy): Promise<boolean>;
     /** Names of dynamic tools loaded in this session (excludes built-ins). */
@@ -96,6 +99,14 @@ export interface SessionToolController {
 
 const FS_DENY_REASON =
     "the session's policy denies file tools, so it is not available in this session";
+
+/**
+ * Name of the `addTools` loader tool. The policy layer owns it because the
+ * loader is judged by a different criterion than every other tool: it keeps
+ * its seat exactly while something remains loadable, never by whether the
+ * profile's whitelist lists it (no profile lists its own loader).
+ */
+export const ADD_TOOLS_TOOL_NAME = "addTools";
 
 /**
  * Candidates this session is allowed to load.
@@ -150,14 +161,47 @@ export class DefaultSessionToolController implements SessionToolController {
         this.loadPolicy = policy;
         const toolState = this.toolState;
         if (!toolState) return false;
-        // A tightened policy must also hide what an earlier, looser one let
-        // through. Removing the name from the active set is enough to hide the
-        // tool; the definition stays so a later loosening needs no reload.
-        return toolState.update(({ activeNames }) => {
-            const refused = activeNames.filter((name) => this.loadRefusal(name) !== undefined);
-            if (refused.length === 0) return undefined;
+        // The loader is judged by the create-time criterion (see
+        // AttachedSession.create's includeAddTools), not by the whitelist:
+        // no profile lists its own loader, so a whitelist check removed it
+        // on every resume and stranded a session whose prompt still tells
+        // it to call `addTools`.
+        const loaderHasWork = loadableCandidates(this.registry.listDeferred(), this).length > 0;
+        return toolState.update(({ tools, activeNames }) => {
+            // A tightened policy must also hide what an earlier, looser one
+            // let through. Removing the name from the active set is enough to
+            // hide the tool; the definition stays so a later loosening needs
+            // no reload.
+            const refused = activeNames.filter((name) =>
+                name === ADD_TOOLS_TOOL_NAME
+                    ? !loaderHasWork
+                    : this.loadRefusal(name) !== undefined,
+            );
+            // A loosened policy hands back what a tightening hid: the
+            // definition stayed behind, so the name only needs re-activating.
+            // Scoped to the loader and this controller's own loads — nothing
+            // else produces a defined-but-inactive name, so a tool the lane
+            // never offered is not swept in.
+            const defined = new Set(tools.map((t) => t.name));
+            const active = new Set(activeNames);
+            const reactivated = [
+                ...(loaderHasWork &&
+                defined.has(ADD_TOOLS_TOOL_NAME) &&
+                !active.has(ADD_TOOLS_TOOL_NAME)
+                    ? [ADD_TOOLS_TOOL_NAME]
+                    : []),
+                ...this.loadedNames.filter(
+                    (name) =>
+                        !active.has(name) &&
+                        defined.has(name) &&
+                        this.loadRefusal(name) === undefined,
+                ),
+            ];
+            if (refused.length === 0 && reactivated.length === 0) return undefined;
             const removed = new Set(refused);
-            return { activeNames: activeNames.filter((name) => !removed.has(name)) };
+            return {
+                activeNames: [...activeNames.filter((name) => !removed.has(name)), ...reactivated],
+            };
         });
     }
 

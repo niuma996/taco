@@ -12,9 +12,10 @@
 
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import type {
-    AddToolsResult,
-    SessionToolController,
+import {
+    ADD_TOOLS_TOOL_NAME,
+    type AddToolsResult,
+    type SessionToolController,
 } from "../runtime/harness/sessionToolController.ts";
 import type { ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 import type { TacoTool } from "./index.ts";
@@ -70,8 +71,8 @@ function formatResult(result: AddToolsResult): string {
 
 export function createAddToolsTool(controller: SessionToolController): TacoTool {
     return {
-        name: "addTools",
-        label: "addTools",
+        name: ADD_TOOLS_TOOL_NAME,
+        label: ADD_TOOLS_TOOL_NAME,
         description: ADD_TOOLS_DESCRIPTION,
         parameters: addToolsSchema,
         executionMode: "sequential",

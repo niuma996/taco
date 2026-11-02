@@ -151,7 +151,11 @@ export async function prepareChildAttach(
     // Capability statement before the role body, so the profile's own prose
     // still wins on conflict — but the model knows what it can do before it
     // reads the role's instructions.
-    const capabilitiesBlock = formatCapabilities(tools, args.agentType);
+    const capabilitiesBlock = formatCapabilities(
+        tools,
+        args.agentType,
+        loadableDeferred.map((c) => c.name),
+    );
     if (capabilitiesBlock) profileContributors.push({ append: capabilitiesBlock });
     // Role body after the generic guidance so it wins on conflict — a
     // read-only explorer must not inherit the main agent's "act, then
@@ -191,24 +195,33 @@ export async function prepareChildAttach(
  * that spends its whole budget preparing to write a file it has no tool to
  * write, and never delivers the report.
  *
- * So the statement is derived from the toolset the child actually got, not
- * from what its profile body claims.
+ * So the statement is derived from the toolset the child actually got — plus
+ * the deferred tools its profile may still load — not from what its profile
+ * body claims.
  *
  * Two flavors, because "no `write` tool" and "cannot write a file" are not
  * the same claim. A profile whose shell is also read-only genuinely cannot
  * create a file by any route, so it gets the directive. A profile with a
  * working shell — `verification` runs builds and writes throwaway scripts —
- * or a PDF writer only lacks the `write` / `edit` tools, and telling it it
- * cannot write a file would be false.
+ * or a loadable PDF writer only lacks the `write` / `edit` tools, and telling
+ * it it cannot write a file would be false.
  *
  * Returns "" when the child has the direct write tools — there is nothing to
  * say.
  */
-function formatCapabilities(tools: readonly TacoTool[], agentType: string | undefined): string {
-    const names = tools.map((t) => t.name);
-    if (hasDirectWriteTool(names)) return "";
-    const hasShell = names.some((n) => n.toLowerCase() === "shell");
-    if (writeCapability(names, agentType) === "writes") {
+function formatCapabilities(
+    tools: readonly TacoTool[],
+    agentType: string | undefined,
+    loadableDeferredNames: readonly string[] = [],
+): string {
+    // The verdict covers what the child could hold this run, not just what it
+    // holds at attach: `addTools` can bring a declared deferred writer in
+    // mid-run, and a child told "you cannot write a file" while its prompt
+    // also lists that writer gets two instructions that disagree.
+    const capabilityNames = [...tools.map((t) => t.name), ...loadableDeferredNames];
+    if (hasDirectWriteTool(capabilityNames)) return "";
+    const hasShell = tools.some((t) => t.name.toLowerCase() === "shell");
+    if (writeCapability(capabilityNames, agentType) === "writes") {
         return [
             "<capabilities>",
             "You have no `write` / `edit` tools. " +

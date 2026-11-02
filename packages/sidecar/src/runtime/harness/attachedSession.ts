@@ -325,6 +325,13 @@ export class AttachedSession extends EventEmitter {
     /** Converges the toolset + system prompt at the start of a turn; no-op when
      *  the workspace supplied no refresher (subagents, tests). */
     private applyToolsetRefresh?: () => Promise<void>;
+    /**
+     * The system-prompt cell the harness thunk reads. A resume re-attaches to
+     * this mounted session without re-running create(), so a profile edited
+     * between runs pushes its rebuilt prompt through here — the same
+     * live-handle pattern as `subagentBudgetThunk`.
+     */
+    private systemPromptCell!: { current: string };
     /** Dynamic-tool controller; undefined when no toolRegistry is configured. */
     readonly toolController: SessionToolController | undefined;
     /**
@@ -420,6 +427,21 @@ export class AttachedSession extends EventEmitter {
         return this.toolController.setLoadPolicy(policy);
     }
 
+    /**
+     * Replace the system prompt a resumed run's turns are assembled with.
+     *
+     * A resume that finds this session still mounted never re-runs
+     * `AttachedSession.create`, so a profile edited between runs would keep
+     * instructing the child with the old prompt — advertising tools the new
+     * load policy refuses, or hiding ones it now permits. Guarded by
+     * comparison: the prompt is the model's KV-cache prefix, so an unchanged
+     * profile must not pay a cache miss.
+     */
+    setSystemPrompt(prompt: string): void {
+        if (this.systemPromptCell.current === prompt) return;
+        this.systemPromptCell.current = prompt;
+    }
+
     static async create(args: AttachedSessionOptions): Promise<AttachedSession> {
         if (!args.model) {
             throw new Error(
@@ -480,9 +502,9 @@ export class AttachedSession extends EventEmitter {
             toolController = controller;
         }
 
-        // Mutable so the per-turn refresh can swap in a rebuilt prompt; read
-        // through the thunk handed to AgentHarness below.
-        let currentSystemPrompt = args.systemPrompt;
+        // Mutable so the per-turn refresh — or a resume's rebuilt prompt — can
+        // swap it; read through the thunk handed to AgentHarness below.
+        const systemPromptCell = { current: args.systemPrompt };
 
         // `AgentHarness.create` restores suspended operations off the session,
         // so it is async and may report work that was interrupted mid-run by a
@@ -497,7 +519,7 @@ export class AttachedSession extends EventEmitter {
                 // request, so a prompt rebuilt by refreshToolset (below) is
                 // picked up without having to mutate harness state. Falls back
                 // to the attach-time value when no refresher is wired.
-                systemPrompt: () => currentSystemPrompt,
+                systemPrompt: () => systemPromptCell.current,
                 tools: initialTools,
                 resources: args.resources,
                 streamOptions: await withTacoUserAgent(
@@ -691,6 +713,7 @@ export class AttachedSession extends EventEmitter {
         );
         attachedCell.current = attached;
         attached.subagentBudgetThunk = args.getSubagentBudget;
+        attached.systemPromptCell = systemPromptCell;
         // Per-turn toolset convergence. Assigned here rather than threaded
         // through the constructor (already 11 params); the refresher also owns
         // the prompt cell so the two can only move together.
@@ -703,7 +726,7 @@ export class AttachedSession extends EventEmitter {
                 },
                 refresh: args.refreshToolset,
                 setSystemPrompt: (prompt) => {
-                    currentSystemPrompt = prompt;
+                    systemPromptCell.current = prompt;
                 },
             });
         }
