@@ -444,7 +444,7 @@ export default function App() {
         onImPolicyChanged: (channelId) => onImPolicyChangedEvent(channelId),
         // Process-level invalidate: the Work pane may not be mounted yet, so
         // the event goes through its module emitter (see lib/workEvents.ts).
-        onWorkChanged: (params) => onWorkChangedEvent(params),
+        onWorkChanged: () => onWorkChangedEvent(),
         // The ImPolicyDialog confirms before saving, so no active warning is
         // needed here; reserved for a future desktop notice.
         onImWorkspacesInvalidated: (_channelId) => {},

@@ -7,8 +7,8 @@
  */
 
 import {
+    WORK_ATTENTION_DELIVERY_STATUSES,
     WORK_LIST_DEFAULT_LIMIT,
-    WORK_RETRYABLE_DELIVERY_STATUSES,
     type WorkDeliverySummary,
     type WorkListResult,
     type WorkSummary,
@@ -17,7 +17,7 @@ import type { WorkRecord } from "./workTypes.ts";
 import { isTerminal } from "./workTypes.ts";
 
 /** Delivery states that are worth a person's attention. */
-const ATTENTION_DELIVERY: ReadonlySet<string> = new Set(WORK_RETRYABLE_DELIVERY_STATUSES);
+const ATTENTION_DELIVERY: ReadonlySet<string> = new Set(WORK_ATTENTION_DELIVERY_STATUSES);
 
 /**
  * A Work needs attention when the user was not told and nothing will fix that

@@ -7,7 +7,7 @@
  * to `work.list` is the only source of truth; a push only says "look again".
  */
 
-import type { WorkChangedParams, WorkListResult, WorkSummary } from "@taco-ai/protocol";
+import type { WorkListResult, WorkSummary } from "@taco-ai/protocol";
 
 export type WorkGroupId = "running" | "attention" | "finished";
 
@@ -81,24 +81,6 @@ export function appendPage(state: WorkOverviewState, page: WorkListResult): Work
         groups: { ...state.groups, finished: [...state.groups.finished, ...fresh] },
         nextCursor: page.nextCursor,
     };
-}
-
-/** Whether the pane should count this Work as asking for attention (badge, sort). */
-export function attentionCount(state: WorkOverviewState): number {
-    return state.groups.attention.length;
-}
-
-/**
- * Whether a push can be ignored. A push from another daemon always means look
- * again (that daemon's ledger is a different one). One from the same daemon
- * matters only when it names a Work the pane could be showing or a new one;
- * since a new id is indistinguishable from an unshown one, any non-empty push
- * qualifies. Kept as a function so the rule has one home.
- */
-export function pushMatters(state: WorkOverviewState, push: WorkChangedParams): boolean {
-    // Nothing is known yet, or the push is from another ledger: look.
-    if (state.instanceId === null || push.instanceId !== state.instanceId) return true;
-    return push.workIds.length > 0;
 }
 
 /**

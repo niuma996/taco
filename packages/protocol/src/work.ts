@@ -44,11 +44,25 @@ export const WORK_DELIVERY_STATUSES = [
 ] as const;
 export type WorkDeliveryStatus = (typeof WORK_DELIVERY_STATUSES)[number];
 
-/** Delivery states a user can re-send from. */
-export const WORK_RETRYABLE_DELIVERY_STATUSES: readonly WorkDeliveryStatus[] = [
+/**
+ * Delivery states that mean the user was not told and nothing more will happen
+ * on its own. The overview groups these under "needs attention".
+ */
+export const WORK_ATTENTION_DELIVERY_STATUSES: readonly WorkDeliveryStatus[] = [
     "retryExhausted",
     "expired",
     "permanentFailure",
+];
+
+/**
+ * The subset a user can re-send from. A permanent failure is excluded on
+ * purpose: the platform refused the target itself, and the frozen target cannot
+ * change, so a manual send fails the same way. Retrying it would be a button
+ * that never works.
+ */
+export const WORK_RETRYABLE_DELIVERY_STATUSES: readonly WorkDeliveryStatus[] = [
+    "retryExhausted",
+    "expired",
 ];
 
 /**
@@ -82,7 +96,14 @@ export interface WorkSummary {
     createdAt: number;
     updatedAt: number;
     endedAt?: number;
-    /** Workspace and session that started it; the overview opens the session from these. */
+    /**
+     * Workspace and session that started it; the overview opens the session
+     * from these. Unlike the delivery summary this is the full key — for an IM
+     * conversation that means `im://channel/peer/chat`, because the key is the
+     * only way back to the session. The delivery summary omits peer/chat
+     * because it names only which channel was used, and the pane never opens a
+     * peer from it.
+     */
     workspace?: string;
     parentSessionId: string;
     childSessionId: string;
@@ -132,10 +153,10 @@ export const WORK_LIST_DEFAULT_LIMIT = 50;
 export { WORK_LIST_MAX_LIMIT } from "./schemas/work.js";
 
 /**
- * `work.changed` push params. Invalidate-not-delta: it names what moved so a
- * client can decide whether to look, and carries no answer text.
+ * `work.changed` push params — empty, like the other invalidate pushes. The
+ * frame says "the overview moved"; the client re-pulls `work.list`. Naming the
+ * changed Work ids bought nothing: an id the client already shows may still
+ * have changed state, and an id it does not know may be new, so every push
+ * ends in the same fetch either way.
  */
-export interface WorkChangedParams {
-    instanceId: string;
-    workIds: string[];
-}
+export type WorkChangedParams = Record<string, never>;

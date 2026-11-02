@@ -648,7 +648,7 @@ describe("methods.snapshot", () => {
         "tools.list": { ensureWorkspace: true },
         "work.get": { ensureWorkspace: false },
         "work.list": { ensureWorkspace: false },
-        "work.retryDelivery": { ensureWorkspace: false, command: true },
+        "work.retryDelivery": { ensureWorkspace: false },
         "workspace.dispose": { ensureWorkspace: false, command: true, workspaceParam: "cwd" },
         "workspace.ensure": { ensureWorkspace: false, command: true, workspaceParam: "cwd" },
         "workspace.list": { ensureWorkspace: false },

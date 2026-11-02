@@ -19,7 +19,6 @@ import type {
     ToolCallEndParams,
     ToolCallStartParams,
     ToolCallUpdateParams,
-    WorkChangedParams,
     WorkspaceAssociationKey,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
@@ -127,10 +126,10 @@ export interface UseSidecarStreamOpts {
     onImPolicyChanged?: (channelId: string) => void;
     /**
      * Invalidate: background Works were created or changed. Process-level, so
-     * it arrives with no workspace and no session; the payload names the daemon
-     * and the Works that moved and carries no answer text.
+     * it arrives with no workspace and no session, and its params are empty —
+     * the pane re-pulls the whole overview.
      */
-    onWorkChanged?: (params: WorkChangedParams) => void;
+    onWorkChanged?: () => void;
     /**
      * Pre-dispose notice: a policy change is about to interrupt live
      * conversations on `channelId`. Reserved for a future desktop warning —
@@ -344,9 +343,7 @@ export function useSidecarStream(
         opts.onChannelStatusChanged?.(channel),
     );
     const onConversationsChangedRef = useStableCallback(() => opts.onConversationsChanged?.());
-    const onWorkChangedRef = useStableCallback((params: WorkChangedParams) =>
-        opts.onWorkChanged?.(params),
-    );
+    const onWorkChangedRef = useStableCallback(() => opts.onWorkChanged?.());
     const onImPolicyChangedRef = useStableCallback((channelId: string) =>
         opts.onImPolicyChanged?.(channelId),
     );
@@ -414,16 +411,9 @@ export function useSidecarStream(
             }
             if (push.method === PushMethods.WorkChanged) {
                 // Process-level: no session dimension, so it must be handled
-                // before anything that routes by session. Shape-checked because
-                // it crosses the wire; a malformed frame is dropped, not guessed at.
-                const params = push.params as Partial<WorkChangedParams> | undefined;
-                if (
-                    typeof params?.instanceId === "string" &&
-                    Array.isArray(params.workIds) &&
-                    params.workIds.every((id) => typeof id === "string")
-                ) {
-                    onWorkChangedRef({ instanceId: params.instanceId, workIds: params.workIds });
-                }
+                // before anything that routes by session. The payload is empty;
+                // the pane re-pulls everything.
+                onWorkChangedRef();
                 return;
             }
             if (push.method === PushMethods.ImPolicyChanged) {

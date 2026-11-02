@@ -448,19 +448,15 @@ describe("work.delivery", () => {
             assert.equal(sender.calls.length, 1);
         });
 
-        it("a permanent failure can be retried too, and fails again if nothing changed", async () => {
+        it("refuses a permanent failure: the frozen target would fail the same way", async () => {
             const { clock, sender, store, deliverer } = rig();
             const id = await seed(store, clock, {
                 status: "permanentFailure",
                 lastError: "no_context",
             });
-            sender.script.push({ kind: "permanentFailure", code: "no_context" });
-            assert.equal(await deliverer.retry(id), "accepted");
-            await until(
-                async () => (await deliveryOf(store, id))?.status === "permanentFailure",
-                "the second refusal to be recorded",
-            );
-            assert.equal(sender.calls.length, 1);
+            assert.equal(await deliverer.retry(id), "not_retryable");
+            assert.equal(sender.calls.length, 0);
+            assert.equal((await deliveryOf(store, id))?.status, "permanentFailure");
         });
 
         it("refuses anything that is still going or already done, so nothing is sent twice", async () => {
@@ -499,6 +495,38 @@ describe("work.delivery", () => {
             const id = await seed(store, clock);
             await Promise.all([deliverer.deliver(id), deliverer.deliver(id), deliverer.resume()]);
             assert.equal(sender.calls.length, 1);
+        });
+
+        it("replays a trigger that arrived while a delivery was mid-send", async () => {
+            const { clock, sender, store, deliverer } = rig();
+            const id = await seed(store, clock);
+            // Hold the first send open so a second trigger provably lands mid-run.
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const original = sender.sendText.bind(sender);
+            let calls = 0;
+            sender.sendText = async (channelId, route, text) => {
+                calls++;
+                if (calls === 1) {
+                    sender.script.push({ kind: "unavailable", code: "not_connected" });
+                    await gate;
+                }
+                return original(channelId, route, text);
+            };
+
+            const first = deliverer.deliver(id);
+            await until(() => calls === 1, "the first send to start");
+            // The trigger that used to be swallowed by the running guard.
+            void deliverer.deliver(id);
+            release();
+            await first;
+            await until(
+                async () => (await deliveryOf(store, id))?.status === "confirmed",
+                "the replayed send to run",
+            );
+            assert.equal(calls, 2);
         });
 
         it("a delivery that already finished is not sent again", async () => {

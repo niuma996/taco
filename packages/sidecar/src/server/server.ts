@@ -514,16 +514,19 @@ export class SidecarServer implements ServerRpcSurface {
         this.conversationRouter = options.conversationRouter;
         // Process-level frames: no workspace, no session, no replay log, no IM
         // forwarding. Straight to the desktop transport and any extra sinks.
-        this.workPush = new WorkPushAdapter(SIDECAR_INSTANCE_ID, (frame) => {
-            void this.getTransport().send(frame);
+        // The transport promise is returned so the adapter can log a rejected
+        // write; this runs from a timer, where a rejection would be unhandled.
+        this.workPush = new WorkPushAdapter((frame) => {
+            const sent = this.getTransport().send(frame);
             this.clientSinkRegistry.fanout(frame, this.transport);
+            return sent;
         });
         this.work = new WorkService({
             root: join(tacoHome(), "work"),
             instanceId: SIDECAR_INSTANCE_ID,
             channels: this.channelRegistry,
             resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
-            onChange: (workId) => this.workPush.changed(workId),
+            onChange: () => this.workPush.changed(),
         });
         this.channelFactory = new ChannelFactory({
             broker: this.channelBindBroker,

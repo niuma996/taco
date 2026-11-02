@@ -5,14 +5,16 @@ import { WorkPushAdapter } from "../../src/server/workPushAdapter.ts";
 
 function rig(windowMs = 1_000_000) {
     const frames: ServerPush[] = [];
-    const adapter = new WorkPushAdapter("inst-1", (f) => frames.push(f), windowMs);
+    const adapter = new WorkPushAdapter((f) => {
+        frames.push(f);
+    }, windowMs);
     return { frames, adapter };
 }
 
 describe("server.workPushAdapter", () => {
-    it("announces a change as a process-level frame with no session and no answer text", () => {
+    it("announces a change as an empty, process-level frame", () => {
         const { frames, adapter } = rig();
-        adapter.changed("w-1");
+        adapter.changed();
         adapter.flush();
         assert.equal(frames.length, 1);
         const frame = frames[0];
@@ -20,20 +22,15 @@ describe("server.workPushAdapter", () => {
         assert.equal(frame?.workspace, WORKSPACE_ANY);
         assert.equal(frame?.session, undefined);
         assert.equal(frame?.seq, undefined, "never enters a session's replay sequence");
-        assert.deepEqual(frame?.params, { instanceId: "inst-1", workIds: ["w-1"] });
+        assert.deepEqual(frame?.params, {});
         adapter.close();
     });
 
-    it("folds a burst of changes into one frame and names each Work once", () => {
+    it("folds a burst of changes into one frame", () => {
         const { frames, adapter } = rig();
-        for (const id of ["w-1", "w-2", "w-1", "w-3", "w-2"]) adapter.changed(id);
+        for (let i = 0; i < 450; i++) adapter.changed();
         adapter.flush();
         assert.equal(frames.length, 1);
-        assert.deepEqual((frames[0]?.params as { workIds: string[] }).workIds, [
-            "w-1",
-            "w-2",
-            "w-3",
-        ]);
         adapter.close();
     });
 
@@ -46,27 +43,38 @@ describe("server.workPushAdapter", () => {
 
     it("sends on its own once the window closes", async () => {
         const { frames, adapter } = rig(5);
-        adapter.changed("w-1");
+        adapter.changed();
         await new Promise((r) => setTimeout(r, 40));
         assert.equal(frames.length, 1);
         adapter.close();
     });
 
-    it("splits an extreme burst across frames instead of one huge one", () => {
-        const { frames, adapter } = rig();
-        for (let i = 0; i < 450; i++) adapter.changed(`w-${i}`);
+    it("survives a transport that throws or rejects, and keeps reporting later changes", async () => {
+        const frames: ServerPush[] = [];
+        let calls = 0;
+        const adapter = new WorkPushAdapter((f) => {
+            calls++;
+            if (calls === 1) throw new Error("sink closed");
+            if (calls === 2) return Promise.reject(new Error("write failed"));
+            frames.push(f);
+        });
+        adapter.changed();
         adapter.flush();
-        assert.equal(frames.length, 3);
-        const ids = frames.flatMap((f) => (f.params as { workIds: string[] }).workIds);
-        assert.equal(new Set(ids).size, 450);
+        adapter.changed();
+        adapter.flush();
+        adapter.changed();
+        adapter.flush();
+        // Let the rejected promise's catch run.
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(frames.length, 1, "the third announcement still went out");
         adapter.close();
     });
 
     it("close drops what was waiting and ignores later changes", async () => {
         const { frames, adapter } = rig(5);
-        adapter.changed("w-1");
+        adapter.changed();
         adapter.close();
-        adapter.changed("w-2");
+        adapter.changed();
         await new Promise((r) => setTimeout(r, 30));
         assert.equal(frames.length, 0);
     });

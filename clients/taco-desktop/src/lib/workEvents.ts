@@ -7,18 +7,16 @@
  * the App-level wiring never needs to know about it.
  */
 
-import type { WorkChangedParams } from "@taco-ai/protocol";
+const listeners = new Set<() => void>();
 
-const listeners = new Set<(params: WorkChangedParams) => void>();
-
-export function subscribeWorkChanged(handler: (params: WorkChangedParams) => void): () => void {
+export function subscribeWorkChanged(handler: () => void): () => void {
     listeners.add(handler);
     return () => {
         listeners.delete(handler);
     };
 }
 
-export function onWorkChangedEvent(params: WorkChangedParams): void {
+export function onWorkChangedEvent(): void {
     // Snapshot: a handler may unsubscribe while this fan-out is running.
-    for (const listener of [...listeners]) listener(params);
+    for (const listener of [...listeners]) listener();
 }

@@ -4,11 +4,9 @@ import type { WorkListResult, WorkSummary } from "@taco-ai/protocol";
 import {
     appendPage,
     applyList,
-    attentionCount,
     createCoalescer,
     EMPTY_WORK_STATE,
     groupWork,
-    pushMatters,
     ResponseGate,
 } from "../../src/lib/workOverview.ts";
 
@@ -86,13 +84,6 @@ describe("workOverview.applyList", () => {
         assert.equal(next.groups.finished.length, 0);
         assert.notEqual(old.groups.finished.length, next.groups.finished.length);
     });
-
-    it("counts attention rows for a badge", () => {
-        const state = applyList(
-            list({ active: [work({ needsAttention: true }), work({ status: "running" })] }),
-        );
-        assert.equal(attentionCount(state), 1);
-    });
 });
 
 describe("workOverview.appendPage", () => {
@@ -118,26 +109,6 @@ describe("workOverview.appendPage", () => {
         );
         const next = appendPage(state, list({ instanceId: "inst-2", terminal: [work()] }));
         assert.equal(next, state);
-    });
-});
-
-describe("workOverview.pushMatters", () => {
-    const state = applyList(list({ instanceId: "inst-1" }));
-
-    it("a push naming Works matters", () => {
-        assert.equal(pushMatters(state, { instanceId: "inst-1", workIds: ["w-1"] }), true);
-    });
-
-    it("a push from a different daemon always matters, even when empty", () => {
-        assert.equal(pushMatters(state, { instanceId: "inst-2", workIds: [] }), true);
-    });
-
-    it("an empty push from the same daemon is ignored", () => {
-        assert.equal(pushMatters(state, { instanceId: "inst-1", workIds: [] }), false);
-    });
-
-    it("before the first answer any push from anywhere matters", () => {
-        assert.equal(pushMatters(EMPTY_WORK_STATE, { instanceId: "x", workIds: [] }), true);
     });
 });
 

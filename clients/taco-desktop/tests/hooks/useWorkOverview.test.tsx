@@ -84,7 +84,7 @@ describe("useWorkOverview", () => {
         assert.equal(result.current.state.loaded, true);
     });
 
-    it("refetches after the coalescing window when a push names a Work", async () => {
+    it("refetches after the coalescing window when a work.changed push arrives", async () => {
         const { client, workList } = fakeClient();
         const { result } = renderHook(() => useWorkOverview(client, true, "/ws"));
         await act(async () => {
@@ -93,8 +93,8 @@ describe("useWorkOverview", () => {
         assert.equal(workList.mock.calls.length, 1);
 
         act(() => {
-            onWorkChangedEvent({ instanceId: "inst-1", workIds: ["w-1"] });
-            onWorkChangedEvent({ instanceId: "inst-1", workIds: ["w-2"] });
+            onWorkChangedEvent();
+            onWorkChangedEvent();
         });
         await act(async () => {
             await vi.advanceTimersByTimeAsync(WORK_OVERVIEW_COALESCE_MS + 10);
@@ -120,6 +120,32 @@ describe("useWorkOverview", () => {
             2,
             "a reconnect the epoch guard misses still refetches",
         );
+    });
+
+    it("does not refetch when the same workspace set switches cwd", async () => {
+        const { client, workList } = fakeClient();
+        const { rerender } = renderHook(({ cwd }) => useWorkOverview(client, true, cwd), {
+            initialProps: { cwd: "/ws-a" },
+        });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        assert.equal(workList.mock.calls.length, 1);
+        rerender({ cwd: "/ws-b" });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(WORK_OVERVIEW_COALESCE_MS + 10);
+        });
+        assert.equal(workList.mock.calls.length, 1, "work.list is process-scoped");
+    });
+
+    it("shows an empty overview, not a spinner, when no workspace exists", async () => {
+        const { client, workList } = fakeClient();
+        const { result } = renderHook(() => useWorkOverview(client, true, ""));
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        assert.equal(workList.mock.calls.length, 0);
+        assert.equal(result.current.state.loaded, true);
     });
 
     it("keeps the newest answer when an older request lands after a reconnect", async () => {

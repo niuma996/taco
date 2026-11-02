@@ -99,6 +99,8 @@ const RETRYABLE: ReadonlySet<DeliveryStatus> = new Set(WORK_RETRYABLE_DELIVERY_S
 
 export class WorkDeliverer {
     private readonly running = new Set<string>();
+    /** Triggers that arrived while a delivery was running; re-run once it ends. */
+    private readonly rerun = new Set<string>();
     private readonly timers = new Map<string, () => void>();
     private stopped = false;
 
@@ -111,19 +113,31 @@ export class WorkDeliverer {
     ) {}
 
     /**
-     * Run the delivery for one Work now. A Work already being delivered is left
-     * alone, so calling this from several triggers (settle, channel start,
-     * manual retry) never produces two senders.
+     * Run the delivery for one Work now. A Work already being delivered is never
+     * sent twice at once, but a trigger that arrives mid-run is not dropped
+     * either: it is replayed once the current pass ends. Without that, a manual
+     * retry landing while the previous pass was finishing would flip the record
+     * to pending and then be swallowed by the running guard, leaving the notice
+     * to sit until its six-hour expiry.
      */
     async deliver(workId: string): Promise<void> {
-        if (this.stopped || this.running.has(workId)) return;
+        if (this.stopped) return;
+        if (this.running.has(workId)) {
+            this.rerun.add(workId);
+            return;
+        }
         this.running.add(workId);
         this.cancelTimer(workId);
         try {
             await this.run(workId);
+        } catch (e) {
+            // Store I/O or a sender that throws must not surface as an unhandled
+            // rejection from a timer; the next trigger retries the Work.
+            log.error("work delivery pass failed", { workId, error: String(e) });
         } finally {
             this.running.delete(workId);
         }
+        if (this.rerun.delete(workId)) void this.deliver(workId);
     }
 
     /**
@@ -179,6 +193,7 @@ export class WorkDeliverer {
 
     stop(): void {
         this.stopped = true;
+        this.rerun.clear();
         for (const cancel of this.timers.values()) cancel();
         this.timers.clear();
     }

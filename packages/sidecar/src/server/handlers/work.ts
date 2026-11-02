@@ -31,7 +31,5 @@ export function registerWorkHandlers(): void {
             if (!server.work) return { outcome: "not_found" };
             return server.work.retryDelivery(params.workId);
         },
-        // A re-send is a side effect: identical commandIds must not send twice.
-        { command: true },
     );
 }

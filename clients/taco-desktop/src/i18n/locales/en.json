@@ -492,7 +492,7 @@
     "refresh": "Refresh",
     "loading": "Loading background work…",
     "empty": "No background work yet.",
-    "emptyHint": "Background subagents and scheduled tasks appear here while they run, and stay after they finish.",
+    "emptyHint": "Background subagents appear here while they run, and stay after they finish.",
     "loadMore": "Load more",
     "loadingMore": "Loading…",
     "partial": "Partial",

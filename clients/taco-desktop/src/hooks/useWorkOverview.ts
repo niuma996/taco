@@ -22,7 +22,6 @@ import {
     applyList,
     createCoalescer,
     EMPTY_WORK_STATE,
-    pushMatters,
     ResponseGate,
     type WorkOverviewState,
 } from "../lib/workOverview.ts";
@@ -120,9 +119,10 @@ export function useWorkOverview(
     }, [clearError]);
 
     useEffect(() => {
-        const unsubscribe = subscribeWorkChanged((params) => {
+        const unsubscribe = subscribeWorkChanged(() => {
+            // Any change means the whole overview may differ (a new Work, a
+            // status flip, a delivery attempt), so the push always re-pulls.
             if (!activeRef.current) return;
-            if (!pushMatters(stateRef.current, params)) return;
             coalescer.trigger();
         });
         return () => {
@@ -140,12 +140,21 @@ export function useWorkOverview(
         });
     }, [client, coalescer]);
 
+    // `work.list` is process-scoped; it needs *a* started workspace as transport,
+    // not this particular one. Depending on the cwd would refetch on every
+    // workspace switch for no reason, and with no workspace at all the pane
+    // would sit on a spinner it can never finish.
+    const hasWorkspace = activeCwd !== undefined && activeCwd !== "";
     useEffect(() => {
-        if (!active || !activeCwd) return undefined;
+        if (!active) return undefined;
+        if (!hasWorkspace) {
+            setState({ ...EMPTY_WORK_STATE, loaded: true });
+            return undefined;
+        }
         gateRef.current.invalidate();
         refreshRef.current();
         return () => gateRef.current.invalidate();
-    }, [active, activeCwd]);
+    }, [active, hasWorkspace]);
 
     const retryDelivery = useCallback(
         async (workId: string): Promise<void> => {

@@ -422,6 +422,7 @@ export type {
     WorkSummary,
 } from "./work.js";
 export {
+    WORK_ATTENTION_DELIVERY_STATUSES,
     WORK_COMPLETENESS,
     WORK_DELIVERY_STATUSES,
     WORK_LIST_DEFAULT_LIMIT,

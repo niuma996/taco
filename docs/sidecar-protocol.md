@@ -104,6 +104,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.5 | `attachment.stage`; `attachments` on `session.prompt` / `.steer` / `.followUp` and `initialAttachments` on `session.create`; user `message` pushes and history carry `attachments` |
 | 2.6 | optional `input` (`"text"` / `"image"`) on `ProviderView.models[]` and on `customProviders[].models` / `providerExtraModels` entries written by `settings.write`; image blocks on session prompts are mime- and size-bounded |
 | 2.7 | optional `query` on `session.list` — a case-insensitive substring filter over the session title and id, applied before pagination so the cursor and `total` describe the filtered set |
+| 2.8 | `work.list` / `work.get` / `work.retryDelivery` and the process-level `work.changed` push (the read-only overview of background Work) |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
@@ -304,7 +305,13 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `work.changed` | WorkChanged |
 <!-- PUSH_TABLE_END -->
 
-**Push routing note**: `session.tool_call_*` frames carry a deduplication `id` equal to the `toolCallId`.  Clients may use this to merge incremental updates.  All other push frames should be accumulated by `workspace` + `session`.
+**Push routing note**: `session.tool_call_*` frames carry a deduplication `id` equal to the `toolCallId`.  Clients may use this to merge incremental updates.  Session-scoped push frames should be accumulated by `workspace` + `session`.
+
+A few frames have no session dimension at all. `models.changed`,
+`channels.conversations_changed`, `im.policy_changed` and `work.changed` are
+process-level refresh signals: they carry an empty or near-empty `params` and
+the client re-pulls the corresponding list. `work.changed` additionally has no
+workspace (`workspace` is `"*"`) and never enters a session's replay log.
 
 ### Session Event Replay (tombstone & capacity)
 
