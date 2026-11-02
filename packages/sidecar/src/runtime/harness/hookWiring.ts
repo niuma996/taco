@@ -43,6 +43,10 @@ import {
     buildStripThinkingContextHook,
     type ImChannelContext,
 } from "../../tags/index.ts";
+import {
+    buildSubagentBudgetContextHook,
+    type SubagentBudgetState,
+} from "../../tags/subagentBudget.ts";
 import { type ActiveTasksState, buildActiveTasksContextHook } from "../../tasks/activeTasksTag.ts";
 import { buildTodoWriteReminderContextHook } from "../../tasks/todoWriteReminder.ts";
 import type { PinOnceConsumer } from "../compaction/pinOnceConsumer.ts";
@@ -57,10 +61,6 @@ import type {
     Skill,
     ThinkingLevel,
 } from "../pi/types.ts";
-import {
-    buildSubagentBudgetContextHook,
-    type SubagentBudgetState,
-} from "../subagent/subagentBudget.ts";
 import { recordPromptCacheFingerprint } from "./promptCacheFingerprint.ts";
 import { capToolResult } from "./toolResultCap.ts";
 

@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/agents/filterTools.ts";
 import { loadAgents } from "../../src/agents/loadAgents.ts";
 import type { Skill } from "../../src/runtime/pi/types.ts";
-import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/subagent/childAttach.ts";
 import {
     parseYamlFrontmatter,
     preloadSkillFrontmatter,

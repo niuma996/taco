@@ -11,6 +11,7 @@
  */
 
 import type { AgentHarnessTool, ExecutionToolContext } from "../runtime/pi/types.ts";
+import { fileAccessOf } from "../tools/fileAccess.ts";
 
 type AgentTool = AgentHarnessTool<ExecutionToolContext>;
 
@@ -58,21 +59,24 @@ export function filterToolsForAgent(
 /**
  * What a session may load on demand.
  *
- * A profile's `tools:` list is its complete declaration, but only the
- * *initial* toolset was filtered against it (`filterToolsForAgent`). The
- * deferred-load path was not: every session gets an `addTools` tool, so a
- * read-only profile could load `configPatch` (mutates the user's global
- * config — no path argument, so the mutation gate does not see it),
- * `pdfMerge` / `pdfSplit` / `pdfFill` (write files) or `sessionSearch` /
+ * When a profile declares `tools:`, that list bounds both the initial toolset
+ * (`filterToolsForAgent`) and the deferred-load path. The deferred path used
+ * to ignore it, which let a read-only profile load `configPatch` (mutates the
+ * user's global config — no path argument, so the mutation gate does not see
+ * it), `pdfMerge` / `pdfSplit` / `pdfFill` (write files) or `sessionSearch` /
  * `sessionList` (read the user's private transcripts), none of which its body
  * says it may do.
+ *
+ * A profile with no `tools:` list inherits the parent's full load surface;
+ * that is the existing meaning of "inherit all", and the depth guard still
+ * applies.
  *
  * The whitelist is the same list the initial toolset was filtered by, so a
  * tool the profile declared stays loadable even when it is deferred — the
  * filter does not accidentally strip a capability the profile asked for.
  */
 export interface AgentToolPolicy {
-    /** Names the session may load; undefined = any candidate. */
+    /** Names the session may load; undefined = inherit the full load surface. */
     readonly allowed?: ReadonlySet<string>;
     /** Names refused regardless of `allowed`. */
     readonly denied: ReadonlySet<string>;
@@ -96,20 +100,62 @@ export function agentToolPolicy(
 }
 
 /**
- * Whether a profile's own toolset can create or modify a file.
+ * Agent types whose `shell` tool is swapped for a read-only-broker instance.
  *
- * A profile that declares an explicit whitelist without `write` / `edit`
- * cannot; one that declares no whitelist inherits the parent's tools and may
- * or may not have them, so the answer is "possibly".
+ * Membership is a permission boundary, not a hint: these profiles tell the
+ * model it must not mutate anything, and prose alone does not stop a shell
+ * call. Any profile whose body claims read-only must be listed here, or the
+ * child inherits the user's root-session allowlist and can write.
  *
- * Callers that need a definite yes/no must also exclude `claude-code`
- * profiles: their whitelist names Claude Code's own tools, where `Bash` can
- * write a file no matter what the list says.
+ * Lives here, not in the subagent runner, because it is an agent-definition
+ * fact: both the shell swap (`childAttach`) and the caller-visible
+ * `read_only` label (`workspace`) decide from it.
  */
-export function agentCanWriteFiles(whitelist: readonly string[] | undefined): boolean {
-    if (!whitelist) return true;
-    const names = new Set(whitelist.map((n) => n.toLowerCase()));
-    return names.has("write") || names.has("edit");
+export const READ_ONLY_SHELL_AGENT_TYPES: ReadonlySet<string> = new Set(["explorer", "reviewer"]);
+
+/**
+ * Whether an agent can create or modify a file.
+ *
+ * "writes" covers every route, not just the `write` tool: a writable shell can
+ * write a file, and the PDF tools (`pdfMerge` / `pdfSplit` / `pdfFill`) write
+ * their output. Only a profile with no writer at all is `"read-only"` — a
+ * profile with a working shell is not, even if it lacks `write` / `edit`
+ * (`verification` runs builds and writes throwaway scripts).
+ *
+ * `toolNames === undefined` means "inherits the parent's tools", which may or
+ * may not include a writer; it is treated as "writes" so a caller never
+ * labels an inheriting agent read-only and withholds an output path it could
+ * actually honour.
+ *
+ * Callers must exclude `claude-code` profiles: their names are Claude Code's
+ * own, where `Bash` writes a file regardless of what the list says.
+ */
+export function writeCapability(
+    toolNames: readonly string[] | undefined,
+    agentType: string | undefined,
+): "writes" | "read-only" {
+    if (!toolNames) return "writes";
+    const names = new Set(toolNames.map((n) => n.toLowerCase()));
+    if (
+        names.has("shell") &&
+        (agentType === undefined || !READ_ONLY_SHELL_AGENT_TYPES.has(agentType))
+    ) {
+        return "writes";
+    }
+    // `fileAccessOf` is keyed by the registry's exact tool name (`pdfMerge`,
+    // not `pdfmerge`), so consult the original spelling.
+    for (const name of toolNames) {
+        if (fileAccessOf(name)?.write !== undefined) return "writes";
+    }
+    return "read-only";
+}
+
+/** Whether the toolset contains the direct file-editing tools. */
+export function hasDirectWriteTool(toolNames: readonly string[]): boolean {
+    return toolNames.some((n) => {
+        const name = n.toLowerCase();
+        return name === "write" || name === "edit";
+    });
 }
 
 /**

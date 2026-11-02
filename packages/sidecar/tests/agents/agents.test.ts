@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
-    agentCanWriteFiles,
     filterToolsForAgent,
     isToolVisibleForAnySubagent,
+    READ_ONLY_SHELL_AGENT_TYPES,
+    writeCapability,
 } from "../../src/agents/filterTools.ts";
 import {
     buildForkedContext,
@@ -21,7 +22,6 @@ import {
 } from "../../src/agents/loadAgents.ts";
 import { isStrictReadOnly } from "../../src/permissions/commandPolicy.ts";
 import type { AgentHarnessTool, Entry, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
-import { READ_ONLY_SHELL_AGENT_TYPES } from "../../src/runtime/subagent/childAttach.ts";
 
 describe("filterTools", () => {
     type AgentTool = AgentHarnessTool<ExecutionToolContext>;
@@ -113,24 +113,39 @@ describe("filterTools", () => {
         });
     });
 
-    describe("agentCanWriteFiles", () => {
-        it("is false for a whitelist without a file-writing tool", () => {
-            assert.equal(agentCanWriteFiles(["read", "grep", "glob", "shell"]), false);
+    describe("writeCapability", () => {
+        it("is read-only for a whitelist with only a read-only shell", () => {
+            assert.equal(
+                writeCapability(["read", "grep", "glob", "shell"], "reviewer"),
+                "read-only",
+            );
         });
 
-        it("is true when the whitelist names write or edit", () => {
-            assert.equal(agentCanWriteFiles(["read", "write"]), true);
-            assert.equal(agentCanWriteFiles(["read", "edit"]), true);
+        it("writes when the profile's shell is not gated", () => {
+            // `verification` runs builds and writes throwaway scripts; calling
+            // it read-only because it lacks `write` would be false.
+            assert.equal(
+                writeCapability(["read", "grep", "glob", "shell"], "verification"),
+                "writes",
+            );
         });
 
-        it("is true when the profile declares no whitelist (it inherits)", () => {
-            assert.equal(agentCanWriteFiles(undefined), true);
+        it("writes when the whitelist names write or edit", () => {
+            assert.equal(writeCapability(["read", "write"], "builder"), "writes");
+            assert.equal(writeCapability(["read", "edit"], "builder"), "writes");
         });
 
-        it("matches Claude Code's own spelling of the write tools", () => {
-            assert.equal(agentCanWriteFiles(["Read", "Write"]), true);
-            assert.equal(agentCanWriteFiles(["Read", "Edit"]), true);
-            assert.equal(agentCanWriteFiles(["Read", "Bash"]), false);
+        it("writes when the whitelist names a PDF writer", () => {
+            assert.equal(writeCapability(["read", "pdfMerge"], "builder"), "writes");
+            assert.equal(writeCapability(["read", "pdfSplit"], "builder"), "writes");
+        });
+
+        it("writes when the profile declares no whitelist (it inherits)", () => {
+            assert.equal(writeCapability(undefined, "builder"), "writes");
+        });
+
+        it("is read-only when there is neither a shell nor a writer", () => {
+            assert.equal(writeCapability(["read", "grep"], "builder"), "read-only");
         });
     });
 });
@@ -519,6 +534,23 @@ describe("readOnlyShellGate", () => {
             // It runs builds and writes ephemeral scripts to /tmp; swapping in the
             // read-only broker would make the profile unable to do its job.
             assert.equal(READ_ONLY_SHELL_AGENT_TYPES.has("verification"), false);
+        });
+
+        it("labels builtin profiles by their real write capability", async () => {
+            // The caller-visible `<read_only>` label and the child's own
+            // `<capabilities>` note both come from `writeCapability`; this is
+            // the assertion that keeps a writable-shell profile (verification)
+            // from being advertised as read-only.
+            const agents = await loadAgents({ builtinDir: BUILTIN_DIR, userDirs: [] });
+            const byType = new Map(agents.map((a) => [a.agentType, a]));
+            for (const type of ["reviewer", "explorer"]) {
+                assert.equal(writeCapability(byType.get(type)?.tools, type), "read-only", type);
+            }
+            assert.equal(
+                writeCapability(byType.get("verification")?.tools, "verification"),
+                "writes",
+                "verification can write through its shell",
+            );
         });
 
         it("reviewer defaults to forked context", async () => {

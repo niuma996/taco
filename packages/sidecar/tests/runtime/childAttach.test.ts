@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { asSessionId } from "@taco-ai/protocol";
+import { agentToolPolicy } from "../../src/agents/filterTools.ts";
 import {
     buildSessionTaskState,
     type SessionTaskState,
@@ -76,7 +77,7 @@ describe("prepareChildAttach — capability statement", () => {
 
     it("does not claim the shell is read-only for a non-gated profile", async () => {
         const prompt = await attach("verification", ["read", "grep", "glob", "shell"]);
-        assert.match(prompt, /no file-writing tools/);
+        assert.match(prompt, /no `write` \/ `edit` tools/);
         assert.ok(!prompt.includes("your shell is read-only"));
         // A profile with a working shell genuinely can write a file through
         // it, so it must not be told it cannot.
@@ -93,6 +94,31 @@ describe("prepareChildAttach — capability statement", () => {
         assert.ok(
             prompt.indexOf("<capabilities>") < prompt.indexOf("ROLE BODY MARKER"),
             "capability statement must come before the role body",
+        );
+    });
+
+    it("lists only the deferred tools the profile may load", async () => {
+        const tools = ["read", "grep"].map(fakeTool);
+        const deps: ChildAttachDeps = {
+            ...depsFor(tools),
+            getDeferredToolCatalog: () => [
+                { name: "pdfMerge", summary: "merge PDFs" },
+                { name: "configPatch", summary: "patch config" },
+            ],
+        };
+        const { systemPrompt } = await prepareChildAttach(deps, {
+            sessionId: asSessionId("s1"),
+            agentType: "builder",
+            childDepth: 1,
+            allowedTools: tools,
+            toolPolicy: agentToolPolicy(["read", "grep", "pdfMerge"], 1),
+            modelIdentity: "test/model",
+        });
+        assert.match(systemPrompt, /<deferred_tools>/);
+        assert.match(systemPrompt, /pdfMerge/);
+        assert.ok(
+            !systemPrompt.includes("configPatch"),
+            "a tool outside the profile's declaration must not be advertised",
         );
     });
 });

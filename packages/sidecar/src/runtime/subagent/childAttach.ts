@@ -9,6 +9,12 @@
  */
 
 import type { CommandPermissionConfig, SessionId } from "@taco-ai/protocol";
+import {
+    type AgentToolPolicy,
+    hasDirectWriteTool,
+    READ_ONLY_SHELL_AGENT_TYPES,
+    writeCapability,
+} from "../../agents/filterTools.ts";
 import type { AgentFewShot } from "../../agents/types.ts";
 import { PermissionBroker } from "../../permissions/permissionBroker.ts";
 import {
@@ -16,6 +22,10 @@ import {
     filterContributorsForTools,
     type SystemPromptContributor,
 } from "../../prompts/buildSystemPrompt.ts";
+import {
+    type DeferredToolCatalogEntry,
+    formatDeferredToolsForSystemPrompt,
+} from "../../prompts/formatCatalogForSystemPrompt.ts";
 import type { EnvironmentContext } from "../../prompts/index.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { createShellTool } from "../../tools/shellTool.ts";
@@ -24,12 +34,9 @@ import type { SessionTaskState } from "../session/sessionTaskState.ts";
 /**
  * Agent types whose `shell` tool is swapped for a read-only-broker instance.
  *
- * Membership is a permission boundary, not a hint: these profiles tell the
- * model it must not mutate anything, and prose alone does not stop a shell
- * call. Any profile whose body claims read-only must be listed here, or the
- * child inherits the user's root-session allowlist and can write.
+ * The set itself lives in `agents/filterTools.ts` so this swap and the
+ * caller-visible `read_only` label decide from the same list.
  */
-export const READ_ONLY_SHELL_AGENT_TYPES: ReadonlySet<string> = new Set(["explorer", "reviewer"]);
 
 export interface ChildAttachDeps {
     /**
@@ -50,6 +57,13 @@ export interface ChildAttachDeps {
     readonly hideWorkspacePath: boolean | undefined;
     /** Parent's rendered instruction blocks; a thunk so a settings.write reaches the child. */
     readonly getParentInstructionsBlock: () => string;
+    /**
+     * Deferred tools the workspace can load on demand, unfiltered. The child
+     * prompt narrows this to what its profile declared, so `addTools` and the
+     * `<deferred_tools>` listing agree — a subagent that holds the tool but
+     * cannot see any loadable name would just burn turns guessing.
+     */
+    readonly getDeferredToolCatalog?: () => readonly DeferredToolCatalogEntry[];
 }
 
 export interface ChildAttachArgs {
@@ -62,6 +76,11 @@ export interface ChildAttachArgs {
     fewShots?: ReadonlyArray<AgentFewShot>;
     forkedContext?: string;
     modelIdentity: string | undefined;
+    /**
+     * What the child may load on demand. The deferred-tools listing is
+     * narrowed by it, matching the controller that enforces it at call time.
+     */
+    toolPolicy?: AgentToolPolicy;
 }
 
 /**
@@ -118,6 +137,17 @@ export async function prepareChildAttach(
     // profile expects (citation shape, stop condition) before it takes over.
     const fewShotsBlock = formatFewShots(args.fewShots);
     if (fewShotsBlock) profileContributors.push({ append: fewShotsBlock });
+    // The deferred tools this profile may load. Same policy the controller
+    // enforces, so the listing never advertises a name `addTools` will refuse.
+    const deferred = deps.getDeferredToolCatalog?.() ?? [];
+    const policy = args.toolPolicy;
+    const loadableDeferred = deferred.filter(
+        (c) =>
+            !(policy?.denied.has(c.name) ?? false) &&
+            (policy?.allowed === undefined || policy.allowed.has(c.name)),
+    );
+    const deferredBlock = formatDeferredToolsForSystemPrompt(loadableDeferred);
+    if (deferredBlock) profileContributors.push({ append: deferredBlock });
     // Capability statement before the role body, so the profile's own prose
     // still wins on conflict — but the model knows what it can do before it
     // reads the role's instructions.
@@ -168,25 +198,31 @@ export async function prepareChildAttach(
  * the same claim. A profile whose shell is also read-only genuinely cannot
  * create a file by any route, so it gets the directive. A profile with a
  * working shell — `verification` runs builds and writes throwaway scripts —
- * only lacks the `write` / `edit` tools, and telling it it cannot write a
- * file would be false.
+ * or a PDF writer only lacks the `write` / `edit` tools, and telling it it
+ * cannot write a file would be false.
  *
- * Returns "" when the child can write — there is nothing to warn about.
+ * Returns "" when the child has the direct write tools — there is nothing to
+ * say.
  */
 function formatCapabilities(tools: readonly TacoTool[], agentType: string | undefined): string {
-    const names = new Set(tools.map((t) => t.name));
-    if (names.has("write") || names.has("edit")) return "";
-    const readOnlyShell = agentType !== undefined && READ_ONLY_SHELL_AGENT_TYPES.has(agentType);
-    if (!readOnlyShell) {
+    const names = tools.map((t) => t.name);
+    if (hasDirectWriteTool(names)) return "";
+    const hasShell = names.some((n) => n.toLowerCase() === "shell");
+    if (writeCapability(names, agentType) === "writes") {
         return [
             "<capabilities>",
-            "You have no file-writing tools (`write` / `edit`).",
+            "You have no `write` / `edit` tools. " +
+                (hasShell
+                    ? "Your shell is available for commands your role needs."
+                    : "Use the file-producing tools your role provides."),
             "</capabilities>",
         ].join("\n");
     }
     return [
         "<capabilities>",
-        "You have no file-writing tools, and your shell is read-only.",
+        hasShell
+            ? "You have no file-writing tools, and your shell is read-only."
+            : "You have no file-writing tools.",
         "If your task asks you to create or modify a file, you cannot do it. Do not retry, and do not",
         "look for another route to the same outcome — another tool, a shell pipeline, a redirect. Write",
         "the complete content in your final reply instead, and state plainly that no file was written.",

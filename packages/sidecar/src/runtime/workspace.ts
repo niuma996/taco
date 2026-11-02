@@ -27,7 +27,7 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
-import { agentCanWriteFiles } from "../agents/filterTools.ts";
+import { writeCapability } from "../agents/filterTools.ts";
 import type { AgentDefinition, SubagentContextMode } from "../agents/types.ts";
 import {
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -737,6 +737,15 @@ export class WorkspaceRuntime extends EventEmitter {
             // block on settings.write, and a captured string would pin every
             // subagent to the startup config while the parent moved on.
             getParentInstructionsBlock: () => this.parentInstructionsBlock,
+            // Same source as the main session's <deferred_tools> listing: a
+            // subagent prompt narrows it to the tools its profile declared.
+            getDeferredToolCatalog: () => {
+                const fsToolsDenied = this.resolveImPolicy()?.tools.fsTools === "deny";
+                return this.toolRegistry
+                    .listDeferred()
+                    .filter((c) => !isFsToolDenied(c.name, fsToolsDenied))
+                    .map((c) => ({ name: c.name, summary: c.summary }));
+            },
             workHooks: options.workHooks,
         });
 
@@ -1503,10 +1512,12 @@ function renderParentInstructionsBlock(
 }
 
 /**
- * Whether an agent profile has no file-writing tool.
+ * Whether an agent profile has no way to write a file.
  *
- * Used to label the profile in `<available_agents>`, so a caller does not hand
- * a read-only agent a task that names an output path.
+ * Not the same as "no `write` tool": a profile with a writable shell
+ * (`verification`, which runs builds and writes throwaway scripts) can write.
+ * `writeCapability` answers the whole question, so the caller-visible label
+ * and the child's own `<capabilities>` note cannot drift.
  *
  * `claude-code` profiles are excluded: their whitelist names Claude Code's own
  * tools, where `Bash` writes a file regardless of what the list says, so the
@@ -1514,7 +1525,7 @@ function renderParentInstructionsBlock(
  */
 function isReadOnlyProfile(def: AgentDefinition): boolean {
     if (def.runtime === "claude-code") return false;
-    return !agentCanWriteFiles(def.tools);
+    return writeCapability(def.tools, def.agentType) === "read-only";
 }
 
 /**

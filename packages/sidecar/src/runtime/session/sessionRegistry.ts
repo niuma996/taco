@@ -35,6 +35,7 @@ import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
 import { createSkillTool } from "../../skills/skillTool.ts";
 import type { TacoSkill } from "../../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../../tags/index.ts";
+import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import { type AgentTypeDescriptor, createAgentTool } from "../../tools/agent.ts";
 import { createAgentAbortTool } from "../../tools/agentAbort.ts";
 import { createAgentContinueTool } from "../../tools/agentContinue.ts";
@@ -56,7 +57,6 @@ import type {
     Session,
     ThinkingLevel,
 } from "../pi/types.ts";
-import type { SubagentBudgetState } from "../subagent/subagentBudget.ts";
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFactsIfAbsent } from "./sessionFacts.ts";
 import { resolveSessionByPrefix, SessionNotFoundError } from "./sessionLookup.ts";
@@ -969,7 +969,18 @@ export class SessionRegistry extends EventEmitter {
         workspaceTools?: TacoTool[],
     ): Promise<AttachedSession> {
         const existing = this.attached.get(sessionId);
-        if (existing) return existing;
+        if (existing) {
+            // A resume re-attaches to the mounted session. The harness hooks
+            // were wired at create time, so any run-scoped control the caller
+            // brought must be pushed onto the live handle or it is ignored.
+            if (opts.toolLoadPolicy !== undefined) {
+                await existing.setToolLoadPolicy(opts.toolLoadPolicy);
+            }
+            if (opts.getSubagentBudget !== undefined) {
+                existing.setSubagentBudget(opts.getSubagentBudget);
+            }
+            return existing;
+        }
 
         // attach() builds and passes taskState; AgentSpawner subagent path
         // doesn't, so re-build here (subagent sessions also have independent

@@ -73,6 +73,13 @@ export interface SessionToolController {
      * allowlist with no definition behind it fails the generation.
      */
     loadRefusal(name: string): string | undefined;
+    /**
+     * Replace the load policy after construction, e.g. when a resume attaches
+     * to a session that is still mounted. Refused names are dropped from the
+     * active set so a tightened profile takes effect without a detach.
+     * Returns whether the active set changed.
+     */
+    setLoadPolicy(policy: AgentToolPolicy): Promise<boolean>;
     /** Names of dynamic tools loaded in this session (excludes built-ins). */
     loadedToolNames(): readonly string[];
     /** Current active tool names (built-ins + dynamic, mirrors lane state). */
@@ -90,13 +97,27 @@ export interface SessionToolController {
 const FS_DENY_REASON =
     "the session's policy denies file tools, so it is not available in this session";
 
+/**
+ * Candidates this session is allowed to load.
+ *
+ * Used for the always-loaded set and for deciding whether `addTools` is worth
+ * installing: a refused candidate must not reach the toolset, and an empty
+ * loadable set leaves `addTools` with nothing it could ever do.
+ */
+export function loadableCandidates<T extends { readonly name: string }>(
+    candidates: readonly T[],
+    controller: Pick<SessionToolController, "loadRefusal">,
+): T[] {
+    return candidates.filter((c) => controller.loadRefusal(c.name) === undefined);
+}
+
 export class DefaultSessionToolController implements SessionToolController {
     readonly registry: DeferredToolRegistry;
     private toolState?: SessionToolState;
     /** Loaded dynamic tool names, in stable insertion order. */
     private loadedNames: string[] = [];
     private readonly fsToolsDenied: () => boolean | Promise<boolean>;
-    private readonly loadPolicy?: AgentToolPolicy;
+    private loadPolicy?: AgentToolPolicy;
 
     constructor(registry: DeferredToolRegistry, options?: SessionToolControllerOptions) {
         this.registry = registry;
@@ -109,21 +130,35 @@ export class DefaultSessionToolController implements SessionToolController {
     /**
      * Why this session may not load `name`, or undefined when it may.
      *
-     * Two independent refusals: the profile never declared the tool, or the
-     * tool is main-session-only and this session is a subagent. The profile
-     * refusal comes first — it is the broader one and the message the model
-     * needs to understand why its request was refused.
+     * Two independent refusals: the tool is main-session-only and this is a
+     * subagent (the depth guard), or the profile never declared it. The depth
+     * guard is checked first; the profile check is the broader one.
      */
     loadRefusal(name: string): string | undefined {
         const policy = this.loadPolicy;
         if (!policy) return undefined;
         if (policy.denied.has(name)) {
-            return `this session cannot load ${name}: it is a main-session-only tool and this is a subagent session`;
+            return "it is a main-session-only tool and this is a subagent session";
         }
         if (policy.allowed && !policy.allowed.has(name)) {
-            return `this session cannot load ${name}: it is not in the tool list this agent declared`;
+            return "it is not in the tool list this agent declared";
         }
         return undefined;
+    }
+
+    async setLoadPolicy(policy: AgentToolPolicy): Promise<boolean> {
+        this.loadPolicy = policy;
+        const toolState = this.toolState;
+        if (!toolState) return false;
+        // A tightened policy must also hide what an earlier, looser one let
+        // through. Removing the name from the active set is enough to hide the
+        // tool; the definition stays so a later loosening needs no reload.
+        return toolState.update(({ activeNames }) => {
+            const refused = activeNames.filter((name) => this.loadRefusal(name) !== undefined);
+            if (refused.length === 0) return undefined;
+            const removed = new Set(refused);
+            return { activeNames: activeNames.filter((name) => !removed.has(name)) };
+        });
     }
 
     bindHarness(toolState: SessionToolState): void {

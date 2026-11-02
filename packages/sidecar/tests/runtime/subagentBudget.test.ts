@@ -5,7 +5,7 @@ import {
     buildSubagentBudgetContextHook,
     renderBudgetReminder,
     type SubagentBudgetState,
-} from "../../src/runtime/subagent/subagentBudget.ts";
+} from "../../src/tags/subagentBudget.ts";
 
 const NOW = 1_800_000_000_000;
 
@@ -119,5 +119,33 @@ describe("buildSubagentBudgetContextHook", () => {
         hook({ messages: list });
         // Only the tail grew: everything before it is unchanged.
         assert.equal(JSON.stringify(list.slice(0, 2)), before);
+    });
+});
+
+describe("budget reminder throttle", () => {
+    it("re-injects at most once per three turns", () => {
+        const budget = { turnsUsed: 18, startedAt: NOW, maxTurns: 20 };
+        const hook = buildSubagentBudgetContextHook(() => budget);
+
+        assert.ok(hook({ messages: messages() }), "first crossing injects");
+        assert.equal(hook({ messages: messages() }), undefined, "same turn stays silent");
+
+        budget.turnsUsed = 19;
+        assert.equal(hook({ messages: messages() }), undefined, "same bucket stays silent");
+
+        budget.turnsUsed = 21;
+        assert.ok(hook({ messages: messages() }), "next bucket injects again");
+    });
+
+    it("resets the throttle when a resumed run supplies a new budget", () => {
+        let current: SubagentBudgetState = { turnsUsed: 18, startedAt: NOW, maxTurns: 20 };
+        const hook = buildSubagentBudgetContextHook(() => current);
+        assert.ok(hook({ messages: messages() }));
+
+        current = { turnsUsed: 18, startedAt: NOW, maxTurns: 20 };
+        assert.ok(
+            hook({ messages: messages() }),
+            "a new run's budget is not throttled by the old one",
+        );
     });
 });

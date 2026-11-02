@@ -5,8 +5,12 @@ import {
     DefaultDeferredToolRegistry,
     type ToolCandidate,
 } from "../../src/runtime/harness/deferredToolRegistry.ts";
-import { DefaultSessionToolController } from "../../src/runtime/harness/sessionToolController.ts";
+import {
+    DefaultSessionToolController,
+    loadableCandidates,
+} from "../../src/runtime/harness/sessionToolController.ts";
 import { SessionToolState } from "../../src/runtime/harness/sessionToolState.ts";
+import { pruneLoadRefusedTools } from "../../src/runtime/harness/toolsetRefresh.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 /**
@@ -143,5 +147,75 @@ describe("DefaultSessionToolController — load policy", () => {
             restored.map((t) => t.name),
             ["configPatch"],
         );
+    });
+});
+
+describe("setLoadPolicy", () => {
+    it("revokes a tool an earlier, looser policy allowed", async () => {
+        const { controller, state } = makeController();
+        await controller.addTools(["configPatch"]);
+        assert.deepEqual(state.active, ["configPatch"]);
+
+        const changed = await controller.setLoadPolicy(agentToolPolicy(["read"], 1));
+        assert.equal(changed, true);
+        assert.deepEqual(state.active, [], "a tightened policy must hide what it refuses");
+    });
+
+    it("is a no-op when the new policy refuses nothing active", async () => {
+        const { controller, state } = makeController(agentToolPolicy(["pdfMerge"], 1));
+        await controller.addTools(["pdfMerge"]);
+        const changed = await controller.setLoadPolicy(agentToolPolicy(["pdfMerge"], 1));
+        assert.equal(changed, false);
+        assert.deepEqual(state.active, ["pdfMerge"]);
+    });
+});
+
+describe("loadableCandidates", () => {
+    it("drops refused candidates and keeps declared ones", () => {
+        const { controller } = makeController(agentToolPolicy(["pdfMerge"], 1));
+        const out = loadableCandidates([{ name: "configPatch" }, { name: "pdfMerge" }], controller);
+        assert.deepEqual(
+            out.map((c) => c.name),
+            ["pdfMerge"],
+        );
+    });
+
+    it("keeps every candidate when the session has no policy", () => {
+        const { controller } = makeController();
+        const candidates = [{ name: "configPatch" }, { name: "pdfMerge" }];
+        assert.deepEqual(loadableCandidates(candidates, controller), candidates);
+    });
+});
+
+describe("pruneLoadRefusedTools", () => {
+    function tool(name: string): TacoTool {
+        return {
+            name,
+            label: name,
+            description: name,
+            parameters: {} as never,
+            execute: (async () => ({ content: [] })) as never,
+        };
+    }
+
+    it("removes refused names with no definition and keeps defined ones", async () => {
+        const { collection, state } = fakeCollection();
+        state.tools = [tool("read"), tool("pdfMerge")];
+        state.active = ["configPatch", "pdfMerge", "read"];
+        const toolState = new SessionToolState(collection);
+
+        const refused = new Set(["configPatch", "pdfMerge"]);
+        const changed = await pruneLoadRefusedTools(toolState, (name) => refused.has(name));
+
+        assert.equal(changed, true);
+        assert.deepEqual(state.active, ["pdfMerge", "read"]);
+    });
+
+    it("writes nothing when nothing is refused", async () => {
+        const { collection, state } = fakeCollection();
+        state.active = ["read"];
+        const toolState = new SessionToolState(collection);
+        assert.equal(await pruneLoadRefusedTools(toolState, () => false), false);
+        assert.deepEqual(state.active, ["read"]);
     });
 });

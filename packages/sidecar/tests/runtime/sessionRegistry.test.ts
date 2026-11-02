@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
+import { agentToolPolicy } from "../../src/agents/filterTools.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
@@ -695,6 +696,61 @@ describe("SessionRegistry", () => {
             assert.equal((await history).entries.length, 0);
             await attach;
             assert.equal((await sr.getHistory(asSessionId(id))).entries.length, 0);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
+    it("a re-attach pushes the new budget thunk and load policy onto the mounted handle", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const budgets: unknown[] = [];
+        const policies: unknown[] = [];
+        const originalCreate = AttachedSession.create;
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) =>
+            ({
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+                setSubagentBudget: (thunk: () => unknown) => {
+                    budgets.push(thunk());
+                },
+                getSubagentBudget: () => undefined,
+                setToolLoadPolicy: async (policy: unknown) => {
+                    policies.push(policy);
+                    return false;
+                },
+            }) as unknown as AttachedSession) as typeof AttachedSession.create;
+
+        try {
+            const first = { turnsUsed: 0, startedAt: 1 };
+            const second = { turnsUsed: 7, startedAt: 2 };
+            await sr.attachChild(
+                asSessionId(id),
+                { thinkingLevel: "off", getSubagentBudget: () => first },
+                [fakeTool("t")],
+            );
+            // The second attach finds the mounted handle; the run controls it
+            // carries must reach that handle, or a resume keeps reading the
+            // previous run's frozen budget.
+            const again = await sr.attachChild(
+                asSessionId(id),
+                {
+                    thinkingLevel: "off",
+                    getSubagentBudget: () => second,
+                    toolLoadPolicy: agentToolPolicy(["read"], 1),
+                },
+                [fakeTool("t")],
+            );
+            // The first attach hands the thunk to `AttachedSession.create`;
+            // only the re-attach has to push it onto the mounted handle.
+            assert.deepEqual(budgets, [second]);
+            assert.equal(policies.length, 1);
+            assert.ok(again);
         } finally {
             AttachedSession.create = originalCreate;
             await sr.detach(asSessionId(id));

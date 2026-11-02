@@ -13,9 +13,9 @@
 
 import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
 import type { SubagentProgressSink } from "../../agents/types.ts";
+import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
-import type { SubagentBudgetState } from "./subagentBudget.ts";
 import {
     assistantText,
     failedResult,
@@ -113,6 +113,10 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
     // the child produced up to that point is still returned below, so a
     // capped run degrades to a partial answer instead of an error.
     const cap = args.maxTurns !== undefined && args.maxTurns > 0 ? args.maxTurns : undefined;
+    // The hook reads the budget's cap; derive it from the one this runner
+    // enforces so the warning and the abort can never disagree (a resume is
+    // handed the *remaining* budget, not the profile's original cap).
+    if (args.budget && cap !== undefined) args.budget.maxTurns = cap;
     let turnsUsed = 0;
     let lastTurnText: string | undefined;
     let hitCap = false;

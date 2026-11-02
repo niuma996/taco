@@ -13,9 +13,9 @@
  * on every turn. A tail tag leaves the prefix byte-identical.
  */
 
-import type { ContextEvent, ContextResult } from "../../extensions/types.ts";
-import { appendUserTag } from "../../tags/appendUserTag.ts";
-import { tagWrap } from "../../tags/builder.ts";
+import type { ContextEvent, ContextResult } from "../extensions/types.ts";
+import { appendUserTag } from "./appendUserTag.ts";
+import { tagWrap } from "./builder.ts";
 
 /**
  * The budget of one subagent run, read live by the reminder hook.
@@ -98,15 +98,45 @@ export function renderBudgetReminder(budget: SubagentBudgetState, now: number): 
  * Returns undefined from the hook — leaving the message list untouched — for
  * every turn that is not near a limit, so the steady state adds nothing to
  * the request and the cache prefix never moves.
+ *
+ * Once inside the margin the tag is re-injected at most once every three
+ * turns (or once a minute, for the clock), not on every model call: a turn
+ * can make many tool-call round trips, and repeating the same paragraph on
+ * each one costs tokens without adding information.
  */
 export function buildSubagentBudgetContextHook(
     getBudget: () => SubagentBudgetState | undefined,
 ): (event: ContextEvent) => ContextResult | undefined {
+    let lastBudget: SubagentBudgetState | undefined;
+    let lastKey: string | undefined;
     return (event: ContextEvent): ContextResult | undefined => {
         const budget = getBudget();
-        if (!budget) return undefined;
-        const body = renderBudgetReminder(budget, Date.now());
-        if (body === undefined) return undefined;
+        if (!budget) {
+            lastBudget = undefined;
+            lastKey = undefined;
+            return undefined;
+        }
+        // A resumed run shares the same hook; a new budget object starts a
+        // fresh throttle window instead of inheriting the previous one.
+        if (budget !== lastBudget) {
+            lastBudget = budget;
+            lastKey = undefined;
+        }
+        const now = Date.now();
+        const body = renderBudgetReminder(budget, now);
+        if (body === undefined) {
+            lastKey = undefined;
+            return undefined;
+        }
+        const remainingMin =
+            budget.timeoutMs === undefined
+                ? ""
+                : String(
+                      Math.max(0, Math.ceil((budget.startedAt + budget.timeoutMs - now) / 60_000)),
+                  );
+        const key = `${Math.floor(budget.turnsUsed / 3)}:${remainingMin}`;
+        if (key === lastKey) return undefined;
+        lastKey = key;
         appendUserTag(event.messages, tagWrap("subagent_budget", body), "system-event");
         return { messages: event.messages };
     };

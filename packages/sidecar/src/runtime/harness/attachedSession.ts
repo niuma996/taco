@@ -40,6 +40,7 @@ import type { PlanModeState } from "../../plan/planModeState.ts";
 import type { SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import type { TacoSkill } from "../../skills/tacoSkill.ts";
 import type { ImChannelContext } from "../../tags/index.ts";
+import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TaskStore } from "../../tasks/taskTypes.ts";
 import { createAddToolsTool } from "../../tools/addTools.ts";
 import type { TacoToolContext, TacoToolContextBase } from "../../tools/context.ts";
@@ -71,7 +72,6 @@ import { AgentHarness, laneConfig, NoActiveOperation } from "../pi/values.ts";
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
 import { TitleSummarizer } from "../session/titleSummarizer.ts";
-import type { SubagentBudgetState } from "../subagent/subagentBudget.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
@@ -85,6 +85,7 @@ import {
 import { resolvePromptReply } from "./promptReply.ts";
 import {
     DefaultSessionToolController,
+    loadableCandidates,
     type SessionToolController,
 } from "./sessionToolController.ts";
 import { SessionToolState } from "./sessionToolState.ts";
@@ -327,6 +328,13 @@ export class AttachedSession extends EventEmitter {
     /** Dynamic-tool controller; undefined when no toolRegistry is configured. */
     readonly toolController: SessionToolController | undefined;
     /**
+     * Live budget thunk. A resumed run re-attaches to this same handle, so the
+     * hook must read the *current* thunk rather than the one captured at
+     * create time — otherwise every `agentContinue` would report the previous
+     * run's frozen counters.
+     */
+    private subagentBudgetThunk?: () => SubagentBudgetState | undefined;
+    /**
      * Lazy accessor for the current `InstructionsConfig`. Stored on the
      * session so the instructions context hook can read the latest config
      * (post-`settings.write`) on every LLM call. Underscore suffix avoids
@@ -384,6 +392,34 @@ export class AttachedSession extends EventEmitter {
         this.compactionController.invalidate();
     }
 
+    /**
+     * Replace the budget thunk a resumed run shares with this handle.
+     *
+     * `attachChild` returns the already-mounted session, so a resume never
+     * re-runs `wireHarnessHooks`; without this, the hook would keep reading
+     * the budget object from the previous run and the counter would stop.
+     */
+    setSubagentBudget(thunk: () => SubagentBudgetState | undefined): void {
+        this.subagentBudgetThunk = thunk;
+    }
+
+    /** Read the current run's budget; used by the hook and reachable for tests. */
+    getSubagentBudget(): SubagentBudgetState | undefined {
+        return this.subagentBudgetThunk?.();
+    }
+
+    /**
+     * Apply a tightened load policy to a mounted subagent session.
+     *
+     * A resume that finds the session still attached never re-runs
+     * `AttachedSession.create`, so a profile edited between runs would
+     * otherwise keep its old, looser load surface.
+     */
+    setToolLoadPolicy(policy: AgentToolPolicy): Promise<boolean> {
+        if (!this.toolController) return Promise.resolve(false);
+        return this.toolController.setLoadPolicy(policy);
+    }
+
     static async create(args: AttachedSessionOptions): Promise<AttachedSession> {
         if (!args.model) {
             throw new Error(
@@ -416,14 +452,31 @@ export class AttachedSession extends EventEmitter {
             );
 
             // Always candidates are part of the session-start contract: failure is fatal.
-            const alwaysCandidates = args.toolRegistry.listAlways();
+            // A refused candidate is skipped, not fatal — `alwaysLoaded` MCP
+            // tools are configured workspace-wide, but a subagent's profile
+            // still bounds what it may hold.
+            const alwaysCandidates = loadableCandidates(args.toolRegistry.listAlways(), controller);
             const alwaysTools = await Promise.all(alwaysCandidates.map((c) => c.load()));
             const alwaysToolMap = new Map(
                 alwaysTools.map((t, i) => [alwaysCandidates[i].name, t] as [string, TacoTool]),
             );
 
+            // `addTools` is only worth installing when something is loadable.
+            // A read-only profile with no deferred tools in its whitelist would
+            // otherwise hold a tool whose every call is refused.
+            const loadableDeferred = loadableCandidates(
+                args.toolRegistry.listDeferred(),
+                controller,
+            );
+            const includeAddTools =
+                args.toolLoadPolicy === undefined || loadableDeferred.length > 0;
             const addTools = createAddToolsTool(controller);
-            initialTools = [...args.tools, addTools, ...restored, ...alwaysToolMap.values()];
+            initialTools = [
+                ...args.tools,
+                ...(includeAddTools ? [addTools] : []),
+                ...restored,
+                ...alwaysToolMap.values(),
+            ];
             toolController = controller;
         }
 
@@ -637,6 +690,7 @@ export class AttachedSession extends EventEmitter {
             args.sessionKind,
         );
         attachedCell.current = attached;
+        attached.subagentBudgetThunk = args.getSubagentBudget;
         // Per-turn toolset convergence. Assigned here rather than threaded
         // through the constructor (already 11 params); the refresher also owns
         // the prompt cell so the two can only move together.
@@ -699,10 +753,10 @@ export class AttachedSession extends EventEmitter {
                     planActive: attached.planState.active,
                     planState: attached.planState,
                 }),
-                // A subagent session's run budget. The reminder hook reads it
-                // live so the model is warned as the run nears its limit.
+                // A subagent session's run budget. Read through the handle so
+                // a resumed run's replacement thunk is seen without re-attach.
                 ...(args.getSubagentBudget !== undefined
-                    ? { getSubagentBudget: args.getSubagentBudget }
+                    ? { getSubagentBudget: () => attached.subagentBudgetThunk?.() }
                     : {}),
                 // Same root the tools resolve against — write/edit targets must stay
                 // inside it, and plan mode refuses mutations at dispatch.

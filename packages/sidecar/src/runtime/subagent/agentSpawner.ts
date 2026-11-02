@@ -28,10 +28,12 @@ import type {
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { SystemPromptContributor } from "../../prompts/buildSystemPrompt.ts";
+import type { DeferredToolCatalogEntry } from "../../prompts/formatCatalogForSystemPrompt.ts";
 import type { EnvironmentContext } from "../../prompts/index.ts";
 import { interpolateArgs } from "../../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
 import { tagWrap } from "../../tags/builder.ts";
+import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
@@ -50,7 +52,6 @@ import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
 import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
-import type { SubagentBudgetState } from "./subagentBudget.ts";
 import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
@@ -182,6 +183,12 @@ export interface AgentSpawnerOptions {
      * `SessionRegistry` takes `getInstructionsConfig`.
      */
     readonly getParentInstructionsBlock?: () => string;
+    /**
+     * Deferred tools the workspace can load on demand, unfiltered. A child
+     * prompt narrows this by the agent's declared tools, so the
+     * `<deferred_tools>` listing matches what its `addTools` will accept.
+     */
+    readonly getDeferredToolCatalog?: () => readonly DeferredToolCatalogEntry[];
     /**
      * Work-layer hooks for background spawns. Absent in tests and in any
      * assembly that does not track Work; every call site is optional-chained so
@@ -321,6 +328,7 @@ export class AgentSpawner extends EventEmitter {
         this.environmentContext = options.environmentContext;
         this.hideWorkspacePath = options.hideWorkspacePath;
         this.getParentInstructionsBlock = options.getParentInstructionsBlock ?? (() => "");
+        this.getDeferredToolCatalog = options.getDeferredToolCatalog ?? (() => []);
         this.workHooks = options.workHooks;
         // In-flight resume promises keyed by subSessionId. Concurrent calls
         // share one promise instead of racing to re-attach the same session —
@@ -360,6 +368,7 @@ export class AgentSpawner extends EventEmitter {
      * Called per spawn/resume so a `settings.write` reaches the next child.
      */
     private readonly getParentInstructionsBlock: () => string;
+    private readonly getDeferredToolCatalog: () => readonly DeferredToolCatalogEntry[];
     private readonly workHooks: BackgroundWorkHooks | undefined;
 
     /** In-flight resume promises, keyed by subSessionId. */
@@ -560,6 +569,7 @@ export class AgentSpawner extends EventEmitter {
             environmentContext: this.environmentContext,
             hideWorkspacePath: this.hideWorkspacePath,
             getParentInstructionsBlock: this.getParentInstructionsBlock,
+            getDeferredToolCatalog: this.getDeferredToolCatalog,
         };
     }
 
@@ -693,6 +703,7 @@ export class AgentSpawner extends EventEmitter {
             agentType: args.agentType,
             childDepth,
             allowedTools: args.tools,
+            ...(args.toolPolicy !== undefined ? { toolPolicy: args.toolPolicy } : {}),
             rolePrompt: args.rolePrompt,
             fewShots: args.fewShots,
             forkedContext: args.forkedContext,
@@ -1976,6 +1987,7 @@ export class AgentSpawner extends EventEmitter {
             agentType,
             childDepth,
             allowedTools: filterToolsForAgent(this.getTools(), def.tools, childDepth),
+            toolPolicy: agentToolPolicy(def.tools, childDepth),
             rolePrompt: def.systemPrompt,
             fewShots: def.fewShots,
             // Re-inject the fork transcript from the spawn-time snapshot so a

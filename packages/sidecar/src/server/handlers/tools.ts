@@ -70,16 +70,17 @@ export function registerToolsHandlers(): void {
         // addTools is also session-scoped, but it is constructed per-session
         // in attachedSession (not in sessionRegistry), so the listing must add
         // it explicitly. Its real description is a getter that reflects live
-        // registry state; here we surface a static summary. Not reachable from
-        // a subagent (subagents share no deferred registry).
+        // registry state; here we surface a static summary. Subagents get it
+        // too when their profile leaves something loadable, bounded by the
+        // tools that profile declared.
         session.push({
             name: "addTools",
             label: "addTools",
             description:
-                "Load additional deferred tools by name on demand. Only usable in the main session; subagents cannot reach it. The current set of loadable tools is appended to this tool's description at runtime, so re-read it (or invoke it) to see what's available now.",
+                "Load additional deferred tools by name on demand. The current set of loadable tools is listed in the system prompt's <deferred_tools> section. A subagent may only load tools its profile declares.",
             category: "session",
             inputSchema: addToolsSchema,
-            availableInSubagent: false,
+            availableInSubagent: true,
             loading: "always",
         });
 
