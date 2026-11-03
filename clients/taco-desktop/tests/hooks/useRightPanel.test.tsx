@@ -134,6 +134,26 @@ describe("useRightPanel — width", () => {
         assert.equal(result.current.width, 250);
     });
 
+    it("suppresses the width transition while the window is resizing", async () => {
+        renderHook(() => useRightPanel(false));
+
+        setViewport(1000);
+        window.dispatchEvent(new Event("resize"));
+        // The mark has to be in place while the new width is laid out, or the
+        // transition would animate and the panel would trail the window edge.
+        assert.equal(document.body.getAttribute("data-panel-resizing"), "true");
+
+        await flushResize();
+        // Still held: the width is re-derived on every frame of the drag.
+        assert.equal(document.body.getAttribute("data-panel-resizing"), "true");
+
+        // Released once the resize settles.
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+        });
+        assert.equal(document.body.hasAttribute("data-panel-resizing"), false);
+    });
+
     it("migrates a legacy pixel width into a share, once", () => {
         localStorage.setItem(LS_RIGHT_PANEL_WIDTH_LEGACY, JSON.stringify(360));
         const { result } = renderHook(() => useRightPanel(false));

@@ -22,6 +22,7 @@ import {
     RIGHT_PANEL_DEFAULT_RATIO,
     RIGHT_PANEL_MAX_RATIO,
 } from "../lib/rightPanelWidth";
+import { holdTransitionSuppressed } from "./primitives/resizeTransition";
 import { type DragHandleProps, useDragResize } from "./primitives/useDragResize";
 
 export type RightPanelKind = "none" | "tasks" | "files" | "subagents";
@@ -57,7 +58,19 @@ export function useRightPanel(sidebarCollapsed = false): UseRightPanelApi {
     const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
     useEffect(() => {
         let frame = 0;
+        // The panel width follows the viewport, so a resize re-derives it on
+        // every frame of the drag. Animating each of those leaves the panel
+        // trailing the window edge, so the transition is dropped for the
+        // whole resize and restored once it settles.
+        let release: (() => void) | null = null;
+        let settle = 0;
         const onResize = () => {
+            if (release === null) release = holdTransitionSuppressed();
+            window.clearTimeout(settle);
+            settle = window.setTimeout(() => {
+                release?.();
+                release = null;
+            }, 120);
             cancelAnimationFrame(frame);
             frame = requestAnimationFrame(() => setViewportWidth(window.innerWidth));
         };
@@ -65,6 +78,8 @@ export function useRightPanel(sidebarCollapsed = false): UseRightPanelApi {
         return () => {
             window.removeEventListener("resize", onResize);
             cancelAnimationFrame(frame);
+            window.clearTimeout(settle);
+            release?.();
         };
     }, []);
 

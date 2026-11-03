@@ -106,6 +106,46 @@ describe("useDragResize", () => {
         assert.equal(document.body.hasAttribute("data-panel-resizing"), false);
     });
 
+    it("suppresses the width transition for a keyboard step, then releases it", async () => {
+        const { result } = setup();
+        act(() => {
+            result.current.handleProps.onKeyDown({
+                key: "ArrowLeft",
+                shiftKey: false,
+                preventDefault: vi.fn(),
+            } as never);
+        });
+        // The mark must be in place while the new width is laid out, or the
+        // transition would animate and the panel would lag the key press.
+        assert.equal(document.body.getAttribute("data-panel-resizing"), "true");
+
+        // Released on the next frame, once the width has been laid out.
+        await act(async () => {
+            await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+        });
+        assert.equal(document.body.hasAttribute("data-panel-resizing"), false);
+    });
+
+    it("keeps the mark across a burst of key presses", async () => {
+        const { result } = setup();
+        for (let i = 0; i < 3; i++) {
+            act(() => {
+                result.current.handleProps.onKeyDown({
+                    key: "ArrowLeft",
+                    shiftKey: false,
+                    preventDefault: vi.fn(),
+                } as never);
+            });
+        }
+        // Every press re-arms the mark, so it is still held here.
+        assert.equal(document.body.getAttribute("data-panel-resizing"), "true");
+
+        await act(async () => {
+            await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+        });
+        assert.equal(document.body.hasAttribute("data-panel-resizing"), false);
+    });
+
     it("pointercancel ends the drag and restores body styles", () => {
         const { result, onCommit } = setup();
         act(() => {

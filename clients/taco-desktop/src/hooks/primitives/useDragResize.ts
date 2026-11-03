@@ -27,6 +27,8 @@
  */
 import { useCallback, useRef, useState } from "react";
 
+import { applyWithoutTransition, holdTransitionSuppressed } from "./resizeTransition";
+
 export interface DragHandleProps {
     role: "separator";
     "aria-orientation": "vertical";
@@ -38,9 +40,6 @@ export interface DragHandleProps {
     onDoubleClick: () => void;
     onKeyDown: (e: React.KeyboardEvent) => void;
 }
-
-/** Marks the body while a drag is live so CSS can drop panel transitions. */
-const RESIZING_ATTRIBUTE = "data-panel-resizing";
 
 export function useDragResize({
     initial,
@@ -113,7 +112,7 @@ export function useDragResize({
             const unit = Math.max(1, pixelsPerUnit);
             document.body.style.setProperty("user-select", "none");
             document.body.style.setProperty("cursor", "col-resize");
-            document.body.setAttribute(RESIZING_ATTRIBUTE, "true");
+            const release = holdTransitionSuppressed();
 
             const onMove = (ev: PointerEvent) => {
                 // Panel is right-anchored: moving the pointer left must widen it.
@@ -129,7 +128,7 @@ export function useDragResize({
                 window.removeEventListener("blur", stop);
                 document.body.style.removeProperty("user-select");
                 document.body.style.removeProperty("cursor");
-                document.body.removeAttribute(RESIZING_ATTRIBUTE);
+                release();
                 onCommit(requestedRef.current);
             };
 
@@ -148,10 +147,13 @@ export function useDragResize({
             const delta = e.shiftKey ? stepFast : step;
             if (e.key === "ArrowLeft") {
                 e.preventDefault();
-                commit(widthRef.current + delta);
+                // The width lands at once: animating it makes the panel crawl
+                // behind the key press. The drag path suppresses the
+                // transition for the whole gesture instead.
+                applyWithoutTransition(() => commit(widthRef.current + delta));
             } else if (e.key === "ArrowRight") {
                 e.preventDefault();
-                commit(widthRef.current - delta);
+                applyWithoutTransition(() => commit(widthRef.current - delta));
             }
         },
         [commit, step, stepFast],
