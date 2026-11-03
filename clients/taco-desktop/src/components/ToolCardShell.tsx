@@ -16,6 +16,7 @@ import { HighlightedCode } from "./HighlightedCode";
 import { DefaultToolBody, defaultSummary } from "./toolViews/defaults";
 import { resolveToolView } from "./toolViews/registry";
 import { IconButton } from "./ui/IconButton";
+import { IconSwap } from "./ui/IconSwap";
 
 export interface ToolCardShellProps {
     tool: UiToolCall;
@@ -52,25 +53,41 @@ export function ToolCardShell({ tool, children }: ToolCardShellProps) {
 
     const isRunning = tool.status === "running";
     const isError = tool.status === "error";
-    const Icon = isRunning ? LoaderCircle : isError ? CircleX : CircleCheck;
     const statusClass = isRunning
         ? "tool-card running"
         : isError
           ? "tool-card error"
           : "tool-card ok";
-    const iconClass = isRunning
-        ? "tool-card-icon tool-card-icon--running"
-        : isError
-          ? "tool-card-icon tool-card-icon--error"
-          : "tool-card-icon tool-card-icon--ok";
 
     return (
         <div className={statusClass} data-tool-id={tool.id} aria-busy={isRunning}>
             <div className="tool-card-head">
-                <Icon
-                    size={14}
-                    aria-hidden="true"
-                    className={`${iconClass} ${isRunning ? "spin" : ""}`.trim()}
+                {/* The three status icons cross-fade. The spinner carries its
+                    rotation only while it is the visible one — a spinner left
+                    running behind a faded-out icon would keep burning frames. */}
+                <IconSwap
+                    className="tool-card-icon"
+                    icons={[
+                        <LoaderCircle
+                            size={14}
+                            key="running"
+                            aria-hidden="true"
+                            className="tool-card-icon--running spin"
+                        />,
+                        <CircleCheck
+                            size={14}
+                            key="ok"
+                            aria-hidden="true"
+                            className="tool-card-icon--ok"
+                        />,
+                        <CircleX
+                            size={14}
+                            key="error"
+                            aria-hidden="true"
+                            className="tool-card-icon--error"
+                        />,
+                    ]}
+                    active={isRunning ? 0 : isError ? 2 : 1}
                 />
                 <span className="tool-card-name">{tool.name}</span>
                 {summary && <span className="tool-card-summary">{summary}</span>}

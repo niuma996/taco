@@ -51,15 +51,15 @@ export function AgentToolView({ tool }: ToolViewProps): ReactElement {
                 <span className="agent-card-type">{agentType}</span>
                 {description.length > 0 && <span className="agent-card-desc">{description}</span>}
                 {isRunning && (
-                    <span className="agent-card-running">
+                    <span className="agent-card-running ui-fade-in">
                         <LoaderCircle size={11} className="spin" aria-hidden="true" />
                         running
                     </span>
                 )}
-                {isError && <span className="agent-card-error">error</span>}
-                {isAborted && <span className="agent-card-aborted">stopped</span>}
+                {isError && <span className="agent-card-error ui-fade-in">error</span>}
+                {isAborted && <span className="agent-card-aborted ui-fade-in">stopped</span>}
                 {subSessionId && (
-                    <span className="agent-card-subid" title={subSessionId}>
+                    <span className="agent-card-subid ui-fade-in" title={subSessionId}>
                         id {subSessionId.slice(0, 8)}
                     </span>
                 )}

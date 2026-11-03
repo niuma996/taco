@@ -1,12 +1,5 @@
 import { asSessionId, type TaskItem, type WorkspaceId } from "@taco-ai/protocol";
-import {
-    ChevronDown,
-    ChevronRight,
-    Circle,
-    CircleCheck,
-    CircleX,
-    LoaderCircle,
-} from "lucide-react";
+import { ChevronRight, Circle, CircleCheck, CircleX, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import type { DragHandleProps } from "../../hooks/primitives/useDragResize";
 import { useTaskSnapshot } from "../../hooks/useTaskSnapshot";
@@ -214,11 +207,11 @@ function HistoryRow({
                 onClick={toggle}
                 aria-expanded={expanded}
             >
-                {expanded ? (
-                    <ChevronDown size={12} aria-hidden="true" />
-                ) : (
-                    <ChevronRight size={12} aria-hidden="true" />
-                )}
+                <ChevronRight
+                    size={12}
+                    aria-hidden="true"
+                    className={`task-history-chevron ${expanded ? "task-history-chevron--open" : ""}`}
+                />
                 <span className="task-history-name">{name}</span>
                 <span className="task-history-badge">
                     {t("tasks.historyBadgeCompleted", {

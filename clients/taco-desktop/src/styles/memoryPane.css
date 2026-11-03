@@ -101,7 +101,7 @@
     color: var(--fg);
     text-align: left;
     cursor: pointer;
-    transition: background 0.12s ease;
+    transition: background var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .memory-list-item:hover {
@@ -183,7 +183,7 @@
 }
 
 .memory-archive-chevron {
-    transition: transform 0.15s ease;
+    transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .memory-archive-chevron.open {

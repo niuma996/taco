@@ -484,6 +484,9 @@
     background: transparent;
     cursor: pointer;
     pointer-events: auto;
+    /* A new user message adds a marker to the rail. It scales in from its
+       own centre — a fixed-size circle, so this touches no layout. */
+    animation: ui-badge-pop-soft var(--motion-duration-base) var(--motion-ease-out) both;
 }
 
 .user-message-guide__marker:focus-visible {

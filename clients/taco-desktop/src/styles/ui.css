@@ -38,7 +38,7 @@
     background: var(--switch-thumb);
     /* Lift off the track instead of being outlined by it. */
     box-shadow: 0 1px 2px var(--shadow-color-strong);
-    transition: transform 0.18s ease;
+    transition: transform var(--motion-duration-base) var(--motion-ease-standard);
 }
 .ui-switch[data-state="checked"] .ui-switch-thumb {
     transform: translateX(16px);
@@ -144,6 +144,48 @@
 }
 .ui-enter {
     animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
+}
+
+/* Fade without the rise — for content that replaces something in place,
+   where a vertical nudge would read as a jump rather than an arrival. */
+.ui-fade-in {
+    animation: ui-fade-in var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+/* Badge entrance — a marker scaling up from nothing. Scale only: a badge
+   that translates would slide across the surface it is pinned to.
+   `both` so the first frame is the small state rather than a flash of the
+   full-size badge before the animation starts. Two strengths: the round
+   markers pop hard, the wide pill only nudges. */
+@keyframes ui-badge-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.4);
+    }
+}
+@keyframes ui-badge-pop-soft {
+    from {
+        opacity: 0;
+        transform: scale(0.85);
+    }
+}
+
+/* Icon swap — two icons stacked, one faded out as the other fades in.
+   Swapping the icon in JSX instead would unmount one SVG and mount another,
+   which reads as a flicker. A grid stacks both in the same cell, so the
+   box keeps the size of whichever icon is wider and the row never shifts. */
+.ui-icon-swap {
+    display: inline-grid;
+    align-items: center;
+    justify-items: center;
+}
+.ui-icon-swap > span {
+    grid-area: 1 / 1;
+    display: inline-flex;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.ui-icon-swap > span[data-icon-hidden="true"] {
+    opacity: 0;
 }
 
 /* Collapsible region whose content has an auto height. `height` cannot be

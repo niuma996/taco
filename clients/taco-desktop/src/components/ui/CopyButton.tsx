@@ -14,6 +14,7 @@
 import { Check, Copy, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { writeToClipboard } from "../../lib/clipboard";
+import { IconSwap } from "./IconSwap.tsx";
 
 export type CopyState = "idle" | "copied" | "failed";
 
@@ -63,7 +64,6 @@ export function CopyButton({ value, className, labels, resetMs = 1500 }: CopyBut
         }, resetMs);
     };
 
-    const Icon = state === "copied" ? Check : state === "failed" ? X : Copy;
     const title =
         state === "copied" ? labels.copied : state === "failed" ? labels.failed : labels.idle;
     return (
@@ -75,7 +75,14 @@ export function CopyButton({ value, className, labels, resetMs = 1500 }: CopyBut
             title={title}
             data-state={state}
         >
-            <Icon size={13} aria-hidden="true" />
+            <IconSwap
+                icons={[
+                    <Copy size={13} key="idle" aria-hidden="true" />,
+                    <Check size={13} key="copied" aria-hidden="true" />,
+                    <X size={13} key="failed" aria-hidden="true" />,
+                ]}
+                active={state === "copied" ? 1 : state === "failed" ? 2 : 0}
+            />
         </button>
     );
 }

@@ -136,7 +136,7 @@ footer.input textarea:focus {
     min-width: 5rem;
     /* button UA default font-size (~13.3px) is smaller than icon 16px — setting it prevents the icon looking bigger than the text. */
     font-size: 0.85rem;
-    transition: background 0.12s ease;
+    transition: background var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 /* Every control in the row shares one height so chips, icon and send line up. */
@@ -257,7 +257,7 @@ footer.input textarea:focus {
    this pop runs once per swap. */
 .send-toggle-icon {
     display: inline-flex;
-    animation: send-toggle-pop 0.18s ease;
+    animation: send-toggle-pop var(--motion-duration-base) var(--motion-ease-out);
 }
 
 @keyframes send-toggle-pop {

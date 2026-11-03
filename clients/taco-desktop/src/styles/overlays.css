@@ -24,7 +24,7 @@
 .update-progress-bar {
     height: 100%;
     background: var(--accent);
-    transition: width 0.15s linear;
+    transition: width var(--motion-duration-fast) linear;
 }
 
 .error-banner {
@@ -63,7 +63,7 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    animation: toast-in 0.18s ease-out;
+    animation: toast-in var(--motion-duration-base) var(--motion-ease-out);
 }
 @keyframes toast-in {
     from {
@@ -123,7 +123,7 @@
     touch-action: none;
     user-select: none;
     opacity: 0.45;
-    transition: opacity 0.12s ease;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .llm-dump-fab:hover,
 .llm-dump-fab:focus-visible {
@@ -955,7 +955,7 @@ html *:hover {
     width: 0.9rem;
     justify-content: center;
     color: var(--fg-dim);
-    transition: transform 0.12s ease;
+    transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .files-tree-row-toggle[data-open="true"] {
     transform: rotate(90deg);

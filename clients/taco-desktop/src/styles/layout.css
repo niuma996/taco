@@ -274,7 +274,7 @@ header.topbar .topbar-picker-group {
     color: var(--fg-dim);
     flex: 0 0 auto;
     display: inline-flex;
-    transition: transform 120ms ease;
+    transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 /* workspace folder icon — same tier as chevron (--fg-dim), hugs label left; flex:0 0 auto
@@ -492,6 +492,9 @@ header.topbar .topbar-picker-group {
     line-height: 14px;
     text-align: center;
     pointer-events: none;
+    /* The count pops in when it first appears, growing from the badge's own
+       centre so the number does not slide in from the bell's edge. */
+    animation: ui-badge-pop var(--motion-duration-base) var(--motion-ease-out) both;
 }
 
 .notification-popover__list {
@@ -719,6 +722,9 @@ button.topbar-context-indicator {
     font-size: 0.7rem;
     letter-spacing: 0.04em;
     color: var(--warning);
+    /* Fades in with the label it follows. Opacity only: the label is inline
+       next to the ring, so a transform would shift the ring. */
+    animation: ui-fade-in var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 /* ContextIndicator — click to open detail popover.
@@ -826,6 +832,10 @@ button.topbar-context-indicator {
     line-height: 1;
     white-space: nowrap;
     user-select: none;
+    /* Scales in rather than sliding: the pill sits inline in the topbar, so a
+       translate would shift the controls beside it. A gentler pop than the
+       round badges — a wide pill shrinking to 40% reads as a glitch. */
+    animation: ui-badge-pop-soft var(--motion-duration-base) var(--motion-ease-out) both;
 }
 
 .plan-mode-indicator .plan-mode-dot {
@@ -881,13 +891,13 @@ button.topbar-context-indicator {
 
 /* The panel's width is a share of the chat area, so it changes whenever the
    sidebar collapses or the window resizes. Transition the width with the same
-   0.18s the sidebar uses, or the change lands in a single frame at the end of
-   the sidebar animation. A live drag must not lag behind the pointer, so the
+   duration the sidebar uses, or the change lands in a single frame at the end
+   of the sidebar animation. A live drag must not lag behind the pointer, so the
    handle drops the transition while it is held. */
 .task-panel,
 .files-drawer,
 .subagent-panel {
-    transition: width 0.18s ease;
+    transition: width var(--motion-duration-slow) var(--motion-ease-standard);
 }
 
 /* Opening a panel fades its contents in. The panel unmounts while closed, so
@@ -1075,6 +1085,16 @@ body[data-panel-resizing="true"] .subagent-panel {
 
 .task-history-row:hover {
     background: var(--hover);
+}
+
+/* One chevron that rotates, rather than two icons swapped in place — the
+   swap rebuilds the SVG and reads as a flicker. */
+.task-history-chevron {
+    flex-shrink: 0;
+    transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.task-history-chevron--open {
+    transform: rotate(90deg);
 }
 
 .task-history-name {

@@ -9,6 +9,7 @@
 import { Eye, EyeOff } from "lucide-react";
 import { type ComponentPropsWithRef, useState } from "react";
 import { IconButton } from "./IconButton.tsx";
+import { IconSwap } from "./IconSwap.tsx";
 import { TextInput } from "./TextInput.tsx";
 
 export interface SecretInputProps extends ComponentPropsWithRef<"input"> {
@@ -29,11 +30,13 @@ export function SecretInput({ revealLabel, hideLabel, ...rest }: SecretInputProp
                 aria-pressed={visible}
                 onClick={() => setVisible((v) => !v)}
             >
-                {visible ? (
-                    <EyeOff size={13} aria-hidden="true" />
-                ) : (
-                    <Eye size={13} aria-hidden="true" />
-                )}
+                <IconSwap
+                    icons={[
+                        <Eye size={13} key="hidden" aria-hidden="true" />,
+                        <EyeOff size={13} key="visible" aria-hidden="true" />,
+                    ]}
+                    active={visible ? 1 : 0}
+                />
             </IconButton>
         </span>
     );

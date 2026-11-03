@@ -16,8 +16,8 @@ aside.sidebar {
        discrete — delayed until the shrink ends so the hidden panel leaves the
        tab order; on expand it flips back immediately. */
     transition:
-        width 0.18s ease,
-        border-right-color 0.18s ease,
+        width var(--motion-duration-slow) var(--motion-ease-standard),
+        border-right-color var(--motion-duration-slow) var(--motion-ease-standard),
         visibility 0s 0s;
 }
 
@@ -26,9 +26,9 @@ aside.sidebar {
     border-right-color: transparent;
     visibility: hidden;
     transition:
-        width 0.18s ease,
-        border-right-color 0.18s ease,
-        visibility 0s 0.18s;
+        width var(--motion-duration-slow) var(--motion-ease-standard),
+        border-right-color var(--motion-duration-slow) var(--motion-ease-standard),
+        visibility 0s var(--motion-duration-slow);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -238,7 +238,7 @@ aside.sidebar .session-item.active {
        `display: none` would make :focus-within impossible to reach by keyboard. */
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.12s ease;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .session-item:hover .session-action,
 .session-item:focus-within .session-action {
@@ -375,7 +375,7 @@ button svg > * {
     transform: translate(-50%, -50%);
     border-radius: var(--radius-sm);
     background: transparent;
-    transition: background 0.12s ease;
+    transition: background var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .activity-rail-item:hover .activity-rail-bg {
@@ -421,7 +421,7 @@ button svg > * {
     pointer-events: none;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.12s ease;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
     z-index: 200;
 }
 
@@ -452,4 +452,7 @@ button svg > * {
     background: var(--brand-orange);
     box-shadow: 0 0 0 2px var(--shell-bg);
     pointer-events: none;
+    /* The dot pops in when an update appears. It grows from its own centre
+       so the pop reads as the marker arriving rather than sliding. */
+    animation: ui-badge-pop var(--motion-duration-base) var(--motion-ease-out) both;
 }

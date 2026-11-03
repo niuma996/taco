@@ -7,6 +7,7 @@
 import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
 
 import type { DirectoryListing, FileEntry } from "../lib/fileTypes";
+import { IconSwap } from "./ui/IconSwap.tsx";
 
 const MAX_DEPTH = 8;
 
@@ -111,11 +112,13 @@ function TreeRow({
                 )}
                 <span className="files-tree-row-icon" aria-hidden="true">
                     {isDir ? (
-                        isExpanded ? (
-                            <FolderOpen size={14} />
-                        ) : (
-                            <Folder size={14} />
-                        )
+                        <IconSwap
+                            icons={[
+                                <Folder size={14} key="closed" />,
+                                <FolderOpen size={14} key="open" />,
+                            ]}
+                            active={isExpanded ? 1 : 0}
+                        />
                     ) : (
                         <File size={14} />
                     )}
