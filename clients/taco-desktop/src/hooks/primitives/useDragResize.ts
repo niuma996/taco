@@ -50,6 +50,7 @@ export function useDragResize({
     step = 16,
     stepFast = 64,
     ariaValue = (value) => value,
+    ariaMin,
     resetTo,
     onCommit,
 }: {
@@ -68,6 +69,13 @@ export function useDragResize({
     stepFast?: number;
     /** Formats the exposed aria values (a share as a percentage, say). */
     ariaValue?: (value: number) => number;
+    /**
+     * Reachable lower bound to announce, when it is narrower than `min`.
+     * The hard bound can be wider than anything the layout allows — a share
+     * whose floor is 30% of the chat area, say — and announcing a range the
+     * user cannot reach is a lie to a screen reader.
+     */
+    ariaMin?: number;
     /** Double-click target; defaults to `initial`. */
     resetTo?: number;
     /** Receives the user's request, not the clamped value. */
@@ -166,7 +174,7 @@ export function useDragResize({
             role: "separator",
             "aria-orientation": "vertical",
             "aria-valuenow": ariaValue(width),
-            "aria-valuemin": ariaValue(min),
+            "aria-valuemin": ariaValue(ariaMin ?? min),
             "aria-valuemax": ariaValue(max),
             tabIndex: 0,
             onPointerDown,

@@ -151,10 +151,11 @@
     color: var(--fg-dim);
 }
 .thinking-body {
-    /* No bottom margin: the collapse wrapper is a grid item, so a bottom
-       margin here would sit inside the collapsed track instead of collapsing
-       away with the block's own margin. */
-    margin: 4px 0 0 14px;
+    /* The collapse wrapper is a grid item, so this margin is clipped by the
+       wrapper's overflow while the block is closed — the collapsed track
+       still measures zero. Kept in full so the expanded block has the same
+       breathing room below the reasoning text as before the collapse. */
+    margin: 4px 0 4px 14px;
     padding: 4px 8px;
     border-left: 2px solid var(--accent-rail);
     color: var(--fg-dim);

@@ -739,7 +739,13 @@
     width: 100%;
     /* Fixed layout honours the column widths below and lets every cell
        truncate on one line — a long job name must not stretch its row
-       past the rows around it. */
+       past the rows around it.
+       The floor keeps the action column wide enough for four 22px icon
+       buttons plus the 24px cell padding. Under table-layout: fixed the
+       percentages ignore any min-width on a cell, so the floor has to live
+       on the table: below it the pane scrolls horizontally instead of
+       squeezing the buttons left over the enabled column. */
+    min-width: 940px;
     table-layout: fixed;
     border-collapse: collapse;
     color: var(--fg);
@@ -840,9 +846,9 @@
 }
 
 /* Column widths — the plan and command columns are the only ones that
-   can hold a long value, so they get the most room. `min-width` on the
-   cells prevents the browser from collapsing a column past the longest
-   single token. */
+   can hold a long value, so they get the most room. Under table-layout:
+   fixed a cell's min-width has no effect; the table's own min-width is
+   what keeps the narrow columns from being squeezed past their content. */
 .schedules-table col.schedules-col-name {
     width: 24%;
 }

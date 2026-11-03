@@ -173,4 +173,24 @@ describe("useRightPanel — width", () => {
         assert.equal(result.current.resizeHandleProps.role, "separator");
         assert.equal(result.current.resizeHandleProps["aria-valuenow"], 30);
     });
+
+    it("announces the reachable range, not the hard clamp", () => {
+        // The hard lower bound is 0, but a share can never go below the 30%
+        // floor here — announcing 0% would describe a range the user cannot
+        // reach with a screen reader.
+        const { result } = renderHook(() => useRightPanel(false));
+        assert.equal(result.current.resizeHandleProps["aria-valuemin"], 30);
+        assert.equal(result.current.resizeHandleProps["aria-valuemax"], 50);
+    });
+
+    it("moves the announced minimum with the chat area", async () => {
+        const { result } = renderHook(() => useRightPanel(false));
+
+        // 1000 - 56 - 220 = 724px chat area → the 250px floor is 34.5%.
+        setViewport(1000);
+        window.dispatchEvent(new Event("resize"));
+        await flushResize();
+
+        assert.equal(result.current.resizeHandleProps["aria-valuemin"], 35);
+    });
 });

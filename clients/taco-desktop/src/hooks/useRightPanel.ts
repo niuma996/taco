@@ -18,6 +18,7 @@ import {
 import {
     chatAreaWidth,
     clampPanelRatio,
+    minPanelRatio,
     panelWidthPx,
     RIGHT_PANEL_DEFAULT_RATIO,
     RIGHT_PANEL_MAX_RATIO,
@@ -109,6 +110,10 @@ export function useRightPanel(sidebarCollapsed = false): UseRightPanelApi {
         step: KEY_STEP,
         stepFast: KEY_STEP_FAST,
         ariaValue: (value) => Math.round(value * 100),
+        // Announce the range the layout actually allows, not the hard bounds:
+        // the floor moves with the chat area, so the reachable minimum is
+        // minPanelRatio, never the 0 the hard clamp accepts.
+        ariaMin: minPanelRatio(chatArea),
         resetTo: RIGHT_PANEL_DEFAULT_RATIO,
         // The request is stored, not the clamped value: the 250px floor is a
         // property of the current layout, not of the user's preference.

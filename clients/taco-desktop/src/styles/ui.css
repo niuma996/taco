@@ -190,8 +190,10 @@
 }
 .ui-btn:active:not(:disabled) {
     /* Press feedback. transform does not touch layout, so a dense row of
-       buttons does not reflow while one is held down. */
+       buttons does not reflow while one is held down. Shorter than the base
+       duration: a press that eases in at 120ms reads as a lag, not a press. */
     transform: scale(0.98);
+    transition-duration: 60ms;
 }
 .ui-btn:disabled {
     opacity: 0.5;
