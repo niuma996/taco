@@ -121,7 +121,8 @@
       "!**/clients/**/dist",
       "!**/.claude/settings.json",
       "!**/.claude/settings.local.json",
-      "!**/.superpowers"
+      "!**/.superpowers",
+      "!**/.worktrees"
     ]
   }
 }
