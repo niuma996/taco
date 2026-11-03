@@ -202,6 +202,9 @@
     min-width: 0;
     overflow-y: auto;
     padding: var(--space-4);
+    /* key={view} remounts per view, so this replays when switching
+       between the reading view and the dream panel. */
+    animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
 }
 
 .memory-detail-placeholder,

@@ -423,6 +423,9 @@ html *:hover {
     min-height: 0;
     overflow-y: auto;
     padding-right: 0.25rem;
+    /* key={step} remounts the body per step, so this replays on each
+       step change rather than only when the wizard first opens. */
+    animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
 }
 
 /* Header — steps indicator + skip link */

@@ -54,6 +54,7 @@
 .settings-pane-content-inner {
     max-width: 720px;
     margin: 0 auto;
+    animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
 }
 
 /* Wide variant — used by views whose primary content is a wide table
@@ -145,6 +146,9 @@
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    /* key={list} remounts per list, so switching between the allow and
+       deny rules replays the entrance instead of swapping in place. */
+    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 .permission-rule-list li {
     display: flex;

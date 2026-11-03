@@ -90,6 +90,9 @@
     margin-top: 0.4rem;
     color: var(--fg-dim);
     font-size: var(--text-xs);
+    /* The row appears when the turn settles; fading it in keeps the bubble
+       from growing in one frame. */
+    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 .message-meta__time {
     font-variant-numeric: tabular-nums;
@@ -148,7 +151,10 @@
     color: var(--fg-dim);
 }
 .thinking-body {
-    margin: 4px 0 4px 14px;
+    /* No bottom margin: the collapse wrapper is a grid item, so a bottom
+       margin here would sit inside the collapsed track instead of collapsing
+       away with the block's own margin. */
+    margin: 4px 0 0 14px;
     padding: 4px 8px;
     border-left: 2px solid var(--accent-rail);
     color: var(--fg-dim);
@@ -163,16 +169,27 @@
     overflow-wrap: anywhere;
 }
 
+/* Collapse body — the wrapper the height animation runs on. Position
+   relative so the dissolve gradient can sit over the body's top edge. */
+.thinking-collapse-body {
+    position: relative;
+}
+
 /* Preview mode: cap the body at 10 lines and scroll internally; the newest
    line stays pinned into view while streaming. 15em = 10 × 1.5em line box;
    content-box sizing keeps the 4px vertical padding outside the cap. */
-.thinking-viewport {
-    position: relative;
-}
 .thinking-body--preview {
     max-height: 15em;
     overflow-y: auto;
     scrollbar-width: thin;
+}
+
+/* Expanded: the whole reasoning is visible, so the cap and the internal
+   scroll both go away. Explicit rather than inherited so the two variants
+   read as a pair. */
+.thinking-body--full {
+    max-height: none;
+    overflow-y: visible;
 }
 
 /* Dissolve gradient over the preview's top edge: a color ramp from the
@@ -183,7 +200,10 @@
    Prefixed variants are required by the WKWebView runtime. */
 .thinking-fade {
     position: absolute;
-    top: 0;
+    /* The body's 4px top margin now sits inside the collapse wrapper instead
+       of collapsing away with it, so the gradient is nudged down to match the
+       text's first line. */
+    top: 4px;
     left: 0;
     right: 0;
     /* ~2.5 lines of the 12px/1.5 thinking text — a longer runway than the
@@ -239,7 +259,7 @@
 }
 
 .thinking-chevron {
-    transition: transform 0.1s;
+    transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .thinking-chevron--open {
     transform: rotate(90deg);

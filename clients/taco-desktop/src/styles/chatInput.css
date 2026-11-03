@@ -25,7 +25,9 @@ footer.input {
     padding: 0 0 0.75rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    /* Spacing is per-child margins, not a flex gap: the queue bar stays
+       mounted so it can collapse, and a gap would reserve room for it even
+       while it is collapsed to zero height. */
 }
 
 /* In-progress status bar. Lives inside footer.input so its width matches
@@ -43,6 +45,8 @@ footer.input {
     border: 1px solid var(--warning);
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
+    margin-bottom: 0.5rem;
+    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .input-status__dot {
@@ -303,6 +307,15 @@ footer.input textarea:focus {
     list-style: none;
     margin: 0;
     padding: 0;
+}
+
+/* The queue bar's collapse wrapper takes spacing only while it is open —
+   the margin sits outside the collapsed grid track, so a closed bar costs
+   no room. Every sibling of the input card carries its own bottom margin
+   instead of the footer using a flex gap, which would reserve room for the
+   collapsed bar. */
+footer.input > .ui-collapse[data-open="true"] {
+    margin-bottom: 0.5rem;
 }
 
 .queue-bar__row {

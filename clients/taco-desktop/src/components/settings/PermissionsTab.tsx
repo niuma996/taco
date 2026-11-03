@@ -150,7 +150,7 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
             {(list === "allow" ? allow : deny).length === 0 ? (
                 <p className="settings-tab-desc">{t("settings.permissionsNoRules")}</p>
             ) : (
-                <ul className="permission-rule-list">
+                <ul className="permission-rule-list" key={list}>
                     {(list === "allow" ? allow : deny).map((rule: string) => (
                         <li key={rule}>
                             <span className="permission-rule-text">

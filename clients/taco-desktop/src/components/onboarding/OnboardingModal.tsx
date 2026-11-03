@@ -219,7 +219,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
                 </Button>
             </div>
 
-            <div className="onboarding-body">
+            <div className="onboarding-body" key={step}>
                 {step === "welcome" && <WelcomeStep onStart={() => setStep("workspace")} />}
                 {step === "workspace" && (
                     <WorkspaceStep

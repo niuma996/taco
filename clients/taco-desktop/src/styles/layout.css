@@ -571,6 +571,22 @@ header.topbar .topbar-picker-group {
     background: var(--chat-panel-bg);
 }
 
+/* Main-view switch — the activity rail swaps one pane for another, and
+   React mounts a different element each time, so this entrance animation
+   replays on every switch. One rule covers all nine views; the chat view's
+   root is .main-col, the rest carry their own pane class. */
+.main-col,
+.tools-pane,
+.agents-pane,
+.plugins-pane,
+.channels-pane,
+.work-pane,
+.memory-pane,
+.checkpoints-pane,
+.skills-pane {
+    animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
+}
+
 /* Right column: topbar → content area → input, top-to-bottom filling remaining width and full height. */
 .main-col {
     display: flex;

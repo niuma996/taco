@@ -133,6 +133,37 @@
     }
 }
 
+/* Entrance fade for content that mounts into place. A CSS animation (not a
+   transition) is what makes it replay on every mount — a transition would
+   only run on the first state flip. */
+@keyframes ui-enter {
+    from {
+        opacity: 0;
+        transform: translateY(2px);
+    }
+}
+.ui-enter {
+    animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
+}
+
+/* Collapsible region whose content has an auto height. `height` cannot be
+   transitioned to `auto`, so the wrapper is a one-row grid whose track is
+   sized in fr units: 0fr collapses it to nothing, 1fr lets it take the
+   content's height. The inner element must clip its own overflow and drop
+   its automatic minimum height, or the track refuses to shrink. */
+.ui-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--motion-duration-slow) var(--motion-ease-standard);
+}
+.ui-collapse[data-open="true"] {
+    grid-template-rows: 1fr;
+}
+.ui-collapse > * {
+    overflow: hidden;
+    min-height: 0;
+}
+
 /* ── Button ── */
 
 /* Shared visual shell — variant/size modifiers below tune color and padding.

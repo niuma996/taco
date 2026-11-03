@@ -6,6 +6,9 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     padding: 0.25rem 0;
+    /* The bar appears with the first attachment and grows the composer;
+       fading it in softens the jump. */
+    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 /* One attached file: thumbnail or icon, name over size, optional remove. */
@@ -20,6 +23,7 @@
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--bg);
+    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .attachment-chip-thumb,

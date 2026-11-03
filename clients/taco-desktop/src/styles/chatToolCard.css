@@ -55,7 +55,7 @@
     margin-left: auto;
 }
 .tool-card-raw-chevron {
-    transition: transform 0.12s ease;
+    transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .tool-card-raw-chevron--open {
     transform: rotate(90deg);
@@ -76,6 +76,9 @@
     overflow-y: auto;
     font-size: 0.9em;
     color: var(--fg-dim);
+    /* Fades in as it opens. The block is not kept mounted while closed —
+       the args are serialized on demand, so a collapsed card pays nothing. */
+    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 .tool-card-raw .shiki {
     margin: 0;

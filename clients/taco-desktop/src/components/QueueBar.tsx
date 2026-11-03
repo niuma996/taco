@@ -27,23 +27,29 @@ const KIND_LABEL_KEYS: Record<QueuedUiItem["kind"], string> = {
 
 export function QueueBar({ items, onCancel }: QueueBarProps) {
     const { t } = useT();
-    if (items.length === 0) return null;
+    // The strip stays mounted while empty so it can collapse out of the
+    // footer instead of vanishing: the composer sits below it, and an
+    // unmounted bar drops the whole input area by its own height in one
+    // frame. The grid track carries the height change; the inner list
+    // clips its overflow so the collapsed track can reach zero.
     return (
-        <ul className="queue-bar" aria-label={t("queue.title")} aria-live="polite">
-            {items.map((item) => (
-                <li key={item.id} className="queue-bar__row">
-                    <span className="queue-bar__kind">{t(KIND_LABEL_KEYS[item.kind])}</span>
-                    <span className="queue-bar__text">{item.text}</span>
-                    <IconButton
-                        aria-label={t("queue.cancel")}
-                        title={t("queue.cancel")}
-                        disabled={item.optimistic === true}
-                        onClick={() => onCancel(item)}
-                    >
-                        <X size={14} aria-hidden="true" />
-                    </IconButton>
-                </li>
-            ))}
-        </ul>
+        <div className="ui-collapse" data-open={items.length > 0}>
+            <ul className="queue-bar" aria-label={t("queue.title")} aria-live="polite">
+                {items.map((item) => (
+                    <li key={item.id} className="queue-bar__row">
+                        <span className="queue-bar__kind">{t(KIND_LABEL_KEYS[item.kind])}</span>
+                        <span className="queue-bar__text">{item.text}</span>
+                        <IconButton
+                            aria-label={t("queue.cancel")}
+                            title={t("queue.cancel")}
+                            disabled={item.optimistic === true}
+                            onClick={() => onCancel(item)}
+                        >
+                            <X size={14} aria-hidden="true" />
+                        </IconButton>
+                    </li>
+                ))}
+            </ul>
+        </div>
     );
 }

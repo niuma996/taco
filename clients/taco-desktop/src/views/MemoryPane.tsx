@@ -490,7 +490,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                 </div>
             </div>
 
-            <div className="memory-detail">
+            <div className="memory-detail" key={view}>
                 {view === "dream" && dream ? (
                     <MemoryDreamPanel
                         state={data.dream}

@@ -17,10 +17,9 @@ function trimCmd(s: string, max = 200): string {
     return truncate(s, max);
 }
 
-/** Truncate the command result. While running, tighten further to 240 to reduce
- *  long streaming-output jitter. */
-function trimResult(s: string, isRunning: boolean, max = 480): string {
-    return truncate(s, isRunning ? 240 : max);
+/** Truncate the command result. */
+function trimResult(s: string, max = 480): string {
+    return truncate(s, max);
 }
 
 export function ShellToolView({ tool }: ToolViewProps) {
@@ -39,8 +38,8 @@ export function ShellToolView({ tool }: ToolViewProps) {
                 </div>
             )}
             {tool.resultText && (
-                <pre className={`tool-card-shell-result ${isRunning ? "streaming" : ""}`}>
-                    {trimResult(tool.resultText, isRunning)}
+                <pre className={`tool-card-shell-result ${isRunning ? "streaming" : ""} ui-enter`}>
+                    {trimResult(tool.resultText)}
                 </pre>
             )}
             {isRunning && !tool.resultText && <div className="tool-card-shell-empty">running…</div>}

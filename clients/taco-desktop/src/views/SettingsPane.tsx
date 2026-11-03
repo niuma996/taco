@@ -88,7 +88,10 @@ export function SettingsPane(props: SettingsPaneProps) {
                 ))}
             </nav>
             <div className="settings-pane-content">
-                <div className="settings-pane-content-inner">
+                {/* key forces a remount per section, so the entrance
+                    animation replays on every switch instead of only the
+                    first time the pane renders. */}
+                <div className="settings-pane-content-inner" key={section}>
                     {section === "appearance" && <AppearanceTab client={props.client} />}
                     {section === "model" && (
                         <ModelTab

@@ -30,12 +30,17 @@ export function defaultSummary(tool: UiToolCall): string {
     return summarizeKnownArgFields(tool.args);
 }
 
-/** Default body — the raw result text, truncated. Tighter while streaming. */
+/** Default body — the raw result text, truncated. */
 export function DefaultToolBody({ tool }: ToolViewProps) {
     const isRunning = tool.status === "running";
     if (!tool.resultText) return null;
-    const cap = isRunning ? 240 : 480;
+    // One cap for both states. A tighter cap while running and a looser one
+    // after completion made the block grow a second time the moment the tool
+    // finished — a visible jump right after the first one.
+    const cap = 480;
     const text =
         tool.resultText.length > cap ? `${tool.resultText.slice(0, cap)}…` : tool.resultText;
-    return <pre className={`tool-card-result ${isRunning ? "streaming" : ""}`}>{text}</pre>;
+    return (
+        <pre className={`tool-card-result ${isRunning ? "streaming" : ""} ui-enter`}>{text}</pre>
+    );
 }

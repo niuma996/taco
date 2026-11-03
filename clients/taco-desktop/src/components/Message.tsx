@@ -10,7 +10,7 @@
 
 import type { CommandPermissionRequest, CommandPermissionScope } from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
 import { useT } from "../i18n/useI18n";
 import {
@@ -213,15 +213,31 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
         setExpanded(false);
     }, [block.endedAt]);
     const open = userOverridden ? !defaultOpen : defaultOpen;
-    const preview = open && !expanded;
     const toggle = () => {
         setUserOverridden((prev) => !prev);
         setExpanded(false);
     };
 
+    // The body stays mounted while the block is closed so the collapse can
+    // animate: a block that unmounts its body disappears in one frame. The
+    // viewport and the full text are the same element with a height cap
+    // toggled on it, so switching between preview and expanded never swaps
+    // the node — the capped form is just the same body with a max-height.
+    //
+    // A block that was never opened keeps no body at all: a long transcript
+    // is mostly closed historical blocks, and mounting their text would cost
+    // DOM for nothing.
+    const hasBody = !block.redacted && block.thinking.length > 0;
+    const [bodyMounted, setBodyMounted] = useState(false);
+    // Layout effect, not effect: a streaming block must show its body on the
+    // first frame it renders, not one frame later.
+    useLayoutEffect(() => {
+        if (open && hasBody) setBodyMounted(true);
+    }, [open, hasBody]);
+
     // Keep the preview on the newest line while the user hasn't scrolled
     // away. Keyed on the preview being mounted: the node only exists then.
-    const previewMounted = open && preview && !block.redacted && block.thinking.length > 0;
+    const previewMounted = open && !expanded && hasBody;
     useStickToBottom(scrollRef, previewMounted);
 
     // The expand affordance only exists when the content actually exceeds the
@@ -229,9 +245,9 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
     // biome-ignore lint/correctness/useExhaustiveDependencies: block.thinking is the trigger — growing content can cross the cap and must re-measure overflow.
     useEffect(() => {
         const el = scrollRef.current;
-        if (!el || !preview) return;
+        if (!el || expanded || !open) return;
         setOverflowing(el.scrollHeight > el.clientHeight + 1);
-    }, [block.thinking, preview]);
+    }, [block.thinking, expanded, open]);
 
     const handleScroll = () => {
         const el = scrollRef.current;
@@ -258,20 +274,22 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
                 />
                 <span>{label}</span>
             </button>
-            {open &&
-                !block.redacted &&
-                block.thinking.length > 0 &&
-                (preview ? (
-                    <div className="thinking-viewport">
+            {bodyMounted && (
+                <div className="ui-collapse" data-open={open && hasBody}>
+                    <div className="thinking-collapse-body">
                         <div
                             ref={scrollRef}
-                            className="thinking-body thinking-body--preview"
+                            className={`thinking-body ${
+                                expanded ? "thinking-body--full" : "thinking-body--preview"
+                            }`}
                             onScroll={handleScroll}
                         >
                             {block.thinking}
                         </div>
-                        {showFade && <div className="thinking-fade" aria-hidden="true" />}
-                        {overflowing && (
+                        {!expanded && showFade && (
+                            <div className="thinking-fade" aria-hidden="true" />
+                        )}
+                        {!expanded && overflowing && (
                             <button
                                 type="button"
                                 className="thinking-expand"
@@ -281,9 +299,8 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
                             </button>
                         )}
                     </div>
-                ) : (
-                    <div className="thinking-body">{block.thinking}</div>
-                ))}
+                </div>
+            )}
         </div>
     );
 }
