@@ -934,6 +934,10 @@ html *:hover {
     user-select: none;
     -webkit-app-region: no-drag;
     border-left: 3px solid transparent;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .files-tree-row:hover {
     background: var(--hover-overlay);

@@ -147,6 +147,15 @@
     --guide-z-index: 4;
     --guide-motion-duration: 150ms;
 
+    /* Motion — weak transitions only (opacity, transform, color). Tiers follow
+       interaction weight: fast for paint-only state changes, base for overlay
+       entrance, slow for height collapse. */
+    --motion-duration-fast: 120ms;
+    --motion-duration-base: 160ms;
+    --motion-duration-slow: 220ms;
+    --motion-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --motion-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
     /* Spacing scale (4px base). Hairline borders stay literal 1px. */
     --space-px: 1px;
     --space-0-5: 0.125rem;
@@ -387,4 +396,24 @@ body,
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: var(--bg);
     color: var(--fg);
+}
+
+/* Motion is decorative: honour the OS setting once for every animation and
+   transition rather than repeating a reduce branch per stylesheet. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    /* A spinner reports "this is still running", which is information rather
+       than decoration — freezing it makes a live task look stalled. */
+    .spin,
+    .task-icon.spinning {
+        animation-duration: 1s !important;
+        animation-iteration-count: infinite !important;
+    }
 }

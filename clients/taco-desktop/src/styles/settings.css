@@ -617,6 +617,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg);
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .mcp-server-card--disabled {
     /* Dim the body so disabled servers read as "configured but inactive", but

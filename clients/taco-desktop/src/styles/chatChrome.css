@@ -225,6 +225,12 @@ main {
     font-size: 0.78rem;
     color: var(--fg);
 }
+.session-info-popover[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.session-info-popover[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
+}
 .session-info-popover__row {
     display: flex;
     align-items: center;

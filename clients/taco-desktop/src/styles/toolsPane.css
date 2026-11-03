@@ -90,6 +90,9 @@
     text-align: left;
     border-radius: var(--radius-sm);
     margin: 1px 4px;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .tools-list-item:hover {

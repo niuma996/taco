@@ -104,8 +104,8 @@ header.topbar .drag-spacer {
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-        background 0.12s ease,
-        color 0.12s ease;
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .window-control-btn:hover {
@@ -125,6 +125,7 @@ header.topbar .drag-spacer {
     border: 0;
     border-radius: var(--radius-circle);
     cursor: pointer;
+    transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .window-control-dot--close {
@@ -202,8 +203,9 @@ header.topbar .topbar-picker-group {
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-        background 0.12s ease,
-        color 0.12s ease;
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .workspace-mode-tab:hover:not(.workspace-mode-tab--active) {
@@ -243,6 +245,7 @@ header.topbar .topbar-picker-group {
     /* Capped to the sidebar list width; the mode tabs beside it size to their
        own labels and stay outside this budget. */
     max-width: calc(var(--pane-width) - 0.5rem - 4px);
+    transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .topbar-workspace-select-label {
@@ -304,6 +307,12 @@ header.topbar .topbar-picker-group {
     max-height: min(60vh, 320px);
     overflow-y: auto;
 }
+.topbar-workspace-menu[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.topbar-workspace-menu[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
+}
 
 .topbar-workspace-item {
     display: flex;
@@ -316,6 +325,7 @@ header.topbar .topbar-picker-group {
     cursor: pointer;
     user-select: none;
     outline: none;
+    transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .topbar-workspace-item[data-highlighted] {
@@ -414,6 +424,12 @@ header.topbar .topbar-picker-group {
     overflow: hidden;
     min-width: 140px;
     padding: 4px 0;
+}
+.topbar-quick-menu[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.topbar-quick-menu[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 /* Visually hidden but announced: the notification badge is aria-hidden
@@ -640,7 +656,9 @@ button.topbar-context-indicator {
     stroke: var(--accent);
     stroke-width: 2.5;
     stroke-linecap: round;
-    transition: stroke-dashoffset 120ms ease-out;
+    transition:
+        stroke-dashoffset 120ms ease-out,
+        stroke var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .topbar-context-indicator__ring-text {
@@ -648,6 +666,7 @@ button.topbar-context-indicator {
     font-size: 7px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    transition: fill var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .topbar-context-indicator--warn .topbar-context-indicator__ring-fill {
@@ -713,6 +732,7 @@ button.topbar-context-indicator {
     font-size: 0.78rem;
     line-height: 1.6;
     box-shadow: 0 4px 12px var(--shadow-color);
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
 }
 
 .context-indicator-popover__row + .context-indicator-popover__row {

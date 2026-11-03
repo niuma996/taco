@@ -14,7 +14,9 @@
        carries the state; the thumb is bright enough to separate on its own. */
     background: var(--switch-track-off);
     cursor: pointer;
-    transition: background 0.18s ease;
+    transition:
+        background-color var(--motion-duration-base) var(--motion-ease-standard),
+        opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .ui-switch[data-state="checked"] {
     background: var(--brand-orange);
@@ -54,6 +56,9 @@
     font-family: inherit;
     font-size: var(--text-base);
     box-sizing: border-box;
+    transition:
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .ui-input:focus-visible {
     /* --focus-ring is a full shadow value, not a colour: nesting it inside
@@ -109,6 +114,25 @@
     color: var(--error);
 }
 
+/* ── Motion primitives ── */
+
+/* Radix Presence decides whether to keep an exiting node mounted by reading
+   the element's animationName, so overlay enter/exit must be @keyframes — a
+   plain transition never delays unmount. Popper-based content (menu, popover,
+   select, tooltip) is positioned with an inline transform, so these keyframes
+   stay on opacity alone; adding a transform would override the placement for
+   the duration of the animation. */
+@keyframes ui-fade-in {
+    from {
+        opacity: 0;
+    }
+}
+@keyframes ui-fade-out {
+    to {
+        opacity: 0;
+    }
+}
+
 /* ── Button ── */
 
 /* Shared visual shell — variant/size modifiers below tune color and padding.
@@ -125,6 +149,18 @@
     cursor: pointer;
     font-family: inherit;
     white-space: nowrap;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard),
+        opacity var(--motion-duration-fast) var(--motion-ease-standard),
+        filter var(--motion-duration-fast) var(--motion-ease-standard),
+        transform var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.ui-btn:active:not(:disabled) {
+    /* Press feedback. transform does not touch layout, so a dense row of
+       buttons does not reflow while one is held down. */
+    transform: scale(0.98);
 }
 .ui-btn:disabled {
     opacity: 0.5;
@@ -197,9 +233,10 @@
     color: var(--fg-dim);
     cursor: pointer;
     transition:
-        background 0.12s ease,
-        border-color 0.12s ease,
-        color 0.12s ease;
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard),
+        opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .ui-icon-btn:hover:not(:disabled),
 .ui-icon-btn[data-state="open"] {
@@ -256,6 +293,9 @@
     font-size: var(--text-base);
     cursor: pointer;
     box-sizing: border-box;
+    transition:
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .ui-select-trigger:focus-visible {
     outline: none;
@@ -281,6 +321,12 @@
     z-index: 1100;
     overflow: hidden;
 }
+.ui-select-content[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.ui-select-content[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
+}
 .ui-select-content [data-radix-select-viewport] {
     padding: 4px 0;
     min-width: var(--radix-select-trigger-width);
@@ -298,6 +344,9 @@
     cursor: pointer;
     user-select: none;
     outline: none;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 /* Same hover language as .ui-menu-item — a tinted overlay, not an accent fill. */
 .ui-select-item[data-highlighted] {
@@ -340,6 +389,14 @@
     box-shadow: 0 8px 24px var(--shadow-color);
     z-index: 300;
 }
+/* Radix DropdownMenu / Select content. The plain <div> consumers of .ui-menu
+   carry no data-state and simply mount without animation. */
+.ui-menu[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.ui-menu[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
+}
 .ui-menu-item {
     display: flex;
     align-items: center;
@@ -357,6 +414,9 @@
     cursor: pointer;
     user-select: none;
     outline: none;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .ui-menu-item:hover,
 .ui-menu-item:focus-visible,
@@ -454,6 +514,12 @@
     background: var(--overlay-scrim);
     z-index: 1000;
 }
+.ui-modal-backdrop[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.ui-modal-backdrop[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
+}
 .ui-modal {
     /* Radix Dialog: Overlay and Content are siblings (not children of a backdrop),
        so the modal positions itself at the screen center and sits above z-index:1000.
@@ -477,6 +543,17 @@
     display: flex;
     flex-direction: column;
     max-height: calc(100vh - 4rem);
+}
+/* Opacity only. The modal is centred with translate(-50%, -50%) on a fixed
+   element; animating transform here makes WebKit paint the untransformed
+   position for the first frame, which reads as "opens at the bottom, then
+   jumps to centre" on tall dialogs. Radix renders Overlay and Content as
+   siblings, so both fade independently. */
+.ui-modal[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.ui-modal[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
 }
 .ui-modal-title {
     flex-shrink: 0;
@@ -626,6 +703,14 @@
     pointer-events: none;
     z-index: 200;
 }
+/* closeDelay is 0, so the exit must not linger: a 120ms fade-out would keep a
+   dismissed tooltip on screen longer than the user expects. */
+.ui-tooltip[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.ui-tooltip[data-state="closed"] {
+    animation: ui-fade-out 80ms var(--motion-ease-out);
+}
 
 /* PopoverPanel — the anchored panel the topbar's menus hang off. The title
    row and the scrolling body are the same for every panel, so the surface
@@ -639,6 +724,13 @@
     width: 340px;
     max-width: calc(100vw - 16px);
     padding: 4px 0;
+}
+
+.ui-popover-panel[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.ui-popover-panel[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .ui-popover-panel__header {
@@ -664,6 +756,9 @@
     color: var(--fg-dim);
     font-size: 0.75rem;
     cursor: pointer;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .ui-popover-panel__action:hover {

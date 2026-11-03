@@ -34,6 +34,8 @@
     max-height: 22rem;
     overflow-y: auto;
     box-sizing: border-box;
+    /* Plain conditional render (no Radix), so this is entrance only. */
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
 }
 /* settings pane: trigger is near the top, flip to downward popup to avoid pane overflow clipping. */
 .model-menu--down .model-menu-popup {

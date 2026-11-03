@@ -76,6 +76,9 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .subagent-row:hover:not(:disabled) {

@@ -510,6 +510,12 @@
     box-shadow: var(--guide-preview-shadow);
     z-index: var(--guide-z-index);
 }
+.user-message-guide__preview[data-state="open"] {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+.user-message-guide__preview[data-state="closed"] {
+    animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
+}
 
 .user-message-guide__preview-position {
     font-size: var(--text-2xs);

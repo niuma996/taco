@@ -61,6 +61,7 @@
     background: var(--input-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
+    transition: border-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .work-item[data-attention="true"] {
