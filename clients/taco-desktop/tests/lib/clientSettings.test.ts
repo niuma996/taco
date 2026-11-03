@@ -13,18 +13,20 @@ import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+    consumeLegacyRightPanelWidth,
     isValidUiLanguage,
     LS_DEBUG_MODE,
     LS_LLM_DUMP_TO_FILE,
-    LS_RIGHT_PANEL_WIDTH,
+    LS_RIGHT_PANEL_RATIO,
+    LS_RIGHT_PANEL_WIDTH_LEGACY,
     LS_THEME,
     LS_UI_LANGUAGE,
     readClientSettings,
-    readPersistedRightPanelWidth,
+    readPersistedRightPanelRatio,
     readPersistedThemePreference,
     readPersistedUiLanguage,
     saveClientSettings,
-    writePersistedRightPanelWidth,
+    writePersistedRightPanelRatio,
     writePersistedUiLanguage,
 } from "../../src/lib/clientSettings";
 
@@ -303,25 +305,38 @@ describe("clientSettings", () => {
         });
     });
 
-    describe("rightPanelWidth 持久化", () => {
+    describe("rightPanelRatio 持久化", () => {
         it("写入后能读回", () => {
-            writePersistedRightPanelWidth(320);
-            assert.equal(readPersistedRightPanelWidth(), 320);
+            writePersistedRightPanelRatio(0.3);
+            assert.equal(readPersistedRightPanelRatio(), 0.3);
         });
 
         it("未设置时返回 undefined", () => {
-            writePersistedRightPanelWidth(undefined);
-            assert.equal(readPersistedRightPanelWidth(), undefined);
+            writePersistedRightPanelRatio(undefined);
+            assert.equal(readPersistedRightPanelRatio(), undefined);
         });
 
         it("非数字的脏值被丢弃", () => {
-            localStorage.setItem(LS_RIGHT_PANEL_WIDTH, JSON.stringify("wide"));
-            assert.equal(readPersistedRightPanelWidth(), undefined);
+            localStorage.setItem(LS_RIGHT_PANEL_RATIO, JSON.stringify("wide"));
+            assert.equal(readPersistedRightPanelRatio(), undefined);
         });
 
         it("NaN 不会被当成有效值读回", () => {
-            localStorage.setItem(LS_RIGHT_PANEL_WIDTH, "NaN");
-            assert.equal(readPersistedRightPanelWidth(), undefined);
+            localStorage.setItem(LS_RIGHT_PANEL_RATIO, "NaN");
+            assert.equal(readPersistedRightPanelRatio(), undefined);
+        });
+    });
+
+    describe("旧像素宽度的迁移", () => {
+        it("读走即删，只发生一次", () => {
+            localStorage.setItem(LS_RIGHT_PANEL_WIDTH_LEGACY, JSON.stringify(320));
+            assert.equal(consumeLegacyRightPanelWidth(), 320);
+            assert.equal(localStorage.getItem(LS_RIGHT_PANEL_WIDTH_LEGACY), null);
+            assert.equal(consumeLegacyRightPanelWidth(), undefined);
+        });
+
+        it("没有旧值时返回 undefined", () => {
+            assert.equal(consumeLegacyRightPanelWidth(), undefined);
         });
     });
 });

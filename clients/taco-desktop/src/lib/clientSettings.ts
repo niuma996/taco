@@ -71,7 +71,9 @@ export const LS_DEBUG_MODE = "taco.debugMode";
 export const LS_LLM_DUMP_TO_FILE = "taco.llmDumpToFile";
 export const LS_UI_LANGUAGE = "taco.uiLanguage";
 export const LS_SIDEBAR_COLLAPSED = "taco.sidebarCollapsed";
-export const LS_RIGHT_PANEL_WIDTH = "taco.rightPanelWidth";
+export const LS_RIGHT_PANEL_RATIO = "taco.rightPanelRatio";
+/** Legacy pixel preference; consumed once by the ratio migration. */
+export const LS_RIGHT_PANEL_WIDTH_LEGACY = "taco.rightPanelWidth";
 
 function isValidTheme(v: unknown): v is ThemePreference {
     return v === "light" || v === "dark" || v === "system";
@@ -176,13 +178,25 @@ export function writePersistedSidebarCollapsed(v: boolean | undefined): void {
     writeLs(LS_SIDEBAR_COLLAPSED, v);
 }
 
-/** Right-side panel width in px, shared by the task / files / subagent panels. */
-export function readPersistedRightPanelWidth(): number | undefined {
-    return readLs(LS_RIGHT_PANEL_WIDTH, isFiniteNumber);
+/** Right-side panel share of the chat area, shared by the three panels. */
+export function readPersistedRightPanelRatio(): number | undefined {
+    return readLs(LS_RIGHT_PANEL_RATIO, isFiniteNumber);
 }
 
-export function writePersistedRightPanelWidth(v: number | undefined): void {
-    writeLs(LS_RIGHT_PANEL_WIDTH, v);
+export function writePersistedRightPanelRatio(v: number | undefined): void {
+    writeLs(LS_RIGHT_PANEL_RATIO, v);
+}
+
+/**
+ * Reads the legacy pixel width and drops it, so the caller can convert it
+ * into a share exactly once. Returns undefined when there is nothing to
+ * migrate.
+ */
+export function consumeLegacyRightPanelWidth(): number | undefined {
+    const legacy = readLs(LS_RIGHT_PANEL_WIDTH_LEGACY, isFiniteNumber);
+    if (legacy === undefined) return undefined;
+    writeLs(LS_RIGHT_PANEL_WIDTH_LEGACY, undefined);
+    return legacy;
 }
 
 function readRaw(): PersistedClientSettings {

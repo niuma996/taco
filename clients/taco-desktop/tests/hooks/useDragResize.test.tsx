@@ -4,12 +4,24 @@ import { describe, it, vi } from "vitest";
 
 import { useDragResize } from "../../src/hooks/primitives/useDragResize";
 
-/** Clamp to [220, 640] — the right panel's real bounds, viewport aside. */
-const clamp = (raw: number) => Math.round(Math.max(220, Math.min(640, raw)));
+/** Clamp to [0.2, 0.5] — a share of the chat area, layout aside. */
+const clamp = (raw: number) => Math.min(0.5, Math.max(0.2, raw));
 
 function setup(overrides: Partial<Parameters<typeof useDragResize>[0]> = {}, onCommit = vi.fn()) {
     const { result } = renderHook(() =>
-        useDragResize({ initial: 300, min: 220, max: 640, clamp, onCommit, ...overrides }),
+        useDragResize({
+            initial: 0.3,
+            min: 0,
+            max: 0.5,
+            clamp,
+            pixelsPerUnit: 1000,
+            step: 0.02,
+            stepFast: 0.05,
+            ariaValue: (value) => Math.round(value * 100),
+            resetTo: 0.3,
+            onCommit,
+            ...overrides,
+        }),
     );
     return { result, onCommit };
 }
@@ -28,26 +40,42 @@ function drag(handleProps: { onPointerDown: (e: never) => void }, from: number, 
 }
 
 describe("useDragResize", () => {
-    it("clamps the initial width instead of trusting it", () => {
-        const { result } = setup({ initial: 9999 });
-        assert.equal(result.current.width, 640);
+    it("clamps the initial value instead of trusting it", () => {
+        const { result } = setup({ initial: 0.9 });
+        assert.equal(result.current.width, 0.5);
     });
 
     it("dragging left widens the right-anchored panel", () => {
         const { result, onCommit } = setup();
-        // Pointer moves left by 100 → panel gains 100.
+        // Pointer moves left by 100px → the share grows by 100/1000.
         drag(result.current.handleProps, 800, 700);
-        assert.equal(result.current.width, 400);
-        assert.equal(onCommit.mock.calls.at(-1)?.[0], 400);
+        assert.equal(result.current.width, 0.4);
+        assert.equal(onCommit.mock.calls.at(-1)?.[0], 0.4);
+    });
+
+    it("the drag delta scales with pixelsPerUnit", () => {
+        const { result } = setup({ pixelsPerUnit: 2000 });
+        // Same 100px of travel, but a unit now spans 2000px.
+        drag(result.current.handleProps, 800, 700);
+        assert.equal(result.current.width, 0.35);
     });
 
     it("dragging right narrows the panel and clamps at the lower bound", () => {
         const { result } = setup();
         drag(result.current.handleProps, 800, 1000);
-        assert.equal(result.current.width, 220);
+        assert.equal(result.current.width, 0.2);
     });
 
-    it("commits the final width once on release, not per move", () => {
+    it("commits the request, not the clamped value", () => {
+        const { result, onCommit } = setup();
+        // Drag below the rendered floor: the request survives, the render does not.
+        drag(result.current.handleProps, 800, 1000);
+        assert.equal(result.current.width, 0.2);
+        const committed = onCommit.mock.calls.at(-1)?.[0] as number;
+        assert.ok(Math.abs(committed - 0.1) < 1e-9, `expected ~0.1, got ${committed}`);
+    });
+
+    it("commits the final value once on release, not per move", () => {
         const { result, onCommit } = setup();
         act(() => {
             result.current.handleProps.onPointerDown({ clientX: 800 } as never);
@@ -63,7 +91,19 @@ describe("useDragResize", () => {
             window.dispatchEvent(new MouseEvent("pointerup"));
         });
         assert.equal(onCommit.mock.calls.length, 1);
-        assert.equal(onCommit.mock.calls[0]?.[0], 400);
+        assert.equal(onCommit.mock.calls[0]?.[0], 0.4);
+    });
+
+    it("marks the body while a drag is live", () => {
+        const { result } = setup();
+        act(() => {
+            result.current.handleProps.onPointerDown({ clientX: 800 } as never);
+        });
+        assert.equal(document.body.getAttribute("data-panel-resizing"), "true");
+        act(() => {
+            window.dispatchEvent(new MouseEvent("pointerup"));
+        });
+        assert.equal(document.body.hasAttribute("data-panel-resizing"), false);
     });
 
     it("pointercancel ends the drag and restores body styles", () => {
@@ -76,7 +116,7 @@ describe("useDragResize", () => {
             window.dispatchEvent(new MouseEvent("pointermove", { clientX: 760 }));
         });
         act(() => {
-            window.dispatchEvent(new Event("pointercancel"));
+            window.dispatchEvent(new MouseEvent("pointercancel"));
         });
         assert.equal(onCommit.mock.calls.length, 1);
         assert.equal(document.body.style.cursor, "", "cursor released");
@@ -111,7 +151,7 @@ describe("useDragResize", () => {
                 preventDefault,
             } as never);
         });
-        assert.equal(result.current.width, 316);
+        assert.equal(result.current.width, 0.32);
         assert.equal(preventDefault.mock.calls.length, 1, "arrow keys must not scroll");
         act(() => {
             result.current.handleProps.onKeyDown({
@@ -120,7 +160,7 @@ describe("useDragResize", () => {
                 preventDefault,
             } as never);
         });
-        assert.equal(result.current.width, 300);
+        assert.equal(result.current.width, 0.3);
         assert.equal(onCommit.mock.calls.length, 2, "keyboard commits each step");
     });
 
@@ -133,7 +173,7 @@ describe("useDragResize", () => {
                 preventDefault: vi.fn(),
             } as never);
         });
-        assert.equal(result.current.width, 364);
+        assert.equal(result.current.width, 0.35);
     });
 
     it("ignores unrelated keys", () => {
@@ -145,70 +185,53 @@ describe("useDragResize", () => {
                 preventDefault: vi.fn(),
             } as never);
         });
-        assert.equal(result.current.width, 300);
+        assert.equal(result.current.width, 0.3);
         assert.equal(onCommit.mock.calls.length, 0);
     });
 
-    it("double-click resets to the initial width", () => {
+    it("double-click resets to the reset target", () => {
         const { result, onCommit } = setup();
         drag(result.current.handleProps, 800, 600);
-        assert.equal(result.current.width, 500);
+        assert.equal(result.current.width, 0.5);
         act(() => {
             result.current.handleProps.onDoubleClick();
         });
-        assert.equal(result.current.width, 300);
-        assert.equal(onCommit.mock.calls.at(-1)?.[0], 300);
+        assert.equal(result.current.width, 0.3);
+        assert.equal(onCommit.mock.calls.at(-1)?.[0], 0.3);
     });
 
-    it("re-clamps on window resize without overwriting the stored preference", () => {
-        // Bound tightens to 360 after the "resize"; the persisted 600 must not
-        // be rewritten, so widening the window can restore it.
-        let upper = 640;
-        const shrinking = (raw: number) => Math.round(Math.max(220, Math.min(upper, raw)));
-        const onCommit = vi.fn();
-        const { result } = renderHook(() =>
-            useDragResize({ initial: 600, min: 220, max: 640, clamp: shrinking, onCommit }),
-        );
-        assert.equal(result.current.width, 600);
-        onCommit.mockClear();
-
-        upper = 360;
-        act(() => {
-            window.dispatchEvent(new Event("resize"));
-        });
-        assert.equal(result.current.width, 360, "rendered width follows the tighter bound");
-        assert.equal(onCommit.mock.calls.length, 0, "shrink must not persist");
-    });
-
-    it("re-clamps when the clamp identity changes without a resize event", () => {
-        // Mirrors the sidebar collapsing: the bound moves but no resize fires.
+    it("re-clamps as soon as the bound tightens", () => {
+        // Mirrors the sidebar collapsing: the bound moves and the value follows
+        // on the next render, with no resize event involved.
         const onCommit = vi.fn();
         const { result, rerender } = renderHook(
             ({ upper }: { upper: number }) =>
                 useDragResize({
-                    initial: 600,
-                    min: 220,
-                    max: 640,
-                    clamp: (raw: number) => Math.round(Math.max(220, Math.min(upper, raw))),
+                    initial: 0.4,
+                    min: 0,
+                    max: 0.5,
+                    clamp: (raw: number) => Math.min(upper, Math.max(0.2, raw)),
+                    pixelsPerUnit: 1000,
                     onCommit,
                 }),
-            { initialProps: { upper: 640 } },
+            { initialProps: { upper: 0.5 } },
         );
-        assert.equal(result.current.width, 600);
+        assert.equal(result.current.width, 0.4);
 
-        rerender({ upper: 400 });
-        assert.equal(result.current.width, 400);
+        rerender({ upper: 0.3 });
+        assert.equal(result.current.width, 0.3);
+        assert.equal(onCommit.mock.calls.length, 0, "a tighter bound must not persist");
     });
 
-    it("exposes the current width through the separator's aria values", () => {
+    it("exposes the current value through the separator's aria values", () => {
         const { result } = setup();
         assert.equal(result.current.handleProps.role, "separator");
         assert.equal(result.current.handleProps["aria-orientation"], "vertical");
-        assert.equal(result.current.handleProps["aria-valuenow"], 300);
-        assert.equal(result.current.handleProps["aria-valuemin"], 220);
-        assert.equal(result.current.handleProps["aria-valuemax"], 640);
+        assert.equal(result.current.handleProps["aria-valuenow"], 30);
+        assert.equal(result.current.handleProps["aria-valuemin"], 0);
+        assert.equal(result.current.handleProps["aria-valuemax"], 50);
 
         drag(result.current.handleProps, 800, 700);
-        assert.equal(result.current.handleProps["aria-valuenow"], 400);
+        assert.equal(result.current.handleProps["aria-valuenow"], 40);
     });
 });

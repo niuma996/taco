@@ -1,5 +1,18 @@
 /**
- * useDragResize — pointer-driven width for a right-anchored panel.
+ * useDragResize — pointer-driven resize for a right-anchored panel.
+ *
+ * The value domain belongs to the caller: the hook works in "units" and only
+ * needs to know how many pixels one unit spans (`pixelsPerUnit`) to turn a
+ * pointer delta into a value delta. A pixel width passes 1; a share of the
+ * chat area passes the chat area's width.
+ *
+ * Two values, deliberately. `requested` is what the user asked for and is
+ * what gets persisted; the exposed width is `clamp(requested)`, derived while
+ * rendering. Keeping the request unclamped by the layout-aware bound is what
+ * lets a preference survive a temporary squeeze — a 50% panel squeezed to
+ * the 250px floor on a narrow window comes back in full when the room
+ * returns. The caller's `clamp` therefore owns the layout-aware bound, and the
+ * caller must re-render when that bound moves.
  *
  * Dragging left widens the panel, so the delta is inverted. Listeners are
  * attached on pointerdown and removed by `stop`, rather than living in an
@@ -12,7 +25,7 @@
  * window would leave the body stuck with a resize cursor and text selection
  * disabled.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 export interface DragHandleProps {
     role: "separator";
@@ -26,64 +39,85 @@ export interface DragHandleProps {
     onKeyDown: (e: React.KeyboardEvent) => void;
 }
 
-/** Keyboard step; Shift multiplies it for coarse adjustment. */
-const KEY_STEP = 16;
-const KEY_STEP_FAST = 64;
+/** Marks the body while a drag is live so CSS can drop panel transitions. */
+const RESIZING_ATTRIBUTE = "data-panel-resizing";
 
 export function useDragResize({
     initial,
     min,
     max,
     clamp,
+    pixelsPerUnit = 1,
+    step = 16,
+    stepFast = 64,
+    ariaValue = (value) => value,
+    resetTo,
     onCommit,
 }: {
     initial: number;
+    /** Hard lower bound of the requested value. */
     min: number;
+    /** Hard upper bound of the requested value. */
     max: number;
-    /** Applied to every candidate value; owns the viewport-aware upper bound. */
+    /** Applied to the request while rendering; owns the layout-aware bound. */
     clamp: (raw: number) => number;
-    onCommit: (width: number) => void;
+    /** Pixels per unit of the value domain — a share's base width. */
+    pixelsPerUnit?: number;
+    /** Keyboard step, in value units. */
+    step?: number;
+    /** Keyboard step with Shift held. */
+    stepFast?: number;
+    /** Formats the exposed aria values (a share as a percentage, say). */
+    ariaValue?: (value: number) => number;
+    /** Double-click target; defaults to `initial`. */
+    resetTo?: number;
+    /** Receives the user's request, not the clamped value. */
+    onCommit: (value: number) => void;
 }): { width: number; handleProps: DragHandleProps; reset: () => void } {
-    // Two values, deliberately: `requested` is what the user asked for, `width`
-    // is what currently fits. Storing only the clamped width would destroy the
-    // preference the first time it is clipped — a 600px panel clamped to 400 on
-    // a narrow window could never widen back when the room returns, because
-    // nothing remembers the 600.
     const [requested, setRequested] = useState(initial);
-    const [width, setWidth] = useState(() => clamp(initial));
-    // Mirrors both for synchronous reads inside closures (onPointerDown's drag
-    // handlers, onKeyDown) without pulling them into those deps.
-    const widthRef = useRef(width);
-    widthRef.current = width;
+    // Mirrors the request for synchronous reads inside closures (the drag
+    // handlers, onKeyDown) without pulling it into their deps.
     const requestedRef = useRef(requested);
     requestedRef.current = requested;
 
+    // Derived, not stored: the bound moves with the layout (window resize,
+    // sidebar collapse), so clamping on every render keeps the value and the
+    // bound in step without an effect that lags a frame behind the layout.
+    const width = clamp(requested);
+    const widthRef = useRef(width);
+    widthRef.current = width;
+
+    // The reset target is fixed at mount: the caller's `initial` may follow
+    // the persisted preference, and a reset that followed it would be a no-op.
+    const resetTarget = useRef(resetTo ?? initial).current;
+
+    const hardClamp = useCallback(
+        (value: number) => Math.min(max, Math.max(min, value)),
+        [max, min],
+    );
+
     const commit = useCallback(
         (next: number) => {
-            const clamped = clamp(next);
-            setRequested(next);
-            requestedRef.current = next;
-            setWidth(clamped);
-            widthRef.current = clamped;
-            onCommit(clamped);
+            const bounded = hardClamp(next);
+            setRequested(bounded);
+            requestedRef.current = bounded;
+            onCommit(bounded);
         },
-        [clamp, onCommit],
+        [hardClamp, onCommit],
     );
 
     const onPointerDown = useCallback(
         (e: React.PointerEvent) => {
             const startX = e.clientX;
-            const startWidth = widthRef.current;
+            const startValue = widthRef.current;
+            const unit = Math.max(1, pixelsPerUnit);
             document.body.style.setProperty("user-select", "none");
             document.body.style.setProperty("cursor", "col-resize");
+            document.body.setAttribute(RESIZING_ATTRIBUTE, "true");
 
             const onMove = (ev: PointerEvent) => {
                 // Panel is right-anchored: moving the pointer left must widen it.
-                const next = clamp(startWidth + (startX - ev.clientX));
-                setWidth(next);
-                widthRef.current = next;
-                // A drag is an explicit request, so it also becomes the
-                // preference — the pointer cannot exceed the clamp anyway.
+                const next = hardClamp(startValue + (startX - ev.clientX) / unit);
                 setRequested(next);
                 requestedRef.current = next;
             };
@@ -95,7 +129,8 @@ export function useDragResize({
                 window.removeEventListener("blur", stop);
                 document.body.style.removeProperty("user-select");
                 document.body.style.removeProperty("cursor");
-                onCommit(widthRef.current);
+                document.body.removeAttribute(RESIZING_ATTRIBUTE);
+                onCommit(requestedRef.current);
             };
 
             window.addEventListener("pointermove", onMove);
@@ -103,46 +138,23 @@ export function useDragResize({
             window.addEventListener("pointercancel", stop);
             window.addEventListener("blur", stop);
         },
-        [clamp, onCommit],
+        [hardClamp, onCommit, pixelsPerUnit],
     );
 
-    // Re-clamp whenever the upper bound moves. `clamp` owns a viewport-dependent
-    // bound, so a width that was legal on a wide window falls out of range when
-    // the window shrinks, or when a persisted width is restored on a smaller
-    // screen. Runs on mount and on every `clamp` identity change, not only on
-    // resize events: a bound that tracks surrounding layout (the sidebar
-    // collapsing, say) moves without the window ever resizing.
-    //
-    // Re-clamps `requested`, not the current width, so the move is reversible —
-    // room reappearing restores the full preference instead of leaving it stuck
-    // at whatever the narrowest layout allowed. onCommit is deliberately not
-    // called: the stored preference must survive a temporary squeeze.
-    useEffect(() => {
-        const apply = () => {
-            const next = clamp(requestedRef.current);
-            if (next === widthRef.current) return;
-            widthRef.current = next;
-            setWidth(next);
-        };
-        apply();
-        window.addEventListener("resize", apply);
-        return () => window.removeEventListener("resize", apply);
-    }, [clamp]);
-
-    const reset = useCallback(() => commit(initial), [commit, initial]);
+    const reset = useCallback(() => commit(resetTarget), [commit, resetTarget]);
 
     const onKeyDown = useCallback(
         (e: React.KeyboardEvent) => {
-            const step = e.shiftKey ? KEY_STEP_FAST : KEY_STEP;
+            const delta = e.shiftKey ? stepFast : step;
             if (e.key === "ArrowLeft") {
                 e.preventDefault();
-                commit(widthRef.current + step);
+                commit(widthRef.current + delta);
             } else if (e.key === "ArrowRight") {
                 e.preventDefault();
-                commit(widthRef.current - step);
+                commit(widthRef.current - delta);
             }
         },
-        [commit],
+        [commit, step, stepFast],
     );
 
     return {
@@ -151,9 +163,9 @@ export function useDragResize({
         handleProps: {
             role: "separator",
             "aria-orientation": "vertical",
-            "aria-valuenow": width,
-            "aria-valuemin": min,
-            "aria-valuemax": max,
+            "aria-valuenow": ariaValue(width),
+            "aria-valuemin": ariaValue(min),
+            "aria-valuemax": ariaValue(max),
             tabIndex: 0,
             onPointerDown,
             onDoubleClick: reset,
