@@ -95,6 +95,14 @@ export function CommandPermissionPrompt({
             ) : (
                 <div className="permission-prompt-command">{request.command}</div>
             )}
+            {!isConfig &&
+                request.evaluation.triggeringCommand &&
+                request.evaluation.triggeringCommand.trim() !== request.command.trim() && (
+                    <div>
+                        {t("settings.permissionsTriggeringCommand")}:{" "}
+                        {request.evaluation.triggeringCommand}
+                    </div>
+                )}
             {children}
             <div className="permission-prompt-actions">
                 <div className="permission-prompt-buttons">

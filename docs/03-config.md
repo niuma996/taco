@@ -161,6 +161,16 @@ below).
 }
 ```
 
+Local automatic sessions also support simple Bash `ls` path globs when
+`commandPermissions.deny` is empty, for example `ls src/*.ts`, `ls src/*/`, and
+`ls ./*`. Bare patterns must follow `--` (`ls -- *`) so filenames cannot become
+options. This supports ordinary `*`, `?`, and character classes, excluding
+globstar, braces, extended globs, and redirects. Loops, variables, command
+substitution, and command runners such as `xargs` still require approval.
+Manual, IM, plan, and read-only execution retain their existing restrictions.
+Any configured deny rule disables this allowance to avoid hiding a denied
+literal path behind a glob.
+
 ### Safe view (returned by `settings.get` / `settings.write`)
 
 `TacoGlobalConfigView` strips secret-bearing fields before the value

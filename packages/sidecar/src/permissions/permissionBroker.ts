@@ -133,6 +133,7 @@ export class PermissionBroker extends EventEmitter {
         const imPolicy = this.imCommandPolicy?.();
         const context = {
             ...this.commandContext?.(),
+            ...(this.refuseApprovals ? { allowPathGlobs: false } : {}),
             ...(args.cwd ? { cwd: args.cwd } : {}),
             ...(args.language ? { language: args.language } : {}),
         };

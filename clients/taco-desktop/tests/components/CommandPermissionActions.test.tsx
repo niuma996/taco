@@ -156,6 +156,35 @@ it("disables persistent approval for unsupported syntax", () => {
     ).toBe(true);
 });
 
+describe("CommandPermissionPrompt triggering command", () => {
+    it("does not repeat the whole command as the triggering sub-command", () => {
+        render(
+            <CommandPermissionPrompt
+                request={{
+                    ...request,
+                    evaluation: { ...request.evaluation, triggeringCommand: "rm -rf build" },
+                }}
+                onResolve={() => {}}
+            />,
+        );
+        expect(screen.queryByText(/settings\.permissionsTriggeringCommand/)).toBeNull();
+    });
+
+    it("shows the sub-command when the prompt covers a compound command", () => {
+        render(
+            <CommandPermissionPrompt
+                request={{
+                    ...request,
+                    command: "git status && rm -rf build",
+                    evaluation: { ...request.evaluation, triggeringCommand: "rm -rf build" },
+                }}
+                onResolve={() => {}}
+            />,
+        );
+        expect(screen.getByText(/settings\.permissionsTriggeringCommand/)).toBeTruthy();
+    });
+});
+
 describe("CommandPermissionPrompt config changes", () => {
     const configRequest: CommandPermissionRequest = {
         requestId: "req-cfg",

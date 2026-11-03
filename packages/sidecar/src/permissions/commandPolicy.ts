@@ -9,6 +9,7 @@ import type {
 import { BUILTIN_READ_ONLY_COMMANDS } from "@taco-ai/protocol";
 import type { ImCommandPolicy } from "../channels/imWorkspacePolicy.ts";
 import { executableName, nestedExecution } from "./commandExecution.ts";
+import { isReadOnlyLsPathGlob } from "./lsPathGlobs.ts";
 import type { ParsedShellNode, ShellLanguage } from "./shellParser.ts";
 import { parseShellCommand } from "./shellParser.ts";
 import {
@@ -335,6 +336,8 @@ export interface CommandEvaluationContext {
     cwd?: string;
     allowedRoots?: readonly string[];
     language?: ShellLanguage;
+    /** IM callers retain the existing dynamic-syntax approval boundary. */
+    allowPathGlobs?: boolean;
 }
 
 function authorizedDirectory(
@@ -601,7 +604,9 @@ function evaluateParsed(
     readOnly = false,
     depth = 0,
 ): CommandEvaluation {
-    const parsed = parseShellCommand(command, context.language);
+    const allowPathGlobs =
+        depth === 0 && !readOnly && config.mode === "auto" && context.allowPathGlobs !== false;
+    const parsed = parseShellCommand(command, context.language, { allowPathGlobs });
     const values: CommandEvaluation[] = [];
     const roots = [
         ...(context.cwd ? [context.cwd] : []),
@@ -712,8 +717,29 @@ function evaluateParsed(
             node.dynamic ||
             isShellWrapperCommand(executableName(node.argv[0] ?? ""))
         ) {
+            if (
+                allowPathGlobs &&
+                parsed.language === "bash" &&
+                !config.deny?.length &&
+                isReadOnlyLsPathGlob(node)
+            ) {
+                values.push(
+                    result("allow", "recognized read-only ls path glob", {
+                        source: "mode",
+                        risk: "readOnly",
+                    }),
+                );
+                continue;
+            }
+            const reason = node.argumentKinds.includes("substitution")
+                ? "command substitution requires approval"
+                : node.argumentKinds.includes("variable")
+                  ? "variable expansion cannot be determined statically"
+                  : node.argumentKinds.includes("glob")
+                    ? "path glob is outside the supported read-only ls forms"
+                    : "unsupported or dynamic shell command";
             values.push(
-                result(readOnly ? "deny" : "ask", "unsupported or dynamic shell command", {
+                result(readOnly ? "deny" : "ask", reason, {
                     persistentAllowed: false,
                 }),
             );
@@ -858,6 +884,6 @@ export function evaluateCommandForImWorkspace(
             deny: [...(config.deny ?? []), ...(policy.deny ?? [])],
             rules: undefined,
         },
-        context,
+        { ...context, allowPathGlobs: false },
     );
 }

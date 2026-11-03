@@ -5,10 +5,12 @@ import { Language, type Node, Parser, type Tree } from "web-tree-sitter";
 
 export type ShellLanguage = "bash" | "powershell" | "unknown";
 export type ShellNodeKind = "command" | "cd" | "unknown";
+export type ShellArgumentKind = "literal" | "glob" | "variable" | "substitution" | "unsupported";
 export interface ParsedShellNode {
     text: string;
     kind: ShellNodeKind;
     argv: string[];
+    argumentKinds: ShellArgumentKind[];
     args: string[];
     start: number;
     end: number;
@@ -86,12 +88,23 @@ const powershellLiteralTypes = new Set([
 ]);
 
 /** Decode one AST-delimited word without executing any expansion. */
-function literal(node: Node, language: "bash" | "powershell"): { value: string; dynamic: boolean } {
+function literal(
+    node: Node,
+    language: "bash" | "powershell",
+): { value: string; dynamic: boolean; kind: ShellArgumentKind } {
     const types = language === "bash" ? bashLiteralTypes : powershellLiteralTypes;
     let dynamic = false;
+    const kinds = new Set<ShellArgumentKind>();
     const check = (part: Node, depth: number): void => {
         if (depth > MAX_DEPTH || !types.has(part.type)) {
             dynamic = true;
+            kinds.add(
+                part.type === "command_substitution"
+                    ? "substitution"
+                    : ["expansion", "simple_expansion"].includes(part.type)
+                      ? "variable"
+                      : "unsupported",
+            );
             return;
         }
         for (const child of part.namedChildren) if (child) check(child, depth + 1);
@@ -150,22 +163,38 @@ function literal(node: Node, language: "bash" | "powershell"): { value: string; 
                 continue;
             }
         }
-        if (ch === "$" || (language === "bash" && ch === "`")) dynamic = true;
-        // Tilde is a valid literal in Git revisions (HEAD~1) and paths after
-        // quoting has been decoded; only shell expansion metacharacters make a
-        // token dynamic here.
+        if (ch === "$" || (language === "bash" && ch === "`")) {
+            dynamic = true;
+            kinds.add(ch === "`" || text[index + 1] === "(" ? "substitution" : "variable");
+        }
+        // Preserve existing tilde policy for static commands, but do not
+        // mistake an unquoted leading tilde for a literal in the glob gate.
+        if (language === "bash" && ch === "~" && index === 0 && !quote) kinds.add("unsupported");
         if (
             !quote &&
             ((language === "bash" && /[*?[\]{}]/.test(ch)) ||
                 (language === "powershell" && /[(){}@,]/.test(ch)))
-        )
+        ) {
             dynamic = true;
+            kinds.add(language === "bash" && /[*?[\]]/.test(ch) ? "glob" : "unsupported");
+        }
         value += ch;
     }
-    return { value, dynamic: dynamic || !!quote };
+    const kind = (["unsupported", "substitution", "variable", "glob"] as const).find((kind) =>
+        kinds.has(kind),
+    );
+    return {
+        value,
+        dynamic: dynamic || !!quote,
+        kind: quote ? "unsupported" : (kind ?? "literal"),
+    };
 }
 
-export function parseShellCommand(command: string, language?: ShellLanguage): ParsedShellCommand {
+export function parseShellCommand(
+    command: string,
+    language?: ShellLanguage,
+    options?: { allowPathGlobs?: boolean },
+): ParsedShellCommand {
     const lang = language ?? (process.platform === "win32" ? "powershell" : "bash");
     const result: ParsedShellCommand = { language: lang, nodes: [], operators: [], complete: true };
     const incomplete = (reason: string): void => {
@@ -218,12 +247,16 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
                 const name =
                     node.childForFieldName("name") ?? node.childForFieldName("command_name");
                 let dynamic = !name;
+                let onlyPathGlobs = !!name;
                 const argv: string[] = [];
+                const argumentKinds: ShellArgumentKind[] = [];
                 let redirects = redirected;
                 const add = (part: Node): void => {
                     const decoded = literal(part, lang);
                     argv.push(decoded.value);
+                    argumentKinds.push(decoded.kind);
                     dynamic ||= decoded.dynamic;
+                    if (decoded.dynamic && decoded.kind !== "glob") onlyPathGlobs = false;
                 };
                 if (name) add(name);
                 for (const child of node.namedChildren) {
@@ -240,7 +273,10 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
                             add(argument);
                         }
                     } else if (lang === "bash" && child.type !== "variable_assignment") add(child);
-                    else dynamic = true;
+                    else {
+                        dynamic = true;
+                        onlyPathGlobs = false;
+                    }
                 }
                 const first = argv[0]?.toLowerCase();
                 const cd = first === "cd" || (lang === "powershell" && first === "set-location");
@@ -258,6 +294,7 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
                     text: node.text,
                     kind: cd ? "cd" : dynamic ? "unknown" : "command",
                     argv,
+                    argumentKinds,
                     args: argv.slice(1),
                     start: node.startIndex,
                     end: node.endIndex,
@@ -265,7 +302,17 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
                     ...(cwd !== undefined ? { cwd } : {}),
                     ...(redirects ? { redirects: true } : {}),
                 });
-                if (dynamic) incomplete("Shell command contains dynamic or unsupported execution");
+                if (
+                    dynamic &&
+                    !(
+                        options?.allowPathGlobs &&
+                        onlyPathGlobs &&
+                        lang === "bash" &&
+                        argumentKinds.includes("glob") &&
+                        argumentKinds.every((kind) => kind === "literal" || kind === "glob")
+                    )
+                )
+                    incomplete("Shell command contains dynamic or unsupported execution");
                 nestedCommands(node, depth);
                 return;
             }
@@ -273,6 +320,25 @@ export function parseShellCommand(command: string, language?: ShellLanguage): Pa
                 if (node.type === "heredoc_redirect") incomplete("Here documents require approval");
                 nestedCommands(node, depth);
                 return;
+            }
+            if (lang === "bash" && node.type === "redirected_statement") {
+                const body = node.childForFieldName("body");
+                if (body) {
+                    const start = result.nodes.length;
+                    visit(body, depth + 1, redirected);
+                    // The grammar can wrap an entire && list in the final
+                    // command's redirect. Nested substitutions end earlier
+                    // than their containing command, so use the greatest end.
+                    const commands = result.nodes.slice(start);
+                    const target = commands.reduce<ParsedShellNode | undefined>(
+                        (last, command) => (!last || command.end > last.end ? command : last),
+                        undefined,
+                    );
+                    if (target) target.redirects = true;
+                    for (const child of node.namedChildren)
+                        if (child && child.id !== body.id) visit(child, depth + 1, redirected);
+                    return;
+                }
             }
             if (!containers[lang].has(node.type))
                 incomplete(`Unsupported shell construct: ${node.type}`);

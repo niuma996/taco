@@ -116,7 +116,7 @@ function getShellDescription(): string {
     if (process.platform === "win32") {
         return "Execute a PowerShell command on Windows. Output is truncated at 1MB, timeout defaults to 120s. Prefer read/write/edit/grep/glob when one fits; use shell for builds, tests, git, package managers, and other shell-only operations. Do not use multi-line here-strings (`@' ... '@`): the permission checker cannot read their body, so they always require approval — write the script to a file first and run it.";
     }
-    return "Execute a shell command on the host (bash/sh). Output is truncated at 1MB, timeout defaults to 120s. Prefer read/write/edit/grep/glob when one fits; use shell for builds, tests, git, package managers, and other shell-only operations. Do not use here-documents (`<<`): the permission checker cannot read their body, so they always require approval — write the script to a file first and run it, or pass the program inline with `-c`.";
+    return "Execute a shell command on the host (bash/sh). Output is truncated at 1MB, timeout defaults to 120s. Prefer read/write/edit/grep/glob when one fits; use shell for builds, tests, git, package managers, and other shell-only operations. For directory inspection prefer glob or simple ls with paths such as src/* or ./*; loops, variable expansion, command substitution, and xargs require approval. Do not use here-documents (`<<`): the permission checker cannot read their body, so they always require approval — write the script to a file first and run it, or pass the program inline with `-c`.";
 }
 
 /** Construct the unified shell tool. cwd comes from context.env.cwd. */
