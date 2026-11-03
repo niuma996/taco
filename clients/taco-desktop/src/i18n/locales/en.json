@@ -948,7 +948,7 @@
       "maxTurnsInvalid": "A positive whole number",
       "timeoutMinutes": "Timeout (minutes)",
       "timeoutMinutesHint": "How long a background run may take. Left empty, it follows the turn budget.",
-      "timeoutMinutesInvalid": "A whole number of minutes (1-240)",
+      "timeoutMinutesInvalid": "A whole number of minutes (1-600)",
       "timeoutMinutesAuto": "Automatic",
       "systemPrompt": "System prompt",
       "systemPromptHint": "The subagent's role, stop condition and reporting contract — with the switch on, it has none.",
