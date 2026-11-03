@@ -6,6 +6,86 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.5] — 2026-11-04
+
+A release about keeping score of the work that happens while you are not
+looking: background runs and scheduled fires are now recorded, visible, and
+delivered.
+
+### Added
+
+**A "Background work" pane.** Background subagents and scheduled fires are
+recorded, and the new pane shows what is running, what needs attention, and
+what has finished. A row can open the conversation that started the work, and
+a notice that was never delivered can be sent again.
+
+**A run history for every schedule.** Each schedule opens a History dialog
+with its recent runs — when they ran, how long they took, how they ended, and
+the answer they produced.
+
+**Background answers reach your chat reliably.** The result is kept with the
+record and delivered to your channel with retries, and a daemon restart in the
+middle of a delivery picks up where it left off.
+
+**A read-only `ls` with a path pattern no longer asks for approval.** In a
+local automatic session with no deny rules, `ls src/*` simply runs.
+
+**MCP servers load on demand.** A workspace no longer waits for every MCP
+server to connect at startup, and adding or removing one no longer asks for a
+restart.
+
+**Background runs get a time limit and a heads-up.** An agent profile can set
+a timeout in minutes, the agent is told when it is close to that limit, and a
+timeout reads differently from a stop you asked for.
+
+**A read-only subagent cannot write files.** The tools an agent profile
+declares are now a hard boundary, and a read-only agent is told up front that
+it cannot write.
+
+### Changed
+
+- The right panel takes a share of the chat area — 30% by default, never more
+  than half — instead of a fixed width, so it behaves the same on a wide
+  display and a narrow one.
+- A scheduled fire is recorded, and settles honestly: a prompt that joined a
+  turn already running is reported as merged, and a run you stopped is
+  reported as stopped rather than failed.
+- The schedules list is one line per schedule, with icon actions, a "last run"
+  column, and a warning when a schedule retired itself after too many runs or
+  too many failures.
+- MCP servers are shared where it is safe: HTTP servers are shared between
+  workspaces, while each IM workspace keeps its own MCP connection private.
+- The desktop follows the system's "reduce motion" setting, and panel opens,
+  height collapses and icon swaps are now animated.
+
+### Fixed
+
+- A failed background subagent shows as failed and keeps its session, so the
+  history stays reachable.
+- A schedule's run history survives a restart, and a run that hangs can no
+  longer lock the schedule forever.
+- The panel width transition no longer lags: dragging, resizing and the
+  keyboard all move it at the same speed.
+- The screen reader announces the panel's real range, and the schedule actions
+  stay in view.
+
+### Breaking changes
+
+- The wire protocol advances 2.7 → 2.10. The desktop refuses an older daemon,
+  so keep the desktop and the sidecar on the same release line. The new
+  surface is `work.list`, `work.get` and `work.retryDelivery`, plus a
+  `work.changed` push.
+- `mcp.createConfig`, `updateConfig` and `deleteConfig` return
+  `requiresRestart: false`; it used to be `true`.
+- `agents.write` accepts `timeoutMinutes` (1–600) and `maxTurns` up to 500
+  (was 200). `agents.list` and `agents.read` return `timeoutMinutes`.
+- Read `WorkSummary.sessionId`; `parentSessionId` remains as a deprecated
+  alias.
+- `jobs.history` reports a fire that is still going, not only finished ones.
+- `@taco-ai/protocol` exports `THINKING_LEVELS`, `CUSTOM_PROVIDER_APIS` and
+  `MCP_TRANSPORT_KINDS` as public constants; the values they hold are
+  unchanged.
+
 ## [0.3.4] — 2026-10-31
 
 A release about finding things again: the sidebar can now search every session
