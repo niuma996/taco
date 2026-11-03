@@ -890,6 +890,21 @@ button.topbar-context-indicator {
     transition: width 0.18s ease;
 }
 
+/* Opening a panel fades its contents in. The panel unmounts while closed, so
+   the entrance is a mount animation — it replays on every open without the
+   panel needing to stay mounted. Only the body fades, never the header row:
+   the close button has to be visible and clickable from the first frame.
+   The general sibling combinator reaches the body without wrapping it — a
+   wrapper div would break .subagent-panel's flex column, where the list and
+   the detail stream are direct flex children.
+   Opacity only — a transform here would move the panel during the fade, and
+   the chat column would jump twice instead of once. */
+.task-panel .right-panel-topbar ~ *,
+.files-drawer .right-panel-topbar ~ *,
+.subagent-panel .right-panel-topbar ~ * {
+    animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
+}
+
 body[data-panel-resizing="true"] .task-panel,
 body[data-panel-resizing="true"] .files-drawer,
 body[data-panel-resizing="true"] .subagent-panel {
