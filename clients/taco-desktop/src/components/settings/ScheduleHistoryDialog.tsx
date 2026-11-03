@@ -28,8 +28,10 @@ import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { createLatestRequestGuard } from "../../lib/latestRequest.ts";
 import { formatRelativeTime } from "../../lib/relativeTime";
 import { subscribeWorkChanged } from "../../lib/workEvents.ts";
+import { IconButton } from "../ui/IconButton.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { Tag } from "../ui/Tag.tsx";
+import { Tooltip } from "../ui/Tooltip.tsx";
 
 export interface ScheduleHistoryDialogProps {
     client: TacoClient;
@@ -204,6 +206,8 @@ export function ScheduleHistoryDialog({
                   : state === "interrupted"
                     ? work?.reason
                     : (entry.summary ?? (entry.status === "err" ? entry.error : undefined));
+        const sessionWorkspace = work?.workspace;
+        const sessionId = work?.sessionId;
         return (
             <li key={entry.started_at} className="work-item schedule-history-item">
                 <div className="work-item-head">
@@ -230,6 +234,27 @@ export function ScheduleHistoryDialog({
                             {duration !== undefined ? formatDuration(duration) : ""}
                         </span>
                     </button>
+                    {/* The note rides on the same line as the timestamp so
+                        every collapsed run is the same height; the full
+                        text is in the title and in the expanded row. The
+                        slot is always there — a run with no note would
+                        otherwise pull its status tag out of the column. */}
+                    <span className="work-item-reason" title={note}>
+                        {note}
+                    </span>
+                    {sessionWorkspace !== undefined && sessionId !== undefined ? (
+                        <Tooltip label={t("work.openSession")} side="top">
+                            <span className="schedules-history-session">
+                                <IconButton
+                                    size="sm"
+                                    aria-label={t("work.openSession")}
+                                    onClick={() => onOpenSession(sessionWorkspace, sessionId)}
+                                >
+                                    <MessageSquare size={13} aria-hidden="true" />
+                                </IconButton>
+                            </span>
+                        </Tooltip>
+                    ) : null}
                     <div className="work-item-badges">
                         {work?.completeness === "partial" && (
                             <Tag size="sm" className="work-status--warn">
@@ -241,29 +266,6 @@ export function ScheduleHistoryDialog({
                         </Tag>
                     </div>
                 </div>
-
-                {note && (
-                    <div className="work-item-meta">
-                        <span className="work-item-reason">{note}</span>
-                    </div>
-                )}
-
-                {work?.workspace !== undefined && (
-                    <div className="work-item-actions">
-                        <button
-                            type="button"
-                            className="work-action"
-                            onClick={() => {
-                                if (work.workspace !== undefined) {
-                                    onOpenSession(work.workspace, work.sessionId);
-                                }
-                            }}
-                        >
-                            <MessageSquare size={13} aria-hidden="true" />
-                            {t("work.openSession")}
-                        </button>
-                    </div>
-                )}
 
                 {isOpen && (
                     <div className="work-item-detail">

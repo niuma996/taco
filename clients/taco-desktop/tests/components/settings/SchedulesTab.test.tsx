@@ -23,7 +23,7 @@
  */
 
 import type { Job } from "@taco-ai/protocol";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SchedulesTab } from "../../../src/components/settings/SchedulesTab";
@@ -297,12 +297,13 @@ describe("SchedulesTab — table layout smoke", () => {
         });
 
         const cols = container.querySelectorAll(".schedules-table col");
-        expect(cols).toHaveLength(5);
+        expect(cols).toHaveLength(6);
 
         // Header cells render with the column keys.
         expect(screen.getByText("schedules.columnName")).toBeTruthy();
         expect(screen.getByText("schedules.columnSchedule")).toBeTruthy();
         expect(screen.getByText("schedules.columnCommand")).toBeTruthy();
+        expect(screen.getByText("schedules.columnLastRun")).toBeTruthy();
         expect(screen.getByText("schedules.columnEnabled")).toBeTruthy();
         expect(screen.getByText("schedules.columnActions")).toBeTruthy();
     });
@@ -617,12 +618,18 @@ describe("SchedulesTab — built-in jobs", () => {
         };
     }
 
-    it("shows the built-in badge and summary, but no delete action", async () => {
+    it("shows the built-in badge and summary, and a disabled delete action", async () => {
         const client = makeClient({ list: () => Promise.resolve({ jobs: [builtinJob()] }) });
         render(<SchedulesTab client={client} onOpenSession={noop} />);
 
         await waitFor(() => expect(screen.getByText("schedules.builtin")).toBeTruthy());
         expect(screen.getByText(/1 consolidated/)).toBeTruthy();
+
+        // The delete control stays on the row so every row carries the
+        // same action set — but a built-in job cannot be deleted, and the
+        // label says so instead of the button silently vanishing.
+        const deleteButton = screen.getByRole("button", { name: "schedules.deleteDisabled" });
+        expect(deleteButton).toHaveProperty("disabled", true);
         expect(screen.queryByRole("button", { name: "schedules.actionDelete" })).toBeNull();
     });
 
@@ -689,5 +696,113 @@ describe("SchedulesTab — built-in jobs", () => {
         );
         expect(screen.getByText(/staleDays must be an integer/)).toBeTruthy();
         expect(updates).toBe(0);
+    });
+});
+
+describe("SchedulesTab — row presentation", () => {
+    it("shows the hover label for a row action, including the disabled one", async () => {
+        const user = userEvent.setup();
+        render(
+            <SchedulesTab
+                client={makeClient({
+                    list: () =>
+                        Promise.resolve({
+                            jobs: [
+                                sampleJob("row-1"),
+                                { ...sampleJob("builtin-1"), builtin: true },
+                            ],
+                        }),
+                })}
+                onOpenSession={noop}
+            />,
+        );
+
+        await waitFor(() => expect(screen.getByText("row-1")).toBeTruthy());
+
+        const row = screen.getByText("row-1").closest("tr");
+        expect(row).toBeTruthy();
+        await user.hover(
+            within(row as HTMLElement).getByRole("button", { name: "schedules.actionEdit" }),
+        );
+        await waitFor(() => {
+            expect(document.querySelector(".ui-tooltip")?.textContent).toBe("schedules.actionEdit");
+        });
+
+        // A disabled button swallows its own pointer events, so the
+        // tooltip trigger is the wrapper around it — the hint has to
+        // still show, because it is the only place that says why the
+        // built-in job cannot be deleted.
+        const builtinRow = screen.getByText("builtin-1").closest("tr");
+        expect(builtinRow).toBeTruthy();
+        await user.hover(
+            within(builtinRow as HTMLElement).getByRole("button", {
+                name: "schedules.deleteDisabled",
+            }),
+        );
+        await waitFor(() => {
+            expect(document.querySelector(".ui-tooltip")?.textContent).toBe(
+                "schedules.deleteDisabled",
+            );
+        });
+    });
+
+    it("shows when the job last ran, and 'never' for a job that has not", async () => {
+        const { container } = render(
+            <SchedulesTab
+                client={makeClient({
+                    list: () =>
+                        Promise.resolve({
+                            jobs: [
+                                sampleJob("ran"),
+                                { ...sampleJob("fresh"), last_run_at: "2026-11-01T04:17:00.000Z" },
+                            ],
+                        }),
+                })}
+                onOpenSession={noop}
+            />,
+        );
+
+        await waitFor(() => expect(screen.getByText("ran")).toBeTruthy());
+        const cells = container.querySelectorAll(".schedules-cell-lastrun");
+        expect(cells.length).toBe(2);
+        // The i18n stub returns the key, so an empty "never" cell is
+        // exactly the key. Rows sort by name, so "fresh" comes first.
+        expect(cells[0]?.textContent).not.toBe("schedules.neverRun");
+        expect(cells[0]?.textContent).toBeTruthy();
+        expect(cells[1]?.textContent).toBe("schedules.neverRun");
+    });
+
+    it("explains why the scheduler turned the job off by itself", async () => {
+        render(
+            <SchedulesTab
+                client={makeClient({
+                    list: () =>
+                        Promise.resolve({
+                            jobs: [
+                                {
+                                    ...sampleJob("failed"),
+                                    enabled: false,
+                                    disabled_reason: "disabled after 3 consecutive failure(s)",
+                                    consecutive_failures: 3,
+                                },
+                                {
+                                    ...sampleJob("retired"),
+                                    enabled: false,
+                                    disabled_reason: "completed 3 of 3 scheduled run(s)",
+                                    run_count: 3,
+                                    max_runs: 3,
+                                },
+                            ],
+                        }),
+                })}
+                onOpenSession={noop}
+            />,
+        );
+
+        await waitFor(() => expect(screen.getByText("failed")).toBeTruthy());
+        // The reason is a warning marker on the row, not a paragraph —
+        // written out it wrapped the cell and stretched the row.
+        expect(screen.getByLabelText("schedules.autoDisabledFailures")).toBeTruthy();
+        expect(screen.getByLabelText("schedules.autoDisabledMaxRuns")).toBeTruthy();
     });
 });

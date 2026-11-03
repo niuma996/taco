@@ -17,20 +17,31 @@
  * Each row's History button opens `ScheduleHistoryDialog` with the job's
  * recent runs and, for agent jobs, what each run answered.
  *
+ * Row actions are icon buttons with a hover label (ui/Tooltip): four text
+ * buttons wrapped onto two lines in the action column and knocked the rows
+ * out of alignment. The delete button is rendered on every row — a built-in
+ * job gets a disabled one, so the action column has the same shape
+ * everywhere and the reason it cannot be deleted stays reachable.
+ *
  * Not yet covered: per-job timezone pickers, and a structured command
  * editor. The `args` field is edited as raw JSON; tightening that is a
  * follow-up.
  */
 
 import type { Job } from "@taco-ai/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useT } from "../../i18n/useI18n.ts";
+import { History, LoaderCircle, Pencil, Play, Plus, Trash, TriangleAlert } from "lucide-react";
+import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import { useNow } from "../../hooks/useNow.ts";
+import { useT, useUiLanguage } from "../../i18n/useI18n.ts";
 import { createJobsClient } from "../../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { formatRelativeTime } from "../../lib/relativeTime.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
+import { IconButton, type IconButtonTone } from "../ui/IconButton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { Tag } from "../ui/Tag.tsx";
+import { Tooltip } from "../ui/Tooltip.tsx";
 import { ScheduleFormDialog, type ScheduleSubmit } from "./ScheduleFormDialog.tsx";
 import { ScheduleHistoryDialog } from "./ScheduleHistoryDialog.tsx";
 
@@ -107,6 +118,11 @@ function useJobsClient(client: TacoClient) {
 export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
     const jobs = useJobsClient(client);
     const { t } = useT();
+    /** Shared clock + language for the "last run" column — read once here
+     *  so every row renders the same timestamp instead of each row
+     *  subscribing to the clock on its own. */
+    const nowMs = useNow();
+    const lng = useUiLanguage();
     /** Dialog mode drives the modal's open state, title, and which
      *  fields it pre-fills. Closed by default so the table is the only
      *  thing on screen. */
@@ -198,9 +214,10 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
     return (
         <div className="settings-tab schedules-tab">
             <div className="schedules-tab-header">
-                <h3>{t("settings.tabSchedules", "Schedules")}</h3>
+                <h3>{t("settings.tabSchedules")}</h3>
                 <Button variant="primary" size="sm" onClick={openCreate}>
-                    {t("schedules.addButton", "+ New schedule")}
+                    <Plus size={14} aria-hidden="true" />
+                    {t("schedules.addButton")}
                 </Button>
             </div>
 
@@ -215,7 +232,7 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
                     <button
                         type="button"
                         className="schedules-error-dismiss"
-                        aria-label={t("schedules.actionDismiss", "Dismiss")}
+                        aria-label={t("schedules.actionDismiss")}
                         onClick={() => jobs.setActionError(null)}
                     >
                         ×
@@ -228,25 +245,25 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
                     <col className="schedules-col-name" />
                     <col className="schedules-col-schedule" />
                     <col className="schedules-col-command" />
+                    <col className="schedules-col-lastrun" />
                     <col className="schedules-col-enabled" />
                     <col className="schedules-col-actions" />
                 </colgroup>
                 <thead>
                     <tr>
-                        <th>{t("schedules.columnName", "Name")}</th>
-                        <th>{t("schedules.columnSchedule", "Schedule")}</th>
-                        <th>{t("schedules.columnCommand", "Command")}</th>
-                        <th>{t("schedules.columnEnabled", "Enabled")}</th>
-                        <th className="schedules-cell-actions">
-                            {t("schedules.columnActions", "Actions")}
-                        </th>
+                        <th>{t("schedules.columnName")}</th>
+                        <th>{t("schedules.columnSchedule")}</th>
+                        <th>{t("schedules.columnCommand")}</th>
+                        <th>{t("schedules.columnLastRun")}</th>
+                        <th>{t("schedules.columnEnabled")}</th>
+                        <th className="schedules-cell-actions">{t("schedules.columnActions")}</th>
                     </tr>
                 </thead>
                 <tbody>
                     {sorted.length === 0 ? (
                         <tr>
-                            <td colSpan={5} className="schedules-empty">
-                                {t("schedules.empty", "No schedules yet.")}
+                            <td colSpan={6} className="ui-empty schedules-empty">
+                                {t("schedules.empty")}
                             </td>
                         </tr>
                     ) : null}
@@ -254,6 +271,8 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
                         <ScheduleRow
                             key={job.id}
                             job={job}
+                            nowMs={nowMs}
+                            lng={lng}
                             isRunning={runningId === job.id}
                             onToggle={(enabled) => {
                                 void jobs
@@ -288,7 +307,7 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
                                         );
                                     } else if (result.status === "failed") {
                                         jobs.setActionError(
-                                            result.error ?? t("schedules.runFailed", "Run failed"),
+                                            result.error ?? t("schedules.runFailed"),
                                         );
                                     } else {
                                         jobs.setActionError(null);
@@ -321,10 +340,10 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
 
             <ConfirmModal
                 open={pendingDelete !== null}
-                title={t("schedules.deleteConfirmTitle", "Delete this schedule?")}
+                title={t("schedules.deleteConfirmTitle")}
                 message={pendingDelete?.name ?? ""}
-                confirmLabel={t("schedules.actionDeleteConfirm", "Delete")}
-                cancelLabel={t("schedules.actionCancel", "Cancel")}
+                confirmLabel={t("schedules.actionDeleteConfirm")}
+                cancelLabel={t("schedules.actionCancel")}
                 onConfirm={() => {
                     const job = pendingDelete;
                     setPendingDelete(null);
@@ -352,12 +371,68 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
     );
 }
 
+interface RowActionProps {
+    /** The hover label — also the button's accessible name. */
+    label: string;
+    icon: ReactElement;
+    disabled?: boolean;
+    tone?: IconButtonTone;
+    onClick: () => void;
+}
+
+/** One row action: an icon button with a hover label.
+ *
+ *  The label lives in the app's Tooltip so every hover hint in the desktop
+ *  draws the same bubble. The trigger is a wrapper span rather than the
+ *  button itself: a disabled button swallows its own pointer events, so
+ *  the tooltip would never open on it — and the one action that needs to
+ *  explain itself ("built-in schedules can't be deleted") is exactly the
+ *  disabled one. The span stands in for the pointer events the button
+ *  gives up; the keyboard focus stays on the button, and the tooltip
+ *  opens on that focus too. */
+function RowAction({ label, icon, disabled = false, tone = "default", onClick }: RowActionProps) {
+    return (
+        <Tooltip label={label} side="left">
+            <span className="schedules-action-slot">
+                <IconButton aria-label={label} tone={tone} disabled={disabled} onClick={onClick}>
+                    {icon}
+                </IconButton>
+            </span>
+        </Tooltip>
+    );
+}
+
+/** Why the scheduler switched this job off on its own. */
+type AutoDisabled =
+    | { kind: "maxRuns"; count: number; max: number }
+    | { kind: "failures"; count: number }
+    | { kind: "raw"; reason: string };
+
+/** The daemon writes a free-form English sentence into `disabled_reason`;
+ *  the job's own counters say the same thing in a form this UI can
+ *  localize, so prefer them and keep the raw text as the fallback. */
+function autoDisabled(job: Job): AutoDisabled | null {
+    if (!job.disabled_reason) return null;
+    const runCount = job.run_count ?? 0;
+    const maxRuns = job.max_runs;
+    if (maxRuns !== undefined && runCount >= maxRuns) {
+        return { kind: "maxRuns", count: runCount, max: maxRuns };
+    }
+    const failures = job.consecutive_failures ?? 0;
+    if (failures > 0) return { kind: "failures", count: failures };
+    return { kind: "raw", reason: job.disabled_reason };
+}
+
 interface ScheduleRowProps {
     job: Job;
     /** True while a Run Now click for this row is awaiting the daemon's
-     *  fire-accepted response. Disables the button + changes its label so
-     *  the click registers visibly. */
+     *  fire-accepted response. Disables the button + swaps its icon for a
+     *  spinner so the click registers visibly. */
     isRunning: boolean;
+    /** Shared clock, for the relative "last run" timestamp. */
+    nowMs: number;
+    /** Active UI language, for that timestamp. */
+    lng: string;
     onToggle: (enabled: boolean) => void;
     onRunNow: () => void;
     onDelete: () => void;
@@ -368,6 +443,8 @@ interface ScheduleRowProps {
 function ScheduleRow({
     job,
     isRunning,
+    nowMs,
+    lng,
     onToggle,
     onRunNow,
     onDelete,
@@ -379,50 +456,101 @@ function ScheduleRow({
         job.schedule.kind === "cron"
             ? `cron: ${job.schedule.expr}${job.schedule.tz ? ` (${job.schedule.tz})` : ""}`
             : `every ${job.schedule.ms}ms`;
+    const lastRun = job.last_run_at ? formatRelativeTime(job.last_run_at, lng, nowMs) : "";
+    const auto = autoDisabled(job);
+    const disabledReason =
+        auto === null
+            ? null
+            : auto.kind === "maxRuns"
+              ? t("schedules.autoDisabledMaxRuns", { count: auto.count, max: auto.max })
+              : auto.kind === "failures"
+                ? t("schedules.autoDisabledFailures", { count: auto.count })
+                : auto.reason;
+    // A built-in job cannot be deleted, so its delete button is disabled —
+    // but the hint has to say why, otherwise the greyed-out control reads
+    // as a broken button.
+    const deleteLabel = job.builtin ? t("schedules.deleteDisabled") : t("schedules.actionDelete");
+    const runLabel = isRunning ? t("schedules.runningNow") : t("schedules.actionRunNow");
     return (
         <tr>
             <td className="schedules-cell-name">
-                <span>{job.name}</span>
-                {job.builtin ? (
-                    <Tag size="sm" className="schedules-builtin-badge">
-                        {t("schedules.builtin", "Built-in")}
-                    </Tag>
-                ) : null}
+                <div className="schedules-name">
+                    <span className="schedules-name-text" title={job.name}>
+                        {job.name}
+                    </span>
+                    {job.builtin ? (
+                        <Tag size="sm" className="schedules-builtin-badge">
+                            {t("schedules.builtin")}
+                        </Tag>
+                    ) : null}
+                </div>
             </td>
             <td className="schedules-cell-schedule">
-                <code>{scheduleLabel}</code>
+                <code title={scheduleLabel}>{scheduleLabel}</code>
             </td>
             <td className="schedules-cell-command">
-                <code>{job.command}</code>
+                <code title={job.command}>{job.command}</code>
                 {job.history?.[0]?.summary ? (
-                    <div className="schedules-last-summary">{job.history[0].summary}</div>
+                    <div className="schedules-last-summary" title={job.history[0].summary}>
+                        {job.history[0].summary}
+                    </div>
                 ) : null}
             </td>
-            <td>
-                <Switch
-                    checked={job.enabled}
-                    onChange={onToggle}
-                    label={t("schedules.toggleAria", "Toggle schedule enabled")}
-                />
+            <td className="schedules-cell-lastrun">{lastRun || t("schedules.neverRun")}</td>
+            <td className="schedules-cell-enabled">
+                <div className="schedules-enabled-control">
+                    <Switch
+                        checked={job.enabled}
+                        onChange={onToggle}
+                        label={t("schedules.toggleAria")}
+                    />
+                    {disabledReason ? (
+                        // The reason is a hover detail, not a column: written
+                        // out it wrapped the cell and stretched the row past
+                        // its neighbours.
+                        <Tooltip label={disabledReason} side="top">
+                            <span
+                                className="schedules-auto-disabled"
+                                role="img"
+                                aria-label={disabledReason}
+                            >
+                                <TriangleAlert size={13} aria-hidden="true" />
+                            </span>
+                        </Tooltip>
+                    ) : null}
+                </div>
             </td>
             <td className="schedules-cell-actions">
                 <div className="schedules-row-actions">
-                    <Button size="sm" variant="default" onClick={onRunNow} disabled={isRunning}>
-                        {isRunning
-                            ? t("schedules.runningNow", "Running…")
-                            : t("schedules.actionRunNow", "Run now")}
-                    </Button>
-                    <Button size="sm" variant="default" onClick={onHistory}>
-                        {t("schedules.actionHistory", "History")}
-                    </Button>
-                    <Button size="sm" variant="default" onClick={onEdit}>
-                        {t("schedules.actionEdit", "Edit")}
-                    </Button>
-                    {job.builtin ? null : (
-                        <Button size="sm" variant="danger" onClick={onDelete}>
-                            {t("schedules.actionDelete", "Delete")}
-                        </Button>
-                    )}
+                    <RowAction
+                        label={runLabel}
+                        disabled={isRunning}
+                        onClick={onRunNow}
+                        icon={
+                            isRunning ? (
+                                <LoaderCircle size={14} className="spin" aria-hidden="true" />
+                            ) : (
+                                <Play size={14} aria-hidden="true" />
+                            )
+                        }
+                    />
+                    <RowAction
+                        label={t("schedules.actionHistory")}
+                        onClick={onHistory}
+                        icon={<History size={14} aria-hidden="true" />}
+                    />
+                    <RowAction
+                        label={t("schedules.actionEdit")}
+                        onClick={onEdit}
+                        icon={<Pencil size={14} aria-hidden="true" />}
+                    />
+                    <RowAction
+                        label={deleteLabel}
+                        tone="danger"
+                        disabled={job.builtin === true}
+                        onClick={onDelete}
+                        icon={<Trash size={14} aria-hidden="true" />}
+                    />
                 </div>
             </td>
         </tr>

@@ -732,6 +732,10 @@
 
 .schedules-table {
     width: 100%;
+    /* Fixed layout honours the column widths below and lets every cell
+       truncate on one line — a long job name must not stretch its row
+       past the rows around it. */
+    table-layout: fixed;
     border-collapse: collapse;
     color: var(--fg);
 }
@@ -747,11 +751,6 @@
     color: var(--fg-dim);
     font-weight: 600;
     font-size: var(--text-sm);
-}
-
-.schedules-row-actions {
-    display: flex;
-    gap: 0.4rem;
 }
 
 .schedules-form {
@@ -835,45 +834,132 @@
     margin: 0;
 }
 
-/* Column widths — keep the cron expression and command visible without
-   wrapping, leave the action row enough room for three short buttons.
-   `min-width` on the cells prevents the browser from collapsing a
-   column past the longest single token. */
+/* Column widths — the plan and command columns are the only ones that
+   can hold a long value, so they get the most room. `min-width` on the
+   cells prevents the browser from collapsing a column past the longest
+   single token. */
 .schedules-table col.schedules-col-name {
-    width: 22%;
+    width: 24%;
 }
 .schedules-table col.schedules-col-schedule {
-    width: 28%;
+    width: 21%;
 }
 .schedules-table col.schedules-col-command {
-    width: 21%;
+    width: 20%;
+}
+.schedules-table col.schedules-col-lastrun {
+    width: 13%;
 }
 /* Sized for the 38px switch plus the cell's 24px horizontal padding. */
 .schedules-table col.schedules-col-enabled {
     width: 9%;
 }
 .schedules-table col.schedules-col-actions {
-    width: 20%;
+    width: 13%;
 }
 
 .schedules-table td.schedules-cell-name,
 .schedules-table td.schedules-cell-schedule,
 .schedules-table td.schedules-cell-command {
-    /* Single-line truncation keeps rows aligned; long values can be
-       read in full via the edit dialog. */
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    /* One line per cell: a long value truncates instead of growing the
+       row. The full value stays reachable in the cell's title. */
+    white-space: nowrap;
+    overflow: hidden;
 }
 
-.schedules-cell-actions {
+/* Action column — the icon group is right-aligned, so the header rides
+   with it. The extra specificity beats the table's default left
+   alignment on the header cells. */
+.schedules-table .schedules-cell-actions {
+    text-align: right;
     white-space: nowrap;
 }
 
 .schedules-row-actions {
     display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
+    gap: 0.15rem;
+    align-items: center;
     justify-content: flex-end;
+}
+
+/* Hover target for a row action. The tooltip trigger is this span, not
+   the button: a disabled button swallows its own pointer events, so the
+   hint ("built-in schedules can't be deleted") would never appear. */
+.schedules-action-slot {
+    display: inline-flex;
+}
+
+/* Hand the pointer back to the wrapper span while the button is
+   disabled — the span is what the tooltip listens to. */
+.schedules-action-slot .ui-icon-btn:disabled {
+    pointer-events: none;
+}
+
+/* Row hover — the first table in the app to carry it, matching the list
+   rows in the skills / agents / sidebar panes. */
+.schedules-table tbody tr:hover {
+    background: var(--accent-bg-hover);
+}
+
+/* Name + built-in badge share one line; the name gives up its width
+   first so the badge never gets pushed out of the cell. */
+.schedules-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.schedules-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Plan / command values — the global inline-code chip is tuned for chat
+   prose (bright orange); in a dense table a neutral surface reads
+   better and lets the row's own accents stand out. */
+.schedules-cell-schedule code,
+.schedules-cell-command code {
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.schedules-cell-lastrun {
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The switch and the warning marker that explains an automatic
+   shutdown sit on one line, so a job that stopped on its own does not
+   make its row taller than the rest. */
+.schedules-enabled-control {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.schedules-auto-disabled {
+    display: inline-flex;
+    color: var(--warning);
+    cursor: help;
+}
+
+/* Empty state — the shared .ui-empty block, centered in the table cell. */
+.schedules-empty {
+    text-align: center;
+    padding: var(--space-4);
 }
 
 /* ── Schedule form dialog ── */
@@ -926,7 +1012,11 @@
     margin-top: var(--space-1);
     color: var(--fg-dim);
     font-size: var(--text-xs);
-    overflow-wrap: anywhere;
+    /* One line — the summary is a preview of the last run, not the
+       record. The history dialog has the full text. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .schedules-dream-args {
@@ -948,10 +1038,53 @@
 
 /* Schedule run history dialog. Rows reuse the work pane's item styles
    (`.work-item`, `.work-status--*`) so a run reads the same in both places;
-   only the dialog width and the disabled toggle of a run with no Work are
-   set here. */
+   only the dialog size and the run-row layout are set here. */
 .schedule-history-modal {
-    width: min(640px, 92vw);
+    /* The list of runs is long: a wide, short dialog reads as a panel
+       over the table instead of a full-height sheet, and the extra width
+       is what lets a run sit on one line. */
+    width: min(880px, 92vw);
+    max-width: calc(100vw - 4rem);
+    max-height: 60vh;
+}
+
+/* Run rows — every collapsed run is one line, so a list of runs reads as
+   a table of runs instead of a stack of uneven cards. The note rides on
+   the timestamp's line and truncates; the expanded row carries the full
+   text. */
+.schedule-history-item .work-item-toggle {
+    flex: 0 0 auto;
+}
+
+.schedule-history-item .work-item-reason {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+}
+
+/* The status tag is a fixed-width column, so the badges line up down
+   the list instead of drifting left on the runs that carry no note. */
+.schedule-history-item .work-item-badges {
+    min-width: 4.5rem;
+    justify-content: flex-end;
+}
+
+.schedule-history-item .work-item-badges .ui-tag:last-child {
+    min-width: 4rem;
+    /* The shared `size="sm"` tag carries no vertical padding of its own —
+       stretched to a fixed width it would read as a flat bar instead of a
+       pill. */
+    padding-top: var(--space-0-5);
+    padding-bottom: var(--space-0-5);
+    text-align: center;
+}
+
+/* Hover target for the "open session" icon, so the tooltip survives the
+   button it wraps. */
+.schedules-history-session {
+    display: inline-flex;
 }
 
 .schedule-history-item .work-item-toggle:disabled {
