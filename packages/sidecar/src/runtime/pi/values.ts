@@ -42,10 +42,12 @@ export {
     DEFAULT_COMPACTION_SETTINGS,
     estimateContextTokens,
     getOrThrow,
+    InMemoryTelemetryContext,
     JsonlSessionRepo,
     LaneBusy,
     laneConfig,
     loadSourcedSkills,
+    MemorySessionRepo,
     NoActiveOperation,
     NothingToCompact,
     NothingToResume,
@@ -56,4 +58,5 @@ export {
     uuidv7,
     value,
     withAbortSignal,
+    withTelemetryContext,
 } from "@taco-ai/pi-harness";
