@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.3.6
+> **版本**: 0.3.7
 > **传输**: NDJSON over stdio 或 daemon data socket
 > **来源**: 源码为唯一权威来源——`packages/protocol/src/rpcContract/`（RPC method 名、参数、返回值与 schema）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -150,6 +150,7 @@ fields of `settings.get` or `settings.write`.
 | `attachment.stage` | attachment.* |
 | `channels.bind` | channels.* |
 | `channels.create` | channels.* |
+| `channels.installSdk` | channels.* |
 | `channels.list` | channels.* |
 | `channels.listConversations` | channels.* |
 | `channels.retry` | channels.* |

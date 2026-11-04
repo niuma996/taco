@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.7] — 2026-11-04
+
+A patch on top of v0.3.6: a channel that cannot start because its dependency is
+missing can now be repaired from the app, the desktop no longer races itself
+into starting several daemons, and the agent runtime moves to the Pi 1.5 model
+stack.
+
+### Added
+
+**A missing channel dependency can be installed from the app.** When a WeChat
+or WeCom channel fails to start because its optional SDK is not installed, the
+failed card in the Channels pane now offers "Install dependency and retry". One
+click installs the dependency and retries the channel; a dependency that is
+already installed can be retried without installing anything.
+
+### Changed
+
+**The agent runtime moves to the Pi 1.5 model stack.** New models and upstream
+provider and auth fixes now arrive by bumping the dependency, and model calls
+can be recorded as spans and metrics through the harness telemetry API.
+
+### Fixed
+
+**Concurrent workspace opens no longer start several daemons.** The desktop app
+keeps a single owner across the whole startup sequence, so parallel opens can no
+longer race into competing daemons.
+
+**A daemon that loses the startup race no longer removes the winner's socket.**
+The sidecar now confirms who owns the control socket before reusing it, and
+never unlinks a live one.
+
+### Upgrade notes
+
+- The Channels pane can install the optional channel dependency for you. You no
+  longer need to open a terminal to install the WeChat or WeCom SDK by hand —
+  the app does it, and retries the channel straight away.
+- The published sidecar now pulls the Pi harness from npm instead of a local
+  tarball. Nothing to do on your side; the dependency arrives with the install.
+- Everything else in 0.3.7 is the same as 0.3.6.
+
 ## [0.3.6] — 2026-11-04
 
 A patch on top of v0.3.5: the sidecar no longer refuses to start on a machine
