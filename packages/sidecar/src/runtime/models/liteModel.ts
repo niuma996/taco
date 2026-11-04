@@ -101,11 +101,20 @@ export async function completeSimpleWithLiteFallback(
 ): Promise<AssistantMessage | undefined> {
     const lite = getLite();
     if (!lite || !fitsLiteWindow(lite, context)) {
+        log.info("auxiliary call on the session model", {
+            model: `${main.provider}/${main.id}`,
+            reason: lite ? "window too small" : "no lite model configured",
+        });
         return await attempt(models, main, context, optionsFor(main));
     }
 
     const result = await attempt(models, lite, context, optionsFor(lite));
-    if (result) return result;
+    if (result) {
+        log.info("auxiliary call on the lite model", {
+            model: `${lite.provider}/${lite.id}`,
+        });
+        return result;
+    }
 
     log.warn("lite model call failed; retrying on the session model", {
         lite: `${lite.provider}/${lite.id}`,
