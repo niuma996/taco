@@ -1,6 +1,9 @@
 packages:
   - "packages/*"
   - "clients/*"
+# CI installs an already reviewed committed lockfile. New resolutions still pass the
+# release-age policy when they are created; frozen installs do not re-evaluate it.
+trustLockfile: true
 allowBuilds:
   '@biomejs/biome': true
   '@google/genai': false
@@ -28,6 +31,7 @@ minimumReleaseAgeExclude:
   # pele 1.13.0 was published less than 24h before the upgrade landed.
   # Drop this entry once that version is older.
   - pele@1.13.0
+  - '@taco-ai/pi-harness'
 peerDependencyRules:
   ignoreMissing:
     - "@earendil-works/*"
