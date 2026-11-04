@@ -226,6 +226,7 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.channelsSubmitVerifyCode({ requestId: "r", code: "123" });
     await client.channelsUnbind({ channelId: "c" });
     await client.channelsRetry({ channelId: "c" });
+    await client.channelsInstallSdk({ channelId: "c" });
     await client.imPolicyGet({ channelId: "c" });
     await client.imPolicySetChannelDefault({ channelId: "c", patch: { tools: { shell: null } } });
     await client.imPolicySetChatOverride({ channelId: "c", peerId: "p", chatId: "t", patch: {} });
