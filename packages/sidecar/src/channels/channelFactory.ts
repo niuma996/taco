@@ -42,7 +42,7 @@ export class WecomSdkMissingError extends Error {
  * Registry-boundary factory. The manifest is attached to the Channel by the registry, not by the Channel itself.
  *
  * `create("wechat")` is async and dynamic-imports the WeChat channel module
- * (which in turn pulls in `@wechatbot/wechatbot`); the same pattern is used
+ * and its optional `@wechatbot/wechatbot` SDK; the same pattern is used
  * for `create("wecom")` and `@wecom/aibot-node-sdk`. Both dependencies are
  * declared `optionalDependencies` in package.json so installs without them
  * succeed; the SDK is only required when a user actually instantiates the
@@ -67,6 +67,9 @@ export class ChannelFactory {
                 }
                 let mod: typeof import("./builtin/wechatChannel.ts");
                 try {
+                    // Import the external SDK dynamically too: a static SDK
+                    // import in a bundled channel is hoisted to sidecar startup.
+                    await import("@wechatbot/wechatbot");
                     mod = await import("./builtin/wechatChannel.ts");
                 } catch (e) {
                     throw new WechatSdkMissingError(e);
@@ -83,6 +86,7 @@ export class ChannelFactory {
                 }
                 let mod: typeof import("./builtin/wecomChannel.ts");
                 try {
+                    await import("@wecom/aibot-node-sdk");
                     mod = await import("./builtin/wecomChannel.ts");
                 } catch (e) {
                     throw new WecomSdkMissingError(e);

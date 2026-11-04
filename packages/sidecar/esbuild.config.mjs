@@ -25,7 +25,12 @@ await build({
     // (see channelFactory, claudeCodeSdk, pdfRender).
     // @napi-rs/canvas is a native binary — bundling it would fail, and it is
     // 30-40MB per platform, so it stays a runtime import.
-    external: ["@wechatbot/wechatbot", "@anthropic-ai/claude-agent-sdk", "@napi-rs/canvas"],
+    external: [
+        "@wechatbot/wechatbot",
+        "@wecom/aibot-node-sdk",
+        "@anthropic-ai/claude-agent-sdk",
+        "@napi-rs/canvas",
+    ],
 });
 
 copyShellParserAssets("lib");

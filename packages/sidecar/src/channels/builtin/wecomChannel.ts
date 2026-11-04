@@ -22,7 +22,6 @@
 
 import type { ChannelsBindCreds, ImRoute, ServerPush } from "@taco-ai/protocol";
 import type { Logger as SdkLogger } from "@wecom/aibot-node-sdk";
-import { WSClient } from "@wecom/aibot-node-sdk";
 import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
@@ -126,7 +125,7 @@ export class WeComChannel implements Channel {
             ctx,
             broker,
             resolveRoute,
-            this.options.createClient ?? defaultCreateClient,
+            this.options.createClient ?? (await loadDefaultCreateClient()),
             {
                 mergeWindowMs: this.options.mergeWindowMs ?? DEFAULT_MERGE_WINDOW_MS,
                 mergeMaxWaitMs: this.options.mergeMaxWaitMs ?? DEFAULT_MERGE_MAX_WAIT_MS,
@@ -488,18 +487,23 @@ export class WeComChannelHandle implements ChannelHandle {
 /** Cast the real SDK class to the structural seam. The WSClient signature
  *  (`sendMessage(chatid, SendMsgBody)`, `on(event: K, listener)`) is a strict
  *  superset of WeComClientLike — the cast narrows without losing calls. */
-function defaultCreateClient(opts: WeComClientFactoryOptions): WeComClientLike {
-    const client = new WSClient({
-        botId: opts.botId,
-        secret: opts.secret,
-        logger: opts.logger,
-        // The SDK's default budget (10 attempts, ~3 min of back-off) gives up
-        // on any outage longer than that, leaving the channel dead until a
-        // manual retry. Auth failures keep their own finite budget, so a wrong
-        // secret still stops.
-        maxReconnectAttempts: -1,
-    });
-    return client as unknown as WeComClientLike;
+async function loadDefaultCreateClient(): Promise<
+    (opts: WeComClientFactoryOptions) => WeComClientLike
+> {
+    const { WSClient } = await import("@wecom/aibot-node-sdk");
+    return (opts) => {
+        const client = new WSClient({
+            botId: opts.botId,
+            secret: opts.secret,
+            logger: opts.logger,
+            // The SDK's default budget (10 attempts, ~3 min of back-off) gives up
+            // on any outage longer than that, leaving the channel dead until a
+            // manual retry. Auth failures keep their own finite budget, so a wrong
+            // secret still stops.
+            maxReconnectAttempts: -1,
+        });
+        return client as unknown as WeComClientLike;
+    };
 }
 
 /** Bridges the sidecar's single-arg Logger to the SDK's variadic Logger.

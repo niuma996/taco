@@ -10,7 +10,6 @@
 
 import type { ImRoute, ServerPush } from "@taco-ai/protocol";
 import { PushMethods } from "@taco-ai/protocol";
-import { WeChatBot } from "@wechatbot/wechatbot";
 import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
@@ -314,7 +313,7 @@ export class WeChatChannel implements Channel {
             if (key === CURSOR_KEY) markHealthy();
         });
 
-        const bot = (this.options.createBot ?? defaultCreateBot)({
+        const bot = await (this.options.createBot ?? defaultCreateBot)({
             storage,
             logger: createLoggerAdapter(log),
         });
@@ -516,7 +515,8 @@ function createLoggerAdapter(log: Logger): SdkLogger {
     return wrap(log);
 }
 
-function defaultCreateBot(opts: WeChatBotFactoryOptions): WeChatBotLike {
+async function defaultCreateBot(opts: WeChatBotFactoryOptions): Promise<WeChatBotLike> {
+    const { WeChatBot } = await import("@wechatbot/wechatbot");
     // No loginCallbacks here on purpose — see SdkLoginCallbacks.
     //
     // botAgent identifies the driving app to the iLink API (sent as
