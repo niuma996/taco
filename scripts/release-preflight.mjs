@@ -2,7 +2,8 @@
 /**
  * release-preflight.mjs — fail-fast gate before pushing release tags.
  *
- * Runs every static check the CI workflow gates publish on, plus a
+ * Defaults to the minimal packaged-runtime regression. Pass --full for
+ * every static check the CI workflow gates publish on, plus a
  * lockfile-sync probe that catches the most common regression: bumping
  * package.json without re-running `pnpm install`. Also surfaces the
  * current GitHub Actions artifact storage so the operator can decide
@@ -97,6 +98,7 @@ check("desktop:build", () =>
     runPnpm(["--filter", "@taco-ai/desktop", "build"], { label: "desktop:build" }),
 );
 check("pack:smoke", () => runPnpm(["pack:smoke"], { label: "pack:smoke" }));
+check("regression", () => runPnpm(["regression"], { label: "regression" }));
 check("artifact-storage", () => {
     const usage = probeArtifactStorage();
     if (usage === null) {
@@ -125,7 +127,15 @@ check("artifact-storage", () => {
 });
 
 let failed = 0;
-for (const { name, fn } of checks) {
+const args = process.argv.slice(2);
+if (args.some((arg) => arg !== "--full")) {
+    console.error("usage: pnpm release:preflight [--full]");
+    process.exit(1);
+}
+const selectedChecks = args.includes("--full")
+    ? checks
+    : checks.filter(({ name }) => name === "regression");
+for (const { name, fn } of selectedChecks) {
     process.stdout.write(`\n=== ${name} ===\n`);
     const t0 = Date.now();
     try {
@@ -142,4 +152,4 @@ if (failed > 0) {
     console.error(`${failed} check(s) failed`);
     process.exit(1);
 }
-console.log("all checks passed — safe to push release tags");
+console.log(`${args.includes("--full") ? "full" : "minimal"} preflight passed`);

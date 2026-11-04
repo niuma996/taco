@@ -119,6 +119,9 @@ jobs:
       - name: Build runtime
         run: pnpm --filter @taco-ai/sidecar package:runtime -- --target ${{ matrix.target }} --strict
 
+      - name: Minimal runtime regression
+        run: pnpm regression --runtime packages/sidecar/dist/runtime/${{ matrix.target }}
+
       - name: Archive
         run: pnpm --filter @taco-ai/sidecar package:archive
 

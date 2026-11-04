@@ -32,6 +32,7 @@
     "shared:build": "pnpm -F @taco-ai/shared build",
     "sidecar:docs": "node scripts/generateProtocolDoc.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
+    "regression": "node scripts/regression/index.mjs",
     "ci:local": "pnpm protocol:build && pnpm shared:build && pnpm lint && pnpm lint:comments && pnpm typecheck && pnpm deps:circular && pnpm test && pnpm --filter @taco-ai/desktop build && pnpm pack:smoke",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:tag": "node scripts/release-tag.mjs"

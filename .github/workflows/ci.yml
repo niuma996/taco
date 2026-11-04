@@ -96,6 +96,10 @@ jobs:
       - run: pnpm protocol:build
       - run: pnpm shared:build
       - run: pnpm --filter @taco-ai/sidecar build
+      - name: Build portable runtime
+        run: pnpm --filter @taco-ai/sidecar package:runtime --strict
+      - name: Minimal runtime regression
+        run: pnpm regression --runtime packages/sidecar/dist/runtime/x86_64-unknown-linux-gnu
       - name: assert dist/.d.ts emitted
         run: |
           ls packages/protocol/dist/*.d.ts
