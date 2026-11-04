@@ -35,6 +35,12 @@ export interface TacoGlobalConfigShape {
     commandPermissions?: CommandPermissionConfig;
     defaultModel?: string;
     defaultProvider?: string;
+    /**
+     * Optional model for bounded auxiliary calls (session titles, memory
+     * extraction). Accepts `provider/id` or a bare id. Unset, unresolvable,
+     * or failing calls fall back to the session's main model.
+     */
+    liteModel?: string;
     sessionsRoot?: string;
     systemPrompt?: string;
     /** Default thinking level; new sessions inherit this. Per-session overrides take precedence. */

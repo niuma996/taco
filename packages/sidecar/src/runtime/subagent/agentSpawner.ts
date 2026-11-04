@@ -37,7 +37,7 @@ import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
-import { findModelById } from "../models/modelRegistry.ts";
+import { findModelById } from "../models/modelLookup.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
 import type { AgentMessage, Api, Model, MutableModels } from "../pi/types.ts";
 import { uuidv7 } from "../pi/values.ts";

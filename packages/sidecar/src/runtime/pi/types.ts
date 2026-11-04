@@ -16,6 +16,8 @@
 
 export type {
     Api,
+    AssistantMessage,
+    Context as ApiContext,
     Credential,
     CredentialInfo,
     CredentialStore,

@@ -99,6 +99,21 @@ describe("settings.write on a real server", () => {
         }
     });
 
+    it("persists and clears the optional lite model without disturbing catalogs", async (t) => {
+        const custom = t.mock.method(server, "setCustomProviders");
+        const broadcasts = t.mock.method(server, "broadcastModelsChanged");
+        const result = await write({ liteModel: "anthropic/claude-haiku" });
+        assert.equal(readGlobalConfig().liteModel, "anthropic/claude-haiku");
+        assert.equal((result.global as { liteModel?: string }).liteModel, "anthropic/claude-haiku");
+        // The lite model only serves auxiliary calls — the provider catalog is untouched.
+        assert.equal(custom.mock.callCount(), 0);
+        assert.equal(broadcasts.mock.callCount(), 0);
+
+        await write({ liteModel: null });
+        assert.equal(readGlobalConfig().liteModel, undefined);
+        assert.ok(!("liteModel" in readGlobalConfig()));
+    });
+
     it("invalidates existing workspace compaction caches after a valid change", async (t) => {
         const ws = await workspace();
         const invalidate = t.mock.method(ws, "invalidateCompactionCache");

@@ -3,13 +3,15 @@
  *
  * Gate: token estimate < MIN_TOKENS → skip
  * Truncate: last ~8000 chars
- * LLM call: completeSimple (lite model, temp 0.1, maxTokens 2000)
+ * LLM call: completeSimple via completeSimpleWithLiteFallback (optional lite
+ * model, session model as fallback). Temp 0.1, no output cap.
  * Output: JSON add/update actions applied against the existing topic index.
  */
 
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { extractJsonSpan } from "../../lib/jsonExtract.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { completeSimpleWithLiteFallback } from "../../runtime/models/liteModel.ts";
 import type { AgentMessage, Api, Model, Models, TextContent } from "../../runtime/pi/types.ts";
 import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
@@ -208,6 +210,7 @@ export class MemoryExtractorImpl implements MemoryExtractor {
         private model: Model<Api>,
         private readonly store: Pick<MemoryStore, "appendEntry" | "listTopics" | "updateTopic">,
         private readonly workspaceId: string,
+        private readonly getLiteModel: () => Model<Api> | undefined = () => undefined,
     ) {}
 
     /** Follow the session's model switch; the next extraction uses it. */
@@ -239,20 +242,22 @@ export class MemoryExtractorImpl implements MemoryExtractor {
         // This call bypasses the harness streamOptions, so attach the same taco
         // identification used by main turns rather than the provider SDK default.
         const { system, user } = buildExtractionPrompt(truncated, existingTopics);
-        const res = await this.models.completeSimple(
+        const res = await completeSimpleWithLiteFallback(
+            this.models,
+            this.getLiteModel,
             this.model,
             {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            {
+            (model) => ({
                 // No output cap: thinking shares the response ceiling, and a
                 // provider that ignores the thinking budget would spend a
                 // small cap on reasoning and return no facts at all.
                 temperature: LLM_TEMPERATURE,
-                reasoning: backgroundThinkingLevel(this.model),
+                reasoning: backgroundThinkingLevel(model),
                 headers: tacoRequestHeaders(),
-            },
+            }),
         );
 
         if (!res) return;

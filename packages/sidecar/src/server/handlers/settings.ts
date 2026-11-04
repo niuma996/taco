@@ -61,6 +61,7 @@ export function toView(raw: TacoGlobalConfigShape): TacoGlobalConfigView {
         commandPermissions: raw.commandPermissions,
         defaultModel: raw.defaultModel,
         defaultProvider: raw.defaultProvider,
+        liteModel: raw.liteModel,
         sessionsRoot: raw.sessionsRoot,
         systemPrompt: raw.systemPrompt,
         thinkingLevel: raw.thinkingLevel,

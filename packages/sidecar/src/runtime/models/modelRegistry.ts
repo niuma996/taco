@@ -251,14 +251,6 @@ function withModelEdits(
     };
 }
 
-/** Looks up a model by id across providers. */
-export function findModelById(models: MutableModels, id: string): Model<Api> | undefined {
-    for (const m of models.getModels() as Array<Model<Api>>) {
-        if (m.id === id) return m;
-    }
-    return undefined;
-}
-
 /** Maps a pi api string back to the taco protocol family (inverse of PI_API_BY_CUSTOM_API). */
 function fromPiApi(api: Api): CustomProviderApi | undefined {
     return CUSTOM_PROVIDER_APIS.find((family) => PI_API_BY_CUSTOM_API[family] === api);

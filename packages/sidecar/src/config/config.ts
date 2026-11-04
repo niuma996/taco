@@ -51,6 +51,7 @@ export interface ResolvedCompaction {
 export interface ResolvedTacoConfig {
     defaultModel?: string;
     defaultProvider?: string;
+    liteModel?: string;
     sessionsRoot?: string;
     systemPrompt?: string;
     /**
@@ -360,6 +361,7 @@ export function resolveConfig(
     return {
         defaultModel: cliOverrides.defaultModel ?? global.defaultModel,
         defaultProvider: cliOverrides.defaultProvider ?? global.defaultProvider,
+        liteModel: cliOverrides.liteModel ?? global.liteModel,
         sessionsRoot: cliOverrides.sessionsRoot ?? global.sessionsRoot,
         systemPrompt: cliOverrides.systemPrompt ?? global.systemPrompt,
         defaultThinkingLevel:
@@ -811,6 +813,7 @@ function mergeGlobalConfigPatch(
 
     if ("defaultModel" in patch) next.defaultModel = cleared(patch.defaultModel);
     if ("defaultProvider" in patch) next.defaultProvider = cleared(patch.defaultProvider);
+    if ("liteModel" in patch) next.liteModel = cleared(patch.liteModel);
     if ("sessionsRoot" in patch) next.sessionsRoot = cleared(patch.sessionsRoot);
     if ("systemPrompt" in patch) next.systemPrompt = cleared(patch.systemPrompt);
     if ("commandPermissions" in patch) {

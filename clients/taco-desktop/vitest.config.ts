@@ -62,6 +62,7 @@ export default defineConfig({
             "tests/components/ui/uiPrimitives.test.tsx",
             "tests/components/settings/ProviderDetailModal.test.tsx",
             "tests/components/settings/ProviderSection.test.tsx",
+            "tests/components/settings/ModelTab.test.tsx",
             "tests/components/settings/McpSection.test.tsx",
             "tests/components/settings/PermissionsTab.test.tsx",
             "tests/components/settings/SchedulesTab.test.tsx",

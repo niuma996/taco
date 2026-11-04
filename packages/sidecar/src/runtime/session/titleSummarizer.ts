@@ -10,20 +10,21 @@
  * memory extraction serializes a conversation. Tail rather than head is what
  * makes re-derivation worth doing — the newest turns are the ones the old
  * title does not describe.
- * LLM call: completeSimple (session's own model, temp 0.2, maxTokens 30).
+ * LLM call: completeSimple via completeSimpleWithLiteFallback, so the optional
+ * lite model is used when its window fits this bounded input, with the session
+ * model as fallback. Temp 0.2, no output cap (thinking shares the ceiling).
  * Output: plain text → trimmed → clamped to MAX_TITLE_LENGTH graphemes → setSummaryTitle.
  *
  * Modeled directly on MemoryExtractorImpl (../../memory/local/extractor.ts):
  * same completeSimple call shape, same tacoRequestHeaders() tagging, same
  * fire-and-forget error handling. Not merged into that class — memory
- * extraction is keyed to `turn_end` and writes topic files; titling is keyed
- * to `run_end` and writes one session value, so the two would share only the
- * LLM plumbing and none of the trigger or write logic.
+ * extraction writes topic files; titling writes one session value.
  */
 
 import type { SessionId } from "@taco-ai/protocol";
 import { createLogger } from "../../lib/logger.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
+import { completeSimpleWithLiteFallback } from "../models/liteModel.ts";
 import type { AgentMessage, Api, Model, Models, TextContent } from "../pi/types.ts";
 import { backgroundThinkingLevel, tacoRequestHeaders } from "../runtimeResources.ts";
 
@@ -104,6 +105,7 @@ export class TitleSummarizer {
         private model: Model<Api>,
         private readonly sessionId: SessionId,
         private readonly setSummaryTitle: (sessionId: SessionId, name: string) => Promise<boolean>,
+        private readonly getLiteModel: () => Model<Api> | undefined = () => undefined,
     ) {}
 
     /** Follow the session's model switch; a title not yet made uses it. */
@@ -137,20 +139,22 @@ export class TitleSummarizer {
         // identification here — see MemoryExtractorImpl for the identical
         // rationale.
         const { system, user } = buildTitlePrompt(truncated);
-        const res = await this.models.completeSimple(
+        const res = await completeSimpleWithLiteFallback(
+            this.models,
+            this.getLiteModel,
             this.model,
             {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            {
+            (model) => ({
                 // No output cap: a title is short, but thinking shares the
                 // response ceiling and a provider that ignores the thinking
                 // budget would never reach the title.
                 temperature: LLM_TEMPERATURE,
-                reasoning: backgroundThinkingLevel(this.model),
+                reasoning: backgroundThinkingLevel(model),
                 headers: tacoRequestHeaders(),
-            },
+            }),
         );
 
         if (!res) return;

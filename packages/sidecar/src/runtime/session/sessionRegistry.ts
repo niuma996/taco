@@ -43,6 +43,7 @@ import type { TacoToolContextBase } from "../../tools/context.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { AttachedSession } from "../harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "../harness/deferredToolRegistry.ts";
+import type { LiteScenario } from "../models/liteModel.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
 import type {
     AgentHarnessResources,
@@ -196,6 +197,12 @@ export interface SessionRegistryOptions {
     readonly memoryStore?: MemoryStore;
     /** True for IM workspaces; disables memory extraction there. */
     readonly isIm?: boolean;
+    /**
+     * Resolves the optional lightweight model for a bounded auxiliary scenario.
+     * A thunk, not a value: `settings.write` may change `liteModel` while
+     * sessions stay attached.
+     */
+    readonly getLiteModel?: (scenario: LiteScenario) => Model<Api> | undefined;
     /**
      * Per-session tool factory: takes a sessionId and the session's hydrated
      * taskState, returns tools with sessionId injected. WorkspaceRuntime uses
@@ -400,6 +407,7 @@ export class SessionRegistry extends EventEmitter {
     private readonly skillAuthoringGuidance?: string;
     private readonly memoryStore?: MemoryStore;
     private readonly isIm?: boolean;
+    private readonly getLiteModel?: (scenario: LiteScenario) => Model<Api> | undefined;
 
     constructor(options: SessionRegistryOptions) {
         super();
@@ -432,6 +440,7 @@ export class SessionRegistry extends EventEmitter {
         this.skillAuthoringGuidance = options.skillAuthoringGuidance;
         this.memoryStore = options.memoryStore;
         this.isIm = options.isIm;
+        this.getLiteModel = options.getLiteModel;
         this.toolsBuilder = options.toolsBuilder;
         this.refreshToolset = options.refreshToolset;
     }
@@ -1027,6 +1036,7 @@ export class SessionRegistry extends EventEmitter {
                     memoryStore: this.memoryStore,
                     isIm: this.isIm,
                     setSummaryTitle: (id, name) => this.setSummaryTitle(id, name),
+                    getLiteModel: this.getLiteModel,
                     taskStore: resolvedTaskState.taskStore,
                     planState: resolvedTaskState.planState,
                     tasksDir: resolvedTaskState.tasksDir,

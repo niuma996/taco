@@ -36,6 +36,7 @@ describe("saveGlobalConfig round-trip", () => {
     }> = [
         { name: "defaultModel", value: "anthropic/claude-sonnet" },
         { name: "defaultProvider", value: "anthropic" },
+        { name: "liteModel", value: "anthropic/claude-haiku" },
         { name: "sessionsRoot", value: "/tmp/sessions" },
         { name: "systemPrompt", value: "be terse" },
         { name: "thinkingLevel", value: "medium" },
@@ -52,6 +53,7 @@ describe("saveGlobalConfig round-trip", () => {
     const clearable: ReadonlySet<keyof TacoGlobalConfigShape> = new Set([
         "defaultModel",
         "defaultProvider",
+        "liteModel",
         "sessionsRoot",
         "systemPrompt",
         "thinkingLevel",

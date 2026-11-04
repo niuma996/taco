@@ -52,6 +52,7 @@ import {
 } from "../compaction/compactionController.ts";
 import { ContextInfoService } from "../compaction/contextInfoService.ts";
 import { PinOnceConsumer } from "../compaction/pinOnceConsumer.ts";
+import type { LiteScenario } from "../models/liteModel.ts";
 import { withTacoUserAgent } from "../models/requestHeaders.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
 import type {
@@ -174,6 +175,13 @@ export interface AttachedSessionOptions {
     memoryStore?: MemoryStore;
     /** True for IM workspaces; disables memory extraction and title summarization. */
     isIm?: boolean;
+    /**
+     * Resolves the optional lightweight model for one bounded auxiliary
+     * scenario. Called on each request rather than captured, so a
+     * `settings.write` change to `liteModel` reaches an already-attached
+     * session without a re-attach. `undefined` means "use the session model".
+     */
+    getLiteModel?: (scenario: LiteScenario) => Model<Api> | undefined;
     /**
      * Write the one-shot LLM-summarized title (see sessionRegistry.ts). Absent
      * disables title summarization outright (e.g. test doubles that don't
@@ -828,6 +836,7 @@ export class AttachedSession extends EventEmitter {
                       args.model,
                       args.memoryStore,
                       args.session.metadata.id,
+                      () => args.getLiteModel?.("memory"),
                   )
                 : undefined;
 
@@ -841,6 +850,7 @@ export class AttachedSession extends EventEmitter {
                       args.model,
                       asSessionId(args.session.metadata.id),
                       args.setSummaryTitle,
+                      () => args.getLiteModel?.("title"),
                   )
                 : undefined;
 

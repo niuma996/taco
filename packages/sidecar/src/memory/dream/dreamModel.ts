@@ -10,7 +10,8 @@
 
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { readGlobalConfig } from "../../config/config.ts";
-import { applyBuiltinProviders, findModelById } from "../../runtime/models/modelRegistry.ts";
+import { findModelById } from "../../runtime/models/modelLookup.ts";
+import { applyBuiltinProviders } from "../../runtime/models/modelRegistry.ts";
 import type { ProviderKeyStore } from "../../runtime/models/providerKeyStore.ts";
 import type { Api, Model, Models } from "../../runtime/pi/types.ts";
 

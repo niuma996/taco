@@ -32,6 +32,7 @@ export type GlobalConfigPatch = Partial<
         TacoGlobalConfigShape,
         | "defaultModel"
         | "defaultProvider"
+        | "liteModel"
         | "sessionsRoot"
         | "systemPrompt"
         | "thinkingLevel"
@@ -49,6 +50,7 @@ export type GlobalConfigPatch = Partial<
     };
     defaultModel?: string | null;
     defaultProvider?: string | null;
+    liteModel?: string | null;
     sessionsRoot?: string | null;
     systemPrompt?: string | null;
     thinkingLevel?: ThinkingLevel | null;

@@ -93,9 +93,10 @@ import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspac
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
 import { DefaultDeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
+import { resolveLiteModel } from "./models/liteModel.ts";
+import { findModelById } from "./models/modelLookup.ts";
 import {
     applyBuiltinProviders,
-    findModelById,
     type ModelInfo,
     ModelRegistry,
     type ProviderInfo,
@@ -686,6 +687,7 @@ export class WorkspaceRuntime extends EventEmitter {
             skills,
             memoryStore: this.memoryStore,
             isIm,
+            getLiteModel: (scenario) => resolveLiteModel(this.models, scenario),
             checkpointStore: this.checkpointStore,
             toolRegistry: this.toolRegistry,
             toolsBuilder,
