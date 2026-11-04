@@ -7,6 +7,11 @@ import { asWorkspaceId } from "@taco-ai/protocol";
 import { resolveConfig, saveGlobalConfig } from "../../src/config/config.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
+
+// Without this, the writes below land in the user's real ~/.taco/taco.json —
+// one of them truncates the file outright to "{}".
+useTempTacoHome("configuration-refresh");
 
 const provider = {
     id: "custom:refresh",
