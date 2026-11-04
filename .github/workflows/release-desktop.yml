@@ -49,10 +49,10 @@ jobs:
         include:
           - variant: internal
             webview_install_mode: '{"type":"skip"}'
-            artifact_name: taco-desktop-internal-setup-x64
+            artifact_suffix: internal-setup-x64
           - variant: portable
             webview_install_mode: '{"type":"offlineInstaller"}'
-            artifact_name: taco-desktop-portable-setup-x64
+            artifact_suffix: portable-setup-x64
     steps:
       - uses: actions/checkout@v4
 
@@ -136,6 +136,9 @@ jobs:
         shell: bash
         run: pnpm --filter @taco-ai/cli build
 
+      - name: Minimal runtime regression
+        run: pnpm regression --runtime packages/sidecar/dist/runtime/x86_64-pc-windows-msvc
+
       # Override webviewInstallMode via --config JSON; leaves every other
       # field at its committed default. installMode stays at currentUser.
       - name: Bundle installer
@@ -151,7 +154,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ARTIFACT="${{ matrix.artifact_name }}"
+          # The versioned artifact name is `taco-desktop-<version>-<suffix>`.
+          # The version comes from tauri.conf.json, which the "Sync version
+          # from tag" step above rewrote to the tag's version on a tagged
+          # push (a dispatch dry-run keeps the committed version).
+          VERSION=$(node -p "require('./clients/taco-desktop/src-tauri/tauri.conf.json').version")
+          ARTIFACT="taco-desktop-${VERSION}-${{ matrix.artifact_suffix }}"
           # Tauri names the NSIS installer <ProductName>_<version>_<arch>-setup.exe
           # inside src-tauri/target/release/bundle/nsis/.
           FOUND=$(find clients/taco-desktop/src-tauri/target/release/bundle/nsis \
@@ -162,6 +170,7 @@ jobs:
             exit 1
           fi
           cp "$FOUND" "${ARTIFACT}.exe"
+          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
           echo "staged=${ARTIFACT}.exe" >> "$GITHUB_OUTPUT"
           # `wc -c` is portable across GNU/BSD/macOS/Windows-Git-bash;
           # GNU `stat -c%s` is missing on BSD/macOS.
@@ -170,7 +179,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ steps.locate.outputs.artifact }}
           path: ${{ steps.locate.outputs.staged }}
           if-no-files-found: error
 
@@ -193,7 +202,7 @@ jobs:
           - variant: dmg-aarch64
             os: macos-15
             arch: arm64
-            artifact_name: taco-desktop-dmg-aarch64
+            artifact_suffix: dmg-aarch64
           # dmg-x64 (Intel Mac) omitted from v0.1.0: macos-13 runners are
           # capacity-constrained right now (Aug 2026). Re-add when the
           # runner pool stabilizes or we have a concrete Apple-Intel
@@ -267,6 +276,9 @@ jobs:
       - name: Build CLI bundle
         run: pnpm --filter @taco-ai/cli build
 
+      - name: Minimal runtime regression
+        run: pnpm regression --runtime packages/sidecar/dist/runtime/${{ matrix.arch == 'arm64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
+
       # `--bundles app,dmg` is the explicit subset of bundle.targets the
       # Tauri config asks for. We pass a per-arch override so the universal
       # binary is never produced — each .dmg matches the runner arch.
@@ -278,7 +290,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ARTIFACT="${{ matrix.artifact_name }}"
+          # The versioned artifact name is `taco-desktop-<version>-<suffix>`.
+          # The version comes from tauri.conf.json, which the "Sync version
+          # from tag" step above rewrote to the tag's version on a tagged
+          # push (a dispatch dry-run keeps the committed version).
+          VERSION=$(node -p "require('./clients/taco-desktop/src-tauri/tauri.conf.json').version")
+          ARTIFACT="taco-desktop-${VERSION}-${{ matrix.artifact_suffix }}"
           # Tauri names the dmg <ProductName>_<version>_<arch>.dmg
           # inside src-tauri/target/release/bundle/dmg/.
           FOUND=$(find clients/taco-desktop/src-tauri/target/release/bundle/dmg \
@@ -289,6 +306,7 @@ jobs:
             exit 1
           fi
           cp "$FOUND" "${ARTIFACT}.dmg"
+          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
           echo "staged=${ARTIFACT}.dmg" >> "$GITHUB_OUTPUT"
           # `wc -c` is portable across GNU/BSD/macOS; GNU `stat -c%s`
           # and BSD `stat -f %z` differ.
@@ -297,7 +315,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ steps.locate.outputs.artifact }}
           path: ${{ steps.locate.outputs.staged }}
           if-no-files-found: error
 
@@ -316,6 +334,17 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#desktop-v}"
+          if [ -z "$V" ] || [ "$V" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::could not parse version from tag '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -421,11 +450,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: signed-desktop-bundle
+          name: signed-desktop-bundle-${{ env.VERSION }}
           path: |
-            dist/taco-desktop-dmg-aarch64/**
-            dist/taco-desktop-internal-setup-x64/**
-            dist/taco-desktop-portable-setup-x64/**
+            dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/**
+            dist/taco-desktop-${{ env.VERSION }}-internal-setup-x64/**
+            dist/taco-desktop-${{ env.VERSION }}-portable-setup-x64/**
             dist/update.json
           if-no-files-found: error
 
@@ -443,9 +472,20 @@ jobs:
     permissions:
       contents: write   # required to create a release
     steps:
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#desktop-v}"
+          if [ -z "$V" ] || [ "$V" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::could not parse version from tag '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
-          name: signed-desktop-bundle
+          name: signed-desktop-bundle-${{ env.VERSION }}
           path: dist
 
       - name: Create release
@@ -455,10 +495,10 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            dist/taco-desktop-dmg-aarch64/taco-desktop-dmg-aarch64.dmg
-            dist/taco-desktop-dmg-aarch64/taco-desktop-dmg-aarch64.dmg.minisig
-            dist/taco-desktop-internal-setup-x64/taco-desktop-internal-setup-x64.exe
-            dist/taco-desktop-internal-setup-x64/taco-desktop-internal-setup-x64.exe.minisig
-            dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe
-            dist/taco-desktop-portable-setup-x64/taco-desktop-portable-setup-x64.exe.minisig
+            dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/taco-desktop-${{ env.VERSION }}-dmg-aarch64.dmg
+            dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/taco-desktop-${{ env.VERSION }}-dmg-aarch64.dmg.minisig
+            dist/taco-desktop-${{ env.VERSION }}-internal-setup-x64/taco-desktop-${{ env.VERSION }}-internal-setup-x64.exe
+            dist/taco-desktop-${{ env.VERSION }}-internal-setup-x64/taco-desktop-${{ env.VERSION }}-internal-setup-x64.exe.minisig
+            dist/taco-desktop-${{ env.VERSION }}-portable-setup-x64/taco-desktop-${{ env.VERSION }}-portable-setup-x64.exe
+            dist/taco-desktop-${{ env.VERSION }}-portable-setup-x64/taco-desktop-${{ env.VERSION }}-portable-setup-x64.exe.minisig
             dist/update.json
