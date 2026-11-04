@@ -59,6 +59,7 @@ export interface ChannelsPaneProps {
     loading: boolean;
     error: string | null;
     savingId: string | null;
+    installingId: string | null;
     pendingRestart: boolean;
     restarting: boolean;
     onCreate: (name: string) => void;
@@ -70,6 +71,7 @@ export interface ChannelsPaneProps {
      *  reconnect budget — typing the secret again would work, but offering
      *  one click is the obvious affordance. */
     onRetry: (channelId: string) => void;
+    onInstallSdk: (channelId: string) => void;
     onUnbind: (channelId: string) => void;
 
     // ── conversations tab ──
@@ -92,6 +94,7 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
         loading,
         error,
         savingId,
+        installingId,
         pendingRestart,
         restarting,
         onCreate,
@@ -99,6 +102,7 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
         onBind,
         onRebind,
         onRetry,
+        onInstallSdk,
         onUnbind,
         conversations,
         conversationsLoading,
@@ -178,6 +182,7 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
                     loading={loading}
                     error={error}
                     savingId={savingId}
+                    installingId={installingId}
                     pendingRestart={pendingRestart}
                     restarting={restarting}
                     onCreate={onCreate}
@@ -185,6 +190,7 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
                     onBind={onBind}
                     onRebind={onRebind}
                     onRetry={onRetry}
+                    onInstallSdk={onInstallSdk}
                     onUnbind={onUnbind}
                     configuredNames={configuredNames}
                     onOpenPolicy={(channelId) => setPolicyScope({ channelId })}
@@ -223,6 +229,7 @@ function BindingsTab(props: {
     loading: boolean;
     error: string | null;
     savingId: string | null;
+    installingId: string | null;
     pendingRestart: boolean;
     restarting: boolean;
     onCreate: (name: string) => void;
@@ -230,6 +237,7 @@ function BindingsTab(props: {
     onBind: (channelId: string) => void;
     onRebind: (channelId: string) => void;
     onRetry: (channelId: string) => void;
+    onInstallSdk: (channelId: string) => void;
     onUnbind: (channelId: string) => void;
     onOpenPolicy: (channelId: string) => void;
     configuredNames: Set<string>;
@@ -240,6 +248,7 @@ function BindingsTab(props: {
         loading,
         error,
         savingId,
+        installingId,
         pendingRestart,
         restarting,
         onCreate,
@@ -247,6 +256,7 @@ function BindingsTab(props: {
         onBind,
         onRebind,
         onRetry,
+        onInstallSdk,
         onUnbind,
         onOpenPolicy,
         configuredNames,
@@ -259,7 +269,12 @@ function BindingsTab(props: {
             {pendingRestart && (
                 <div className="pane-restart-banner">
                     <span>{t("channels.pendingRestart")}</span>
-                    <Button size="sm" variant="primary" disabled={restarting} onClick={onRestart}>
+                    <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={restarting || installingId !== null}
+                        onClick={onRestart}
+                    >
                         {restarting ? t("channels.restarting") : t("channels.restart")}
                     </Button>
                 </div>
@@ -283,7 +298,11 @@ function BindingsTab(props: {
                             <ConfiguredCard
                                 key={entry.channelId}
                                 entry={entry}
-                                saving={savingId === entry.channelId}
+                                saving={
+                                    savingId === entry.channelId ||
+                                    installingId !== null ||
+                                    restarting
+                                }
                                 onBind={() => onBind(entry.channelId)}
                                 onRebind={() => onRebind(entry.channelId)}
                                 onRetry={() => onRetry(entry.channelId)}
@@ -304,7 +323,9 @@ function BindingsTab(props: {
                                 key={type.name}
                                 type={type}
                                 added={configuredNames.has(type.name)}
-                                saving={savingId === type.name}
+                                saving={
+                                    savingId === type.name || installingId !== null || restarting
+                                }
                                 onCreate={() => onCreate(type.name)}
                                 t={t}
                             />
@@ -323,6 +344,40 @@ function BindingsTab(props: {
                                     <span className="channels-card-error" role="status">
                                         {f.error}
                                     </span>
+                                    <div className="channels-card-actions">
+                                        {/(@wechatbot\/wechatbot|@wecom\/aibot-node-sdk)/.test(
+                                            f.error,
+                                        ) && (
+                                            <Button
+                                                size="sm"
+                                                variant="primary"
+                                                disabled={
+                                                    savingId !== null ||
+                                                    installingId !== null ||
+                                                    restarting
+                                                }
+                                                onClick={() => onInstallSdk(f.channelId)}
+                                            >
+                                                {installingId === f.channelId
+                                                    ? t("channels.installingSdk")
+                                                    : t("channels.installSdk")}
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled={
+                                                savingId !== null ||
+                                                installingId !== null ||
+                                                restarting
+                                            }
+                                            onClick={onRestart}
+                                        >
+                                            {restarting
+                                                ? t("channels.restarting")
+                                                : t("channels.retryStartup")}
+                                        </Button>
+                                    </div>
                                 </div>
                             ))}
                         </ChannelSection>

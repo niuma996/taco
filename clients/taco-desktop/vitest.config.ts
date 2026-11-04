@@ -16,6 +16,7 @@ export default defineConfig({
         // React component tests use vitest.
         include: [
             "tests/hooks/useRetryOnError.test.tsx",
+            "tests/hooks/useChannelsPane.test.tsx",
             "tests/hooks/useSessionContextInfo.test.tsx",
             "tests/hooks/useSessionSearch.test.tsx",
             "tests/hooks/useFileTree.test.tsx",

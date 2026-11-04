@@ -27,6 +27,8 @@ test("bundled channel factory loads without optional SDKs and reports missing SD
         writeFileSync(
             runner,
             `import { strict as assert } from "node:assert";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { ChannelFactory, WechatSdkMissingError, WecomSdkMissingError } from "./factory.mjs";
 const factory = new ChannelFactory({ broker: {}, resolveRoute: () => undefined });
 assert.ok(await factory.create("mock"));
@@ -41,12 +43,26 @@ for (const [name, ErrorType, sdk] of [
         return true;
     });
 }
+// Installing into the user prefix must recover in the same process, including
+// a previous failed import; installing in the app directory is not required.
+for (const [name, sdk, exports] of [
+    ["wechat", "@wechatbot/wechatbot", "export class WeChatBot {}"],
+    ["wecom", "@wecom/aibot-node-sdk", "export class WSClient {}"],
+]) {
+    const dir = join(process.env.TACO_HOME, "vendor", "node_modules", sdk);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: sdk, type: "module", exports: "./index.js" }));
+    writeFileSync(join(dir, "index.js"), exports);
+    const channel = await factory.create(name);
+    assert.equal(channel.manifest.name, name);
+}
 `,
         );
         const child = spawnSync(process.execPath, [runner], {
             cwd: dir,
             encoding: "utf8",
             timeout: 10_000,
+            env: { ...process.env, TACO_HOME: join(dir, "home") },
         });
         assert.equal(child.status, 0, child.stderr || child.stdout);
     } finally {

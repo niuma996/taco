@@ -25,6 +25,7 @@ import type { Logger as SdkLogger } from "@wecom/aibot-node-sdk";
 import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
+import { loadChannelSdk } from "../channelSdk.ts";
 import {
     DEFAULT_MERGE_MAX_WAIT_MS,
     DEFAULT_MERGE_WINDOW_MS,
@@ -490,7 +491,7 @@ export class WeComChannelHandle implements ChannelHandle {
 async function loadDefaultCreateClient(): Promise<
     (opts: WeComClientFactoryOptions) => WeComClientLike
 > {
-    const { WSClient } = await import("@wecom/aibot-node-sdk");
+    const { WSClient } = await loadChannelSdk("wecom");
     return (opts) => {
         const client = new WSClient({
             botId: opts.botId,

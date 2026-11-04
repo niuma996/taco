@@ -1,6 +1,7 @@
 import { MockChannel } from "./builtin/mockChannel.ts";
 import type { ChannelBindBroker } from "./channelBindBroker.ts";
 import { CHANNEL_NAME_MOCK, CHANNEL_NAME_WECHAT, CHANNEL_NAME_WECOM } from "./channelNames.ts";
+import { channelSdkInstallHint, loadChannelSdk } from "./channelSdk.ts";
 import type { Channel, ChannelRouteResolver } from "./types.ts";
 
 /** Dependencies real channels need beyond their ChannelContext. Optional so
@@ -19,9 +20,7 @@ export interface ChannelFactoryDeps {
 /** Thrown by create("wechat") when the @wechatbot/wechatbot SDK is not installed. */
 export class WechatSdkMissingError extends Error {
     constructor(cause: unknown) {
-        super(
-            "wechat channel requires the @wechatbot/wechatbot optional dependency; install it with `pnpm add @wechatbot/wechatbot@2.2.0`",
-        );
+        super(channelSdkInstallHint("wechat"));
         this.name = "WechatSdkMissingError";
         this.cause = cause;
     }
@@ -30,9 +29,7 @@ export class WechatSdkMissingError extends Error {
 /** Thrown by create("wecom") when the @wecom/aibot-node-sdk SDK is not installed. */
 export class WecomSdkMissingError extends Error {
     constructor(cause: unknown) {
-        super(
-            "wecom channel requires the @wecom/aibot-node-sdk optional dependency; install it with `pnpm add @wecom/aibot-node-sdk@1.0.7`",
-        );
+        super(channelSdkInstallHint("wecom"));
         this.name = "WecomSdkMissingError";
         this.cause = cause;
     }
@@ -69,7 +66,7 @@ export class ChannelFactory {
                 try {
                     // Import the external SDK dynamically too: a static SDK
                     // import in a bundled channel is hoisted to sidecar startup.
-                    await import("@wechatbot/wechatbot");
+                    await loadChannelSdk("wechat");
                     mod = await import("./builtin/wechatChannel.ts");
                 } catch (e) {
                     throw new WechatSdkMissingError(e);
@@ -86,7 +83,7 @@ export class ChannelFactory {
                 }
                 let mod: typeof import("./builtin/wecomChannel.ts");
                 try {
-                    await import("@wecom/aibot-node-sdk");
+                    await loadChannelSdk("wecom");
                     mod = await import("./builtin/wecomChannel.ts");
                 } catch (e) {
                     throw new WecomSdkMissingError(e);

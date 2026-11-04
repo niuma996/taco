@@ -312,9 +312,19 @@ async function runDaemon(
     }
     await new Promise<void>((resolve, reject) => {
         const onError = (err: Error) => {
-            if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") {
-                log.info(`another daemon bound ${controlSocketPath} first; exiting`);
-                process.exit(0);
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === "EADDRINUSE" || code === "EEXIST") {
+                // macOS may report EEXIST when another contender binds between
+                // our probe and listen. Confirm ownership before reusing it;
+                // never unlink the winner's socket or hide a non-listening file.
+                void probeControlSocket(controlSocketPath).then((state) => {
+                    if (state === "ready") {
+                        log.info(`another daemon bound ${controlSocketPath} first; exiting`);
+                        process.exit(0);
+                    }
+                    reject(err);
+                }, reject);
+                return;
             }
             reject(err);
         };
@@ -636,7 +646,7 @@ async function main(): Promise<void> {
     // workspace_ensure) daemons would otherwise lose their stderr to a
     // captured pipe buffer in the parent.
     if (process.cwd() === "/") {
-        log.warn("cwd is / (typical for .app bundles); runtime resources must use absolute paths");
+        log.debug("cwd is / (typical for .app bundles); runtime resources must use absolute paths");
     }
     if (process.env.TACO_STDERR_LOG) {
         const logPath = process.env.TACO_STDERR_LOG;

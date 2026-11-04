@@ -495,13 +495,7 @@ async fn workspace_ensure(
     #[cfg(not(target_os = "macos"))]
     let _ = cwd;
 
-    // Phase 1 (lock-free): fast-path slot check + idempotent reap. The reap
-    // runs without the ensure_lock because it does not race with anything
-    // (unlink is idempotent, SIGTERM is idempotent). Moving it out of the
-    // lock window is what removes the 4s+ reap from the cold-start critical
-    // path: a stale daemon killed by an earlier ensure no longer blocks the
-    // next caller's spawn, and a hung daemon's SIGTERM grace overlaps with
-    // the webview's own load instead of stalling it.
+    // Fast path for an already-installed connection.
     {
         let slot = state.sidecar.lock().await;
         if slot.as_ref().is_some() {
@@ -510,6 +504,23 @@ async fn workspace_ensure(
         }
         if state.shutdown_initiated.load(Ordering::Acquire) {
             boot_trace::mark_rust("ensure.shutdown_initiated");
+            return Err("sidecar shutting down".into());
+        }
+    }
+    // Keep ownership through reap, spawn, connect and slot publication. Releasing
+    // after spawn lets every workspace start another daemon while the slot is
+    // still None; reaping outside the lock can also touch a newly-started owner.
+    let _ensure_guard = {
+        let _p = boot_trace::Phase::new("ensure.acquire_ensure_lock");
+        state.ensure_lock.lock().await
+    };
+    {
+        let slot = state.sidecar.lock().await;
+        if slot.is_some() {
+            boot_trace::mark_rust("ensure.slot_already_present_late");
+            return Ok(());
+        }
+        if state.shutdown_initiated.load(Ordering::Acquire) {
             return Err("sidecar shutting down".into());
         }
     }
@@ -636,17 +647,7 @@ async fn workspace_ensure(
     let stderr_log_path = resolved_home.join("logs").join("daemon.err.log");
     cmd.env("TACO_STDERR_LOG", &stderr_log_path);
 
-    // Phase 2 (ensure_lock): serialize the spawn window only. The lock is
-    // dropped as soon as the launcher is forked and the stderr reader is
-    // attached, so a second ensure() that arrives mid-wait (or mid-bind)
-    // sees the slot populated by the first one and returns Ok(())
-    // immediately. Without this narrowing, a 4s reap inside the lock
-    // blocked every other ensure behind it for 4s+ and forced the UI
-    // through a doomed attempt0 → attempt1 retry chain (~6s wasted).
-    let _ensure_guard = {
-        let _p = boot_trace::Phase::new("ensure.acquire_ensure_lock");
-        state.ensure_lock.lock().await
-    };
+    // Dispose may have begun while the command and environment were prepared.
     {
         let slot = state.sidecar.lock().await;
         if slot.as_ref().is_some() {
@@ -776,14 +777,6 @@ async fn workspace_ensure(
         });
     }
 
-    // Spawn window closed — drop the ensure_lock so concurrent ensure()
-    // callers can race into their own slot check (and most of them will
-    // see the slot Some installed by the first finisher, returning
-    // immediately). The wait + connect + install below all run with only
-    // the state.sidecar mutex, not the ensure_lock.
-    drop(_ensure_guard);
-    boot_trace::mark_rust("ensure.spawn_window_closed");
-
     // Wait for the daemon to bind the socket, then connect. The bundle (in
     // daemon mode) prints nothing on stdout, so we poll the socket path
     // instead. 15s mirrors the CLI's waitForSocket and covers a cold dev
@@ -910,13 +903,8 @@ async fn workspace_ensure(
         }
     });
 
-    // Third check: re-check shutdown flag and slot before install — if dispose was
-    // triggered during spawn, or a concurrent ensure already installed, kill the orphan
-    // launcher we just spawned.
-    // Lock-free ensure_guard above means this race is the new normal rather
-    // than a corner case: every second ensure() that enters after the first
-    // has released its spawn-window guard ends up here, sees Some(_), and
-    // dies fast instead of re-running the whole 6s spawn chain.
+    // Dispose can still interrupt an ensure while it holds ensure_lock.
+    // Do not publish the connection if shutdown began during startup.
     let mut slot = state.sidecar.lock().await;
     if state.shutdown_initiated.load(Ordering::Acquire) {
         drop(tx);

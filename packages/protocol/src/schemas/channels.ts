@@ -46,6 +46,7 @@ export const channelsSubmitVerifyCodeSchema = Type.Object({
 export const channelsUnbindSchema = Type.Object({ channelId });
 
 export const channelsRetrySchema = Type.Object({ channelId });
+export const channelsInstallSdkSchema = Type.Object({ channelId });
 
 const toolVerdict = Type.Union([Type.Literal("deny"), Type.Literal("allow")]);
 

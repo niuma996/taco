@@ -14,6 +14,7 @@ import { mimeTypeFromName } from "../../attachments/mimeType.ts";
 import { sidecarVersion } from "../../runtime/runtimeResources.ts";
 import type { ChannelBindBroker } from "../channelBindBroker.ts";
 import { CREDENTIALS_KEY } from "../channelConfigStore.ts";
+import { loadChannelSdk } from "../channelSdk.ts";
 import {
     DEFAULT_MERGE_MAX_WAIT_MS,
     DEFAULT_MERGE_WINDOW_MS,
@@ -516,7 +517,7 @@ function createLoggerAdapter(log: Logger): SdkLogger {
 }
 
 async function defaultCreateBot(opts: WeChatBotFactoryOptions): Promise<WeChatBotLike> {
-    const { WeChatBot } = await import("@wechatbot/wechatbot");
+    const { WeChatBot } = await loadChannelSdk("wechat");
     // No loginCallbacks here on purpose — see SdkLoginCallbacks.
     //
     // botAgent identifies the driving app to the iLink API (sent as

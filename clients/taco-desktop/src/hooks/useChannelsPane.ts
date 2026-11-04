@@ -16,12 +16,14 @@ export interface UseChannelsPaneResult {
     channelsError: string | null;
     /** channelId currently mid-request, so its row can disable its controls. */
     channelsSavingId: string | null;
+    channelsInstallingId: string | null;
     bindChannel: (channelId: string, force?: boolean, creds?: ChannelsBindCreds) => Promise<void>;
     unbindChannel: (channelId: string) => Promise<void>;
     /** Reconnect using already-stored credentials. The only path back from a
      *  SDK that stopped retrying (e.g. WeCom's auth-failure budget) without
      *  forcing the user to retype the secret. */
     retryChannel: (channelId: string) => Promise<void>;
+    installChannelSdk: (channelId: string) => Promise<void>;
     submitVerifyCode: (requestId: string, code: string) => Promise<boolean>;
     createChannel: (name: string) => Promise<void>;
     /** True once an instance was created; channels load statically at startup. */
@@ -43,6 +45,7 @@ export function useChannelsPane(
     const [channelsStatus, setChannelsStatus] = useState<ChannelsListResult | null>(null);
     const [channelsLoading, setChannelsLoading] = useState(false);
     const [channelsSavingId, setChannelsSavingId] = useState<string | null>(null);
+    const [channelsInstallingId, setChannelsInstallingId] = useState<string | null>(null);
     const [channelsPendingRestart, setChannelsPendingRestart] = useState(false);
     const [channelsRestarting, setChannelsRestarting] = useState(false);
     const { error: channelsError, fail: failWith, clearError } = useAutoClearError();
@@ -83,6 +86,7 @@ export function useChannelsPane(
 
     const bindChannel = useCallback(
         async (channelId: string, force?: boolean, creds?: ChannelsBindCreds): Promise<void> => {
+            if (channelsInstallingId) return;
             setChannelsSavingId(channelId);
             clearError();
             try {
@@ -98,11 +102,12 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, clearError, failWith],
+        [client, clearError, failWith, channelsInstallingId],
     );
 
     const unbindChannel = useCallback(
         async (channelId: string): Promise<void> => {
+            if (channelsInstallingId) return;
             setChannelsSavingId(channelId);
             clearError();
             try {
@@ -114,11 +119,12 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, clearError, refreshChannels, failWith],
+        [client, clearError, refreshChannels, failWith, channelsInstallingId],
     );
 
     const retryChannel = useCallback(
         async (channelId: string): Promise<void> => {
+            if (channelsInstallingId) return;
             setChannelsSavingId(channelId);
             clearError();
             try {
@@ -129,11 +135,12 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, clearError, failWith],
+        [client, clearError, failWith, channelsInstallingId],
     );
 
     const createChannel = useCallback(
         async (name: string): Promise<void> => {
+            if (channelsInstallingId) return;
             setChannelsSavingId(name);
             clearError();
             try {
@@ -146,11 +153,13 @@ export function useChannelsPane(
                 setChannelsSavingId(null);
             }
         },
-        [client, clearError, refreshChannels, failWith],
+        [client, clearError, refreshChannels, failWith, channelsInstallingId],
     );
 
     const restartForChannels = useCallback(async (): Promise<void> => {
+        if (channelsInstallingId) return;
         setChannelsRestarting(true);
+        clearError();
         try {
             await restartSidecar();
             setChannelsPendingRestart(false);
@@ -160,7 +169,35 @@ export function useChannelsPane(
         } finally {
             setChannelsRestarting(false);
         }
-    }, [restartSidecar, refreshChannels, failWith]);
+    }, [restartSidecar, refreshChannels, failWith, clearError, channelsInstallingId]);
+
+    const installChannelSdk = useCallback(
+        async (channelId: string): Promise<void> => {
+            if (channelsInstallingId || channelsSavingId || channelsRestarting) return;
+            setChannelsInstallingId(channelId);
+            clearError();
+            try {
+                await client.channelsInstallSdk({ channelId });
+                await restartSidecar();
+                setChannelsPendingRestart(false);
+                await refreshChannels();
+            } catch (e) {
+                failWith(e);
+            } finally {
+                setChannelsInstallingId(null);
+            }
+        },
+        [
+            client,
+            restartSidecar,
+            refreshChannels,
+            clearError,
+            failWith,
+            channelsInstallingId,
+            channelsSavingId,
+            channelsRestarting,
+        ],
+    );
 
     const submitVerifyCode = useCallback(
         async (requestId: string, code: string): Promise<boolean> => {
@@ -181,9 +218,11 @@ export function useChannelsPane(
         channelsLoading,
         channelsError,
         channelsSavingId,
+        channelsInstallingId,
         bindChannel,
         unbindChannel,
         retryChannel,
+        installChannelSdk,
         submitVerifyCode,
         createChannel,
         channelsPendingRestart,

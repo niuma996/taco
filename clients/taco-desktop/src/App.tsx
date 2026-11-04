@@ -553,9 +553,11 @@ export default function App() {
         channelsLoading,
         channelsError,
         channelsSavingId,
+        channelsInstallingId,
         bindChannel,
         unbindChannel,
         retryChannel,
+        installChannelSdk,
         submitVerifyCode,
         createChannel,
         channelsPendingRestart,
@@ -1109,6 +1111,7 @@ export default function App() {
                             loading={channelsLoading}
                             error={channelsError}
                             savingId={channelsSavingId}
+                            installingId={channelsInstallingId}
                             pendingRestart={channelsPendingRestart}
                             restarting={channelsRestarting}
                             onCreate={(name) => void createChannel(name)}
@@ -1126,6 +1129,7 @@ export default function App() {
                                 }
                             }}
                             onRetry={(channelId) => void retryChannel(channelId)}
+                            onInstallSdk={(channelId) => void installChannelSdk(channelId)}
                             onUnbind={(channelId) => void unbindChannel(channelId)}
                             conversations={conversations}
                             conversationsLoading={conversationsLoading}

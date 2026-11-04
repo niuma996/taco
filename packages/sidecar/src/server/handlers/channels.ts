@@ -15,6 +15,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { WechatSdkMissingError, WecomSdkMissingError } from "../../channels/channelFactory.ts";
+import { installChannelSdk } from "../../channels/channelSdk.ts";
 import type { ChannelControl, ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
@@ -30,6 +31,19 @@ function requireChannels(server: ServerRpcSurface): ChannelControl {
 }
 
 export function registerChannelsHandlers(): void {
+    registerMethod(
+        "channelsInstallSdk",
+        false,
+        async ({ server, params }) => {
+            const entry = requireChannels(server)
+                .list()
+                .configured.find((channel) => channel.channelId === params.channelId);
+            if (!entry) throw new RpcHandlerError(ErrorCodes.InvalidParams, "unknown channelId");
+            await installChannelSdk(entry.name);
+            return { requiresRestart: true };
+        },
+        { command: true },
+    );
     registerMethod(
         "channelsList",
         false,

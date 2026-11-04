@@ -21,6 +21,7 @@ import type {
 import {
     channelsBindSchema,
     channelsCreateSchema,
+    channelsInstallSdkSchema,
     channelsListConversationsSchema,
     channelsListSchema,
     channelsRetrySchema,
@@ -49,6 +50,11 @@ const channelsRows = {
     ),
     channelsUnbind: row<ChannelsUnbindResult>()("channels.unbind", "process", channelsUnbindSchema),
     channelsRetry: row<ChannelsRetryResult>()("channels.retry", "process", channelsRetrySchema),
+    channelsInstallSdk: row<{ requiresRestart: boolean }>()(
+        "channels.installSdk",
+        "process",
+        channelsInstallSdkSchema,
+    ),
     imPolicyGet: row<ImPolicyGetResult>()("imPolicy.get", "process", imPolicyGetSchema),
     imPolicySetChannelDefault: row<ImPolicyWriteResult>()(
         "imPolicy.setChannelDefault",
