@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.6] — 2026-11-04
+
+A patch on top of v0.3.5: the sidecar no longer refuses to start on a machine
+that does not have the optional channel SDKs installed.
+
+### Fixed
+
+- The sidecar starts without the optional channel SDKs. The WeChat and WeCom
+  SDKs are now loaded on demand, so a machine that never installed them runs
+  the sidecar as usual, and only hears about the missing SDK when it actually
+  creates that channel.
+
+### Upgrade notes
+
+- If you installed 0.3.5, please move to 0.3.6. The sidecar in 0.3.5 loaded
+  the optional channel SDKs while starting up, so it could refuse to start at
+  all on a machine without them. The desktop app shipped the same sidecar, so
+  the desktop build needs the update too.
+- Everything else in 0.3.6 is the same as 0.3.5.
+
 ## [0.3.5] — 2026-11-04
 
 A release about keeping score of the work that happens while you are not

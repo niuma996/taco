@@ -1,6 +1,6 @@
 {
   "name": "@taco-ai/shared",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": false,
   "type": "module",
   "main": "./dist/tacoClient.js",
