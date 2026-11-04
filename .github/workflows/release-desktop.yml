@@ -306,6 +306,9 @@ jobs:
             exit 1
           fi
           cp "$FOUND" "${ARTIFACT}.dmg"
+          # The updater expects a gzip-compressed tar containing Taco.app;
+          # the DMG is retained only for manual installation.
+          tar -C clients/taco-desktop/src-tauri/target/release/bundle/macos -czf "${ARTIFACT}.app.tar.gz" Taco.app
           echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
           echo "staged=${ARTIFACT}.dmg" >> "$GITHUB_OUTPUT"
           # `wc -c` is portable across GNU/BSD/macOS; GNU `stat -c%s`
@@ -316,7 +319,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.locate.outputs.artifact }}
-          path: ${{ steps.locate.outputs.staged }}
+          path: |
+            ${{ steps.locate.outputs.staged }}
+            ${{ steps.locate.outputs.artifact }}.app.tar.gz
           if-no-files-found: error
 
   # ── Sign release artifacts + build updater manifest ──────────────────
@@ -394,7 +399,7 @@ jobs:
           while IFS= read -r -d '' f; do
             echo "$MINISIGN_PRIVATE_KEY_PASSPHRASE" | minisign -S -s /tmp/taco-update.key -m "$f" -W
             echo "signed $f -> $f.minisig"
-          done < <(find dist -type f \( -name '*.dmg' -o -name '*.exe' \) -print0)
+          done < <(find dist -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.app.tar.gz' \) -print0)
           # Wipe the key file before any later step can read /tmp.
           shred -u /tmp/taco-update.key 2>/dev/null || rm -f /tmp/taco-update.key
 
@@ -411,11 +416,13 @@ jobs:
           version = tag.removeprefix('desktop-v')
           platforms = {}
           for path in sorted(pathlib.Path('dist').rglob('*')):
-              if not path.is_file() or path.suffix not in ('.dmg', '.exe'):
+              if not path.is_file() or path.name.endswith('.minisig'):
                   continue
-              sig = path.with_suffix(path.suffix + '.minisig')
+              if not (path.name.endswith('.app.tar.gz') or path.name.endswith('.exe')):
+                  continue
+              sig = pathlib.Path(str(path) + '.minisig')
               if not sig.exists():
-                  raise SystemExit(f'missing signature for {path}')
+                  raise SystemExit(f'missing updater signature for {path}')
               name = path.name
               # tauri-plugin-updater expects darwin-aarch64, darwin-x86_64,
               # windows-x86_64, windows-aarch64 — derive from the file name.
@@ -427,7 +434,7 @@ jobs:
                   print(f'skipping {name} from manifest (internal preferred for windows-x86_64)')
                   continue
               is_arm = 'aarch64' in name or 'arm64' in name
-              if name.endswith('.dmg'):
+              if name.endswith('.app.tar.gz'):
                   platform = 'darwin-aarch64' if is_arm else 'darwin-x86_64'
               else:
                   platform = 'windows-aarch64' if is_arm else 'windows-x86_64'
@@ -446,6 +453,27 @@ jobs:
           }
           pathlib.Path('dist/update.json').write_text(json.dumps(manifest, indent=2) + '\n')
           print(json.dumps(manifest, indent=2))
+          PYEOF
+
+      - name: Validate updater payloads
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import gzip, json, pathlib, tarfile
+          manifest = json.loads(pathlib.Path('dist/update.json').read_text())
+          for platform, entry in manifest['platforms'].items():
+              name = entry['url'].rsplit('/', 1)[-1]
+              matches = list(pathlib.Path('dist').rglob(name))
+              if len(matches) != 1:
+                  raise SystemExit(f'{platform}: expected one payload for {name}, found {matches}')
+              payload = matches[0]
+              if name.endswith('.app.tar.gz'):
+                  with gzip.open(payload, 'rb') as stream, tarfile.open(fileobj=stream, mode='r:') as archive:
+                      if not any(member.name.endswith('.app/Contents/Info.plist') for member in archive):
+                          raise SystemExit(f'{payload}: no application bundle')
+              elif not name.endswith('.exe'):
+                  raise SystemExit(f'{payload}: not an updater artifact')
+              print(f'validated {platform}: {payload}')
           PYEOF
 
       - uses: actions/upload-artifact@v4
@@ -497,6 +525,8 @@ jobs:
           files: |
             dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/taco-desktop-${{ env.VERSION }}-dmg-aarch64.dmg
             dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/taco-desktop-${{ env.VERSION }}-dmg-aarch64.dmg.minisig
+            dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/taco-desktop-${{ env.VERSION }}-dmg-aarch64.app.tar.gz
+            dist/taco-desktop-${{ env.VERSION }}-dmg-aarch64/taco-desktop-${{ env.VERSION }}-dmg-aarch64.app.tar.gz.minisig
             dist/taco-desktop-${{ env.VERSION }}-internal-setup-x64/taco-desktop-${{ env.VERSION }}-internal-setup-x64.exe
             dist/taco-desktop-${{ env.VERSION }}-internal-setup-x64/taco-desktop-${{ env.VERSION }}-internal-setup-x64.exe.minisig
             dist/taco-desktop-${{ env.VERSION }}-portable-setup-x64/taco-desktop-${{ env.VERSION }}-portable-setup-x64.exe
