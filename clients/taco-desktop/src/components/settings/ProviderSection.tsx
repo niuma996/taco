@@ -24,6 +24,7 @@ import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../../lib/globalConfig.ts";
 import { Tag } from "../ui/Tag.tsx";
 import { ProviderDetailModal } from "./ProviderDetailModal.tsx";
+import { ProviderIcon } from "./ProviderIcon.tsx";
 
 export interface ProviderSectionProps {
     client: TacoClient;
@@ -194,15 +195,18 @@ export function ProviderSection(props: ProviderSectionProps) {
                                 )
                             }
                         >
+                            <span className="provider-icon-frame">
+                                <ProviderIcon providerId={p.id} name={p.name} />
+                            </span>
                             <span className="provider-row-title">
-                                <span
-                                    className={`provider-row-dot${
-                                        p.configured ? " provider-row-dot--ok" : ""
-                                    }`}
-                                    aria-hidden="true"
-                                />
                                 <span className="provider-row-name">{p.name}</span>
                             </span>
+                            <span
+                                className={`provider-row-dot${
+                                    p.configured ? " provider-row-dot--ok" : ""
+                                }`}
+                                aria-hidden="true"
+                            />
                             <span className="provider-row-meta">
                                 <span className="provider-row-count">
                                     {t("settings.providerModelCount", {

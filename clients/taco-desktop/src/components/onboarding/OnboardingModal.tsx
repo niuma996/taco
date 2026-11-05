@@ -38,6 +38,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
     const [selectedModel, setSelectedModel] = useState<ModelSelection | undefined>(undefined);
     // Disables footer Next + workspace step's "Use default" while openWorkspace is in flight.
     const [goingNext, setGoingNext] = useState(false);
+    const [modelSaving, setModelSaving] = useState(false);
     // The newest workspace-open failure from `useWorkspaces.notifications`, so
     // it renders inside the modal. The failure also toasts (it replies to the
     // user's click), but the toast sits at z-index 2000 and the onboarding scrim
@@ -154,7 +155,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
                 // models. ModelStep owns the authoritative provider
                 // list for selection; the sidecar re-validates the
                 // key at session-create time anyway.
-                if (selectedModel) setStep("done");
+                if (selectedModel && !modelSaving) setStep("done");
                 break;
             case "done":
                 break;
@@ -184,7 +185,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
         step === "welcome" ||
         step === "workspace" ||
         (step === "provider" && providerConfigured) ||
-        (step === "model" && selectedModel);
+        (step === "model" && selectedModel && !modelSaving);
 
     const canGoBack = step !== "welcome" && step !== "done";
 
@@ -258,7 +259,8 @@ export function OnboardingModal(props: OnboardingModalProps) {
                     <ModelStep
                         client={props.client}
                         workspace={workspace}
-                        onSelect={(sel) => setSelectedModel(sel)}
+                        onSelect={setSelectedModel}
+                        onSavingChange={setModelSaving}
                     />
                 )}
                 {step === "done" && (
@@ -273,7 +275,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
 
             <div className="onboarding-actions">
                 {canGoBack && (
-                    <Button variant="ghost" onClick={goBack}>
+                    <Button variant="ghost" onClick={goBack} disabled={modelSaving}>
                         {t("onboarding.back")}
                     </Button>
                 )}
@@ -282,7 +284,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
                         type="button"
                         className="onboarding-cta"
                         onClick={goNext}
-                        disabled={!canGoNext || goingNext}
+                        disabled={!canGoNext || goingNext || modelSaving}
                     >
                         {t("onboarding.next")}
                     </button>

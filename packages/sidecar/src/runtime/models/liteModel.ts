@@ -12,17 +12,19 @@
  * surface as a run failure.
  */
 
+import { LITE_THINKING_LEVELS, type LiteThinkingLevel } from "@taco-ai/protocol";
 import { readGlobalConfig } from "../../config/config.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type {
     Api,
     ApiContext,
+    ApiThinkingLevel,
     AssistantMessage,
     Model,
     Models,
     MutableModels,
 } from "../pi/types.ts";
-import { estimateApiContextTokens, normalizeContext } from "../pi/values.ts";
+import { clampThinkingLevel, estimateApiContextTokens, normalizeContext } from "../pi/values.ts";
 import { findModelById } from "./modelLookup.ts";
 
 const log = createLogger("sidecar.liteModel");
@@ -79,6 +81,53 @@ export function resolveLiteModel(
     return model;
 }
 
+/**
+ * Resolve the configured thinking level for lite-model calls.
+ *
+ * Read on every call, like {@link resolveLiteModel}: a `settings.write`
+ * change must reach an already-attached session without a re-attach.
+ * `undefined` means "keep the default" — the caller then derives the level
+ * from the model itself (`minimal` for reasoning models, none otherwise).
+ *
+ * An out-of-domain value is ignored rather than thrown: the level is a
+ * preference, and a stale hand-edited taco.json must not break auxiliary
+ * calls that are already best-effort.
+ */
+export function resolveLiteThinkingLevel(): LiteThinkingLevel | undefined {
+    const configured = readGlobalConfig().liteThinkingLevel;
+    if (!configured) return undefined;
+    if (!(LITE_THINKING_LEVELS as readonly string[]).includes(configured)) {
+        log.warn("ignoring out-of-range liteThinkingLevel", { configured });
+        return undefined;
+    }
+    return configured;
+}
+
+/**
+ * An explicit thinking level for a lite call.
+ *
+ * The wrapper is present whenever the user configured a level, so "off"
+ * stays distinguishable from "not configured" (keep the auxiliary default).
+ * `reasoning` is `undefined` for "off"; attempt() then checks the model's
+ * capabilities, since some reasoning models cannot disable thinking.
+ */
+export interface LiteThinkingOverride {
+    reasoning?: ApiThinkingLevel;
+}
+
+/**
+ * Translate a configured level into the request-level value pi expects.
+ *
+ * pi's request `reasoning` option has no "off" — omitting it asks the adapter
+ * to disable thinking when supported. Model capability checks happen in
+ * attempt() before this request-level encoding reaches the adapter.
+ */
+export function liteThinkingToRequest(
+    level: LiteThinkingLevel | undefined,
+): ApiThinkingLevel | undefined {
+    return level === "off" ? undefined : level;
+}
+
 type SimpleArgs = Parameters<Models["completeSimple"]>;
 type SimpleOptions = NonNullable<SimpleArgs[2]>;
 
@@ -89,6 +138,11 @@ type SimpleOptions = NonNullable<SimpleArgs[2]>;
  * options (thinking level differs between a reasoning and a non-reasoning
  * model) for whichever model is actually being called.
  *
+ * `optionsFor` takes an optional thinking override, passed only on the lite
+ * branch: the configured lite level must not leak into the main-model
+ * fallback, which keeps its auxiliary default. The override's presence
+ * marks "the user chose a level"; its absence means "keep the default".
+ *
  * Returns `undefined` on total failure — the callers already treat a missing
  * response as "no title / no facts this run" and never propagate it.
  */
@@ -97,7 +151,7 @@ export async function completeSimpleWithLiteFallback(
     getLite: () => Model<Api> | undefined,
     main: Model<Api>,
     context: ApiContext,
-    optionsFor: (model: Model<Api>) => SimpleOptions,
+    optionsFor: (model: Model<Api>, thinking?: LiteThinkingOverride) => SimpleOptions,
 ): Promise<AssistantMessage | undefined> {
     const lite = getLite();
     if (!lite || !fitsLiteWindow(lite, context)) {
@@ -108,10 +162,15 @@ export async function completeSimpleWithLiteFallback(
         return await attempt(models, main, context, optionsFor(main));
     }
 
-    const result = await attempt(models, lite, context, optionsFor(lite));
+    const configured = resolveLiteThinkingLevel();
+    // Absent override = keep the model's default; present = the user chose.
+    const thinking =
+        configured === undefined ? undefined : { reasoning: liteThinkingToRequest(configured) };
+    const result = await attempt(models, lite, context, optionsFor(lite, thinking));
     if (result) {
         log.info("auxiliary call on the lite model", {
             model: `${lite.provider}/${lite.id}`,
+            thinking: configured ?? "default",
         });
         return result;
     }
@@ -136,7 +195,15 @@ async function attempt(
     options: SimpleOptions,
 ): Promise<AssistantMessage | undefined> {
     try {
-        const res = await models.completeSimple(model, context, options);
+        // Anthropic's simple adapter does not clamp levels. Normalize here
+        // for every provider, including defaults and main-model fallbacks.
+        // A model with off:null needs its lowest supported level instead of
+        // a disable request; a non-reasoning model always resolves to off.
+        const level = clampThinkingLevel(model, options.reasoning ?? "off");
+        const res = await models.completeSimple(model, context, {
+            ...options,
+            reasoning: level === "off" ? undefined : level,
+        });
         if (res.stopReason === "error" || res.stopReason === "aborted") {
             log.warn("auxiliary completion failed:", {
                 model: `${model.provider}/${model.id}`,

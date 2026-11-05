@@ -1,25 +1,34 @@
-import type { WorkspaceId } from "@taco-ai/protocol";
+import type { GlobalConfigPatch, ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
+import { useStableCallback } from "../../hooks/primitives/useStableCallback.ts";
 import { useProviders } from "../../hooks/useProviders.js";
 import { useWorkspaceModels } from "../../hooks/useWorkspaceModels.js";
 import { useT } from "../../i18n/useI18n.js";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { defaultModelForNewSession } from "../../lib/globalConfig.ts";
 import { ModelMenu } from "../settings/ModelMenu.js";
 import type { ModelOption, ModelSelection } from "../settings/ModelPicker.js";
+import { ThinkingSlider } from "../settings/ThinkingSlider.tsx";
 
 export interface ModelStepProps {
     client: TacoClient;
     workspace: WorkspaceId;
     onSelect: (selection: ModelSelection | undefined) => void;
+    onSavingChange?: (saving: boolean) => void;
 }
 
 export function ModelStep(props: ModelStepProps) {
     const { t } = useT();
     const { options, refresh: refreshModels } = useWorkspaceModels(props.client, props.workspace);
     const { providers, refresh: refreshProviders } = useProviders(props.client, props.workspace);
-    const { save, saving } = useSaveConfigPatch(props.client);
-    const [selected, setSelected] = useState<ModelSelection | undefined>(undefined);
+    const { save, error } = useSaveConfigPatch(props.client);
+    const [writeState, setWriteState] = useState({ pending: false, failed: false });
+    const saving = writeState.pending;
+    const { global } = useGlobalConfig();
+    const notifySelection = useStableCallback(props.onSelect);
+    const notifySaving = useStableCallback((busy: boolean) => props.onSavingChange?.(busy));
 
     // Mirror App.tsx: only show models from providers that actually have a configured key.
     // Without this filter, sidecar returns every model's full id+provider pair, including
@@ -45,31 +54,40 @@ export function ModelStep(props: ModelStepProps) {
     }, [configuredProviderIds, refreshModels]);
 
     const value = useMemo<ModelOption | undefined>(() => {
+        const selected = defaultModelForNewSession(global);
         if (!selected) return undefined;
         return filteredOptions.find(
-            (o) => o.id === selected.id && o.provider === selected.provider,
+            (o) => o.id === selected.id && (!selected.provider || o.provider === selected.provider),
         );
-    }, [selected, filteredOptions]);
+    }, [global, filteredOptions]);
+
+    useEffect(() => {
+        notifySelection(
+            writeState.pending || writeState.failed || !value
+                ? undefined
+                : { provider: value.provider, id: value.id },
+        );
+    }, [value, writeState, notifySelection]);
+
+    const savePatch = (patch: GlobalConfigPatch) => {
+        notifySelection(undefined);
+        notifySaving(true);
+        setWriteState({ pending: true, failed: false });
+        void save({ kind: "global", patch })
+            .then(
+                () => setWriteState({ pending: false, failed: false }),
+                () => setWriteState({ pending: false, failed: true }),
+            )
+            .finally(() => notifySaving(false));
+    };
 
     const handleChange = (next: ModelSelection) => {
-        // The dropdown is already filtered to configured providers, but the
-        // selection can still drift if the user picks the moment before
-        // providers load, or after they removed a key upstream. Refuse the
-        // pick at the source — saving defaultProvider to a keyless provider
-        // turns into "Provider is not configured" on the first chat attempt
-        // and is invisible until then.
-        if (!configuredProviderIds.has(next.provider)) {
-            setSelected(undefined);
-            props.onSelect(undefined);
-            return;
-        }
-        setSelected(next);
-        void save({
-            kind: "global",
-            patch: { defaultModel: next.id, defaultProvider: next.provider || undefined },
-        }).then(() => {
-            props.onSelect(next);
-        });
+        if (!configuredProviderIds.has(next.provider)) return;
+        savePatch({ defaultModel: next.id, defaultProvider: next.provider || null });
+    };
+
+    const handleThinkingChange = (next: ThinkingLevel) => {
+        savePatch({ thinkingLevel: next });
     };
 
     const refresh = () => {
@@ -82,21 +100,42 @@ export function ModelStep(props: ModelStepProps) {
             <h2>{t("onboarding.modelTitle")}</h2>
             <p>{t("onboarding.modelBody")}</p>
             {filteredOptions.length > 0 ? (
-                <div className="settings-row">
-                    <ModelMenu
-                        value={value ? { provider: value.provider, id: value.id } : undefined}
-                        options={filteredOptions}
-                        onModelChange={handleChange}
-                        disabled={saving}
-                        onOpen={refresh}
-                        placement="down"
-                    />
-                    {saving && <span className="settings-saving">{t("app.saving")}</span>}
-                </div>
+                <fieldset
+                    className="model-config-card"
+                    aria-label={t("settings.defaultModelTitle")}
+                >
+                    <div className="settings-row">
+                        <ModelMenu
+                            value={value ? { provider: value.provider, id: value.id } : undefined}
+                            options={filteredOptions}
+                            onModelChange={handleChange}
+                            disabled={saving}
+                            onOpen={refresh}
+                            placement="down"
+                        />
+                        {saving && <span className="settings-saving">{t("app.saving")}</span>}
+                    </div>
+                    {value && (
+                        <div className="model-config-thinking">
+                            <h4>{t("settings.defaultThinkingLevel")}</h4>
+                            <p className="settings-tab-desc">{t("settings.defaultThinkingDesc")}</p>
+                            <ThinkingSlider
+                                value={global.thinkingLevel ?? "off"}
+                                onChange={handleThinkingChange}
+                                disabled={saving}
+                            />
+                        </div>
+                    )}
+                </fieldset>
             ) : (
                 <p className="settings-tab-desc">{t("settings.providerFirst")}</p>
             )}
-            {!selected && filteredOptions.length > 0 && (
+            {error && (
+                <div className="error-banner" role="alert">
+                    {error}
+                </div>
+            )}
+            {!value && filteredOptions.length > 0 && (
                 <div className="error-banner" role="status">
                     {t("onboarding.modelRequired")}
                 </div>

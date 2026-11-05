@@ -3,12 +3,17 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
+import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
+import { asSessionId } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../src/config/config.ts";
 import { MemoryExtractorImpl } from "../../src/memory/local/extractor.ts";
 import {
     completeSimpleWithLiteFallback,
     LITE_BUDGET_CHARS,
+    liteThinkingToRequest,
     resolveLiteModel,
+    resolveLiteThinkingLevel,
 } from "../../src/runtime/models/liteModel.ts";
 import type {
     Api,
@@ -17,6 +22,8 @@ import type {
     Model,
     MutableModels,
 } from "../../src/runtime/pi/types.ts";
+import { normalizeContext } from "../../src/runtime/pi/values.ts";
+import { TitleSummarizer } from "../../src/runtime/session/titleSummarizer.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 useTempTacoHome("lite-model");
@@ -143,6 +150,241 @@ describe("resolveLiteModel", () => {
         assert.ok(resolveLiteModel(models, "title"));
         saveGlobalConfig({ liteModel: null });
         assert.equal(resolveLiteModel(models, "title"), undefined);
+    });
+});
+
+describe("auxiliary thinking requests", () => {
+    // Exercise both production callers, including repeated calls on the same instance.
+    for (const scenario of ["title", "memory"] as const) {
+        function setup(
+            lite: Model<Api> | undefined,
+            main: Model<Api> = { ...MAIN, reasoning: true },
+        ) {
+            const seen: Array<{ id: string; reasoning: SimpleOptions["reasoning"] }> = [];
+            let failLite = false;
+            const models = fakeModels({
+                onCall: async (model, options) => {
+                    seen.push({ id: model.id, reasoning: options.reasoning });
+                    if (failLite && model.id === LITE.id) throw new Error("lite offline");
+                    return assistantMessage(scenario === "memory" ? "[]" : "A title");
+                },
+            });
+            const caller =
+                scenario === "title"
+                    ? new TitleSummarizer(
+                          models,
+                          main,
+                          asSessionId("test"),
+                          async () => true,
+                          () => lite,
+                      )
+                    : new MemoryExtractorImpl(
+                          models,
+                          main,
+                          {
+                              listTopics: () => [],
+                              appendEntry: async () => {},
+                              updateTopic: async () => {
+                                  throw new Error("unexpected update");
+                              },
+                          },
+                          "test-workspace",
+                          () => lite,
+                      );
+            return {
+                seen,
+                failLite: () => {
+                    failLite = true;
+                },
+                run: () =>
+                    caller.onRunEnd([
+                        {
+                            role: "user",
+                            content: "conversation ".repeat(40),
+                            timestamp: Date.now(),
+                        },
+                    ]),
+            };
+        }
+
+        it(`${scenario}: hot updates default, low, off and clear without recreating the caller`, async () => {
+            const { run, seen } = setup({ ...windowed(LITE, 128_000), reasoning: true });
+            for (const level of [null, "low", "off", null] as const) {
+                saveGlobalConfig({ liteThinkingLevel: level });
+                await run();
+            }
+            assert.deepEqual(
+                seen.map((call) => call.reasoning),
+                ["minimal", "low", undefined, "minimal"],
+            );
+        });
+
+        it(`${scenario}: does not request reasoning from a non-reasoning lite model`, async () => {
+            saveGlobalConfig({ liteThinkingLevel: "low" });
+            const { run, seen } = setup({ ...windowed(LITE, 128_000), reasoning: false });
+            await run();
+            assert.deepEqual(seen, [{ id: LITE.id, reasoning: undefined }]);
+        });
+
+        it(`${scenario}: uses the lowest supported thinking level when off is unavailable`, async () => {
+            saveGlobalConfig({ liteThinkingLevel: "off" });
+            const { run, seen } = setup({
+                ...windowed(LITE, 128_000),
+                reasoning: true,
+                thinkingLevelMap: { off: null, minimal: null },
+            });
+            await run();
+            assert.deepEqual(seen, [{ id: LITE.id, reasoning: "low" }]);
+        });
+
+        it(`${scenario}: normalizes the default and explicit minimal to model capabilities`, async () => {
+            const { run, seen } = setup({
+                ...windowed(LITE, 128_000),
+                reasoning: true,
+                thinkingLevelMap: { minimal: null, low: null },
+            });
+            for (const level of [null, "minimal"] as const) {
+                saveGlobalConfig({ liteThinkingLevel: level });
+                await run();
+            }
+            assert.deepEqual(
+                seen.map((call) => call.reasoning),
+                ["medium", "medium"],
+            );
+        });
+
+        it(`${scenario}: fallback derives the main model default instead of inheriting lite off`, async () => {
+            saveGlobalConfig({ liteThinkingLevel: "off" });
+            const { run, seen, failLite } = setup({ ...windowed(LITE, 128_000), reasoning: true });
+            failLite();
+            await run();
+            assert.deepEqual(seen, [
+                { id: LITE.id, reasoning: undefined },
+                { id: MAIN.id, reasoning: "minimal" },
+            ]);
+        });
+
+        it(`${scenario}: direct main calls normalize their own default`, async () => {
+            saveGlobalConfig({ liteThinkingLevel: "off" });
+            const { run, seen } = setup(undefined, {
+                ...MAIN,
+                reasoning: true,
+                thinkingLevelMap: { minimal: null },
+            });
+            await run();
+            assert.deepEqual(seen, [{ id: MAIN.id, reasoning: "low" }]);
+        });
+    }
+});
+
+describe("lite off provider payloads", () => {
+    for (const api of ["anthropic-messages", "openai-responses"] as const) {
+        for (const supportsOff of [true, false]) {
+            it(`${api}: ${supportsOff ? "sends disabled thinking" : "uses supported thinking when off is unavailable"}`, async () => {
+                saveGlobalConfig({ liteThinkingLevel: "off" });
+                const model: Model<Api> = {
+                    ...windowed(LITE, 128_000),
+                    name: "Test lite model",
+                    api,
+                    baseUrl: "https://example.invalid/v1",
+                    input: ["text"],
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                    reasoning: true,
+                    thinkingLevelMap: supportsOff ? {} : { off: null, minimal: null },
+                    ...(api === "anthropic-messages"
+                        ? { compat: { forceAdaptiveThinking: true } }
+                        : {}),
+                };
+                const adapter =
+                    api === "anthropic-messages" ? anthropicMessagesApi() : openAIResponsesApi();
+                let payload: unknown;
+                const models = fakeModels({
+                    onCall: async (called, options) => {
+                        const response = await adapter
+                            .streamSimple(called, normalizeContext(testContext()), {
+                                ...options,
+                                apiKey: "test-api-key",
+                                // The real adapter builds the payload, then stops before any network IO.
+                                onPayload: (value) => {
+                                    payload = value;
+                                    throw new Error("payload captured");
+                                },
+                                fetch: async () => {
+                                    throw new Error("unexpected network request");
+                                },
+                            })
+                            .result();
+                        assert.match(response.errorMessage ?? "", /payload captured/);
+                        return assistantMessage("ok");
+                    },
+                });
+                await completeSimpleWithLiteFallback(
+                    models,
+                    () => model,
+                    MAIN,
+                    testContext(),
+                    (_model, thinking) => ({ reasoning: thinking?.reasoning }),
+                );
+                const request = payload as {
+                    thinking?: { type: string };
+                    output_config?: { effort: string };
+                    reasoning?: { effort: string };
+                };
+                assert.ok(request, "the real provider adapter must build a request");
+                if (api === "anthropic-messages") {
+                    assert.equal(request.thinking?.type, supportsOff ? "disabled" : "adaptive");
+                    if (!supportsOff) assert.equal(request.output_config?.effort, "low");
+                } else {
+                    assert.equal(request.reasoning?.effort, supportsOff ? "none" : "low");
+                }
+            });
+        }
+    }
+});
+
+describe("resolveLiteThinkingLevel", () => {
+    it("returns undefined when unset", () => {
+        saveGlobalConfig({ liteThinkingLevel: null });
+        assert.equal(resolveLiteThinkingLevel(), undefined);
+    });
+
+    it("returns the configured level", () => {
+        saveGlobalConfig({ liteThinkingLevel: "low" });
+        assert.equal(resolveLiteThinkingLevel(), "low");
+    });
+
+    it("rejects an out-of-range value at write time, like thinkingLevel does", () => {
+        saveGlobalConfig({ liteThinkingLevel: "low" });
+        assert.throws(
+            () => saveGlobalConfig({ liteThinkingLevel: "medium" as never }),
+            /invalid liteThinkingLevel/,
+        );
+        // The rejected write leaves the previous value in place.
+        assert.equal(resolveLiteThinkingLevel(), "low");
+    });
+
+    it("reads config on every call so settings.write reaches attached sessions", () => {
+        saveGlobalConfig({ liteThinkingLevel: null });
+        assert.equal(resolveLiteThinkingLevel(), undefined);
+        saveGlobalConfig({ liteThinkingLevel: "minimal" });
+        assert.equal(resolveLiteThinkingLevel(), "minimal");
+        saveGlobalConfig({ liteThinkingLevel: null });
+        assert.equal(resolveLiteThinkingLevel(), undefined);
+    });
+});
+
+describe("liteThinkingToRequest", () => {
+    it("maps off to no reasoning field", () => {
+        assert.equal(liteThinkingToRequest("off"), undefined);
+    });
+
+    it("passes the other levels through", () => {
+        assert.equal(liteThinkingToRequest("minimal"), "minimal");
+        assert.equal(liteThinkingToRequest("low"), "low");
+    });
+
+    it("maps an unset level to no reasoning field", () => {
+        assert.equal(liteThinkingToRequest(undefined), undefined);
     });
 });
 
@@ -339,5 +581,64 @@ describe("completeSimpleWithLiteFallback", () => {
                 { id: MAIN.id, temperature: 0.7 },
             ],
         );
+    });
+
+    it("passes the configured thinking level to the lite branch only", async () => {
+        saveGlobalConfig({ liteThinkingLevel: "low" });
+        const { models } = trackingModels(async (m) => {
+            if (m.id === LITE.id) throw new Error("lite offline");
+            return assistantMessage("main");
+        });
+        const overrides: Array<{ id: string; thinking: unknown }> = [];
+        await completeSimpleWithLiteFallback(
+            models,
+            () => windowed(LITE, 128_000),
+            MAIN,
+            testContext(),
+            (m, thinking) => {
+                overrides.push({ id: m.id, thinking });
+                return {};
+            },
+        );
+        assert.deepEqual(overrides, [
+            { id: LITE.id, thinking: { reasoning: "low" } },
+            // The main-model fallback keeps the session's own default.
+            { id: MAIN.id, thinking: undefined },
+        ]);
+    });
+
+    it("keeps the model default when no thinking level is configured", async () => {
+        saveGlobalConfig({ liteThinkingLevel: null });
+        const { models } = trackingModels(async () => assistantMessage("ok"));
+        const overrides: Array<unknown> = [];
+        await completeSimpleWithLiteFallback(
+            models,
+            () => windowed(LITE, 128_000),
+            MAIN,
+            testContext(),
+            (_m, thinking) => {
+                overrides.push(thinking);
+                return {};
+            },
+        );
+        assert.deepEqual(overrides, [undefined]);
+    });
+
+    it("maps an explicit off to no reasoning field on the lite branch", async () => {
+        saveGlobalConfig({ liteThinkingLevel: "off" });
+        const { models } = trackingModels(async () => assistantMessage("ok"));
+        const overrides: Array<unknown> = [];
+        await completeSimpleWithLiteFallback(
+            models,
+            () => windowed(LITE, 128_000),
+            MAIN,
+            testContext(),
+            (_m, thinking) => {
+                overrides.push(thinking);
+                return {};
+            },
+        );
+        // Present wrapper with no reasoning: "off" is a choice, not "unset".
+        assert.deepEqual(overrides, [{ reasoning: undefined }]);
     });
 });

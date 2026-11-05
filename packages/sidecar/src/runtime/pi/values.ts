@@ -28,7 +28,12 @@
  * assert on the upstream value without punching through the boundary rule.
  */
 
-export { createProvider, envApiKeyAuth, normalizeContext } from "@earendil-works/pi-ai";
+export {
+    clampThinkingLevel,
+    createProvider,
+    envApiKeyAuth,
+    normalizeContext,
+} from "@earendil-works/pi-ai";
 export { estimateContextTokens as estimateApiContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 export {
     AgentHarness,

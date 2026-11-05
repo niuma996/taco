@@ -34,7 +34,7 @@
 }
 .thinking-slider-current {
     font-size: 0.85rem;
-    font-weight: 700;
+    font-weight: 400;
     color: var(--brand-orange);
     text-align: center;
     text-transform: uppercase;

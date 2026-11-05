@@ -14,7 +14,7 @@ import type {
     TacoGlobalConfigShape,
 } from "./config.js";
 import type { SessionId, ToolCallId, WorkspaceId } from "./frames.js";
-import type { ThinkingLevel } from "./messages.js";
+import type { LiteThinkingLevel, ThinkingLevel } from "./messages.js";
 
 /**
  * A `settings.write` patch: `TacoGlobalConfigShape` with `null` allowed on the
@@ -33,6 +33,7 @@ export type GlobalConfigPatch = Partial<
         | "defaultModel"
         | "defaultProvider"
         | "liteModel"
+        | "liteThinkingLevel"
         | "sessionsRoot"
         | "systemPrompt"
         | "thinkingLevel"
@@ -51,6 +52,7 @@ export type GlobalConfigPatch = Partial<
     defaultModel?: string | null;
     defaultProvider?: string | null;
     liteModel?: string | null;
+    liteThinkingLevel?: LiteThinkingLevel | null;
     sessionsRoot?: string | null;
     systemPrompt?: string | null;
     thinkingLevel?: ThinkingLevel | null;

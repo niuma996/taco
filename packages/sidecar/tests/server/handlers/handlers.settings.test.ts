@@ -114,6 +114,32 @@ describe("settings.write on a real server", () => {
         assert.ok(!("liteModel" in readGlobalConfig()));
     });
 
+    it("persists and clears the optional lite thinking level", async () => {
+        for (const level of ["off", "minimal", "low"] as const) {
+            const result = await write({ liteThinkingLevel: level });
+            assert.equal(readGlobalConfig().liteThinkingLevel, level);
+            assert.equal(
+                (result.global as { liteThinkingLevel?: string }).liteThinkingLevel,
+                level,
+            );
+        }
+
+        await write({ liteThinkingLevel: null });
+        assert.equal(readGlobalConfig().liteThinkingLevel, undefined);
+        assert.ok(!("liteThinkingLevel" in readGlobalConfig()));
+    });
+
+    it("rejects invalid lite thinking levels before changing disk or runtime", async (t) => {
+        await write({ liteThinkingLevel: "off" });
+        const before = readFileSync(join(home, "taco.json"), "utf8");
+        const refresh = t.mock.method(server, "refreshConfiguration");
+        for (const value of ["medium", "default", "", false, 0]) {
+            await assert.rejects(write({ liteThinkingLevel: value }), /invalid liteThinkingLevel/);
+            assert.equal(readFileSync(join(home, "taco.json"), "utf8"), before);
+        }
+        assert.equal(refresh.mock.callCount(), 0);
+    });
+
     it("invalidates existing workspace compaction caches after a valid change", async (t) => {
         const ws = await workspace();
         const invalidate = t.mock.method(ws, "invalidateCompactionCache");

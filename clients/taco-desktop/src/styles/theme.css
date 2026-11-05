@@ -177,6 +177,9 @@
     --composer-control-height: 1.5rem;
     /* One height for a dialog form row (input + icon button + text button). */
     --control-height-md: 2rem;
+    /* Brand mark on a provider card: the square the vendored SVG is painted in. */
+    --provider-icon-size: 1.35rem;
+    --provider-status-ready: #34d399;
     --radius-circle: 50%;
     --radius-line: 1px;
 
@@ -279,6 +282,7 @@
        Hover is near-transparent (faint warm tint); active is the sole saturated orange. */
     --rail-bg-hover: rgba(211, 95, 16, 0.05);
     --rail-bg-active: rgba(211, 95, 16, 0.2);
+    --provider-status-ready: #059669;
     --success: #5b8a3c; /* Same as --user, for task done icons etc. */
     --success-bg: rgba(91, 138, 60, 0.12);
     --tool-bg: rgba(168, 118, 10, 0.08);

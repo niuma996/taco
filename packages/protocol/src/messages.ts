@@ -5,6 +5,10 @@
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+/** Auxiliary calls are short and bounded; only the low levels are meaningful. */
+export const LITE_THINKING_LEVELS = ["off", "minimal", "low"] as const;
+export type LiteThinkingLevel = (typeof LITE_THINKING_LEVELS)[number];
+
 export interface TextBlock {
     type: "text";
     text: string;

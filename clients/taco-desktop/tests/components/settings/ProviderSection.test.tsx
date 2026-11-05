@@ -55,6 +55,22 @@ function makeClient(settingsWrite: TacoClient["settingsWrite"]): TacoClient {
     } as unknown as TacoClient;
 }
 
+const BUILTIN_VIEW: ProviderView = {
+    id: "anthropic",
+    name: "Anthropic",
+    configured: true,
+    custom: false,
+    models: [{ provider: "anthropic", id: "claude-sonnet", origin: "builtin" }],
+};
+
+/** A client whose catalog mixes a built-in provider with the custom relay. */
+function makeIconClient(): TacoClient {
+    return {
+        settingsWrite: vi.fn().mockResolvedValue({ global: {} }),
+        providersList: () => Promise.resolve({ providers: [BUILTIN_VIEW, RELAY_VIEW] }),
+    } as unknown as TacoClient;
+}
+
 async function openRelay(client: TacoClient, global: Record<string, unknown>) {
     // Seed the global-config cache directly — the section reads its fields from
     // there, and the save path refreshes it via applyGlobalConfig on success.
@@ -128,5 +144,41 @@ describe("ProviderSection — deleting the default custom provider", () => {
         await user.click(screen.getByRole("button", { name: "settings.customProviderDeleteBtn" }));
         await user.click(screen.getByRole("button", { name: "settings.providerCancel" }));
         expect(settingsWrite).not.toHaveBeenCalled();
+    });
+});
+
+describe("ProviderSection — brand marks", () => {
+    it("paints a vendored mask for a built-in provider", async () => {
+        applyGlobalConfig({ customProviders: [] } as never);
+        render(<ProviderSection client={makeIconClient()} workspace={WS} />);
+        await screen.findByLabelText("Anthropic — settings.providerConfigured");
+        const card = screen.getByLabelText("Anthropic — settings.providerConfigured");
+        const icon = card.querySelector(".provider-icon");
+        expect(icon).toBeTruthy();
+        expect(icon?.classList.contains("provider-icon--fallback")).toBe(false);
+        // The vendored SVG is applied as a data-URI mask over the element's
+        // background, so the colour follows the theme.
+        expect((icon as HTMLElement).style.maskImage).toContain("data:image/svg+xml");
+    });
+
+    it("falls back to a neutral mark for a custom provider", async () => {
+        applyGlobalConfig({ customProviders: [RELAY] } as never);
+        render(<ProviderSection client={makeIconClient()} workspace={WS} />);
+        await screen.findByLabelText("Relay — settings.providerConfigured");
+        const card = screen.getByLabelText("Relay — settings.providerConfigured");
+        const icon = card.querySelector(".provider-icon");
+        expect(icon?.classList.contains("provider-icon--fallback")).toBe(true);
+    });
+
+    it("keeps the status dot outside the title line, in the card corner", async () => {
+        applyGlobalConfig({ customProviders: [] } as never);
+        render(<ProviderSection client={makeIconClient()} workspace={WS} />);
+        await screen.findByLabelText("Anthropic — settings.providerConfigured");
+        const card = screen.getByLabelText("Anthropic — settings.providerConfigured");
+        const dot = card.querySelector(".provider-row-dot");
+        expect(dot).toBeTruthy();
+        // The dot is a direct child of the card, not of the title line.
+        expect(dot?.parentElement).toBe(card);
+        expect(card.querySelector(".provider-row-title .provider-row-dot")).toBeNull();
     });
 });

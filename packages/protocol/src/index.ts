@@ -209,6 +209,7 @@ export type {
     AgentMessage,
     AssistantMessage,
     ImageBlock,
+    LiteThinkingLevel,
     ProtocolContentBlock,
     TextBlock,
     ThinkingBlock,
@@ -218,7 +219,7 @@ export type {
     Usage,
     UserMessage,
 } from "./messages.js";
-export { THINKING_LEVELS } from "./messages.js";
+export { LITE_THINKING_LEVELS, THINKING_LEVELS } from "./messages.js";
 // Push methods + payload types.
 export type {
     AttachedParams,

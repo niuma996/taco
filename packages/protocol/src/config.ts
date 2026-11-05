@@ -9,7 +9,7 @@
  */
 
 import type { SessionId, ToolCallId } from "./frames.js";
-import type { ThinkingLevel } from "./messages.js";
+import type { LiteThinkingLevel, ThinkingLevel } from "./messages.js";
 
 /**
  * Wire shape of `taco.json` on disk — the protocol-layer contract.
@@ -41,6 +41,14 @@ export interface TacoGlobalConfigShape {
      * or failing calls fall back to the session's main model.
      */
     liteModel?: string;
+    /**
+     * Optional thinking level for lite-model calls only. Unset keeps the
+     * auxiliary default (`minimal` for reasoning models, none otherwise).
+     * Requests are clamped to the model's supported levels, so `off` uses
+     * the lowest supported level when thinking cannot be disabled.
+     * Main-model fallback calls always use their own auxiliary default.
+     */
+    liteThinkingLevel?: LiteThinkingLevel;
     sessionsRoot?: string;
     systemPrompt?: string;
     /** Default thinking level; new sessions inherit this. Per-session overrides take precedence. */

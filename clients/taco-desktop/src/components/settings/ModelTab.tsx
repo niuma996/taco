@@ -5,7 +5,8 @@
  * Subscribes to `globalConfig.ts`; useSaveConfigPatch emits immediately on RPC success
  * without waiting for the next loadGlobalConfig. Per-session overrides live in the chat input.
  */
-import type { ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
+import type { LiteThinkingLevel, ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
+import { LITE_THINKING_LEVELS } from "@taco-ai/protocol";
 import { useEffect, useState } from "react";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
@@ -49,17 +50,14 @@ export function ModelTab(props: ModelTabProps) {
         ? { provider: defaultOption.provider, id: defaultOption.id }
         : undefined;
 
-    // Both model and thinking level live in global config but use separate
-    // useSaveConfigPatch instances so their saving/error states don't collide
-    // (e.g. one section disabling both inputs simultaneously).
     const { save: saveModel, saving, error } = useSaveConfigPatch(props.client);
     const onSetDefault = (next: ModelSelection) =>
         // settings.write accepts id-only (when provider is missing, the backend's
         // findModelById searches across providers); normalize the empty provider away.
         void saveModel({
             kind: "global",
-            patch: { defaultModel: next.id, defaultProvider: next.provider || undefined },
-        });
+            patch: { defaultModel: next.id, defaultProvider: next.provider || null },
+        }).catch(() => {});
 
     const {
         save: saveThinking,
@@ -68,7 +66,7 @@ export function ModelTab(props: ModelTabProps) {
     } = useSaveConfigPatch(props.client);
     const currentThinking: ThinkingLevel = state.global.thinkingLevel ?? "off";
     const onSetThinking = (next: ThinkingLevel) =>
-        void saveThinking({ kind: "global", patch: { thinkingLevel: next } });
+        void saveThinking({ kind: "global", patch: { thinkingLevel: next } }).catch(() => {});
 
     // A sentinel stands in for "no lite model configured": Radix Select forbids
     // an empty item value, and `""` on the Root means "no selection". `provider/id`
@@ -100,10 +98,27 @@ export function ModelTab(props: ModelTabProps) {
         void saveLite({
             kind: "global",
             patch: { liteModel: next === NO_LITE_MODEL ? null : next },
-        });
+        }).catch(() => {});
+
+    // An unset lite level follows the model; explicit off disables reasoning.
+    const {
+        save: saveLiteThinking,
+        saving: savingLiteThinking,
+        error: liteThinkingError,
+    } = useSaveConfigPatch(props.client);
+    const liteThinking: ThinkingLevel = state.global.liteThinkingLevel ?? "off";
+    const onSetLiteThinking = (next: ThinkingLevel) => {
+        // The slider only offers the low levels, so `next` is always one of
+        // them; the guard keeps that a checked fact, not an assumption.
+        if (!(LITE_THINKING_LEVELS as readonly string[]).includes(next)) return;
+        void saveLiteThinking({
+            kind: "global",
+            patch: { liteThinkingLevel: next as LiteThinkingLevel },
+        }).catch(() => {});
+    };
 
     return (
-        <section className="settings-tab">
+        <section className="settings-tab model-settings-tab">
             <h3>{t("settings.tabModel")}</h3>
 
             {/* Section ① Providers — list all built-in providers, fill keys inline. */}
@@ -113,65 +128,99 @@ export function ModelTab(props: ModelTabProps) {
                 onKeysChanged={props.onRefreshModels}
             />
 
-            {/* Section ② Default model — list models from all configured providers. */}
-            <h3 className="settings-tab-h3-secondary">{t("settings.defaultModelTitle")}</h3>
-            <p className="settings-tab-desc">{t("settings.defaultModelDesc")}</p>
-            {props.options.length > 0 ? (
-                <>
+            <fieldset className="model-config-card" aria-labelledby="main-model-title">
+                <h3 id="main-model-title">{t("settings.defaultModelTitle")}</h3>
+                <p className="settings-tab-desc">{t("settings.defaultModelDesc")}</p>
+                {props.options.length > 0 || selection ? (
                     <div className="settings-row">
                         <ModelMenu
                             value={selection}
                             options={props.options}
                             onModelChange={onSetDefault}
-                            disabled={saving}
+                            disabled={saving || savingThinking}
                             onOpen={props.onRefreshModels}
                             placement="down"
                         />
                         {saving && <span className="settings-saving">{t("app.saving")}</span>}
                     </div>
-                    {error && (
-                        <div className="error-banner" role="alert">
-                            {error}
-                        </div>
-                    )}
-                </>
-            ) : (
-                <p className="settings-tab-desc">{t("settings.providerFirst")}</p>
-            )}
+                ) : (
+                    <p className="settings-tab-desc">{t("settings.providerFirst")}</p>
+                )}
+                {error && (
+                    <div className="error-banner" role="alert">
+                        {error}
+                    </div>
+                )}
+                {selection && (
+                    <div className="model-config-thinking">
+                        <h4>{t("settings.defaultThinkingLevel")}</h4>
+                        <p className="settings-tab-desc">{t("settings.defaultThinkingDesc")}</p>
+                        <ThinkingSlider
+                            value={currentThinking}
+                            onChange={onSetThinking}
+                            disabled={saving || savingThinking}
+                        />
+                        {savingThinking && (
+                            <span className="settings-saving">{t("app.saving")}</span>
+                        )}
+                        {thinkingError && (
+                            <div className="error-banner" role="alert">
+                                {thinkingError}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </fieldset>
 
-            <h3 className="settings-tab-h3-secondary">{t("settings.liteModelTitle")}</h3>
-            <p className="settings-tab-desc">{t("settings.liteModelDesc")}</p>
-            <div className="settings-row">
-                <Select
-                    value={liteValue}
-                    options={liteOptions}
-                    onValueChange={onSetLite}
-                    disabled={savingLite}
-                    label={t("settings.liteModelTitle")}
-                />
-                {savingLite && <span className="settings-saving">{t("app.saving")}</span>}
-            </div>
-            {liteError && (
-                <div className="error-banner" role="alert">
-                    {liteError}
+            <fieldset className="model-config-card" aria-labelledby="lite-model-title">
+                <h3 id="lite-model-title">{t("settings.liteModelTitle")}</h3>
+                <p className="settings-tab-desc">{t("settings.liteModelDesc")}</p>
+                <div className="settings-row">
+                    <Select
+                        value={liteValue}
+                        options={liteOptions}
+                        onValueChange={onSetLite}
+                        disabled={savingLite || savingLiteThinking}
+                        label={t("settings.liteModelTitle")}
+                    />
+                    {savingLite && <span className="settings-saving">{t("app.saving")}</span>}
                 </div>
-            )}
-
-            <h3 className="settings-tab-h3-secondary">{t("settings.defaultThinkingLevel")}</h3>
-            <p className="settings-tab-desc">{t("settings.defaultThinkingDesc")}</p>
-            <div className="settings-row-block">
-                <ThinkingSlider
-                    value={currentThinking}
-                    onChange={onSetThinking}
-                    disabled={savingThinking}
-                />
-                {savingThinking && <span className="settings-saving">{t("app.saving")}</span>}
-            </div>
-            {thinkingError && (
-                <div className="error-banner" role="alert">
-                    {thinkingError}
-                </div>
-            )}
+                {liteError && (
+                    <div className="error-banner" role="alert">
+                        {liteError}
+                    </div>
+                )}
+                {configuredLite && (
+                    <div className="model-config-thinking">
+                        <h4>{t("settings.liteThinkingLevelTitle")}</h4>
+                        <p className="settings-tab-desc">{t("settings.liteThinkingLevelDesc")}</p>
+                        <ThinkingSlider
+                            value={liteThinking}
+                            onChange={onSetLiteThinking}
+                            disabled={savingLite || savingLiteThinking}
+                            levels={LITE_THINKING_LEVELS}
+                            ariaLabel={t("settings.liteThinkingLevelTitle")}
+                            modelDefault={{
+                                selected: state.global.liteThinkingLevel === undefined,
+                                onSelect: () => {
+                                    void saveLiteThinking({
+                                        kind: "global",
+                                        patch: { liteThinkingLevel: null },
+                                    }).catch(() => {});
+                                },
+                            }}
+                        />
+                        {savingLiteThinking && (
+                            <span className="settings-saving">{t("app.saving")}</span>
+                        )}
+                        {liteThinkingError && (
+                            <div className="error-banner" role="alert">
+                                {liteThinkingError}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </fieldset>
         </section>
     );
 }

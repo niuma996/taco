@@ -250,12 +250,14 @@ export class MemoryExtractorImpl implements MemoryExtractor {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            (model) => ({
+            (model, thinking) => ({
                 // No output cap: thinking shares the response ceiling, and a
                 // provider that ignores the thinking budget would spend a
                 // small cap on reasoning and return no facts at all.
                 temperature: LLM_TEMPERATURE,
-                reasoning: backgroundThinkingLevel(model),
+                // The configured lite level applies only to the lite branch;
+                // the main-model fallback keeps its auxiliary default.
+                reasoning: thinking ? thinking.reasoning : backgroundThinkingLevel(model),
                 headers: tacoRequestHeaders(),
             }),
         );

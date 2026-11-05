@@ -28,6 +28,10 @@ export type {
     Provider,
     RetryPolicy,
     TextContent,
+    // pi-ai's request-level thinking level — six values, without "off".
+    // pi-harness's own `ThinkingLevel` (below) carries the "off" that the
+    // protocol surface uses.
+    ThinkingLevel as ApiThinkingLevel,
     Usage,
 } from "@earendil-works/pi-ai";
 export type {

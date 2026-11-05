@@ -26,6 +26,8 @@ import {
     DEFAULT_COMPACTION_THRESHOLD,
     type GlobalConfigPatch,
     type InstructionsConfig,
+    LITE_THINKING_LEVELS,
+    type LiteThinkingLevel,
     MCP_TRANSPORT_KINDS,
     type McpServerConfig,
     type McpTransportKind,
@@ -52,6 +54,7 @@ export interface ResolvedTacoConfig {
     defaultModel?: string;
     defaultProvider?: string;
     liteModel?: string;
+    liteThinkingLevel?: LiteThinkingLevel;
     sessionsRoot?: string;
     systemPrompt?: string;
     /**
@@ -96,6 +99,18 @@ function validateThinkingLevel(value: unknown, source: string): ThinkingLevel | 
         throw new Error(`invalid thinkingLevel from ${source}: ${JSON.stringify(value)}`);
     }
     return value;
+}
+
+/** Value domain for the lite model's thinking level — a low subset of THINKING_LEVELS. */
+const LITE_THINKING_LEVEL_SET: ReadonlySet<string> = new Set(LITE_THINKING_LEVELS);
+
+/** Validate and normalise the liteThinkingLevel field; invalid values throw Error. */
+function validateLiteThinkingLevel(value: unknown, source: string): LiteThinkingLevel | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string" || !LITE_THINKING_LEVEL_SET.has(value)) {
+        throw new Error(`invalid liteThinkingLevel from ${source}: ${JSON.stringify(value)}`);
+    }
+    return value as LiteThinkingLevel;
 }
 
 /**
@@ -362,6 +377,10 @@ export function resolveConfig(
         defaultModel: cliOverrides.defaultModel ?? global.defaultModel,
         defaultProvider: cliOverrides.defaultProvider ?? global.defaultProvider,
         liteModel: cliOverrides.liteModel ?? global.liteModel,
+        liteThinkingLevel:
+            validateLiteThinkingLevel(cliOverrides.liteThinkingLevel, "cli") ??
+            validateLiteThinkingLevel(global.liteThinkingLevel, "taco.json") ??
+            undefined,
         sessionsRoot: cliOverrides.sessionsRoot ?? global.sessionsRoot,
         systemPrompt: cliOverrides.systemPrompt ?? global.systemPrompt,
         defaultThinkingLevel:
@@ -814,6 +833,9 @@ function mergeGlobalConfigPatch(
     if ("defaultModel" in patch) next.defaultModel = cleared(patch.defaultModel);
     if ("defaultProvider" in patch) next.defaultProvider = cleared(patch.defaultProvider);
     if ("liteModel" in patch) next.liteModel = cleared(patch.liteModel);
+    if ("liteThinkingLevel" in patch) {
+        next.liteThinkingLevel = validateLiteThinkingLevel(patch.liteThinkingLevel, "patch");
+    }
     if ("sessionsRoot" in patch) next.sessionsRoot = cleared(patch.sessionsRoot);
     if ("systemPrompt" in patch) next.systemPrompt = cleared(patch.systemPrompt);
     if ("commandPermissions" in patch) {

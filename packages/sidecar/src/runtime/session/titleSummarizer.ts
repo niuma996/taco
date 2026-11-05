@@ -147,12 +147,14 @@ export class TitleSummarizer {
                 systemPrompt: system,
                 messages: [{ role: "user", content: user, timestamp: Date.now() }],
             },
-            (model) => ({
+            (model, thinking) => ({
                 // No output cap: a title is short, but thinking shares the
                 // response ceiling and a provider that ignores the thinking
                 // budget would never reach the title.
                 temperature: LLM_TEMPERATURE,
-                reasoning: backgroundThinkingLevel(model),
+                // The configured lite level applies only to the lite branch;
+                // the main-model fallback keeps its auxiliary default.
+                reasoning: thinking ? thinking.reasoning : backgroundThinkingLevel(model),
                 headers: tacoRequestHeaders(),
             }),
         );
