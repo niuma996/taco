@@ -1,7 +1,7 @@
 /**
  * SkillsPane — skill list panel (shown when mainView = 'skills').
  *
- * Left column: fixed header (title + count + search) above a scrollable list;
+ * Left column: fixed header (title + count + search) above scrollable cards;
  * right column: detail view (name, description, path, markdown content). Pure
  * view — content fetching lives in App.tsx, header/search are shared PaneHeader.
  */
@@ -103,17 +103,29 @@ export function SkillsPane({
                             )}
                         </div>
                     ) : (
-                        skills.map((skill) => (
-                            <button
-                                key={skill.name}
-                                type="button"
-                                className={`skills-list-item${selected === skill.name ? " active" : ""}`}
-                                onClick={() => onSelect(skill.name)}
-                            >
-                                <span className="skills-list-item-name">{skill.name}</span>
-                                <span className="skills-list-item-source">{skill.source}</span>
-                            </button>
-                        ))
+                        <div className="skills-card-grid">
+                            {skills.map((skill) => (
+                                <button
+                                    key={skill.name}
+                                    type="button"
+                                    className={`skills-list-item${selected === skill.name ? " active" : ""}`}
+                                    aria-current={selected === skill.name ? "true" : undefined}
+                                    onClick={() => onSelect(skill.name)}
+                                >
+                                    <span className="skills-list-item-name">{skill.name}</span>
+                                    <span className="skills-list-item-description">
+                                        {skill.description || t("tools.noDescription")}
+                                    </span>
+                                    <span className="skills-list-item-meta">
+                                        <span className="skills-list-item-source">
+                                            {skill.source === "builtin"
+                                                ? t("activity.skillsSourceBuiltin")
+                                                : t("activity.skillsSourceUser")}
+                                        </span>
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
                     )}
                 </div>
             </div>

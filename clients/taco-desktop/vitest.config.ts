@@ -45,6 +45,7 @@ export default defineConfig({
             "tests/components/AgentForm.test.tsx",
             "tests/components/AgentsPane.test.tsx",
             "tests/components/ToolsPane.test.tsx",
+            "tests/components/SkillsPane.test.tsx",
             "tests/components/WorkPane.test.tsx",
             "tests/components/ImPolicyDialog.test.tsx",
             "tests/components/ContextIndicator.test.tsx",

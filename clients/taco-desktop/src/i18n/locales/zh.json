@@ -197,6 +197,8 @@
     "manageAssociations": "关联目录…",
     "contentLabel": "内容",
     "skillsEmptyState": "未发现技能。",
+    "skillsSourceBuiltin": "内置",
+    "skillsSourceUser": "自定义",
     "skillsEmptyHint": "请在 ~/.taco/skills/ 或 <cwd>/.taco/skills/ 中添加 SKILL.md 文件（也支持 ~/.pi/skills/、<cwd>/.pi/skills/）。",
     "skillsDiagnosticsTitle": "部分技能文件存在问题",
     "skillsDiagnosticsOverrideTitle_one": "{{count}} 个同名技能已按优先级覆盖",

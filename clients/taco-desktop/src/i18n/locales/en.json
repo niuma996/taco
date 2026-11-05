@@ -197,6 +197,8 @@
     "manageAssociations": "Associated directories…",
     "contentLabel": "Content",
     "skillsEmptyState": "No skills found.",
+    "skillsSourceBuiltin": "Built-in",
+    "skillsSourceUser": "Custom",
     "skillsEmptyHint": "Add a SKILL.md file in ~/.taco/skills/ or <cwd>/.taco/skills/ (also scans ~/.pi/skills/, <cwd>/.pi/skills/).",
     "skillsDiagnosticsTitle": "Some skill files have problems",
     "skillsDiagnosticsOverrideTitle_one": "{{count}} same-name skill overridden by priority",
