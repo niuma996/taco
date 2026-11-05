@@ -110,6 +110,40 @@ describe("attachedSession.streaming", () => {
     }
 
     describe("AttachedSession — streaming a turn", () => {
+        it("does not admit a prompt cancelled while waiting for recovery", async () => {
+            const attached = await makeAttached("must not run");
+            let release!: () => void;
+            let entered!: () => void;
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const waiting = new Promise<void>((resolve) => {
+                entered = resolve;
+            });
+            const recovery = attached as unknown as { awaitRecovery: () => Promise<void> };
+            recovery.awaitRecovery = async () => {
+                entered();
+                await gate;
+            };
+            const controller = new AbortController();
+            let started = false;
+            attached.on("event", (event) => {
+                if (event.type === "run_start") started = true;
+            });
+            const prompt = attached.prompt("go", undefined, undefined, controller.signal);
+            const rejected = assert.rejects(prompt, { name: "AbortError" });
+            await waiting;
+            controller.abort();
+            await attached.abort();
+            release();
+            try {
+                await rejected;
+                assert.equal(started, false);
+            } finally {
+                await attached.dispose();
+            }
+        });
+
         it("republishes incremental message_update events, not just the final message", async () => {
             const events = await runStreamingTurn("hello streaming world");
             const updates = events.filter((e) => e.type === "message_update");

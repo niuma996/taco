@@ -163,7 +163,10 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
     args.signal?.addEventListener("abort", onAbortSignal, { once: true });
 
     try {
-        await attached.prompt(args.prompt);
+        // Setup can outlive the parent turn. An abort event that already fired
+        // will not reach the listener above; do not admit a new child run.
+        args.signal?.throwIfAborted();
+        await attached.prompt(args.prompt, undefined, undefined, args.signal);
     } catch (e) {
         // hitCap before signal.aborted: keep partial answer instead of discarding it.
         if (hitCap) {

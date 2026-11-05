@@ -32,7 +32,7 @@ import type {
     ToolCallHook,
     ToolResultHookBuckets,
 } from "../../extensions/index.ts";
-import { harnessContext } from "../../lib/harnessContext.ts";
+import { contextFor, harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { createTopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { MemoryExtractorImpl, type MemoryStore } from "../../memory/index.ts";
@@ -930,6 +930,7 @@ export class AttachedSession extends EventEmitter {
         text: string,
         images?: ImageContent[],
         uiLocale?: SupportedLocale,
+        signal?: AbortSignal,
     ): Promise<ProtocolAgentMessage> {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
@@ -941,7 +942,14 @@ export class AttachedSession extends EventEmitter {
         // Converge before the run reads the toolset: a permission granted or
         // revoked since the last message takes effect on this turn.
         await this.applyToolsetRefresh?.();
-        const result = await this.lane.prompt(text, images, harnessContext);
+        // A child may have been stopped while recovery or tool preparation
+        // held it here, before the lane had an operation for abort() to stop.
+        signal?.throwIfAborted();
+        const result = await this.lane.prompt(
+            text,
+            images,
+            signal ? contextFor(signal) : harnessContext,
+        );
         if (!result.ok) throw toHarnessError("session.prompt", result.error);
 
         if (result.value.status === "suspended") {

@@ -1809,7 +1809,11 @@ export class SidecarServer implements ServerRpcSurface {
                 session !== undefined &&
                 method === PushMethods.Event &&
                 this.work.controller.isHoldingReplies(session);
-            if (parsed && !held) this.channelRegistry.push(parsed.channelId, frame);
+            // Child sessions report through their parent's tool result or Work
+            // notice. They have no independent IM route and must not speak here.
+            if (parsed && !held && sessionKind !== "subagent") {
+                this.channelRegistry.push(parsed.channelId, frame);
+            }
         }
     }
 }

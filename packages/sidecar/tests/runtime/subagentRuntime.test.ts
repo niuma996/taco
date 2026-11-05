@@ -381,6 +381,27 @@ describe("subagentRunner", () => {
             assert.match(result.resultText, /deliberate\s+interruption, not a failure/);
         });
 
+        it("does not start a child whose signal was aborted during setup", async () => {
+            const attached = new FakeAttached();
+            let prompts = 0;
+            attached.prompt = async () => {
+                prompts++;
+            };
+            const controller = new AbortController();
+            controller.abort();
+            const result = await runAttachedSubagent({
+                subSessionId: asSessionId("cancelled-during-setup"),
+                attached: attached.asSession(),
+                prompt: "go",
+                agentType: "explorer",
+                signal: controller.signal,
+                readLastAssistantText: finalText,
+            });
+            assert.equal(prompts, 0, "a cancelled spawn must not start a model run");
+            assert.equal(result.aborted, true);
+            assert.equal(result.isError, true);
+        });
+
         it("says a timeout was a time limit, not a user stop", async () => {
             const attached = new FakeAttached();
             const controller = new AbortController();
