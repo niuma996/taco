@@ -9,8 +9,8 @@
 }
 
 .tools-list {
-    width: var(--pane-width);
-    flex-shrink: 0;
+    flex: 0 0 60%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--divider-panel);
@@ -18,12 +18,12 @@
     overflow: hidden;
 }
 
-/* Pinned strip under the header — filter dropdowns stay put while rows scroll. */
+/* Filter groups stay pinned under the header while cards scroll. */
 .tools-list-controls {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.25rem 0.75rem 0.6rem;
+    gap: var(--space-1);
+    padding: 0 var(--space-3) var(--space-2-5);
     border-bottom: 1px solid var(--divider-section);
     margin-bottom: 0.35rem;
 }
@@ -33,85 +33,138 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding-bottom: 0.5rem;
+    padding: 0 var(--space-3) var(--space-3);
 }
 
 .tools-filters {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
 }
 
 .tools-filter {
     display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
+    align-items: center;
+    gap: var(--space-2);
     min-width: 0;
 }
 
 .tools-filter-label {
-    font-size: 0.6rem;
+    flex: 0 0 3.25rem;
     color: var(--fg-dim);
-    text-align: center;
-    line-height: 1.2;
+    font-size: var(--text-2xs);
+    text-align: left;
+    line-height: var(--leading-normal);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* Selects share the cell equally; long option text truncates instead of
-   wrapping to a second line. */
-.tools-filter .ui-select-trigger {
-    width: 100%;
+.tools-filter-chips {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    gap: var(--space-1);
     min-width: 0;
-    font-size: 0.7rem;
-    padding: 0.15rem 0.35rem;
-    height: auto;
-    white-space: nowrap;
-    overflow: hidden;
 }
 
-.tools-filter .ui-select-trigger > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
+.tools-filter-chip {
+    flex: 0 0 auto;
+    min-height: var(--control-height-xs);
+    padding: 0 var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+}
+
+.tools-filter-chip:hover {
+    background: var(--hover-overlay);
+    color: var(--fg);
+}
+
+.tools-filter-chip[aria-checked="true"] {
+    background: var(--accent-bg-active);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.tools-filter-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.tools-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
 }
 
 .tools-list-item {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
     width: 100%;
-    padding: 0.4rem 0.75rem;
-    background: transparent;
-    border: none;
+    min-height: 138px;
+    padding: var(--space-2-5);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
     color: var(--fg);
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     cursor: pointer;
     text-align: left;
-    border-radius: var(--radius-sm);
-    margin: 1px 4px;
+    border-radius: var(--radius-md);
     transition:
         background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
         color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .tools-list-item:hover {
-    background: var(--accent-bg-hover);
+    border-color: var(--accent-rail);
+    background: var(--hover-overlay);
 }
 
 .tools-list-item.active {
     background: var(--accent-bg-active);
     color: var(--accent);
+    border-color: var(--accent);
 }
 
-/* Tool name on left, builtin/external tag pill on right — instantly distinguishable even in narrow columns. */
 .tools-list-label {
-    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-weight: 600;
+    line-height: var(--leading-tight);
+    word-break: break-word;
 }
+
+.tools-list-item-description {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    word-break: break-word;
+}
+
+.tools-list-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-top: auto;
+}
+
 .tools-list-tag {
     flex: 0 0 auto;
     font-size: 0.65rem;
@@ -151,14 +204,50 @@
     border-color: var(--success);
 }
 .tools-list-tag.tag-loading-deferred {
-    color: var(--fg-dim);
-    border-color: var(--border);
+    color: #5ec8e8;
+    border-color: #5ec8e8;
+    background: color-mix(in srgb, #5ec8e8 12%, transparent);
 }
 
 .tools-detail {
-    flex: 1;
+    flex: 0 0 40%;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     padding: 1.2rem;
+}
+
+@media (max-width: 1100px) {
+    .tools-card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .tools-pane {
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .tools-list,
+    .tools-detail {
+        flex: 0 0 auto;
+        width: 100%;
+    }
+
+    .tools-list {
+        max-height: 58vh;
+        border-right: none;
+        border-bottom: 1px solid var(--divider-panel);
+    }
+
+    .tools-detail {
+        min-height: 42vh;
+    }
+
+    .tools-card-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .tools-detail-name {
@@ -198,11 +287,35 @@
     font-weight: 600;
 }
 
-/* Fixed-height frame: the schema scrolls inside instead of growing the page,
-   so tools with large parameter schemas keep a consistent layout. */
 .tools-detail-schema {
-    max-height: 420px;
     overflow: auto;
+}
+
+/* A long schema fills the remaining detail height rather than stopping at an
+   arbitrary cap and leaving unused panel space underneath. */
+.tools-detail-schema--fill {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+}
+
+@media (max-width: 760px) {
+    .tools-detail-schema--fill {
+        flex: 0 0 auto;
+        height: 42vh;
+        min-height: 12rem;
+    }
+}
+
+/* JSON is a reading surface: wrap long keys, URLs, and descriptions in the
+   available width so the default interaction is vertical scrolling only. */
+.tools-detail-schema--fill pre {
+    overflow-x: hidden;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .tools-detail-schema pre {

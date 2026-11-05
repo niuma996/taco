@@ -1,19 +1,17 @@
 /**
  * ToolsPane — tool list panel (shown when mainView = 'tools').
  *
- * Left: searchable/filterable list showing only tool names. Right: detail with
- * category/loading/subagent tags and a shiki-highlighted JSON schema inside a
- * fixed-height scrollable frame. Data is passed via props; the parent fetches
- * from the sidecar.
+ * Left: searchable tool cards with source, subagent, and loading filters.
+ * Right: tool metadata and a wrapping, highlighted JSON schema that fills the
+ * remaining detail height. Data is passed via props; the parent fetches it.
  */
 
 import rehypeShiki from "@shikijs/rehype";
 import type { ToolEntry } from "@taco-ai/protocol";
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import { MarkdownHooks as ReactMarkdown } from "react-markdown";
 
 import { PaneHeader } from "../components/PaneHeader";
-import { Select } from "../components/ui/Select";
 import { useT } from "../i18n/useI18n";
 
 export interface ToolsPaneProps {
@@ -94,6 +92,69 @@ type SourceFilter = "all" | ToolEntry["category"];
 type TriFilter = "all" | "yes" | "no";
 type LoadingFilter = "all" | "always" | "deferred";
 
+function FilterChips<T extends string>({
+    label,
+    value,
+    onChange,
+    options,
+}: {
+    label: string;
+    value: T;
+    onChange: (value: T) => void;
+    options: ReadonlyArray<{ value: T; label: string }>;
+}) {
+    const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        const step =
+            event.key === "ArrowRight" || event.key === "ArrowDown"
+                ? 1
+                : event.key === "ArrowLeft" || event.key === "ArrowUp"
+                  ? -1
+                  : 0;
+        const currentIndex = options.findIndex((option) => option.value === value);
+        const index =
+            event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? options.length - 1
+                  : step === 0
+                    ? -1
+                    : (currentIndex + step + options.length) % options.length;
+        if (index < 0) return;
+        event.preventDefault();
+        const next = options[index];
+        if (!next) return;
+        onChange(next.value);
+        event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=radio]")[index]?.focus();
+    };
+
+    return (
+        <div className="tools-filter">
+            <span className="tools-filter-label">{label}</span>
+            <div
+                className="tools-filter-chips"
+                role="radiogroup"
+                aria-label={label}
+                onKeyDown={handleKeyDown}
+            >
+                {options.map((option) => (
+                    // biome-ignore lint/a11y/useSemanticElements: pill buttons follow the memory pane's radio-group pattern with roving focus and arrow navigation
+                    <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={value === option.value}
+                        tabIndex={value === option.value ? 0 : -1}
+                        className="tools-filter-chip"
+                        onClick={() => onChange(option.value)}
+                    >
+                        {option.label}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 export function ToolsPane({ tools, error }: ToolsPaneProps) {
     const { t } = useT();
     // `userPick` tracks the user's explicit selection. When unset (or pointing
@@ -143,64 +204,68 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                 )}
                 <div className="tools-list-controls">
                     <div className="tools-filters">
-                        <div className="tools-filter">
-                            <span className="tools-filter-label">{t("tools.filterSource")}</span>
-                            <Select
-                                value={source}
-                                onValueChange={(v) => setSource(v as SourceFilter)}
-                                label={t("tools.filterSource")}
-                                options={[
-                                    { value: "all", label: t("tools.filterAll") },
-                                    { value: "builtin", label: t("tools.categoryBuiltin") },
-                                    { value: "external", label: t("tools.categoryExtension") },
-                                    { value: "mcp", label: t("tools.categoryMcp") },
-                                    { value: "session", label: t("tools.categorySession") },
-                                ]}
-                            />
-                        </div>
-                        <div className="tools-filter">
-                            <span className="tools-filter-label">{t("tools.filterSubagent")}</span>
-                            <Select
-                                value={subagent}
-                                onValueChange={(v) => setSubagent(v as TriFilter)}
-                                label={t("tools.filterSubagent")}
-                                options={[
-                                    { value: "all", label: t("tools.filterAll") },
-                                    { value: "yes", label: t("tools.subagentAvailable") },
-                                    { value: "no", label: t("tools.subagentUnavailable") },
-                                ]}
-                            />
-                        </div>
-                        <div className="tools-filter">
-                            <span className="tools-filter-label">{t("tools.filterLoading")}</span>
-                            <Select
-                                value={loading}
-                                onValueChange={(v) => setLoading(v as LoadingFilter)}
-                                label={t("tools.filterLoading")}
-                                options={[
-                                    { value: "all", label: t("tools.filterAll") },
-                                    { value: "always", label: t("tools.loadingAlways") },
-                                    { value: "deferred", label: t("tools.loadingDeferred") },
-                                ]}
-                            />
-                        </div>
+                        <FilterChips
+                            label={t("tools.filterSource")}
+                            value={source}
+                            onChange={setSource}
+                            options={[
+                                { value: "all", label: t("tools.filterAll") },
+                                { value: "builtin", label: t("tools.categoryBuiltin") },
+                                { value: "external", label: t("tools.categoryExtension") },
+                                { value: "mcp", label: t("tools.categoryMcp") },
+                                { value: "session", label: t("tools.categorySession") },
+                            ]}
+                        />
+                        <FilterChips
+                            label={t("tools.filterSubagent")}
+                            value={subagent}
+                            onChange={setSubagent}
+                            options={[
+                                { value: "all", label: t("tools.filterAll") },
+                                { value: "yes", label: t("tools.subagentAvailable") },
+                                { value: "no", label: t("tools.subagentUnavailable") },
+                            ]}
+                        />
+                        <FilterChips
+                            label={t("tools.filterLoading")}
+                            value={loading}
+                            onChange={setLoading}
+                            options={[
+                                { value: "all", label: t("tools.filterAll") },
+                                { value: "always", label: t("tools.loadingAlways") },
+                                { value: "deferred", label: t("tools.loadingDeferred") },
+                            ]}
+                        />
                     </div>
                 </div>
                 <div className="tools-list-body">
                     {filtered.length === 0 ? (
                         <div className="ui-empty">{t("tools.noMatch")}</div>
                     ) : (
-                        filtered.map((tool) => (
-                            <button
-                                key={tool.name}
-                                type="button"
-                                className={`tools-list-item${selected === tool.name ? " active" : ""}`}
-                                onClick={() => setUserPick(tool.name)}
-                                title={tool.name}
-                            >
-                                <span className="tools-list-label">{tool.label}</span>
-                            </button>
-                        ))
+                        <div className="tools-card-grid">
+                            {filtered.map((tool) => (
+                                <button
+                                    key={tool.name}
+                                    type="button"
+                                    className={`tools-list-item${selected === tool.name ? " active" : ""}`}
+                                    onClick={() => setUserPick(tool.name)}
+                                    title={tool.name}
+                                >
+                                    <span className="tools-list-label">{tool.label}</span>
+                                    <span className="tools-list-item-description">
+                                        {tool.description || t("tools.noDescription")}
+                                    </span>
+                                    <span className="tools-list-item-meta">
+                                        <CategoryTag category={tool.category} label={t} />
+                                        <LoadingTag loading={tool.loading} label={t} />
+                                        <SubagentTag
+                                            available={tool.availableInSubagent}
+                                            label={t}
+                                        />
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
                     )}
                 </div>
             </div>
@@ -223,15 +288,15 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                                 <div className="tools-detail-schema-label">
                                     {t("tools.schemaLabel")}
                                 </div>
-                                <div className="tools-detail-schema md-code-block">
+                                <div className="tools-detail-schema tools-detail-schema--fill md-code-block">
                                     <ReactMarkdown
                                         rehypePlugins={[
                                             [
                                                 rehypeShiki,
                                                 {
                                                     themes: {
-                                                        light: "github-light",
-                                                        dark: "github-dark",
+                                                        light: "material-theme-lighter",
+                                                        dark: "material-theme-ocean",
                                                     },
                                                     defaultColor: false,
                                                 },

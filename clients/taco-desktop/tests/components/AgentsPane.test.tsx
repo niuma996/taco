@@ -108,3 +108,35 @@ describe("AgentsPane — 删除确认", () => {
         assert.equal(screen.queryByText("delete failed: EACCES"), null);
     });
 });
+
+describe("AgentsPane — 浏览布局", () => {
+    it("将智能体作为分组卡片展示，并保留右侧系统提示词 Markdown", () => {
+        const { container } = render(
+            <AgentsPane
+                {...paneProps(async () => {}, false)}
+                agents={[
+                    agent,
+                    {
+                        agentType: "reviewer",
+                        description: "reviews changes",
+                        source: "user",
+                        editable: true,
+                    },
+                ]}
+                content={{
+                    agentType: "my-agent",
+                    description: agent.description,
+                    source: agent.source,
+                    editable: agent.editable,
+                    systemPrompt: "## Role\n\nReview work carefully.",
+                }}
+            />,
+        );
+
+        const cards = container.querySelectorAll(".agents-card-grid .agents-list-item");
+        assert.equal(cards.length, 2);
+        assert.ok(container.querySelector(".agents-list-item-description"));
+        assert.ok(container.querySelector(".agents-detail-content"));
+        assert.ok(screen.getByRole("heading", { name: "Role", level: 2 }));
+    });
+});

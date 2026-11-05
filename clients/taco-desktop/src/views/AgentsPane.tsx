@@ -128,24 +128,35 @@ export function AgentsPane({
                             {query ? t("pane.noMatch") : t("activity.noAgents")}
                         </div>
                     ) : (
-                        filtered.map((a) => (
-                            <button
-                                key={a.agentType}
-                                type="button"
-                                className={`agents-list-item${selected === a.agentType ? " active" : ""}`}
-                                onClick={() => onSelect(a.agentType)}
-                            >
-                                <span className="agents-list-item-name">{a.agentType}</span>
-                                <span className="agents-list-item-source">
-                                    {a.runtime === "claude-code" ? t("agents.runtimeCc") : a.source}
-                                </span>
-                                {a.scope === "workspace" && (
-                                    <span className="agents-list-item-source">
-                                        {t("agents.scope.workspace")}
+                        <div className="agents-card-grid">
+                            {filtered.map((a) => (
+                                <button
+                                    key={a.agentType}
+                                    type="button"
+                                    className={`agents-list-item${selected === a.agentType ? " active" : ""}`}
+                                    onClick={() => onSelect(a.agentType)}
+                                >
+                                    <span className="agents-list-item-name">{a.agentType}</span>
+                                    {a.description && (
+                                        <span className="agents-list-item-description">
+                                            {a.description}
+                                        </span>
+                                    )}
+                                    <span className="agents-list-item-meta">
+                                        <span className="agents-list-item-source">
+                                            {a.runtime === "claude-code"
+                                                ? t("agents.runtimeCc")
+                                                : a.source}
+                                        </span>
+                                        {a.scope === "workspace" && (
+                                            <span className="agents-list-item-source">
+                                                {t("agents.scope.workspace")}
+                                            </span>
+                                        )}
                                     </span>
-                                )}
-                            </button>
-                        ))
+                                </button>
+                            ))}
+                        </div>
                     )}
                 </div>
             </div>
