@@ -31,8 +31,8 @@ function SubagentTag({ available, label }: SubagentTagProps) {
             className={`tools-list-tag ${available ? "tag-subagent-ok" : "tag-subagent-no"}`}
             title={
                 available
-                    ? "Available in sub-agent (depth=1)"
-                    : "Filtered out in sub-agent (depth=1)"
+                    ? label("tools.subagentAvailableHint")
+                    : label("tools.subagentUnavailableHint")
             }
         >
             {available ? label("tools.subagentAvailable") : label("tools.subagentUnavailable")}
