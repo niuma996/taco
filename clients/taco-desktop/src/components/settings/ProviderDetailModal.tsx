@@ -875,6 +875,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                     )}
                     confirmLabel={t("settings.customProviderDeleteConfirmBtn")}
                     cancelLabel={t("settings.providerCancel")}
+                    tone="danger"
                     busy={props.saving}
                     onConfirm={() => {
                         setConfirmingDelete(false);

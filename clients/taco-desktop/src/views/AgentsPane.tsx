@@ -299,6 +299,7 @@ export function AgentsPane({
                 title={t("agents.deleteTitle")}
                 message={t("agents.deleteBody")}
                 confirmLabel={t("agents.delete")}
+                tone="danger"
                 error={actionError}
                 busy={saving}
                 onConfirm={confirmDeleteSelected}

@@ -344,6 +344,7 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
                 message={pendingDelete?.name ?? ""}
                 confirmLabel={t("schedules.actionDeleteConfirm")}
                 cancelLabel={t("schedules.actionCancel")}
+                tone="danger"
                 onConfirm={() => {
                     const job = pendingDelete;
                     setPendingDelete(null);

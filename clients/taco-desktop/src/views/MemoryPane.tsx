@@ -732,6 +732,7 @@ export function MemoryPane(props: MemoryPaneProps) {
                 message={t("memory.deleteTopicBody")}
                 confirmLabel={t("memory.delete")}
                 cancelLabel={t("memory.cancel")}
+                tone="danger"
                 onConfirm={() => {
                     void handleDelete();
                 }}

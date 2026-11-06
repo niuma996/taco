@@ -297,6 +297,7 @@ export function McpSection(props: McpSectionProps) {
                 message={pendingDelete ?? ""}
                 confirmLabel={t("settings.mcpServerDeleteConfirm")}
                 cancelLabel={t("settings.mcpServerCancel")}
+                tone="danger"
                 onConfirm={() => {
                     const id = pendingDelete;
                     setPendingDelete(null);
