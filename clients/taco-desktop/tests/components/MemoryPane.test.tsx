@@ -70,6 +70,26 @@ describe("MemoryPane", () => {
         expect(within(container).getByText("memory.emptyState")).toBeTruthy();
     });
 
+    it("keeps the MEMORY.md heading in both the preview and markdown reading view", () => {
+        const { container } = render(
+            <MemoryPane
+                data={sampleData}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={() => {}}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => {}}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+
+        expect(container.querySelector(".memory-global-card")?.textContent).toContain("# Memory");
+        expect(screen.getByRole("heading", { name: "Memory", level: 1 })).toBeTruthy();
+        expect(screen.getByRole("heading", { name: "[2026-07-29] user", level: 2 })).toBeTruthy();
+    });
+
     it("enters edit mode on edit click and calls onSaveMemory with draft and hash", async () => {
         const onSaveMemory = vi.fn().mockResolvedValue({ ok: true });
         const { container } = render(
@@ -249,6 +269,49 @@ describe("MemoryPane", () => {
                 .getByRole("radio", { name: "memory.type.reference" })
                 .getAttribute("aria-checked"),
         ).toBe("true");
+    });
+
+    it("renders MEMORY.md separately and lays topics out in grouped card grids", () => {
+        const now = new Date().toISOString();
+        const { container } = render(
+            <MemoryPane
+                data={{
+                    ...sampleData,
+                    topics: [
+                        {
+                            id: "recent_one",
+                            name: "Recent one",
+                            description: "one",
+                            type: "project" as const,
+                            content: "one content",
+                            createdAt: now,
+                        },
+                        {
+                            id: "recent_two",
+                            name: "Recent two",
+                            description: "two",
+                            type: "reference" as const,
+                            content: "two content",
+                            createdAt: now,
+                        },
+                    ],
+                }}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={() => {}}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => {}}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+
+        expect(container.querySelector(".memory-global-card")).toBeTruthy();
+        expect(container.querySelector(".memory-global-card")?.textContent).toContain("test");
+        const grids = container.querySelectorAll(".memory-card-grid");
+        expect(grids).toHaveLength(1);
+        expect(grids[0]?.querySelectorAll("[data-memory-row]")).toHaveLength(2);
     });
 
     it("arrow keys move the selection through the list", () => {

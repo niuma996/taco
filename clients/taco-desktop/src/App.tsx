@@ -720,6 +720,8 @@ export default function App() {
         handleDreamUndo,
         handleRestoreTopic,
         handleDreamScheduleToggle,
+        dreamConfig,
+        handleDreamConfigSave,
     } = useMemoryPane(client, mainView === "memory", activeCwd, t, pushNotification);
 
     const checkpoints = useCheckpointsPane(
@@ -1167,6 +1169,8 @@ export default function App() {
                                 onUndo: handleDreamUndo,
                                 onRestoreTopic: handleRestoreTopic,
                                 onScheduleToggle: handleDreamScheduleToggle,
+                                dreamConfig,
+                                onSaveConfig: handleDreamConfigSave,
                             }}
                         />
                     ) : mainView === "checkpoints" ? (

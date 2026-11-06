@@ -25,16 +25,6 @@ import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
-export interface DreamArgsDraft {
-    minHours: string;
-    minChanges: string;
-    staleDays: string;
-    staleDaysDurable: string;
-    model: string;
-    archiveCleanupEnabled: boolean;
-    archiveRetentionDays: "7" | "30" | "90";
-}
-
 export interface ScheduleDraft {
     name: string;
     schedule: JobScheduleSpec;
@@ -46,8 +36,6 @@ export interface ScheduleDraft {
     /** Raw text of the max-runs field. Held as a string because TextInput is
      *  controlled and "" has to mean "unlimited" (not 0). */
     maxRunsInput: string;
-    /** Structured args for the built-in memory.dream job; unused for agent jobs. */
-    dreamArgs: DreamArgsDraft;
 }
 
 export interface ScheduleSubmit {
@@ -88,15 +76,6 @@ const EMPTY_DRAFT: ScheduleDraft = {
     run_on_startup: false,
     sessionStrategy: "pin",
     maxRunsInput: "",
-    dreamArgs: {
-        minHours: "24",
-        minChanges: "5",
-        staleDays: "90",
-        staleDaysDurable: "180",
-        model: "",
-        archiveCleanupEnabled: false,
-        archiveRetentionDays: "7",
-    },
 };
 
 const SCHEDULE_KIND_OPTIONS = [
@@ -110,28 +89,7 @@ const SESSION_STRATEGY_OPTIONS = [
     { value: "reuse", label: "reuse — continue an existing session" },
 ] as const;
 
-const ARCHIVE_RETENTION_OPTIONS = [
-    { value: "7", label: "7 days" },
-    { value: "30", label: "30 days" },
-    { value: "90", label: "90 days" },
-] as const;
-
 const ARGS_PLACEHOLDER = '{\n  "workspace": "/path/to/repo",\n  "prompt": "…"\n}';
-
-function dreamArgsFromJob(args: Record<string, unknown>): DreamArgsDraft {
-    const numberText = (key: string, fallback: string): string =>
-        typeof args[key] === "number" ? String(args[key]) : fallback;
-    return {
-        minHours: numberText("minHours", "24"),
-        minChanges: numberText("minChanges", "5"),
-        staleDays: numberText("staleDays", "90"),
-        staleDaysDurable: numberText("staleDaysDurable", "180"),
-        model: typeof args.model === "string" ? args.model : "",
-        archiveCleanupEnabled: args.archiveCleanupEnabled === true,
-        archiveRetentionDays:
-            args.archiveRetentionDays === 30 ? "30" : args.archiveRetentionDays === 90 ? "90" : "7",
-    };
-}
 
 function draftFromJob(job: Job): ScheduleDraft {
     return {
@@ -145,7 +103,6 @@ function draftFromJob(job: Job): ScheduleDraft {
         // Absent cap renders as an empty field, not a "0" that a later save
         // would persist as a bogus unlimited-but-written cap.
         maxRunsInput: job.max_runs != null ? String(job.max_runs) : "",
-        dreamArgs: dreamArgsFromJob(job.args),
     };
 }
 
@@ -167,12 +124,11 @@ type DraftError =
     | { field: "intervalMs"; message: string }
     | { field: "cronExpr"; message: string }
     | { field: "argsJson"; message: string }
-    | { field: "dreamArgs"; message: string }
     | { field: "maxRuns"; message: string };
 
 function validateDraft(
     draft: ScheduleDraft,
-    builtinDream = false,
+    _builtinDream = false,
 ): {
     ok: boolean;
     args?: Record<string, unknown>;
@@ -203,45 +159,6 @@ function validateDraft(
     ) {
         errors.push({ field: "maxRuns", message: "Max runs must be a positive integer or empty." });
     }
-    if (builtinDream) {
-        const args: Record<string, unknown> = {};
-        const fields: Array<
-            [
-                keyof Omit<
-                    DreamArgsDraft,
-                    "model" | "archiveCleanupEnabled" | "archiveRetentionDays"
-                >,
-                number,
-                number,
-            ]
-        > = [
-            ["minHours", 1, 720],
-            ["minChanges", 0, 1000],
-            ["staleDays", 7, 3650],
-            ["staleDaysDurable", 7, 3650],
-        ];
-        for (const [key, min, max] of fields) {
-            const raw = draft.dreamArgs[key].trim();
-            const value = Number(raw);
-            if (!/^\d+$/.test(raw) || value < min || value > max) {
-                errors.push({
-                    field: "dreamArgs",
-                    message: `${key} must be an integer in [${min}, ${max}].`,
-                });
-            } else {
-                args[key] = value;
-            }
-        }
-        if (draft.dreamArgs.model.length > 200) {
-            errors.push({ field: "dreamArgs", message: "model must be at most 200 characters." });
-        } else if (draft.dreamArgs.model.trim()) {
-            args.model = draft.dreamArgs.model.trim();
-        }
-        args.archiveCleanupEnabled = draft.dreamArgs.archiveCleanupEnabled;
-        args.archiveRetentionDays = Number(draft.dreamArgs.archiveRetentionDays);
-        return { ok: nameOk && errors.length === 0, args, errors };
-    }
-
     let args: Record<string, unknown> | undefined;
     try {
         const parsed = JSON.parse(draft.argsJson) as unknown;
@@ -267,7 +184,6 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
 
     const enabledId = useId();
     const runOnStartupId = useId();
-    const archiveCleanupId = useId();
 
     const [draft, setDraft] = useState<ScheduleDraft>(EMPTY_DRAFT);
 
@@ -510,127 +426,19 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                 />
             </FormField>
 
-            {isBuiltinDream ? (
-                <div className="schedules-dream-args">
-                    {(
-                        [
-                            ["minHours", "schedules.dreamMinHours"],
-                            ["minChanges", "schedules.dreamMinChanges"],
-                            ["staleDays", "schedules.dreamStaleDays"],
-                            ["staleDaysDurable", "schedules.dreamStaleDaysDurable"],
-                        ] as const
-                    ).map(([key, label]) => (
-                        <FormField key={key} label={t(label)}>
-                            <TextInput
-                                id={`schedules-form-dream-${key}`}
-                                type="number"
-                                value={draft.dreamArgs[key]}
-                                onChange={(e) =>
-                                    setDraft({
-                                        ...draft,
-                                        dreamArgs: { ...draft.dreamArgs, [key]: e.target.value },
-                                    })
-                                }
-                            />
-                        </FormField>
-                    ))}
-                    <FormField
-                        label={t("schedules.dreamModel")}
-                        hint={t("schedules.dreamModelHint")}
-                    >
-                        <TextInput
-                            id="schedules-form-dream-model"
-                            type="text"
-                            value={draft.dreamArgs.model}
-                            onChange={(e) =>
-                                setDraft({
-                                    ...draft,
-                                    dreamArgs: { ...draft.dreamArgs, model: e.target.value },
-                                })
-                            }
-                        />
-                    </FormField>
-                    <div className="schedules-dream-archive">
-                        <label className="schedules-modal-toggle" htmlFor={archiveCleanupId}>
-                            <Switch
-                                id={archiveCleanupId}
-                                checked={draft.dreamArgs.archiveCleanupEnabled}
-                                onChange={(next) =>
-                                    setDraft({
-                                        ...draft,
-                                        dreamArgs: {
-                                            ...draft.dreamArgs,
-                                            archiveCleanupEnabled: next,
-                                        },
-                                    })
-                                }
-                                label={t(
-                                    "schedules.dreamArchiveCleanup",
-                                    "Automatically delete expired archived memories",
-                                )}
-                            />
-                            <span>
-                                {t(
-                                    "schedules.dreamArchiveCleanup",
-                                    "Automatically delete expired archived memories",
-                                )}
-                            </span>
-                        </label>
-                        <FormField
-                            label={t("schedules.dreamArchiveRetention", "Archive retention period")}
-                            hint={t(
-                                "schedules.dreamArchiveRetentionHint",
-                                "Archived memories older than this period are physically deleted; undo expires at the same time. This controls retention, not how often the job runs.",
-                            )}
-                        >
-                            <Select
-                                value={draft.dreamArgs.archiveRetentionDays}
-                                onValueChange={(value) =>
-                                    setDraft({
-                                        ...draft,
-                                        dreamArgs: {
-                                            ...draft.dreamArgs,
-                                            archiveRetentionDays:
-                                                value as DreamArgsDraft["archiveRetentionDays"],
-                                        },
-                                    })
-                                }
-                                options={ARCHIVE_RETENTION_OPTIONS.map(({ value, label }) => ({
-                                    value,
-                                    label: t(`schedules.dreamArchiveRetention${value}`, label),
-                                }))}
-                                disabled={!draft.dreamArgs.archiveCleanupEnabled}
-                                label={t(
-                                    "schedules.dreamArchiveRetention",
-                                    "Archive retention period",
-                                )}
-                            />
-                        </FormField>
-                    </div>
-                    {errorFor("dreamArgs") ? (
-                        <p className="schedules-error" role="alert">
-                            {errorFor("dreamArgs")}
-                        </p>
-                    ) : null}
-                </div>
-            ) : (
-                <FormField
-                    label={t("schedules.fieldArgs", "Args (JSON object)")}
-                    hint={t(
-                        "schedules.fieldArgsHint",
-                        "JSON object passed to the command, e.g. { workspace, prompt }.",
-                    )}
-                    error={errorFor("argsJson")}
-                >
-                    <Textarea
-                        id="schedules-form-args"
-                        rows={4}
-                        value={draft.argsJson}
-                        placeholder={ARGS_PLACEHOLDER}
-                        onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
-                    />
-                </FormField>
-            )}
+            <FormField
+                label={t("schedules.fieldArgs", "Args (JSON object)")}
+                error={errorFor("argsJson")}
+            >
+                <Textarea
+                    id="schedules-form-args"
+                    rows={4}
+                    value={draft.argsJson}
+                    placeholder={ARGS_PLACEHOLDER}
+                    disabled={isBuiltinDream}
+                    onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
+                />
+            </FormField>
 
             {!isBuiltinDream ? (
                 <FormField

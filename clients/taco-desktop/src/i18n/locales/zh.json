@@ -925,6 +925,13 @@
         "interrupted": "已中断",
         "cancelled": "已停止",
         "timedOutRunning": "仍在运行"
+      },
+      "unknownFailure": "未知失败",
+      "failure": {
+        "fireTimeout": "任务总执行超时",
+        "modelTimeout": "整理模型调用超时",
+        "invalidReference": "整理计划引用了不存在的记忆",
+        "invalidOutput": "整理模型返回了无法解析的计划"
       }
     }
   },

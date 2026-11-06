@@ -58,7 +58,12 @@ export interface MemoryPaneProps {
     /** Held by App.tsx to prevent duplicate submits. */
     saving: boolean;
     /** Consolidation controls; absent in hosts that do not expose dream RPCs. */
-    dream?: MemoryDreamActions;
+    dream?: MemoryDreamActions & {
+        dreamConfig: import("../hooks/useMemoryPane").MemoryDreamConfig | null;
+        onSaveConfig: (
+            config: import("../hooks/useMemoryPane").MemoryDreamConfig,
+        ) => Promise<boolean>;
+    };
 }
 
 function lastActivityMs(topic: MemoryTopicEntry): number {
@@ -554,6 +559,8 @@ export function MemoryPane(props: MemoryPaneProps) {
                         onDiscard={dream.onDiscard}
                         onUndo={dream.onUndo}
                         onScheduleToggle={dream.onScheduleToggle}
+                        dreamConfig={dream.dreamConfig}
+                        onSaveConfig={dream.onSaveConfig}
                         onClose={() => setView("detail")}
                     />
                 ) : isMemoryEmpty && !isEditing && !selectedArchivedTopic ? (

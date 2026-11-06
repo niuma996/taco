@@ -84,6 +84,22 @@ export function runState(entry: JobHistoryEntry, work: WorkSummary | undefined):
     return entry.status === "ok" ? "completed" : "failed";
 }
 
+export function formatDreamFailureReason(
+    reason: string | undefined,
+    t: (key: string) => string,
+): string {
+    if (!reason) return t("schedules.history.unknownFailure");
+    if (reason.includes("fire timeout"))
+        return `${t("schedules.history.failure.fireTimeout")}: ${reason}`;
+    if (reason.includes("model call timed out"))
+        return `${t("schedules.history.failure.modelTimeout")}: ${reason}`;
+    if (reason.includes("rejected plan") && reason.includes("does not exist"))
+        return `${t("schedules.history.failure.invalidReference")}: ${reason}`;
+    if (reason.includes("no parseable plan"))
+        return `${t("schedules.history.failure.invalidOutput")}: ${reason}`;
+    return reason;
+}
+
 /** Wall-clock length of a finished entry, or undefined while it runs. */
 export function entryDurationMs(entry: JobHistoryEntry): number | undefined {
     if (!entry.ended_at) return undefined;
@@ -205,7 +221,10 @@ export function ScheduleHistoryDialog({
                   ? t("schedules.history.mergedHint")
                   : state === "interrupted"
                     ? work?.reason
-                    : (entry.summary ?? (entry.status === "err" ? entry.error : undefined));
+                    : formatDreamFailureReason(
+                          entry.summary ?? (entry.status === "err" ? entry.error : undefined),
+                          t,
+                      );
         const sessionWorkspace = work?.workspace;
         const sessionId = work?.sessionId;
         return (

@@ -10,8 +10,8 @@
 }
 
 .memory-list {
-    width: var(--pane-width);
-    flex-shrink: 0;
+    flex: 0 0 60%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -70,7 +70,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0 0 var(--space-2);
+    padding: 0 var(--space-3) var(--space-3);
 }
 
 /* Sticky so a long list still says which section it is in at row 80. */
@@ -78,7 +78,7 @@
     position: sticky;
     top: 0;
     z-index: 1;
-    padding: var(--space-2) var(--space-3) var(--space-1);
+    padding: var(--space-3) 0 var(--space-1-5);
     background: var(--pane-list-bg);
     color: var(--fg-dim);
     font-size: var(--text-2xs);
@@ -87,70 +87,150 @@
     text-transform: uppercase;
 }
 
-.memory-list-item {
+.memory-global-card,
+.memory-topic-card {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: var(--space-px);
-    width: calc(100% - 2 * var(--space-1));
-    margin: var(--space-px) var(--space-1);
-    padding: var(--space-1-5) var(--space-2-5);
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-2-5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
     color: var(--fg);
     text-align: left;
     cursor: pointer;
-    transition: background var(--motion-duration-fast) var(--motion-ease-standard);
+    transition:
+        background var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
-.memory-list-item:hover {
+.memory-global-card {
+    width: 100%;
+    margin-bottom: var(--space-2);
+    padding: var(--space-3);
+    background: var(--pane-list-bg);
+}
+
+/* MEMORY.md is the workspace's long-form memory. Its card carries a useful
+   preview rather than reducing the document to its first heading. */
+.memory-global-card .memory-card-description {
+    -webkit-line-clamp: 6;
+    min-height: 0;
+    line-height: 1.3;
+    white-space: pre-wrap;
+}
+
+.memory-global-card:hover,
+.memory-topic-card:hover {
+    border-color: var(--accent-rail);
     background: var(--hover-overlay);
 }
 
-.memory-list-item.active {
+.memory-global-card.active,
+.memory-topic-card.active {
     background: var(--accent-bg-active);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-bg-active);
 }
 
-.memory-list-item.active .memory-list-item-name {
+.memory-global-card.active .memory-card-title,
+.memory-topic-card.active .memory-card-title {
     color: var(--accent);
 }
 
-.memory-list-item-name {
+.memory-global-card-heading,
+.memory-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.memory-card-title {
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    min-height: calc(2 * var(--leading-tight) * var(--text-base));
     font-size: var(--text-base);
     font-weight: 600;
     text-align: left;
+    line-height: var(--leading-tight);
+    word-break: break-word;
 }
 
-/* The description is the "when is this relevant" line; it beats a type badge
-   that the filter chips already carry. */
-.memory-list-item-desc {
+.memory-card-description {
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    min-height: calc(3 * var(--leading-normal) * var(--text-xs));
     color: var(--fg-dim);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
     text-align: left;
+    word-break: break-word;
+}
+
+.memory-card-meta,
+.memory-global-card-footer {
+    margin-top: auto;
+    padding-top: var(--space-2);
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+}
+
+.memory-card-type,
+.memory-global-card-mark {
+    display: inline-flex;
+    align-items: center;
+    height: var(--control-height-xs);
+    padding: 0 var(--space-1-5);
+    border: 1px solid var(--divider-section);
+    border-radius: var(--radius-pill);
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+}
+
+.memory-global-card-mark {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    text-transform: uppercase;
 }
 
 /* Archived rows drop to the dim foreground instead of fading the whole row:
    opacity on dim text in the light theme falls below a readable contrast. */
-.memory-list-item.archived .memory-list-item-name {
+.memory-topic-card.archived .memory-card-title {
     color: var(--fg-dim);
     font-weight: 500;
 }
 
-.memory-list-item.archived:hover .memory-list-item-name,
-.memory-list-item.archived.active .memory-list-item-name {
+.memory-topic-card.archived:hover .memory-card-title,
+.memory-topic-card.archived.active .memory-card-title {
     color: var(--fg);
 }
 
-.memory-list-item.archived.active .memory-list-item-name {
+.memory-topic-card.archived.active .memory-card-title {
     color: var(--accent);
+}
+
+.memory-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+}
+
+.memory-card-grid .memory-topic-card {
+    min-height: 142px;
+}
+
+.memory-card-grid-archived {
+    padding-top: var(--space-1);
 }
 
 .memory-archive-section {
@@ -163,8 +243,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
-    width: calc(100% - 2 * var(--space-1));
-    margin: 0 var(--space-1);
+    width: 100%;
+    margin: 0;
     padding: var(--space-1-5) var(--space-2-5);
     border: none;
     border-radius: var(--radius-sm);
@@ -198,13 +278,47 @@
 /* ── Reading column ───────────────────────────────────────────── */
 
 .memory-detail {
-    flex: 1;
+    flex: 0 0 40%;
+    width: 40%;
     min-width: 0;
     overflow-y: auto;
     padding: var(--space-4);
     /* key={view} remounts per view, so this replays when switching
        between the reading view and the dream panel. */
     animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
+}
+
+@media (max-width: 1100px) {
+    .memory-card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .memory-pane {
+        overflow-y: auto;
+        flex-direction: column;
+    }
+
+    .memory-list,
+    .memory-detail {
+        flex: 0 0 auto;
+        width: 100%;
+    }
+
+    .memory-list {
+        max-height: 58vh;
+        border-right: none;
+        border-bottom: 1px solid var(--divider-panel);
+    }
+
+    .memory-detail {
+        min-height: 42vh;
+    }
+
+    .memory-card-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .memory-detail-placeholder,
@@ -243,7 +357,8 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    max-width: var(--reading-width);
+    width: 100%;
+    max-width: none;
 }
 
 .memory-view-header {
@@ -290,7 +405,54 @@
 /* Markdown typography comes from .md-assistant (chatMarkdown.css); this only
    supplies the reading measure. */
 .memory-view-markdown {
-    max-width: var(--reading-width);
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+}
+
+.memory-dream-settings {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+}
+
+.memory-dream-settings[hidden] {
+    display: none;
+}
+
+.memory-dream-settings > label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+
+.memory-dream-settings input[type="number"],
+.memory-dream-settings select {
+    width: 100%;
+    min-height: var(--control-height-sm);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--fg);
+}
+
+.memory-dream-settings-check {
+    grid-column: 1 / -1;
+    flex-direction: row !important;
+    align-items: center;
+}
+
+.memory-dream-settings-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
 }
 
 /* Quiet footer line: identity, age, and the one action that applies. */
@@ -394,7 +556,8 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    max-width: var(--reading-width-wide);
+    width: 100%;
+    max-width: none;
     min-height: 100%;
 }
 
@@ -565,8 +728,25 @@
 .memory-dream-report-meta {
     display: flex;
     align-items: center;
+    min-height: var(--control-height-sm);
     gap: var(--space-2);
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    width: 100%;
+    line-height: var(--leading-tight);
+}
+
+.memory-dream-report-meta > span:first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.memory-dream-report-meta > small {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.memory-dream-report-meta > button {
+    flex: 0 0 auto;
 }
 
 .memory-view-meta-time time {

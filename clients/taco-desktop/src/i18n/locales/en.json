@@ -925,6 +925,13 @@
         "interrupted": "Interrupted",
         "cancelled": "Stopped",
         "timedOutRunning": "Still running"
+      },
+      "unknownFailure": "Unknown failure",
+      "failure": {
+        "fireTimeout": "Scheduler fire timed out",
+        "modelTimeout": "Consolidation model call timed out",
+        "invalidReference": "Consolidation plan referenced a missing memory",
+        "invalidOutput": "Consolidation model returned an invalid plan"
       }
     }
   },

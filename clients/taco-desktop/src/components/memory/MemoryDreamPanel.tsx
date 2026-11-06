@@ -14,8 +14,9 @@ import type {
     MemoryDreamState,
     MemoryTopicEntry,
 } from "@taco-ai/protocol";
-import { X } from "lucide-react";
-import type { DreamBusy } from "../../hooks/useMemoryPane";
+import { Settings2, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { DreamBusy, MemoryDreamConfig } from "../../hooks/useMemoryPane";
 import { useNow } from "../../hooks/useNow";
 import { useT, useUiLanguage } from "../../i18n/useI18n";
 import { formatRelativeTime } from "../../lib/relativeTime";
@@ -33,6 +34,8 @@ export interface MemoryDreamActions {
     onUndo: (reportId: string) => unknown;
     onRestoreTopic: (id: string) => boolean | Promise<boolean>;
     onScheduleToggle: (enabled: boolean) => unknown;
+    dreamConfig: MemoryDreamConfig | null;
+    onSaveConfig: (config: MemoryDreamConfig) => unknown;
 }
 
 interface MemoryDreamPanelProps extends Omit<MemoryDreamActions, "onRestoreTopic"> {
@@ -135,6 +138,96 @@ function ActionGroup({
                     names={names}
                 />
             ))}
+        </div>
+    );
+}
+
+function DreamSettings({
+    config,
+    onSave,
+}: {
+    config: MemoryDreamConfig;
+    onSave: (config: MemoryDreamConfig) => unknown;
+}) {
+    const { t } = useT();
+    const [draft, setDraft] = useState(config);
+    useEffect(() => setDraft(config), [config]);
+    return (
+        <div className="memory-dream-settings" hidden>
+            <label>
+                {t("memory.dream.minHours", "Minimum hours between evaluations")}
+                <input
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={draft.minHours}
+                    onChange={(e) => setDraft({ ...draft, minHours: Number(e.target.value) })}
+                />
+            </label>
+            <label>
+                {t("memory.dream.minChanges", "Minimum changed memories")}
+                <input
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={draft.minChanges}
+                    onChange={(e) => setDraft({ ...draft, minChanges: Number(e.target.value) })}
+                />
+            </label>
+            <label>
+                {t("memory.dream.staleDays", "Project/reference candidate age")}
+                <input
+                    type="number"
+                    min={7}
+                    max={3650}
+                    value={draft.staleDays}
+                    onChange={(e) => setDraft({ ...draft, staleDays: Number(e.target.value) })}
+                />
+            </label>
+            <label>
+                {t("memory.dream.staleDaysDurable", "User/feedback candidate age")}
+                <input
+                    type="number"
+                    min={7}
+                    max={3650}
+                    value={draft.staleDaysDurable}
+                    onChange={(e) =>
+                        setDraft({ ...draft, staleDaysDurable: Number(e.target.value) })
+                    }
+                />
+            </label>
+            <label className="memory-dream-settings-check">
+                <input
+                    type="checkbox"
+                    checked={draft.archiveCleanupEnabled}
+                    onChange={(e) =>
+                        setDraft({ ...draft, archiveCleanupEnabled: e.target.checked })
+                    }
+                />
+                {t("memory.dream.archiveCleanup", "Delete expired archived memories")}
+            </label>
+            <label>
+                {t("memory.dream.archiveRetention", "Archive retention")}
+                <select
+                    value={draft.archiveRetentionDays}
+                    disabled={!draft.archiveCleanupEnabled}
+                    onChange={(e) =>
+                        setDraft({
+                            ...draft,
+                            archiveRetentionDays: Number(e.target.value) as 7 | 30 | 90,
+                        })
+                    }
+                >
+                    <option value={7}>{t("memory.dream.archiveRetention7", "7 days")}</option>
+                    <option value={30}>{t("memory.dream.archiveRetention30", "30 days")}</option>
+                    <option value={90}>{t("memory.dream.archiveRetention90", "90 days")}</option>
+                </select>
+            </label>
+            <div className="memory-dream-settings-actions">
+                <Button size="sm" variant="primary" onClick={() => onSave(draft)}>
+                    {t("memory.dream.saveSettings", "Save")}
+                </Button>
+            </div>
         </div>
     );
 }
@@ -275,6 +368,8 @@ export function MemoryDreamPanel({
     onDiscard,
     onUndo,
     onScheduleToggle,
+    dreamConfig,
+    onSaveConfig,
     onClose,
 }: MemoryDreamPanelProps) {
     const { t } = useT();
@@ -315,7 +410,18 @@ export function MemoryDreamPanel({
                 <Button size="sm" variant="default" disabled={busy !== null} onClick={onRun}>
                     {busy === "run" ? t("memory.dream.running") : t("memory.dream.run")}
                 </Button>
+                <IconButton
+                    aria-label={t("memory.dream.settings", "Memory consolidation settings")}
+                    title={t("memory.dream.settings", "Memory consolidation settings")}
+                    onClick={() => {
+                        const element = document.querySelector(".memory-dream-settings");
+                        element?.toggleAttribute("hidden");
+                    }}
+                >
+                    <Settings2 size={14} aria-hidden="true" />
+                </IconButton>
             </div>
+            {dreamConfig ? <DreamSettings config={dreamConfig} onSave={onSaveConfig} /> : null}
             {pausedReason ? (
                 // Turned off by the failure breaker, not by the user: the
                 // switch alone would look like a choice they made.

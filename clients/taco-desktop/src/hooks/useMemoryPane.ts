@@ -31,6 +31,17 @@ export interface UseMemoryPaneResult {
     /** Resolves true when the topic was restored; failures are already notified. */
     handleRestoreTopic: (id: string) => Promise<boolean>;
     handleDreamScheduleToggle: (enabled: boolean) => Promise<boolean>;
+    dreamConfig: MemoryDreamConfig | null;
+    handleDreamConfigSave: (config: MemoryDreamConfig) => Promise<boolean>;
+}
+
+export interface MemoryDreamConfig {
+    minHours: number;
+    minChanges: number;
+    staleDays: number;
+    staleDaysDurable: number;
+    archiveCleanupEnabled: boolean;
+    archiveRetentionDays: 7 | 30 | 90;
 }
 
 export type DreamBusy = "run" | "apply" | "discard" | "undo" | "restore" | "schedule";
@@ -59,6 +70,7 @@ export function useMemoryPane(
     const [memoryError, setMemoryError] = useState<string | null>(null);
     const [memorySelectedId, setMemorySelectedId] = useState<string>(MEMORY_ROOT_ID);
     const [memorySaving, setMemorySaving] = useState(false);
+    const [dreamConfig, setDreamConfig] = useState<MemoryDreamConfig | null>(null);
     // Busy is per workspace: a run still going in A must not lock B's buttons.
     const [dreamBusyFor, setDreamBusyFor] = useState<{ cwd: string; busy: DreamBusy } | null>(null);
     const jobs = useMemo(() => createJobsClient(client), [client]);
@@ -107,6 +119,33 @@ export function useMemoryPane(
         if (!active || !activeCwd) return;
         loadMemory();
     }, [active, activeCwd, loadMemory]);
+
+    useEffect(() => {
+        if (!active || !activeCwd) return;
+        void jobs
+            .get(MEMORY_DREAM_JOB_ID)
+            .then((job) => {
+                if (!job || cwdRef.current !== activeCwd) return;
+                const args = job.args as Record<string, unknown>;
+                setDreamConfig({
+                    minHours: typeof args.minHours === "number" ? args.minHours : 24,
+                    minChanges: typeof args.minChanges === "number" ? args.minChanges : 5,
+                    staleDays: typeof args.staleDays === "number" ? args.staleDays : 90,
+                    staleDaysDurable:
+                        typeof args.staleDaysDurable === "number" ? args.staleDaysDurable : 180,
+                    archiveCleanupEnabled: args.archiveCleanupEnabled === true,
+                    archiveRetentionDays:
+                        args.archiveRetentionDays === 30
+                            ? 30
+                            : args.archiveRetentionDays === 90
+                              ? 90
+                              : 7,
+                });
+            })
+            .catch((error: unknown) => {
+                console.error("[useMemoryPane] memory-dream job read failed:", error);
+            });
+    }, [active, activeCwd, jobs]);
 
     // A selection whose topic is gone after a refetch (deleted elsewhere,
     // merged by consolidation) falls back to the global entry.
@@ -259,6 +298,28 @@ export function useMemoryPane(
         [jobs, runDreamAction],
     );
 
+    const handleDreamConfigSave = useCallback(
+        async (config: MemoryDreamConfig): Promise<boolean> => {
+            try {
+                const job = await jobs.get(MEMORY_DREAM_JOB_ID);
+                if (!job) throw new Error("the consolidation job is not available");
+                const { history: _history, ...rest } = job;
+                await jobs.update({
+                    ...rest,
+                    args: { ...job.args, ...config },
+                });
+                setDreamConfig(config);
+                return true;
+            } catch (error) {
+                notify(
+                    `${t("memory.dream.error.settings")}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+                return false;
+            }
+        },
+        [jobs, notify, t],
+    );
+
     const dreamBusy = dreamBusyFor && dreamBusyFor.cwd === activeCwd ? dreamBusyFor.busy : null;
 
     return {
@@ -278,5 +339,7 @@ export function useMemoryPane(
         handleDreamUndo,
         handleRestoreTopic,
         handleDreamScheduleToggle,
+        dreamConfig,
+        handleDreamConfigSave,
     };
 }

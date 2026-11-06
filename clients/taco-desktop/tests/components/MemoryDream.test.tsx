@@ -74,6 +74,15 @@ function actions() {
         onUndo: vi.fn(),
         onRestoreTopic: vi.fn(async () => true),
         onScheduleToggle: vi.fn(),
+        dreamConfig: {
+            minHours: 24,
+            minChanges: 5,
+            staleDays: 90,
+            staleDaysDurable: 180,
+            archiveCleanupEnabled: false,
+            archiveRetentionDays: 7,
+        },
+        onSaveConfig: vi.fn(),
     };
 }
 
@@ -112,6 +121,28 @@ describe("MemoryPane dream controls", () => {
 
         await user.click(screen.getByRole("switch", { name: "memory.dream.schedule" }));
         expect(dream.onScheduleToggle).toHaveBeenCalledWith(false);
+    });
+
+    it("opens schedule settings from the consolidation panel", async () => {
+        const user = userEvent.setup({ delay: null });
+        const dream = actions();
+        renderPane(dream);
+
+        await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        expect(screen.getByText("memory.dream.minHours")).toBeTruthy();
+        expect(dream.onSaveConfig).not.toHaveBeenCalled();
+    });
+
+    it("saves memory settings from the expanded settings card", async () => {
+        const user = userEvent.setup({ delay: null });
+        const dream = actions();
+        renderPane(dream);
+        await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        const minHours = screen.getByLabelText("memory.dream.minHours") as HTMLInputElement;
+        await user.clear(minHours);
+        await user.type(minHours, "48");
+        await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        expect(dream.onSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ minHours: 48 }));
     });
 
     it("applies the reviewed preview and can discard it", async () => {
