@@ -50,12 +50,17 @@ describe("Sidebar session actions", () => {
         );
 
         const search = screen.getByRole("button", { name: "pane.searchLabel" });
+        const rowMain = document.querySelector("[data-session-row]") as HTMLElement;
         const rename = screen.getByRole("button", { name: "session.rename" });
         const remove = screen.getByRole("button", { name: "session.deleteSession" });
 
         const user = userEvent.setup({ delay: null });
         await user.tab();
         expect(document.activeElement).toBe(search);
+        // The row's main click target is a real button in the tab order —
+        // this is what makes the session list keyboard reachable at all.
+        await user.tab();
+        expect(document.activeElement).toBe(rowMain);
         await user.tab();
         expect(document.activeElement).toBe(rename);
         await user.tab();
@@ -73,6 +78,40 @@ describe("Sidebar session actions", () => {
         expect(actionRule).not.toContain("display: none");
         expect(rename.getAttribute("tabindex")).toBeNull();
         expect(remove.getAttribute("tabindex")).toBeNull();
+    });
+
+    it("moves focus between session rows with arrow keys", async () => {
+        render(
+            <Sidebar
+                ws={
+                    {
+                        sessions: [
+                            { id: "session-1", name: "First", createdAt: 0 },
+                            { id: "session-2", name: "Second", createdAt: 0 },
+                        ],
+                        activeSession: null,
+                        pendingBySessionId: {},
+                    } as never
+                }
+                onAttach={() => {}}
+                onDelete={() => {}}
+                onRename={() => {}}
+                search={searchStub()}
+            />,
+        );
+
+        const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-session-row]"));
+        expect(rows).toHaveLength(2);
+        const user = userEvent.setup({ delay: null });
+        rows[0].focus();
+        await user.keyboard("{ArrowDown}");
+        expect(document.activeElement).toBe(rows[1]);
+        await user.keyboard("{ArrowUp}");
+        expect(document.activeElement).toBe(rows[0]);
+        await user.keyboard("{End}");
+        expect(document.activeElement).toBe(rows[1]);
+        await user.keyboard("{Home}");
+        expect(document.activeElement).toBe(rows[0]);
     });
 
     it("starts a new chat from the pinned header button", async () => {

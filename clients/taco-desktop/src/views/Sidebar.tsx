@@ -11,7 +11,7 @@
  */
 
 import { Pencil, Plus, Trash } from "lucide-react";
-import { useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import { PaneSearch } from "../components/PaneSearch";
 import { IconButton } from "../components/ui/IconButton";
 import { useNow } from "../hooks/useNow";
@@ -41,6 +41,32 @@ export function Sidebar(props: SidebarProps) {
     const lng = useUiLanguage();
     const nowMs = useNow();
     const [searchOpen, setSearchOpen] = useState(false);
+    const listRef = useRef<HTMLUListElement>(null);
+
+    // Same keyboard pattern as WorkPane: ArrowUp/Down/Home/End move focus
+    // between rows; Enter/Space activate the focused row natively.
+    const handleListKeyDown = (event: KeyboardEvent<HTMLUListElement>): void => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const rows = Array.from(
+            listRef.current?.querySelectorAll<HTMLButtonElement>("[data-session-row]") ?? [],
+        );
+        if (rows.length === 0) return;
+        event.preventDefault();
+        const current = rows.indexOf(document.activeElement as HTMLButtonElement);
+        const index =
+            event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? rows.length - 1
+                  : Math.min(
+                        rows.length - 1,
+                        Math.max(
+                            0,
+                            (current < 0 ? -1 : current) + (event.key === "ArrowDown" ? 1 : -1),
+                        ),
+                    );
+        rows[index]?.focus();
+    };
 
     // A query switches the list to the server's matches. The box's own text
     // decides, not the debounced query, so the mode flips as soon as the
@@ -89,27 +115,36 @@ export function Sidebar(props: SidebarProps) {
                 />
             </div>
             {/* Scroll container: header stays fixed; min-height:0 lets flex children collapse correctly. */}
-            <div className="sidebar-list">
+            <ul className="sidebar-list" ref={listRef} onKeyDown={handleListKeyDown}>
                 {sessions.map((s) => (
-                    <div
+                    <li
                         key={s.id}
                         className={`session-item ${ws?.activeSession === s.id ? "active" : ""}`}
-                        onClick={() => onAttach(s.id)}
                     >
-                        <div className="session-meta">
-                            <div className="session-main">
-                                <span
-                                    className={`session-status-dot ${ws?.pendingBySessionId[s.id] ? "running" : "idle"}`}
-                                    aria-hidden="true"
-                                />
-                                <div className="session-id" title={s.name || undefined}>
-                                    {s.name || s.id.slice(0, 8)}
+                        {/* The row's main click target is a real button so the
+                            list is keyboard-reachable; the hover actions stay
+                            siblings because nested <button> is invalid. */}
+                        <button
+                            type="button"
+                            className="session-item-main"
+                            data-session-row={s.id}
+                            onClick={() => onAttach(s.id)}
+                        >
+                            <div className="session-meta">
+                                <div className="session-main">
+                                    <span
+                                        className={`session-status-dot ${ws?.pendingBySessionId[s.id] ? "running" : "idle"}`}
+                                        aria-hidden="true"
+                                    />
+                                    <div className="session-id" title={s.name || undefined}>
+                                        {s.name || s.id.slice(0, 8)}
+                                    </div>
+                                </div>
+                                <div className="session-time">
+                                    {formatRelativeTime(s.updatedAt ?? s.createdAt, lng, nowMs)}
                                 </div>
                             </div>
-                            <div className="session-time">
-                                {formatRelativeTime(s.updatedAt ?? s.createdAt, lng, nowMs)}
-                            </div>
-                        </div>
+                        </button>
                         <div className="session-actions">
                             <IconButton
                                 className="session-action"
@@ -135,34 +170,36 @@ export function Sidebar(props: SidebarProps) {
                                 <Trash size={14} aria-hidden="true" />
                             </IconButton>
                         </div>
-                    </div>
+                    </li>
                 ))}
                 {searching && sessions.length === 0 && (
-                    <div className="session-empty">
+                    <li className="session-empty">
                         {search.failed
                             ? t("session.searchFailed")
                             : search.pending || search.loading
                               ? t("session.searching")
                               : t("session.noSearchResults")}
-                    </div>
+                    </li>
                 )}
                 {moreCursor && loadMore && (
-                    <button
-                        type="button"
-                        className="session-load-more"
-                        onClick={loadMore}
-                        disabled={moreDisabled}
-                    >
-                        {moreLoading ? t("session.loadingMore") : t("session.loadMore")}
-                        {moreTotal !== undefined && moreTotal > sessions.length && (
-                            <span className="session-load-more-count">
-                                {" "}
-                                ({sessions.length}/{moreTotal})
-                            </span>
-                        )}
-                    </button>
+                    <li>
+                        <button
+                            type="button"
+                            className="session-load-more"
+                            onClick={loadMore}
+                            disabled={moreDisabled}
+                        >
+                            {moreLoading ? t("session.loadingMore") : t("session.loadMore")}
+                            {moreTotal !== undefined && moreTotal > sessions.length && (
+                                <span className="session-load-more-count">
+                                    {" "}
+                                    ({sessions.length}/{moreTotal})
+                                </span>
+                            )}
+                        </button>
+                    </li>
                 )}
-            </div>
+            </ul>
         </aside>
     );
 }
