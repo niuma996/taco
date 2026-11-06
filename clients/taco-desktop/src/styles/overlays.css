@@ -260,14 +260,14 @@
     margin-bottom: 0.25rem;
 }
 .llm-dump-line-role {
-    font-size: 0.68rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--line-role, var(--fg-dim));
 }
 .llm-dump-line-index {
-    font-size: 0.68rem;
+    font-size: var(--text-2xs);
     color: var(--fg-dim);
 }
 .llm-dump-line-body {

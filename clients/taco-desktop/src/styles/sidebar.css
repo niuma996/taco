@@ -238,7 +238,7 @@ aside.sidebar .session-item.active {
 }
 
 .session-time {
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     color: var(--fg-dim);
     /* Left indent to align with the title text, accounting for the status dot. */
     padding-left: calc(6px + 0.45rem);

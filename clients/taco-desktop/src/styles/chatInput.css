@@ -119,6 +119,13 @@ footer.input textarea:focus {
     outline: none;
 }
 
+/* The UA placeholder color (#757575 in WebKit) falls below AA on the dark
+   panel. --fg-dim is tuned for the theme's surfaces. */
+footer.input textarea::placeholder {
+    color: var(--fg-dim);
+    opacity: 1;
+}
+
 /* Controls row: attachments + model + send/stop. Bottom half uses --input-bg (slightly darker than the
    textarea panel color); top has a divider line. Bottom corners carry the card's outer radius. */
 .input-controls {

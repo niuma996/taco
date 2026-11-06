@@ -6,7 +6,10 @@
     /* Chat panel + input top-half: slightly brighter than --bg, aligns with sidebar bg. */
     --chat-panel-bg: #171a1f;
     --fg: #d8dee9;
-    --fg-dim: #7a8390;
+    /* Secondary text. Tuned for AA (4.5:1) against the *lightest* surface it
+       lands on (--composer-chip-bg #252a32), not just --bg — the previous
+       #7a8390 fell to 3.76:1 there. */
+    --fg-dim: #9aa4b0;
     --accent: #88c0d0;
     --user: #a3be8c;
     --assistant: #88c0d0;
@@ -32,7 +35,7 @@
     --accent-rail: rgba(136, 192, 208, 0.24);
 
     /* Semantic tokens — consolidates scattered hardcoded colors, overridden per theme. */
-    --error: #bf616a;
+    --error: #cc727a;
     --error-bg: rgba(191, 97, 106, 0.25);
     /* Filled stop buttons hover lighter in dark, darker on paper. */
     --danger-hover: #d4757e;
@@ -184,10 +187,11 @@
     --radius-line: 1px;
 
     /* Font size scale — consolidates scattered 0.65rem~1.2rem hardcoded values. Tiers:
-       xs (badge/metadata) < sm (secondary text) < base (body default) < md (subheading)
-       < lg (section heading) < xl (page heading). */
-    --text-2xs: 0.62rem;
-    --text-xs: 0.72rem;
+       2xs (badge/metadata) < xs (compact metadata) < sm (secondary text)
+       < base (body default) < md (subheading) < lg (section heading)
+       < xl (page heading). 2xs stays above the 11px functional-text floor. */
+    --text-2xs: 0.7rem;
+    --text-xs: 0.75rem;
     --text-sm: 0.8rem;
     --text-base: 0.85rem;
     --text-md: 0.95rem;
@@ -238,7 +242,7 @@
     /* QR plates and orange-surface text stay consistent across themes. */
     --qr-bg: #ffffff;
     --qr-hint-fg: #57606a;
-    --brand-orange-fg: #ffffff;
+    --brand-orange-fg: #171a1f;
 }
 
 /* Light theme — neutral warm-gray surfaces + Nord blue accent. Same hue as dark theme (no cross-theme hue shift).
@@ -256,7 +260,10 @@
     --bg: var(--warm-gray-2);
     --chat-panel-bg: var(--warm-gray-1);
     --fg: #2b2620;
-    --fg-dim: #8a8177;
+    /* Secondary text. Darker than the dark theme's --fg-dim because the
+       light surfaces it lands on (--warm-gray-4 #e8e5e0) need more ink to
+       clear AA; the old #8a8177 fell to 3.05:1 there. */
+    --fg-dim: #6b6359;
     --accent: #5e81ac; /* Nord 10, deep blue — matches dark #88c0d0 family */
     --user: #5b8a3c;
     --assistant: #4078c0; /* darker than --accent for role differentiation */
@@ -370,7 +377,7 @@
     --qr-hint-fg: #57606a;
     /* Foreground color for content rendered on --brand-orange surfaces
        (the toolbar buttons in overlays.css). */
-    --brand-orange-fg: #ffffff;
+    --brand-orange-fg: #171a1f;
 }
 
 :root[data-platform="macos"] {

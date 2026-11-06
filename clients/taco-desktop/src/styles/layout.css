@@ -473,7 +473,7 @@ header.topbar .topbar-picker-group {
     border-radius: var(--radius-pill);
     background: var(--accent);
     color: var(--bg);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     line-height: 14px;
     text-align: center;
     pointer-events: none;
@@ -488,7 +488,7 @@ header.topbar .topbar-picker-group {
     border-radius: var(--radius-pill);
     background: var(--error);
     color: var(--bg);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     line-height: 14px;
     text-align: center;
     pointer-events: none;
@@ -545,7 +545,7 @@ header.topbar .topbar-picker-group {
     border-radius: var(--radius-pill);
     background: var(--error-bg);
     color: var(--fg-dim);
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     font-variant-numeric: tabular-nums;
     line-height: 1.4;
 }
