@@ -1,10 +1,11 @@
 /**
  * ActivityRail — narrow left icon column spanning the full window height.
  *
- * Entries: chat (default) then agents/skills/tools/mcp/plugins/channels in
- * the top group, a single "more" button collapsing memory/checkpoints/
- * schedules, and settings pinned to the bottom group. Top padding is driven
- * by --rail-top-padding (36px on macOS to align with the traffic-light center).
+ * Entries: chat (default) then agents/skills/tools/plugins/channels in
+ * the top group, work right above the "more" button, a single "more" button
+ * collapsing memory/checkpoints/schedules/mcp, and settings pinned to the
+ * bottom group. Top padding is driven by --rail-top-padding (36px on macOS
+ * to align with the traffic-light center).
  *
  * The rail is too narrow to hold labels, so each button surfaces its label in
  * a tooltip on hover/focus instead of rendering it inline.
@@ -52,24 +53,28 @@ type ItemDef = {
 };
 
 /** Views behind the "more" button — they have no rail slot of their own. */
-const OVERFLOW_VIEWS: ReadonlyArray<ActivityView> = ["memory", "checkpoints", "schedules", "work"];
+const OVERFLOW_VIEWS: ReadonlyArray<ActivityView> = ["memory", "checkpoints", "schedules", "mcp"];
 
 const CHAT_ITEM: ItemDef = { type: "chat", icon: MessageSquare, labelKey: "activity.chat" };
 
+// Ordered by daily-use frequency, not by subsystem. Work (the daemon's
+// activity feed) keeps a fixed slot so background runs stay visible at a
+// glance, but sits right above "more" rather than claiming the prime
+// position under Chat. MCP is a configuration surface and lives behind "more".
 const TOP_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "agents", icon: Bot, labelKey: "activity.agents" },
     { type: "skills", icon: Sparkles, labelKey: "activity.skills" },
     { type: "tools", icon: Wrench, labelKey: "activity.tools" },
-    { type: "mcp", icon: ServerCog, labelKey: "activity.mcp" },
     { type: "plugins", icon: Puzzle, labelKey: "activity.plugins" },
     { type: "channels", icon: MessagesCircle, labelKey: "activity.channels" },
+    { type: "work", icon: ClipboardList, labelKey: "activity.work" },
 ];
 
 const OVERFLOW_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "memory", icon: NotebookDot, labelKey: "activity.memory" },
     { type: "checkpoints", icon: RotateCcwClock, labelKey: "activity.checkpoints" },
     { type: "schedules", icon: CalendarClock, labelKey: "activity.schedules" },
-    { type: "work", icon: ClipboardList, labelKey: "activity.work" },
+    { type: "mcp", icon: ServerCog, labelKey: "activity.mcp" },
 ];
 
 const SETTINGS_ITEM: ItemDef = { type: "settings", icon: Settings, labelKey: "activity.settings" };
