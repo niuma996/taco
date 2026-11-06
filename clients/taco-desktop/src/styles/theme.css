@@ -223,6 +223,9 @@
     --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
     --border-soft: color-mix(in srgb, var(--border) 40%, transparent);
     --info: var(--accent);
+    /* Deferred-loading tag — a brighter cyan than --info so "lazy" reads
+       distinct from plain informational. */
+    --info-deferred: #5ec8e8;
     --cache-hit: var(--success);
     --accent-soft: rgba(136, 192, 208, 0.15);
     --accent-fg: var(--accent);
@@ -347,6 +350,8 @@
     --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
     --border-soft: color-mix(in srgb, var(--border) 40%, transparent);
     --info: var(--accent);
+    /* Deepened counterpart of the dark theme's #5ec8e8 for light surfaces. */
+    --info-deferred: #1888aa;
     --cache-hit: var(--success);
     --accent-soft: rgba(94, 129, 172, 0.15);
     --accent-fg: var(--accent);

@@ -619,7 +619,6 @@ html *:hover {
     padding: 0.7rem 0.9rem;
     border-radius: var(--radius-sm);
     border: 1px solid var(--error);
-    border-left: 3px solid var(--error);
     background: var(--error-bg);
     font-size: var(--text-base);
     line-height: 1.5;
